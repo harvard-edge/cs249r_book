@@ -1,6 +1,5 @@
 # Extending TinyTorch: The Systems Ecosystem {#sec-ecosystem}
 
-
 ::: {.column-margin}
 ![](assets/images/diagrams/22_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting the Ecosystem chapter connecting the core framework to production scale."}
 
@@ -9,50 +8,89 @@
 
 The core of TinyTorch—its tensor striding, autograd engine, and execution loop—is intentionally kept small. This minimalism is not a limitation; it is an architectural feature.
 
-In traditional machine learning education, students consume massive frameworks as black boxes. In TinyTorch, the framework is the foundation, and you are the architect. Because operations inherit from a clean `Function` base class and neural networks inherit from a clean `Module` base class, TinyTorch is explicitly designed to be extended.
+In traditional machine learning education, students consume massive frameworks as black boxes. In TinyTorch, the framework is the foundation, and you are the architect. Because operations inherit from a clean `Function` base class and neural networks inherit from a clean `Module` base class, TinyTorch is explicitly designed to be extended. You do not need to rewrite the core engine to test a new systems theory; you only need to plug into it.
 
-You do not need to rewrite the core engine to test a new systems theory. You only need to plug into it.
+To prove this, we will not just describe how TinyTorch can be extended. We will actually implement two of the most important systems extensions in modern machine learning: **Low-Rank Adaptation (LoRA)** and **Mixed Precision Loss Scaling**.
 
-To bridge the gap between our core curriculum and active machine learning systems research, we provide a suite of **Systems Extensions**. These are self-contained modules that students implement to solve cutting-edge engineering bottlenecks, extending TinyTorch far beyond its single-node, float32 origins.
+## Extension 1: Parameter-Efficient Fine-Tuning (LoRA)
 
-## Architectural Extensibility
+**The Systems Problem:** Fine-tuning a 10-billion parameter model requires updating 10-billion optimizer momentums. If you use Adam, you need 8 bytes per parameter (4 bytes for momentum, 4 bytes for variance), plus 4 bytes for gradients, plus the weights themselves. This completely saturates GPU memory capacity, making fine-tuning impossible on consumer hardware.
 
-Before looking at the extensions, consider *why* they are possible. When you want to add a novel mathematical operation to PyTorch, you subclass `torch.autograd.Function`. In TinyTorch, you do the exact same thing:
+**The Solution:** LoRA freezes the primary weights of the model and injects two small, low-rank matrices ($A$ and $B$) alongside them.
+
+Because TinyTorch's `Module` class natively registers parameters, and `Tensor` respects `requires_grad=False` during the backward pass, we can implement LoRA as a standalone extension in just a few lines of Python:
 
 ```python
-from tinytorch.core.tensor import Function
+from tinytorch.nn import Module
+from tinytorch.core import Tensor
 
-class Swish(Function):
+class LoRALinear(Module):
+    def __init__(self, in_features, out_features, rank=4):
+        super().__init__()
+        # 1. The frozen pre-trained weights
+        self.weight = Tensor.uniform(out_features, in_features, requires_grad=False)
+        self.bias = Tensor.zeros(out_features, requires_grad=False)
+
+        # 2. The low-rank adapter matrices (these are trained!)
+        # A maps from in_features down to the bottleneck rank
+        self.A = Tensor.uniform(rank, in_features, requires_grad=True)
+        # B maps from the bottleneck rank back up to out_features
+        self.B = Tensor.zeros(out_features, rank, requires_grad=True)
+
     def forward(self, x):
-        self.save_for_backward(x)
-        return x * (1 / (1 + np.exp(-x)))
+        # Standard forward pass: x @ W^T + b
+        base = x.matmul(self.weight.transpose()) + self.bias
 
-    def backward(self, grad_output):
-        x, = self.saved_tensors
-        # ... compute and return local gradient ...
+        # Adapter forward pass: (x @ A^T) @ B^T
+        adapter = x.matmul(self.A.transpose()).matmul(self.B.transpose())
+
+        # The autograd tape automatically merges gradients where they sum!
+        return base + adapter
 ```
 
-Because the autograd engine dynamically walks the graph via these `.backward()` methods, any new hardware trick or algorithmic optimization can be bolted onto the side of the framework without touching the core `Tensor` class.
+To use this extension, a student only needs to traverse a pre-trained `TinyGPT` model and replace every `nn.Linear` with `LoRALinear`. When they pass the model's parameters to the optimizer, TinyTorch will seamlessly ignore the frozen 10-billion parameter weights and only allocate optimizer state for the tiny $A$ and $B$ matrices, crushing the memory footprint.
 
-## The Systems Extensions
+## Extension 2: Mixed Precision Loss Scaling
 
-Here are examples of extensions that have been implemented to allow students to tackle the real-world scale of modern machine learning.
+**The Systems Problem:** Training in `float16` halves memory bandwidth requirements, which is critical for scaling. However, small gradient values frequently drop below $5.96 \times 10^{-8}$, which is the smallest positive normal number in `float16`. They silently underflow to exactly zero, destroying the backward pass.
 
-### 1. Activation Checkpointing (Memory Planners)
-**The Systems Problem:** Deep transformers crash with Out-Of-Memory (OOM) errors because the autograd tape must keep every forward activation pinned in RAM for the backward pass.
-**The Extension:** Students write a `checkpoint(module, x)` wrapper. Instead of saving activations, the wrapper discards them and mathematically re-evaluates the forward pass on the fly during the backward step. This trades a 33% compute penalty for exponential memory savings, exactly as production models do.
+**The Solution:** We must multiply the loss by a massive constant (e.g., $2^{16}$) *before* calling `.backward()`. This scales the gradients up into the safe `float16` range. Before the optimizer takes a step, we unscale them.
 
-### 2. Low-Rank Adaptation (LoRA)
-**The Systems Problem:** Fine-tuning a 10-billion parameter model requires updating 10-billion optimizer momentums, completely saturating GPU memory bandwidth.
-**The Extension:** Students subclass `Module` to create a `LoRALinear` layer. They freeze the primary weights (`requires_grad=False`) and inject two small, low-rank matrices ($A \times B$). By routing gradients only to the small matrices, they learn how parameter-efficient fine-tuning evades the memory wall.
+We can extend the training loop by writing a standalone `LossScaler` class that manipulates the TinyTorch gradient buffers directly:
 
-### 3. Mixed Precision Training (Loss Scaling)
-**The Systems Problem:** Training in `float16` halves memory bandwidth requirements, but small gradient values numerically underflow to exactly zero, destroying learning.
-**The Extension:** Students build a `LossScaler` class. They multiply the loss by a massive constant (e.g., $2^{16}$) before calling `.backward()`, ensuring the gradients survive the `float16` backward pass, and then unscale them right before the optimizer steps.
+```python
+class LossScaler:
+    def __init__(self, scale=65536.0):
+        self.scale = scale
 
-### 4. Speculative Decoding
-**The Systems Problem:** Autoregressive generation is strictly memory-bandwidth bound, generating only one token per forward pass.
-**The Extension:** Students deploy two models simultaneously. A tiny "draft" model guesses 5 tokens into the future, and the large "target" model verifies all 5 tokens in a single parallel batch. If the draft was right, generation speeds up by 5x without losing mathematical exactness.
+    def backward(self, loss: Tensor):
+        # Multiply the loss to protect gradients from underflow
+        scaled_loss = loss * self.scale
+        # TinyTorch's autograd engine pushes the scaled gradients back
+        scaled_loss.backward()
+
+    def unscale_(self, optimizer):
+        # Traverse the registered parameters and divide the gradients back down
+        for p in optimizer.parameters():
+            if p.grad is not None:
+                p.grad = p.grad / self.scale
+```
+
+Now, the training loop simply becomes:
+
+```python
+scaler = LossScaler(scale=65536.0)
+
+for batch in dataloader:
+    optimizer.zero_grad()
+    loss = model(batch)
+
+    # Use our extension to safely route gradients through float16
+    scaler.backward(loss)
+    scaler.unscale_(optimizer)
+
+    optimizer.step()
+```
 
 ## Building the Future
 
