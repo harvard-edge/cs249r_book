@@ -684,7 +684,9 @@ class Conv2d:
         """
         Forward pass through Conv2d layer.
 
-        This method composes five steps:
+        TODO: Compose input validation, spatial dimension calculation, and Conv2dFunction.apply.
+
+        APPROACH:
         1. Validate input is 4D (shared helper)
         2. Compute output spatial dimensions
         3. Pad input if needed
