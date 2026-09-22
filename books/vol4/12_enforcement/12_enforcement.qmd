@@ -175,7 +175,7 @@ class EnforcementLatchFilter:
     v_latch_str = fmt_velocity(v_latch, precision=2)
 ```
 
-When a proposal conflicts with physical constraints, the enforcer chooses between filtering and veto. Filtering applies when the proposal is structurally sound and a nearby admissible command still serves its intent. The chunk policy's proposal to approach the strike plate of the cage door at `{python} EnforcementLatchFilter.v_latch_high_str` is well formed, for instance, but the door zone admits only the `{python} EnforcementLatchFilter.v_latch_str` guarded approach of the target ODD (@sec-evaluation-logs), the speed its demonstrations and trials cover. The enforcer therefore keeps the approach's direction and target and projects only its speed onto the boundary of the safe set at `{python} EnforcementLatchFilter.v_latch_str`. That least-change correction is the one @sec-enforcement-minimal-intervention computes as a quadratic program\index{Quadratic programming} constrained by a Control Barrier Function\index{Control barrier function}.
+When a proposal conflicts with physical constraints, the enforcer chooses between filtering and veto. Filtering applies when the proposal is structurally sound and a nearby admissible command still serves its intent. The spring-latched cage door that the arm opens supplies the case. The chunk policy's proposal to approach the door's strike plate at `{python} EnforcementLatchFilter.v_latch_high_str` is well formed, but the door zone admits only the `{python} EnforcementLatchFilter.v_latch_str` guarded approach of the target ODD, the one speed its demonstrations and trials cover (@sec-evaluation-logs). That ceiling marks where the evidence stops, not where the physics of the plate does. The enforcer therefore keeps the approach's direction and target and projects only its speed onto the `{python} EnforcementLatchFilter.v_latch_str` ceiling, a constraint that the least-change quadratic program\index{Quadratic programming} of @sec-enforcement-minimal-intervention enforces beside the half-spaces a Control Barrier Function\index{Control barrier function} derives.
 
 Filtering must respect momentum as well as position, because the actuators must still be able to stop the machine before clearance vanishes (@sec-enforcement-safe-sets-conditional-permission). Projection is permissible only when the corrected command keeps the proposal's direction and target, changes it continuously, and stays well clear of a hazard. A structurally invalid proposal, such as a discontinuous jump in commanded position, an acceleration beyond the available torque, or a trajectory aimed into an immovable obstacle, indicates that perception or inference has entered an unmodeled failure mode, and projecting it onto the nearest safe boundary would execute a motion unrelated to any task intent. The enforcer vetoes such a proposal, and the output selector drops authority to a local fallback.
 
@@ -191,8 +191,11 @@ Filtering and veto both happen at runtime, and training the policy cannot replac
 # │          the enforcement record, and the summary reuse these strings.
 # │ Goal:    state the three timers and the delay from last renewal to brake onset.
 # │ Show:    chunk rate, lease, heartbeat rate and timeout, self-watchdog,
-# │          tick, bus cycle, brake onset, renewal-to-onset delay. The base
-# │          stall is priced in calc-enforcement-authority-loss, after the budget.
+# │          tick, bus cycle, brake onset, renewal-to-onset delay; the
+# │          evidence-age refusal threshold (budgeted observation age plus the
+# │          clock-conversion bound) read by cycle stage 2 and the record. The
+# │          base stall is priced in calc-enforcement-stopping-budget, after the
+# │          spare is set.
 # │ How:     the same RM/AISLE fields that size the lease in @sec-nervous-cadences.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -211,16 +214,21 @@ class EnforcementLeaseStop:
     tick = AISLE.t_tick  # category: chosen
     bus = AISLE.t_bus  # category: illustrative
     onset = AISLE.t_brake_onset  # category: illustrative
+    t_age = AISLE.perception_age  # category: derived (observation age the budget charges, row 5)
+    eps_sync = 0.2 * millisecond  # category: illustrative (clock-conversion bound, @sec-perception-observation-contract)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     chunk_period = (1 / chunk_rate).to(millisecond)
     renewal_to_onset = (lease + tick + bus + onset).to(millisecond)
+    age_threshold = (t_age + eps_sync).to(millisecond)  # evidence-age refusal threshold
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(chunk_period < lease, "One chunk period must fit inside the lease.")
     check(heartbeat_timeout < lease, "A total host stall must trip the heartbeat before the lease expires.")
     check(abs(lease.to(millisecond).magnitude - 60.0) < 1e-9, "The chunk lease is 60 ms.")
     check(abs(renewal_to_onset.magnitude - 82.0) < 1e-9, "Brake onset comes 82 ms after the last valid renewal.")
+    check(abs(t_age.to(millisecond).magnitude - 51.6) < 0.05, "The budgeted observation age is 51.6 ms.")
+    check(abs(age_threshold.magnitude - 51.8) < 0.05, "The evidence-age refusal threshold is 51.8 ms.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     chunk_rate_hz_str = fmt(chunk_rate.to(hertz).magnitude, precision=0)
@@ -232,6 +240,9 @@ class EnforcementLeaseStop:
     bus_ms_str = fmt_latency(bus, unit=millisecond, precision=0)
     onset_ms_str = fmt_latency(onset, unit=millisecond, precision=0)
     renewal_to_onset_ms_str = fmt_latency(renewal_to_onset, unit=millisecond, precision=0)
+    t_age_str = fmt_latency(t_age, unit=millisecond, precision=1)
+    eps_sync_str = fmt_latency(eps_sync, unit=millisecond, precision=1)
+    age_threshold_str = fmt_latency(age_threshold, unit=millisecond, precision=1)
 ```
 
 The enforcer keeps authority when the upstream host stalls because it holds the chunk lease of @sec-nervous-cadences, `{python} EnforcementLeaseStop.lease_ms_str`, sized there to outlast one chunk period and its renewal jitter. A separate `{python} EnforcementLeaseStop.heartbeat_rate_hz_str` $\text{Hz}$ host heartbeat has a validated maximum interval of $15\text{ ms}$ and a `{python} EnforcementLeaseStop.heartbeat_timeout_ms_str` silence timeout. The $1\text{ kHz}$ MCU loop feeds its own `{python} EnforcementLeaseStop.self_watchdog_ms_str` self-watchdog only after a successful cycle; a separate external trip covers MCU failure. At each timeout the MCU revokes the proposal and executes a resident, state-matched fallback, provided the reserved clearance and available braking still suffice. On the warehouse mobile manipulator, if a proposer renews its lease and then stalls, the brake still begins within `{python} EnforcementLeaseStop.renewal_to_onset_ms_str` of the last valid renewal. This lease-expiry case assumes the separate heartbeat remains live while fresh admissible proposals stop arriving; a total host stall triggers the `{python} EnforcementLeaseStop.heartbeat_timeout_ms_str` heartbeat timeout earlier. The age of the frame that showed the person adds to the renewal-to-onset delay, and @sec-enforcement-stopping-envelopes carries the sum into the admission check. Enforcing the lease at the drive, rather than trusting the host to withdraw its own proposal, is what bounds the delay at all.
@@ -248,13 +259,13 @@ The enforcer's position in the signal pipeline is set by the dynamics' timescale
 ↳ **Downstream:** Heterogeneous silicon partitioning of the reflex enforcer onto isolated microcontroller enclaves is mapped in @sec-placement-two-paths-one-die.
 :::
 
-Downstream of the feedback controller, near the power electronics, a command checker inspects phase currents, duty cycles, and joint torque references immediately before they are written to hardware registers. Running at the machine's $1\text{ kHz}$ inner-loop rate, it prevents overcurrent, over-torque, and thermal runaway by clipping or zeroing signals beyond the plant's ratings, but it surrenders foresight. A torque well inside its continuous rating looks safe to a scalar clamp even while it accelerates a descending arm joint toward the fixture faster than the remaining travel can absorb, and the clamp registers no fault until no allowable reverse torque can prevent the collision.
+Downstream of the feedback controller, near the power electronics, a command checker inspects phase currents, duty cycles, and joint torque references immediately before they are written to hardware registers. Running at the machine's $1\text{ kHz}$ inner-loop rate, it prevents overcurrent, over-torque, and thermal runaway by clipping or zeroing signals beyond the plant's ratings, but it surrenders foresight. A torque well inside its continuous rating looks safe to a scalar clamp even while it accelerates a descending arm joint toward the packing station faster than the remaining travel can absorb, and the clamp registers no fault until no allowable reverse torque can prevent the collision.
 
 The split trades latency for visibility. A reference checker at planning rates of $10$ to $50\text{ Hz}$ sees several steps ahead but cannot respond to resonance, noise amplification, or instability above its update rate. A command checker acts on every tick, but its one-step horizon creates dynamic traps in which every instantaneous torque is legal until an irrecoverable state is reached.
 
 Placement also decides how the enforcer joins the computing fabric. An in-line enforcer inspects every command before the next stage reads it, which leaves no command uninspected but puts its worst-case execution time on the critical path of the $1000\,\mu\text{s}$ loop, where an overrun faults the whole cycle. A parallel monitor on a separate core preserves loop timing and opens a safety contactor or switches the drive to dynamic braking when it detects a violation, but its detection and signaling lag, bounded by the monitor cycle and bus jitter\index{Latency!bus jitter}, must be paid for with wider margins or lower speed.
 
-Because neither single location provides both dynamic foresight and instantaneous protection, physical AI architectures resolve the tension through a **dual-stage enforcement pattern**\index{Dual-stage enforcement pattern}. This pattern maps onto the two-processor implementation of the machine model (@sec-boundary-machine-model):
+Because neither single location provides both dynamic foresight and instantaneous protection, physical AI architectures resolve the tension through a **dual-stage enforcement pattern**\index{Dual-stage enforcement pattern}. This pattern maps onto the two-processor implementation of the machine model (@sec-nervous-silicon-partitioning):
 
 - **Upstream Stage (Advisory Corridor Pre-Check on Application MPU):** Operating at $20\text{--}50\text{ Hz}$ on an unprivileged application microprocessor core, this stage screens multi-step trajectory chunks emitted by the learned policy against a dynamic stopping corridor under worst-case braking parameters and against static workspace envelopes before packing the waypoints into a leased chunk proposal sent over RPMsg. The stage is advisory. It spares the MCU proposals that would fail, but it runs on the proposer's side of the proposal boundary, so the binding admission of the trajectory and its stop suffix stays on the MCU (@sec-planning-behavior-seam).
 - **Downstream Stage (Instantaneous CBF-QP Safety Shield on Bare-Metal MCU):** Operating inside a strict $1000\text{ Hz}$ ($1000\,\mu\text{s}$) timer interrupt loop on an isolated hard real-time safety microcontroller, this stage receives the proposed setpoint from shared SRAM, verifies tracking error bounds, solves an active-set Control Barrier Function (CBF-QP)\index{Safety shield!control barrier function} quadratic program in pre-allocated static SRAM, and clamps raw current and torque commands directly before writing to PWM timer registers. The barrier it enforces reduces to a single-step convex projection (@sec-enforcement-safe-sets-conditional-permission), whose execution time must be bounded on the selected hardware.
@@ -293,7 +304,8 @@ Under those delay, estimate, and braking assumptions, any trajectory proposal th
 # │ Show:    each row's term, value, running total, and remainder at the drive
 # │          limit; the same terms at the aisle speed; the ceiling; the time rows;
 # │          the missed-tick cost reused by the cycle list; the walking-person
-# │          ceiling (moved from @sec-memory-belief-through-occlusion).
+# │          ceiling (moved from @sec-memory-belief-through-occlusion); the
+# │          base stall at the aisle speed (distance added, overrun past D_clear).
 # │ How:     RM/AISLE fields; calc_c2_stop_suffix (row 6, a_eff),
 # │          calc_max_permitted_velocity (ceiling), calc_safe_stopping_distance
 # │          (cross-check), calc_action_chunk_streaming_amortization (time row).
@@ -330,6 +342,7 @@ class EnforcementStoppingBudget:
     mu_inspected = AISLE.mu_inspected_floor  # category: illustrative
     frame_rate = RM.nav_camera.frame_rate  # category: datasheet (navigation camera)
     intent_weights = memory_from_params(RM.intent_model.parameters, BYTES_FP16)  # category: derived
+    t_stall = 200.0 * millisecond  # category: illustrative (proposer stall before any brake)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     lease_path = (t_lease + t_tick + t_bus).to(millisecond)
@@ -370,6 +383,10 @@ class EnforcementStoppingBudget:
     shape_aisle = (c2_aisle - brake_aisle).to(millimeter)
     total_aisle = (brake_aisle + overhead + onset_aisle + lease_aisle + age_aisle + shape_aisle + inset).to(millimeter)
     spare = (d_clear - total_aisle).to(millimeter)
+    # Base stall: a last proposal that keeps authority for the stall instead of
+    # the lease adds the extra delay's travel to the finished budget.
+    stall_added = (v_aisle * (t_stall - t_lease)).to(millimeter)
+    stall_breach = (total_aisle + stall_added - d_clear).to(millimeter)
 
     # Speed is the one free term: the ceiling of @eq-enforce-stopping-envelope
     ceiling = calc_max_permitted_velocity(d_clear, tau_delay, a_eff, loc_margin=delta_loc, physical_margin=delta_margin + eps_track).to(
@@ -427,6 +444,9 @@ class EnforcementStoppingBudget:
     check(v_aisle < ceiling, "The chosen aisle speed must sit under the ceiling.")
     check(abs(total_aisle.magnitude - 997.43) < 1e-6, "Budget at 1.3 m/s is 997.43 mm.")
     check(abs(spare.magnitude - 102.57) < 1e-6, "Spare at 1.3 m/s is 102.57 mm.")
+    check(abs(stall_added.magnitude - 182.0) < 1e-6, "A 200 ms stall adds 182 mm at 1.3 m/s.")
+    check(stall_added > spare, "The stall's added travel exceeds the whole spare.")
+    check(abs(stall_breach.magnitude - 79.43) < 5e-3, "The stall runs 79.4 mm past the clear distance.")
     check(abs(intent_sweep.magnitude - 98.04) < 5e-3, "Intent weight sweep is 98.0 ms.")
     check(intent_sweep > t_lease, "The intent sweep cannot renew a chunk lease.")
     check(abs(belief_life.magnitude - 31.25) < 1e-9, "Occluded-rack-end belief expires in about 31 ms.")
@@ -462,6 +482,9 @@ class EnforcementStoppingBudget:
     over7_str = fmt_length(-left[6], unit=millimeter, precision=2)
     total_aisle_str = fmt_length(total_aisle, unit=millimeter, precision=1)
     spare_str = fmt_length(spare, unit=millimeter, precision=1)
+    t_stall_str = fmt_latency(t_stall, unit=millisecond, precision=0)
+    stall_added_str = fmt_length(stall_added, unit=millimeter, precision=0)
+    stall_breach_str = fmt_length(round(stall_breach.magnitude, 1) * millimeter, unit=millimeter, precision=1)
     # Table cells (the column headers carry mm)
     brake_drive_value_str = fmt_magnitude(brake_drive, millimeter, precision=1, commas=True)
     overhead_value_str = fmt_magnitude(overhead, millimeter, precision=0, commas=True)
@@ -627,6 +650,8 @@ The finished budget assumes that the obstacle stays where it was when the stop b
 
 Later chapters spend the remainder or restrict the premise beneath it. At the aisle speed the unspent distance lasts `{python} EnforcementStoppingBudget.t_latest_str` (@sec-intervention-authority-transitions), and the credible deceleration binds only on floors with friction of at least `{python} EnforcementStoppingBudget.mu_min_str`, since $a=\min(a_{\text{brake}},\mu g)$, so on a floor inspected to `{python} EnforcementStoppingBudget.mu_inspected_str` the ceiling falls to `{python} EnforcementStoppingBudget.ceiling_inspected_str` (@sec-frontier-residual-claims-register).
 
+A stalled proposer would spend more than the whole remainder. Were the chunk lease of @sec-enforcement-authority-refuse left to the host to honor, a last proposal that kept its authority for `{python} EnforcementStoppingBudget.t_stall_str` instead of the `{python} EnforcementLeaseStop.lease_ms_str` lease would add `{python} EnforcementStoppingBudget.stall_added_str` to the stop and carry the base `{python} EnforcementStoppingBudget.stall_breach_str` past the clear distance at the rack end.
+
 A mobile base can also sense the rack end through a risk-assessed protective field designed under the applicable vehicle and machinery standards, including ISO 3691-4 and ISO 13849, such as the time-of-flight safety laser scanner shown in @fig-12-real-laser-scanner. Its protective field must be at least as long as the stopping budget.
 
 ::: {#fig-12-real-laser-scanner fig-env="figure" fig-pos="t" fig-cap="**Industrial safety laser scanner**: A scanner can provide an early warning field and a protective field. The warning field requests earlier deceleration; the protective field's safety output feeds a controller that selects a risk-assessed stop. Protective-field length must include scanner response, controller and drive delay, braking travel, and uncertainty. A moving AMR does not become safe merely because motor torque is removed." fig-alt="Industrial safety laser scanner with outer warning and inner protective fields. The protective field initiates a safety-controller response whose total sensing, control, drive, braking, and uncertainty budget determines the required field length; drive torque removal alone may allow coasting."}
@@ -764,10 +789,8 @@ where $J$ is the mechanism inertia and $\tau_{\max}$ is the peak dynamic torque 
 # │ Context: the descending-arm and windup paragraphs immediately below;
 # │          reused by calc-enforcement-kinetic-barrier.
 # │ Goal:    show that bias torque quarters the arm's braking and that windup
-# │          delay and a proposer stall on the base each overrun the spare.
-# │ Show:    arm stop with and without bias; unbraked windup travel vs spare;
-# │          the base stall at the aisle speed (distance added, overrun past
-# │          D_clear), moved here from the lease paragraph.
+# │          delay on the base overruns the spare.
+# │ Show:    arm stop with and without bias; unbraked windup travel vs spare.
 # │ How:     RM.arm.max_torque, RM.tcp_speed_limit, AISLE fields,
 # │          calc_c2_stop_suffix for the finished budget at the aisle speed.
 # └─────────────────────────────────────────────────────────────────────────────
@@ -794,8 +817,6 @@ class EnforcementAuthorityLoss:
     tau_delay = AISLE.tau_delay  # category: derived
     fixed_overhead = AISLE.fixed_overhead  # category: illustrative + chosen
     d_clear = AISLE.d_clear  # category: illustrative
-    lease = AISLE.t_lease  # category: chosen
-    delta_t_stall_base = 200.0 * millisecond  # category: illustrative (proposer stall before any brake)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     bias = (torque_limit * bias_fraction).to(newton * meter)
@@ -811,10 +832,6 @@ class EnforcementAuthorityLoss:
     windup_travel = (v_aisle * unwind).to(millimeter)
     budget = (v_aisle * tau_delay + calc_c2_stop_suffix(v_aisle, a_brake)["distance"] + fixed_overhead).to(millimeter)
     spare = (d_clear - budget).to(millimeter)
-    # Base stall: a last proposal that keeps authority for the stall instead of
-    # the lease adds the extra delay's travel to the finished budget.
-    stall_added = (v_aisle * (delta_t_stall_base - lease)).to(millimeter)
-    stall_breach = (budget + stall_added - d_clear).to(millimeter)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(bias.magnitude - 65.25) < 1e-9, "Bias is 65.25 of 87 N·m.")
@@ -824,8 +841,6 @@ class EnforcementAuthorityLoss:
     check(abs(windup_travel.magnitude - 195.0) < 1e-9, "Windup at 1.3 m/s adds 195 mm.")
     check(abs(spare.magnitude - 102.57) < 1e-6, "The finished budget leaves 102.57 mm spare at 1.3 m/s.")
     check(windup_travel > 1.8 * spare, "Windup travel is almost twice the spare.")
-    check(abs(stall_added.magnitude - 182.0) < 1e-6, "A 200 ms stall adds 182 mm at 1.3 m/s.")
-    check(abs(stall_breach.magnitude - 79.43) < 5e-3, "The stall runs 79.4 mm past the clear distance.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     torque_limit_str = fmt_torque(torque_limit, precision=0)
@@ -851,18 +866,13 @@ class EnforcementAuthorityLoss:
     v_aisle_str = fmt_velocity(v_aisle, precision=1)
     windup_travel_str = fmt_length(windup_travel, unit=millimeter, precision=0)
     spare_str = fmt_length(spare, unit=millimeter, precision=1)
-    t_stall_str = fmt_latency(delta_t_stall_base, unit=millisecond, precision=0)
-    stall_added_str = fmt_length(stall_added, unit=millimeter, precision=0)
-    stall_breach_str = fmt_length(round(stall_breach.magnitude, 1) * millimeter, unit=millimeter, precision=1)
 ```
 
 Consider the warehouse mobile manipulator's arm carrying the mug from the takeaway conveyor down toward the coworker at the packing station, with the loaded joint descending at an angular velocity $\omega_0 =$ `{python} EnforcementAuthorityLoss.joint_speed_str` $\text{rad/s}$ (the scenario's values are illustrative; see the Reader Guide). The effective link length is $\ell =$ `{python} EnforcementAuthorityLoss.link_length_str`, so the tool point moves at `{python} EnforcementAuthorityLoss.tcp_speed_str`, inside the arm's `{python} EnforcementAuthorityLoss.tcp_limit_str` free-space limit; only the final approach to the coworker's hand runs at the far lower handover speed that @sec-enforcement-telemetry records. The joint inertia with the mug is $J =$ `{python} EnforcementAuthorityLoss.inertia_str`, and the joint's peak torque is $\tau_{\max} =$ `{python} EnforcementAuthorityLoss.torque_limit_str`. With no gravitational bias ($\tau_{\text{bias}} = 0$), the whole peak torque is available for braking, and the angular deceleration is $\alpha_{\text{nom}} = \tau_{\max}/J =$ `{python} EnforcementAuthorityLoss.alpha_nom_str` $\text{rad/s}^2$. The stopping angle from $\omega_0$ is $\Delta \theta_{\text{nom}} = \omega_0^2 / (2 \alpha_{\text{nom}}) =$ `{python} EnforcementAuthorityLoss.angle_nom_str` $\text{rad}$ (`{python} EnforcementAuthorityLoss.angle_nom_deg_str`$^\circ$), which moves the tool point $d_{\text{tool,nom}} = \ell \Delta \theta_{\text{nom}} =$ `{python} EnforcementAuthorityLoss.d_nom_str` along its arc.
 
-During the descent, however, the arm's own geometry and the mug load the joint with a downward bias of $\tau_{\text{bias}} =$ `{python} EnforcementAuthorityLoss.bias_str`, `{python} EnforcementAuthorityLoss.bias_pct_str` of its peak torque. By @eq-enforce-effective-deceleration, the net torque left for braking is $\tau_{\max} - \tau_{\text{bias}} =$ `{python} EnforcementAuthorityLoss.net_torque_str`, and the angular deceleration falls fourfold to $\alpha_{\text{eff}} =$ `{python} EnforcementAuthorityLoss.alpha_eff_str` $\text{rad/s}^2$. The stopping angle grows fourfold to `{python} EnforcementAuthorityLoss.angle_eff_str` $\text{rad}$ (`{python} EnforcementAuthorityLoss.angle_eff_deg_str`$^\circ$), and the tool travels `{python} EnforcementAuthorityLoss.d_eff_str`, an unbudgeted overrun of `{python} EnforcementAuthorityLoss.overrun_str`. If the enforcer evaluates barrier envelopes with the datasheet torque $\tau_{\max}$ rather than the net headroom $\tau_{\max} - \tau_{\text{bias}}$, the real stop runs `{python} EnforcementAuthorityLoss.overrun_str` past the predicted one. Whether contact occurs or causes damage depends on the actual initial clearance to the station and to the coworker's hand.
+During the descent, however, the arm's own geometry and the mug load the joint with a downward bias of $\tau_{\text{bias}} =$ `{python} EnforcementAuthorityLoss.bias_str`, `{python} EnforcementAuthorityLoss.bias_pct_str` of its peak torque. By @eq-enforce-effective-deceleration, the net torque left for braking is $\tau_{\max} - \tau_{\text{bias}} =$ `{python} EnforcementAuthorityLoss.net_torque_str`, and the angular deceleration falls fourfold to $\alpha_{\text{eff}} =$ `{python} EnforcementAuthorityLoss.alpha_eff_str` $\text{rad/s}^2$. The stopping angle grows fourfold to `{python} EnforcementAuthorityLoss.angle_eff_str` $\text{rad}$ (`{python} EnforcementAuthorityLoss.angle_eff_deg_str`$^\circ$), and the tool travels `{python} EnforcementAuthorityLoss.d_eff_str`, an unbudgeted overrun of `{python} EnforcementAuthorityLoss.overrun_str`. If the enforcer evaluates barrier envelopes with the datasheet torque $\tau_{\max}$ rather than the net headroom $\tau_{\max} - \tau_{\text{bias}}$, the real stop runs `{python} EnforcementAuthorityLoss.overrun_str` past the predicted one. Whether that overrun ends on the station surface depends on the clearance at which braking begins, which the barrier of @sec-enforcement-safe-sets-conditional-permission evaluates. The coworker's hand must never come within the arm's biased stop of `{python} EnforcementAuthorityLoss.d_eff_str` plus its response-delay travel before the handover channel engages.
 
 Integral action beneath the enforcer adds a latency penalty during saturation. While the actuator is clipped and tracking error persists, the integrator keeps accumulating a command the plant cannot execute, so when the enforcer commands full braking the output stays pinned at the forward limit until that integral unwinds. If error accumulates for `{python} EnforcementAuthorityLoss.windup_span_str`, unwinding delays net braking force by $\tau_{\text{unwind}} =$ `{python} EnforcementAuthorityLoss.unwind_str`. On the mobile manipulator's base at the `{python} EnforcementAuthorityLoss.v_aisle_str` aisle speed, this delay adds $v\,\tau_{\text{unwind}} =$ `{python} EnforcementAuthorityLoss.windup_travel_str` of unbraked travel, almost twice the `{python} EnforcementAuthorityLoss.spare_str` that the finished stopping budget of @sec-enforcement-stopping-envelopes leaves spare. Anti-windup clamping, back-calculation, and conditional integration address the loop [@astrom2006advanced; @franklin1998digital]; the enforcement requirement is to measure the unwinding delay that remains and budget its unbraked distance inside the stopping horizon.
-
-A stalled proposer spends the same spare from upstream of the drive. Were the chunk lease of @sec-enforcement-authority-refuse left to the host to honor, a last proposal that kept its authority for `{python} EnforcementAuthorityLoss.t_stall_str` would add `{python} EnforcementAuthorityLoss.stall_added_str` to the stop and carry the base `{python} EnforcementAuthorityLoss.stall_breach_str` past the clear distance at the rack end. Enforcing the lease at the drive, rather than trusting the host to withdraw its own proposal, is what bounds that delay inside the budget.
 
 Saturation is one of the few hardware failures with a direct, deterministic detector inside the permission path. On each $1\text{ ms}$ tick the permission path compares the commanded effort $u_{\text{cmd}}$ with the realizable effort $u_{\text{act}} = \text{clip}(u_{\text{cmd}}, u_{\text{min}}, u_{\text{max}})$. A nonzero difference, or an inverter status register reporting current-limit saturation, shows that the actuator has exhausted its authority, and the duration and magnitude of the clamping track the remaining authority without noisy external state estimation.
 
@@ -906,7 +916,7 @@ that enforces linear braking half-space constraints ($\mathbf{a}(\mathbf{x})^\to
 
 When the tracker turns a learned policy's unverified setpoints into a nominal torque $\mathbf{u}_{\text{nom}}$, the enforcer does not forecast the machine's entire future path. It evaluates a single half-space inequality at the current state $\mathbf{x}$, the linear constraint that bounds the safe approach toward the boundary. If the proposed action satisfies $\mathbf{a}(\mathbf{x})^\top \mathbf{u}_{\text{nom}} \le b(\mathbf{x})$, the enforcer passes it to the motor untouched; if it violates a feasible half-space, the enforcer projects its torque vector.
 
-The MCU evaluates this barrier on sampled cycles, so the admission margin must cover intersample travel and measured sensing-to-torque delay. A barrier on the arm's distance to the fixture alone would register the danger only once momentum had already made contact inevitable,[^fn-math-cbf-degree] so the barrier must carry the kinetic stopping angle ($\omega^2 / 2\alpha$ for approach rate $\omega$ and braking bound $\alpha$) as well as position, a requirement that follows from **relative degree**\index{Relative degree}. Actuators command current and torque, torque produces acceleration, and position therefore lies two integrals from the input:
+The MCU evaluates this barrier on sampled cycles, so the admission margin must cover intersample travel and measured sensing-to-torque delay. A barrier on the arm's distance to the station surface alone would register the danger only once momentum had already made contact inevitable,[^fn-math-cbf-degree] so the barrier must carry the kinetic stopping angle ($\omega^2 / 2\alpha$ for approach rate $\omega$ and braking bound $\alpha$) as well as position, a requirement that follows from **relative degree**\index{Relative degree}. Actuators command current and torque, torque produces acceleration, and position therefore lies two integrals from the input:
 $$\text{Actuation } u \xrightarrow{\int \frac{1}{m} dt} \text{Velocity } v \xrightarrow{\int dt} \text{Position } x$$
 This two-step cascade defines relative degree $r = 2$. Differentiating clearance once yields velocity:
 $$\dot{d} = -v$$
@@ -976,7 +986,7 @@ class KineticBarrierArm:
     brake_near_str = fmt_torque(-ceiling_near, precision=1)
 ```
 
-Carry the descending-arm scenario of @sec-enforcement-exhausted-authority into this barrier: $J=$ `{python} EnforcementAuthorityLoss.inertia_str`, $\tau_{\text{bias}}=$ `{python} EnforcementAuthorityLoss.bias_str` toward the station, $|\tau|\le$ `{python} EnforcementAuthorityLoss.torque_limit_str`, $\alpha=(\tau_{\max}-\tau_{\text{bias}})/J=$ `{python} KineticBarrierArm.alpha_str` $\text{rad/s}^2$, $\ell=$ `{python} EnforcementAuthorityLoss.link_length_str`, $\omega=$ `{python} EnforcementAuthorityLoss.joint_speed_str` $\text{rad/s}$, and $\gamma=$ `{python} KineticBarrierArm.gamma_str` $\text{s}^{-1}$. These are stated joint-level scenario inputs; the bias is not inferred from the payload mass alone. At `{python} KineticBarrierArm.clear_far_str` of tool clearance, $D=$ `{python} KineticBarrierArm.angle_far_str` $\text{rad}$ and $h=$ `{python} KineticBarrierArm.h_far_str` $\text{rad}$, so @eq-enforce-kinetic-torque requires the joint to brake with at least `{python} KineticBarrierArm.brake_far_str`. At `{python} KineticBarrierArm.clear_zero_str`, $h=0$ and the requirement reaches `{python} KineticBarrierArm.brake_zero_str`, the joint's full peak torque. At `{python} KineticBarrierArm.clear_near_str`, it demands `{python} KineticBarrierArm.brake_near_str`, more than the joint can produce, so this state is already outside the modeled viable set. The enforcer must prevent entry into it; a fallback started there cannot restore the lost clearance.
+Carry the descending-arm scenario of @sec-enforcement-exhausted-authority into this barrier: $J=$ `{python} EnforcementAuthorityLoss.inertia_str`, $\tau_{\text{bias}}=$ `{python} EnforcementAuthorityLoss.bias_str` toward the station, $|\tau|\le$ `{python} EnforcementAuthorityLoss.torque_limit_str`, $\alpha=(\tau_{\max}-\tau_{\text{bias}})/J=$ `{python} KineticBarrierArm.alpha_str` $\text{rad/s}^2$, $\ell=$ `{python} EnforcementAuthorityLoss.link_length_str`, $\omega=$ `{python} EnforcementAuthorityLoss.joint_speed_str` $\text{rad/s}$, and $\gamma=$ `{python} KineticBarrierArm.gamma_str` $\text{s}^{-1}$. These are stated joint-level scenario inputs; the bias is not inferred from the payload mass alone. At `{python} KineticBarrierArm.clear_far_str` of tool clearance to the station surface, $D=$ `{python} KineticBarrierArm.angle_far_str` $\text{rad}$ and $h=$ `{python} KineticBarrierArm.h_far_str` $\text{rad}$, so @eq-enforce-kinetic-torque requires the joint to brake with at least `{python} KineticBarrierArm.brake_far_str`. At `{python} KineticBarrierArm.clear_zero_str`, $h=0$ and the requirement reaches `{python} KineticBarrierArm.brake_zero_str`, the joint's full peak torque. At `{python} KineticBarrierArm.clear_near_str`, it demands `{python} KineticBarrierArm.brake_near_str`, more than the joint can produce, so this state is already outside the modeled viable set. The enforcer must prevent entry into it; a fallback started there cannot restore the lost clearance.
 
 A real machine realizes neither exact state feedback nor instantaneous torque. Stator current rise, bus jitter, and gearbox compliance delay and soften the corrective action, so the enforcer evaluates the barrier against a boundary inset by the worst-case stopping deficit they cause and intervenes earlier in the trajectory.
 
@@ -1146,7 +1156,7 @@ class EnforcementCycleBudget:
 In this heterogeneous design, the shield executes inside a `{python} EnforcementCycleBudget.rate_str` timer interrupt routine on the real-time microcontroller core. An unloaded cycle of acquisition, validation, and a typical active-set solve completes in about `{python} EnforcementCycleBudget.unloaded_us_str` $\mu\text{s}$, an observation rather than a bound. The qualified path instead declares a worst-case execution time of `{python} EnforcementCycleBudget.wcet_us_str` $\mu\text{s}$ for the whole cycle (@sec-appendix-systems-timers), divided among the stages below, and the whole sequence must finish inside the `{python} EnforcementCycleBudget.deadline_us_str` $\mu\text{s}$ deadline:
 
 1. **Interrupt Entry & State Acquisition (`{python} EnforcementCycleBudget.acquisition_us_str` $\mu\text{s}$):** The hardware timer triggers the ISR, and firmware latches the wheel and joint encoder registers and the latest IMU sample.
-2. **Proposal & Lease Verification (`{python} EnforcementCycleBudget.proposal_lease_us_str` $\mu\text{s}$):** The MCU inspects the shared SRAM ring buffer populated by the Linux MPU over RPMSG or shared memory. It validates the checksum, confirms sequence order, reads the proposal's evidence epoch, and checks lease expiry. The proposal's age on the MCU clock may not exceed the `{python} EnforcementLeaseStop.lease_ms_str` chunk lease. A separate `{python} EnforcementLeaseStop.heartbeat_rate_hz_str` $\text{Hz}$ host heartbeat times out after `{python} EnforcementLeaseStop.heartbeat_timeout_ms_str` of silence. The MCU feeds its `{python} EnforcementLeaseStop.self_watchdog_ms_str` self-watchdog only after successful control cycles; an external trip covers MCU loss of execution.
+2. **Proposal & Lease Verification (`{python} EnforcementCycleBudget.proposal_lease_us_str` $\mu\text{s}$):** The MCU inspects the shared SRAM ring buffer populated by the Linux MPU over RPMSG or shared memory. It validates the checksum, confirms sequence order, reads the proposal's evidence epoch, and makes two age checks against it and the lease. The upper age of the evidence the proposal was built on, stamped at dispatch, may not exceed the `{python} EnforcementLeaseStop.age_threshold_str` refusal threshold, which is the `{python} EnforcementLeaseStop.t_age_str` observation age the stopping budget charged plus the `{python} EnforcementLeaseStop.eps_sync_str` clock-conversion bound (@sec-perception-observation-contract). The proposal's own age on the MCU clock may not exceed the `{python} EnforcementLeaseStop.lease_ms_str` chunk lease. A separate `{python} EnforcementLeaseStop.heartbeat_rate_hz_str` $\text{Hz}$ host heartbeat times out after `{python} EnforcementLeaseStop.heartbeat_timeout_ms_str` of silence. The MCU feeds its `{python} EnforcementLeaseStop.self_watchdog_ms_str` self-watchdog only after successful control cycles; an external trip covers MCU loss of execution.
 3. **Tracking Contract Verification (`{python} EnforcementCycleBudget.tracking_us_str` $\mu\text{s}$):** Firmware evaluates instantaneous tracking error $e(t) = \|x(t) - r(t)\|$ against the certified bound $\epsilon_{\text{track}}$.
 4. **CBF-QP Safety Shield Solve (`{python} EnforcementCycleBudget.qp_us_str` $\mu\text{s}$):** An active-set QP solver running in pre-allocated static DTCM SRAM (@sec-nervous-silicon-partitioning) evaluates active barrier inequalities and computes $u^* = \arg\min_u \frac{1}{2}\|u - u_{\text{nom}}\|^2$. A fixed iteration cap holds the solve inside its share even for ill-conditioned constraint geometry; nominal solves for one or two active constraints finish well within it. Dynamic memory allocation is forbidden, because a heap search has no bounded duration.
 5. **Output Selection & Setpoint Staging (`{python} EnforcementCycleBudget.write_us_str` $\mu\text{s}$):** If the QP is feasible and constraints hold, $u^*$ is staged as the admitted setpoints for the next EtherCAT frame to the drives, whose current loops apply it; a proposal that fails validation leaves the previously admitted setpoints in force. If the chunk lease has expired, the host heartbeat has fallen silent, the shared control rail reports undervoltage, tracking error exceeds $\epsilon_{\text{track}}$, or actuator saturation renders the feasible control set empty ($\mathcal{U}_{\text{safe}} = \emptyset$), the output selector revokes the policy and selects the state-matched stop. At standstill, the same lease, heartbeat, or undervoltage trigger selects a powered hold instead.
@@ -1334,7 +1344,7 @@ The enforcer sees the plant only through state estimates, so filter group delay\
 
 Determinism\index{Software Architecture!real-time operating system (RTOS)} guarantees that a computation finishes in a fixed number of cycles with bit-identical outputs, but it says nothing about whether the equations match the plant. An enforcer that assumes the base's friction premise of `{python} EnforcementStoppingBudget.mu_min_str` on a floor that oil has made slicker plays the resident suffix exactly on schedule while the tires cannot deliver its deceleration, so the base runs past the rack end with every deadline met. No timing monitor can see that failure, and @sec-frontier-residual-claims-register keeps its friction premise open.
 
-Contention on the shared system-on-chip (SoC) interconnect can defeat an enforcer that meets its own deadline, because a camera direct memory access (DMA) burst or bulk flash write that holds the bus matrix after the solve adds directly to the command's age at the drive while the inverter holds its last setpoint. The machine's placement keeps the permission path off that bus (@sec-placement-resource-contention), so a burst on the application processor appears instead as evidence age, which the freshness check on every tick reads against the proposal's evidence expiry.
+Contention on the shared system-on-chip (SoC) interconnect can defeat an enforcer that meets its own deadline, because a camera direct memory access (DMA) burst or bulk flash write that holds the bus matrix after the solve adds directly to the command's age at the drive while the inverter holds its last setpoint. The machine's placement keeps the permission path off that bus (@sec-placement-resource-contention), so a burst on the application processor appears instead as evidence age. Cycle stage 2 refuses every proposal whose evidence the burst has aged past the `{python} EnforcementLeaseStop.age_threshold_str` threshold. The admitted setpoints stay in force until the lease lapses and the output selector chooses the stop, so contention on this placement costs availability, never stopping distance.
 
 **Priority inversion**\index{Priority inversion} stalls the enforcer at the operating-system layer when a low-priority telemetry thread holds a mutex the $1000\text{ Hz}$ enforcer needs and a medium-priority thread keeps the holder from running, so the check waits without bound. Priority inheritance (`PTHREAD_PRIO_INHERIT`) or ceiling locking bounds the wait, and @sec-nervous-deterministic-fieldbuses examines the failure in flight hardware.
 
@@ -1426,6 +1436,7 @@ class EnforcementRecordMachine:
     check(abs(tcp_limit.to(meter / second).magnitude - 1.0) < 1e-9, "The free-space TCP limit is 1.0 m/s.")
     check(abs(v_handover.to(meter / second).magnitude - 0.10) < 1e-9, "The handover approach ceiling is 0.10 m/s.")
     check(v_handover < v_handover_ceiling, "The handover ceiling sits under the contact-force ceiling.")
+    check(abs(v_handover_ceiling.magnitude - 0.118) < 5e-4, "The contact-force ceiling at the hand is 0.118 m/s.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     eps_track_str = fmt_length(eps_track, unit=millimeter, precision=0)
@@ -1448,21 +1459,23 @@ class EnforcementRecordMachine:
     t_contact_str = fmt_latency(t_contact, unit=millisecond, precision=0)
     tcp_limit_str = fmt_velocity(tcp_limit, precision=0)
     v_handover_str = fmt_velocity(v_handover, precision=2)
+    v_handover_ceiling_str = fmt_velocity(v_handover_ceiling, precision=3)
 ```
 
-Filled in for the machine, the record fixes the base's stops at the rack end and the arm's validity region at the door and the packing station:
+Filled in for the machine, the record fixes the base's stops at the rack end and the arm's validity region and channels at the door and the packing station:
 
 - The tracking bound $\epsilon_{\text{track}}$ is `{python} EnforcementRecordMachine.eps_track_str`, the inset of row 7 in @tbl-enforcement-stopping-budget.
 - The resident stop is the C² suffix, which lasts `{python} EnforcementRecordMachine.t_stop_aisle_str` and covers `{python} EnforcementRecordMachine.d_stop_aisle_str` from the `{python} EnforcementRecordMachine.v_aisle_str` aisle speed, or `{python} EnforcementRecordMachine.t_stop_drive_str` and `{python} EnforcementRecordMachine.d_stop_drive_str` from the `{python} EnforcementRecordMachine.v_drive_str` drive limit.
 - The loop period is `{python} EnforcementCycleBudget.tick_str`, with a declared WCET of `{python} EnforcementCycleBudget.wcet_us_str` $\mu\text{s}$ inside a `{python} EnforcementCycleBudget.deadline_us_str` $\mu\text{s}$ deadline. Three timers run beside it, the `{python} EnforcementLeaseStop.lease_ms_str` chunk lease, the `{python} EnforcementLeaseStop.heartbeat_rate_hz_str` $\text{Hz}$ host heartbeat with its `{python} EnforcementLeaseStop.heartbeat_timeout_ms_str` silence timeout, and the `{python} EnforcementLeaseStop.self_watchdog_ms_str` self-watchdog.
-- The validity region for the arm covers the door and the packing station. At the door it is the target ODD of @sec-evaluation-logs, which admits only the nominal plate, the door's own load, a stopped base, and the guarded approach, and the approach-speed channel of the evaluation record's `runtime_monitor_specs` enters the check as a `{python} EnforcementRecordMachine.v_latch_str` ceiling on the tool point inside the door zone. At the packing station it admits the mug pick from the conveyor under the `{python} EnforcementRecordMachine.tcp_limit_str` free-space TCP limit and a live intent lease (@sec-intent-lease), and the handover that follows. While the coworker holds `accept_item` (@sec-intervention-human-authority), a handover channel caps the tool point's approach to the coworker's hand at `{python} EnforcementRecordMachine.v_handover_str`, a ceiling the enforcer applies as it applies the door's.
+- The validity region for the arm covers the door and the packing station. At the door it is the target ODD of @sec-evaluation-logs, which admits only the nominal plate, the door's own load, a stopped base, and the guarded approach. At the packing station it admits the mug pick from the conveyor under a live intent lease (@sec-intent-lease), and the handover that follows.
+- The arm's channels are ceilings the enforcer applies to the tool point. The approach-speed channel of the evaluation record's `runtime_monitor_specs` caps it at `{python} EnforcementRecordMachine.v_latch_str` inside the door zone. The mug pick runs under the `{python} EnforcementRecordMachine.tcp_limit_str` free-space TCP limit. While the coworker holds `accept_item` (@sec-intervention-human-authority), a handover channel caps the approach to the coworker's hand at `{python} EnforcementRecordMachine.v_handover_str`, below the `{python} EnforcementRecordMachine.v_handover_ceiling_str` contact-force ceiling, and it engages before the hand comes within the arm's biased stop plus its response-delay travel.
 - For the base, the normal configuration is valid on floors with friction of at least `{python} EnforcementRecordMachine.mu_min_str`, where the credible deceleration binds. A restricted configuration is valid down to the inspected-floor friction of `{python} EnforcementRecordMachine.mu_inspected_str`; its suffix is sized for the `{python} EnforcementRecordMachine.a_inspected_str` peak that floor allows, and it takes `{python} EnforcementRecordMachine.t_stop_restricted_str` and `{python} EnforcementRecordMachine.d_stop_restricted_str` to stop from `{python} EnforcementRecordMachine.v_restricted_str`, under the `{python} EnforcementRecordMachine.v_inspected_str` inspected-floor ceiling. Each configuration carries its own digest, and the release manifest (@sec-release-manifest) names both.
 
 Each numerical entry in the record carries the evidence category of its limit record (@sec-body-measuring-limits), whether measured, derived, datasheet, or illustrative, and the categories carry very different real-world confidence. The base's `{python} EnforcementRecordMachine.t_stop_aisle_str` stopping time is derived. It follows from the shape of the C² suffix and from a credible deceleration that is itself illustrative, and it assumes that the drive delivers the commanded current and that the tires hold the floor throughout the stop. Only loaded stopping trials on the floor itself make it a measured value, and those trials expose what no derivation contains, among them the scatter in brake onset and the friction of the actual floor surface. Even then the measured sample stands for the bound only with a justified worst-case fault and stated operating conditions. Recording the category prevents an integrator from mistaking a derived stop for a measured hardware limit.
 
 The record maps separately qualified thresholds to protective actions, and on the machine the routing depends on whether the body is moving. Routing does not rely on coarse error strings or unquantified health flags. The base stays on the project rung, where quadratic programming (QP)\index{Quadratic programming} filter adjustments are permitted, as long as tracking error satisfies $e(t) \le \epsilon_{\text{track}} =$ `{python} EnforcementRecordMachine.eps_track_str`, the kinetic barrier stays feasible, and the solver stays within its declared `{python} EnforcementCycleBudget.qp_us_str` $\mu\text{s}$ share of the cycle budget. A new proposal that fails validation while the active lease holds is refused, and the previously admitted setpoints stay in force until that lease lapses. In motion, a lapsed lease, a silent heartbeat, an undervoltage flag on the shared control rail, tracking error beyond $\epsilon_{\text{track}}$, or a kinetic barrier at zero selects the stop rung, which plays the resident suffix on the base and the state-matched stop on the arm. At standstill the same lease or heartbeat expiry, or the same undervoltage flag, selects the hold rung, since no motion remains to arrest. The `{python} EnforcementLeaseStop.self_watchdog_ms_str` MCU self-watchdog detects missed successful cycles; this design also assumes an independently wired supervisor output or external trip that requests the inhibit rung if the MCU fails. Its total trip response must be measured. A contactor, if fitted, is an independently timed supply-isolation function.
 
-Each field of the record is either an integrity field or a threshold that one of these checks reads: the proposal's sequence number and checksum, its evidence time against the lease, the tracking bound, the joint-velocity and torque-slew ceilings, the barrier margins, the phase-current and bus-voltage limits, and the watchdog timeout. The record binds each threshold to the independent hardware that measures it and to the rung that a failed check selects. @Tbl-12-fallback-hierarchy groups those rungs by the authority path that remains active after a failed check, together with the timer that triggers each one.
+Each field of the record is either an integrity field or a threshold that one of these checks reads: the proposal's sequence number and checksum, its evidence age against the `{python} EnforcementLeaseStop.age_threshold_str` refusal threshold (the budgeted observation age plus the clock-conversion bound), its own age against the lease, the tracking bound, the joint-velocity and torque-slew ceilings, the barrier margins, the phase-current and bus-voltage limits, and the watchdog timeout. The record binds each threshold to the independent hardware that measures it and to the rung that a failed check selects. @Tbl-12-fallback-hierarchy groups those rungs by the authority path that remains active after a failed check, together with the timer that triggers each one.
 
 ::: {.column-margin .margin-pointer}
 ↳ **Byte layout:** The enforcement record's fields, types, and units are given in @sec-appendix-systems-wire-enforcement.
@@ -1477,7 +1490,7 @@ Each field of the record is either an integrity field or a threshold that one of
 
 : **Enforcement state contract**: The `{python} EnforcementLeaseStop.chunk_rate_hz_str` $\text{Hz}$ proposal, `{python} EnforcementLeaseStop.lease_ms_str` chunk lease, `{python} EnforcementLeaseStop.heartbeat_rate_hz_str` $\text{Hz}$ host heartbeat, and $1\text{ kHz}$ MCU loop have distinct renewal and failure paths. {#tbl-12-fallback-hierarchy tbl-colwidths="[18,29,22,31]"}
 
-No enforcement guarantee holds when the machine operates outside its designed physical environment, so the record bounds the plant dynamics within an explicit validity region. The arm's door ceiling rests on evidence. The arithmetic alone would have admitted the chunk policy's `{python} EnforcementRecordMachine.v_latch_high_str` approach of @sec-enforcement-authority-refuse, whose `{python} EnforcementRecordMachine.t_yield_high_str` contact deadline still exceeds the `{python} EnforcementRecordMachine.t_contact_str` contact loop, but neither the demonstrations nor the evaluation trials behind the policy include that speed (@sec-data-schema), so the enforcer projects the proposal to `{python} EnforcementRecordMachine.v_latch_str` and logs the channel that bound it. The handover ceiling rests on the contact model instead, sitting below the speed at which an unplanned touch of the coworker's hand would reach the contact criterion (@sec-intervention-human-authority), and a faster proposal is projected and logged in the same way.
+No enforcement guarantee holds when the machine operates outside its designed physical environment, so the record bounds the plant dynamics within an explicit validity region. The arm's door ceiling rests on evidence. The arithmetic alone would have admitted the chunk policy's `{python} EnforcementRecordMachine.v_latch_high_str` approach of @sec-enforcement-authority-refuse, whose `{python} EnforcementRecordMachine.t_yield_high_str` contact deadline still exceeds the `{python} EnforcementRecordMachine.t_contact_str` contact loop, but neither the demonstrations nor the evaluation trials behind the policy include that speed (@sec-evaluation-logs), so the enforcer projects the proposal to `{python} EnforcementRecordMachine.v_latch_str` and logs the channel that bound it. The handover ceiling rests on the contact model instead, sitting below the contact-force ceiling, the speed at which an unplanned touch of the coworker's hand would reach the contact criterion (@sec-intervention-human-authority), and a faster proposal is projected and logged in the same way.
 
 A live state outside the validity region that the machine can observe, such as a payload the manifest never declared, is refused like any other failed check, and the supervisory monitors that detect it revoke policy dispatch and select the state-matched stop. A floor below the base's friction premise is not such a state, because no sensor on the machine observes the friction under its wheels. The normal configuration therefore rests on that friction as a premise, and the restricted configuration rests on inspection of the floor (@sec-frontier-residual-claims-register).
 

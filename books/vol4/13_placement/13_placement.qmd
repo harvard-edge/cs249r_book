@@ -87,13 +87,15 @@ Because these couplings are governed by physical solid-state phenomena rather th
 # │ Show: 135 µs unloaded = 40 + 80 + 15 µs = 54,000 cycles at 400 MHz, against
 # │       a declared 250 µs WCET and a chosen 400 µs deadline in the 1 ms tick.
 # │       The permission path's isolated rail holds up for 2 s (a placement
-# │       fact recorded here; decided in Ch2, sized in Ch12).
+# │       fact recorded here; decided in Ch2, sized in Ch12). The 5 ms
+# │       renewal-jitter allowance tolerates at most a 12.5 percent stretch of
+# │       the 40 ms chunk inference (Ch8's HostContentionAllowance).
 # │ How: Registry fields of the warehouse mobile manipulator and its aisle
 # │      scenario; the three enforcer sub-costs are chapter-local.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import microsecond, millisecond, second, hertz
-from mlsysim.fmt import fmt_int, fmt_latency, fmt_frequency, check
+from mlsysim.fmt import fmt_int, fmt_latency, fmt_frequency, fmt_percent, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
@@ -113,6 +115,7 @@ class PlacementMachine:
     deadline = AISLE.enforcer_deadline  # category: chosen
     self_watchdog = AISLE.mcu_self_watchdog  # category: chosen
     rail_holdup = RM.permission_rail_holdup  # category: chosen (permission-rail hold-up)
+    renewal_jitter = 5 * millisecond  # category: chosen (renewal-jitter allowance of the lease rule, @sec-nervous-coupled-budget)
     sense = 40 * microsecond  # scenario assumption; category: illustrative (encoders, IMU, evidence epoch)
     constraint = 80 * microsecond  # scenario assumption; category: illustrative
     write = 15 * microsecond  # scenario assumption; category: illustrative (drive-frame staging)
@@ -126,6 +129,7 @@ class PlacementMachine:
     unloaded_cycles = (unloaded * mcu_clock).to("dimensionless").magnitude
     min_chunk_rate = (1 / lease).to(hertz)
     compute_after_sense = (constraint + write).to(microsecond)
+    contention_stretch = (renewal_jitter / chunk_inference).to("dimensionless").magnitude
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(
@@ -143,6 +147,11 @@ class PlacementMachine:
         chunk_period < lease, "Lease rule: the lease outlasts one chunk period, leaving the renewal-jitter allowance that absorbs the proposal link."
     )
     check(abs(rail_holdup.to(second).magnitude - 2.0) < 1e-9, "Canon (D15): the permission rail holds up for 2.0 s.")
+    check(chunk_period + renewal_jitter < lease, "Lease rule: chunk period plus the 5 ms renewal-jitter allowance fits inside the lease.")
+    check(
+        abs(contention_stretch - 0.125) < 1e-9,
+        "Matches Ch8 HostContentionAllowance: 5 ms of jitter is a 12.5 percent stretch of the 40 ms inference.",
+    )
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     chunk_rate_str = fmt_frequency(chunk_rate, precision=0)
@@ -168,6 +177,8 @@ class PlacementMachine:
     deadline_str = fmt_latency(deadline, unit=microsecond, precision=0)
     self_watchdog_str = fmt_latency(self_watchdog, unit=millisecond, precision=0)
     rail_holdup_str = fmt_latency(rail_holdup, unit=second, precision=0)
+    renewal_jitter_str = fmt_latency(renewal_jitter, unit=millisecond, precision=0)
+    contention_stretch_pct_str = fmt_percent(contention_stretch, precision=1)
 ```
 
 Placement cannot defer to integration; the physical assignment of software functions to hardware execution engines determines separation. The mobile manipulator partitions its control across two paths with conflicting requirements. The proposal path runs the chunk policy on the application processor at `{python} PlacementMachine.chunk_rate_str`, taking the navigation and wrist camera streams and emitting base velocity and arm joint targets together. Its P99 inference, vision included, takes `{python} PlacementMachine.chunk_inference_str` (illustrative; see the Reader Guide) of each `{python} PlacementMachine.chunk_period_str` chunk period; it holds no direct hardware authority over the drives and runs in unprivileged user space. The permission path runs on the discrete safety microcontroller at `{python} PlacementMachine.permission_rate_str`. Each tick it reads the wheel and joint encoders, the IMU, and the evidence epoch of the latest proposal, checks that proposal against the stopping envelope of @sec-enforcement-stopping-envelopes, and stages the admitted setpoints for the EtherCAT frame to the drives. It must finish inside a chosen `{python} PlacementMachine.deadline_str` deadline within its `{python} PlacementMachine.tick_str` tick, and it runs in a privileged real-time execution domain on a dual-core lockstep controller,[^fn-place-asild-lockstep] whose comparator diagnostics cover the permission path's own failure, because an envelope check cannot detect a fault in the core that executes it. Only the permission path holds memory-mapped input-output (MMIO)\index{Memory-mapped I/O} access to the fieldbus master that carries drive commands.
@@ -222,7 +233,7 @@ Principle \ref{pri-vol4-proposal-permission} requires a permission path that lea
 
 Every shared physical resource has multiple claimants; a utilization metric that ignores concurrent competition cannot bound a deadline. Had the mobile manipulator placed its permission path on the application SoC, the proposal path, the enforcement path, and the system infrastructure would compete directly for the same memory controllers, crossbar switches, and power distribution rails. Digital claimants on that shared memory bus would include camera and lidar DMA streams depositing frames into DRAM, the neural accelerator fetching model weight matrices and intermediate activation tensors, the real-time core reading its constraint tables and sensor history, actuator write buffers for drive commands, cache controllers executing dirty line writebacks, and diagnostic logging processes writing state records to nonvolatile storage. On the machine as built, the same bursts stay on the application processor, where they delay the observation and the chunk rather than the permission tick. The permission path meets them as evidence age (@sec-perception-cost-ingestion), refusing evidence older than its refusal threshold and entering its fallback if no admitted chunk renews the lease.
 
-In physical AI hardware design, **crossbar bus and DRAM bank contention**\index{Crossbar bus and DRAM bank contention!definition} is queuing delay when memory and DMA transactions share an interconnect and controller. One in-flight AXI4 transaction may finish before a newly arrived safety request; blocking by a whole model tile requires a specified repeated-grant or FIFO policy. Row-buffer scheduling can add delay, so the actual bound depends on transaction size, queue capacity, QoS semantics, bank mapping, and new arrivals.[^fn-place-dram-bandwidth]
+On a shared die, **crossbar bus and DRAM bank contention**\index{Crossbar bus and DRAM bank contention!definition} is queuing delay when memory and DMA transactions share an interconnect and controller. One in-flight AXI4 transaction may finish before a newly arrived safety request; blocking by a whole model tile requires a specified repeated-grant or FIFO policy. Row-buffer scheduling can add delay, so the actual bound depends on transaction size, queue capacity, QoS semantics, bank mapping, and new arrivals.[^fn-place-dram-bandwidth]
 
 [^fn-place-dram-bandwidth]: **DRAM bank conflicts**\index{DRAM!bank conflicts}: A different row in the same active bank may require precharge and activation before column service. Actual bank mapping, overlap, and scheduling determine the added delay.
 
@@ -711,7 +722,7 @@ If reservations, partitioning, and workload reduction cannot establish the requi
 
 Relocation also reaches couplings that reservation and partitioning cannot. A rail sag or thermal throttle that slows the permission core stretches its tick through physics rather than through bus contention, and a shared reset or clock domain lets one fault halt both paths; a partitioned SoC that claims to contain such a fault has to show it by design and injection tests. A separate controller removes these common-cause paths only as far as its power, clock, reset, sensor, and actuator independence are designed and tested.
 
-Relocating a workload to separate silicon is rarely a localized modification. It triggers a cascade of placement and communication adjustments across the entire machine, and the mobile manipulator shows where that cost lands. The $T_{\text{bus}}$ term of @sec-nervous-cadences does not change, because drive commands cross the EtherCAT fieldbus wherever the permission path runs. What relocation adds is the proposal's crossing from the application processor to the microcontroller over a board-level link instead of an on-die mailbox. That delay enters no new term of $\tau_{\text{delay}}$. A proposal that arrives late spends part of the renewal-jitter allowance that the lease rule of @sec-nervous-coupled-budget places in the gap between the `{python} PlacementMachine.chunk_period_str` chunk period and the `{python} PlacementMachine.lease_str` lease, so the link's worst case, measured under load, must fit inside that allowance with the proposer's own jitter.
+Relocating a workload to separate silicon is rarely a localized modification. It triggers a cascade of placement and communication adjustments across the entire machine, and the mobile manipulator shows where that cost lands. The $T_{\text{bus}}$ term of @sec-nervous-cadences does not change, because drive commands cross the EtherCAT fieldbus wherever the permission path runs. What relocation adds is the proposal's crossing from the application processor to the microcontroller over a board-level link instead of an on-die mailbox. That delay enters no new term of $\tau_{\text{delay}}$. A proposal that arrives late spends part of the `{python} PlacementMachine.renewal_jitter_str` renewal-jitter allowance that the lease rule of @sec-nervous-coupled-budget places in the gap between the `{python} PlacementMachine.chunk_period_str` chunk period and the `{python} PlacementMachine.lease_str` lease. Host memory contention draws on the same allowance, so the most it may stretch the chunk policy's `{python} PlacementMachine.chunk_inference_str` inference is `{python} PlacementMachine.contention_stretch_pct_str` percent (@sec-perception-cost-ingestion). The link's worst case, measured under load, must therefore fit inside what that contention and the proposer's own jitter leave of the allowance.
 
 The harder decision is where each sensor attaches. The machine keeps the encoders and the IMU on the microcontroller's side of the link, because those are what the permission path reads every tick, and it leaves the cameras and the lidar on the application processor, because the learned models consume them and the permission path reads only the proposal's evidence epoch. Moving a camera interface to the microcontroller would offload the main chip, but it would force the learned models to receive their observation stream over the slower external link and add to the observation age that @sec-perception measured. Every re-placement decision propagates through the physical interconnects, shifting bottlenecks from on-die memory arbiters to board-level pin counts, wiring runs, and serial buses.
 
@@ -844,7 +855,7 @@ class PlacementFallacyMargins:
 
 **Fallacy**: *Logical privilege rings protect real-time enforcers from shared-rail electrical droop.*\index{Voltage droop!gate delay}\index{Interference!shared power rail}
 
-Suppose the mobile manipulator placed its lockstep permission core on the accelerator's supply in one SoC. The accelerator current step of @sec-placement-resource-contention sags that shared `{python} PlacementFallacyMargins.v_core_str` $\text{V}$ rail by `{python} PlacementFallacyMargins.v_droop_mv_str` $\text{mV}$, and the alpha-power model stretches the propagation delay of every gate on it by `{python} PlacementFallacyMargins.gate_stretch_pct_str` percent, the permission core's gates included, whatever priority its software holds. A core whose clock leaves less timing slack than that stretch misses setup time on its critical paths. Both lockstep cores see the same sag, so they can latch the same wrong value and the comparator stays silent, or the brownout detector resets the enforcer while the base is moving. Access control decides which addresses the enforcer may write; it has no term for the voltage at its flip-flops. Placement qualification must bound the droop with decoupling capacitance or $di/dt$ slew limits and show the timing margin under the declared current step, or remove the shared supply. The machine removes it, running its permission path on the isolated, held-up rail of @sec-body-power-integrity, which the accelerator does not draw on.
+Suppose the mobile manipulator placed its lockstep permission core on the accelerator's supply in one SoC. The accelerator current step of @sec-placement-resource-contention sags that shared `{python} PlacementFallacyMargins.v_core_str` $\text{V}$ rail by `{python} PlacementFallacyMargins.v_droop_mv_str` $\text{mV}$, and the alpha-power model stretches the propagation delay of every gate on it by `{python} PlacementFallacyMargins.gate_stretch_pct_str` percent, the permission core's gates included, whatever priority its software holds. A core whose clock leaves less timing slack than that stretch misses setup time on its critical paths. Both lockstep cores see the same sag, so they can latch the same wrong value and the comparator stays silent, or the brownout detector resets the enforcer while the base is moving. Access control decides which addresses the enforcer may write; it has no term for the voltage at its flip-flops. Placement qualification must bound the droop with decoupling capacitance or $di/dt$ slew limits and show the timing margin under the declared current step, or remove the shared supply. The machine removes it, running its permission path on the isolated, held-up rail of @sec-body-archetype-matrix, which the accelerator does not draw on.
 
 :::
 
