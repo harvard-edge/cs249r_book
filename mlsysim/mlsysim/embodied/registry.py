@@ -240,6 +240,10 @@ class MobileManipulators(Registry):
         control_rail_battery_low=21.5 * ureg.volt,             # illustrative depleted battery
         control_rail_resistance=60.0 * ureg.milliohm,          # illustrative harness resistance
         control_rail_dropout=18.0 * ureg.volt,                 # illustrative regulator dropout
+        permission_rail_holdup=2.0 * ureg.second,              # chosen hold-up time
+        permission_rail_load=70.0 * ureg.watt,                 # illustrative permission-path load
+        spring_brake_engage_min=30.0 * ureg.millisecond,       # illustrative spring-brake engage, fast end
+        spring_brake_engage_max=80.0 * ureg.millisecond,       # illustrative spring-brake engage, slow end
         metadata=Metadata(provenance=pc.WAREHOUSE_MOBILE_MANIPULATOR),
     )
 

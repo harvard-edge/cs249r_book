@@ -470,6 +470,13 @@ WAREHOUSE_MOBILE_MANIPULATOR = _est(
         " Control rail: 24 V nominal is a design choice; the 21.5 V depleted-battery "
         "voltage, 60 mOhm shared harness resistance, and 18.0 V point-of-load "
         "regulator dropout are illustrative."
+        " Permission-path rail isolated and held up (round-3 D15): isolated from the "
+        "application processor's supply and held up by a supercapacitor store behind "
+        "an ideal-diode controller, feeding the safety MCU, drive-logic and gate-driver "
+        "supplies, encoder interfaces, and all spring-brake coils. The 2.0 s hold-up is "
+        "a design choice; the 70 W permission-path load and the 30-80 ms spring-brake "
+        "engage window are illustrative. The permission loads are assumed to share the "
+        "18.0 V regulator dropout."
     ),
     verified="2026-09-21",
 )

@@ -314,3 +314,54 @@ def test_clock_rate_rejects_flops():
     with pytest.raises(ValueError):
         ComputeCore(peak_flops="1 TFLOPs / s", clock_rate="1 TFLOPs / s")
     assert ComputeCore(peak_flops="1 TFLOPs / s").clock_rate is None
+
+
+# ---------------------------------------------------------------------------
+# Permission-path rail guard values (added 2026-09-22, round-3 D15, add-only).
+# The rail must ride through from an undervoltage or feed-loss flag until the
+# longest stop the enforcer can command inside the envelope has finished and
+# the spring brakes have set at standstill.
+# ---------------------------------------------------------------------------
+
+
+def _inspected_floor_stop_duration():
+    """C2 stop duration from the inspected-floor ceiling on mu_inspected_floor."""
+    decel = _AISLE.mu_inspected_floor * _G
+    return calc_c2_stop_suffix(_v(_ceiling(decel=decel)), decel)["duration"]
+
+
+def _flag_to_brakes_set():
+    """Tick + bus + brake onset, the inspected-floor C2 stop, then the slow spring-brake engage."""
+    return (_AISLE.t_tick + _AISLE.t_bus + _AISLE.t_brake_onset
+            + _inspected_floor_stop_duration() + _RM.spring_brake_engage_max)
+
+
+_PERMISSION_RAIL_GUARDS = [
+    # (id, getter, expected, unit, abs tolerance)
+    ("holdup_capacitance", lambda: _RM.permission_rail_holdup_capacitance, 2.025, "F", 5e-4),
+    ("holdup_energy", lambda: _RM.permission_rail_load * _RM.permission_rail_holdup, 140.0, "J", 1e-9),
+    ("flag_to_onset", lambda: _AISLE.t_tick + _AISLE.t_bus + _AISLE.t_brake_onset, 22.0, "ms", 1e-9),
+    ("inspected_floor_stop", _inspected_floor_stop_duration, 1395.35, "ms", 5e-3),
+    ("flag_to_brakes_set", _flag_to_brakes_set, 1497.35, "ms", 5e-3),
+    ("holdup_margin", lambda: _RM.permission_rail_holdup - _flag_to_brakes_set(), 502.65, "ms", 5e-3),
+]
+
+
+@pytest.mark.parametrize(
+    "getter, want, unit, tol",
+    [g[1:] for g in _PERMISSION_RAIL_GUARDS],
+    ids=[g[0] for g in _PERMISSION_RAIL_GUARDS],
+)
+def test_permission_rail_guard(getter, want, unit, tol):
+    assert getter().to(unit).magnitude == pytest.approx(want, abs=tol)
+
+
+def test_permission_rail_rides_through_the_envelope_stop():
+    """The hold-up covers the envelope's longest stop; an oil-film stop lies outside it."""
+    assert _flag_to_brakes_set() < _RM.permission_rail_holdup
+    assert _RM.spring_brake_engage_min < _RM.spring_brake_engage_max
+    assert _RM.control_rail_dropout < _RM.control_rail_battery_low
+    oil = _AISLE.mu_oil_film * _G
+    oil_stop = calc_c2_stop_suffix(_v(_ceiling(decel=_AISLE.mu_inspected_floor * _G)), oil)["duration"]
+    assert (_AISLE.t_tick + _AISLE.t_bus + _AISLE.t_brake_onset + oil_stop
+            + _RM.spring_brake_engage_max) > _RM.permission_rail_holdup

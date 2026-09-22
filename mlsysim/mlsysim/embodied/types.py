@@ -110,6 +110,15 @@ class MobileManipulatorPlatform(BaseModel):
     control_rail_battery_low: Quantity      # V, battery at the low end of its discharge
     control_rail_resistance: Quantity       # ohm, shared harness resistance
     control_rail_dropout: Quantity          # V, point-of-load regulator dropout
+    # Permission-path rail: isolated from the application processor's supply and
+    # held up by a local supercapacitor store behind an ideal-diode controller. It
+    # feeds the safety MCU, the drive-logic and gate-driver supplies, the encoder
+    # interfaces, and every spring-brake coil. The permission loads are assumed to
+    # share the control rail's regulator dropout.
+    permission_rail_holdup: Quantity        # s, ride-through time after the feed is lost
+    permission_rail_load: Quantity          # W, total load on the permission-path rail
+    spring_brake_engage_min: Quantity       # ms, spring-brake engage time after coil decay (fast end)
+    spring_brake_engage_max: Quantity       # ms, spring-brake engage time after coil decay (slow end)
     metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator("onboard_payload_capacity", mode="after")
@@ -167,6 +176,19 @@ class MobileManipulatorPlatform(BaseModel):
     def _validate_resistance(cls, v, info):
         return require_dimensionality(v, ureg.ohm, info.field_name)
 
+    @field_validator(
+        "permission_rail_holdup", "spring_brake_engage_min", "spring_brake_engage_max",
+        mode="after",
+    )
+    @classmethod
+    def _validate_permission_rail_time(cls, v, info):
+        return require_dimensionality(v, ureg.second, info.field_name)
+
+    @field_validator("permission_rail_load", mode="after")
+    @classmethod
+    def _validate_permission_rail_power(cls, v, info):
+        return require_dimensionality(v, ureg.watt, info.field_name)
+
     @property
     def unloaded_mass(self):
         """Base plus arm, without the tote-rack payload."""
@@ -181,6 +203,16 @@ class MobileManipulatorPlatform(BaseModel):
     def arm_effective_contact_mass(self):
         """Robot-side effective mass at the TCP: half the arm's moving mass plus payload."""
         return (self.arm.mass / 2 + self.arm.payload_capacity).to(ureg.kg)
+
+    @property
+    def permission_rail_holdup_capacitance(self):
+        """Hold-up store sized to carry the permission load for the hold-up time.
+
+        The store is charged to the depleted-battery voltage and may discharge to
+        the regulator dropout: C = 2 P t / (V_low^2 - V_dropout^2).
+        """
+        return (2 * self.permission_rail_load * self.permission_rail_holdup
+                / (self.control_rail_battery_low**2 - self.control_rail_dropout**2)).to(ureg.farad)
 
 
 class EmbodiedSiteScenario(BaseModel):
