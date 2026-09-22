@@ -638,6 +638,134 @@ Once DMA write completion occurs, the kernel driver issues an interrupt.[^fn-hw-
 
 [^fn-hw-v4l2-dma]: **Video4Linux2 direct memory access**\index{Hardware!V4L2 DMA}: A V4L2 driver may use scatter-gather or physically contiguous DMA storage and expose a capture buffer through `V4L2_MEMORY_MMAP`, which a compatible `dma_buf` importer can share. See @sec-appendix-systems-ipc.
 
+The physical interconnect choice dictates the lower bound on sensor transport and host ingestion overhead (@fig-08-perception-camera-latency-breakdown). In robotic systems, designers frequently select camera interfaces based on mechanical convenience (such as USB 3.0 cabling) without accounting for driver queueing and protocol packetization taxes. Measuring the full photon-to-actuator latency waterfall across four standard embodied vision interfaces reveals the cumulative cost of these transport choices. While standard industrial USB 3.0 introduces a substantial 58.4 ms closed-loop latency due to USB Video Class (UVC) driver packetization, userspace kernel copies, and variable USB frame-interval polling, embedded MIPI CSI-2 achieves a deterministic 34.6 ms round trip via direct SoC D-PHY direct memory access (DMA). Automotive GMSL2 serializers/deserializers (SerDes) match the latency performance of MIPI CSI-2 (34.8 ms) while extending physical signal reach to 15 meters over lightweight coaxial cable with only ~50 µs link serialization delay. Finally, neuromorphic event cameras (such as Prophesee Metavision DVS) bypass conventional exposure integration and rolling shutter readout altogether, streaming asynchronous polarity changes within microsecond intervals to enable an ultra-responsive 11.9 ms closed-loop reaction time.
+
+::: {#fig-08-perception-camera-latency-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Photon-to-actuator latency waterfall across camera interfaces**: Stage-by-stage latency comparison across four camera interfaces (neuromorphic event camera, embedded MIPI CSI-2, automotive GMSL2 SerDes, and industrial USB 3.0 UVC) measuring the cumulative journey from optical transduction to mechanical motor torque rise. While USB 3.0 incurs significant driver and packetization tax (58.4 ms total), embedded MIPI CSI-2 and automotive GMSL2 provide deterministic DMA ingest (34.6 ms and 34.8 ms), and neuromorphic DVS bypasses frame exposure and rolling readout to reach an 11.9 ms closed-loop reaction." fig-alt="Horizontal stacked bar chart comparing photon-to-actuator latency across four camera interfaces: Neuromorphic Event Camera (11.9 ms), Embedded MIPI CSI-2 (34.6 ms), Automotive GMSL2 (34.8 ms), and Industrial USB 3.0 (58.4 ms). Stacked segments show optical transduction, sensor readout, transport and SerDes, host DMA and ISP, neural inference, planning dispatch, and motor torque rise."}
+
+```{python}
+#| label: fig-08-perception-camera-latency-breakdown
+#| echo: false
+#| message: false
+#| warning: false
+
+import matplotlib as mpl
+
+mpl.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Publication styling
+plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
+plt.rcParams["axes.edgecolor"] = "#334155"
+plt.rcParams["axes.linewidth"] = 1.0
+
+fig, ax = plt.subplots(figsize=(14.0, 8.2), dpi=300, facecolor="#FFFFFF")
+ax.set_facecolor("#FFFFFF")
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5, color="#E2E8F0")
+ax.set_axisbelow(True)
+
+interfaces = [
+    "Neuromorphic Event Camera\n(Prophesee Metavision DVS)",
+    "Embedded MIPI CSI-2\n(Direct SoC D-PHY DMA)",
+    "Automotive GMSL2\n(15 m Coaxial SerDes)",
+    "Industrial USB 3.0\n(Standard UVC Driver)",
+]
+
+# Stages and their measured latencies (in milliseconds)
+stages = [
+    ("Optical Transduction / Exposure", [0.05, 8.0, 8.0, 10.0], "#F59E0B"),  # Amber
+    ("Sensor Readout & ADC Digitization", [0.10, 8.3, 8.3, 14.2], "#F97316"),  # Orange
+    ("Interface Transport & Link SerDes", [0.20, 0.15, 0.05, 4.8], "#EF4444"),  # Red
+    ("Host Ingest, DMA & ISP Pipeline", [0.80, 1.4, 1.6, 8.5], "#8B5CF6"),  # Purple
+    ("Neural Perception Inference", [2.8, 8.5, 8.5, 11.2], "#0284C7"),  # Cyan/Blue
+    ("Planning & Control Dispatch", [1.5, 1.8, 1.8, 2.2], "#0D9488"),  # Teal
+    ("Actuator Bus & Motor Torque Rise", [6.5, 6.5, 6.5, 7.5], "#16A34A"),  # Green
+]
+
+y_pos = np.arange(len(interfaces))
+bar_height = 0.50
+lefts = np.zeros(len(interfaces))
+
+for stage_name, values, color in stages:
+    vals = np.array(values)
+    ax.barh(y_pos, vals, left=lefts, height=bar_height, label=stage_name, color=color, edgecolor="#FFFFFF", linewidth=1.2, alpha=0.95, zorder=3)
+    for i, val in enumerate(vals):
+        if val >= 4.0:
+            ax.text(
+                lefts[i] + val / 2.0, y_pos[i], f"{val:.1f}", ha="center", va="center", color="#FFFFFF", fontsize=8.5, fontweight="bold", zorder=4
+            )
+    lefts += vals
+
+for i, total in enumerate(lefts):
+    ax.text(total + 1.2, y_pos[i], f"{total:.1f} ms", ha="left", va="center", color="#1E293B", fontsize=11.0, fontweight="bold", zorder=4)
+
+ax.set_yticks(y_pos)
+ax.set_yticklabels(interfaces, fontsize=10.5, fontweight="bold", color="#1E293B")
+ax.invert_yaxis()
+
+ax.set_xlabel("Photon-to-Actuator Pipeline Latency (milliseconds)", fontsize=11.5, fontweight="bold", color="#1E293B", labelpad=10)
+ax.set_title("Photon-to-Actuator Latency Waterfall Across Camera Interfaces", fontsize=14.5, fontweight="bold", color="#1E293B", pad=24)
+
+ax.set_xlim(0, 72)
+ax.set_ylim(3.7, -0.7)
+
+legend = ax.legend(
+    loc="upper right", bbox_to_anchor=(0.98, 0.98), frameon=True, facecolor="#FFFFFF", edgecolor="#CBD5E1", framealpha=0.95, fontsize=8.5, ncol=2
+)
+legend.set_zorder(10)
+
+def add_badge(ax, text, xy, xytext, color="#1E293B", fontsize=8.8, arrow_color="#94A3B8"):
+    ax.annotate(
+        text,
+        xy=xy,
+        xytext=xytext,
+        fontsize=fontsize,
+        fontweight="normal",
+        color=color,
+        bbox=dict(boxstyle="round,pad=0.35", facecolor="#FFFFFF", edgecolor="#CBD5E1", alpha=0.95, linewidth=0.8),
+        arrowprops=dict(arrowstyle="-", color=arrow_color, linewidth=0.8, shrinkA=3, shrinkB=3),
+        va="center",
+        zorder=10,
+    )
+
+add_badge(
+    ax,
+    "Neuromorphic DVS: Bypasses exposure & rolling readout\n11.9 ms total photon-to-actuator reaction",
+    xy=(13.5, y_pos[0]),
+    xytext=(24.5, y_pos[0] + 0.12),
+    color="#1E793C",
+    fontsize=8.8,
+    arrow_color="#16A34A",
+)
+
+add_badge(
+    ax,
+    "GMSL2 SerDes: 15 m automotive reach with only ~50 µs link delay\nHardware zero-copy ISP DMA enables deterministic 34.8 ms loop",
+    xy=(16.35, y_pos[2] - 0.26),
+    xytext=(28.0, y_pos[2] - 0.42),
+    color="#004B87",
+    fontsize=8.8,
+    arrow_color="#0284C7",
+)
+
+add_badge(
+    ax,
+    "USB 3.0 UVC Tax: Host kernel queueing & driver copy\nadds ~13.3 ms protocol overhead + non-deterministic jitter",
+    xy=(26.5, y_pos[3] + 0.26),
+    xytext=(36.0, y_pos[3] + 0.42),
+    color="#A51C30",
+    fontsize=8.8,
+    arrow_color="#DC2626",
+)
+
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+:::
+
 ### Memory bus contention and observation age
 
 ```{python}

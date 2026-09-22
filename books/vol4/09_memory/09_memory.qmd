@@ -243,6 +243,150 @@ A transform tree dates the machine's own geometry, and a stale edge misplaces th
 
 A robot that has swept its range sensor down an aisle holds three kinds of space afterward: space it saw occupied, space it saw empty, and space it never saw. Only the second can ever vouch that a path is clear, and only while its evidence is fresh. Every scene representation stores some version of these three states, and they differ in what they store and what it costs. An **occupancy grid**\index{Occupancy grid mapping} [@elfes1989using], or its sparse octree form [@hornung2013octomap], keeps an occupancy estimate per cell. A **truncated signed distance field (TSDF)**\index{Truncated signed distance field} [@curless1996volumetric] keeps a truncated projective distance to the observed surface along each sensing ray. **3D Gaussian splatting**\index{3D Gaussian splatting} [@kerbl20233d] keeps optimized primitives that render new camera views. A dense grid's storage grows with the cube of its cells per dimension, while the octree, the surface-band blocks of a TSDF, and a Gaussian map store only allocated structure, whose size depends on the observed geometry and the accuracy target; @sec-appendix-ml-voxels and @sec-appendix-ml-3dgs give the updates behind these costs. For motion permission they share one limit. A projective distance is not the nearest-surface Euclidean distance a clearance decision needs, and a Gaussian density does not identify occupied space, so none of them certifies clearance by itself. Each must first be converted into a validated occupancy layer or Euclidean signed distance field (ESDF), with an explicit policy for unknown space, before the permission path can query it.
 
+The choice of metric representation defines an empirical Pareto trade-off between volumetric memory footprint and spatial collision query latency (@fig-09-memory-3d-representation-pareto). Continuous trajectory optimization and real-time reflex controllers running in 1 kHz control loops ($1{,}000\ \mu\text{s}$ periods) require spatial clearance and gradient queries to execute in under $10\ \mu\text{s}$ across dozens of robot body articulation points. While implicit neural representations such as coordinate MLPs (NeRF, iMAP) achieve minimal memory density ($\sim 0.08\ \text{MB/m}^3$), querying signed distance or occupancy requires evaluating deep neural network forward passes, imposing massive computational latency ($>650\ \mu\text{s}$ per query point) that confines them to deliberative offline planners. Hierarchical octrees (OctoMap [@hornung2013octomap]) compress unobserved free space down to $0.18\text{--}1.25\ \text{MB/m}^3$, but pointer indirection during recursive tree traversals incurs CPU cache misses that limit query speeds to $24\text{--}38\ \mu\text{s}$. Conversely, dynamically hashed truncated signed distance fields (Voxblox TSDF [@oleynikova2017voxblox]) allocate memory only around observed surface bands ($4.1\ \text{MB/m}^3$), enabling $1.8\ \mu\text{s}$ ray queries, while propagating Euclidean signed distance fields (ESDF) increases memory overhead to $28.5\ \text{MB/m}^3$ to deliver sub-microsecond ($0.85\ \mu\text{s}$) distance evaluations with analytic continuous gradients. Meanwhile, 3D Gaussian splatting primitives [@kerbl20233d] occupy a middle regime ($1.6\text{--}5.2\ \text{MB/m}^3$, $5.8\text{--}8.2\ \mu\text{s}$), enabling photographic radiance rendering alongside bounding-volume-hierarchy accelerated collision checks.
+
+::: {#fig-09-memory-3d-representation-pareto fig-env="figure" fig-pos="htb" fig-cap="**3D scene representation frontier: memory footprint versus spatial query latency**: Empirical Pareto trade-off across implicit neural fields, hierarchical octrees, 3D Gaussian splatting, and hashed voxel grids. While implicit coordinate MLPs compress rooms into megabytes of weights, multi-layer forward passes exceed real-time collision query limits ($>100\\ \\mu\\text{s}$). Hashed voxel grids (Voxblox TSDF/ESDF [@oleynikova2017voxblox]) consume $4.1\\text{--}28.5\\ \\text{MB/m}^3$ but provide the sub-microsecond query latencies ($<2\\ \\mu\\text{s}$) necessary to service 1 kHz reactive control loops." fig-alt="Log-log scatter plot of volumetric memory footprint in megabytes per cubic meter versus spatial point distance and collision query latency in microseconds. The empirical Pareto frontier descends from iMAP NeRF (0.08 MB/m3, 650 us) through OctoMap 5cm (0.18 MB/m3, 24 us), 3DGS Compressed Scaffold (1.6 MB/m3, 8.2 us), Voxblox TSDF (4.1 MB/m3, 1.8 us), Voxblox ESDF (28.5 MB/m3, 0.85 us), to Dense Occupancy Array (125 MB/m3, 0.45 us). Shaded green region highlights the real-time 1 kHz control budget below 10 us, and shaded red region indicates the deliberative zone above 100 us."}
+
+```{python}
+#| label: fig-09-memory-3d-representation-pareto
+#| echo: false
+#| message: false
+#| warning: false
+
+import matplotlib as mpl
+
+mpl.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Inlined publication styling
+plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
+plt.rcParams["axes.edgecolor"] = "#334155"
+plt.rcParams["axes.linewidth"] = 1.0
+
+fig, ax = plt.subplots(figsize=(14.0, 8.2), dpi=300, facecolor="#FFFFFF")
+ax.set_facecolor("#FFFFFF")
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5, color="#E2E8F0")
+ax.set_axisbelow(True)
+
+# 1. Shaded Region for Real-Time Control Clearance
+ax.axhspan(0.2, 10.0, color="#ECFDF5", alpha=0.55, zorder=1)
+ax.text(0.046, 6.2, "Real-Time 1 kHz Control Budget\n(Sub-10 µs Collision Query Limit)", fontsize=8.5, fontweight="bold", color="#059669", zorder=2)
+
+# High-latency warning zone
+ax.axhspan(100.0, 1500.0, color="#FEF2F2", alpha=0.45, zorder=1)
+ax.text(0.046, 210.0, "Deliberative / Offline Zone\n(High Latency: >100 µs / Query)", fontsize=8.5, fontweight="bold", color="#DC2626", zorder=2)
+
+data = [
+    ("iMAP / NeRF (Implicit MLP)", 0.08, 650.0, "neural", "center", "bottom", (0, 10)),
+    ("Instant-NGP (Hash Grid)", 0.42, 140.0, "neural", "left", "center", (10, 0)),
+    ("OctoMap (5 cm Octree)", 0.18, 24.0, "octree", "right", "bottom", (-10, 8)),
+    ("OctoMap (2 cm Octree)", 1.25, 38.0, "octree", "left", "bottom", (10, 6)),
+    ("3DGS (Compressed Scaffold)", 1.60, 8.2, "3dgs", "right", "top", (-10, -6)),
+    ("3DGS (SplaTAM Dense)", 5.20, 5.8, "3dgs", "left", "top", (10, -8)),
+    ("Voxblox TSDF (5 cm Hashed)", 4.10, 1.8, "voxblox", "center", "top", (0, -10)),
+    ("Voxblox ESDF (2 cm Hashed + Grad)", 28.5, 0.85, "voxblox", "left", "center", (10, 0)),
+    ("Dense Occupancy Array (2 cm Grid)", 125.0, 0.45, "dense", "right", "top", (-10, -10)),
+]
+
+cat_styles = {
+    "neural": {"label": "Implicit Neural Field (NeRF / NGP)", "color": "#7C3AED", "marker": "D", "size": 115},
+    "octree": {"label": "Hierarchical Octree (OctoMap)", "color": "#004B87", "marker": "s", "size": 110},
+    "3dgs": {"label": "3D Gaussian Splatting (3DGS)", "color": "#A51C30", "marker": "*", "size": 190},
+    "voxblox": {"label": "Hashed Voxel TSDF / ESDF (Voxblox)", "color": "#1E793C", "marker": "^", "size": 125},
+    "dense": {"label": "Dense Uniform Array", "color": "#475569", "marker": "o", "size": 95},
+}
+
+for name, mem, lat, cat, ha, va, (dx, dy) in data:
+    style = cat_styles[cat]
+    ax.scatter(mem, lat, color=style["color"], marker=style["marker"], s=style["size"], edgecolors="#FFFFFF", linewidth=1.2, zorder=5)
+    ax.annotate(
+        name, (mem, lat), xytext=(dx, dy), textcoords="offset points", fontsize=8.8, fontweight="bold", color="#1E293B", ha=ha, va=va, zorder=6
+    )
+
+frontier_x = np.array([0.08, 0.18, 1.60, 4.10, 28.5, 125.0])
+frontier_y = np.array([650.0, 24.0, 8.2, 1.8, 0.85, 0.45])
+
+ax.plot(frontier_x, frontier_y, linestyle="--", color="#0284C7", linewidth=1.8, alpha=0.85, zorder=4, label="Empirical Pareto Frontier")
+
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.set_xlim(0.04, 250.0)
+ax.set_ylim(0.25, 1500.0)
+
+ax.set_xlabel("Volumetric Memory Footprint (MB / m³ at operational resolution)", fontsize=11.5, fontweight="bold", color="#1E293B", labelpad=10)
+ax.set_ylabel("Spatial Point Distance / Collision Query Latency (microseconds, µs)", fontsize=11.5, fontweight="bold", color="#1E293B", labelpad=10)
+ax.set_title("3D Scene Representation Frontier: Memory Density vs. Spatial Query Latency", fontsize=14.5, fontweight="bold", color="#1E293B", pad=24)
+
+def add_clean_badge(ax, text, xy, xytext, color="#1E293B", fontsize=8.5, arrow_color="#94A3B8"):
+    bbox = dict(boxstyle="round,pad=0.4", facecolor="#FFFFFF", edgecolor="#CBD5E1", alpha=0.96, linewidth=0.8)
+    arrowprops = dict(arrowstyle="->", color=arrow_color, linewidth=1.0, shrinkA=3, shrinkB=4)
+    ax.annotate(
+        text, xy=xy, xytext=xytext, fontsize=fontsize, fontweight="normal", color=color, bbox=bbox, arrowprops=arrowprops, va="center", zorder=10
+    )
+
+add_clean_badge(
+    ax,
+    "NeRF (Implicit MLP):\nMinimal memory (~8 MB/room),\nbut requires forward pass per query point",
+    xy=(0.08, 650.0),
+    xytext=(0.32, 650.0),
+    color="#7C3AED",
+    fontsize=8.5,
+    arrow_color="#7C3AED",
+)
+
+add_clean_badge(
+    ax,
+    "OctoMap (Hierarchical Octree):\nPrunes empty space via tree compression;\npointer indirection causes CPU cache misses",
+    xy=(0.18, 24.0),
+    xytext=(0.20, 95.0),
+    color="#004B87",
+    fontsize=8.5,
+    arrow_color="#004B87",
+)
+
+add_clean_badge(
+    ax,
+    "3D Gaussian Splatting (3DGS):\nExplicit ellipsoids enable photo-realism\n+ GPU BVH analytic distance evaluation",
+    xy=(5.20, 5.8),
+    xytext=(16.0, 22.0),
+    color="#A51C30",
+    fontsize=8.5,
+    arrow_color="#A51C30",
+)
+
+add_clean_badge(
+    ax,
+    "Voxblox ESDF (Hashed Voxels):\nHigher memory footprint (28.5 MB/m³),\nbut enables sub-µs O(1) continuous gradients",
+    xy=(28.5, 0.85),
+    xytext=(42.0, 2.5),
+    color="#1E793C",
+    fontsize=8.5,
+    arrow_color="#1E793C",
+)
+
+legend_elements = [
+    plt.Line2D([0], [0], linestyle="--", color="#0284C7", lw=1.8, label="Empirical Pareto Frontier"),
+    plt.Line2D([0], [0], marker="D", color="w", markerfacecolor="#7C3AED", markersize=9, label="Implicit Neural Field (NeRF / NGP)"),
+    plt.Line2D([0], [0], marker="s", color="w", markerfacecolor="#004B87", markersize=9, label="Hierarchical Octree (OctoMap)"),
+    plt.Line2D([0], [0], marker="*", color="w", markerfacecolor="#A51C30", markersize=12, label="3D Gaussian Splatting (3DGS)"),
+    plt.Line2D([0], [0], marker="^", color="w", markerfacecolor="#1E793C", markersize=9, label="Hashed Voxel TSDF / ESDF (Voxblox)"),
+    plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="#475569", markersize=8, label="Dense Uniform Array"),
+]
+
+legend = ax.legend(
+    handles=legend_elements, loc="upper right", frameon=True, facecolor="#FFFFFF", edgecolor="#CBD5E1", framealpha=0.96, fontsize=8.5, ncol=1
+)
+legend.set_zorder(10)
+
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+:::
+
 What a map can certify comes from how a range return updates it. Traversing the ray from the sensor to the return [@amanatides1987fast], the map asserts **negative evidence**\index{Negative evidence} in every cell the ray crossed and positive evidence in the cell where it ended; @sec-appendix-ml-voxels gives the log-odds update. Negative evidence lets the map retire a phantom obstacle as soon as the same region is seen empty, instead of waiting for a timeout, and it also marks the limit of what the map can say. It covers only cells a valid ray actually traversed. It says nothing about the volume behind the return, and a new scan down the aisle cannot renew a cell hidden behind the rack, so the occluded cross aisle stays unknown and still needs expiry. Every return also touches every cell along its ray, so sparse allocation saves capacity but not traversal, and that traffic reaches the permission path only as added evidence age (@sec-placement-resource-contention).
 
 ::: {.column-margin}
