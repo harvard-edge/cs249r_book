@@ -538,6 +538,7 @@ Empirical profiling demonstrates that $B = 16$ and $B = 32$ occupy the optimal s
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import check, fmt, fmt_int
+from mlsysim.physics.agents import calc_kv_cache_bytes_per_token
 
 class PhysicalBlockSizing:
     """Block footprint and tail fragmentation in paged attention systems."""
@@ -556,8 +557,8 @@ class PhysicalBlockSizing:
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     n_kv_heads_gpu = n_kv_heads // tp_degree
-    m_token_gpu = (2 * n_layers * n_kv_heads_gpu * d_head * bytes_per_elem).to(byte)
-    m_token_node = m_token_gpu * tp_degree
+    m_token_node = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem)
+    m_token_gpu = (m_token_node / tp_degree).to(byte)
     m_block_16 = (block_size_16 * m_token_gpu).to(KiB)
     m_block_64 = (block_size_64 * m_token_gpu).to(KiB)
     n_blocks_16 = int(pool_per_gpu.to(KiB) / m_block_16)
@@ -778,7 +779,7 @@ class RadixPrefixReuse:
     t_novel_prefill = 6.0 * millisecond
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    mem_token = 2 * n_layers * n_kv_heads * d_head * bytes_per_elem
+    mem_token = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem)
     mem_kv_prefix = (s_prefix * mem_token).to(GiB)
     mem_kv_prefix_per_gpu = (mem_kv_prefix / n_gpus).to(MiB)
     flops_linear = 2 * n_params * s_prefix
@@ -1254,7 +1255,7 @@ class BreakEvenFrontier:
     s_seq = 16_384
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    m_token = 2 * n_layers * n_kv_heads * d_head * bytes_per_elem
+    m_token = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem)
     m_kv = (s_seq * m_token).to(GiB)
     flops_recomp = 2 * n_params * s_seq
     t_recomp = (flops_recomp / throughput_prefill).to(second)
@@ -1451,7 +1452,7 @@ class HbmSizingMultiTurnAgent:
     m_weights_device = (n_params * bytes_per_weight / tp_degree).to(GB)
     m_kv_device = c_hbm_device - m_non_kv_device
     m_kv_node = tp_degree * m_kv_device
-    m_token = (2 * n_layers * n_kv_heads * d_head * bytes_per_elem).to(byte)
+    m_token = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem)
     m_token_device = m_token / tp_degree
     n_capacity_node = int(m_kv_node.to(byte) / m_token)
     n_usable_tokens = int(n_capacity_node * (1 - pool_headroom))

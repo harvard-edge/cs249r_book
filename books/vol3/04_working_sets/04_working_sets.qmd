@@ -738,17 +738,20 @@ When compaction is triggered, the supervisor identifies contiguous blocks of una
 import math
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple, fmt_memory_capacity
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_multiple, fmt_memory_capacity
+from mlsysim.physics.agents import calc_kv_cache_bytes_per_token
 
 class TokenBudgetCompaction:
     """Token budget compaction and Roofline prefill savings."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    agent = CodingAgents.SWE_Bench_Runner
+    model = agent.reference_model
     n_params = 70e9
-    n_layers = 80
-    d_model = 8192
-    h_kv = 8
-    d_k = 128
+    n_layers = model.layers
+    d_model = model.hidden_dim
+    h_kv = model.kv_heads
+    d_k = model.hidden_dim // model.heads
     bytes_per_elem = 2 * byte
     p_effective = 494.5 * (TFLOP / second)
 
@@ -759,7 +762,7 @@ class TokenBudgetCompaction:
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     n_compact = n_raw - (lossless_strip + structured_prune + semantic_reclaim)
-    bytes_per_token = 2 * (n_layers * h_kv * d_k * bytes_per_elem)
+    bytes_per_token = calc_kv_cache_bytes_per_token(agent)
 
     mem_raw = (n_raw * bytes_per_token).to(GiB)
     mem_compact = (n_compact * bytes_per_token).to(GiB)
@@ -961,20 +964,21 @@ class CheckpointAuditingPrefill:
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     p_effective = n_gpus * p_peak_per_gpu * mfu_prefill
     l_hydrated = l_chk + l_tail
+    bytes_per_token = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem)
 
     # Raw
     flops_gemm_raw = 48 * n_layers * (d_model**2) * l_raw
     flops_attn_raw = 4 * n_layers * d_model * (l_raw**2)
     flops_total_raw = flops_gemm_raw + flops_attn_raw
     t_prefill_raw = (flops_total_raw * flop / p_effective).to(second)
-    mem_kv_raw = (4 * byte * n_layers * (n_kv_heads * d_head) * l_raw).to(GB)
+    mem_kv_raw = (l_raw * bytes_per_token).to(GB)
 
     # Checkpoint
     flops_gemm_chk = 48 * n_layers * (d_model**2) * l_hydrated
     flops_attn_chk = 4 * n_layers * d_model * (l_hydrated**2)
     flops_total_chk = flops_gemm_chk + flops_attn_chk
     t_prefill_chk = (flops_total_chk * flop / p_effective).to(second)
-    mem_kv_chk = (4 * byte * n_layers * (n_kv_heads * d_head) * l_hydrated).to(GB)
+    mem_kv_chk = (l_hydrated * bytes_per_token).to(GB)
 
     # Summary
     compression_ratio = l_raw / l_hydrated
