@@ -57,16 +57,22 @@ The architectural anatomy of this expanding context and its physical realization
 
 The **key-value cache** is the retained physical attention state of a transformer sequence; its byte footprint is dictated strictly by model geometry and active token count, establishing the fundamental concurrency ceiling of the serving runtime. Understanding the physical mechanics of this cache is the prerequisite for designing agent serving systems. A serving runtime cannot virtualize or schedule what it cannot measure. To build dependable agent runtimes, systems engineers must derive the exact memory footprint of attention tensors, characterize how model architectural variants alter state volume, and analyze the physical trade-off between retaining activations in high-bandwidth memory and recomputing them on demand.
 
+::: {.column-margin}
+![](images/svg/hsa_locator_s.svg){width="100%" fig-alt="H·S·A locator with the State axis highlighted."}
+
+*This chapter closes State, holding attention state in pages it can share and reclaim.*
+:::
+
 Three agent behaviors make that state hard to manage. Trajectories stop at lengths no one can predict, so no fixed reservation fits them. They fork, so several branches want the same prefix. They pause for tools, so state sits idle while other trajectories wait for memory. In H·S·A terms (@sec-vol3-intro-hsa), this is where a long horizon becomes carried state that the accelerator must physically hold. The question for this chapter is how a serving system allocates, shares, and reclaims attention state so that a node's capacity is set by what trajectories use rather than by what they might use.
+
+In @sec-vol3-processor-tokenization, we established the tensor geometry of the Key-Value (KV) cache, demonstrating that avoiding quadratic $O(S^2)$ recomputation requires preserving intermediate projection vectors in accelerator High-Bandwidth Memory (HBM).[^fn-kv-cache-geometry] For an active context containing $S$ tokens across a concurrent batch of $B$ agent trajectories, aggregate attention state scales linearly as $\text{Mem}_{\text{batch}} = B \cdot S \cdot \text{Mem}_{\text{token}}$, where $\text{Mem}_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot P$.
+
+[^fn-kv-cache-geometry]: **KV Cache Geometry**: See @sec-vol3-processor-tokenization for the mathematical derivation of Key-Value tensor projections across transformer layers and attention heads. This chapter addresses the physical virtualization of these blocks on accelerator silicon.
 
 ::: {.column-margin}
 **Attention Head Topologies:**
 In Multi-Head Attention (MHA), $H_{\text{kv}} = H_{\text{q}}$, maintaining separate key and value heads for every query head. In Multi-Query Attention (MQA), $H_{\text{kv}} = 1$, collapsing all key and value projections into a single shared head. Grouped-Query Attention (GQA) groups query heads into $H_{\text{kv}} = H_{\text{q}} / G$ clusters, providing an intermediate design that dramatically curbs KV memory while preserving modeling expressiveness.
 :::
-
-In @sec-vol3-processor-tokenization, we established the tensor geometry of the Key-Value (KV) cache, demonstrating that avoiding quadratic $O(S^2)$ recomputation requires preserving intermediate projection vectors in accelerator High-Bandwidth Memory (HBM).[^fn-kv-cache-geometry] For an active context containing $S$ tokens across a concurrent batch of $B$ agent trajectories, aggregate attention state scales linearly as $\text{Mem}_{\text{batch}} = B \cdot S \cdot \text{Mem}_{\text{token}}$, where $\text{Mem}_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot P$.
-
-[^fn-kv-cache-geometry]: **KV Cache Geometry**: See @sec-vol3-processor-tokenization for the mathematical derivation of Key-Value tensor projections across transformer layers and attention heads. This chapter addresses the physical virtualization of these blocks on accelerator silicon.
 
 In @sec-vol3-processor, this cache was analyzed under an idealized systems assumption: that the runtime allocates a contiguous physical memory buffer for each sequence. On physical accelerator hardware, however, this assumption fails catastrophically. Because an autonomous agent's execution horizon is non-deterministic—terminating after three turns or continuing for fifty tool interactions—contiguous memory allocators must pre-allocate physical buffers sized for the worst-case context length ($S_{\max}$). When actual trajectories terminate early or grow dynamically, this contiguous strategy induces severe internal and external memory fragmentation.
 
