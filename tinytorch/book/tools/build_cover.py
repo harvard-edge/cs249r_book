@@ -207,7 +207,7 @@ def build():
     node_out_y = ly + n/2
     
     # Label for the branches
-    p.append(_t(node_out_x + 280, node_out_y - 120, "COMMUNITY LABS &amp; EXTENSIONS", SANS, 22, TITLE_C, weight="bold", anchor="middle", ls=2))
+    p.append(_t(node_out_x + 230, ly + n + 44, "COMMUNITY LABS &amp; EXTENSIONS", SANS, 22, TITLE_C, weight="bold", anchor="middle", ls=2))
     
     # 1. Straight right
     p.append(f'<path d="M {node_out_x} {node_out_y} L {node_out_x + 100} {node_out_y}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
