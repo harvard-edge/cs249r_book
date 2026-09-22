@@ -437,7 +437,8 @@ The learning cycle for each module:
             # Handle no command
             if not parsed_args.command:
                 # Show ASCII logo first
-                print_ascii_logo()
+                is_first = self._is_first_run()
+                print_ascii_logo(animate=is_first)
 
                 # Show first-run welcome (only once, ever)
                 self._show_first_run_welcome()
