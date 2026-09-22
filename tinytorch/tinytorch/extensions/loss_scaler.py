@@ -18,6 +18,6 @@ class LossScaler:
         
     def unscale_(self, optimizer: Optimizer):
         # Traverse the registered parameters and divide the gradients back down
-        for p in optimizer.parameters():
+        for p in optimizer.params:
             if p.grad is not None:
                 p.grad = p.grad / self.scale
