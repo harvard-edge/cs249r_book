@@ -86,11 +86,13 @@ Because these couplings are governed by physical solid-state phenomena rather th
 # │       enforcer tick on the discrete safety MCU.
 # │ Show: 135 µs unloaded = 40 + 80 + 15 µs = 54,000 cycles at 400 MHz, against
 # │       a declared 250 µs WCET and a chosen 400 µs deadline in the 1 ms tick.
+# │       The permission path's isolated rail holds up for 2 s (a placement
+# │       fact recorded here; decided in Ch2, sized in Ch12).
 # │ How: Registry fields of the warehouse mobile manipulator and its aisle
 # │      scenario; the three enforcer sub-costs are chapter-local.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.core.units import microsecond, millisecond, hertz
+from mlsysim.core.units import microsecond, millisecond, second, hertz
 from mlsysim.fmt import fmt_int, fmt_latency, fmt_frequency, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -110,6 +112,7 @@ class PlacementMachine:
     wcet = AISLE.enforcer_wcet  # category: chosen (declared, not measured)
     deadline = AISLE.enforcer_deadline  # category: chosen
     self_watchdog = AISLE.mcu_self_watchdog  # category: chosen
+    rail_holdup = RM.permission_rail_holdup  # category: chosen (permission-rail hold-up)
     sense = 40 * microsecond  # scenario assumption; category: illustrative (encoders, IMU, evidence epoch)
     constraint = 80 * microsecond  # scenario assumption; category: illustrative
     write = 15 * microsecond  # scenario assumption; category: illustrative (drive-frame staging)
@@ -139,6 +142,7 @@ class PlacementMachine:
     check(
         chunk_period < lease, "Lease rule: the lease outlasts one chunk period, leaving the renewal-jitter allowance that absorbs the proposal link."
     )
+    check(abs(rail_holdup.to(second).magnitude - 2.0) < 1e-9, "Canon (D15): the permission rail holds up for 2.0 s.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     chunk_rate_str = fmt_frequency(chunk_rate, precision=0)
@@ -163,6 +167,7 @@ class PlacementMachine:
     wcet_margin_str = fmt_latency(wcet_margin, unit=microsecond, precision=0)
     deadline_str = fmt_latency(deadline, unit=microsecond, precision=0)
     self_watchdog_str = fmt_latency(self_watchdog, unit=millisecond, precision=0)
+    rail_holdup_str = fmt_latency(rail_holdup, unit=second, precision=0)
 ```
 
 Placement cannot defer to integration; the physical assignment of software functions to hardware execution engines determines separation. The mobile manipulator partitions its control across two paths with conflicting requirements. The proposal path runs the chunk policy on the application processor at `{python} PlacementMachine.chunk_rate_str`, taking the navigation and wrist camera streams and emitting base velocity and arm joint targets together. Its P99 inference, vision included, takes `{python} PlacementMachine.chunk_inference_str` (illustrative; see the Reader Guide) of each `{python} PlacementMachine.chunk_period_str` chunk period; it holds no direct hardware authority over the drives and runs in unprivileged user space. The permission path runs on the discrete safety microcontroller at `{python} PlacementMachine.permission_rate_str`. Each tick it reads the wheel and joint encoders, the IMU, and the evidence epoch of the latest proposal, checks that proposal against the stopping envelope of @sec-enforcement-stopping-envelopes, and stages the admitted setpoints for the EtherCAT frame to the drives. It must finish inside a chosen `{python} PlacementMachine.deadline_str` deadline within its `{python} PlacementMachine.tick_str` tick, and it runs in a privileged real-time execution domain on a dual-core lockstep controller,[^fn-place-asild-lockstep] whose comparator diagnostics cover the permission path's own failure, because an envelope check cannot detect a fault in the core that executes it. Only the permission path holds memory-mapped input-output (MMIO)\index{Memory-mapped I/O} access to the fieldbus master that carries drive commands.
@@ -181,7 +186,7 @@ Placement cannot defer to integration; the physical assignment of software funct
 ↰ **Prerequisite:** The sub-millisecond execution deadline of the CBF-QP reflex enforcer was established in @sec-enforcement-minimal-intervention.
 :::
 
-The machine maps these functions onto the two-processor implementation of @sec-nervous-silicon-partitioning. Proposal inference, telemetry logging, network communication, and fault recording run on the application processor under Linux, whose scheduling tail stays exposed to kernel and driver jitter even in a real-time configuration.[^fn-place-preempt-rt] Enforcement and sensor validation run on the discrete safety microcontroller as bare-metal firmware behind a hardware memory protection unit,[^fn-place-memory-partitioning] with the encoder interfaces, the IMU, and the timer channels wired directly to it. Each proposal reaches the microcontroller over a board-level link and is published there through the seqlock mailbox of @sec-nervous-cadences, so no dynamic random-access memory (DRAM)\index{DRAM}\index{Dynamic random-access memory|see{DRAM}} is shared between the paths.
+The machine maps these functions onto the two-processor implementation of @sec-nervous-silicon-partitioning. Proposal inference, telemetry logging, network communication, and fault recording run on the application processor under Linux, whose scheduling tail stays exposed to kernel and driver jitter even in a real-time configuration.[^fn-place-preempt-rt] Enforcement and sensor validation run on the discrete safety microcontroller as bare-metal firmware behind a hardware memory protection unit,[^fn-place-memory-partitioning] with the encoder interfaces, the IMU, and the timer channels wired directly to it. Each proposal reaches the microcontroller over a board-level link and is published there through the seqlock mailbox of @sec-nervous-cadences, so no dynamic random-access memory (DRAM)\index{DRAM}\index{Dynamic random-access memory|see{DRAM}} is shared between the paths. On the supply side the two paths share only the battery. The microcontroller, the drive logic, and the spring-brake coils sit on the isolated rail of @sec-body-archetype-matrix, which carries no proposal-side load and is held up by a local store for `{python} PlacementMachine.rail_holdup_str`, longer than any stop the enforcer can command inside the envelope (@sec-enforcement-fallback-ladder). A sag on the shared control rail therefore cannot reset the permission path.
 
 On the unloaded machine the computational budgets appear generous. Illustrative sub-costs on the safety microcontroller put reading the encoders, the IMU, and the proposal's evidence epoch at `{python} PlacementMachine.sense_str`, evaluating the constraints at `{python} PlacementMachine.constraint_str`, and staging the admitted setpoints for the drive frame at `{python} PlacementMachine.write_str`. The unloaded tick totals `{python} PlacementMachine.unloaded_str`, which at the microcontroller's `{python} PlacementMachine.mcu_clock_str` clock is `{python} PlacementMachine.unloaded_cycles_str` cycles. Against the `{python} PlacementMachine.deadline_str` deadline, the unloaded path leaves `{python} PlacementMachine.unloaded_slack_str` of slack, and the declared worst-case execution time of `{python} PlacementMachine.wcet_str`, the qualified budget of @sec-enforcement-minimal-intervention, still leaves `{python} PlacementMachine.wcet_margin_str`. On the application processor, the chunk policy's `{python} PlacementMachine.chunk_inference_str` inference leaves `{python} PlacementMachine.chunk_slack_str` of its `{python} PlacementMachine.chunk_period_str` period. Evaluated in isolation, both loops operate with comfortable margins.
 
@@ -191,7 +196,7 @@ On the unloaded machine the computational budgets appear generous. Illustrative 
 *Candidate execution domains differ in their timing controls; measured tails determine placement.*
 :::
 
-Assigning tasks to separate processor cores does not create independent failure domains if the silicon infrastructure is shared.[^fn-std-cast-32a] On a shared die, the rejected option for this machine, the real-time core executes instructions independently from the application processor, yet both cores rely on common hardware services:
+Assigning tasks to separate processor cores does not create independent failure domains if the silicon infrastructure is shared.[^fn-std-cast-32a] @sec-nervous-hardware-isolation traced these common-cause paths on the machine's board, where separate packages and the isolated rail cut the memory and supply paths. On a shared die, the rejected option for this machine, they move inside one package. The real-time core executes instructions independently from the application processor, yet both cores rely on common hardware services:
 
 - *Shared interrupt routing:* The Generic Interrupt Controller (GIC) routes peripheral and inter-processor notifications across a shared fabric, where a flood of Ethernet packet interrupts on the Linux MPU can delay the timer interrupt that triggers the `{python} PlacementMachine.permission_rate_str` MCU safety loop.
 - *Shared memory controllers:* Both paths access the same dynamic memory controller\index{Memory controller} and interconnect crossbar\index{Interconnect crossbar}, where large matrix tile loads generated by the neural accelerator saturate DRAM command queues, turning an expected $20\text{ ns}$ level-two cache refill on the real-time core into a $350\text{ ns}$ round-trip to main memory.[^fn-place-cache-coloring]
@@ -215,11 +220,7 @@ Principle \ref{pri-vol4-proposal-permission} requires a permission path that lea
 
 ## Contention for Shared Resources {#sec-placement-resource-contention}
 
-Every shared physical resource has multiple claimants; a utilization metric that ignores concurrent competition cannot bound a deadline. Had the mobile manipulator placed its permission path on the application SoC, the proposal path, the enforcement path, and the system infrastructure would compete directly for the same memory controllers, crossbar switches, and power distribution rails. Digital claimants on the main memory bus include camera and lidar DMA streams depositing frames into DRAM, the neural accelerator fetching model weight matrices and intermediate activation tensors, the real-time core reading its constraint tables and sensor history, actuator write buffers for drive commands, cache controllers executing dirty line writebacks, and diagnostic logging processes writing state records to nonvolatile storage.
-
-::: {.column-margin .margin-pointer}
-↰ **Prerequisite:** Multi-camera direct memory access ingress traffic volumes were calculated in @sec-perception-cost-ingestion.
-:::
+Every shared physical resource has multiple claimants; a utilization metric that ignores concurrent competition cannot bound a deadline. Had the mobile manipulator placed its permission path on the application SoC, the proposal path, the enforcement path, and the system infrastructure would compete directly for the same memory controllers, crossbar switches, and power distribution rails. Digital claimants on that shared memory bus would include camera and lidar DMA streams depositing frames into DRAM, the neural accelerator fetching model weight matrices and intermediate activation tensors, the real-time core reading its constraint tables and sensor history, actuator write buffers for drive commands, cache controllers executing dirty line writebacks, and diagnostic logging processes writing state records to nonvolatile storage. On the machine as built, the same bursts stay on the application processor, where they delay the observation and the chunk rather than the permission tick. The permission path meets them as evidence age (@sec-perception-cost-ingestion), refusing evidence older than its refusal threshold and entering its fallback if no admitted chunk renews the lease.
 
 In physical AI hardware design, **crossbar bus and DRAM bank contention**\index{Crossbar bus and DRAM bank contention!definition} is queuing delay when memory and DMA transactions share an interconnect and controller. One in-flight AXI4 transaction may finish before a newly arrived safety request; blocking by a whole model tile requires a specified repeated-grant or FIFO policy. Row-buffer scheduling can add delay, so the actual bound depends on transaction size, queue capacity, QoS semantics, bank mapping, and new arrivals.[^fn-place-dram-bandwidth]
 
@@ -649,32 +650,23 @@ class PlacementSeparationBudget:
 
 The pass threshold for this experiment comes from the claim under test. The machine's permission path declares a worst-case execution time $C_{\text{wcet}} =$ `{python} PlacementSeparationBudget.wcet_str` and must finish each tick inside its chosen deadline $D_{\text{enf}} =$ `{python} PlacementSeparationBudget.deadline_str`, which sits inside the tick $T_{\text{tick}} =$ `{python} PlacementSeparationBudget.tick_str`. Every measured enforcement time $t_{\text{enf}}$ must respect that chain, as @eq-placement-falsification-threshold states:
 $$t_{\text{enf}} \le C_{\text{wcet}} < D_{\text{enf}} < T_{\text{tick}}$$ {#eq-placement-falsification-threshold}
-The declared bound $C_{\text{wcet}}$ is the **falsification threshold**\index{Falsification threshold!definition}. If any enforcement cycle under test exceeds it, the independence hypothesis is refuted, even when the cycle still meets the deadline, because every margin above the enforcer, from its deadline to the tick that the stopping budget counts, was sized on the declared number.
+The declared bound $C_{\text{wcet}}$ is the **falsification threshold**\index{Falsification threshold!definition}. If any enforcement cycle under test exceeds it, the independence hypothesis is refuted, even when the cycle still meets the deadline, because every margin above the enforcer, from its deadline to the tick that the stopping budget counts, was sized on the declared number. A measured maximum can refute the declared bound but cannot establish it, because a campaign samples only the states it reaches, and on speculative cores timing anomalies can place the true worst case above every cycle recorded.[^fn-math-wcet-anomalies]
+
+[^fn-math-wcet-anomalies]: **Microarchitectural Timing Anomalies**\index{Timing anomalies!worst-case execution time}\index{Worst-case execution time!timing anomalies}: In out-of-order and speculative processing architectures, a local performance improvement—such as a cache hit or accelerated branch evaluation—can alter instruction scheduling and resource contention, resulting in a net increase in global execution time. This counterintuitive behavior invalidates simple compositional worst-case execution time analysis. Safety verification needs a justified bound for the declared workload, arbitration, temperature, and fault conditions; measurements alone and a non-speculative core alone do not establish a hard end-to-end bound.
 
 The distance at stake in one tick is small, which makes the bound easy to undervalue. The finished budget in @tbl-enforcement-stopping-budget stops the machine in `{python} PlacementSeparationBudget.budget_str` at the `{python} PlacementSeparationBudget.v_aisle_str` aisle speed, `{python} PlacementSeparationBudget.spare_str` inside the `{python} PlacementSeparationBudget.d_clear_str` clear distance, and one missed tick adds only $v\,T_{\text{tick}} =$ `{python} PlacementSeparationBudget.missed_tick_str`. What placement protects is the bound itself, because $\tau_{\text{delay}}$ counts exactly one $T_{\text{tick}}$, and contention without a bound is a stall of unknown length.
 
-::: {#dfn-placement-worst-case-execution-time .callout-definition title="Worst-case execution time"}
-
-***Worst-case execution time***\index{Worst-case execution time!definition}\index{WCET!definition} is the formal upper bound on the physical wall-clock duration required for a computational task to execute to completion on a target hardware platform under all admissible inputs, architectural contention states, and operating conditions:
-$$t_{\text{exec}} \le t_{\text{WCET}} \le t_{\text{deadline}}$$
-
-1.  **Significance**: In cyber-physical control loops, correctness depends not only on the numerical validity of the output but also on the instant of its delivery; an optimal control command delivered after the hard physical deadline is functionally equivalent to a total system failure.
-2.  **Distinction**: Unlike average execution time ($\bar{t}$) or high percentiles ($P_{99}$), which characterize throughput in soft real-time software, WCET is an absolute deterministic bound that must hold under concurrent memory-bus saturation, cache thrashing, and peripheral interrupt storms.
-3.  **Common pitfall**: Relying on empirical execution profiling or benchmark averages to establish WCET on modern superscalar or out-of-order processors. Microarchitectural timing anomalies (where a local cache hit or branch prediction success paradoxically increases total execution time) mean empirical testing alone cannot prove the true global upper bound without formal static analysis and hardware contention bounds.
-
-:::
-
-Refuting an independence claim requires synthetic workloads engineered to induce worst-case resource contention\index{Resource contention!worst-case} rather than standard benchmarks that report average throughput.[^fn-math-wcet-anomalies] High average utilization schedules memory accesses evenly across clock cycles, making the system look safely underloaded, whereas actual physical interference peaks during synchronized bursts when multiple components demand the same wires at the exact same instant. The test framework must deliberately flood shared memory channels with unaligned direct memory access transfers, thrash shared cache capacity with dirty line writebacks from transformer weight tensors, trigger accelerator matrix multiplications that induce rapid supply rail voltage droops ($L \cdot di/dt$)\index{Voltage droop}, and stream peak-rate sensor telemetry while diagnostic logging writes to non-volatile flash storage. These stress profiles reproduce the transient contention that occurs when a proposal model initiates a large attention pass at the exact microsecond the permission loop reads its sensor snapshot.
-
-[^fn-math-wcet-anomalies]: **Microarchitectural Timing Anomalies**\index{Timing anomalies!worst-case execution time}\index{Worst-case execution time!timing anomalies}: In out-of-order and speculative processing architectures, a local performance improvement—such as a cache hit or accelerated branch evaluation—can alter instruction scheduling and resource contention, resulting in a net increase in global execution time. This counterintuitive behavior invalidates simple compositional worst-case execution time analysis. Safety verification needs a justified bound for the declared workload, arbitration, temperature, and fault conditions; measurements alone and a non-speculative core alone do not establish a hard end-to-end bound.
+Refuting an independence claim requires synthetic workloads engineered to induce worst-case resource contention\index{Resource contention!worst-case} rather than standard benchmarks that report average throughput. High average utilization schedules memory accesses evenly across clock cycles, making the system look safely underloaded, whereas actual physical interference peaks during synchronized bursts when multiple components demand the same wires at the exact same instant. The test framework must deliberately flood shared memory channels with unaligned direct memory access transfers, thrash shared cache capacity with dirty line writebacks from transformer weight tensors, trigger accelerator matrix multiplications that induce rapid supply rail voltage droops ($L \cdot di/dt$)\index{Voltage droop}, and stream peak-rate sensor telemetry while diagnostic logging writes to non-volatile flash storage. These stress profiles reproduce the transient contention that occurs when a proposal model initiates a large attention pass at the exact microsecond the permission loop reads its sensor snapshot.
 
 Instrumentation records enforcement entry after the sensor snapshot is coherent ($t_0$), permission completion ($t_1$), and publication of the admitted setpoints to the drive frame ($t_2$). These diagnose compute and dispatch, but $t_2$ is not braking. The frame's arrival at the drive ($t_3$) and measured brake onset ($t_4$) complete the physical chain. The endpoint that matters is $t_4$ measured from the last valid lease renewal, with clock error included. Brake onset must follow within `{python} PlacementSeparationBudget.renewal_to_onset_str`, the sum of the lease, one tick, one bus cycle, and brake onset in @sec-nervous-cadences. The `{python} PlacementSeparationBudget.wcet_str` computation bound alone is insufficient.
 
 Coupling mechanisms compound across physical, electrical, and logical domains, requiring a full factorial experimental matrix. The evaluation sweeps across cold junction conditions ($T_j = 35^\circ\text{C}$) and warm junction conditions ($T_j = 85^\circ\text{C}$), an idle proposal path versus a saturated proposal engine executing maximum-batch inference, diagnostic circular logging disabled versus streaming at full non-volatile memory bandwidth, and nominal tracking commands versus boundary-violating commands that trigger refusal routines. Testing refusal paths under full stress is mandatory because executing a safe clamping trajectory or entering emergency shutdown involves cold branch paths, non-cached error-handling code, and secondary bus transactions that never execute during steady-state aisle driving.
 
+On the rejected shared-die placement, the pair the matrix exists to catch is specific. A person steps out at a rack end, and the permission path takes its refusal branch toward the stop rung, a cold path through uncached code. At the same instant the application processor, having flagged the same anomaly, starts a diagnostic memory dump over the shared direct memory access fabric. A test suite that exercises refusal and diagnostic logging separately passes both and never measures the pair, because the two subsystems contend for one memory controller only when they run together.
+
 Consider an illustrative $10^7$-tick stress trace for the rejected placement, the permission path on a real-time cluster of the application SoC. At one tick per `{python} PlacementSeparationBudget.tick_str`, the trace spans `{python} PlacementSeparationBudget.trace_s_str`, or `{python} PlacementSeparationBudget.trace_h_str` h `{python} PlacementSeparationBudget.trace_min_str` min `{python} PlacementSeparationBudget.trace_sec_str` s, before reset or setup time. The cold trace has $P_{50}=$ `{python} PlacementSeparationBudget.cold_p50_str`, $P_{99}=$ `{python} PlacementSeparationBudget.cold_p99_str`, and observed maximum `{python} PlacementSeparationBudget.cold_max_str`; the warm, loaded trace has $P_{50}=$ `{python} PlacementSeparationBudget.warm_p50_str`, $P_{99}=$ `{python} PlacementSeparationBudget.warm_p99_str`, $P_{99.9}=$ `{python} PlacementSeparationBudget.warm_p999_str`, and observed maximum `{python} PlacementSeparationBudget.warm_max_str`. The loaded $P_{99}$ already exceeds the `{python} PlacementSeparationBudget.wcet_str` declared bound, and the maximum crosses the `{python} PlacementSeparationBudget.deadline_str` deadline, so the trace refutes that placement.
 
-A passing trace supports much less than a failing one refutes. Millions of test cycles without a timing violation show only that observed interference stayed below the threshold in the tested states. A report gives the latency distribution, observed maximum, sample count, duration, and unexercised conditions, including supply degradation, electromagnetic interference, and aging.[^fn-hw-silicon-aging]
+Had the trace passed, its ticks would show only that observed interference stayed below the threshold in the tested states. A report gives the latency distribution, observed maximum, sample count, duration, and unexercised conditions, including supply degradation, electromagnetic interference, and aging.[^fn-hw-silicon-aging]
 
 [^fn-hw-silicon-aging]: **Silicon Substrate Aging and Timing Margins**\index{Silicon aging!timing margins}: Long-term substrate degradation mechanisms, such as Negative Bias Temperature Instability (NBTI) and Hot Carrier Injection (HCI), gradually increase transistor switching delays over years of operation. When coupled with transient supply-voltage droop under sudden multi-core current steps ($\frac{di}{dt}$), aged silicon experiences propagation delays that exceed design margins. In hard real-time systems, these physical timing degradations cause intermittent race conditions and missed scheduler deadlines that never manifest during clean bench qualification.
 
@@ -690,9 +682,7 @@ A passing trace supports much less than a failing one refutes. Millions of test 
 **Systems lesson**: A peripheral can consume execution capacity at the same moment guidance needs it. Modern placement tests should account for asynchronous peripheral load and verify that the critical path and its recovery behavior remain within their declared timing bounds.
 :::
 
-Apollo 11’s Executive alarms and the Mars Pathfinder priority inversion (examined in @sec-nervous-deterministic-fieldbuses) illustrate two distinct forms of real-time resource contention. In Apollo 11 a peripheral consumed execution capacity; in Pathfinder a low-priority task held a resource that a high-priority task needed. Neither was a memory-bus queue of the kind this chapter measures. Ariane 501 marks what contention testing cannot catch. Its unprotected floating-point conversion was a specification and exception-handling fault that no timing measurement would have exposed [@lions1996ariane5].
-
-On modern safety silicon, placing high-throughput cognitive policies and hard real-time safety reflexes on a single die exposes the physical machine to the hardware analog of both contention pathologies. On the rejected shared-die placement, the dangerous combination is specific. A person steps out at a rack end, and the permission path takes its refusal branch toward the stop rung, a cold path through uncached code. At the same instant the application processor, having flagged the same anomaly, starts a diagnostic memory dump over the shared direct memory access fabric. A test suite that exercises refusal and diagnostic logging separately passes both and never measures the pair, because the two subsystems contend for one memory controller only when they run together. That is why the factorial matrix above crosses refusal paths with full logging load.
+Apollo 11’s Executive alarms and the Mars Pathfinder priority inversion (examined in @sec-nervous-deterministic-fieldbuses) illustrate two distinct forms of real-time resource contention. In Apollo 11 a peripheral consumed execution capacity; in Pathfinder a low-priority task held a resource that a high-priority task needed. Neither was a memory-bus queue of the kind this chapter analyzes. Ariane 501 marks what contention testing cannot catch. Its unprotected floating-point conversion was a specification and exception-handling fault that no timing measurement would have exposed [@lions1996ariane5].
 
 A failed interference test identifies where the assumed separation may collapse: cache, memory arbitration, thermal clocks, power, or output queues. Further instrumentation localizes the mechanism before the team reserves, partitions, or relocates the shared resource.
 
@@ -735,9 +725,9 @@ The record has two parts. A compact header holds the configuration values and th
 ↳ **Byte layout:** The placement record's field offsets and sizes are given in @sec-appendix-systems-wire-placement.
 :::
 
-For the mobile manipulator, the header records the `{python} PlacementMachine.tick_str` tick, the `{python} PlacementMachine.deadline_str` deadline, and the `{python} PlacementMachine.unloaded_str` unloaded maximum; example domain IDs are MPU, NPU, GPU, MCU, and lockstep controller. Its loaded field stays empty, because no loaded test ledger exists for this machine yet. Filling it takes the campaign of @sec-placement-testing-separation run on the machine itself, with the discrete microcontroller ticking while the application processor runs peak proposal inference with full logging, at warm junction, with the refusal branch exercised in the same trials. Every loaded maximum that campaign records must stay at or below the declared `{python} PlacementMachine.wcet_str`, and brake onset, timed from the last valid renewal, must follow within `{python} PlacementSeparationBudget.renewal_to_onset_str`. Until those measurements exist, the permission-independence claim that @sec-release weighs rests on a declared bound with nothing behind it, and a verdict that needs the claim cannot be granted on it.
+For the mobile manipulator, the header records the `{python} PlacementMachine.tick_str` tick, the `{python} PlacementMachine.deadline_str` deadline, and the `{python} PlacementMachine.unloaded_str` unloaded maximum, with the permission path's isolated rail among its mitigation flags; example domain IDs are MPU, NPU, GPU, MCU, and lockstep controller. Its loaded field stays empty, because no loaded test ledger exists for this machine yet. Filling it takes the campaign of @sec-placement-testing-separation run on the machine itself, with the discrete microcontroller ticking while the application processor runs peak proposal inference with full logging, at warm junction, with the refusal branch exercised in the same trials. Every loaded maximum that campaign records must stay at or below the declared `{python} PlacementMachine.wcet_str`, and brake onset, timed from the last valid renewal, must follow within `{python} PlacementSeparationBudget.renewal_to_onset_str`. Until those measurements exist, the permission-independence claim that @sec-release weighs rests on a declared bound with nothing behind it, and a verdict that needs the claim cannot be granted on it.
 
-The external ledger inventories memory channels, cache partitions, DMA engines, power rails, and their competing claimants. For each it records the arbitration configuration and measured interference. A read inflation large enough to threaten the sense allowance is the kind of entry that motivates a local TCM snapshot, but the deadline itself is judged on the whole tick.
+The external ledger inventories memory channels, cache partitions, DMA engines, power rails, and their competing claimants. For each it records the arbitration configuration and measured interference. For the permission rail it records the `{python} PlacementMachine.rail_holdup_str` hold-up, which the feed-loss injection of @sec-verification-hardware-fault-injection exercises, and a claimant list that carries the isolation claim itself, naming the microcontroller, the drive logic, and the spring-brake coils and no proposal-side load. A read inflation large enough to threaten the sense allowance is the kind of entry that motivates a local TCM snapshot, but the deadline itself is judged on the whole tick.
 
 An interference measurement needs its operating state: model and firmware hashes, clock policy, enclosure and thermal interface, ambient and junction temperatures, power rail, arbitration settings, traffic generators, sampling rates, instrumentation, sample count, and test duration. The ledger carries those fields beside the latency distributions and unexercised states they qualify, and the header's observed maxima summarize those distributions. The $10^7$-tick trace of @sec-placement-testing-separation spans only `{python} PlacementSeparationBudget.trace_h_str` h `{python} PlacementSeparationBudget.trace_min_str` min `{python} PlacementSeparationBudget.trace_sec_str` s of one machine's operation, too short to resolve a $P_{99.99}$ tail.
 
@@ -812,39 +802,38 @@ Placement determines the physical resources shared by complex proposal algorithm
 # │
 # │ Goal: Put the rail-droop and average-utilization fallacies on the machine's
 # │       own enforcer budget.
-# │ Show: halving the 400 MHz clock doubles the 250 µs WCET to 500 µs, past the
-# │       400 µs deadline; a 320 µs read tail leaves 80 µs, less than the 95 µs
-# │       that constraint evaluation and the drive-frame write need.
-# │ How: Reuses PlacementMachine (registry fields and chapter-local sub-costs);
-# │      the throttle ratio and read tail are scenario inputs.
+# │ Show: on a shared 0.85 V supply the accelerator step sags the rail by
+# │       138 mV and stretches every gate delay by about 39 percent, whatever
+# │       the enforcer's privilege; a 320 µs read tail leaves 80 µs, less than
+# │       the 95 µs that constraint evaluation and the drive-frame write need.
+# │ How: Reuses InductivePDNVoltageDroop (the droop worked example) and
+# │      PlacementMachine (registry fields and chapter-local sub-costs); the
+# │      read tail is a scenario input.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import microsecond
-from mlsysim.fmt import fmt_latency, fmt_frequency, check
+from mlsysim.core.units import microsecond, ureg
+from mlsysim.fmt import fmt, fmt_int, fmt_latency, check
 
 class PlacementFallacyMargins:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
-    mcu_clock = PlacementMachine.mcu_clock  # category: illustrative (registry)
-    wcet = PlacementMachine.wcet  # category: chosen (registry)
+    v_core = InductivePDNVoltageDroop.v_core  # category: illustrative (shared-die supply)
+    v_droop = InductivePDNVoltageDroop.v_droop  # category: derived (L dI/dt + I R)
+    gate_stretch_pct = InductivePDNVoltageDroop.delay_expansion_pct  # category: derived (alpha-power model)
     deadline = PlacementMachine.deadline  # category: chosen (registry)
     compute_after_sense = PlacementMachine.compute_after_sense  # category: illustrative (80 + 15 µs)
-    throttle_ratio = 2.0  # scenario assumption; category: illustrative (governor halves the clock)
     read_tail = 320 * microsecond  # scenario assumption; category: illustrative (shared-DRAM read tail)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    throttled_clock = mcu_clock / throttle_ratio
-    throttled_wcet = (wcet * throttle_ratio).to(microsecond)
     after_read = (deadline - read_tail).to(microsecond)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
-    check(throttled_wcet > deadline, "A halved clock pushes the declared WCET past the deadline.")
-    check(abs(throttled_wcet.magnitude - 500.0) < 1e-9, "250 µs doubled is 500 µs.")
+    check(abs(v_droop.to(ureg.millivolt).magnitude - 138.0) < 1e-6, "90 mV inductive + 48 mV resistive = 138 mV of droop.")
+    check(round(gate_stretch_pct) == 39, "The alpha-power model stretches gate delay by about 39 percent at 0.712 V.")
     check(after_read < compute_after_sense, "The read tail leaves less than the 95 µs of constraint and write work.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
-    mcu_clock_str = fmt_frequency(mcu_clock, precision=0)
-    throttled_clock_str = fmt_frequency(throttled_clock, precision=0)
-    wcet_str = fmt_latency(wcet, unit=microsecond, precision=0)
-    throttled_wcet_str = fmt_latency(throttled_wcet, unit=microsecond, precision=0)
+    v_core_str = fmt(v_core.to(ureg.volt).magnitude, precision=2)
+    v_droop_mv_str = fmt(v_droop.to(ureg.millivolt).magnitude, precision=0)
+    gate_stretch_pct_str = fmt_int(round(gate_stretch_pct))
     deadline_str = fmt_latency(deadline, unit=microsecond, precision=0)
     read_tail_str = fmt_latency(read_tail, unit=microsecond, precision=0)
     after_read_str = fmt_latency(after_read, unit=microsecond, precision=0)
@@ -853,9 +842,9 @@ class PlacementFallacyMargins:
 
 ::: {.fallacy-pitfall}
 
-**Fallacy**: *Logical privilege rings protect real-time enforcers from shared-rail electrical droop.*\index{Voltage droop!clock throttling}\index{Interference!shared power rail}
+**Fallacy**: *Logical privilege rings protect real-time enforcers from shared-rail electrical droop.*\index{Voltage droop!gate delay}\index{Interference!shared power rail}
 
-Suppose the mobile manipulator placed a neural accelerator and its lockstep permission core on one SoC. An accelerator current burst ($di/dt$) depresses their shared power rail, and the power-management circuitry halves the permission core's clock from `{python} PlacementFallacyMargins.mcu_clock_str` to `{python} PlacementFallacyMargins.throttled_clock_str` to prevent a complete brownout. For a compute-bound tick, the declared `{python} PlacementFallacyMargins.wcet_str` worst case becomes `{python} PlacementFallacyMargins.throttled_wcet_str`, past the `{python} PlacementFallacyMargins.deadline_str` deadline, despite the task's highest-priority software privileges. Access control prevents unauthorized memory writes, but it cannot preserve execution timing through the physical electrical transient. Placement qualification must test shared-rail interference and establish adequate capacitance decoupling, $di/dt$ slew limits, or physical supply separation so accelerator activity does not consume the enforcer's timing margin.
+Suppose the mobile manipulator placed its lockstep permission core on the accelerator's supply in one SoC. The accelerator current step of @sec-placement-resource-contention sags that shared `{python} PlacementFallacyMargins.v_core_str` $\text{V}$ rail by `{python} PlacementFallacyMargins.v_droop_mv_str` $\text{mV}$, and the alpha-power model stretches the propagation delay of every gate on it by `{python} PlacementFallacyMargins.gate_stretch_pct_str` percent, the permission core's gates included, whatever priority its software holds. A core whose clock leaves less timing slack than that stretch misses setup time on its critical paths. Both lockstep cores see the same sag, so they can latch the same wrong value and the comparator stays silent, or the brownout detector resets the enforcer while the base is moving. Access control decides which addresses the enforcer may write; it has no term for the voltage at its flip-flops. Placement qualification must bound the droop with decoupling capacitance or $di/dt$ slew limits and show the timing margin under the declared current step, or remove the shared supply. The machine removes it, running its permission path on the isolated, held-up rail of @sec-body-power-integrity, which the accelerator does not draw on.
 
 :::
 

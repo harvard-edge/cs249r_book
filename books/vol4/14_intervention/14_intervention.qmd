@@ -120,15 +120,15 @@ Naming the operations separates **intervention**\index{Intervention} from **safe
 # │          (veto_path and manual_drive for the remote assistant, accept_item
 # │          for the coworker).
 # │
-# │ Goal:    Show that the chosen handover speed sits under the force-limited
-# │          ceiling for contact with the coworker's hand.
-# │ Show:    Chosen TCP handover speed, the ceiling F_h / sqrt(k_h m_eff), the
-# │          arm's effective contact mass, the contact criterion.
+# │ Goal:    Recall the handover cap that the enforcement record's handover
+# │          entry holds (@sec-enforcement-telemetry owns it), and check that
+# │          it sits under the force-limited contact ceiling.
+# │ Show:    Chosen TCP handover speed and the ceiling F_h / sqrt(k_h m_eff).
 # │ How:     WarehouseAisle contact fields and the machine's effective mass.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, kilogram, newton
-from mlsysim.fmt import fmt_velocity, fmt_qty, check
+from mlsysim.fmt import fmt_velocity, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
@@ -153,11 +153,9 @@ class InterventionCoworkerHandover:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_handover_str = fmt_velocity(v_handover, unit=meter / second, precision=2)
     v_ceiling_str = fmt_velocity(v_ceiling, unit=meter / second, precision=3)
-    m_eff_str = fmt_qty(m_eff, kilogram, precision=0)
-    f_criterion_str = fmt_qty(f_criterion, newton, precision=0)
 ```
 
-For example, the remote assistant who supervises the mobile manipulator may hold a signed **trajectory veto** capability for the base's planner channel: role `remote_assistant`, operation `veto_path`, channel `planner_proposal`, priority above the learned planner but below the local enforcer, authenticated session and nonce, and a clearance-derived acknowledgment deadline. The enforcer responds to a valid veto with a checked local hold or stop. The same session carries a second entry, `manual_drive`, on the base-velocity and arm-joint channels, which becomes active only through a handover that commits within the clearance-derived deadline, and lapses with the manual lease of @sec-intervention-authority-transitions; every command it carries still passes the permission check. A wheel drive-torque packet from that credential is denied, because neither entry grants the base's wheel drive-torque channel. The coworker at the packing station holds a different entry, `accept_item`, which lets the coworker take from the gripper the mug the arm picked from the takeaway conveyor (@sec-intent, @sec-planning). That entry grants no motion authority, and the enforcer caps the arm's approach to the coworker's hand at a chosen `{python} InterventionCoworkerHandover.v_handover_str`, under the `{python} InterventionCoworkerHandover.v_ceiling_str` at which an unplanned contact of the arm's `{python} InterventionCoworkerHandover.m_eff_str` effective mass with the hand would reach the `{python} InterventionCoworkerHandover.f_criterion_str` contact criterion. The permission record binds actor, operation, channel, deadline, authentication, rank, and fallback; a valid signature alone grants no motion authority.
+For example, the remote assistant who supervises the mobile manipulator may hold a signed **trajectory veto** capability for the base's planner channel: role `remote_assistant`, operation `veto_path`, channel `planner_proposal`, priority above the learned planner but below the local enforcer, authenticated session and nonce, and a clearance-derived acknowledgment deadline. The enforcer responds to a valid veto with a checked local hold or stop. The same session carries a second entry, `manual_drive`, on the base-velocity and arm-joint channels, which becomes active only through a handover that commits within the clearance-derived deadline, and lapses with the manual lease of @sec-intervention-authority-transitions; every command it carries still passes the permission check. A wheel drive-torque packet from that credential is denied, because neither entry grants the base's wheel drive-torque channel. The coworker at the packing station holds a different entry, `accept_item`, which lets the coworker take from the gripper the mug the arm picked from the takeaway conveyor (@sec-intent, @sec-planning). That entry grants no motion authority. The handover channel of the enforcement record (@sec-enforcement-telemetry) caps the arm's approach to the coworker's hand at `{python} InterventionCoworkerHandover.v_handover_str`, under the `{python} InterventionCoworkerHandover.v_ceiling_str` contact ceiling, and no capability lifts that cap. The permission record binds actor, operation, channel, deadline, authentication, rank, and fallback; a valid signature alone grants no motion authority.
 
 When an operator attempts an intervention, human biology imposes a hard real-time latency budget before any physical corrective action can occur. Human response time is not a single point event, but a cascaded pipeline of physiological and mechanical stages. In one illustrative, additive budget for an operator monitoring a machine's telemetry stream, the sensory recognition stage requires $150\text{ ms}$ to $300\text{ ms}$ for light to strike the retina, travel through the visual pathway, and register as an optical anomaly. The situational assessment stage, in which the operator recognizes that the learned policy is drifting toward a hazard and selects an appropriate counter-action, demands $500\text{ ms}$ to $1500\text{ ms}$. Finally, the motor actuation stage, covering the transmission of motor signals down the spinal cord, muscle recruitment in the hand, and the physical displacement of an override switch, consumes $200\text{ ms}$ to $400\text{ ms}$. Summing these sequential budgets establishes the physiological **takeover reaction floor**\index{Takeover reaction floor}. Accounting for network transport and communication handshake latency $T_{\text{comm}}$, total supervisory takeover latency $T_{\Sigma}$ decomposes into:
 $$T_{\Sigma} = T_{\text{sensory}} + T_{\text{cognitive}} + T_{\text{motor}} + T_{\text{comm}}$$ {#eq-intervention-reaction-floor}
@@ -794,18 +792,7 @@ The enforcer's $1\text{ kHz}$ loop gathers the four-phase handshake, integrator 
 ↳ **Protocol:** The enforcer's cadence, memory and write invariants, and per-state execution steps are given in @sec-appendix-systems-authority-protocol.
 :::
 
-### Admittance versus impedance control
-
-When the remote assistant holds a manual lease on the arm and drives it through a force-reflecting master, the machine must decide whether it responds to the operator's motion or to the operator's force. In physical AI and haptic teleoperation [@hogan1985impedance], this distinction separates **impedance control** (responding to motion by rendering a force) from **admittance control** (responding to force by yielding in motion):
-
-1. **Impedance Control ($\text{motion} \to \text{force}$)**: The controller measures kinematic displacement or velocity ($\mathbf{x}, \dot{\mathbf{x}}$) and commands an interaction force or joint torque ($\boldsymbol{\tau}$):
-   $$\boldsymbol{\tau} = \mathbf{K} (\mathbf{x}_{\text{des}} - \mathbf{x}) + \mathbf{D} (\dot{\mathbf{x}}_{\text{des}} - \dot{\mathbf{x}})$$
-   Impedance control behaves like a virtual spring-damper. It is naturally suited for direct-drive or highly backdrivable mechanisms where the mechanical linkage can be moved by hand with minimal unmodeled friction.
-2. **Admittance Control ($\text{force} \to \text{motion}$)**: The controller measures external interaction forces ($\mathbf{F}_{\text{ext}}$) exerted by the human (via a six-axis wrist force-torque sensor) and calculates a compliant kinematic trajectory that the actuator tracks under stiff position control:
-   $$\mathbf{M}_d \ddot{\mathbf{x}} + \mathbf{D}_d \dot{\mathbf{x}} + \mathbf{K}_d (\mathbf{x} - \mathbf{x}_0) = \mathbf{F}_{\text{ext}}$$
-   Admittance control is essential for non-backdrivable, high-gear-ratio industrial robots (such as harmonic or cycloidal drives with large reflected rotor inertia $N^2 J$, as established in @sec-body-actuator-limits).
-
-The human arm, actuator, and communication channel form a coupled feedback loop. Their resonance and phase margin depend on the operator, grip, mechanism, controller gains, and transport delay; a universal $4\text{--}8\text{ Hz}$ human resonance or automatic limit cycle cannot be assumed. If measured manual torque and drive current oppose one another during a handover, the engineer can reduce stiffness, add validated damping, or change the control mode while retaining clearance and torque limits. Impedance and admittance designs must be tested for passivity or stability over their specified operating range.
+When the remote assistant holds a manual lease on the arm and drives it through a force-reflecting master, the arm must respond either to the operator's motion or to the operator's force. **Impedance control** [@hogan1985impedance] renders a force from measured motion, the virtual spring-damper of \ref{psp-body-impedance-control}, and suits backdrivable joints. **Admittance control** measures the operator's force at a wrist force-torque sensor and yields in motion under stiff position tracking, which suits the high-ratio drives whose reflected rotor inertia $N^2 J$ resists being moved by hand (@sec-body-actuator-limits). Either mode closes a loop through the operator, the mechanism, and the transport delay, and the stability of that loop depends on grip, gains, and delay, so each mode must be tested for passivity over its specified operating range. The enforcer keeps its clearance and torque limits whichever mode the master uses.
 
 Blending, pre-biasing, and compliant interaction all assume that the proposals they shape come from an operator entitled to control the arm, and a force measured at a sensor carries no credential of its own. If the permission path accepts a transfer request without validating identity, an unauthenticated command injection or a malfunctioning subsystem can seize authority and override the machine while it is in motion. The mechanisms that make an intervention smooth must therefore be paired with mechanisms that establish who is allowed to intervene.
 
@@ -937,7 +924,7 @@ A record supporting an argument months later has requirements that a debug log l
 
 [^fn-std-ptp-edr]: **Precision Time Protocol Logging**\index{Precision time protocol logging}: Unlike legacy event data recorders logging at coarse $10\text{ Hz}$ intervals, physical AI incident reconstruction demands sub-millisecond precision. A qualified PTP installation can align the named device clocks with a measured conversion-error bound. Event ordering requires the intervals around timestamps, sensor exposure and sampling, and actuator response not to overlap.
 
-The chosen $1\text{ kHz}$ control design records a structured authority and action tuple each tick, with declared loss handling. The minimal **evidence tuple**\index{Evidence tuple} takes the form $\langle t_{\text{MCU}}, S_{\text{auth}}, \mathbf{x}_{\text{state}}, \mathbf{u}_{\text{prop}}, \mathbf{u}_{\text{enf}}, \mathbf{u}_{\text{act}}, \text{ID}_{\text{operator}}\rangle$, which records both sides of the proposal boundary (@sec-boundary-machine-model). In this structure, $t_{\text{MCU}}$ is the event time in nanoseconds on the permission processor's clock, converted from any other clock with a recorded error bound, $S_{\text{auth}}$ records the active authority state indicating whether autonomous policy, manual override, or fault mitigation holds control, and $\text{ID}_{\text{operator}}$ identifies the authenticated source of any active intervention. The three action vectors map onto the action taps of @sec-data-collection-sources, with $\mathbf{u}_{\text{prop}}$ as the requested action $a_{\text{req}}$ and $\mathbf{u}_{\text{enf}}$ as the enforced command $a_{\text{enf}}$. The mapped command $a_{\text{cmd}}$ lies between them and needs no field of its own when the proposal already arrives in actuator coordinates. The field $\mathbf{u}_{\text{act}}$ is the command dispatched to the drives, and the measured response $a_{\text{meas}}$ comes from the plant observations in $\mathbf{x}_{\text{state}}$. Omitting one element can limit a particular causal question, so the record declares what each field actually measures. If the log records $\mathbf{u}_{\text{act}}$ without $\mathbf{u}_{\text{prop}}$, investigators lose the policy-command comparison. If $\mathbf{u}_{\text{enf}}$ is omitted, the log loses the proposed-versus-admitted comparison.
+The chosen $1\text{ kHz}$ control design records a structured authority and action tuple each tick, with declared loss handling. The minimal **evidence tuple**\index{Evidence tuple} takes the form $\langle t_{\text{MCU}}, S_{\text{auth}}, \mathbf{x}_{\text{state}}, \mathbf{u}_{\text{prop}}, \mathbf{u}_{\text{enf}}, \mathbf{u}_{\text{act}}, \text{ID}_{\text{operator}}\rangle$, which records both sides of the proposal boundary (@sec-boundary-machine-model). In this structure, $t_{\text{MCU}}$ is the event time in nanoseconds on the permission processor's clock, converted from any other clock with a recorded error bound, $S_{\text{auth}}$ records the active authority state indicating whether autonomous policy, manual override, or fault mitigation holds control, and $\text{ID}_{\text{operator}}$ identifies the authenticated source of any active intervention. The three action vectors map onto the action taps of @sec-data-action-label, with $\mathbf{u}_{\text{prop}}$ as the requested action $a_{\text{req}}$ and $\mathbf{u}_{\text{enf}}$ as the enforced command $a_{\text{enf}}$. The mapped command $a_{\text{cmd}}$ lies between them and needs no field of its own when the proposal already arrives in actuator coordinates. The field $\mathbf{u}_{\text{act}}$ is the command dispatched to the drives, and the measured response $a_{\text{meas}}$ comes from the plant observations in $\mathbf{x}_{\text{state}}$. Omitting one element can limit a particular causal question, so the record declares what each field actually measures. If the log records $\mathbf{u}_{\text{act}}$ without $\mathbf{u}_{\text{prop}}$, investigators lose the policy-command comparison. If $\mathbf{u}_{\text{enf}}$ is omitted, the log loses the proposed-versus-admitted comparison.
 
 A **forensic authority record**\index{Forensic authority record} is a sampled ledger entry with protected integrity and clock-conversion metadata that logs the discrete authority state $S_{\text{auth}}$, raw proposed action $\mathbf{u}_{\text{prop}}$, enforcer-modified action $\mathbf{u}_{\text{enf}}$, delivered actuator command $\mathbf{u}_{\text{act}}$, and operator identity across every control cycle to support incident reconstruction and separate policy, blend, and reviewed human-recovery data.
 
@@ -1170,11 +1157,59 @@ The remote assistant takes over the mobile manipulator's base to route it around
 
 :::
 
+```{python}
+#| label: calc-intervention-verifier-flood-pitfall
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FORGED PACKETS QUEUED AHEAD OF A GENUINE VETO
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-intervention-fallacies-pitfalls, the verifier-flooding
+# │          pitfall.
+# │
+# │ Goal:    Show that authentication alone leaves an availability hazard:
+# │          forged packets that the verifier must reject still spend its time.
+# │ Show:    The fast verifier's time per packet; the fewest forged packets
+# │          queued ahead of a genuine veto that push its admission past
+# │          T_latest at the aisle speed; the admission time they cause.
+# │ How:     Serial verification on the permission processor, each packet
+# │          taking t_auth,B of InterventionAuthBudget; the genuine veto
+# │          finishes after (n + 1) verifications.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import millisecond
+from mlsysim.fmt import fmt_latency, fmt_count, check
+
+class InterventionVerifierFloodPitfall:
+    """Forged takeover packets that delay a genuine veto past T_latest."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_verify = InterventionAuthBudget.t_auth_b  # category: derived
+    t_latest = InterventionTimeoutBudget.t_latest  # category: derived
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    # Fewest forged packets n with (n + 1) * t_verify > t_latest.
+    n_forged = math.floor((t_latest / t_verify).to("").magnitude)
+    t_admit = ((n_forged + 1) * t_verify).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_forged == 5, f"forged packets that push the veto past T_latest: {n_forged}")
+    check(abs(t_admit.magnitude - 90.0) < 1e-9, f"genuine veto admission time: {t_admit}")
+    check(t_admit > t_latest, "The queued forgeries must push the veto past T_latest.")
+    check(n_forged * t_verify <= t_latest, "One fewer forgery must still let the veto fit.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_verify_str = fmt_latency(t_verify, unit=millisecond, precision=0)
+    t_latest_str = fmt_latency(t_latest, unit=millisecond, precision=1)
+    t_admit_str = fmt_latency(t_admit, unit=millisecond, precision=0)
+    n_forged_str = fmt_count(n_forged)
+```
+
 ::: {.fallacy-pitfall}
 
-**Pitfall**: *Relying on software-level cryptographic authentication without hardware rate limiting on real-time fieldbuses.*
+**Pitfall**: *Relying on cryptographic authentication without rate limiting the traffic that reaches the verifier.*
 
-A manipulator verifies cryptographic message authentication codes (MACs)\index{Authentication!cryptographic MAC} on takeover frames, but a faulty fieldbus\index{Hardware!fieldbus} node floods the network at an illustrative $8000\text{ frames/s}$. At an assumed $18.5\text{ µs}$ of interrupt and verification work per frame, this traffic alone consumes $8000(18.5\text{ µs})=148\text{ ms}$ of CPU time each second, or $14.8\%$ of one core. Whether it causes a deadline miss depends on the remaining utilization, priorities, and interrupt budget. Authentication can preserve command integrity while leaving an availability hazard. Mailbox filtering and rate limiting\index{Network!rate limiting} should bound traffic before it reaches the critical execution path; qualification must test both command rejection and enforcement timing under admitted load.
+The mobile manipulator's permission processor checks each remote takeover packet with the fast verifier of @sec-intervention-authenticating-intervention, at `{python} InterventionVerifierFloodPitfall.t_verify_str` per signature\index{Authentication!signature verification}. Verification rejects a forged packet only after spending that time on it. If a faulty or compromised node on the link\index{Network!availability} sends `manual_drive` packets faster than the verifier retires them, `{python} InterventionVerifierFloodPitfall.n_forged_str` forgeries queued ahead of the remote assistant's genuine `veto_path` delay its admission to `{python} InterventionVerifierFloodPitfall.t_admit_str`, past the `{python} InterventionVerifierFloodPitfall.t_latest_str` deadline at the aisle speed. The independently wired protective input does not wait in that queue, but every network command does. Authentication preserves command integrity while leaving an availability hazard. Mailbox filtering and per-source rate limiting\index{Network!rate limiting} must bound the traffic before it reaches the verifier, and qualification must test both command rejection and enforcement timing under the admitted load.
 
 :::
 

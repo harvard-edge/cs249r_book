@@ -107,7 +107,7 @@ Collapsing these three timestamps into a single receipt or transmission timestam
 ↰ **Prerequisite:** Synchronized hardware timestamping across fieldbuses is established in @sec-nervous-deterministic-fieldbuses.
 :::
 
-Even when a system records true acquisition epochs, physical AI architectures rely on distributed processing nodes whose local oscillator clocks drift independently. Synchronizing these distributed clocks over standard bus networks introduces a bounded synchronization error, and that temporal uncertainty translates directly into spatial uncertainty.[^fn-hw-ptp-canfd] Consider, with illustrative values, an autonomous manipulator tracking a moving assembly target. The vision processor and the joint motion controller run on separate compute boards whose clocks are synchronized in software over Ethernet, without the hardware timestamping that lets the Precision Time Protocol (PTP, IEEE 1588) hold offsets near a microsecond, and the achieved clock offset is bounded at $\delta t = \pm 1.5\text{ ms}$. If the target moves relative to the camera at an operational velocity of $v = 1.20\text{ m/s}$, the clock offset alone creates an irrecoverable spatial positioning uncertainty of $e_{\text{sync}} = v \cdot \delta t = (1.20\text{ m/s})(0.0015\text{ s}) = 1.80\text{ mm}$. In an assembly operation with a mechanical clearance tolerance of $0.50\text{ mm}$, an uncalibrated clock synchronization bound of $1.5\text{ ms}$ causes physical interference and tool collision before any controller tracking latency is added. The physical error budget must therefore allocate margin for clock synchronization jitter alongside sensor resolution and structural deflection.
+Even when a system records true acquisition epochs, physical AI architectures rely on distributed processing nodes whose local oscillator clocks drift independently. Synchronizing these distributed clocks over standard bus networks introduces a bounded synchronization error, and that temporal uncertainty becomes spatial uncertainty at the relative speed of whatever the record describes.[^fn-hw-ptp-canfd] The observation record of @sec-perception-observation-contract already carries this bound as its clock-conversion error, and a belief built from that observation keeps it. Every consumer adds the bound to the evidence age before judging freshness, and the error budget allocates the distance that bound covers at the record's relative speed alongside sensor resolution and structural deflection.
 
 [^fn-hw-ptp-canfd]: **Fieldbus clock synchronization jitter**\index{Fieldbus!synchronization jitter}: Fieldbus architectures exhibit distinct hardware clock synchronization bounds: IEEE 1588 PTP over Ethernet achieves $\delta t < 1.0\,\mu\text{s}$, EtherCAT Distributed Clocks achieve $<100\text{ ns}$ hardware SYNC0 jitter, and CAN-FD bit-phase synchronization yields $\pm 10\text{--}50\,\mu\text{s}$. Because spatial uncertainty scales with target relative velocity ($e_{\text{sync}} = v_{\text{rel}} \delta t$), microsecond-level synchronization is essential to keep temporal errors within micrometer mechanical budgets. Uncalibrated clock drift between distributed sensor and motor nodes degrades multi-axis tool coordination, inducing high-frequency chatter in joint torque loops.
 
@@ -125,7 +125,66 @@ Geometric coordinates lack meaning without their reference frame, which moves in
 
 The cost of an expired transform is direct spatial displacement (@fig-frame-staleness-error). Applying the delay-as-distance principle from @sec-body to kinematics, uncompensated latency translates directly into geometric positioning error through the lever arm of the linkages. For the rigorous cross-product derivation of this kinematic error propagation, see @sec-appendix-control-spatial.
 
-Take an illustrative manipulator holding a tool point at a distance of $\ell = 0.60\text{ m}$ from its wrist assembly. Suppose the base and wrist rotate at an angular velocity of $\omega = 1.50\text{ rad/s}$ while the arm translates through space at $v = 0.80\text{ m/s}$. If a tracking pipeline publishes a camera-to-tool transform with an uncompensated staleness of $\Delta t = 40\text{ ms} = 0.040\text{ s}$, the translation of the frame drifts by $e_{\text{trans}} = v \cdot \Delta t = (0.80\text{ m/s})(0.040\text{ s}) = 0.032\text{ m} = 3.20\text{ cm}$. Over the same interval, the angular orientation rotates through $\Delta \theta = \omega \cdot \Delta t = (1.50\text{ rad/s})(0.040\text{ s}) = 0.060\text{ rad}$. Through the lever-arm relation $e_{\text{rot}} \approx \ell \Delta \theta$, this angular shift swings the tool point across an arc of $e_{\text{rot}} \approx (0.60\text{ m})(0.060\text{ rad}) = 0.036\text{ m} = 3.60\text{ cm}$. Summing the translational shift and the lever-arm deflection yields a total tool-point positioning error of $e_{\text{tool}} \approx e_{\text{trans}} + \ell \Delta \theta = 3.20\text{ cm} + 3.60\text{ cm} = 6.80\text{ cm}$. Comparing this $68.0\text{ mm}$ error against a physical task clearance tolerance of $\epsilon_{\text{tol}} = \pm 0.50\text{ mm}$ reveals that an uncompensated staleness of just $40\text{ ms}$ breaches clearance by a factor of $68.0\text{ mm} / 0.50\text{ mm} = 136\times$. Because the transform tree evaluates without error, nothing flags the stale pose, and the controller drives the tool into the fixture before contact sensing can respond.
+```{python}
+#| label: calc-memory-latch-transform-staleness
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STALE SLOT-TO-FINGER TRANSFORM AT THE LATCH SLOT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-memory-reference-frames (lever-arm staleness example); owns
+# │          the latch-slot constants that @sec-memory-belief-through-occlusion
+# │          (LatchSlotBelief) reads.
+# │
+# │ Goal:    Show that one missed wrist-camera frame on the slot-to-finger
+# │          edge can spend more than the latch-release slot's tolerance, most
+# │          of it through the lever arm.
+# │ Show:    the frame period, the lateral drift at the finger's drift bound,
+# │          the lever-arm arc, and their sum with E0 against the slot.
+# │ How:     e_tool ~ E0 + v_drift dt + l omega dt, dt one wrist-camera frame.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class LatchTransformStaleness:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
+    frame_rate = RM.wrist_camera.frame_rate  # category: datasheet (wrist camera)
+    e0 = 0.1 * ureg.millimeter  # category: illustrative (finger-to-slot error at the wrist capture)
+    v_drift = 12.0 * ureg.millimeter / ureg.second  # category: illustrative (unobserved lateral velocity error bound)
+    e_max = 1.0 * ureg.millimeter  # category: illustrative (latch-release slot tolerance)
+    lever = 0.15 * ureg.meter  # category: illustrative (wrist-to-fingertip lever arm)
+    omega = 0.30 * ureg.radian / ureg.second  # category: illustrative (wrist rate while aligning the finger)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
+    dt = (1 / frame_rate).to(millisecond)
+    e_trans = (v_drift * dt).to(ureg.millimeter)
+    e_rot = (lever * omega * dt / ureg.radian).to(ureg.millimeter)
+    e_tool = (e0 + e_trans + e_rot).to(ureg.millimeter)
+    ratio = (e_tool / e_max).to(ureg.dimensionless).magnitude
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(abs(dt.magnitude - 16.667) < 1e-3, f"Wrist-camera frame period should be 16.7 ms, got {dt}.")
+    check(abs(e_trans.magnitude - 0.2) < 1e-6, f"Lateral drift over one frame should be 0.20 mm, got {e_trans}.")
+    check(abs(e_rot.magnitude - 0.75) < 1e-6, f"Lever-arm arc should be 0.75 mm, got {e_rot}.")
+    check(e_rot > e_trans, "The lever arm must contribute more than the lateral drift.")
+    check(e_tool > e_max, "One missed frame must exceed the slot tolerance.")
+    check(abs(e_tool.magnitude - 1.05) < 1e-6, f"Total finger error should be 1.05 mm, got {e_tool}.")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    dt_str = fmt_latency(dt, unit=millisecond, precision=1)
+    e0_str = fmt_length(e0, unit=ureg.millimeter, precision=1)
+    v_drift_str = fmt_velocity(v_drift, unit=ureg.millimeter / ureg.second, precision=0)
+    lever_str = fmt_length(lever, unit=ureg.meter, precision=2)
+    omega_str = fmt_qty(omega, ureg.radian / ureg.second, precision=2)
+    e_trans_str = fmt_length(e_trans, unit=ureg.millimeter, precision=2)
+    e_rot_str = fmt_length(e_rot, unit=ureg.millimeter, precision=2)
+    e_tool_str = fmt_length(e_tool, unit=ureg.millimeter, precision=2)
+    e_max_str = fmt_length(e_max, unit=ureg.millimeter, precision=0)
+    ratio_pct_str = fmt_percent(ratio - 1, precision=0, style="prose")
+```
+
+How little staleness it takes to spend a task's tolerance shows at the latch-release slot, while the wrist camera can still see it. Each wrist-camera frame, one every `{python} LatchTransformStaleness.dt_str`, renews the slot's pose in the camera frame and with it the slot-to-finger edge the controller aligns on, and the finger must stay within the slot tolerance $E_{\max}$ of `{python} LatchTransformStaleness.e_max_str`. Suppose that edge misses a single frame. Starting from an initial error of `{python} LatchTransformStaleness.e0_str`, the finger's lateral offset drifts at most $e_{\text{trans}} = v_{\text{drift}}\,\Delta t$ under an illustrative `{python} LatchTransformStaleness.v_drift_str` bound on its unobserved lateral velocity, validated for the arm's operating region, or `{python} LatchTransformStaleness.e_trans_str`. With the fingertip an illustrative $\ell$ = `{python} LatchTransformStaleness.lever_str` beyond the wrist and the wrist turning at an illustrative $\omega$ = `{python} LatchTransformStaleness.omega_str` as it aligns the finger, the lever arm adds $e_{\text{rot}} \approx \ell\,\omega\,\Delta t$, or `{python} LatchTransformStaleness.e_rot_str`. The joint encoders measure that turn, but the stale edge still dates the slot to the previous frame while the wrist pose it is composed with is current, so the tree returns a hybrid pose, a finger position the arm never held. Only chaining the slot against the wrist pose of its own capture epoch, or expiring the edge, removes that arc. Left in the chain, the stale edge misplaces the finger by `{python} LatchTransformStaleness.e_tool_str`, `{python} LatchTransformStaleness.ratio_pct_str` more than the slot allows, and more of that error comes from the lever arm than from the drift. Because the transform tree evaluates without error, nothing flags the stale pose, and the controller drives the finger into the strike plate beside the slot before contact sensing can respond.
 
 ::: {#fig-frame-staleness-error fig-env="figure" fig-pos="t" fig-cap="**Transform staleness and lever-arm error propagation**: Geometric error propagation under uncompensated transform latency $\\Delta t$. Base translation shifts the origin by $e_{\\text{trans}} = v\\,\\Delta t$, while joint rotation across link length $\\ell$ swings the tool tip by $e_{\\text{rot}} \\approx \\ell\\,\\omega\\,\\Delta t$, accumulating into total tool displacement $e_{\\text{tool}} \\approx e_{\\text{trans}} + \\ell\\,\\Delta\\theta$ that breaches clearance tolerance $\\pm \\epsilon_{\\text{tol}}$." fig-alt="Coordinate transform staleness and lever-arm kinematic error propagation. Compares reported state at t0 against true physical state at t0 + Δt. Base translation produces displacement e_trans = v Δt, while link rotation over length ℓ introduces angular deflection Δθ = ω Δt and arc error e_rot ≈ ℓ Δθ. The resulting vector sum e_tool breaches the target clearance envelope ±ε_tol."}
 ![](images/svg/fig09_frame_staleness_error.svg){width="100%"}
@@ -141,7 +200,7 @@ A transform tree dates the machine's own geometry, and a stale edge misplaces th
 
 A robot that has swept its range sensor down an aisle holds three kinds of space afterward: space it saw occupied, space it saw empty, and space it never saw. Only the second can ever vouch that a path is clear, and only while its evidence is fresh. Every scene representation stores some version of these three states, and they differ in what they store and what it costs. An **occupancy grid**\index{Occupancy grid mapping} [@elfes1989using], or its sparse octree form [@hornung2013octomap], keeps an occupancy estimate per cell. A **truncated signed distance field (TSDF)**\index{Truncated signed distance field} [@curless1996volumetric] keeps a truncated projective distance to the observed surface along each sensing ray. **3D Gaussian splatting**\index{3D Gaussian splatting} [@kerbl20233d] keeps optimized primitives that render new camera views. A dense grid's storage grows with the cube of its cells per dimension, while the octree, the surface-band blocks of a TSDF, and a Gaussian map store only allocated structure, whose size depends on the observed geometry and the accuracy target; @sec-appendix-ml-voxels and @sec-appendix-ml-3dgs give the updates behind these costs. For motion permission they share one limit. A projective distance is not the nearest-surface Euclidean distance a clearance decision needs, and a Gaussian density does not identify occupied space, so none of them certifies clearance by itself. Each must first be converted into a validated occupancy layer or Euclidean signed distance field (ESDF), with an explicit policy for unknown space, before the permission path can query it.
 
-What a map can certify comes from how a range return updates it. Traversing the ray from the sensor to the return [@amanatides1987fast], the map asserts **negative evidence**\index{Negative evidence} in every cell the ray crossed and positive evidence in the cell where it ended; @sec-appendix-ml-voxels gives the log-odds update. Negative evidence lets the map retire a phantom obstacle as soon as the same region is seen empty, instead of waiting for a timeout, and it also marks the limit of what the map can say. It covers only cells a valid ray actually traversed. It says nothing about the volume behind the return, and a new scan down the aisle cannot renew a cell hidden behind the rack, so the occluded cross aisle stays unknown and still needs expiry. The same rule sets the map's update cost. Every return touches every cell along its ray, so sparse allocation saves map capacity but not traversal, and at camera rates that traffic shares the memory bus with policy inference. A burst of it adds to the age of every record queued behind it, and whether the permission path survives such bursts is the placement question of @sec-placement-resource-contention.
+What a map can certify comes from how a range return updates it. Traversing the ray from the sensor to the return [@amanatides1987fast], the map asserts **negative evidence**\index{Negative evidence} in every cell the ray crossed and positive evidence in the cell where it ended; @sec-appendix-ml-voxels gives the log-odds update. Negative evidence lets the map retire a phantom obstacle as soon as the same region is seen empty, instead of waiting for a timeout, and it also marks the limit of what the map can say. It covers only cells a valid ray actually traversed. It says nothing about the volume behind the return, and a new scan down the aisle cannot renew a cell hidden behind the rack, so the occluded cross aisle stays unknown and still needs expiry. The same rule sets the map's update cost. Every return touches every cell along its ray, so sparse allocation saves map capacity but not traversal, and at camera rates that traffic shares the memory bus with policy inference. A burst of it adds to the age of every record queued behind it. On this machine the burst cannot delay the permission path itself, which reads its inputs on its own microcontroller (@sec-placement-resource-contention), so it reaches that path as evidence age, and the age check refuses whatever the burst has made too old.
 
 ::: {.column-margin}
 ![](images/svg/margin_active_negative_evidence_chain.svg){width="100%" fig-alt="Causal chain showing raycast through free space to surface hit, evicting ghost obstacles."}
@@ -310,10 +369,10 @@ from mlsysim.fmt import fmt_math, fmt_magnitude, fmt_qty_int
 
 class LatchSlotBelief:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
-    e0 = 0.1 * ureg.millimeter  # category: illustrative (initial error at the wrist capture)
-    v_drift = 12.0 * ureg.millimeter / ureg.second  # category: illustrative (unobserved velocity error bound)
+    e0 = LatchTransformStaleness.e0  # category: illustrative (initial error at the wrist capture, calc-memory-latch-transform-staleness)
+    v_drift = LatchTransformStaleness.v_drift  # category: illustrative (unobserved velocity error bound, calc-memory-latch-transform-staleness)
     a_dist = 50.0 * ureg.millimeter / ureg.second**2  # category: illustrative (disturbance acceleration bound)
-    e_max = 1.0 * ureg.millimeter  # category: illustrative (latch-release slot tolerance)
+    e_max = LatchTransformStaleness.e_max  # category: illustrative (latch-release slot tolerance, calc-memory-latch-transform-staleness)
     e_max_tight = 0.30 * ureg.millimeter  # category: illustrative (tighter machined slot)
     eps_sync = 0.2 * millisecond  # category: illustrative (clock-conversion bound, @sec-perception-observation-contract)
 
@@ -368,7 +427,7 @@ class LatchSlotBelief:
     growth_law_math = fmt_math(rf"E(t) = {_e0}\text{{ mm}} + ({_v}\text{{ mm/s}})\,t + \tfrac12({_a}\text{{ mm/s}}^2)\,t^2")
 ```
 
-Consider the mobile manipulator's arm guiding a gripper finger into the latch-release slot of the spring-latched cage door. In the final approach the finger hides the slot from the wrist camera, and the finger must stay within `{python} LatchSlotBelief.e_max_str` of the slot's centerline, the task tolerance $E_{\max}$ (@fig-uncertainty-growth). Assume illustrative bounds within the arm's validated operating region: initial position error $E_0$ at most `{python} LatchSlotBelief.e0_str`, unobserved velocity error $v_{\text{drift}}$ at most `{python} LatchSlotBelief.v_drift_str`, and acceleration disturbance $a_{\text{dist}}$ at most `{python} LatchSlotBelief.a_dist_str`. Position error then follows the growth law of @eq-mem-occlusion-expansion.
+Consider the mobile manipulator's arm guiding a gripper finger into the latch-release slot of the spring-latched cage door. In the final approach the finger hides the slot from the wrist camera, and the finger must stay within `{python} LatchSlotBelief.e_max_str` of the slot's centerline, the task tolerance $E_{\max}$ (@fig-uncertainty-growth). The arm's validated operating region supplies the bounds already charged at the slot's missed frame in @sec-memory-reference-frames, initial position error $E_0$ at most `{python} LatchSlotBelief.e0_str` and unobserved velocity error $v_{\text{drift}}$ at most `{python} LatchSlotBelief.v_drift_str`, and occlusion adds one more, an illustrative acceleration disturbance $a_{\text{dist}}$ at most `{python} LatchSlotBelief.a_dist_str`. Position error then follows the growth law of @eq-mem-occlusion-expansion.
 
 Evaluating this growth bound with the stated parameters yields `{python} LatchSlotBelief.growth_math`, with $\Delta t$ in seconds and $E(\Delta t)$ in millimeters. Setting $E(\Delta t) = E_{\max}$ gives the quadratic equation `{python} LatchSlotBelief.quad_math`. Its single positive real root is `{python} LatchSlotBelief.t_exp_str`, so a proposal depending on this belief must expire by then. If the slot were machined to a clearance of `{python} LatchSlotBelief.e_max_tight_str`, the allowable unobserved duration shrinks to `{python} LatchSlotBelief.t_exp_tight_str` (`{python} LatchSlotBelief.quad_tight_math`). Tightening mechanical tolerance by `{python} LatchSlotBelief.tol_ratio_mult_str` shrinks the allowable unobserved duration by `{python} LatchSlotBelief.horizon_ratio_mult_str`, requiring sensor re-acquisition or compliant impedance holding within that shorter window. In contrast, if an estimator naively assumes constant velocity ($a_{\text{dist}} = 0$), it predicts a valid horizon of $(E_{\max} - E_0)/v_{\text{drift}}$, or `{python} LatchSlotBelief.t_linear_str`. At that elapsed time the modeled bound reaches `{python} LatchSlotBelief.e_linear_str`, exceeding the clearance by `{python} LatchSlotBelief.overshoot_str`. A constant-velocity-only admission rule would keep accepting the estimate for `{python} LatchSlotBelief.t_extra_str` beyond the bounded-model deadline; whether contact occurs depends on the path and geometry.
 
@@ -583,7 +642,51 @@ The belief about the latch-slot finger in @sec-memory-belief-through-occlusion n
 
 : **Complete spatial-belief record**: Value, unit, entity, frame, two epochs, clock conversion, error model, validity region, expiry, provenance, and lifecycle travel together. A later estimate epoch dates a computation, not a measurement, and cannot extend expiry past $t_0 + t_{\text{exp}}$. {#tbl-09-invalidation-epochs tbl-colwidths="[23,39,38]"}
 
-A consumer of the record in @tbl-09-invalidation-epochs converts the capture epoch to its own clock, adds the clock-error margin to the age, checks the lifecycle status and the validity region, and only then evaluates $E(t)$ against the proposed motion's tolerance. Passing these checks admits the belief to the **separate permission decision**; it does not actuate the robot. On expiry or unobservability, the controller rejects dependent proposals and selects a validated fallback whose braking, hold, or search behavior remains physically feasible.
+```{python}
+#| label: calc-memory-mug-handle-belief
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MUG-HANDLE BELIEF ON THE CONVEYOR
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-memory-spatial-state-schema (second filled belief, the one
+# │          @sec-intent's lease consumes).
+# │
+# │ Goal:    Fill the belief record for the mug's handle on the takeaway
+# │          conveyor beside the latch-slot finger.
+# │ Show:    initial error, conveyor drift bound, grasp tolerance, expiry.
+# │ How:     E(t) = E0 + v_conveyor t (the belt speed bounds drift, so a = 0);
+# │          expiry is the root of E(t) = grasp tolerance.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class MugHandleBelief:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
+    e0 = AISLE.grasp_initial_error  # category: illustrative (handle-pose error at the wrist capture)
+    v_conv = AISLE.v_conveyor  # category: illustrative (takeaway-conveyor speed bound)
+    e_max = AISLE.grasp_tolerance  # category: chosen (task-profile grasp tolerance)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
+    t_exp = ((e_max - e0) / v_conv).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(abs(e0.to(ureg.millimeter).magnitude - 3.0) < 1e-9, f"Handle initial error should be 3 mm, got {e0}.")
+    check(abs(e_max.to(ureg.millimeter).magnitude - 15.0) < 1e-9, f"Grasp tolerance should be 15 mm, got {e_max}.")
+    check(abs(v_conv.to(ureg.meter / ureg.second).magnitude - 0.20) < 1e-9, f"Conveyor speed should be 0.20 m/s, got {v_conv}.")
+    check(abs(t_exp.magnitude - 60.0) < 1e-9, f"Mug-handle expiry should be 60 ms, got {t_exp}.")
+    check(LatchSlotBelief.t_exp > t_exp, "The mug handle must expire before the latch-slot finger.")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    e0_str = fmt_length(e0, unit=ureg.millimeter, precision=0)
+    v_conv_str = fmt_velocity(v_conv, unit=ureg.meter / ureg.second, precision=2)
+    e_max_str = fmt_length(e_max, unit=ureg.millimeter, precision=0)
+    t_exp_str = fmt_latency(t_exp, unit=millisecond, precision=0)
+```
+
+The same form carries the belief that @sec-intent builds on, the pose of the mug's handle as the mug rides the takeaway conveyor toward the arm. Its frame is the robot base frame, its evidence epoch is the last wrist-camera capture of the handle, converted under the same `{python} LatchSlotBelief.eps_sync_str` clock bound, and its initial error is `{python} MugHandleBelief.e0_str`. Its growth law differs in kind from the finger's. The belt carries the mug at no more than `{python} MugHandleBelief.v_conv_str`, a bound on speed rather than on force, so the error grows linearly from its initial value and reaches the `{python} MugHandleBelief.e_max_str` grasp tolerance at $t_0$ + `{python} MugHandleBelief.t_exp_str`. Its validity region is the belt running forward within that speed with the mug seated on it, so a knock that tips or lifts the mug, or a belt that overspeeds or reverses, expires the record at once, whatever time remains. A qualified tracker that renews the record on every frame replaces that belt-drift law with one bounded by the belt's residual slip (@sec-intent-goals-expire).
+
+A consumer of either record converts the capture epoch to its own clock, adds the clock-error margin to the age, checks the lifecycle status and the validity region, and only then evaluates $E(t)$ against the proposed motion's tolerance. Passing these checks admits the belief to the **separate permission decision**; it does not actuate the robot. On expiry or unobservability, the controller rejects dependent proposals and selects a validated fallback whose braking, hold, or search behavior remains physically feasible.
 
 ::: {#chk-mem-observability-state-schema .callout-checkpoint title="Belief expiry, observability, and the belief record"}
 
@@ -680,5 +783,5 @@ Two kinds of error hide from the checks a consumer can run. A frozen transform o
 The third law requires the permission path to decide each action on state whose age is known (principle \ref{pri-vol4-proposal-permission}), and spatial memory gives that age its definition, counting it from the evidence epoch of the last physical measurement rather than from the estimate epoch of the latest computation. Space that no valid ray has crossed has no evidence epoch at all, so it reaches the permission path as unknown, with no age that could make it clear. A known age is still not a license. It means something only through the growth law that turns it into an error bound, and however exactly the age is known, the permission path must refuse the state at the deadline where that bound reaches the task tolerance.
 
 ::: {.callout-chapter-connection title="From valid beliefs to bounded goals"}
-What may a valid belief authorize? Memory rules only on validity. It can say that a remembered object lies within a stated bound until a stated deadline, but it cannot say what the machine should do about that object. In @sec-intent, a human goal becomes an intent lease that consumes the belief record, carries the belief's evidence epoch forward as its own evidence horizon, and grants a bounded target with effort limits, never a path, for no longer than the evidence beneath it supports.
+What may a valid belief authorize? Memory rules only on validity. It can say that a remembered object lies within a stated bound until a stated deadline, but it cannot say what the machine should do about that object. In @sec-intent, a human goal, taking the mug from the conveyor, becomes an intent lease that consumes the belief record of the mug's handle, carries that belief's evidence epoch forward as its own evidence horizon, and grants a bounded target with effort limits, never a path, for no longer than the evidence beneath it supports.
 :::

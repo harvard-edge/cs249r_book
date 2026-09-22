@@ -52,7 +52,7 @@ A semantic request like 'retrieve the tool' specifies an outcome but leaves the 
 When the warehouse mobile manipulator is told to "pick the red mug" from the takeaway conveyor, the directive specifies an outcome but leaves path, force, and deadline unresolved. A motor inverter accepts electrical commands, not language. Vision-Language-Action (VLA) models [@brohan2023rt1; @brohan2023rt2] can propose actions or targets, but their update cadence depends on the model and hardware and may be much slower than local control. If a target moves during inference, a stale proposal can consume clearance. The system therefore needs dated geometric evidence, bounded requests, and an independent permission path that can withdraw authority while the model is silent.
 
 ::: {.column-margin .margin-pointer}
-↰ **Prerequisite:** Persistent spatial object states and bounding volumes are tracked in @sec-memory-spatial-state-schema.
+↰ **Prerequisite:** The belief record a lease consumes (evidence epoch, initial error, growth law) is specified in @sec-memory-spatial-state-schema.
 :::
 
 Memory can supply a spatial belief with a validity window (@sec-memory); it cannot decide what action that belief authorizes. **Intent**\index{Intent} bridges this chasm by connecting high-level task semantics to a bounded physical goal. It specifies an admissible, time-bounded target before the trajectory planner of @sec-planning constructs a continuous motion profile to reach it.
@@ -347,9 +347,50 @@ The complete computational pipeline from multimodal patch tokenization to the en
 ![](images/svg/fig10_vla_cross_attention_intent_lease.svg){width="100%"}
 :::
 
-Consider a gripper target with nominal base-frame position $\mathbf{p}_0=[0.450,-0.120,0.220]^T\text{ m}$. In an illustrative calibrated Gaussian localization model, the principal sensor-frame standard deviations are $4.0$, $6.0$, and $15.0\text{ mm}$. A **95 percent statistical region** uses Mahalanobis squared distance $(\mathbf{p}-\mathbf{p}_0)^T\mathbf{\Sigma}^{-1}(\mathbf{p}-\mathbf{p}_0)\le\chi^2_{3,0.95}\approx7.815$, yielding principal semi-axes $11.18$, $16.77$, and $41.93\text{ mm}$. @Fig-10-intent-lease-envelope contrasts that uncertain target with a separately specified $12.0\text{ mm}$ mechanical capture tolerance along the approach axis. The depth uncertainty exceeds that tolerance, so the proposal needs better sensing, a different approach, or refusal. A 95 percent region also leaves a residual tail and cannot by itself certify clearance, so the intent proposal carries conservative base-frame error bounds rather than claiming to encode this covariance.
+```{python}
+#| label: calc-intent-handle-ellipsoid
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ The mug-handle localization estimate as a 95 percent region, compared with  │
+# │ the mug's grasp tolerance axis by axis.                                     │
+# └─────────────────────────────────────────────────────────────────────────────┘
+import math
 
-::: {#fig-10-intent-lease-envelope fig-env="figure" fig-pos="t" fig-cap="**Localization uncertainty and authority expiry**: Panel (a) sketches a statistical target-uncertainty ellipsoid beside a separate gripper capture tolerance. Panel (b) compares counterfactual traces: blue expires and brakes, green continues only with fresh renewals, and red shows motion without a lease. Whether the blue trace rests before the obstacle depends on total pre-brake delay, deceleration, and clearance." fig-alt="Panel (a) shows target-position uncertainty beside a separate gripper capture region. Panel (b) compares alternative velocity traces: blue authority expires then braking reaches rest if feasible; green dots show fresh renewals in a separate scenario; red continues without a lease toward the obstacle. Physical clearance depends on the complete stopping budget."}
+# ┌── 1. LOAD: illustrative single-view localization model ────────────────────
+sigma_lat_x = 4.0 * millimeter  # category: illustrative (distant pre-approach wrist-camera view, lateral std. dev.)
+sigma_lat_y = 5.0 * millimeter  # category: illustrative (wrist-camera lateral std. dev.)
+sigma_depth = 12.0 * millimeter  # category: illustrative (wrist-camera depth std. dev.)
+chi2_3dof_95 = 7.815  # category: constant (chi-square quantile, 3 degrees of freedom, 0.95)
+
+# ┌── 2. EXECUTE: principal semi-axes of the 95 percent region ────────────────
+k_region = math.sqrt(chi2_3dof_95)
+semi_x = (k_region * sigma_lat_x).to(millimeter)
+semi_y = (k_region * sigma_lat_y).to(millimeter)
+semi_z = (k_region * sigma_depth).to(millimeter)
+chi2_cdf = math.erf(math.sqrt(chi2_3dof_95 / 2)) - math.sqrt(2 * chi2_3dof_95 / math.pi) * math.exp(-chi2_3dof_95 / 2)
+
+# ┌── 3. GUARD: the claims the prose makes ────────────────────────────────────
+check(abs(chi2_cdf - 0.95) < 1e-4, "7.815 is the 0.95 chi-square quantile for 3 degrees of freedom")
+check(semi_x < AISLE.grasp_tolerance and semi_y < AISLE.grasp_tolerance, "Lateral semi-axes fit the grasp tolerance")
+check(semi_z > AISLE.grasp_tolerance, "Depth semi-axis exceeds the grasp tolerance")
+check(AISLE.grasp_initial_error < AISLE.grasp_tolerance, "Admitted handle estimate fits the tolerance")
+
+# ┌── 4. OUTPUT: rendered values ──────────────────────────────────────────────
+class HandleEllipsoid:
+    sigma_x_str = fmt_length(sigma_lat_x, unit=millimeter, precision=0)
+    sigma_y_str = fmt_length(sigma_lat_y, unit=millimeter, precision=0)
+    sigma_z_str = fmt_length(sigma_depth, unit=millimeter, precision=0)
+    chi2_str = fmt(chi2_3dof_95, precision=3, commas=False)
+    semi_x_str = fmt_length(semi_x, unit=millimeter, precision=1)
+    semi_y_str = fmt_length(semi_y, unit=millimeter, precision=1)
+    semi_z_str = fmt_length(semi_z, unit=millimeter, precision=1)
+```
+
+Consider the grounding model's estimate of the red mug's handle from a single wrist-camera view taken at a distance, before the arm begins its approach. In an illustrative calibrated Gaussian localization model, the principal sensor-frame standard deviations are `{python} HandleEllipsoid.sigma_x_str`, `{python} HandleEllipsoid.sigma_y_str`, and `{python} HandleEllipsoid.sigma_z_str`, the largest along the camera's depth axis, which is also the gripper's approach axis. A **95 percent statistical region** around the estimated handle position $\mathbf{p}_0$ uses Mahalanobis squared distance $(\mathbf{p}-\mathbf{p}_0)^T\mathbf{\Sigma}^{-1}(\mathbf{p}-\mathbf{p}_0)\le\chi^2_{3,0.95}$, where the three-degree-of-freedom quantile is `{python} HandleEllipsoid.chi2_str`, yielding principal semi-axes `{python} HandleEllipsoid.semi_x_str`, `{python} HandleEllipsoid.semi_y_str`, and `{python} HandleEllipsoid.semi_z_str`. @Fig-10-intent-lease-envelope contrasts that uncertain target with the mug's `{python} IntentLeaseArchetypes.r_tol_str` grasp tolerance. Both lateral semi-axes fit inside the tolerance, but the depth semi-axis does not, so this estimate fails admission and needs better sensing, a different approach, or refusal.
+
+The pick admitted in @sec-intent-lease takes the first course, resting on the belief record of @sec-memory-spatial-state-schema, whose closer wrist-camera capture on the approach bounds the initial error at `{python} IntentLeaseArchetypes.e0_str`. A 95 percent region also leaves a residual tail and cannot by itself certify clearance, so the intent proposal carries conservative base-frame error bounds rather than claiming to encode this covariance.
+
+::: {#fig-10-intent-lease-envelope fig-env="figure" fig-pos="t" fig-cap="**Localization uncertainty and authority expiry**: Panel (a) sketches a statistical target-uncertainty ellipsoid beside the grasp's separate task tolerance. Panel (b) compares counterfactual traces: blue expires and brakes, green continues only with fresh renewals, and red shows motion without a lease. Whether the blue trace rests before the obstacle depends on total pre-brake delay, deceleration, and clearance." fig-alt="Panel (a) shows target-position uncertainty beside the grasp's separate task tolerance region. Panel (b) compares alternative velocity traces: blue authority expires then braking reaches rest if feasible; green dots show fresh renewals in a separate scenario; red continues without a lease toward the obstacle. Physical clearance depends on the complete stopping budget."}
 ![](images/svg/fig10_intent_lease_envelope.svg){width="100%"}
 :::
 
@@ -454,7 +495,7 @@ On the running machine the proposal travels from the application processor to th
 
 [^fn-intent-intercore-channel]: **Inter-core communication across the proposal boundary**\index{Inter-core communication!RPMSG}\index{Proposal boundary!inter-core communication}: RPMSG over a statically bounded shared SRAM ring is one transport. Copy count, cache maintenance, coherency, and worst-case handoff time depend on the SoC and driver, and the MCU's independent timer detects lost renewals even through a host kernel panic. See @sec-appendix-systems-ipc.
 
-The full covariance ellipsoid in the earlier grounding example is a producer-side localization estimate. The proposal does not pretend that six numbers encode a general oriented $3\times3$ covariance. Instead, its bounds carry three conservative **position-error envelopes** $(e_x,e_y,e_z)$ and three requested **task tolerances** $(r_x,r_y,r_z)$ in the named robot-base frame. These have different meanings: uncertainty describes where the target could be, while tolerance describes error the task can accept, so admission requires $0\le e_i\le r_i$ on each axis. The producer must justify any conversion from covariance to an envelope, including calibration bias and declared tail risk. Orientation tolerances and contact-mode rules come from an independently approved task profile; the proposal carries only the target orientation itself.
+The covariance ellipsoid of the mug-handle estimate in @sec-intent-request-to-proposal is a producer-side localization estimate. The proposal does not pretend that six numbers encode a general oriented $3\times3$ covariance. Instead, its bounds carry three conservative **position-error envelopes** $(e_x,e_y,e_z)$ and three requested **task tolerances** $(r_x,r_y,r_z)$ in the named robot-base frame. These have different meanings: uncertainty describes where the target could be, while tolerance describes error the task can accept, so admission requires $0\le e_i\le r_i$ on each axis. The producer must justify any conversion from covariance to an envelope, including calibration bias and declared tail risk. Orientation tolerances and contact-mode rules come from an independently approved task profile; the proposal carries only the target orientation itself.
 
 The proposal's evidence time is the **belief record's evidence epoch**, never its estimate epoch, converted to the permission processor's clock under the clock rule of @sec-nervous-cadences. The MCU matches both the parent digest and that epoch to a retained belief record and adds the mapping's error bound to its age test. The requested expiry uses the same clock, and the MCU shortens it to the earliest of target-evidence expiry, configured lease ceiling, and any state-dependent stopping deadline. The parent digest is **lineage, not message authentication**, under the integrity policy of @sec-nervous-cadences. It does not prove who chose the target, limits, or requested terminal mode, and the intent proposal carries no keyed tag because the permission path admits it by content, not origin.
 
@@ -482,7 +523,7 @@ The proposal's fields support layered checks, cheapest first, and one implementa
 4. **Authority latch:** Store only the MCU-approved target, effort ceilings, expiry no later than the evidence deadline, and selected fallback. Arm the local timer for the admitted interval. The untrusted requested expiry and terminal mode do not control the drive directly.
 5. **Runtime check:** On each configured control tick and relevant hardware fault event, compare measured state with the admitted limits. On evidence expiry, missed renewal, or an observed violation, revoke the proposal and start the previously validated response. The ensuing braking and hold have their own measured delay and physical margin.
 
-Filled in for the red mug, the lease admitted for the pick carries six entries. Its parent is the belief record of the mug's handle, matched by digest and evidence epoch. Its goal is the handle pose, with a `{python} IntentLeaseArchetypes.e0_str` error envelope inside a `{python} IntentLeaseArchetypes.r_tol_str` task tolerance. Its evidence horizon is `{python} IntentLeaseArchetypes.tau_untracked_str` when the target rests on the capture alone and `{python} IntentLeaseArchetypes.tau_tracked_str` under the qualified tracker. Its effort ceiling is the arm's `{python} IntentLeaseArchetypes.v_tcp_str` tool-center-point speed limit; it carries no item-specific force ceiling, because none is registered for the mug. The configured task and actuator ceilings still bound the wrench, and fragility is handled by the site's control of which items reach the conveyor, not by the controller. Its requested terminal mode is grasp, then hold for the handover, although the MCU still selects the fallback from its approved responses. Its expiry is the earliest of that evidence horizon, the configured lease ceiling, and the stop deadline.
+Filled in for the red mug, the lease admitted for the pick carries six entries. Its parent is the mug-handle belief record of @sec-memory-spatial-state-schema, matched by digest and evidence epoch. Its goal is the handle pose, and its error envelope is that record's `{python} IntentLeaseArchetypes.e0_str` initial error, inside a `{python} IntentLeaseArchetypes.r_tol_str` task tolerance. Its evidence horizon is the age at which the governing growth law reaches that tolerance, `{python} IntentLeaseArchetypes.tau_untracked_str` under the record's belt-drift law and `{python} IntentLeaseArchetypes.tau_tracked_str` under the residual-slip law of the qualified tracker's renewed record. Its effort ceiling is the arm's `{python} IntentLeaseArchetypes.v_tcp_str` tool-center-point speed limit; it carries no item-specific force ceiling, because none is registered for the mug. The configured task and actuator ceilings still bound the wrench, and fragility is handled by the site's control of which items reach the conveyor, not by the controller. Its requested terminal mode is grasp, then hold for the handover, although the MCU still selects the fallback from its approved responses. Its expiry is the earliest of that evidence horizon, the configured lease ceiling, and the stop deadline.
 
 This record gives @sec-verification a concrete interface for fault-injection tests in which corrupted quaternions, stale capture records, oversize force requests, and incompatible terminal requests should each be rejected under the tested state and timing conditions.
 
