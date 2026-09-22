@@ -30,6 +30,7 @@ from typing import Dict, Type, Optional, List
 # only way to actually fix the encoding for this process.
 if sys.platform == "win32" or os.name == "nt":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    os.environ.setdefault("PYTHONUTF8", "1")
     for _stream in (sys.stdout, sys.stderr):
         if hasattr(_stream, "reconfigure"):
             _stream.reconfigure(encoding="utf-8", errors="replace")
@@ -80,7 +81,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('tito-cli.log'),
+        logging.FileHandler('tito-cli.log', encoding='utf-8'),
         logging.StreamHandler(sys.stderr)
     ]
 )

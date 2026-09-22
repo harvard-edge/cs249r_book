@@ -82,7 +82,7 @@ def section_text(text, heading):
 def export_targets():
     t = {}
     for num, name, py in module_files():
-        m = re.search(r"^#\|\s*default_exp\s+([\w.]+)", py.read_text(), re.M)
+        m = re.search(r"^#\|\s*default_exp\s+([\w.]+)", py.read_text(encoding='utf-8'), re.M)
         if m:
             t[f"tinytorch.{m.group(1)}"] = (num, name)
     return t
@@ -109,7 +109,7 @@ def g_imports_position():
     # 2026-09-11: heading-only spine checks missed imports before prerequisites.
     errors = []
     for _, name, path in module_files():
-        source_cells = cells(path.read_text())
+        source_cells = cells(path.read_text(encoding='utf-8'))
         dependencies = [i for i, (_, body) in enumerate(source_cells)
                         if '## 📋 Module Dependencies' in body]
         imports = [i for i, (_, body) in enumerate(source_cells)
@@ -147,7 +147,7 @@ def g_spine():
     # Integration and eight with extra top-level sections. See MODULE_ANATOMY.md.
     errs = []
     for _, name, py in module_files():
-        heads = re.findall(r"^## (.+)$", py.read_text(), re.M)
+        heads = re.findall(r"^## (.+)$", py.read_text(encoding='utf-8'), re.M)
         for sec in SPINE:
             if (name, sec) in SPINE_EXEMPT:
                 continue
@@ -171,7 +171,7 @@ def g_spine():
 def g_dup_heads():
     errs = []
     for _, name, py in module_files():
-        heads = re.findall(r"^## (.+)$", py.read_text(), re.M)
+        heads = re.findall(r"^## (.+)$", py.read_text(encoding='utf-8'), re.M)
         for h, c in collections.Counter(heads).items():
             if c > 1:
                 errs.append(f"{name}: '{h}' appears {c}x")
@@ -183,7 +183,7 @@ def g_head_sep():
     errs = []
     for _, name, py in module_files():
         # Extended from ## to ### on 2026-09-08; the ### form had 30 offenders.
-        for m in re.finditer(r"^(##|###) (.+)$", py.read_text(), re.M):
+        for m in re.finditer(r"^(##|###) (.+)$", py.read_text(encoding='utf-8'), re.M):
             if " - " in m.group(2):
                 errs.append(f"{name}: '{m.group(1)} {m.group(2)}'")
     return errs
@@ -195,7 +195,7 @@ def g_summary():
              "Ready for Next Steps", "Export with:", "**Next**:"]
     errs = []
     for num, name, py in module_files():
-        t = py.read_text()
+        t = py.read_text(encoding='utf-8')
         if "## 🚀 MODULE SUMMARY" not in t:
             errs.append(f"{name}: no MODULE SUMMARY")
             continue
@@ -217,7 +217,7 @@ def g_dependencies():
               "**TinyTorch Dependencies**", "**Dependency Flow**"]
     errs = []
     for _, name, py in module_files():
-        sec = section_text(py.read_text(), "## 📋 Module Dependencies")
+        sec = section_text(py.read_text(encoding='utf-8'), "## 📋 Module Dependencies")
         found = [l for l in re.findall(r"^(\*\*[^*]+\*\*)", sec, re.M) if l in LABELS]
         if found != LABELS:
             errs.append(f"{name}: got {found}")
@@ -229,7 +229,7 @@ def g_reflection_numbering():
     # Standardized 2026-09-08 from four heading styles (bare, numbered, emoji, bonus).
     errs = []
     for _, name, py in module_files():
-        sec = section_text(py.read_text(), "## 🤔 ML Systems Reflection Questions")
+        sec = section_text(py.read_text(encoding='utf-8'), "## 🤔 ML Systems Reflection Questions")
         heads = re.findall(r"^### (.+)$", sec, re.M)
         nums = []
         for h in heads:
@@ -253,7 +253,7 @@ def g_headers():
     }
     errs = []
     for _, name, py in module_files():
-        for line in py.read_text().splitlines():
+        for line in py.read_text(encoding='utf-8').splitlines():
             if line.startswith("# %% nbgrader=") and not any(p.match(line) for p in ok.values()):
                 errs.append(f"{name}: {line[:88]}")
     return errs
@@ -263,7 +263,7 @@ def g_headers():
 def g_solution_markers():
     errs = []
     for _, name, py in module_files():
-        for h, b in cells(py.read_text()):
+        for h, b in cells(py.read_text(encoding='utf-8')):
             if '"solution": true' in h and "### BEGIN SOLUTION" not in b:
                 gid = re.search(r'"grade_id":\s*"([^"]+)"', h)
                 errs.append(f"{name}: {gid.group(1) if gid else '?'}")
@@ -274,7 +274,7 @@ def g_solution_markers():
 def g_gid_unique():
     errs = []
     for _, name, py in module_files():
-        ids = re.findall(r'"grade_id":\s*"([^"]+)"', py.read_text())
+        ids = re.findall(r'"grade_id":\s*"([^"]+)"', py.read_text(encoding='utf-8'))
         for g, c in collections.Counter(ids).items():
             if c > 1:
                 errs.append(f"{name}: grade_id '{g}' used {c}x")
@@ -286,7 +286,7 @@ def g_gid_unique():
 def g_no_orphans():
     errs = []
     for _, name, py in module_files():
-        cs = cells(py.read_text())
+        cs = cells(py.read_text(encoding='utf-8'))
         for i, (h, b) in enumerate(cs):
             if '"solution": true' in h:
                 if not (i > 0 and cs[i-1][0].startswith("# %% [markdown]")):
@@ -299,7 +299,7 @@ def g_no_orphans():
 def g_test_headers():
     errs = []
     for _, name, py in module_files():
-        cs = cells(py.read_text())
+        cs = cells(py.read_text(encoding='utf-8'))
         for i, (h, b) in enumerate(cs):
             if '"grade": true' not in h:
                 continue
@@ -335,7 +335,7 @@ def g_test_grammar():
     # it is framed by its own ## heading and prints a per-module banner.
     errs = []
     for _, name, py in module_files():
-        text = py.read_text()
+        text = py.read_text(encoding='utf-8')
         for m in re.finditer(r"^(#+) (.*(?:Unit|Integration) Test.*)$", text, re.M):
             level, h = m.groups()
             if h.startswith("🧪 Module Integration Test"):
@@ -370,7 +370,7 @@ def g_solution_exports():
     # two unexported solutions in 15 and 16 on 2026-09-08.
     errs = []
     for _, name, py in module_files():
-        for h, b in cells(py.read_text()):
+        for h, b in cells(py.read_text(encoding='utf-8')):
             if '"solution": true' not in h:
                 continue
             first = b.split("\n", 1)[0]
@@ -387,7 +387,7 @@ def g_test_module_tail():
     # must not self-run, or the notebook runs the suite twice (2026-09-08).
     errs = []
     for _, name, py in module_files():
-        cs = cells(py.read_text())
+        cs = cells(py.read_text(encoding='utf-8'))
         for h, b in cs:
             if "def test_module" in b and re.search(r"^if __name__", b, re.M):
                 errs.append(f"{name}: test_module cell runs itself")
@@ -407,7 +407,7 @@ def g_runner_order():
     # notebook gate caught it, this catches it in under a second.
     errs = []
     for _, name, py in module_files():
-        code = [b for h, b in cells(py.read_text()) if not h.startswith("# %% [markdown]")]
+        code = [b for h, b in cells(py.read_text(encoding='utf-8')) if not h.startswith("# %% [markdown]")]
         trees = []
         for b in code:
             try:
@@ -471,7 +471,7 @@ def g_runner_order():
 def g_scaffold():
     errs = []
     for _, name, py in module_files():
-        for h, b in cells(py.read_text()):
+        for h, b in cells(py.read_text(encoding='utf-8')):
             if '"solution": true' not in h:
                 continue
             gid = re.search(r'"grade_id":\s*"([^"]+)"', h)
@@ -486,7 +486,7 @@ def g_scaffold():
 def g_reflection_markdown():
     errs = []
     for _, name, py in module_files():
-        for h, b in cells(py.read_text()):
+        for h, b in cells(py.read_text(encoding='utf-8')):
             if "## 🤔 ML Systems Reflection Questions" in b and not h.startswith("# %% [markdown]"):
                 errs.append(f"{name}: reflection section is a code cell")
     return errs
@@ -498,7 +498,7 @@ def g_disclosure():
     targets = export_targets()
     errs = []
     for num, name, py in module_files():
-        for i, line in enumerate(py.read_text().splitlines(), 1):
+        for i, line in enumerate(py.read_text(encoding='utf-8').splitlines(), 1):
             m = re.match(r"\s*from (tinytorch\.[\w.]+) import ", line)
             if m and m.group(1) in targets and targets[m.group(1)][0] > num:
                 errs.append(f"{name}:{i} imports {m.group(1)} (module {targets[m.group(1)][1]})")
@@ -512,7 +512,7 @@ def g_forward_refs():
                "implements", "adds", "teaches", "written in", "completes", "is the same", "exists to")
     errs = []
     for num, name, py in module_files():
-        for i, line in enumerate(py.read_text().splitlines(), 1):
+        for i, line in enumerate(py.read_text(encoding='utf-8').splitlines(), 1):
             # A dependency-diagram label row such as "(Module 06)  (Module 07)" is not
             # prose and needs no preview framing (2026-09-08).
             if not re.sub(r"\([^)]*\)|\s", "", line):
@@ -539,7 +539,7 @@ def g_imports():
 def g_documented_imports():
     errs = []
     for _, name, py in module_files():
-        for line in py.read_text().splitlines():
+        for line in py.read_text(encoding='utf-8').splitlines():
             m = re.match(r"\s*from (tinytorch\.[\w.]+) import (.+?)\s*(?:#.*)?$", line)
             if not m or "(" in m.group(2) or m.group(2).strip() == "*":
                 continue
@@ -558,7 +558,7 @@ def g_documented_imports():
 def g_dead_demos():
     errs = []
     for _, name, py in module_files():
-        src = py.read_text()
+        src = py.read_text(encoding='utf-8')
         tree = ast.parse(src)
         for node in tree.body:
             if not isinstance(node, ast.FunctionDef):
@@ -581,7 +581,7 @@ def g_syntax_warnings():
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", SyntaxWarning)
             try:
-                compile(py.read_text(), str(py), "exec")
+                compile(py.read_text(encoding='utf-8'), str(py), "exec")
             except SyntaxError as e:
                 errs.append(f"{name}: SyntaxError line {e.lineno}: {e.msg}")
                 continue
@@ -606,7 +606,7 @@ def g_graded_touches_student_work():
 
     errs = []
     for _, name, py in module_files():
-        text = py.read_text()
+        text = py.read_text(encoding='utf-8')
         stripped = [
             l for l in text.splitlines()
             if "### BEGIN SOLUTION" in l
@@ -632,7 +632,7 @@ def g_graded_touches_student_work():
 def g_test_returns():
     errs = []
     for f in sorted(TESTS.rglob("test_*.py")):
-        src = f.read_text()
+        src = f.read_text(encoding='utf-8')
         for m in re.finditer(r"^def (test_\w+)\(", src, re.M):
             nxt = re.search(r"^(?:def |class |@)", src[m.end():], re.M)
             body = src[m.end(): m.end() + (nxt.start() if nxt else len(src))]
@@ -645,7 +645,7 @@ def g_test_returns():
 def g_bare_except():
     errs = []
     for f in sorted(TESTS.rglob("test_*.py")):
-        for i, line in enumerate(f.read_text().splitlines(), 1):
+        for i, line in enumerate(f.read_text(encoding='utf-8').splitlines(), 1):
             if re.match(r"\s*except:\s*$", line):
                 errs.append(f"{f.relative_to(ROOT)}:{i}")
     return errs
@@ -656,7 +656,7 @@ def g_no_false_success_handlers():
     # 2026-09-11: progressive tests caught ImportError/TypeError then asserted True.
     errors = []
     for path in sorted(TESTS.rglob('test_*.py')):
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding='utf-8'))
         for node in ast.walk(tree):
             if not isinstance(node, ast.ExceptHandler):
                 continue
@@ -680,7 +680,7 @@ def g_graded_except():
     """
     errs = []
     for _, name, path in module_files():
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding='utf-8').splitlines()
         graded = False
         for i, line in enumerate(lines):
             if line.startswith("# %%"):
@@ -742,7 +742,7 @@ def g_exercise_runs():
     tst = re.compile(r'^# %% nbgrader=\{"grade": true, "grade_id": "[^"]+", "locked": true, "points": \d+\}')
     for _, name, path in module_files():
         run, first = 0, None
-        for i, line in enumerate(path.read_text().splitlines(), 1):
+        for i, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
             m = sol.match(line)
             if m:
                 run += 1
@@ -760,7 +760,7 @@ def g_exercise_runs():
 def g_collect():
     p = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q",
                         str(TESTS), "--ignore", str(TESTS / "environment")],
-                       capture_output=True, text=True, cwd=ROOT)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=ROOT)
     if p.returncode != 0:
         return [l for l in (p.stdout + p.stderr).splitlines() if "error" in l.lower()][:10]
     return []
@@ -790,7 +790,7 @@ def g_reference_regressions():
     # fractional-constant, and distillation-training defects. Build from source
     # in a temporary package so stale local exports cannot make this check pass.
     p = subprocess.run([sys.executable, str(ROOT / "tools" / "check_reference.py")],
-                       capture_output=True, text=True, cwd=ROOT)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=ROOT)
     if p.returncode:
         return (p.stdout + p.stderr).splitlines()[-20:] or [f"reference check exited {p.returncode}"]
     return []
@@ -828,7 +828,7 @@ def g_journey():
             print(f"          Running {path.parent.name} with earlier modules only", flush=True)
             try:
                 p = subprocess.run([sys.executable, "-c", runner, str(path)], cwd=tmp,
-                                   env=env, capture_output=True, text=True, timeout=300)
+                                   env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
                 if p.returncode:
                     errs.append(f"{path.parent.name}: " + (p.stderr or p.stdout)[-1500:])
                     break
@@ -848,7 +848,7 @@ def g_journey():
 def g_pytest():
     p = subprocess.run([sys.executable, "-m", "pytest", "-q", str(TESTS),
                         "--ignore", str(TESTS / "environment")],
-                       capture_output=True, text=True, cwd=ROOT)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=ROOT)
     for line in p.stdout.splitlines():
         if re.search(r"\d+ passed|\d+ failed|\d+ skipped", line) and " in " in line:
             print(f"          {line}", flush=True)

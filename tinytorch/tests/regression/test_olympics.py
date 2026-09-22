@@ -108,7 +108,7 @@ class TestTinyTorchOlympics:
         # Test save and reload
         filepath = str(tmp_path / "submission.json")
         save_submission(submission, filepath)
-        with open(filepath) as f:
+        with open(filepath, encoding='utf-8') as f:
             loaded = json.load(f)
         assert validate_submission_schema(loaded)
         assert loaded["student_name"] == "Ada Lovelace"
@@ -125,6 +125,8 @@ class TestTinyTorchOlympics:
             cwd=repo_root,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
         )
         assert res_logo.returncode == 0
@@ -136,6 +138,8 @@ class TestTinyTorchOlympics:
             cwd=repo_root,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
         )
         assert res_status.returncode == 0

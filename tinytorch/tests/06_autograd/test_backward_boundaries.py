@@ -20,7 +20,7 @@ def source_autograd(monkeypatch):
         module = types.ModuleType(f'tinytorch.core.{target}')
         module.__file__ = str(source)
         monkeypatch.setitem(sys.modules, module.__name__, module)
-        exec(compile(source.read_text(), str(source), 'exec'), module.__dict__)
+        exec(compile(source.read_text(encoding="utf-8"), str(source), 'exec'), module.__dict__)
     return module
 
 

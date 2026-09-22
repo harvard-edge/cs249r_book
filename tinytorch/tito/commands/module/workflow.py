@@ -552,13 +552,16 @@ class ModuleWorkflowCommand(BaseCommand):
     def _jupyter_pid_file(self) -> Path:
         return self.config.project_root / ".tito" / "jupyter.pid"
 
+    def _jupyter_log_file(self) -> Path:
+        return self.config.project_root / ".tito" / "jupyter.log"
+
     def _running_jupyter_pid(self) -> Optional[int]:
         """Return the PID of a tito-launched Jupyter Lab server still running, if any."""
         pid_file = self._jupyter_pid_file()
         if not pid_file.exists():
             return None
         try:
-            pid = int(pid_file.read_text().strip())
+            pid = int(pid_file.read_text(encoding='utf-8').strip())
         except (ValueError, OSError):
             return None
 
@@ -694,29 +697,35 @@ class ModuleWorkflowCommand(BaseCommand):
             if notebook_path and notebook_path.exists():
                 cmd.append(str(notebook_path))
 
-            process = subprocess.Popen(
-                cmd,
-                cwd=str(module_dir),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace"
-            )
+            log_file = self._jupyter_log_file()
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_file, "a", encoding="utf-8") as log_f:
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=str(module_dir),
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT,
+                )
 
             pid_file = self._jupyter_pid_file()
             pid_file.parent.mkdir(parents=True, exist_ok=True)
-            pid_file.write_text(str(process.pid))
+            pid_file.write_text(str(process.pid), encoding='utf-8')
 
             # Give Jupyter a moment to start and capture the URL
             time.sleep(2)
 
+            if process.poll() is not None:
+                self.console.print(f"[red]❌ Jupyter Lab failed to start (exit code {process.returncode}).[/red]")
+                self.console.print(f"[dim]Check {log_file} for error details.[/dim]")
+                return 1
+
             self.console.print("[green]✅ Jupyter Lab started![/green]")
             self.console.print(f"[dim]Working directory: {module_dir}[/dim]")
+            self.console.print(f"[dim]Log file: {log_file}[/dim]")
             self.console.print()
             self.console.print("[bold]If Jupyter doesn't open automatically:[/bold]")
             self.console.print("  Open [cyan]http://localhost:8888[/cyan] in your browser")
-            self.console.print("  [dim]Or check the terminal for the full URL with token[/dim]")
+            self.console.print(f"  [dim]Or check {log_file.name} for the full URL with token[/dim]")
             return 0
 
         except FileNotFoundError:
