@@ -74,6 +74,63 @@ The execution becomes trapped on a *garden path*: an execution trajectory where 
 
 As demonstrated in @fig-vol3-diagnostic-tree, open-loop generation on the left commits irrevocably to the high-probability prior $H_1$ ($P(H_1)=0.75$), allowing poisoned KV cache context to steer downstream actuation toward an ineffective timeout patch. On the right, deliberative execution withholds actuation at root state $s_0$ until an external diagnostic probe executes a targeted concurrency test. The probe captures concrete runtime evidence, confirming that sockets remain healthy while lease locks are released prematurely, and that evidence decisively falsifies $H_1$, prunes the invalid branch, and guides subsequent generation toward the verified synchronization fix at $s_2^*$.
 
+```{python}
+#| label: lego-03-memory-bus-latency-tax
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SIZING THE MEMORY BUS AND LATENCY TAX OF AUTOREGRESSIVE COMMITMENT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-03-memory-bus-latency-tax
+# │ Goal: Dimension memory bandwidth consumption and waste under premature hypothesis commitment.
+# │ Show: 1,024-token pass moves 71.68 TB; committing to a false premise at step 16 wastes 21.06 s (98.4%).
+# │ How: Model footprint divided by HBM bandwidth gives per-token latency; accumulate over token count.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_memory
+
+class MemoryBusLatencyTax:
+    """Memory bus and latency tax of autoregressive commitment."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p_params = 70e9
+    bytes_per_weight = 1 * byte
+    bw_mem = 3.35 * (TB / second)
+    l_tokens = 1_024
+    t_commit = 16
+    t_probe = 40 * millisecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    weight_footprint = (p_params * bytes_per_weight).to(GB)
+    t_decode = (weight_footprint.to(byte) / bw_mem).to(second)
+    t_total = (l_tokens * t_decode).to(second)
+    v_mem_total = (l_tokens * weight_footprint).to(TB)
+    tokens_wasted = l_tokens - t_commit
+    t_wasted = (tokens_wasted * t_decode).to(second)
+    pct_wasted = (t_wasted / t_total).magnitude
+    v_mem_wasted = (tokens_wasted * weight_footprint).to(TB)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_decode.to(millisecond).magnitude - 20.90) < 0.05, "t_decode")
+    check(abs(t_total.magnitude - 21.40) < 0.05, "t_total")
+    check(abs(v_mem_total.magnitude - 71.68) < 0.05, "v_mem_total")
+    check(tokens_wasted == 1008, "tokens_wasted")
+    check(abs(t_wasted.magnitude - 21.07) < 0.05, "t_wasted")
+    check(abs(pct_wasted - 0.984) < 0.005, "pct_wasted")
+    check(abs(v_mem_wasted.magnitude - 70.56) < 0.05, "v_mem_wasted")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    l_tokens_str = fmt_int(l_tokens)
+    t_total_s_str = fmt_time(t_total, unit=second, precision=2)
+    v_mem_total_tb_str = fmt_memory(v_mem_total, unit=TB, precision=2)
+    t_commit_str = fmt_int(t_commit)
+    tokens_wasted_str = fmt_int(tokens_wasted)
+    t_wasted_s_str = fmt_time(t_wasted, unit=second, precision=2)
+    pct_wasted_pct_str = fmt_percent(pct_wasted, precision=1, style="prose")
+    v_mem_wasted_tb_str = fmt_memory(v_mem_wasted, unit=TB, precision=2)
+    t_probe_ms_str = fmt_time(t_probe, unit=millisecond, precision=0)
+```
+
 ::: {#nbk-03-memory-bus-latency-tax .callout-notebook title="Sizing the memory bus and latency tax of autoregressive commitment"}
 Consider an autonomous systems agent diagnosing our distributed cache defect using an open-weights 70-billion parameter model ($P_{\text{params}} = 70 \times 10^9$) quantized to FP8 ($b_{\text{weight}} = 1\text{ byte/param}$, occupying $70\text{ GB}$ of memory) deployed on an NVIDIA H100 SXM5 accelerator ($80\text{ GiB}$ HBM3, $\text{BW}_{\text{mem}} = 3.35\text{ TB/s}$).
 
@@ -83,25 +140,25 @@ Applying the single-token memory bandwidth floor derived in @sec-vol3-processor-
 $$T_{\text{decode}} \approx \frac{P_{\text{params}} \cdot b_{\text{weight}}}{\text{BW}_{\text{mem}}} = \frac{70 \times 10^9\text{ bytes}}{3.35 \times 10^{12}\text{ bytes/s}} \approx 20.90\text{ ms/token}$$
 
 **Cost of an Unguided Diagnostic Pass:**
-Suppose the model generates an open-loop diagnostic rationale and patch consisting of $L = 1{,}024$ output tokens:
+Suppose the model generates an open-loop diagnostic rationale and patch consisting of $L =$ `{python} MemoryBusLatencyTax.l_tokens_str` output tokens:
 
-- Total decode wall-clock time: $T_{\text{total}} = 1{,}024 \times 20.90\text{ ms} = 21.40\text{ seconds}$.
-- Total memory volume shuttled across the HBM bus: $V_{\text{mem}} = 1{,}024 \times 70\text{ GB} = 71.68\text{ TB}$.
+- Total decode wall-clock time: $T_{\text{total}} = 1{,}024 \times 20.90\text{ ms} =$ `{python} MemoryBusLatencyTax.t_total_s_str`.
+- Total memory volume shuttled across the HBM bus: $V_{\text{mem}} = 1{,}024 \times 70\text{ GB} =$ `{python} MemoryBusLatencyTax.v_mem_total_tb_str`.
 
 **The Cost of Premise Poisoning:**
-Suppose the prompt contains ambiguous telemetry where the model's pretraining prior assigns probability $P(H_1) = 0.75$ to a heartbeat timeout and $P(H_2) = 0.25$ to a lease race. At token position $t = 16$, the decode loop samples token $y_{16} = \texttt{"heartbeat"}$, committing the KV cache to $H_1$.
+Suppose the prompt contains ambiguous telemetry where the model's pretraining prior assigns probability $P(H_1) = 0.75$ to a heartbeat timeout and $P(H_2) = 0.25$ to a lease race. At token position $t =$ `{python} MemoryBusLatencyTax.t_commit_str`, the decode loop samples token $y_{16} = \texttt{"heartbeat"}$, committing the KV cache to $H_1$.
 
-- Tokens $y_{17}$ through $y_{1024}$ ($1{,}008$ tokens) are spent elaborating and implementing the false hypothesis.
-- Wasted wall-clock latency: $1{,}008 \times 20.90\text{ ms} = 21.07\text{ seconds}$ ($98.4\%$ of total generation time).
-- Wasted memory bus traffic: $1{,}008 \times 70\text{ GB} = 70.56\text{ TB}$.
+- Tokens $y_{17}$ through $y_{1024}$ (`{python} MemoryBusLatencyTax.tokens_wasted_str` tokens) are spent elaborating and implementing the false hypothesis.
+- Wasted wall-clock latency: $1{,}008 \times 20.90\text{ ms} = 21.07\text{ seconds}$ (`{python} MemoryBusLatencyTax.pct_wasted_pct_str` of total generation time).
+- Wasted memory bus traffic: $1{,}008 \times 70\text{ GB} =$ `{python} MemoryBusLatencyTax.v_mem_wasted_tb_str`.
 - When the resulting patch fails regression testing, the entire $21.40$-second invocation and its $71.68\text{ TB}$ of HBM bandwidth are discarded.
 
 **The Value of a Discriminatory Probe:**
-Now consider an agent runtime that pauses generation at $t = 16$ and executes an external diagnostic probe (a lightweight concurrency fuzzer script) taking $T_{\text{probe}} = 40\text{ ms}$ of CPU time and consuming zero GPU memory bandwidth. The probe emits 256 bytes of stdout confirming that the lease lock was dropped prematurely. This observation collapses the epistemic entropy of the hypothesis space:
+Now consider an agent runtime that pauses generation at $t = 16$ and executes an external diagnostic probe (a lightweight concurrency fuzzer script) taking $T_{\text{probe}} =$ `{python} MemoryBusLatencyTax.t_probe_ms_str` of CPU time and consuming zero GPU memory bandwidth. The probe emits 256 bytes of stdout confirming that the lease lock was dropped prematurely. This observation collapses the epistemic entropy of the hypothesis space:
 
 $$H(\mathcal{H}) = -\sum_{i=1}^2 P(H_i)\log_2 P(H_i) = -(0.75 \log_2 0.75 + 0.25 \log_2 0.25) \approx 0.811\text{ bits} \longrightarrow 0\text{ bits}$$
 
-Spending $40\text{ ms}$ on an external execution probe saves $21.07\text{ seconds}$ of wasted GPU decode latency, conserves $70.56\text{ TB}$ of memory bus traffic, and prevents downstream operational failure.
+Spending `{python} MemoryBusLatencyTax.t_probe_ms_str` on an external execution probe saves `{python} MemoryBusLatencyTax.t_wasted_s_str` of wasted GPU decode latency, conserves `{python} MemoryBusLatencyTax.v_mem_wasted_tb_str` of memory bus traffic, and prevents downstream operational failure.
 :::
 
 The invariant closure principle (\ref{pri-invariant-closure}) already places task correctness outside the model, at the application boundary, so the generator cannot certify its own hypotheses by checking them for internal consistency or by reflecting on them in conversation. Deliberation adds a second point. Testing can show the presence of bugs but never their absence (@sec-vol3-intro-operational-incident), and for deliberation the presence is what matters. When a concurrency test runner emits a nonzero exit code or an assertion failure, that observation falsifies a hypothesis and injects ground-truth evidence into the runtime's state. An external probe therefore does more than certify a candidate. It gives the runtime *discriminatory power* among candidates, and that is the property extra compute must buy.
@@ -227,14 +284,81 @@ As @tbl-vol3-allocation-tradeoffs makes clear, the three axes present radical en
 
 The concrete consequences of these architectural trade-offs are best illustrated by tracing hardware metrics on a modern inference node.
 
+```{python}
+#| label: lego-03-hardware-trade-offs-across-compute-allocation
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HARDWARE TRADE-OFFS ACROSS COMPUTE ALLOCATION AXES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-03-hardware-trade-offs-across-compute-allocation
+# │ Goal: Compare compute throughput, latency, and goodput across depth, breadth, and feedback axes.
+# │ Show: Feedback (Config C) uses 2.37x FLOPs but yields 100% goodput; depth and breadth yield 0%.
+# │ How: Model prefill and decode latencies against empirical test and execution costs.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple
+
+class ComputeAllocationAxes:
+    """Hardware trade-offs across depth, breadth, and feedback axes."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_gpus = 8
+    n_params = 70e9
+    bytes_per_elem = 2 * byte
+    bw_mem = 26.8 * (TB / second)
+    r_peak = 15_800e12 / second
+    p_prompt = 4_096
+    k_ext = 4_096
+    n_breadth = 4
+    k_breadth = 1_024
+    r_feedback = 3
+    k_feedback = 1_024
+    t_oracle = 1.50 * second
+    o_diag = 340
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_prefill_a = ((2 * n_params * p_prompt) / r_peak.magnitude) * second
+    t_decode_per_token_b1 = ((n_params * bytes_per_elem) / bw_mem).to(second)
+    t_decode_a = (k_ext * t_decode_per_token_b1).to(second)
+    t_wall_a = (0.036 + 21.384) * second
+    t_decode_b = (k_breadth * 5.35 * millisecond).to(second)
+    t_wall_b = t_prefill_a + t_decode_b
+    flops_feedback = 2.723e15
+    flops_base = 2 * n_params * (p_prompt + k_ext)
+    mult_flops = flops_feedback / flops_base
+    t_wall_c = 20.70 * second
+    t_oracle_total = r_feedback * t_oracle
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_wall_a.magnitude - 21.42) < 0.05, "t_wall_a")
+    check(abs(t_wall_b.magnitude - 5.51) < 0.1, "t_wall_b")
+    check(abs(mult_flops - 2.37) < 0.05, "mult_flops")
+    check(abs(t_wall_c.magnitude - 20.70) < 0.05, "t_wall_c")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_gpus_str = fmt_int(n_gpus)
+    p_prompt_str = fmt_int(p_prompt)
+    k_ext_str = fmt_int(k_ext)
+    n_breadth_str = fmt_int(n_breadth)
+    k_breadth_str = fmt_int(k_breadth)
+    r_feedback_str = fmt_int(r_feedback)
+    k_feedback_str = fmt_int(k_feedback)
+    t_oracle_s_str = fmt_time(t_oracle, unit=second, precision=2)
+    o_diag_str = fmt_int(o_diag)
+    mult_flops_mult_str = fmt_multiple(mult_flops, precision=2)
+    t_wall_c_s_str = fmt_time(t_wall_c, unit=second, precision=2)
+    t_wall_a_s_str = fmt_time(t_wall_a, unit=second, precision=2)
+```
+
 ::: {#nbk-03-hardware-trade-offs-across-compute-allocation .callout-notebook title="Hardware trade-offs across compute allocation axes"}
-Consider an autonomous agent runtime deployed on an 8-GPU node running an unquantized 70-billion parameter model ($|\Theta| = 70 \times 10^9$) in BF16 precision ($b_{\text{bytes}} = 2$ bytes). The node possesses an aggregate memory bandwidth $B_{\text{mem}} = 26.8\text{ TB/s}$ ($3.35\text{ TB/s}$ per GPU) and sustained BF16 matrix compute throughput of $R_{\text{peak}} = 15{,}800\text{ TFLOPS}$.
+Consider an autonomous agent runtime deployed on an `{python} ComputeAllocationAxes.n_gpus_str`-GPU node running an unquantized 70-billion parameter model ($|\Theta| = 70 \times 10^9$) in BF16 precision ($b_{\text{bytes}} = 2$ bytes). The node possesses an aggregate memory bandwidth $B_{\text{mem}} = 26.8\text{ TB/s}$ ($3.35\text{ TB/s}$ per GPU) and sustained BF16 matrix compute throughput of $R_{\text{peak}} = 15{,}800\text{ TFLOPS}$.
 
-The agent is tasked with synthesizing a lockless ring buffer. The base specification prompt contains $P = 4{,}096$ tokens. We analyze three concrete configurations designed to consume comparable total generation budgets of approximately $4{,}096$ emitted tokens:
+The agent is tasked with synthesizing a lockless ring buffer. The base specification prompt contains $P =$ `{python} ComputeAllocationAxes.p_prompt_str` tokens. We analyze three concrete configurations designed to consume comparable total generation budgets of approximately $4{,}096$ emitted tokens:
 
-1. **Configuration A (Depth):** A single serial rollout of $K_{\text{ext}} = 4{,}096$ intermediate reasoning and implementation tokens.
-2. **Configuration B (Breadth):** An $N = 4$ parallel sampling sweep, where each branch emits $K = 1{,}024$ tokens concurrently.
-3. **Configuration C (Feedback):** An $R = 3$ round iterative repair loop. Each round emits $K = 1{,}024$ tokens, followed by an external compilation and ThreadSanitizer test pass taking $t_{\text{oracle}} = 1.50\text{ s}$ that yields $|O_r| = 340$ tokens of diagnostic traces.
+1. **Configuration A (Depth):** A single serial rollout of $K_{\text{ext}} =$ `{python} ComputeAllocationAxes.k_ext_str` intermediate reasoning and implementation tokens.
+2. **Configuration B (Breadth):** An $N =$ `{python} ComputeAllocationAxes.n_breadth_str` parallel sampling sweep, where each branch emits $K =$ `{python} ComputeAllocationAxes.k_breadth_str` tokens concurrently.
+3. **Configuration C (Feedback):** An $R =$ `{python} ComputeAllocationAxes.r_feedback_str` round iterative repair loop. Each round emits $K =$ `{python} ComputeAllocationAxes.k_feedback_str` tokens, followed by an external compilation and ThreadSanitizer test pass taking $t_{\text{oracle}} =$ `{python} ComputeAllocationAxes.t_oracle_s_str` that yields $|O_r| =$ `{python} ComputeAllocationAxes.o_diag_str` tokens of diagnostic traces.
 
 **Step 1: Compute and Memory Baseline**
 Loading the model weights requires:
@@ -278,7 +402,7 @@ Prompt lengths expand across rounds:
 - **Wall-Clock Latency:**
   $$T_{\text{wall}}^{\text{feedback}} = (0.036 + 0.048 + 0.061) + 3 \times 5.35\text{ s} + 3 \times 1.50\text{ s} = 0.145\text{ s} + 16.05\text{ s} + 4.50\text{ s} = 20.70\text{ s}$$
 
-- **Outcome and Trajectory Goodput:** Configuration C consumes $2.37\times$ more total FLOPs than Configurations A and B due to the quadratic accumulation of context in the prefill phases. Its wall-clock latency ($20.70\text{ s}$) is nearly identical to single-shot depth ($21.42\text{ s}$). Yet evaluated through the systems lens of Trajectory Goodput ($\mathcal{G}$), Configuration A and Configuration B yielded $\mathcal{G} = 0\%$ (100 percent badput: $\$0.178$ of GPU compute wasted producing non-functional code), whereas Configuration C yielded $\mathcal{G} = 100\%$ goodput: in Round 2, ThreadSanitizer flagged the missing memory barrier, providing the exact line and register offset required for Round 3 to emit a verified, race-free barrier. Feedback is the only architecture that converts raw FLOPs into verified systems deliverables.
+- **Outcome and Trajectory Goodput:** Configuration C consumes `{python} ComputeAllocationAxes.mult_flops_mult_str` more total FLOPs than Configurations A and B due to the quadratic accumulation of context in the prefill phases. Its wall-clock latency (`{python} ComputeAllocationAxes.t_wall_c_s_str`) is nearly identical to single-shot depth (`{python} ComputeAllocationAxes.t_wall_a_s_str`). Yet evaluated through the systems lens of Trajectory Goodput ($\mathcal{G}$), Configuration A and Configuration B yielded $\mathcal{G} = 0\%$ (100 percent badput: $\$0.178$ of GPU compute wasted producing non-functional code), whereas Configuration C yielded $\mathcal{G} = 100\%$ goodput: in Round 2, ThreadSanitizer flagged the missing memory barrier, providing the exact line and register offset required for Round 3 to emit a verified, race-free barrier. Feedback is the only architecture that converts raw FLOPs into verified systems deliverables.
 :::
 
 The architectural imperative that emerges from this quantitative comparison is that real-world agent runtimes rarely deploy any single axis in isolation. Instead, high-performance runtime orchestrators construct hybrid deliberation topologies: leveraging depth to unpack local procedural logic, deploying breadth to explore disjoint architectural candidates across parallel workers, and closing the loop with feedback to verify and prune invalid candidates against deterministic system oracles.
@@ -405,8 +529,64 @@ The following candidate matrix illustrates how these selection stages filter and
 
 Notice that Candidates $\mathbf{y}^{(1)}$ and $\mathbf{y}^{(2)}$ exhibited distinct surface code structures but collapsed into the identical functional equivalence cluster (Cluster $\alpha$), sharing a common synchronization failure. Deterministic filtering dropped $\mathbf{y}^{(4)}$ immediately due to compilation failure, allowing the learned verifier to focus its evaluation budget exclusively on the valid alternatives.
 
+```{python}
+#| label: lego-03-candidate-sampling-and-verifier-throughput
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CANDIDATE SAMPLING AND VERIFIER THROUGHPUT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-03-candidate-sampling-and-verifier-throughput
+# │ Goal: Dimension memory bus vs compute-bound overhead of candidate generation and PRM scoring.
+# │ Show: 16 candidates take 21.4 s decode + 5.73 s PRM scoring (27.13 s total); 75% filter drops PRM to 1.43 s.
+# │ How: Weight memory reads against GEMM throughput for 16,384 candidate tokens.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_bandwidth
+
+class CandidateSamplingVerifierThroughput:
+    """Candidate sampling and verifier throughput under fixed GPU memory bandwidth."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    bw_hbm = 3_350.0 * (GB / second)
+    n_candidates = 16
+    l_tokens = 1_024
+    p_params = 70e9
+    throughput_prm = 400e12 / second
+    filter_drop = 0.75
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    m_weights = (p_params * 1 * byte).to(GB)
+    t_read_step = (m_weights / bw_hbm).to(second)
+    t_decode = (l_tokens * t_read_step).to(second)
+    tokens_total = n_candidates * l_tokens
+    flops_prm = 2 * p_params * tokens_total
+    t_prm = (flops_prm / throughput_prm.magnitude) * second
+    t_total_deliberation = t_decode + t_prm
+    t_prm_filtered = t_prm * (1.0 - filter_drop)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_read_step.to(millisecond).magnitude - 20.9) < 0.05, "t_read_step")
+    check(abs(t_decode.magnitude - 21.4) < 0.05, "t_decode")
+    check(tokens_total == 16384, "tokens_total")
+    check(abs(t_prm.magnitude - 5.73) < 0.05, "t_prm")
+    check(abs(t_total_deliberation.magnitude - 27.13) < 0.05, "t_total_deliberation")
+    check(abs(t_prm_filtered.magnitude - 1.43) < 0.05, "t_prm_filtered")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    bw_hbm_gb_per_s_str = fmt_bandwidth(bw_hbm, unit=GB / second, precision=0)
+    n_candidates_str = fmt_int(n_candidates)
+    l_tokens_str = fmt_int(l_tokens)
+    t_decode_s_str = fmt_time(t_decode, unit=second, precision=1)
+    tokens_total_str = fmt_int(tokens_total)
+    t_prm_s_str = fmt_time(t_prm, unit=second, precision=2)
+    t_total_deliberation_s_str = fmt_time(t_total_deliberation, unit=second, precision=2)
+    filter_drop_pct_str = fmt_percent(filter_drop, precision=0, style="prose")
+    t_prm_filtered_s_str = fmt_time(t_prm_filtered, unit=second, precision=2)
+```
+
 ::: {#nbk-03-candidate-sampling-and-verifier-throughput .callout-notebook title="Candidate sampling and verifier throughput under fixed GPU memory bandwidth"}
-A systems engineer deploys an agentic code generation supervisor running on an NVIDIA H100 SXM5 GPU (3,350 GB/s HBM3 memory bandwidth). The system generates $N = 16$ candidate solutions in parallel, each generating an average of $L = 1,024$ decode tokens. The base generator is a 70-billion parameter dense model stored in FP8 ($P = 70 \times 10^9$ bytes).
+A systems engineer deploys an agentic code generation supervisor running on an NVIDIA H100 SXM5 GPU (`{python} CandidateSamplingVerifierThroughput.bw_hbm_gb_per_s_str` HBM3 memory bandwidth). The system generates $N =$ `{python} CandidateSamplingVerifierThroughput.n_candidates_str` candidate solutions in parallel, each generating an average of $L =$ `{python} CandidateSamplingVerifierThroughput.l_tokens_str` decode tokens. The base generator is a 70-billion parameter dense model stored in FP8 ($P = 70 \times 10^9$ bytes).
 
 Decode is bound by memory bandwidth (@sec-vol3-processor-cost), so each decode step reads the full 70 GB of weights from HBM. Evaluating candidates using a learned Process Reward Model (PRM) of identical size requires an independent forward prefill pass over the generated tokens.
 
@@ -415,16 +595,16 @@ We quantify the memory bus transfer time and latency overhead imposed by generat
 **1. Candidate Decode Phase (Generator):**
 Because the 16 candidates are batched concurrently during decoding, the 70 GB weight matrix is read once per decode step across all 16 streams:
 $$T_{\text{read/step}} = \frac{70 \times 10^9 \text{ bytes}}{3.35 \times 10^{12} \text{ bytes/sec}} \approx 20.9 \times 10^{-3} \text{ seconds} = 20.9 \text{ ms}$$
-For $L = 1,024$ autoregressive steps, the minimum execution time spent sweeping model weights across the bus is:
+For $L =$ `{python} CandidateSamplingVerifierThroughput.l_tokens_str` autoregressive steps, the minimum execution time spent sweeping model weights across the bus is:
 $$T_{\text{decode}} = 1,024 \times 20.9 \text{ ms} = 21.4 \text{ seconds}$$
 
 **2. Candidate Verification Phase (PRM Prefill):**
-The 16 generated candidates collectively total $16 \times 1,024 = 16,384$ tokens. Unlike decode, the PRM evaluates these tokens in the compute-bound prefill phase (GEMM). Assuming the H100 achieves an effective throughput of $400 \times 10^{12}$ FP8 FLOPs/sec on prefill, and the model requires $2P$ FLOPs per token:
+The `{python} CandidateSamplingVerifierThroughput.n_candidates_str` generated candidates collectively total $16 \times 1,024 =$ `{python} CandidateSamplingVerifierThroughput.tokens_total_str` tokens. Unlike decode, the PRM evaluates these tokens in the compute-bound prefill phase (GEMM). Assuming the H100 achieves an effective throughput of $400 \times 10^{12}$ FP8 FLOPs/sec on prefill, and the model requires $2P$ FLOPs per token:
 $$\text{FLOPs}_{\text{PRM}} = 2 \times (70 \times 10^9) \times 16,384 \approx 2.29 \times 10^{15} \text{ FLOPs}$$
 $$T_{\text{PRM}} = \frac{2.29 \times 10^{15} \text{ FLOPs}}{400 \times 10^{12} \text{ FLOPs/sec}} \approx 5.73 \text{ seconds}$$
 
 **Systems Implication:**
-Generating the candidates consumes $21.4\text{ s}$ on the memory bus, while learned verification adds $5.73\text{ s}$ of compute time, bringing total deliberation latency to $27.13\text{ s}$. If the runtime deployed a deterministic static filter that dropped $75\%$ of candidates prior to PRM scoring, the verification phase latency would drop from $5.73\text{ s}$ to $1.43\text{ s}$, saving over four seconds of critical-path execution time.
+Generating the candidates consumes `{python} CandidateSamplingVerifierThroughput.t_decode_s_str` on the memory bus, while learned verification adds `{python} CandidateSamplingVerifierThroughput.t_prm_s_str` of compute time, bringing total deliberation latency to `{python} CandidateSamplingVerifierThroughput.t_total_deliberation_s_str`. If the runtime deployed a deterministic static filter that dropped `{python} CandidateSamplingVerifierThroughput.filter_drop_pct_str` of candidates prior to PRM scoring, the verification phase latency would drop from `{python} CandidateSamplingVerifierThroughput.t_prm_s_str` to `{python} CandidateSamplingVerifierThroughput.t_prm_filtered_s_str`, saving over four seconds of critical-path execution time.
 :::
 
 ### The verification budget
@@ -536,20 +716,93 @@ $$\Pi_V = \frac{0.01 \times 0.98}{(0.01 \times 0.98) + (0.99 \times 0.02)} = \fr
 
 Despite utilizing a verifier with $98\%$ nominal accuracy, roughly two out of every three candidates approved by the supervisor are functionally invalid. Scaling breadth-based sampling under these operating conditions does not elevate system reliability; it merely floods the downstream execution environment with plausible, verifier-approved bugs. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) settles how the two kinds of verifier divide the work. Statistical verifiers ($\alpha > 0$) may order candidates to steer search. Only deterministic checks may guard the commit gate, and even they reach $\alpha = 0$ only within the invariants they cover, so their coverage must match the task's completion criteria and they must sit where the candidate cannot modify them.
 
+```{python}
+#| label: lego-03-compute-overhead-and-yield-under
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMPUTE OVERHEAD AND YIELD UNDER ASYMMETRIC VERIFIER ERROR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-03-compute-overhead-and-yield-under
+# │ Goal: Dimension posterior candidate precision and risk-weighted incident cost under asymmetric verifier error.
+# │ Show: 70.31% posterior precision; $608 risk-weighted incident damage outstrips $0.178 compute cost by 3,400x.
+# │ How: Compound false negative and false positive rates over 64 parallel candidate samples.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_usd
+
+class AsymmetricVerifierYield:
+    """Compute overhead and yield under asymmetric verifier error."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_gpus = 8
+    n_candidates = 64
+    l_tokens = 1_024
+    r_decode = 32 / second
+    p_success = 0.05
+    beta_frr = 0.10
+    alpha_far = 0.02
+    cost_gpu_hr = 2.50
+    cost_incident = 500.00
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_valid = n_candidates * p_success
+    n_invalid = n_candidates * (1.0 - p_success)
+    valid_accepted = n_valid * (1.0 - beta_frr)
+    valid_rejected = n_valid * beta_frr
+    invalid_rejected = n_invalid * (1.0 - alpha_far)
+    invalid_accepted = n_invalid * alpha_far
+    n_accepted = valid_accepted + invalid_accepted
+    precision_accepted = valid_accepted / n_accepted
+    t_wall = (l_tokens / r_decode.magnitude) * second
+    t_gpu_s = (n_gpus * t_wall).to(second)
+    t_gpu_hr = t_gpu_s.to(hour)
+    cost_compute = t_gpu_hr.magnitude * cost_gpu_hr
+    wasted_valid_tokens = valid_rejected * l_tokens
+    cost_fa_risk = invalid_accepted * cost_incident
+    damage_ratio = round(cost_fa_risk / cost_compute, -2)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(n_valid - 3.2) < 0.01, "n_valid")
+    check(abs(n_invalid - 60.8) < 0.01, "n_invalid")
+    check(abs(valid_accepted - 2.88) < 0.01, "valid_accepted")
+    check(abs(valid_rejected - 0.32) < 0.01, "valid_rejected")
+    check(abs(invalid_accepted - 1.216) < 0.01, "invalid_accepted")
+    check(abs(n_accepted - 4.096) < 0.01, "n_accepted")
+    check(abs(precision_accepted - 0.7031) < 0.001, "precision_accepted")
+    check(abs(t_wall.magnitude - 32.0) < 0.01, "t_wall")
+    check(abs(t_gpu_s.magnitude - 256.0) < 0.1, "t_gpu_s")
+    check(abs(cost_compute - 0.178) < 0.005, "cost_compute")
+    check(abs(cost_fa_risk - 608.0) < 0.1, "cost_fa_risk")
+    check(abs(damage_ratio - 3400) < 50, "damage_ratio")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_gpus_str = fmt_int(n_gpus)
+    n_candidates_str = fmt_int(n_candidates)
+    l_tokens_str = fmt_int(l_tokens)
+    p_success_pct_str = fmt_percent(p_success, precision=0, style="prose")
+    beta_frr_pct_str = fmt_percent(beta_frr, precision=0, style="prose")
+    alpha_far_pct_str = fmt_percent(alpha_far, precision=0, style="prose")
+    cost_gpu_hr_str = fmt_usd(cost_gpu_hr, precision=2)
+    cost_compute_str = fmt_usd(cost_compute, precision=3)
+    cost_incident_str = fmt_usd(cost_incident)
+    damage_ratio_str = fmt_int(damage_ratio)
+```
+
 ::: {#nbk-03-compute-overhead-and-yield-under .callout-notebook title="Compute overhead and yield under asymmetric verifier error"}
-A distributed agent runtime orchestrates candidate generation on an 8-GPU node running an inference serving engine. The engine generates $N = 64$ parallel candidate trajectories for a complex concurrency bug fix. Each candidate consumes $L = 1024$ decode tokens. The serving cluster achieves an autoregressive decode throughput of $R = 32\text{ tokens/second}$ per GPU worker thread, allocating one GPU worker per candidate.
+A distributed agent runtime orchestrates candidate generation on an `{python} AsymmetricVerifierYield.n_gpus_str`-GPU node running an inference serving engine. The engine generates $N =$ `{python} AsymmetricVerifierYield.n_candidates_str` parallel candidate trajectories for a complex concurrency bug fix. Each candidate consumes $L =$ `{python} AsymmetricVerifierYield.l_tokens_str` decode tokens. The serving cluster achieves an autoregressive decode throughput of $R = 32\text{ tokens/second}$ per GPU worker thread, allocating one GPU worker per candidate.
 
 The generation parameters and verifier performance metrics are:
 
-- Candidate length: $L = 1024\text{ tokens}$
-- Raw generator base success rate: $p = 0.05$ (5 percent of generated patches are truly correct)
-- Candidate sampling count: $N = 64$
-- Verifier False Rejection Rate: $\beta = 0.10$ (10 percent of valid patches wrongly discarded)
-- Verifier False Acceptance Rate: $\alpha = 0.02$ (2 percent of invalid patches mistakenly approved)
-- Execution cost per GPU-hour: $\$2.50$
+- Candidate length: $L =$ `{python} AsymmetricVerifierYield.l_tokens_str` tokens
+- Raw generator base success rate: $p = 0.05$ (`{python} AsymmetricVerifierYield.p_success_pct_str` of generated patches are truly correct)
+- Candidate sampling count: $N =$ `{python} AsymmetricVerifierYield.n_candidates_str`
+- Verifier False Rejection Rate: $\beta = 0.10$ (`{python} AsymmetricVerifierYield.beta_frr_pct_str` of valid patches wrongly discarded)
+- Verifier False Acceptance Rate: $\alpha = 0.02$ (`{python} AsymmetricVerifierYield.alpha_far_pct_str` of invalid patches mistakenly approved)
+- Execution cost per GPU-hour: `{python} AsymmetricVerifierYield.cost_gpu_hr_str`
 
 **Problem 1: Calculate the Expected Candidate Yield and Posterior Precision.**
-Across $N = 64$ sampled candidates:
+Across $N =$ `{python} AsymmetricVerifierYield.n_candidates_str` sampled candidates:
 
 - Expected truly valid candidates: $N_{\text{valid}} = N \times p = 64 \times 0.05 = 3.2$
 - Expected truly invalid candidates: $N_{\text{invalid}} = N \times (1 - p) = 64 \times 0.95 = 60.8$
@@ -570,7 +823,7 @@ $$\Pi_V = \frac{2.88}{4.096} \approx 70.31\%$$
 Nearly $30\%$ of the candidates presented to the runtime commit queue remain defective, despite the verifier boasting a $98\%$ true-negative rate ($1 - \alpha$).
 
 **Problem 2: Quantify the Computational Waste Induced by Verification Deficiencies.**
-The critical-path wall-clock time required to generate the $N=64$ candidates across the 8-GPU node (with 8 concurrent candidate streams per GPU) is:
+The critical-path wall-clock time required to generate the $N=$ `{python} AsymmetricVerifierYield.n_candidates_str` candidates across the `{python} AsymmetricVerifierYield.n_gpus_str`-GPU node (with 8 concurrent candidate streams per GPU) is:
 $$T_{\text{wall}} = \frac{L}{R} = \frac{1024\text{ tokens}}{32\text{ tokens/sec}} = 32.0\text{ seconds}$$
 
 Total GPU execution time expended for the batch:
@@ -581,10 +834,10 @@ $$\text{Cost}_{\text{compute}} = 0.0711\text{ GPU-hours} \times \$2.50/\text{GPU
 Because the generator operates at $p=0.05$, $95\%$ of all generated tokens ($60.8 \times 1024 = 62,259\text{ tokens}$) represent wasted decode bandwidth. Crucially, the verifier's false rejections waste an additional:
 $$\text{Wasted Valid Compute} = 0.32\text{ candidates} \times 1024\text{ tokens} = 327.68\text{ tokens}$$
 
-If the system downstream accepts one of the $1.216$ false acceptances and deploys it, triggering a production incident requiring a 15-minute automated rollback and engineering triage valued at $\$500.00$, the expected risk-weighted cost of false acceptance is:
+If the system downstream accepts one of the $1.216$ false acceptances and deploys it, triggering a production incident requiring a 15-minute automated rollback and engineering triage valued at `{python} AsymmetricVerifierYield.cost_incident_str`, the expected risk-weighted cost of false acceptance is:
 $$\mathbb{E}[\text{Cost}_{\text{FA}}] = 1.216 \times \$500.00 = \$608.00$$
 
-The risk-weighted damage of the verifier's false acceptance ($1.216$ instances) outstrips the raw GPU generation cost ($\$0.178$) by more than a factor of $3,400$. In systems design, verifier optimization must prioritize driving $\alpha \to 0$ over minimizing $\beta$.
+The risk-weighted damage of the verifier's false acceptance ($1.216$ instances) outstrips the raw GPU generation cost (`{python} AsymmetricVerifierYield.cost_compute_str`) by more than a factor of `{python} AsymmetricVerifierYield.damage_ratio_str`. In systems design, verifier optimization must prioritize driving $\alpha \to 0$ over minimizing $\beta$.
 :::
 
 ### Search exploitation mechanics
@@ -801,6 +1054,70 @@ where $\mathcal{F}_{\text{verified}}$ is the verified frontier (the set of compl
 #### Global escalation (root invalidation) {.unnumbered}
 When an environmental failure falsifies an invariant of the root task itself—such as encountering an immutable hardware incompatibility, missing kernel capabilities, or revoked access credentials—branch-level resynthesis cannot succeed. Continuing to deliberate in this regime wastes tokens in an unresolvable search space. The runtime halts graph execution, marks the root objective as unachievable under the current environment constraints, and escalates to the supervisor or human operator, emitting a structured diagnostic proof containing the chain of verified state deltas and the terminal invalidation signature.
 
+```{python}
+#| label: lego-03-compute-and-token-savings-of
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMPUTE AND TOKEN SAVINGS OF SUBGRAPH RESYNTHESIS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-03-compute-and-token-savings-of
+# │ Goal: Dimension FLOP savings and critical-path latency reduction from localized subgraph resynthesis.
+# │ Show: Subgraph repair cuts compute by 82.4% (0.231 vs 1.315 PFLOPs) and delivers 4x decode speedup (11.25 vs 45 s).
+# │ How: Contrast full plan re-generation prompt and decode FLOPs against scoped 3-node replacement.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_multiple
+
+class SubgraphResynthesisSavings:
+    """Compute and token savings of subgraph resynthesis vs global regeneration."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p_params = 70e9
+    n_plan_nodes = 12
+    tokens_per_node = 150
+    n_base = 4_096
+    n_exec_prefix = 3_500
+    n_scoped = 1_200
+    n_resynth_nodes = 3
+    throughput_decode = 40 / second
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_prompt_a = n_base + n_exec_prefix
+    flops_prefill_a = 2 * p_params * n_prompt_a
+    n_gen_a = n_plan_nodes * tokens_per_node
+    flops_decode_a = 2 * p_params * n_gen_a
+    flops_total_a = (flops_prefill_a + flops_decode_a) / 1e15
+    n_prompt_b = n_scoped
+    flops_prefill_b = 2 * p_params * n_prompt_b
+    n_gen_b = n_resynth_nodes * tokens_per_node
+    flops_decode_b = 2 * p_params * n_gen_b
+    flops_total_b = (flops_prefill_b + flops_decode_b) / 1e15
+    compute_reduction = (flops_total_a - flops_total_b) / flops_total_a
+    t_decode_a = (n_gen_a / throughput_decode.magnitude) * second
+    t_decode_b = (n_gen_b / throughput_decode.magnitude) * second
+    speedup_resynth = (t_decode_a / t_decode_b).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_prompt_a == 7596, "n_prompt_a")
+    check(n_gen_a == 1800, "n_gen_a")
+    check(abs(flops_total_a - 1.315) < 0.01, "flops_total_a")
+    check(n_gen_b == 450, "n_gen_b")
+    check(abs(flops_total_b - 0.231) < 0.01, "flops_total_b")
+    check(abs(compute_reduction - 0.824) < 0.005, "compute_reduction")
+    check(abs(t_decode_a.magnitude - 45.0) < 0.05, "t_decode_a")
+    check(abs(t_decode_b.magnitude - 11.25) < 0.05, "t_decode_b")
+    check(abs(speedup_resynth - 4.0) < 0.01, "speedup_resynth")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_plan_nodes_str = fmt_int(n_plan_nodes)
+    tokens_per_node_str = fmt_int(tokens_per_node)
+    n_base_str = fmt_int(n_base)
+    n_scoped_str = fmt_int(n_scoped)
+    n_resynth_nodes_str = fmt_int(n_resynth_nodes)
+    speedup_resynth_mult_str = fmt_multiple(speedup_resynth, precision=0)
+```
+
 ::: {#nbk-03-compute-and-token-savings-of .callout-notebook title="Compute and token savings of subgraph resynthesis vs. global regeneration"}
 Consider an autonomous systems agent running on an inference cluster powered by a 70-billion parameter dense foundation model ($P = 70 \times 10^9$ parameters) in 16-bit precision. The model architecture uses Grouped-Query Attention (GQA) with $L = 80$ transformer layers, $d_{\text{model}} = 8{,}192$, and 8 key-value heads ($d_{\text{head}} = 128$).
 
@@ -808,14 +1125,14 @@ Under GQA, each token stored in the KV cache consumes:
 
 $$M_{\text{token}} = 2 \times L \times n_{\text{kv}} \times d_{\text{head}} \times 2 \text{ bytes} = 2 \times 80 \times 8 \times 128 \times 2 = 327{,}680 \text{ bytes} \approx 320 \text{ KiB}$$
 
-The agent is executing a 12-node plan graph. Each plan node requires an average of 150 tokens to specify. The initial system prompt, environment description, and tool definitions consume $N_{\text{base}} = 4{,}096$ tokens.
+The agent is executing a `{python} SubgraphResynthesisSavings.n_plan_nodes_str`-node plan graph. Each plan node requires an average of `{python} SubgraphResynthesisSavings.tokens_per_node_str` tokens to specify. The initial system prompt, environment description, and tool definitions consume $N_{\text{base}} =$ `{python} SubgraphResynthesisSavings.n_base_str` tokens.
 
 The agent successfully executes nodes $v_1$ through $v_5$. Over these five steps, the tool invocation arguments and environment execution observations add an aggregate of $N_{\text{exec}} = 3{,}500$ tokens of interaction history into context. At node $v_6$, a C++ compilation fails due to an incompatible shared library ABI.
 
 We evaluate the physical compute and latency costs of two recovery policies:
 
 - **Policy A (Global Regeneration):** The runtime discards the current plan, appends the entire interaction history and failure log to the context, and prompts the model to regenerate the complete 12-node plan from scratch.
-- **Policy B (Subgraph Resynthesis):** The runtime retains nodes $v_1$ through $v_5$ in memory escrow, prunes the failed branch $\{v_6, v_7, v_8\}$, and provides a scoped prompt containing only the base system instructions ($N_{\text{base}}$), the state delta produced by $v_5$, and the specific linker error. This scoped prompt totals $N_{\text{scoped}} = 1{,}200$ tokens. The model generates a 3-node replacement subgraph ($3 \times 150 = 450$ tokens) that builds the missing dependency from source.
+- **Policy B (Subgraph Resynthesis):** The runtime retains nodes $v_1$ through $v_5$ in memory escrow, prunes the failed branch $\{v_6, v_7, v_8\}$, and provides a scoped prompt containing only the base system instructions ($N_{\text{base}}$), the state delta produced by $v_5$, and the specific linker error. This scoped prompt totals $N_{\text{scoped}} =$ `{python} SubgraphResynthesisSavings.n_scoped_str` tokens. The model generates a `{python} SubgraphResynthesisSavings.n_resynth_nodes_str`-node replacement subgraph ($3 \times 150 = 450$ tokens) that builds the missing dependency from source.
 
 **1. Inference FLOP Analysis:**
 Recall that processing prompt tokens (prefill phase) requires approximately $2P$ FLOPs per token, and generating output tokens (decode phase) requires $2P$ FLOPs per token.
@@ -841,7 +1158,7 @@ Autoregressive decoding is strictly memory-bandwidth bound and sequential. Assum
 $$T_{\text{decode, Policy A}} = \frac{1{,}800 \text{ tokens}}{40 \text{ tokens/s}} = 45.0 \text{ seconds}$$
 $$T_{\text{decode, Policy B}} = \frac{450 \text{ tokens}}{40 \text{ tokens/s}} = 11.25 \text{ seconds}$$
 
-Subgraph resynthesis delivers a **$4.0\times$ speedup** in critical-path replanning latency while avoiding the risk of re-executing or corrupting the verified state deltas produced by steps $v_1$ through $v_5$.
+Subgraph resynthesis delivers a **`{python} SubgraphResynthesisSavings.speedup_resynth_mult_str` speedup** in critical-path replanning latency while avoiding the risk of re-executing or corrupting the verified state deltas produced by steps $v_1$ through $v_5$.
 :::
 
 ### Replanning damping invariants {#sec-vol3-deliberation-replanning-thrashing}
@@ -969,18 +1286,104 @@ $$C_{\text{verif}}^{\text{det}} = \sum_{j \in \mathcal{V}_{\text{eval}}} \left( 
 
 The tool execution cost $C_{\text{tool}}$ encapsulates the latency, network bandwidth, and third-party API overhead incurred when an exploratory branch interacts with external environments. Unlike pure generation, tool execution introduces non-deterministic wall-clock delays: an agent branch that invokes an external database query or static analysis tool may stall for hundreds of milliseconds while holding accelerator memory state in suspense.
 
+```{python}
+#| label: lego-03-compute-allocation-and-latency-trade-offs
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMPUTE ALLOCATION AND LATENCY TRADE-OFFS IN BOUNDED SEARCH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-03-compute-allocation-and-latency-trade-offs
+# │ Goal: Compare wall-clock latency, token volume, and FLOP cost between Best-of-N and beam search.
+# │ Show: Beam search with PRM matches latency (11.26 vs 11.70 s) while cutting tokens by 43.75% and FLOPs by 37.3%.
+# │ How: Contrast flat parallel decoding against step-level synchronous PRM evaluation and pruning.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_bandwidth
+
+class BoundedSearchTradeoffs:
+    """Compute allocation and latency trade-offs in bounded search."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    bw_hbm = 3.35 * (TB / second)
+    n_params = 70e9
+    l_step = 128
+    n_traj_p1 = 16
+    n_steps_p1 = 4
+    t_sandbox = 500 * millisecond
+    concurrency_sandbox = 8
+    beam_width = 4
+    m_expand = 3
+    n_depth_p2 = 4
+    n_params_prm = 8e9
+    t_prm_step = 15 * millisecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_token = ((n_params * 1 * byte) / bw_hbm).to(second)
+    l_total_p1 = n_steps_p1 * l_step
+    k_total_p1 = n_traj_p1 * l_total_p1
+    t_gen_p1 = (l_total_p1 * t_token).to(second)
+    rounds_sandbox_p1 = n_traj_p1 / concurrency_sandbox
+    t_verif_p1 = (rounds_sandbox_p1 * t_sandbox).to(second)
+    t_wall_p1 = t_gen_p1 + t_verif_p1
+    c_flop_p1 = 2 * n_params * k_total_p1
+    n_segments_p2 = 3 + 9 + 12 + 12
+    k_total_p2 = n_segments_p2 * l_step
+    reduction_tokens = (k_total_p1 - k_total_p2) / k_total_p1
+    t_gen_p2 = (n_depth_p2 * l_step * t_token).to(second)
+    t_prm_total = (n_depth_p2 * t_prm_step).to(second)
+    t_sandbox_p2 = (1 * t_sandbox).to(second)
+    t_verif_p2 = t_prm_total + t_sandbox_p2
+    t_wall_p2 = t_gen_p2 + t_verif_p2
+    c_flop_gen_p2 = 2 * n_params * k_total_p2
+    c_flop_prm_p2 = 2 * n_params_prm * k_total_p2
+    c_flop_total_p2 = c_flop_gen_p2 + c_flop_prm_p2
+    flop_savings = (c_flop_p1 - c_flop_total_p2) / c_flop_p1
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_token.to(millisecond).magnitude - 20.90) < 0.05, "t_token")
+    check(k_total_p1 == 8192, "k_total_p1")
+    check(abs(t_gen_p1.magnitude - 10.70) < 0.05, "t_gen_p1")
+    check(abs(t_verif_p1.magnitude - 1.00) < 0.01, "t_verif_p1")
+    check(abs(t_wall_p1.magnitude - 11.70) < 0.05, "t_wall_p1")
+    check(n_segments_p2 == 36, "n_segments_p2")
+    check(k_total_p2 == 4608, "k_total_p2")
+    check(abs(reduction_tokens - 0.4375) < 0.001, "reduction_tokens")
+    check(abs(t_gen_p2.magnitude - 10.70) < 0.05, "t_gen_p2")
+    check(abs(t_prm_total.magnitude - 0.06) < 0.01, "t_prm_total")
+    check(abs(t_sandbox_p2.magnitude - 0.50) < 0.01, "t_sandbox_p2")
+    check(abs(t_verif_p2.magnitude - 0.56) < 0.01, "t_verif_p2")
+    check(abs(t_wall_p2.magnitude - 11.26) < 0.05, "t_wall_p2")
+    check(abs(flop_savings - 0.373) < 0.005, "flop_savings")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    l_step_str = fmt_int(l_step)
+    n_traj_p1_str = fmt_int(n_traj_p1)
+    n_steps_p1_str = fmt_int(n_steps_p1)
+    l_total_p1_str = fmt_int(l_total_p1)
+    t_sandbox_ms_str = fmt_time(t_sandbox, unit=millisecond, precision=0)
+    beam_width_str = fmt_int(beam_width)
+    m_expand_str = fmt_int(m_expand)
+    n_depth_p2_str = fmt_int(n_depth_p2)
+    t_prm_step_ms_str = fmt_time(t_prm_step, unit=millisecond, precision=0)
+    reduction_tokens_pct_str = fmt_percent(reduction_tokens, precision=2, style="prose")
+    t_wall_p2_s_str = fmt_time(t_wall_p2, unit=second, precision=2)
+    t_wall_p1_s_str = fmt_time(t_wall_p1, unit=second, precision=2)
+    flop_savings_pct_str = fmt_percent(flop_savings, precision=1, style="prose")
+```
+
 ::: {#nbk-03-compute-allocation-and-latency-trade-offs .callout-notebook title="Compute allocation and latency trade-offs in bounded search"}
 **Problem Statement:**
 An autonomous software engineering runtime must generate a functional patch for a failing repository module. The host system operates an NVIDIA H100 SXM accelerator with a peak memory bandwidth of $\text{BW}_{\text{HBM}} = 3.35\text{ TB/s}$. The generator is a 70B parameter model ($|\Theta| = 70 \times 10^9$ parameters) operating in 8-bit floating-point precision (FP8, 1 byte per parameter). Each reasoning step requires generating $L_{\text{step}} = 128$ tokens.
 
 The runtime must select between two search policies:
 
-1. **Policy 1 (Best-of-16 Flat Sampling):** Generate $N = 16$ complete trajectories of 4 steps each ($L_{\text{total}} = 512$ tokens). Concurrently evaluate all completed patches using an automated sandbox unit test suite ($t_{\text{sandbox}} = 500\text{ ms}$ per test execution).
-2. **Policy 2 (Beam Search with PRM):** Run beam search with beam width $B = 4$, expanding $M = 3$ candidate steps at each of the 4 depth levels. Each candidate step is scored by an 8B parameter PRM ($|\Theta_{\text{PRM}}| = 8 \times 10^9$ bytes) executing a forward pass of 128 tokens. Only the final surviving 4 trajectories are verified in the sandbox.
+1. **Policy 1 (Best-of-16 Flat Sampling):** Generate $N =$ `{python} BoundedSearchTradeoffs.n_traj_p1_str` complete trajectories of `{python} BoundedSearchTradeoffs.n_steps_p1_str` steps each ($L_{\text{total}} =$ `{python} BoundedSearchTradeoffs.l_total_p1_str` tokens). Concurrently evaluate all completed patches using an automated sandbox unit test suite ($t_{\text{sandbox}} =$ `{python} BoundedSearchTradeoffs.t_sandbox_ms_str` per test execution).
+2. **Policy 2 (Beam Search with PRM):** Run beam search with beam width $B =$ `{python} BoundedSearchTradeoffs.beam_width_str`, expanding $M =$ `{python} BoundedSearchTradeoffs.m_expand_str` candidate steps at each of the `{python} BoundedSearchTradeoffs.n_depth_p2_str` depth levels. Each candidate step is scored by an 8B parameter PRM ($|\Theta_{\text{PRM}}| = 8 \times 10^9$ bytes) executing a forward pass of `{python} BoundedSearchTradeoffs.l_step_str` tokens. Only the final surviving `{python} BoundedSearchTradeoffs.beam_width_str` trajectories are verified in the sandbox.
 
 Assume that for both policies, decoding operates at memory bandwidth saturation with batch size $N \le 16$, yielding a per-token generation latency of:
 $$t_{\text{token}} \approx \frac{|\Theta| \times 1\text{ byte}}{\text{BW}_{\text{HBM}}} = \frac{70 \times 10^9\text{ bytes}}{3.35 \times 10^{12}\text{ bytes/sec}} \approx 20.90\text{ ms/token}$$
-For the 8B PRM, the prefill/evaluation time for a 128-token step is compute-bound at $t_{\text{PRM}} \approx 15\text{ ms}$.
+For the 8B PRM, the prefill/evaluation time for a `{python} BoundedSearchTradeoffs.l_step_str`-token step is compute-bound at $t_{\text{PRM}} \approx$ `{python} BoundedSearchTradeoffs.t_prm_step_ms_str`.
 
 Compute the total tokens generated, total wall-clock latency $T_{\text{wall}}$, and total FLOP expenditure for each policy.
 
@@ -1019,16 +1422,16 @@ Compute the total tokens generated, total wall-clock latency $T_{\text{wall}}$, 
   - Total step segments generated: $3 + 9 + 12 + 12 = 36$ step segments.
 - **Tokens Generated:**
   $$K_{\text{total}}^{(2)} = 36 \times 128 = 4{,}608\text{ tokens}$$
-  *(A 43.75 percent reduction in generated tokens compared to Best-of-16).*
+  *(A `{python} BoundedSearchTradeoffs.reduction_tokens_pct_str` reduction in generated tokens compared to Best-of-16).*
 
 - **Generation Latency:**
   Generation occurs in 4 sequential depth phases. Each phase decodes 128 tokens:
   $$T_{\text{gen}}^{(2)} = 4 \times (128\text{ tokens} \times 20.90\text{ ms/token}) = 4 \times 2.675\text{ s} = 10.70\text{ seconds}$$
 
 - **Verification Latency:**
-  At each of the 4 steps, PRM scoring must run synchronously before the runtime can prune branches. With PRM scoring taking $15\text{ ms}$ per step:
+  At each of the `{python} BoundedSearchTradeoffs.n_depth_p2_str` steps, PRM scoring must run synchronously before the runtime can prune branches. With PRM scoring taking `{python} BoundedSearchTradeoffs.t_prm_step_ms_str` per step:
   $$T_{\text{PRM}} = 4 \times 15\text{ ms} = 60\text{ ms} = 0.06\text{ seconds}$$
-  At the leaf level, only the surviving 4 candidates execute sandbox verification in parallel:
+  At the leaf level, only the surviving `{python} BoundedSearchTradeoffs.beam_width_str` candidates execute sandbox verification in parallel:
   $$T_{\text{sandbox}}^{(2)} = 1 \times 500\text{ ms} = 0.50\text{ seconds}$$
   $$T_{\text{verif}}^{(2)} = 0.06\text{ s} + 0.50\text{ s} = 0.56\text{ seconds}$$
 
@@ -1041,7 +1444,7 @@ Compute the total tokens generated, total wall-clock latency $T_{\text{wall}}$, 
   $$C_{\text{FLOP}}^{(2)} = 6.451 \times 10^{14} + 7.373 \times 10^{13} = 7.188 \times 10^{14}\text{ FLOPs} \approx 0.72\text{ PFLOPs}$$
 
 **Analytical Conclusion:**
-Beam search with process verification achieves roughly equivalent wall-clock time ($11.26\text{ s}$ vs. $11.70\text{ s}$) while cutting total FLOP expenditure and token consumption by **$37.3\%$**. The compute saved by early step pruning directly compensates for the overhead of the PRM model and synchronous pipeline stalls.
+Beam search with process verification achieves roughly equivalent wall-clock time (`{python} BoundedSearchTradeoffs.t_wall_p2_s_str` vs. `{python} BoundedSearchTradeoffs.t_wall_p1_s_str`) while cutting total FLOP expenditure and token consumption by **`{python} BoundedSearchTradeoffs.flop_savings_pct_str`**. The compute saved by early step pruning directly compensates for the overhead of the PRM model and synchronous pipeline stalls.
 :::
 
 ### Multicriteria stopping invariants
