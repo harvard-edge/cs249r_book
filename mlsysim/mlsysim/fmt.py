@@ -3155,6 +3155,26 @@ def fmt_torque_rate(quantity, *, unit=None, precision=None, commas=False):
         trim_trailing_zeros=auto_precision,
     )
 
+def fmt_torque_constant(quantity, *, unit=None, precision=None, commas=False):
+    """Format a motor torque constant for prose (N·m/A)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_torque_constant() requires a Pint Quantity.")
+    kt_dim = (1 * (ureg.newton * ureg.meter / ureg.ampere)).dimensionality
+    if (1 * quantity).dimensionality != kt_dim:
+        raise ValueError(f"fmt_torque_constant unit must have N·m/A dimensionality, got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.newton * ureg.meter / ureg.ampere)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        unit_label="N·m/A",
+        trim_trailing_zeros=auto_precision,
+    )
+
 def fmt_velocity(quantity, *, unit=None, precision=None, commas=False):
     """Format velocity/speed quantities for prose (m/s, km/h, mph)."""
     if not isinstance(quantity, ureg.Quantity):
