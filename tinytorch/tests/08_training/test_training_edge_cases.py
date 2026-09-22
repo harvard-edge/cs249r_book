@@ -17,7 +17,7 @@ from tinytorch.core.tensor import Tensor
 def training_source():
     path = Path(__file__).resolve().parents[2] / "src/08_training/08_training.py"
     module = types.ModuleType("training_source")
-    for cell in re.split(r"^# %%.*$", path.read_text(), flags=re.MULTILINE):
+    for cell in re.split(r"^# %%.*$", path.read_text(encoding="utf-8"), flags=re.MULTILINE):
         if re.search(r"^#\| exporti?\s*$", cell, re.MULTILINE):
             exec(compile(cell, str(path), "exec"), module.__dict__)
     return module

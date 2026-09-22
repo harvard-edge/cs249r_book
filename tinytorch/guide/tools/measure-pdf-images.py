@@ -155,7 +155,7 @@ class QmdRef:
 def locate_nth_mermaid_block(qmd_path: Path, n: int) -> int | None:
     """Return the 1-indexed line number where the Nth mermaid block starts."""
     try:
-        lines = qmd_path.read_text().splitlines()
+        lines = qmd_path.read_text(encoding="utf-8").splitlines()
     except Exception:
         return None
     count = 0
@@ -176,7 +176,7 @@ def build_qmd_index(site_root: Path) -> dict[str, list[QmdRef]]:
     ]
     for qmd in qmd_files:
         try:
-            lines = qmd.read_text().splitlines()
+            lines = qmd.read_text(encoding="utf-8").splitlines()
         except Exception:
             continue
         for lineno, line in enumerate(lines, start=1):

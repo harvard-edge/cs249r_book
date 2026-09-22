@@ -45,7 +45,7 @@ def _export_targets():
     """Map 'tinytorch.core.tensor' -> (1, '01_tensor') from each default_exp."""
     targets = {}
     for num, name, py in _module_files():
-        m = re.search(r"^#\|\s*default_exp\s+([\w.]+)", py.read_text(), re.M)
+        m = re.search(r"^#\|\s*default_exp\s+([\w.]+)", py.read_text(encoding="utf-8"), re.M)
         if m:
             targets[f"tinytorch.{m.group(1)}"] = (num, name)
     return targets
@@ -82,7 +82,7 @@ def test_documented_imports_resolve():
     """
     broken = []
     for num, name, py in MODULES:
-        for line in py.read_text().splitlines():
+        for line in py.read_text(encoding="utf-8").splitlines():
             m = re.match(r"\s*from (tinytorch\.[\w.]+) import (.+?)\s*(?:#.*)?$", line)
             if not m:
                 continue
@@ -110,7 +110,7 @@ def test_progressive_disclosure():
     """
     violations = []
     for num, name, py in MODULES:
-        for i, line in enumerate(py.read_text().splitlines(), 1):
+        for i, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
             m = re.match(r"\s*from (tinytorch\.[\w.]+) import ", line)
             if not m:
                 continue

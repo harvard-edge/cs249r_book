@@ -17,15 +17,16 @@ def curriculum(tmp_path, monkeypatch):
     source.write_text(
         '#| default_exp core.demo\n'
         'def test_unit_demo():\n    assert True\n'
-        'def test_module():\n    test_unit_demo()\n'
+        'def test_module():\n    test_unit_demo()\n',
+        encoding='utf-8',
     )
     notebook = tmp_path / 'modules/01_demo/demo.ipynb'
     notebook.parent.mkdir(parents=True)
     target = tmp_path / 'tinytorch/core/demo.py'
     target.parent.mkdir(parents=True)
-    target.write_text('value = "stale reference"\n')
+    target.write_text('value = "stale reference"\n', encoding='utf-8')
     # nbdev looks for its project settings relative to the working directory.
-    (tmp_path / 'pyproject.toml').write_text('[tool.nbdev]\nlib_name="tinytorch"\n')
+    (tmp_path / 'pyproject.toml').write_text('[tool.nbdev]\nlib_name="tinytorch"\n', encoding='utf-8')
     monkeypatch.chdir(tmp_path)
     command = ModuleWorkflowCommand(CLIConfig.from_project_root(tmp_path))
     command.console = Console(file=io.StringIO())
@@ -94,8 +95,8 @@ def test_valid_notebook_executes_tests_and_replaces_export(curriculum):
     assert command._run_inline_unit_tests('01_demo', False)['failed'] == 0
     assert command._complete_module_quiet('01', '01_demo', False, False) == 0
     assert command.get_progress_data()['completed_modules'] == ['01']
-    assert 'student implementation' in target.read_text()
-    assert 'stale reference' not in target.read_text()
+    assert 'student implementation' in target.read_text(encoding='utf-8')
+    assert 'stale reference' not in target.read_text(encoding='utf-8')
 
 
 def test_partial_export_exception_does_not_replace_existing_package(curriculum, monkeypatch):
@@ -105,7 +106,7 @@ def test_partial_export_exception_does_not_replace_existing_package(curriculum, 
     def fail_export(notebook_path, lib_path):
         produced = Path(lib_path) / 'core/demo.py'
         produced.parent.mkdir(parents=True)
-        produced.write_text('value = "incomplete"\n')
+        produced.write_text('value = "incomplete"\n', encoding='utf-8')
         raise RuntimeError('export interrupted')
     monkeypatch.setattr('nbdev.export.nb_export', fail_export)
     assert command.export_module('01_demo') == 1
