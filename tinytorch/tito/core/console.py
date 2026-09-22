@@ -38,7 +38,7 @@ def print_banner(compact: bool = False):
         banner_text.append("Tiny", style=Theme.BRAND_ACCENT)
         banner_text.append("🔥", style=Theme.BRAND_FLAME)
         banner_text.append("TORCH", style=Theme.BRAND_PRIMARY)
-        banner_text.append(": Don't import it. Build it.", style=Theme.DIM)
+        banner_text.append(": Don't just import Torch. Build it.", style=Theme.DIM)
         console.print(Panel(banner_text, style=Theme.BORDER_DEFAULT, padding=(1, 2)))
 
 def print_compact_banner():
@@ -49,7 +49,7 @@ def print_compact_banner():
     banner_text.append("Tiny", style=Theme.BRAND_ACCENT)
     banner_text.append("\n🔥", style=Theme.BRAND_FLAME)
     banner_text.append("TORCH", style=Theme.BRAND_PRIMARY)
-    banner_text.append(": Don't import it. Build it.", style=Theme.DIM)
+    banner_text.append(": Don't just import Torch. Build it.", style=Theme.DIM)
     console.print(Panel(banner_text, style=Theme.BORDER_DEFAULT, padding=(1, 2)))
 
 def print_ascii_logo(compact: bool = False):
@@ -104,7 +104,7 @@ def print_ascii_logo(compact: bool = False):
         logo_text.append("\n")
 
     # Add tagline with flame (aligned under TORCH)
-    logo_text.append("\n           🔥 Don't import it. Build it.", style=TAGLINE_COLOR)
+    logo_text.append("\n       🔥 Don't just import Torch. Build it.", style=TAGLINE_COLOR)
     logo_text.append("\n")
 
     # Combine logo and tagline
