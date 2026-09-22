@@ -1,0 +1,52 @@
+# Extending TinyTorch: The Systems Ecosystem {#sec-ecosystem}
+
+The core of TinyTorch—its tensor striding, autograd engine, and execution loop—is intentionally kept small. This minimalism is not a limitation; it is an architectural feature.
+
+In traditional machine learning education, students consume massive frameworks as black boxes. In TinyTorch, the framework is the foundation, and you are the architect. Because operations inherit from a clean `Function` base class and neural networks inherit from a clean `Module` base class, TinyTorch is explicitly designed to be extended.
+
+You do not need to rewrite the core engine to test a new systems theory. You only need to plug into it.
+
+To bridge the gap between our core curriculum and active machine learning systems research, we provide a suite of **Systems Extensions**. These are self-contained modules that students implement to solve cutting-edge engineering bottlenecks, extending TinyTorch far beyond its single-node, float32 origins.
+
+## Architectural Extensibility
+
+Before looking at the extensions, consider *why* they are possible. When you want to add a novel mathematical operation to PyTorch, you subclass `torch.autograd.Function`. In TinyTorch, you do the exact same thing:
+
+```python
+from tinytorch.core.tensor import Function
+
+class Swish(Function):
+    def forward(self, x):
+        self.save_for_backward(x)
+        return x * (1 / (1 + np.exp(-x)))
+
+    def backward(self, grad_output):
+        x, = self.saved_tensors
+        # ... compute and return local gradient ...
+```
+
+Because the autograd engine dynamically walks the graph via these `.backward()` methods, any new hardware trick or algorithmic optimization can be bolted onto the side of the framework without touching the core `Tensor` class.
+
+## The Systems Extensions
+
+Here are examples of extensions that have been implemented to allow students to tackle the real-world scale of modern machine learning.
+
+### 1. Activation Checkpointing (Memory Planners)
+**The Systems Problem:** Deep transformers crash with Out-Of-Memory (OOM) errors because the autograd tape must keep every forward activation pinned in RAM for the backward pass.
+**The Extension:** Students write a `checkpoint(module, x)` wrapper. Instead of saving activations, the wrapper discards them and mathematically re-evaluates the forward pass on the fly during the backward step. This trades a 33% compute penalty for exponential memory savings, exactly as production models do.
+
+### 2. Low-Rank Adaptation (LoRA)
+**The Systems Problem:** Fine-tuning a 10-billion parameter model requires updating 10-billion optimizer momentums, completely saturating GPU memory bandwidth.
+**The Extension:** Students subclass `Module` to create a `LoRALinear` layer. They freeze the primary weights (`requires_grad=False`) and inject two small, low-rank matrices ($A \times B$). By routing gradients only to the small matrices, they learn how parameter-efficient fine-tuning evades the memory wall.
+
+### 3. Mixed Precision Training (Loss Scaling)
+**The Systems Problem:** Training in `float16` halves memory bandwidth requirements, but small gradient values numerically underflow to exactly zero, destroying learning.
+**The Extension:** Students build a `LossScaler` class. They multiply the loss by a massive constant (e.g., $2^{16}$) before calling `.backward()`, ensuring the gradients survive the `float16` backward pass, and then unscale them right before the optimizer steps.
+
+### 4. Speculative Decoding
+**The Systems Problem:** Autoregressive generation is strictly memory-bandwidth bound, generating only one token per forward pass.
+**The Extension:** Students deploy two models simultaneously. A tiny "draft" model guesses 5 tokens into the future, and the large "target" model verifies all 5 tokens in a single parallel batch. If the draft was right, generation speeds up by 5x without losing mathematical exactness.
+
+## Building the Future
+
+We keep the core of TinyTorch deliberately constrained so that you have room to build on it. By implementing these extensions, you are not just learning how to use a machine learning framework—you are learning how to engineer the next one.
