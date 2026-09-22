@@ -703,7 +703,7 @@ VOL4_CHAPTERS = [
         'font': FONT_HELVETICA,
         'labels': [
             {'text': 'brain', 'pill': (240, 150), 'targ': (240, 320), 'border': '#1A4D3E', 'color': '#1A4D3E'},
-            {'text': 'causal boundary', 'pill': (890, 220), 'targ': (890, 560), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'causal boundary', 'pill': (890, 220), 'targ': (890, 455), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'nervous system', 'pill': (695, 285), 'targ': (695, 520), 'border': '#1A4D3E', 'color': '#1A4D3E'},
             {'text': 'body', 'pill': (1150, 170), 'targ': (1150, 320), 'border': '#1A4D3E', 'color': '#1A4D3E'},
             {'text': 'sensor feedback return', 'pill': (480, 700), 'targ': (480, 560), 'border': '#1A4D3E', 'color': '#1A4D3E'},
@@ -748,7 +748,7 @@ VOL4_CHAPTERS = [
             {'text': 'CBF reflex filter', 'pill': (420, 660), 'targ': (690, 372), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'shielded fieldbus ring', 'pill': (1180, 210), 'targ': (1050, 260), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'machined heatsink fins', 'pill': (1180, 440), 'targ': (850, 400), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': 'sensor feedback return', 'pill': (960, 720), 'targ': (750, 560), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'sensor feedback return', 'pill': (960, 720), 'targ': (780, 580), 'border': '#1C4E4F', 'color': '#1C4E4F'},
         ]
     },
     {
@@ -785,7 +785,7 @@ VOL4_CHAPTERS = [
         'labels': [
             {'text': 'optical mocap tower', 'pill': (200, 180), 'targ': (348, 275), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'retroreflective constellation', 'pill': (480, 80), 'targ': (618, 290), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'dynamometer baseplate', 'pill': (260, 640), 'targ': (570, 440), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'dynamometer baseplate', 'pill': (260, 640), 'targ': (620, 480), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'safety perimeter rail', 'pill': (190, 480), 'targ': (380, 480), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'confidence ledger cylinder', 'pill': (1160, 680), 'targ': (885, 545), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'tracking ray cone', 'pill': (1160, 240), 'targ': (850, 310), 'border': '#1C4E4F', 'color': '#1C4E4F'},
@@ -825,7 +825,7 @@ VOL4_CHAPTERS = [
             {'text': 'task token projection', 'pill': (740, 60), 'targ': (735, 120), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'kinematic reachability dome', 'pill': (200, 160), 'targ': (380, 180), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'spatial tolerance cylinder', 'pill': (240, 440), 'targ': (690, 380), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'aerospace bracket workpiece', 'pill': (320, 680), 'targ': (854, 329), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'aerospace bracket workpiece', 'pill': (320, 680), 'targ': (725, 470), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'countdown lease ring dial', 'pill': (1140, 160), 'targ': (765, 265), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'insertion affordance cone', 'pill': (1140, 360), 'targ': (886, 280), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'expiration tripwire', 'pill': (1140, 560), 'targ': (940, 500), 'border': '#9B2226', 'color': '#9B2226'},
@@ -906,7 +906,7 @@ VOL4_CHAPTERS = [
             {'text': 'evidence telemetry pipelines', 'pill': (280, 680), 'targ': (473, 549), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'GSN argument hierarchy', 'pill': (270, 200), 'targ': (691, 379), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'deployment authorization seal', 'pill': (722, 60), 'targ': (710, 175), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'certified envelope threshold', 'pill': (1220, 470), 'targ': (875, 410), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'certified envelope threshold', 'pill': (1220, 470), 'targ': (1065, 430), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'revocation interlock', 'pill': (1120, 680), 'targ': (888, 524), 'border': '#9B2226', 'color': '#9B2226'},
         ]
     },
@@ -1083,52 +1083,82 @@ def render_chapter(vol_name, ch):
     print(f"Generated [{vol_name}] {slug} -> {out_png}")
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate publication-quality labeled isometric blueprint chapter openers")
+    parser.add_argument('--vol1', action='store_true', help="Render Volume 1")
+    parser.add_argument('--vol2', action='store_true', help="Render Volume 2")
+    parser.add_argument('--vol3', action='store_true', help="Render Volume 3")
+    parser.add_argument('--vol4', action='store_true', help="Render Volume 4")
+    parser.add_argument('--all', action='store_true', help="Render all volumes")
+    args = parser.parse_args()
+
+    explicit = any([args.vol1, args.vol2, args.vol3, args.vol4, args.all])
+    if explicit:
+        run_vol1 = args.vol1 or args.all
+        run_vol2 = args.vol2 or args.all
+        run_vol3 = args.vol3 or args.all
+        run_vol4 = args.vol4 or args.all
+    else:
+        # Auto-detect existing volume directories
+        run_vol1 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol1', '01_introduction'))
+        run_vol2 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol2', '01_introduction'))
+        run_vol3 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol3', '07_checkpointing'))
+        run_vol4 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol4', '01_boundary'))
+
     print("=" * 70)
-    print("Pre-validating all configurations across Volumes 1, 2, 3, and 4...")
+    print("Pre-validating configurations...")
     print("=" * 70)
     
-    for ch in VOL1_CHAPTERS:
-        validate_chapter('vol1', ch)
-    print("✓ Volume 1 validation passed: 0 color words, 0 line crossings.")
-    
-    for ch in VOL2_CHAPTERS:
-        validate_chapter('vol2', ch)
-    print("✓ Volume 2 validation passed: 0 color words, 0 line crossings.")
-    
-    for ch in VOL3_CHAPTERS:
-        validate_chapter('vol3', ch)
-    print("✓ Volume 3 validation passed: 0 color words, 0 line crossings.")
-    
-    for ch in VOL4_CHAPTERS:
-        validate_chapter('vol4', ch)
-    print("✓ Volume 4 validation passed: 0 color words, 0 line crossings.")
-    
-    print("\n" + "=" * 70)
-    print("Rendering Volume 1 blueprints with 4x supersampling (2800x1600 print)...")
-    print("=" * 70)
-    for ch in VOL1_CHAPTERS:
-        render_chapter('vol1', ch)
+    if run_vol1:
+        for ch in VOL1_CHAPTERS:
+            validate_chapter('vol1', ch)
+        print("✓ Volume 1 validation passed: 0 color words, 0 line crossings.")
         
-    print("\n" + "=" * 70)
-    print("Rendering Volume 2 blueprints with 4x supersampling (2800x1600 print)...")
-    print("=" * 70)
-    for ch in VOL2_CHAPTERS:
-        render_chapter('vol2', ch)
+    if run_vol2:
+        for ch in VOL2_CHAPTERS:
+            validate_chapter('vol2', ch)
+        print("✓ Volume 2 validation passed: 0 color words, 0 line crossings.")
         
-    print("\n" + "=" * 70)
-    print("Rendering Volume 3 blueprints with 2x supersampling (1400x800)...")
-    print("=" * 70)
-    for ch in VOL3_CHAPTERS:
-        render_chapter('vol3', ch)
+    if run_vol3:
+        for ch in VOL3_CHAPTERS:
+            validate_chapter('vol3', ch)
+        print("✓ Volume 3 validation passed: 0 color words, 0 line crossings.")
         
-    print("\n" + "=" * 70)
-    print("Rendering Volume 4 blueprints with 2x supersampling (1400x800)...")
-    print("=" * 70)
-    for ch in VOL4_CHAPTERS:
-        render_chapter('vol4', ch)
+    if run_vol4:
+        for ch in VOL4_CHAPTERS:
+            validate_chapter('vol4', ch)
+        print("✓ Volume 4 validation passed: 0 color words, 0 line crossings.")
         
+    if run_vol1:
+        print("\n" + "=" * 70)
+        print("Rendering Volume 1 blueprints with 4x supersampling (2800x1600 print)...")
+        print("=" * 70)
+        for ch in VOL1_CHAPTERS:
+            render_chapter('vol1', ch)
+            
+    if run_vol2:
+        print("\n" + "=" * 70)
+        print("Rendering Volume 2 blueprints with 4x supersampling (2800x1600 print)...")
+        print("=" * 70)
+        for ch in VOL2_CHAPTERS:
+            render_chapter('vol2', ch)
+            
+    if run_vol3:
+        print("\n" + "=" * 70)
+        print("Rendering Volume 3 blueprints with 2x supersampling (1400x800)...")
+        print("=" * 70)
+        for ch in VOL3_CHAPTERS:
+            render_chapter('vol3', ch)
+            
+    if run_vol4:
+        print("\n" + "=" * 70)
+        print("Rendering Volume 4 blueprints with 2x supersampling (1400x800)...")
+        print("=" * 70)
+        for ch in VOL4_CHAPTERS:
+            render_chapter('vol4', ch)
+            
     print("\n" + "=" * 70)
-    print("All 68 chapter blueprints across 4 volumes successfully generated with 0 defects.")
+    print("Blueprint generation complete.")
     print("=" * 70)
 
 if __name__ == '__main__':
