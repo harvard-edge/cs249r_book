@@ -1,12 +1,12 @@
-# Runtime Orchestration Principles {.unnumbered}
+# Agent Runtime Principles {.unnumbered}
 
-Part III bounded what a single action may do. Part IV builds the operating system of the Stochastic Computer, the runtime that carries one trajectory across time, and so builds closure for the horizon exposure of H·S·A. Over many steps and hours of wall-clock time, errors compound, tools time out, processes crash, and the environment drifts underneath the agent. A long horizon also reshapes the other two exposures. It turns state into a durability problem, because what the trajectory knows must survive the process that holds it, and it turns authority into an ordering problem, because some effects cannot be undone once later steps depend on them. Part IV answers both through one object, the record the runtime keeps for each trajectory.
+Part III bounded what a single action may do. A trajectory strings hundreds of those actions across minutes, hours, or days, and the longer it runs, the more it meets failures that no single action shows: a loop that stays inside every per-call limit while advancing nothing, a tool that never answers, a host that dies at turn forty, a step that fails after earlier steps have already changed the world. Part IV builds the runtime that carries one trajectory across that horizon, and so builds closure for the horizon exposure of H·S·A. A long horizon also reshapes the other two exposures. It turns state into a durability problem, because what the trajectory knows must survive the process that holds it, and it turns authority into an ordering problem, because some effects cannot be undone once later steps depend on them. The part ends by measuring the single-agent system it has built, because nothing should be trained or scaled before it can be shown to work.
 
 ::: {#pri-vol3-trajectory-encapsulation .callout-principle title="Trajectory-level encapsulation"}
 
-**Invariant**: The unit the runtime schedules, budgets, and protects is the whole trajectory, not the model call. Its identity, context handles, cache pointers, tool grants, and resource use live in one Agent Control Block that the runtime owns, and the trajectory advances only through state transitions that the runtime's guards permit.
+**Invariant**: The unit the runtime schedules, budgets, and protects is the whole trajectory, not the model call. Its identity, state, budgets and measured spend, grants and leases, and pending work live in one trajectory record that the runtime owns and the model never writes, and the trajectory advances only through state transitions that the runtime's guards permit.
 
-**Implication**: Model output never changes lifecycle state directly. The runtime rejects illegal transitions, such as a late tool reply for a canceled trajectory or a tool call proposed while the trajectory waits for approval, and it releases accelerator slots and memory whenever the trajectory waits on a tool or a person.
+**Implication**: Model output never changes lifecycle state directly. The runtime rejects illegal transitions, such as a late tool reply for a canceled trajectory or a tool call dispatched while the trajectory waits for approval, and a trajectory that waits on a tool or a person holds only its record, so its serving-side state can be reclaimed (@sec-vol3-kvcache-swapping).
 
 :::
 
@@ -16,7 +16,7 @@ Owning the record gives the runtime the right to stop a trajectory. It still nee
 
 **Invariant**: A trajectory cannot be relied on to yield, to stop, or to notice that it has stopped making progress. A looping model can stay live, well formed, and inside every per-call limit while advancing nothing.
 
-**Implication**: The runtime must hold control outside the model. It delivers operator and budget signals at turn boundaries, with only a non-maskable kill allowed to break a turn. It bounds every decode with token and wall-clock ceilings and the whole trajectory with a multi-dimensional budget, and it judges progress from the environment's state rather than from heartbeats or the model's own reports.
+**Implication**: The runtime must hold control outside the model. It applies operator and budget actions at turn boundaries, allowing only a kill to break a turn. It bounds every model call with output and deadline ceilings and the whole trajectory with a multi-dimensional budget, and it judges progress from the environment's state rather than from heartbeats or the model's own reports.
 
 :::
 
@@ -24,20 +24,30 @@ A record held only in memory dies with the process that holds it.
 
 ::: {#pri-vol3-intent-before-effect .callout-principle title="Intent before effect"}
 
-**Invariant**: A trajectory's authoritative state is its append-only log of what the runtime proposed, authorized, dispatched, and observed. The in-memory Agent Control Block is a projection of that log, and re-invoking the model reproduces none of it.
+**Invariant**: A trajectory's authoritative state is its append-only log of what the runtime proposed, authorized, dispatched, and observed. The live trajectory record is a projection of that log, and re-invoking the model reproduces none of it.
 
-**Implication**: No external effect may leave the host before the record that authorizes it is durable. Recovery replays the log from the latest snapshot without calling the model or the tools, and an intent with no recorded outcome stays in doubt until it is settled, never re-dispatched on the assumption that it failed.
+**Implication**: No external effect may leave the host before the record that authorizes it is durable. Recovery rebuilds the trajectory from its latest checkpoint and the log after it without calling the model or the tools, and an intent with no recorded outcome stays in doubt until it is settled, never re-dispatched on the assumption that it failed.
 
 :::
 
 The log makes the runtime's own state recoverable. The environment's state is another matter.
 
-::: {#pri-vol3-reversibility-sagas .callout-principle title="The pivot boundary and compensating Sagas"}
+::: {#pri-vol3-reversibility-sagas .callout-principle title="The pivot boundary and compensating sagas"}
 
-**Invariant**: Every action is invertible, compensable, or irreversible. An invertible action, such as a write confined to the sandbox, can be undone exactly by rolling back to a snapshot. A compensable action on a shared external system can be answered by another action that restores the environment's invariants but not its history. After an irreversible action the runtime can only complete forward.
+**Invariant**: Every action is invertible, compensable, or irreversible. An invertible action, such as a write confined to the sandbox, can be undone exactly by restoring a workspace snapshot. A compensable action on a shared external system can be answered by another action that restores the environment's invariants but not its history. After an irreversible action the runtime can only complete forward.
 
-**Implication**: The supervisory runtime must register a compensating action for each compensable step before dispatching it, allow at most one irreversible pivot action per trajectory and order it after all compensable work, and gate the pivot with deterministic checks and, where policy requires, a human approval. Once the pivot commits, recovery switches from compensation to idempotent retry or escalation.
+**Implication**: The runtime must register a compensating action for each compensable step before dispatching it, allow at most one irreversible pivot action per trajectory and order it after all compensable work, and gate the pivot with deterministic checks and, where policy requires, a human approval. Once the pivot commits, recovery switches from compensation to idempotent retry or escalation.
 
 :::
 
-@Sec-vol3-checkpointing gives each trajectory an Agent Control Block and a supervisor that can pause, escrow, budget, and stop it without the model's cooperation. @Sec-vol3-interrupts derives that block from an append-only log so that it survives a crash. @Sec-vol3-scheduling repairs the world around it when a multi-step task fails partway. With Part IV in place the live loop is complete, and every closure it provides holds whatever the model's weights happen to be. Part V turns to those weights.
+With those four principles the runtime is complete for one agent. None of them says whether the agent does its job, and a stochastic agent cannot be judged from one run.
+
+::: {#pri-vol3-release-evidence .callout-principle title="Causal and statistical release evidence"}
+
+**Invariant**: Activity signals such as exit codes and status responses do not show that a stochastic system works. Evidence that it works is a verified change in environment state, measured over many independent tasks with stated uncertainty, and joined by one causal trace to the model calls, tool effects, and authority grants that produced it.
+
+**Implication**: The runtime must carry trace context across every process, sandbox, and agent boundary, retain every failing trajectory, and diagnose failures by replaying recorded observations rather than by expecting regenerated model output to match. A change reaches production only after staged gates show, at a stated confidence, that it is no worse than the version it replaces.
+
+:::
+
+The four chapters of Part IV build these principles in order, each on the one before. @Sec-vol3-agent-harness gives each trajectory a record and a harness that can pause, approve, budget, and stop it without the model's cooperation, which is trajectory-level encapsulation and the preemption half of the second principle. @Sec-vol3-durable-execution makes that record a projection of an append-only log, so that a trajectory survives a crash, resumes on another worker, and can be replayed for debugging. @Sec-vol3-failure-recovery uses the log to repair the world around a trajectory that fails partway, orders its one irreversible action last, and adds the progress half of the second principle. @Sec-vol3-evaluation then measures the finished single-agent system, defining the accepted task and the evidence a release requires. With Part IV in place the live loop is complete and measured, and every closure it provides holds whatever the model's weights happen to be. Part V turns to those weights, and the verified trajectories and release gates of evaluation supply its training signal.

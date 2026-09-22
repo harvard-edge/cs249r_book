@@ -1,32 +1,32 @@
-# Memory Hierarchy Principles {.unnumbered}
+# Agent Memory Principles {.unnumbered}
 
-Part I priced a single proposal. A trajectory issues hundreds of them, and each one must be told what has already happened. Part II builds the memory of the Stochastic Computer, which carries that history from step to step, and so builds closure for the state exposure of H·S·A. State in an agentic system fails in three ways. It overflows the context, it goes stale when the environment changes underneath it, and it contradicts itself when two copies disagree. The part follows one piece of state from the host to the accelerator and out to durable storage. These places are not levels of one cache. Each holds a different kind of object under a different owner, and the principles below say what each may hold and when its contents stop being true.
+Part I priced a single model call and asked when buying more proposals raises the evidence behind a decision. A trajectory makes that call dozens or hundreds of times, and the model keeps nothing between calls, so everything the next call knows about the task is state that the runtime carries and hands back to it. Part II closes the State exposure of H·S·A. Carried state fails in three ways. It overflows what a call can use, it goes stale when the source it describes changes underneath it, and it contradicts itself when two copies disagree. The part treats state at two of its levels. Within a session ($S_1$), state is the context each call reads and the attention state the serving system computes from it. Beyond the session ($S_3$), it is the sources, logs, indexes, and notes that persist and must be retrieved to matter. The sandboxed workspace between them ($S_2$) arrives with Part III, which gives the agent the authority to write it. These places are not levels of one cache. Each holds a different kind of object under a different owner, and the principles below say what each may hold and when its contents stop being true.
 
 ::: {#pri-vol3-attention-working-set .callout-principle title="Context is a selected working set"}
 
-**Invariant**: A model reliably uses far less context than its nominal window admits, and task success peaks at an effective working-set size, then falls as further tokens dilute attention and lengthen prefill. The tokens staged for one invocation are therefore a selection from the trajectory's history, not the history itself. The full treatment appears in @sec-vol3-working-sets-physics.
+**Invariant**: A model reliably uses far less context than its nominal window admits, and task success peaks at an effective working-set size, then falls as further tokens dilute attention and lengthen prefill. The tokens staged for one call are therefore a selection from the trajectory's history, not the history itself. The full treatment appears in @sec-vol3-context-engineering-physics.
 
-**Implication**: The host runtime must choose, order, and bound what each invocation sees against an effective size measured on its own workload. When it compacts history, it must keep verbatim the identifiers, paths, and failing assertions that later actions depend on.
+**Implication**: The runtime must choose, order, and bound what each call sees against an effective size measured on its own workload. When it compacts history, it must keep verbatim the identifiers, paths, and failing assertions that later actions depend on.
 
 :::
 
-What the runtime selects, the serving engine must turn into attention state and hold in accelerator memory.
+What the runtime selects, the serving system must turn into attention state and hold in accelerator memory.
 
 ::: {#pri-vol3-prefix-coherence .callout-principle title="Attention state is derived from the token prefix"}
 
-**Invariant**: The key-value cache for a sequence is a function of its exact token prefix. It can be reused only up to the first token that differs, shared only among sequences whose prefixes are identical, and rebuilt from the tokens at any time, so losing it costs computation and never task knowledge.
+**Invariant**: The key-value cache for a sequence is a function of its exact token prefix. It can be reused only up to the first token that differs, shared only among sequences whose prefixes are identical, and rebuilt from the tokens at any time, so losing it costs computation and never task knowledge. The full treatment appears in @sec-vol3-kvcache-radix-tree.
 
-**Implication**: The serving engine should hold attention state in fixed-size pages, so that branching trajectories share prefix pages and a paused trajectory's state can be kept, offloaded, or dropped by comparing its wait time with the cost of reload and recompute. The host runtime should stage tokens in order of ascending volatility and route each turn to where its prefix is already cached.
+**Implication**: The harness should stage tokens in order of ascending volatility and keep history append-only between compactions, so that each turn reuses the previous turn's work. The serving system should hold attention state in fixed-size blocks, so that branching trajectories share prefix blocks and a paused trajectory's state can be kept, offloaded, or dropped by comparing its wait time with the cost of reload and recompute.
 
 :::
 
-What must outlive a session lives outside the model entirely and returns to it only when the runtime retrieves it.
+What must outlive a session lives outside the model entirely and returns to it only through retrieval.
 
 ::: {#pri-vol3-retrieval-contract .callout-principle title="Retrieval is a contract, not recall"}
 
-**Invariant**: Durable information re-enters the model only when the runtime retrieves it and stages it into context, and a retrieval score measures similarity to the query, not whether a record is current, authoritative, or permitted.
+**Invariant**: Durable information re-enters the model only when it is retrieved and staged into context, and a retrieval score measures similarity to the query, not whether a record is current, authoritative, or permitted. The full treatment appears in @sec-vol3-persistent-governance.
 
-**Implication**: Every read from durable storage must pass through a typed contract that bounds scope, freshness, candidate count, and latency. The runtime chooses lexical, dense, or graph retrieval by the information need, fuses their rankings, and checks each candidate's version and provenance against its source before staging it.
+**Implication**: Every read from durable storage, whether the runtime pre-stages it or the model requests it through a search tool, must pass through a typed contract that bounds scope, freshness, candidate count, and latency. The runtime chooses exact search, lexical, dense, or graph retrieval by the information need, and checks each candidate's version and provenance against its source before staging it.
 
 :::
 
@@ -34,10 +34,10 @@ The three places where state lives share one rule about which copy is true.
 
 ::: {#pri-vol3-source-authority .callout-principle title="Authority stays with the source"}
 
-**Invariant**: Only source artifacts, such as the filesystem, the version-control tree, and the database, are authoritative. A staged observation, a compacted summary, an index entry, and the attention state computed from any of them are derived views that become false when their source is written, and the model cannot tell when that has happened.
+**Invariant**: Only source artifacts, such as the filesystem, the version-control tree, and the database, are authoritative. A staged observation, a compacted summary, an index entry, a note the agent wrote, and the attention state computed from any of them are derived views that become false when their source is written, and the model cannot tell when that has happened. The full treatment appears in @sec-vol3-context-engineering-context-rot for the prompt and in @sec-vol3-persistent-invalidation for durable stores.
 
-**Implication**: Every mutating action must invalidate each derived view that read the mutated source before the next invocation, and freshness is judged by version rather than by age. Each place resolves invalidation at its own cost, by marking, refreshing, or removing stale entries in the prompt and by filtering stale records at read time in an index.
+**Implication**: Every mutating action must invalidate each derived view that read the mutated source before the next call, and freshness is judged by version rather than by age. Each place resolves invalidation at its own cost, by marking, refreshing, or removing stale entries in the prompt, by filtering stale records at read time in an index, and by flagging agent-written notes for revalidation.
 
 :::
 
-@Sec-vol3-working-sets decides which tokens each invocation sees. @Sec-vol3-virtual-memory stores the attention state those tokens produce and shares, pages, or drops it under finite accelerator memory. @Sec-vol3-episodic-memory keeps what must outlive a session and governs how it returns to context. A trajectory that remembers everything it needs still cannot change anything outside the model, and giving it that power safely is the work of Part III.
+@Sec-vol3-context-engineering decides which tokens each call sees and keeps them bounded, ordered, and current as the horizon grows. @Sec-vol3-kv-cache follows those tokens into the serving system and prices holding their attention state across the turns, forks, and tool waits of a trajectory. @Sec-vol3-long-term-memory decides what outlives the session, how it returns to context, and what the agent may write back. A trajectory that remembers everything it needs still cannot change anything outside the model, and giving it that power safely is the work of Part III.

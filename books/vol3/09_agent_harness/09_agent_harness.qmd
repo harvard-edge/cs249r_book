@@ -1,0 +1,838 @@
+# The Agent Harness {#sec-vol3-agent-harness}
+
+::: {layout-narrow}
+::: {.column-margin}
+
+\chapterminitoc
+
+:::
+
+::: {.content-visible when-format="pdf"}
+\noindent
+![](images/png/cover_checkpointing_blueprint_labeled_print.png){fig-alt="Blueprint illustration for the agent harness chapter."}
+:::
+
+::: {.content-visible unless-format="pdf"}
+![](images/webp/cover_checkpointing_blueprint_labeled.webp){fig-alt="Blueprint illustration for the agent harness chapter."}
+:::
+
+:::
+
+## Purpose {.unnumbered .unlisted}
+
+\begin{marginfigure}
+\mlagentstack{0}{0}{100}{0}{0}{0}
+\end{marginfigure}
+
+_Why does an agent loop that works for five turns fail when it is left to run for five hundred?_
+
+A prototype agent is a loop around a model call, and for a short task the loop is enough. Left to run for hours, the same loop meets events it has no way to handle. A tool hangs and holds the whole trajectory with it. The model keeps proposing retries that are each well formed and none of which changes anything, so the bill grows while the task stands still. An operator needs to stop the run, but the loop listens only for the model's own signal that it is finished. A proposal to delete production data arrives and runs at once, because nothing stands between the proposal and the effect. All four failures share one cause. The only record of what the trajectory is doing, what it has spent, and what it is waiting for lives inside the loop and the model's context, where nothing outside can read or change it. The harness moves that record outside the model and uses it to pause, approve, bound, and stop a trajectory without asking the model to cooperate. It is the runtime's first closure for the horizon exposure of H·S·A, since every added turn is another chance to loop, stall, or overspend, and it is also where the authority exposure meets its hardest case, the irreversible action that no sandbox can undo.
+
+::: {.content-visible when-format="pdf"}
+
+\newpage
+
+:::
+
+::: {.callout-learning-objectives}
+
+- Explain why a prototype agent loop cannot pause, bound, or stop a trajectory without the model's cooperation
+- Design a trajectory record that keeps status, budgets, grants, and pending work outside the model's context
+- Construct a closed trajectory state machine whose guards reject late tool results and illegal resumptions
+- Apply cancel, pause, resume, and kill at turn boundaries using stop reasons and streaming cancellation
+- Design an approval gate for irreversible tool calls with an expiry, a precondition re-check, and a refusal observation
+- Calculate a trajectory's spend against a multi-dimensional budget and select a steer, restrict, and halt ladder
+- Evaluate budget ceilings against measured cost-vs.-success curves rather than fixed rules of thumb
+
+:::
+
+## From a While Loop to a Harness {#sec-vol3-controlplane-need}
+
+::: {.column-margin}
+![](images/svg/hsa_locator_h.svg){width="100%" fig-alt="H·S·A locator triad with the Horizon axis highlighted."}
+
+*The horizon exposure, closed by a harness that keeps control outside the model.*
+:::
+
+Consider one trajectory on a shared node, forty turns into a task it was expected to finish in five. Within the same minute, four events arrive. An operator wants to pause it for inspection, an interactive task from another tenant is waiting for the same model rate limit, its next proposal would drop a production table, and it has spent most of its budget without passing a test. The agent loop of @sec-vol3-intro-trajectory-engine, written as a `while` loop around a model call, can act on none of these events. Its only exit is the stop reason with which the model ends a reply (@sec-vol3-foundation-model-contract). The trajectory's phase, spending, pending tool calls, and permissions exist nowhere except in the message list and the interpreter's stack. If the process dies, the trajectory dies with it, and any process it started in its sandbox keeps running with no one to collect it.
+
+Each of the four events asks for something the model cannot supply. Pausing needs a place outside the model where a request to stop can land and be honored at a safe moment. Yielding to the interactive tenant needs a scheduler that can see which trajectories are waiting and which are running. Holding the table drop needs a gate between the proposal and the tool. Stopping the unproductive spend needs a meter the model can neither read nor reset. Invariant closure (principle \ref{pri-invariant-closure}) already says where such bounds belong: in the runtime, below the model, enforced whatever the model proposes. Part II applied that rule to what the next call sees, and Part III applied it to what a single action may touch (@sec-vol3-tool-calling, @sec-vol3-sandboxes). Part IV applies it to the loop itself, and the component that carries it is the harness.
+
+::: {#dfn-agent-harness .callout-definition title="Agent harness"}
+
+***Agent harness***\index{Agent harness!definition} is the runtime component that owns the agent loop for one trajectory, assembling each model call, interpreting the reply, deciding whether and when each proposed tool call is dispatched, and keeping the record through which anything outside the loop can inspect, pause, bound, or stop the trajectory.
+
+1.  **Significance**: Every guarantee that must hold across turns (a turn cap, a dollar ceiling, an approval before an irreversible call, a clean stop on request) is enforced here or nowhere, because the model sees only its context and cannot be relied on to count, yield, or stop.
+2.  **Distinction**: The tool layer decides whether one call is valid, authorized, and settled, and the sandbox bounds what that call can reach; the harness decides when calls happen at all, in what order, and whether the trajectory continues.
+3.  **Common pitfall**: Treating the harness as glue code around the model, so that status, spend, and pending work live in local variables and prompt text that no scheduler, operator, or recovery path can read.
+
+:::
+
+@Fig-vol3-controlplane-arch contrasts the two designs. In panel (a), the prototype loop calls the model, runs whatever tool call comes back, and appends the result, so nothing outside the loop can intervene and nothing survives the process. In panel (b), the same loop runs inside a harness. The model still reads a context and returns a proposal, but the proposal goes to the harness, which consults a record it owns before anything happens. Granted calls cross into the tool and sandbox layers built in Part III, and observations come back through the harness before they reach the next context.
+
+::: {#fig-vol3-controlplane-arch fig-env="figure" fig-pos="htb" fig-cap="**The Prototype Loop vs. the Agent Harness**: Panel (a) shows the prototype agent loop, in which the model's reply is run directly and all trajectory state lives in the message list, so the loop cannot be stopped from outside, has no ceiling on spend, and dispatches irreversible calls at once. Panel (b) wraps the same loop in a harness that keeps a trajectory record, guards state transitions, applies control actions and approval gates, and enforces budgets, while the model proposes and the tool and sandbox layers execute only granted calls." fig-alt="Two stacked panels. The top panel shows a four-line while loop that calls a model, breaks on end_turn, runs the tool call, and appends the result, beside three boxes listing what the loop cannot do. The bottom panel shows three boxes connected by paired arrows: a model box, a harness box containing trajectory record, guarded state transitions, control actions and approval gates, and budgets and ceilings, and a tools and sandbox box."}
+![](images/svg/fig-vol3-controlplane-arch.svg)
+:::
+
+One turn of a harness makes the division of labor concrete. @Lst-vol3-harness-turn shows the decisions the harness makes around a single model call. Before calling the model it checks for pending control requests and for an exhausted budget. It calls the model with a ceiling on output tokens and a deadline. It charges the call from the provider's usage report, never from the model's own account. Then it branches on the stop reason. A reply that ends the turn goes to a completion check, a truncated reply is never dispatched, and a reply containing tool calls either waits at an approval gate or is dispatched through the tool layer.
+
+::: {#lst-vol3-harness-turn lst-cap="**One Harness Turn**: The harness checks control requests and budgets, calls the model under per-call ceilings, charges measured usage, and branches on the stop reason before any tool call is dispatched."}
+```python
+def run_turn(rec: TrajectoryRecord) -> None:
+    if rec.pending_control:                  # cancel, pause, kill
+        return apply_control(rec)            # applied at a turn boundary
+    if budget_exhausted(rec):
+        return finalize(rec, reason="BUDGET_EXCEEDED")
+
+    transition(rec, "CALLING_MODEL")
+    reply = call_model(rec.context(),
+                       max_tokens=rec.limits.max_output_tokens,
+                       deadline=rec.limits.call_deadline)
+    charge(rec, reply.usage)                 # metered, not self-reported
+
+    if reply.stop_reason == "end_turn":
+        return finalize(rec, reason="MODEL_ENDED")   # completion check
+    if reply.stop_reason == "max_tokens":
+        return observe(rec, truncation_notice(reply))  # never dispatched
+    calls = reply.tool_calls
+    if not calls:                            # refusal, stop sequence, text
+        return observe(rec, reply)           # handled by policy, then READY
+    if any(needs_approval(c, rec) for c in calls):
+        return hold_for_approval(rec, calls)
+    for c in calls:
+        dispatch(rec, c)                     # validated, granted, keyed
+    transition(rec, "WAITING_TOOL")
+```
+:::
+
+Every line of the listing reads or writes `rec`, and the rest of the chapter follows those reads and writes in order. The record itself comes first, because the harness cannot enforce anything about a trajectory it cannot describe. The states and the guarded `transition` function come next, then the control actions and stop reasons that drive them, the waits on tools and on people, the scheduler that chooses which ready trajectory runs, and finally the budgets behind `charge` and `budget_exhausted`.
+
+The profound performance divergence between an unadorned string-concatenating while loop and an architected agent harness is not merely theoretical; it is empirically measurable across complex reasoning environments. As demonstrated in @fig-vol3-harness-sensitivity, benchmarking the exact same foundation model policy on the ARC-AGI interactive reasoning benchmark [@chollet2019measure] reveals the **Harness Sensitivity Law**. Under a standard while-loop ReAct scaffold [@yao2023react] that passes unstructured textual frames and unmanaged scratchpad notes, the model solves only 35.2 percent to 62.7 percent of tasks across search budgets. In contrast, wrapping the identical neural weights in a stateful Provider Adapter Harness—which maintains native key-value cache prefix trees, enforces schema-validated state frames, and decouples tool execution from memory stranding [@yang2024sweagent]—catapults task accuracy to 99.95 percent. This 37.24 percentage-point capability leap proves that an agent's real-world competence and operational efficiency are bounded by the architectural fidelity of its harness state machine, rather than neural parameter scaling alone.
+
+::: {#fig-vol3-harness-sensitivity fig-env="figure" fig-pos="htb" fig-cap="**The Harness Sensitivity Frontier**: Empirical solve rate for identical foundation model weights across harness architectures on the ARC-AGI interactive reasoning benchmark [@chollet2019measure]. Transitioning from an ephemeral while-loop ReAct scaffold [@yao2023react] to a native stateful adapter harness yields a 37.24 percentage-point capability gain (from 62.7 percent to 99.95 percent), demonstrating that runtime harness state machines dominate raw parameter scaling." fig-alt="Bar chart visualizing the Harness Sensitivity Frontier. The graph plots ARC-AGI benchmark solve rates across six configurations, rising from 35.2 percent, 54.8 percent, and 62.7 percent under while-loop scaffolds to 98.4 percent, 98.5 percent, and 99.95 percent under stateful adapter harnesses, highlighted by a red arrow marking a 37.24 percentage-point leap."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE HARNESS SENSITIVITY FRONTIER (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-harness-sensitivity—harness architecture vs. while loops
+# │
+# │ Goal: Contrast interactive reasoning benchmark solve rates across scaffolds.
+# │ Show: +37.24 percentage-point solve rate gain when transitioning from
+# │       ephemeral while loops to stateful agent harnesses.
+# │ How: Single-panel bar chart with category groupings and callout annotation.
+# └─────────────────────────────────────────────────────────────────────────────
+import sys
+from pathlib import Path
+
+for p in [Path(".").resolve(), Path("../..").resolve(), Path("../../..").resolve()]:
+    if (p / "binder").exists():
+        sys.path.insert(0, str(p))
+        break
+
+import matplotlib.pyplot as plt
+import numpy as np
+from binder.tools.figures import style as book_style
+
+book_style.set_book_style()
+
+fig, ax = plt.subplots(1, 1, figsize=(7.2, 4.4))
+
+configs = [
+    "ReAct\n(Zero Search)",
+    "ReAct\n(High Search)",
+    "ReAct\n(Max Search)",
+    "Adapter\n(Medium)",
+    "Adapter\n(Max Search)",
+    "Adapter\n(High SOTA)",
+]
+scores = [35.18, 54.82, 62.71, 98.44, 98.55, 99.95]
+bar_colors = ["#94A3B8", "#D97706", "#D97706", "#0284C7", "#0284C7", "#7C3AED"]
+
+bars = ax.bar(range(len(configs)), scores, color=bar_colors, edgecolor="#0F172A", linewidth=0.9, width=0.54, zorder=3)
+ax.set_ylim(0, 122)
+ax.set_xticks(range(len(configs)))
+ax.set_xticklabels(configs, fontsize=8.0, fontweight="bold")
+ax.set_ylabel("ARC-AGI benchmark solve rate (%)", fontsize=9.0, fontweight="bold")
+ax.grid(axis="y", linestyle="--", linewidth=0.5, color="#CBD5E1", alpha=0.7, zorder=1)
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+for bar, score in zip(bars, scores):
+    yval = bar.get_height()
+    score_txt = f"{score:.2f}%" if score > 99.0 else f"{score:.1f}%"
+    ax.text(bar.get_x() + bar.get_width() / 2.0, yval + 2.5, score_txt, ha="center", va="bottom", fontsize=7.6, fontweight="bold")
+
+ax.annotate(
+    "+37.24% Solve Rate Leap",
+    xy=(2.28, 63.5),
+    xytext=(0.45, 92),
+    arrowprops=dict(arrowstyle="->", color="#DC2626", lw=1.5),
+    fontsize=8.0,
+    fontweight="bold",
+    color="#B91C1C",
+    bbox=dict(boxstyle="round,pad=0.3", fc="#FEF2F2", ec="#FECACA", lw=0.8),
+    zorder=10,
+)
+
+ax.plot([-0.25, 2.25], [-14, -14], color="#64748B", linewidth=1.2, clip_on=False)
+ax.text(1.0, -18, "Ephemeral While Loops", ha="center", fontsize=7.5, fontweight="bold", color="#64748B", clip_on=False)
+
+ax.plot([2.75, 5.25], [-14, -14], color="#7C3AED", linewidth=1.2, clip_on=False)
+ax.text(4.0, -18, "Stateful Agent Harnesses", ha="center", fontsize=7.5, fontweight="bold", color="#7C3AED", clip_on=False)
+
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+:::
+
+This empirical divergence illustrates why the harness state machine is a first-class systems primitive. An unmanaged while loop degrades on complex reasoning tasks due to three compounding failure modes: transcript bloat ($O(T^2)$ token re-transmissions that evict prefix caches), unvalidated schema drift (allowing hallucinated arguments to execute silently), and lack of transaction rollback (causing transient environment faults to permanently poison the trajectory context). By contrast, an architected harness enforces invariant closure below the model policy.
+
+The architectural mechanisms underlying this performance and cost divergence are summarized in @tbl-vol3-harness-scaffold-comparison. While an unadorned while-loop scaffold re-transmits growing context strings and maintains unmanaged tool executions, an architected agent harness manages memory, state representation, and execution invariants through deterministic systems primitives.
+
+| Systems Dimension        | Ephemeral While-Loop Scaffold                                | Stateful Provider Adapter Harness                          |
+|:-------------------------|:-------------------------------------------------------------|:-----------------------------------------------------------|
+| **Context Management**   | Naive string re-send ($O(T^2)$ token bloat)                  | Native key-value cache prefix reuse (shared prompt blocks) |
+| **State Representation** | Unstructured, free-form scratchpad text                      | Typed Trajectory Record (Agent Control Block)              |
+| **Tool Suspension**      | Synchronous blocking remote call (accelerator memory pinned) | Cooperative asynchronous yielding and eviction             |
+| **Error Recovery**       | Process abort on fatal execution fault                       | Deterministic checkpoint rollback and repair               |
+| **Action Invariants**    | Unchecked tool proposal dispatch                             | Pre-flight capability and schema validation                |
+: **Scaffold versus Harness Systems Comparison**: Architectural mechanisms distinguishing ephemeral while loops from stateful agent harnesses. {#tbl-vol3-harness-scaffold-comparison}
+
+## The Trajectory Record {#sec-vol3-controlplane-acb}
+
+A node runs five hundred trajectories, and an operator needs to know which of them are waiting on a person, which have spent more than 90 percent of their budget, and which still hold a sandbox. The transcripts cannot answer quickly, because a transcript records what was said, not what the trajectory holds, owes, or is waiting for. The same gap appears inside the harness on every turn. When a tool result arrives, the harness must know which calls are outstanding before it accepts the result, and when a cancel arrives, it must know which jobs and leases to release. The harness therefore keeps one small structured record per trajectory, and every mechanism in this chapter works through it.
+
+::: {#dfn-trajectory-record .callout-definition title="Trajectory record"}
+
+***Trajectory record***\index{Trajectory record!definition} is the per-trajectory control state that the harness owns and the model never writes: the trajectory's identity, current state, per-call limits, budgets and measured spend, grants and leases, pending work, and pointers to its context, plan, log, and workspace.
+
+1.  **Significance**: It makes the whole trajectory, not the individual model call, the unit that can be scheduled, budgeted, paused, approved, and stopped, and it lets those operations run in time proportional to the number of trajectories rather than the length of their transcripts.
+2.  **Distinction**: The transcript is what the model reads; the record is what the harness reads. The durable log of @sec-vol3-durable-execution is the history from which the record can be rebuilt; the record is the live projection the harness consults on every turn.
+3.  **Common pitfall**: Storing control state in the prompt (for example, "you have used 40 of 50 turns") or letting the model's own claims update it, which turns every bound into a request the model may ignore.
+
+:::
+
+@Tbl-vol3-acb-schema groups the record's fields by the job each group lets the harness do. Most groups belong to mechanisms owned elsewhere in the book; the record is where the harness keeps its handle on them.
+
+| Field group           | Contents                                                                                                                              | What it lets the harness do                                                             |
+|:----------------------|:--------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------|
+| **Identity**          | Trajectory ID, parent ID, tenant, task contract (@sec-vol3-intro-task-contract)                                                       | Route control requests, charge the right tenant, link a retry or subagent to its origin |
+| **Status**            | Current state, exit reason, turn count                                                                                                | Answer "what is this trajectory doing" without reading its transcript                   |
+| **Per-call limits**   | Model version, sampling parameters, maximum output tokens, call deadline (@sec-vol3-foundation-model-contract)                        | Bound and reproduce each model call                                                     |
+| **Budgets and spend** | Ceilings on turns, tokens, wall-clock time, and dollars; measured use of each                                                         | Enforce ceilings the model cannot see or reset                                          |
+| **Grants and leases** | Tool grants (@sec-vol3-tool-calling-mcp), workspace lease (@sec-vol3-sandboxes-cow), credential handle                                | Narrow authority mid-trajectory and release everything on exit                          |
+| **Pending work**      | Outstanding tool call IDs and deadlines, job handles (@sec-vol3-tool-calling-async), held approval, pending control request           | Accept only matching results and cancel exactly what is still open                      |
+| **Pointers**          | Context store (@sec-vol3-context-engineering), plan (@sec-vol3-test-time-compute-planning-revision), log position, workspace snapshot | Reach bulky state without copying it into the record                                    |
+
+: **Trajectory Record Fields**: The record groups the control state the harness needs on every turn, with pointers to the context, plan, log, and workspace owned by other parts of the runtime. {#tbl-vol3-acb-schema}
+
+The pointer group explains why the record stays small. It references the transcript, the plan, and the workspace instead of containing them, so a status query, a budget check, or a scheduling decision touches a few hundred bytes rather than hundreds of thousands of tokens. The same discipline applies to the serving side. A trajectory's attention state in the serving system (@sec-vol3-kv-cache) is expensive to hold and cheap to reference, and whether it stays resident while the trajectory waits is a serving decision made in @sec-vol3-kvcache-swapping. The record carries the reference and the harness supplies the expected wait, but the record never becomes a place where that state lives.
+
+The second discipline concerns who writes. The model holds zero ambient authority, so nothing it emits changes the record directly. A claim in the model's output that the task is done, that little budget remains, or that a call is safe is an observation for the harness to evaluate, not an update to apply. Spend fields come from the usage the provider reports for each call, status changes only through transitions the harness validates, and grants narrow only by the harness's decision. This is trajectory-level encapsulation (principle \ref{pri-vol3-trajectory-encapsulation}) in concrete form. The whole trajectory is the unit the runtime schedules, budgets, and protects, and its control state sits where the model cannot reach it.
+
+The record now holds everything the harness needs to describe a trajectory. A description is only as trustworthy as the rules that change it, however, and a status field that any code path can overwrite reproduces the failures of the prototype loop with an extra layer of indirection. The next section closes the status field under a small set of guarded transitions.
+
+### Decoupling control metadata from attention memory
+
+To support thousands of concurrent agent sessions without exhausting host resources, the harness decouples lightweight trajectory control metadata from the memory-heavy transformer inference buffers. For an agent trajectory of length $L = 32{,}768$ tokens on a model with $H = 64$ layers, $N_{\text{kv}} = 8$ key-value heads, and dimension $D = 128$:
+$$
+M_{\text{KV}} = 2 \times H \times N_{\text{kv}} \times D \times L \times \text{sizeof(fp16)} = 2 \times 64 \times 8 \times 128 \times 32{,}768 \times 2 \approx 8.59 \text{ GB}
+$$
+The context token buffer occupies:
+$$
+M_{\text{tokens}} = L \times 4 \text{ bytes} = 32{,}768 \times 4 = 131{,}072 \text{ bytes} \approx 128 \text{ KB}
+$$
+In sharp contrast, the Agent Control Block (ACB) metadata structure requires a compact, fixed footprint:
+$$
+\text{SizeOf}(\text{ACB}) = 256 \text{ bytes}
+$$
+Maintaining 10,000 concurrent agent trajectories in memory requires only:
+$$
+M_{\text{control}} = 10{,}000 \times 256 \text{ bytes} = 2.56 \times 10^6 \text{ bytes} \approx 2.44 \text{ MB}
+$$
+
+The ACB achieves this radical memory decoupling by acting as a descriptor holding indirection handles to external physical resources, as detailed in @tbl-vol3-acb-pointers.
+
+| Pointer Reference   | Target Subsystem / Memory Tier | Physical Storage Location       | Indirection & Attenuation Invariant                                                             |
+|:--------------------|:-------------------------------|:--------------------------------|:------------------------------------------------------------------------------------------------|
+| `context_buf_ref`   | Logical Token Buffer           | Host System RAM                 | Monotonically growing sequence of token IDs and role boundaries; shared across prefill batches. |
+| `kv_lease_id`       | Physical PagedAttention Tables | GPU High-Bandwidth Memory (HBM) | Bound to inference engine memory lease; migratable to host DRAM or evictable under contention.  |
+| `wal_stream_offset` | Append-Only Write-Ahead Log    | Local NVMe Flash Storage        | Monotonically advancing byte offset enforcing durable state recovery before turn dispatch.      |
+| `cap_token_ref`     | Attenuated Capability Tokens   | Supervisor Secure Memory        | Cryptographically signed Ed25519 tokens enforcing zero ambient authority across sandboxes.      |
+
+: **Agent Control Block Memory Indirection Architecture**: Memory tiers, physical hardware boundaries, and supervisory isolation invariants for ACB descriptor pointer fields. {#tbl-vol3-acb-pointers}
+
+The architectural trade-offs between thread-per-agent, async coroutines, and ACB process tables are compared in @tbl-vol3-concurrency-models.
+
+| Systems Dimension             | Synchronous Thread-per-Agent                                                 | Cooperative Event-Driven Yielding                                       |
+|:------------------------------|:-----------------------------------------------------------------------------|:------------------------------------------------------------------------|
+| **Worker Concurrency**        | Bounded by OS thread limits ($10^2\text{--}10^3$ threads)                    | Bounded only by host memory descriptors ($10^4\text{--}10^5$ ACBs)      |
+| **Idle Memory Footprint**     | $2\text{--}8\text{ MiB}$ per idle trajectory (thread stack + kernel structs) | $64\text{--}128\text{ KiB}$ per idle trajectory (serialized ACB in RAM) |
+| **Signal Interception**       | Blocked in kernel syscalls; requires `EINTR` retry handling                  | Immediate; signal bits evaluated at checkpoint before thread release    |
+| **Accelerator Serving Slots** | Pinned or leaked during tool execution; poor GPU utilization                 | Released immediately; GPU resources service active decode queues        |
+| **Failure Blast Radius**      | Worker crash destroys thread stack and leaves sandbox orphaned               | ACB outlives the worker; crash recovery needs a durable log             |
+: **Synchronous versus Cooperative Execution Architecture**: Quantitative comparison of concurrency limits, memory footprint, signal responsiveness, and fault recovery across agent execution models. {#tbl-vol3-concurrency-models}
+
+## Trajectory States {#sec-vol3-controlplane-statemachine}
+
+Two failures show what an unguarded status field allows. In the first, a trajectory dispatches a test suite with a ten-minute deadline. The deadline passes, the harness appends a timeout observation, and the model proposes a different approach. A minute later the original run finishes and its result arrives. If the harness appends it, the next call sees two contradictory observations about the same call, one saying it timed out and one saying it passed. This race, a late result crossing a newer decision, is an **observation crossing**\index{Observation crossing}. In the second failure, a trajectory is waiting for a person to approve a database drop, and a retry path elsewhere in the harness, seeing an idle trajectory, calls the model again and dispatches whatever it proposes. Both failures come from code that sets the status instead of asking whether the change is legal.
+
+The harness prevents both by giving the trajectory a closed set of states and allowing only the transitions between them that the design names. @Tbl-vol3-lifecycle-states lists the states by what each one holds and where it may go next. Six are live and three are terminal.
+
+| State                             | Meaning                                    | What the trajectory holds                           | Legal next states                                          |
+|:----------------------------------|:-------------------------------------------|:----------------------------------------------------|:-----------------------------------------------------------|
+| `READY`                           | Queued for its next model call             | The record only                                     | `CALLING_MODEL`, `PAUSED`, `FINALIZING`                    |
+| `CALLING_MODEL`                   | One model call in flight                   | An open request with an output ceiling and deadline | `READY`, `WAITING_TOOL`, `AWAITING_APPROVAL`, `FINALIZING` |
+| `WAITING_TOOL`                    | Tool calls dispatched, results outstanding | Pending call IDs, deadlines, job handles            | `READY`, `FINALIZING`                                      |
+| `AWAITING_APPROVAL`               | An irreversible call held for a decision   | The held call, its approval request, an expiry      | `WAITING_TOOL`, `READY`, `FINALIZING`                      |
+| `PAUSED`                          | Held at a turn boundary for a person       | The record only                                     | `READY`, `FINALIZING`                                      |
+| `FINALIZING`                      | Cleanup before exit                        | Open jobs to cancel, leases to release              | `COMPLETED`, `FAILED`, `CANCELED`                          |
+| `COMPLETED`, `FAILED`, `CANCELED` | Terminal                                   | Nothing                                             | None                                                       |
+
+: **Trajectory States**: The closed state set of the harness, what a trajectory holds in each state, and the transitions each state permits. {#tbl-vol3-lifecycle-states}
+
+@Fig-vol3-acb-lifecycle draws the same machine. The main cycle runs from `READY` through `CALLING_MODEL` to `WAITING_TOOL` and back. A reply with nothing to run, such as plain text or a truncated reply, returns directly to `READY` with an observation for the next call. An irreversible call diverts to `AWAITING_APPROVAL`, which leaves either toward `WAITING_TOOL` when the call is approved and still valid or back to `READY` with a refusal observation. Every exit, whether the model ended its turn or an operator, a kill, or an exhausted budget ended the run, passes through `FINALIZING`.
+
+`PAUSED` is entered only from `READY`, and that holds even when the pause is forced rather than requested. When automated recovery cannot continue, for example because an action that should undo an earlier step has failed for good, the failure can surface in any live state, often `WAITING_TOOL`. The harness then escalates to an operator in two steps. It first settles whatever is in flight, canceling an open model call, withdrawing a held approval, and canceling each outstanding tool call or marking it in doubt when cancellation cannot be confirmed, which returns the trajectory to `READY` with nothing outstanding. Only then does it pause the trajectory through the ordinary guarded transition and revoke its grants. Escalation therefore adds no path to the machine, and the operator inherits a trajectory with no half-finished work. @Sec-vol3-sagas-pivot describes the failures that lead there.
+
+::: {#fig-vol3-acb-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**Trajectory State Machine**: Six live states and three terminal states. A trajectory cycles through READY, CALLING_MODEL, and WAITING_TOOL, diverts irreversible calls to AWAITING_APPROVAL, and pauses only from READY, including when failed recovery escalates the trajectory to an operator. Every exit passes through FINALIZING, which cancels open work, releases leases, and runs the completion check before the trajectory settles in an absorbing terminal state." fig-alt="State diagram with a live-states region and an exit region. Live states are PAUSED, READY, CALLING_MODEL, WAITING_TOOL, and AWAITING_APPROVAL, connected by labeled arrows: pause and resume, call model, no call to run, granted tool call, irreversible call, approved, matching result or timeout, and a dashed arrow for denied, expired, or stale requests back to READY. An end_turn arrow and a dashed arrow from any live state lead to FINALIZING, which leads to COMPLETED, FAILED, and CANCELED."}
+![](images/svg/ch09-acb-lifecycle.svg)
+:::
+
+The completion path deserves care. A stop reason of `end_turn` is the model's claim that it is finished, and the harness treats it as a request to run the task's completion check, not as success. `FINALIZING` runs whatever check the task contract specifies, at the closure evidence level it requires (@sec-vol3-intro-closure-evidence), and records `COMPLETED` only if the check passes. Whether a completed trajectory also counts as an accepted task, and how often a given agent reaches one, is the measurement problem of @sec-vol3-evaluation.
+
+Four invariants make the machine a guard rather than a diagram:
+
+1. A tool result is accepted only in `WAITING_TOOL`, and only if its call ID is still pending. When a deadline passes, the harness removes the call's ID from the pending set before it appends the timeout observation, so the late result in the first failure above finds no matching ID and is dropped and logged. This closes the observation crossing.
+2. A held call leaves `AWAITING_APPROVAL` for dispatch only through an approval that passes the gate's re-check. No other path, including a retry path that finds the trajectory idle, can dispatch it, which closes the second failure.
+3. Every exit passes through `FINALIZING`. That state is the cleanup barrier. It cancels outstanding jobs, releases the workspace lease and credentials, records the exit reason, and runs the completion check. A trajectory that jumps straight to a terminal state leaves orphaned processes and live credentials behind.
+4. Terminal states are absorbing. No late result, operator action, or retry can revive a finished trajectory. A retry is a new trajectory with a new ID whose record names the old one as its parent, so the history of each attempt stays intact for evaluation and debugging.
+
+@Lst-vol3-guarded-transition implements the guard. Every state change in the harness goes through one function that checks the transition against the legal set, evaluates any guard attached to it, and records the change, all under the record's lock so that two concurrent events cannot both succeed.
+
+::: {#lst-vol3-guarded-transition lst-cap="**Guarded Transitions**: Every state change passes through one function that checks the legal transition set and the transition's guard under the record's lock, and tool results are accepted only for pending call IDs."}
+```python
+LIVE = {"READY", "CALLING_MODEL", "WAITING_TOOL",
+        "AWAITING_APPROVAL", "PAUSED"}
+LEGAL = {("READY", "CALLING_MODEL"), ("READY", "PAUSED"),
+         ("CALLING_MODEL", "READY"), ("CALLING_MODEL", "WAITING_TOOL"),
+         ("CALLING_MODEL", "AWAITING_APPROVAL"),
+         ("WAITING_TOOL", "READY"), ("AWAITING_APPROVAL", "WAITING_TOOL"),
+         ("AWAITING_APPROVAL", "READY"), ("PAUSED", "READY")}
+LEGAL |= {(s, "FINALIZING") for s in LIVE}
+LEGAL |= {("FINALIZING", t) for t in ("COMPLETED", "FAILED", "CANCELED")}
+
+def transition(rec, new_state, event):
+    with rec.lock:
+        key = (rec.state, new_state)
+        guard = GUARDS.get(key, lambda rec, event: True)
+        if key not in LEGAL or not guard(rec, event):
+            raise IllegalTransition(rec.state, new_state, event)
+        rec.history.append((rec.state, new_state, event.id))
+        rec.state = new_state
+
+def on_tool_result(rec, result):
+    with rec.lock:
+        if rec.state != "WAITING_TOOL" or result.call_id not in rec.pending:
+            audit(rec, "late_or_unknown_result", result.call_id)
+            return                                  # dropped, never appended
+        rec.pending.remove(result.call_id)
+        append_observation(rec, result)
+```
+:::
+
+The guard costs a lock, a set lookup, and an append, which is negligible next to a model call measured in seconds, so there is no performance argument for skipping it. The state machine now says which transitions are legal. It does not yet say who may request a transition from outside the loop, or when such a request takes effect if it arrives while a model call is streaming.
+
+::: {#chk-09-agent-control-block .callout-checkpoint title="Trajectory record and states"}
+
+- [ ] **Record vs. transcript**: Why must pending call IDs and measured spend live in the record rather than in the transcript the model reads?
+- [ ] **Observation crossing**: Which invariant rejects a tool result that arrives after its deadline, and in what order must the harness update the record to make that work?
+- [ ] **Cleanup barrier**: What would leak if a canceled trajectory moved directly from `WAITING_TOOL` to `CANCELED`?
+- [ ] **Retry identity**: Why is a retry a new trajectory rather than a finished trajectory returned to `READY`?
+
+:::
+
+### Formal state transition invariants
+
+Formally, the trajectory state space is defined as the finite set:
+$$
+\mathcal{S} = \{\text{INIT}, \text{RUNNABLE}, \text{RUNNING}, \text{WAIT\_IO}, \text{WAIT\_ESCROW}, \text{PREEMPTED}, \text{COMPLETED}, \text{FAILED}, \text{TERMINATED}\}
+$$
+State transitions occur according to an explicit transition function:
+$$
+s' = \delta(s, e, g) \quad \text{where} \quad g(\text{ACB}, e) = \mathbf{true}
+$$
+where $e$ is an incoming lifecycle event and $g$ is a guard predicate evaluating ACB invariants. @Lst-vol3-acb-transition implements strict guard checks preventing illegal state jumps.
+
+::: {#lst-vol3-acb-transition lst-cap="**State Transition Guard Verification**: Transitioning an Agent Control Block between lifecycle states with transition validation."}
+```python
+def transition_acb(acb: AgentControlBlock, new_state: State, event: Event) -> None:
+    """Validate and apply state transition on Agent Control Block."""
+    valid_transitions = {
+        State.INIT: {State.RUNNABLE},
+        State.RUNNABLE: {State.RUNNING},
+        State.RUNNING: {State.WAIT_IO, State.WAIT_ESCROW, State.PREEMPTED, State.COMPLETED, State.FAILED},
+        State.WAIT_IO: {State.RUNNABLE, State.FAILED, State.TERMINATED},
+        State.WAIT_ESCROW: {State.RUNNABLE, State.FAILED, State.TERMINATED},
+        State.PREEMPTED: {State.RUNNABLE, State.TERMINATED},
+    }
+    if new_state not in valid_transitions.get(acb.state, set()):
+        raise InvalidStateTransitionError(f"Illegal transition from {acb.state} to {new_state} via {event}")
+    acb.state = new_state
+    acb.last_event = event
+    acb.transition_epoch_ms = current_epoch_ms()
+```
+:::
+
+## Control Actions {#sec-vol3-controlplane-signals}
+
+An operator presses stop while the model is streaming a tool call whose arguments so far read `{"action": "drop_table", "target": "cust`. Stopping at once leaves a fragment that is not a valid call; if the harness logs it as the trajectory's last proposal, a recovery path that later parses the log may try to complete it. Waiting for the call to finish means waiting for the model to emit the rest of a destructive request the operator is trying to prevent. Control requests arrive whenever people and policies send them, while the trajectory can only be changed safely at certain moments, and a harness needs a rule that reconciles the two.
+
+The rule separates arrival from effect. When a control request arrives, the harness records it in the record's pending-control field and returns. It applies the request at the next **turn boundary**\index{Turn boundary}, a moment when no model call is in flight and no tool call is half dispatched. A trajectory reaches a turn boundary before each model call, after a model reply has been parsed but before anything is dispatched, after a tool result has been accepted, and on entering an approval wait. Because a trajectory cannot be relied on to yield or stop by itself, this control has to sit outside the model (principle \ref{pri-vol3-preemptive-interrupts}), and the turn boundary is where the harness exercises it. @Tbl-vol3-signal-vocabulary lists the requests a harness needs.
+
+| Action              | Typically issued by               | Takes effect                                     | Resulting state                      |
+|:--------------------|:----------------------------------|:-------------------------------------------------|:-------------------------------------|
+| **Cancel**          | User, operator, parent trajectory | Next turn boundary; an in-flight call is aborted | `FINALIZING`, then `CANCELED`        |
+| **Interrupt**       | User                              | Next turn boundary, as a new user message        | `READY`, with the message in context |
+| **Pause**           | Operator, scheduler               | Next turn boundary                               | `PAUSED`                             |
+| **Resume**          | Operator                          | Immediately                                      | `READY`                              |
+| **Kill**            | Operator, security policy         | Immediately, even mid-turn                       | `FINALIZING`, then `FAILED`          |
+| **Budget exceeded** | The harness's own meter           | Next turn boundary                               | `FINALIZING`, then `FAILED`          |
+
+: **Control Actions**: The requests a harness accepts from outside the loop, who typically issues them, when each takes effect, and the state that results. {#tbl-vol3-signal-vocabulary}
+
+Most requests wait for a turn boundary, which raises the question of how long a model call can take to reach one. A reply cannot end before it has emitted its last token, and decode time grows with the number of output tokens (@sec-vol3-foundation-model-cost). The worst-case wait is therefore the output-token ceiling multiplied by the time per output token. For a call allowed thousands of output tokens, that can reach a minute or more, far too long for an operator stopping a destructive action. Two mechanisms shorten it. The first is the output-token ceiling itself, which bounds the wait along with the cost. The second is **streaming cancellation**\index{Streaming cancellation}: the harness streams every model call and, when a cancel, pause, or kill is pending, aborts the stream, discards the partial reply, and records a cancellation event in place of a proposal. The partial reply is never parsed into a tool call. A truncated or aborted completion cannot pass verification, so it cannot be dispatched (principle \ref{pri-02-quarantining-invariant}). Tokens emitted before the abort are still billed, and the harness charges them like any others.
+
+Every model reply also reports why it ended. The status envelope of @tbl-vol3-invocation-status already fixes what the loop may do with each outcome of a call; the harness adds only where each outcome leaves the trajectory. An end-of-turn reply moves it to `FINALIZING` for the completion check. A reply with tool calls moves it to `AWAITING_APPROVAL` if any call is irreversible and to `WAITING_TOOL` otherwise. A reply cut off at its output limit, ended by a stop sequence, or refused returns it to `READY` with an observation for the next call, unless the task's policy escalates or finalizes a refusal. A failed or timed-out call returns it to `READY` for a retry while the budget allows and to `FINALIZING` once it does not.
+
+Kill is the one request that does not wait. It exists for cases where finishing the turn is itself the hazard, such as a sandbox escape attempt or a runaway tool writing to shared storage. The harness aborts any model call, terminates every process in the trajectory's sandbox through the process-group teardown of @sec-vol3-tool-calling-async-governance, and enters `FINALIZING` with the reason recorded. Breaking a turn has a price. A tool call dispatched just before the kill may or may not have taken effect, and its outcome is now in doubt. The harness marks such calls as in doubt rather than failed and leaves them to the settlement machinery of @sec-vol3-tool-calling-idempotency, which uses the call's idempotency key to learn whether the effect happened. When the trajectory has spawned subagents, cancel and kill must also reach them; @sec-vol3-multiagent-backpressure extends the same rule across agents.
+
+Control actions give people and policies a way into the loop at well-defined moments. Most of a trajectory's wall-clock time, however, is spent not in model calls but waiting for tools to answer, and a request that arrives during that wait has to find the trajectory in a state where it can be applied.
+
+### Safe inspection checkpoints and signal evaluation
+
+Asynchronous signals must not interrupt execution arbitrarily. Terminating an agent in the middle of a non-atomic filesystem operation corrupts workspace state. The harness defines deterministic checkpoints where pending signals can be safely evaluated, as detailed in @tbl-vol3-safe-checkpoints.
+
+| Checkpoint Symbol | Cycle Boundary    | Quiescent State & Invariant Guarantee                                                      | Supervisory Trap Mechanics                                                                  |
+|:------------------|:------------------|:-------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|
+| $C_{\text{obs}}$  | Post-Observation  | Sandbox execution completed; observation envelope verified against pending I/O descriptor. | Traps pause/kill signals before context append; discards invalid observation payloads.      |
+| $C_{\text{pre}}$  | Pre-Inference     | Context assembled and serialized; no pending tensor operations on inference engine.        | Intercepts signals prior to dispatching expensive prefill batch; evicts KV lease if paused. |
+| $C_{\text{post}}$ | Post-Decode       | Autoregressive decode complete; grammar validated; proposed action unparsed.               | Captures cancellation or pause before mutating host state or validating tool parameters.    |
+| $C_{\text{tool}}$ | Pre-Tool Dispatch | Tool arguments validated; security capability checked; no RPC dispatched.                  | Final safety gate; prevents uncommitted side effects in sandboxes or external systems.      |
+
+: **Safe Inspection Checkpoints**: Turn-cycle boundaries, quiescence guarantees, and supervisory trap actions ensuring atomic signal delivery. {#tbl-vol3-safe-checkpoints}
+
+The signal dispatch lifecycle and checkpoint evaluation are diagrammed in @fig-vol3-signal-handling.
+
+::: {#fig-vol3-signal-handling fig-env="figure" fig-pos="htb" fig-cap="**Asynchronous Signal Interception and State Resumption**: End-to-end protocol sequence governing asynchronous signal trapping, turn-boundary synchronization, and state resumption. An operator `SIGPAUSE` is buffered in the ACB signal bitmask during active autoregressive decode. At the bounded sub-checkpoint $C_{\text{post}}$ ($K=16$ tokens, latency $\le 533\text{ ms}$), the supervisor intercepts execution, persists the ACB to durable storage, evicts 2.50 GB of KV cache over PCIe Gen5 to host DRAM, and places the agent into a quiescent suspended state. Upon receiving `SIGRESUME`, the supervisor re-stages memory and resumes tool dispatch without context tearing." fig-alt="Protocol ladder diagram depicting the interaction between Operator CLI, Supervisor Kernel, Inference Accelerator, and Host DRAM during asynchronous SIGPAUSE arrival, bounded token sub-checkpoint evaluation, PCIe DMA eviction, and SIGRESUME restoration."}
+![](images/svg/ch09-fig-signal-handling.svg)
+:::
+
+@Lst-vol3-signal-eval implements checkpoint evaluation, allowing trajectories to pause or terminate cleanly.
+
+::: {#lst-vol3-signal-eval lst-cap="**Evaluating Supervisory Signals at Checkpoints**: Checking pending asynchronous signals at safe trajectory boundaries."}
+```python
+def evaluate_signal_checkpoint(acb: AgentControlBlock, checkpoint: Checkpoint) -> bool:
+    """Evaluate pending signals at deterministic trajectory checkpoints."""
+    if not acb.pending_signals:
+        return True
+    sig = acb.pending_signals.popleft()
+    if sig == Signal.SIGPAUSE:
+        acb.state = State.PREEMPTED
+        persist_trajectory_checkpoint(acb)
+        return False
+    elif sig == Signal.SIGKILL:
+        acb.state = State.TERMINATED
+        release_sandbox_lease(acb.sandbox_id)
+        return False
+    return True
+```
+:::
+
+## Waiting on Tools {#sec-vol3-controlplane-yielding}
+
+A coding agent's turn typically pairs a model call of a few seconds with a test suite, build, or search that takes far longer. The trajectory duration accounting of @sec-vol3-intro-duration-accounting splits each turn into model time, tool time, and waiting, and for tool-heavy tasks the tool term dominates. A harness that gives each trajectory its own worker and lets that worker block until the tool returns spends almost all of its workers waiting. With a thousand concurrent trajectories it holds a thousand blocked workers, and a blocked worker cannot notice that a cancel has arrived until its tool call returns or times out.
+
+The fix is to let the record, not a blocked worker, represent a waiting trajectory. At dispatch the harness writes each call's ID and deadline into the pending set, moves the trajectory to `WAITING_TOOL`, and releases the worker to serve another trajectory. The tool's completion arrives later as an event. The harness applies the guard of @lst-vol3-guarded-transition, appends the observation, and moves the trajectory to `READY` once nothing remains pending. Any event-driven I/O runtime makes this cheap. The lesson is not the choice of event loop but the fact that a waiting trajectory costs a record and nothing else, so a cancel that arrives during the wait finds the trajectory in a state where the harness can act immediately, canceling the outstanding calls and moving to `FINALIZING`.
+
+Three refinements complete the wait. Tools that run for minutes or hours return a job handle instead of a result (@sec-vol3-tool-calling-async). The harness stores the handle in the pending set, polls it or subscribes to its completion, and uses it to cancel the job when the trajectory is canceled. A reply that contains several parallel tool calls leaves the trajectory in `WAITING_TOOL` until every call has returned or passed its deadline, so the next model call sees a complete set of observations. Every dispatched call also carries a deadline. When the deadline passes, the harness removes the call's ID from the pending set, asks the tool layer to cancel the call, and appends a structured timeout observation. If the call had side effects, its outcome is in doubt in the same way as a call interrupted by a kill, and the same settlement machinery resolves it.
+
+While the trajectory waits, its context's cached state in the serving system is not the harness's to manage. Retaining it, evicting it, recomputing it, or offloading it is a trade between memory held and recomputation paid, decided in @sec-vol3-kvcache-swapping from how long the wait is expected to last. The harness contributes the one input it alone knows, the expected wait, derived from the call's deadline and the tool's history. A short lint call suggests keeping the state warm. A long test suite, a pause, or an approval wait suggests releasing it.
+
+A tool wait ends when the tool answers or its deadline passes. The next kind of wait has no such bound on the machine side, because the party the trajectory waits for is a person deciding whether an irreversible call should run at all.
+
+### Cooperative process yielding mechanics
+
+Model token generation operates on millisecond scales ($10 - 50\ \text{ms}$ per token), whereas external tool calls—such as compilation jobs, database queries, and web retrievals—frequently take seconds to minutes. If an agent thread synchronously blocks while awaiting external tool completion, it ties up valuable host concurrency slots and GPU worker capacity.
+
+Cooperative process yielding decouples execution by transitioning the trajectory to `WAIT_IO` immediately upon dispatching a tool request, freeing execution threads for other active trajectories. The execution dynamics are diagrammed in @fig-vol3-cooperative-yielding.
+
+::: {#fig-vol3-cooperative-yielding fig-env="figure" fig-pos="htb" fig-cap="**Synchronous Blocking versus Cooperative Yielding**: Architectural comparison between synchronous thread-per-agent execution and cooperative event-driven yielding. Panel (a) illustrates the synchronous blocking model, where 2,000 POSIX threads lock over 8 GB of dormant stack memory and pin GPU batch slots while waiting on high-latency tool execution ($\tau_{\text{tool}} \gg \tau_{\text{model}}$). Panel (b) illustrates the supervisory `epoll` datapath, where a fixed pool of worker threads is immediately relinquished at checkpoint $C_{\text{tool}}$, registering non-blocking file descriptors with the kernel event multiplexer and scaling concurrency to $10^4\text{--}10^5$ trajectories with negligible memory overhead." fig-alt="Systems architecture diagram comparing synchronous thread-per-agent blocking, which locks 8 GB of stack memory for 2,000 threads, against cooperative event-driven yielding using an epoll multiplexer and a fixed pool of 8 worker threads managing compact ACB descriptors."}
+![](images/svg/fig-vol3-cooperative-yielding.svg)
+:::
+
+The event-driven wakeup mechanics connecting OS network polling (`epoll`) to ACB dispatch are summarized in @tbl-vol3-event-wakeup-pipeline.
+
+| Stage                          | Subsystem Component                   | Operational Mechanism & Transition Invariants                                                                       |
+|:-------------------------------|:--------------------------------------|:--------------------------------------------------------------------------------------------------------------------|
+| **1. Event Notification**      | Kernel Multiplexer (`epoll`/`kqueue`) | Edge-triggered wake-up fires as sandbox process writes JSON-RPC completion to socket descriptor.                    |
+| **2. Observation Extraction**  | Supervisor Event Loop                 | Reads observation buffer $\mathbf{o}_k$, binds payload to ACB at Checkpoint $C_{\text{obs}}$, and records duration. |
+| **3. Liveness & Signal Check** | ACB Signal Validator                  | Evaluates pending signal bitmask; routes to `TERMINATING` if canceled during wait, else advances to `RUNNABLE`.     |
+| **4. Runqueue Re-Entry**       | Scheduler Priority Queue              | Inserts ACB descriptor into active priority queue; readies context for subsequent prefill batch.                    |
+: **Event-Driven Reactivation Pipeline**: The four-stage event-driven reactivation pipeline transitioning a trajectory from `WAITING_IO` to `RUNNABLE` without thread polling or compute starvation. {#tbl-vol3-event-wakeup-pipeline}
+
+@Lst-vol3-bounded-decode implements bounded token generation with cooperative yielding.
+
+::: {#lst-vol3-bounded-decode lst-cap="**Bounded Token Generation with Cooperative Yielding**: Yielding execution to the event loop immediately upon emitting a tool call delimiter."}
+```python
+async def execute_bounded_decode(acb: AgentControlBlock, client: LLMClient) -> GenerationResult:
+    """Execute token decoding bounded by cooperative step quotas."""
+    tokens_generated = 0
+    while tokens_generated < acb.step_token_quota:
+        token = await client.decode_next_token(acb.trajectory_id)
+        tokens_generated += 1
+        acb.tokens_total += 1
+        if token.is_tool_call_delimiter:
+            acb.state = State.WAIT_IO
+            return GenerationResult(status=Status.TOOL_PENDING, tokens=tokens_generated)
+    return GenerationResult(status=Status.QUOTA_EXHAUSTED, tokens=tokens_generated)
+```
+:::
+
+## Approval Gates {#sec-vol3-controlplane-hitl}
+
+A cleanup agent proposes `drop_table(db="prod", table="orders_staging")`. The tool is in its catalog, the arguments pass validation, and the grant of @sec-vol3-tool-calling-mcp allows schema changes on staging tables. The sandbox of @sec-vol3-sandboxes bounds what the agent's code can reach, but this call acts on a shared external system whose state no sandbox snapshot can restore. In the terms of @sec-vol3-intro-hsa, it is an $A_3$ action. Under the pivot boundary (principle \ref{pri-vol3-reversibility-sagas}), an irreversible action can only be completed forward, so the one moment to stop a wrong one is before dispatch. The harness needs a way to hold such a call until someone with the authority to approve it has decided, without holding anything else while it waits.
+
+::: {#dfn-escrow .callout-definition title="Escrow"}
+
+***Escrow***\index{Escrow!definition}\index{Approval gate!escrow} is the harness's holding of an irreversible proposed tool call, undispatched, until an authorized reviewer approves it; the held call carries an expiry, is re-checked against its recorded preconditions before dispatch, and is replaced by a refusal observation to the model if it is denied, expires, or has gone stale.
+
+1.  **Significance**: It is the only closure available for an action that cannot be undone, because every other runtime mechanism either bounds what an action can reach or repairs its effects afterward.
+2.  **Distinction**: A grant decides whether a call is permitted at all; escrow decides whether a permitted irreversible call runs now, on this world state, with a person's explicit agreement.
+3.  **Common pitfall**: Deciding what to gate from the model's own description of the call, or approving a call and dispatching it later without re-checking that the world still matches what the reviewer saw.
+
+:::
+
+The harness decides which calls go to the gate from facts it controls. The tool's side-effect annotation (@sec-vol3-tool-calling-schemas) marks a call as destructive or irreversible, the trajectory's authority level sets how much it may do unattended, and a policy names the targets that always require review, such as production data or payments above a threshold. The model's own statement that a call is safe plays no part. The gate should also stay narrow. A reviewer asked to approve dozens of routine calls an hour learns to approve without reading, and a gate that is always approved provides no closure. Grants and sandboxes handle reversible and low-authority calls, and the gate is reserved for the calls they cannot make safe.
+
+@Fig-vol3-human-escrow shows what the reviewer receives and how the gate proceeds. Panel (a) is the approval request. It shows the exact call in canonical form rather than the transcript that led to it, the target and its authority level, a preview such as a dry run or the number of rows affected, the preconditions the harness observed when the call was proposed, a digest of the canonical call, an expiry, and the requesting trajectory's identity and remaining budget. The approval binds to the digest, so a reviewer approves one specific action. If a later turn changes even one argument, the approval no longer applies.
+
+::: {#fig-vol3-human-escrow fig-env="figure" fig-pos="htb" fig-cap="**The Approval Gate**: Panel (a) lists what the reviewer is asked to approve: the exact canonical call, its target and authority level, a preview, the preconditions recorded at request time, a digest that binds the approval to this call, an expiry, and the requesting trajectory. Panel (b) shows the gate: the harness holds the call, sends the request, receives a decision the model does not take part in, and re-checks the digest, preconditions, grant, and budget before dispatching with an idempotency key or returning a refusal observation." fig-alt="Two panels. The left panel lists seven labeled boxes: exact action with a drop_table call, target and authority, preview, preconditions at request time, action digest, expiry, and requesting trajectory. The right panel shows four numbered steps connected by downward arrows (hold the call, send the request, decision, re-check before dispatch) branching into an approved-and-current box that dispatches and enters WAITING_TOOL and a denied, expired, or stale box that returns a REFUSED observation and READY."}
+![](images/svg/fig-vol3-human-escrow.svg)
+:::
+
+Panel (b) is the protocol. The harness holds the call and moves the trajectory to `AWAITING_APPROVAL`, where it holds only its record. The wait is long on the machine's scale, minutes to hours against seconds per turn, and by Little's law (@sec-vol3-kv-capacity-formulations) the number of trajectories waiting at once is the rate of approval requests multiplied by the mean review time. A slow review queue therefore multiplies the number of waiting trajectories, which is why a waiting trajectory must cost nothing but its record. The wait counts against the request's expiry, not against the trajectory's compute budget, because a person's review time says nothing about whether the trajectory is making progress. A long wait also makes a host restart during the wait likely, so the held call and its request must survive the process; @sec-vol3-durable-execution provides that durability.
+
+An approval is a decision about the world as it was when the request was written, and by the time it arrives the world may have moved. The staging table may hold new rows, another process may have changed its schema, or the grant may have been revoked. Before dispatch, the harness therefore re-reads the preconditions recorded in the request, confirms that the digest still matches the held call, and checks that the grant and budget are still valid. Only when all of these hold does it dispatch the call, with the idempotency key that makes a retried dispatch safe (principle \ref{pri-vol3-exactly-once-settlement}). A policy that requires two reviewers from different roles changes only the decision step, which waits for both approvals before the re-check.
+
+Denial, expiry, and stale preconditions all end the same way. The harness discards the held call and returns a structured refusal to the model as the call's observation, then moves the trajectory to `READY`, so the next turn can plan around the refusal, request a fresh approval against the current state, or finish without the action:
+
+```json
+{
+  "status": "REFUSED",
+  "reason": "APPROVAL_EXPIRED",
+  "call": "drop_table(db=\"prod\", table=\"orders_staging\")",
+  "message": "No approval was recorded before the request expired."
+}
+```
+
+Silence counts as denial. A gate that defaults to dispatching when no answer arrives turns every lost notification into an unreviewed irreversible action. The approval gate bounds a single step of one trajectory. The trajectories on a node still compete with each other for the same model rate limits and sandboxes, and the harness has to decide which ready trajectory runs next.
+
+::: {#chk-09-supervisory-state-machine .callout-checkpoint title="Control actions and approval gates"}
+
+- [ ] **Turn boundaries**: Why does a pause wait for a turn boundary while a kill does not, and what does the kill leave in doubt?
+- [ ] **Stop reasons**: What should the harness do with a reply that stopped at its output limit in the middle of a tool call?
+- [ ] **Gate inputs**: Which facts decide whether a call goes to the approval gate, and why is the model's description of the call excluded?
+- [ ] **Stale approvals**: What must the harness re-check between receiving an approval and dispatching the call?
+
+:::
+
+### Cryptographic escrow manifests and quorum invariants
+
+When an agent proposes an irreversible external action ($A_3$), the harness freezes execution and serializes an immutable escrow manifest. @Lst-vol3-verify-escrow demonstrates cryptographic manifest verification against operator authorization tokens.
+
+::: {#lst-vol3-verify-escrow lst-cap="**Cryptographic Escrow Manifest Verification**: Validating cryptographic authorization tokens before settling irreversible actions."}
+```python
+def verify_escrow_payload(manifest: EscrowManifest, auth_token: AuthToken) -> bool:
+    """Verify cryptographic signature and policy validity of an escrow manifest."""
+    if not crypto_verify(auth_token.signature, manifest.payload_hash, auth_token.public_key):
+        return False
+    if auth_token.expiration_epoch_ms < current_epoch_ms():
+        return False
+    return manifest.action_type in auth_token.permitted_actions
+```
+:::
+
+The lifecycle transitions of an escrow manifest are detailed in @tbl-vol3-escrow-transitions.
+
+| Current State    | Event / Guard Condition                                                                         | Next State       | Action / Transition Side Effect                                                                                   |
+|:-----------------|:------------------------------------------------------------------------------------------------|:-----------------|:------------------------------------------------------------------------------------------------------------------|
+| `RUNNING`        | Action proposal exceeds blast radius threshold ($\mathbf{a}_k \in \mathcal{A}_{\text{escrow}}$) | `WAITING_ESCROW` | Halt dispatch, unbind OS worker thread, checkpoint KV cache to host DRAM, persist ACB to NVMe storage.            |
+| `WAITING_ESCROW` | Wall clock $\tau_{\text{current}} > \tau_{\text{expire}}$ (Lease expiration)                    | `READY`          | Invalidate manifest $\mathcal{M}$, synthesize `REFUSED` observation $\mathbf{o}_k^{\text{synth}}$, reenqueue ACB. |
+| `WAITING_ESCROW` | Valid cryptographic signature set satisfies policy $\mathcal{P}_{\text{quorum}}$                | `READY`          | Validate digests, restore ACB from NVMe, bind OS worker thread, dispatch $\mathbf{a}_k$ to sandbox driver.        |
+: **Human Escrow State Transitions and Side Effects**: Operational state transitions, guard conditions, and resource side effects governing human approval escrows. {#tbl-vol3-escrow-transitions}
+
+For high-stakes enterprise workflows, multiple distinct approvers are required according to the quorum invariants in @tbl-vol3-quorum-checkpoint-invariants.
+
+| Invariant              | Formal Constraint                                                       | Systems Verification Rule                                                                                                                                                                                   |
+|:-----------------------|:------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Signer Uniqueness**  | $\forall j \neq k,\; u_j \neq u_k$                                      | Every recorded signature must originate from a distinct cryptographic identity. A single operator cannot satisfy an $m=2$ quorum by signing twice with different credential sub-keys.                       |
+| **Role Orthogonality** | $\bigcup_{i=1}^m \text{Role}(u_i) \supseteq \mathcal{C}_{\text{roles}}$ | Signatures must span disparate organizational domains. For example, deploying infrastructure mutations to production requires independent signatures from `role:secops` and `role:site-reliability`.        |
+| **Temporal Validity**  | $\forall i,\; \tau_{\text{issued}} \le \tau_i \le \tau_{\text{expire}}$ | All $m$ signatures must register within the active lease window. If required signatures arrive post-expiration, the entire manifest is invalidated; partial approvals do not persist across lease renewals. |
+: **Quorum Checkpoint Invariants and Formal Constraints**: Formal expressions and verification rules governing atomic multi-signature commit manifests. {#tbl-vol3-quorum-checkpoint-invariants}
+
+## Scheduling Concurrent Trajectories {#sec-vol3-controlplane-scheduling}
+
+A node runs forty batch trajectories doing overnight repository maintenance alongside a handful of interactive trajectories with a person waiting on each. All of them share one provider rate limit on tokens and requests per minute, and one pool of sandboxes (@sec-vol3-sandboxes-pooling). Served first come, first served, an interactive turn waits behind a queue of batch turns. Served greedily, the node exceeds the provider's rate limit, the provider rejects requests, and trajectories that back off on the same schedule retry together and are rejected together.
+
+The harness schedules turns, not threads. The unit it hands out is a `READY` trajectory's next model call, and three rules handle most of the problem. First, it shares turns across priority classes in proportion to their weights, charging each turn by its estimated tokens so that one large batch turn cannot starve a small interactive one; weighted fair queuing schemes such as deficit round-robin do this with constant work per decision. Second, it admits turns against a local token bucket set below the provider's rate limit, so the harness decides who waits instead of discovering the limit through rejected requests. Third, it acquires a sandbox only when a tool call is dispatched and releases it when the call returns, so no sandbox sits idle through a model call.
+
+Trajectories in `WAITING_TOOL`, `AWAITING_APPROVAL`, or `PAUSED` take no turns, and a trajectory returning from a long wait does not arrive with banked credit that would let it monopolize the node. The remaining hazard is priority inversion, where an interactive trajectory waits for a sandbox held by a batch trajectory's long build. Reserving a share of the sandbox pool for the interactive class removes it at the cost of some idle capacity. Sizing rate limits, pools, and priority lanes across a fleet of nodes is a capacity question taken up in @sec-vol3-agent-economics-capacity.
+
+Fair scheduling bounds how much of the node a trajectory takes in any window of time. It does not bound how much a trajectory takes in total, because a trajectory can behave perfectly on every turn for hundreds of turns without ever finishing its task.
+
+### Multi-dimensional resource contention vectors
+
+Concurrent agent trajectories compete across four distinct physical hardware vectors, summarized in @tbl-vol3-contention-vectors.
+
+| Contention Vector       | Physical / Virtual Subsystem | Bottleneck Metric                         | System Failure Mode Under Saturation                  | Supervisory Enforcement Mechanism                   |
+|:------------------------|:-----------------------------|:------------------------------------------|:------------------------------------------------------|:----------------------------------------------------|
+| **Sandbox Memory**      | Physical Host RAM            | Resident Set Size ($\text{RSS}$)          | Linux OOM killer invocation; host kernel thrashing    | Hard capacity semaphore on active container pool    |
+| **Tool Execution**      | Host CPU Schedulers          | CPU Thread Utilization ($\%$)             | Supervisor event loop starvation; watchdog timeouts   | Cgroup CPU quotas and bounded worker thread pools   |
+| **Inference Bandwidth** | Model Gateway Quota          | Tokens Per Minute ($\text{TPM}$)          | HTTP 429 cascades; exponential backoff convoy stalls  | Local token bucket rate-shaping admission gate      |
+| **Disk Bandwidth**      | Host Storage (NVMe/SSD)      | I/O Operations Per Second ($\text{IOPS}$) | SQLite/WAL snapshot stalls; filesystem locking delays | Direct I/O rate limiting and ephemeral tmpfs mounts |
+
+: **Multi-Dimensional Resource Contention Vectors**: Physical and virtual bottlenecks, failure modes, and supervisory arbitration strategies across host runtime subsystems. {#tbl-vol3-contention-vectors}
+
+### Deficit round-robin dispatch architecture
+
+To prevent greedy trajectories with large contexts from monopolizing GPU memory bandwidth and host thread pools, the harness employs Deficit Round-Robin (DRR) scheduling. The node scheduling hierarchy is illustrated in @fig-vol3-node-scheduler.
+
+::: {#fig-vol3-node-scheduler fig-env="figure" fig-pos="htb" fig-cap="**Weighted Deficit Round-Robin (WDRR) Node Scheduling Architecture**: Multi-resource arbitration pipeline multiplexing heterogeneous agent workloads across shared host resources. Active trajectories across Interactive ($w=4$), Standard ($w=2$), and Batch ($w=1$) priority queues are arbitrated by a central WDRR engine. In each round, the arbiter replenishes deficits via $D_i \leftarrow D_i + (w_i \times Q_{\text{base}})$, admits turns satisfying $D_i \ge C(\tau_{i,k})$, and decrements the counter upon dispatch while resetting empty queues ($D_i \leftarrow 0$) to prevent burst hoarding. Dispatched turns are mediated downstream through a global token rate-limiter and a warm sandbox counting semaphore ($S \le S_{\max}$) before binding to worker threads." fig-alt="Systems architecture diagram of a Weighted Deficit Round-Robin node scheduler showing priority ready queues on the left, WDRR deficit accumulator and cost evaluator in the center, and downstream token bucket and warm sandbox semaphore admission gates on the right."}
+![](images/svg/fig-vol3-node-scheduler.svg)
+:::
+
+The per-round quantum dispatch mechanics are diagrammed in @fig-vol3-scheduler-dispatch.
+
+::: {#fig-vol3-scheduler-dispatch fig-env="figure" fig-pos="htb" fig-cap="**Scheduler Run Queue and Priority Scoring Engine**: Three-level supervisory dispatch datapath arbitrating candidate Agent Control Blocks in host DRAM. Level 1 filters the active ACB array to extract runnable trajectories while bypassing blocked I/O and escrow states. Level 2 ranks runnable candidates through a multi-attribute fair-share priority scoring engine $P_i$. Level 3 evaluates hard token and step ceilings, admitting compliant tasks to inference batch slots while preemptively terminating exhausted trajectories." fig-alt="Systems datapath diagram showing an ACB runqueue array in host DRAM, filtered for RUNNABLE phase, scored by a priority engine evaluating tokens and SLO deficits, and branched into inference worker dispatch or preemptive TERMINATED rejection."}
+![](images/svg/fig-vol3-scheduler-dispatch.svg)
+:::
+
+@Lst-vol3-drr-dispatch implements deficit round-robin dispatch across active trajectories.
+
+::: {#lst-vol3-drr-dispatch lst-cap="**Deficit Round-Robin Trajectory Dispatch**: Fair-share scheduling across active trajectories using token-bucket deficit accounting."}
+```python
+def dispatch_round(active_acbs: list[AgentControlBlock], q_base: int, bucket: TokenBucket) -> None:
+    """Dispatch active trajectories using Deficit Round-Robin scheduling."""
+    for acb in active_acbs:
+        if acb.state != State.RUNNABLE:
+            continue
+        acb.deficit += q_base
+        cost = acb.estimated_step_cost
+        if acb.deficit >= cost and bucket.consume(cost):
+            acb.deficit -= cost
+            acb.state = State.RUNNING
+            schedule_vcpus(acb)
+```
+:::
+
+## Budgets and Ceilings {#sec-vol3-controlplane-accounting}
+
+An agent asked to diagnose a failing data pipeline runs a query that times out. The model proposes that the query was malformed and tries a variant, then another, then a broader diagnostic that also fails. Each failure appends a stack trace to the context, and each new proposal is a well-formed tool call within every per-call limit. The trajectory yields at every tool call, stays within its share of the rate limit, and releases its sandbox between calls, so to the scheduler it is a model citizen. Hours and hundreds of turns later it has spent real money and changed nothing in the environment. @Fig-vol3-epistemic-attractor-cycle traces the loop and the one mechanism that ends it.
+
+::: {#fig-vol3-epistemic-attractor-cycle fig-env="figure" fig-pos="htb" fig-cap="**A Runaway Loop and the Budget That Ends It**: A tool failure appends error observations to the context, the model rarely proposes ending the turn, and each retry is well formed and within per-call limits, so the loop continues without progress. A budget kept by the harness outside the context, checked before every model call against turns, tokens, dollars, and wall-clock time, stops the loop and finalizes the trajectory as FAILED." fig-alt="Four boxes in a cycle: model proposes an action, error observations accumulate, ending the turn becomes rare, and runaway loop, connected by arrows labeled tool fails and another retry. A green harness budget box at the bottom checks turns, tokens, dollars, and wall-clock ceilings and leads to a halt box reading FINALIZING to FAILED with BUDGET_EXCEEDED, with an arrow marked budget crossed stopping the loop."}
+![](images/svg/fig-vol3-epistemic-attractor-cycle.svg)
+:::
+
+The model cannot end this loop by itself. It sees its context, not the meter, so turn counts, token counts, and prices are not among its inputs, and as error observations accumulate they crowd out the instructions that framed the task (@sec-vol3-intro-context-poisoning). An instruction such as "stay under five dollars" lowers the probability of overspending; it does not bound it, and it grows weaker as the context fills with failures. A looping model stays live, well formed, and inside every per-call limit while advancing nothing, so the bound on the whole trajectory has to sit outside the model with the other controls (principle \ref{pri-vol3-preemptive-interrupts}).
+
+The harness enforces two layers of ceilings. Per-call ceilings, the maximum output tokens and the call deadline set on every request (@sec-vol3-foundation-model-contract), bound a single call. A per-trajectory **budget**\index{Budget!per-trajectory} bounds the whole run with a vector of ceilings,
+
+$$\mathbf{B} = \langle H_{\max},\ N_{\max},\ T_{\max},\ C_{\max} \rangle$$
+
+on turns, tokens, wall-clock time, and dollars. The turn cap $H_{\max}$ is the simplest and most widely used, and it counts the same turns as the horizon $H$ of @sec-vol3-intro-hsa. It is not sufficient alone. A trajectory within its turn cap can still exhaust a large dollar budget if every turn re-sends a very long context. A wall-clock ceiling alone kills slow but cheap work, such as a trajectory waiting on a long build, and a dollar ceiling alone misses a runaway on an inexpensive model that holds sandboxes for hours. Each dimension catches a failure the others miss, and a deployment may add dimensions such as sandbox-hours where they bind.
+
+Spend is metered, not estimated. After every call the harness reads the usage the provider reports, split into uncached input tokens, cached input tokens, and output tokens, and updates the trajectory's cost:
+
+$$C^{(k)} = C^{(k-1)} + p_{\text{in}}\, n_{\text{in}}^{(k)} + p_{\text{cache}}\, n_{\text{cache}}^{(k)} + p_{\text{out}}\, n_{\text{out}}^{(k)} + \sum_{j} c_{\text{tool}}(t_{k,j})$$
+
+where $n_{\text{in}}^{(k)}$, $n_{\text{cache}}^{(k)}$, and $n_{\text{out}}^{(k)}$ are turn $k$'s uncached input, cached input, and output tokens, the $p$ terms are their unit prices, and $c_{\text{tool}}$ is any direct charge for a tool call, such as a paid search. The price structure comes from @sec-vol3-foundation-model-cost. Output tokens cost several times more than input tokens, but a trajectory re-sends its growing context on every turn, so input usually dominates the trajectory's bill, and prefix caching of that re-sent context (laid out for reuse in @sec-vol3-context-engineering-staging, served by the mechanism of @sec-vol3-kvcache-radix-tree) is the largest single lever on it. The worked example below shows what that lever does to a budget.
+
+```{python}
+#| label: calc-vol3-harness-budget
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ METERING ONE TRAJECTORY AGAINST ITS BUDGET (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-controlplane-accounting, the worked example on metering
+# │          a trajectory against a multi-dimensional budget.
+# │
+# │ Goal: Show which ceiling binds for the coding agent's thirty-turn
+# │       trajectory, and how a broken prefix cache moves the binding
+# │       dimension from turns to dollars.
+# │ Show: Tokens processed, dollar cost with and without prefix caching, and
+# │       the budget share used in each dimension.
+# │ How:  The trajectory is the one priced in tokens in the foundation-model
+# │       chapter (same first prompt, per-turn growth, output per turn, and
+# │       MLSysIM coding-agent trajectory length), so its numbers agree with
+# │       that chapter and with the agent-economics caching notebook. Prices
+# │       and the four ceilings are illustrative scenario inputs.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import fmt, fmt_int, fmt_usd, fmt_percent, check
+
+class HarnessBudget:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    agent = Agents.Coding.SWE_Bench_Runner
+    turns = agent.max_trajectory_steps  # turns completed so far
+    s0 = 8_000  # scenario: first prompt (same as the foundation-model estimate)
+    delta = 1_500  # scenario: tokens appended per turn
+    k_out = 200  # scenario: output tokens per reply
+    p_in = 3.00  # scenario: dollars per million uncached input tokens
+    p_cache = 0.30  # scenario: dollars per million cached input tokens
+    p_out = 15.00  # scenario: dollars per million output tokens
+    h_max = 40  # scenario: turn ceiling
+    n_max = 2_000_000  # scenario: token ceiling
+    t_max = 900  # scenario: wall-clock ceiling, seconds
+    c_max = 3.50  # scenario: dollar ceiling
+    t_wall = 460  # scenario: harness clock reading, seconds
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_in = turns * s0 + delta * turns * (turns - 1) // 2
+    n_uncached = s0 + delta * (turns - 1)
+    n_cached = n_in - n_uncached
+    n_out = turns * k_out
+    n_total = n_in + n_out
+
+    c_total = (n_uncached * p_in + n_cached * p_cache + n_out * p_out) / 1e6
+    c_total_nocache = (n_in * p_in + n_out * p_out) / 1e6
+
+    rho_turns = turns / h_max
+    rho_tokens = n_total / n_max
+    rho_wall = t_wall / t_max
+    rho_dollars = c_total / c_max
+    rho_dollars_nocache = c_total_nocache / c_max
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(rho_turns == max(rho_turns, rho_tokens, rho_wall, rho_dollars), "With caching, the turn cap should bind")
+    check(rho_dollars_nocache > max(rho_turns, rho_tokens, rho_wall), "Without caching, the dollar ceiling should bind")
+    check(0.70 <= rho_dollars_nocache < 0.90, "The uncached run should sit in the steer band, not restrict")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    turns_str = fmt_int(turns)
+    h_max_str = fmt_int(h_max)
+    n_max_m_str = fmt_int(n_max / 1e6)
+    t_max_str = fmt_int(t_max)
+    c_max_str = fmt_usd(c_max, precision=2)
+    t_wall_str = fmt_int(t_wall)
+    p_in_str = fmt_usd(p_in)
+    p_cache_str = fmt_usd(p_cache, precision=2)
+    p_out_str = fmt_usd(p_out)
+    n_total_str = fmt_int(n_total)
+    c_total_str = fmt_usd(c_total, precision=2)
+    c_total_nocache_str = fmt_usd(c_total_nocache, precision=2)
+    rho_turns_str = fmt_percent(rho_turns, style="prose")
+    rho_tokens_str = fmt_percent(rho_tokens, style="prose")
+    rho_wall_str = fmt_percent(rho_wall, style="prose")
+    rho_dollars_str = fmt_percent(rho_dollars, style="prose")
+    rho_dollars_nocache_str = fmt_percent(rho_dollars_nocache, style="prose")
+```
+
+::: {#nbk-09-multi-dimensional-accounting-and-prefix-cache .callout-notebook title="Metering a trajectory against its budget"}
+
+**Problem**: The coding agent of @sec-vol3-foundation-model-cost has run its `{python} HarnessBudget.turns_str`-turn trajectory under a budget of `{python} HarnessBudget.h_max_str` turns, `{python} HarnessBudget.n_max_m_str` million tokens, `{python} HarnessBudget.t_max_str` s of wall-clock time, and `{python} HarnessBudget.c_max_str`, and the harness's clock reads `{python} HarnessBudget.t_wall_str` s. Its token counts are the ones already worked out in tokens (\ref{nbk-02-price-of-a-trajectory}). At illustrative prices of `{python} HarnessBudget.p_in_str` per million uncached input tokens, `{python} HarnessBudget.p_cache_str` per million cached input tokens, and `{python} HarnessBudget.p_out_str` per million output tokens, which ceiling binds, with and without a working prefix cache?
+
+**Meter readings**: The trajectory has processed `{python} HarnessBudget.n_total_str` tokens, almost all of them re-sent context. With an append-only context, only the first prompt and each later turn's new tokens are billed at the uncached price, and the trajectory has cost `{python} HarnessBudget.c_total_str`. If the cache misses on every turn, the same tokens cost `{python} HarnessBudget.c_total_nocache_str`.
+
+**Budget used**: With caching, the trajectory has used `{python} HarnessBudget.rho_turns_str` of its turns, `{python} HarnessBudget.rho_tokens_str` of its tokens, `{python} HarnessBudget.rho_wall_str` of its wall-clock time, and `{python} HarnessBudget.rho_dollars_str` of its dollars, so the turn cap binds. Without caching, the dollar share jumps to `{python} HarnessBudget.rho_dollars_nocache_str` and dollars become the binding dimension. The token share is the same either way, because a cache changes what a token costs, not how many are processed.
+
+**Systems insight**: The same trajectory sits comfortably inside its budget or close to its dollar ceiling depending on whether its prefix cache hits. A change that breaks the cache, such as reordering the tool list on every turn (@sec-vol3-context-engineering-staging), shows up first as a dollar ceiling approached early, which is one reason the budget meters dollars separately from tokens. @Sec-vol3-agent-economics-caching prices the saving itself.
+
+:::
+
+The harness reduces the budget to one number per turn, the share of the tightest ceiling already used,
+
+$$\rho_k = \max_{d} \frac{u_{k,d}}{B_d}$$
+
+where $u_{k,d}$ is the measured use of dimension $d$ after turn $k$. A hard stop at $\rho_k = 1$ alone is wasteful, because a trajectory stopped abruptly at its ceiling discards work that a few more turns could have packaged into a usable result. The harness therefore escalates in stages, summarized in @tbl-vol3-budget-triggers and in the margin.
+
+::: {.column-margin}
+![](images/svg/vol3_checkpointing_margin_004.svg){width="100%" fig-alt="Four stacked bands labeled by share of the tightest budget used: below 70 percent nominal with full grant, 70 to 90 percent steer with a notice and compacted context, 90 to 100 percent restrict to read-only tools, and at or above 100 percent halt and finalize as FAILED."}
+
+*Illustrative thresholds for staged escalation; the right values come from measured cost-vs.-success curves.*
+:::
+
+| Share of budget used ($\rho_k$) | Stage        | Harness action                                                                            | What it guarantees                                |
+|:--------------------------------|:-------------|:------------------------------------------------------------------------------------------|:--------------------------------------------------|
+| Below 0.70                      | **Nominal**  | None                                                                                      | Ordinary per-call ceilings only                   |
+| 0.70 to 0.90                    | **Steer**    | Append a budget notice to the next call; compact the context                              | Nothing; lowers the chance of further exploration |
+| 0.90 to 1.00                    | **Restrict** | Narrow the grant to read-only tools; disable subagent creation; ask for a final result    | No new effects on the environment                 |
+| 1.00 or more                    | **Halt**     | Enter `FINALIZING`; record `BUDGET_EXCEEDED` and the binding dimension; keep partial work | No further spend                                  |
+
+: **Staged Budget Escalation**: What the harness does as a trajectory approaches its tightest ceiling, and which stages are guarantees rather than requests. {#tbl-vol3-budget-triggers}
+
+Each stage uses a mechanism from earlier chapters. The steer stage appends a notice stating the binding dimension and the remaining allowance, and it triggers context compaction (@sec-vol3-context-engineering-compaction), since a long re-sent context is usually the largest cost driver. The notice is a request, so it lowers the probability of further exploration without guaranteeing anything. The restrict stage is a guarantee, because it changes the grant rather than the prompt. Narrowing the trajectory to read-only tools moves it to $A_0$, and disabling subagent creation prevents it from escaping the budget by delegating work. Changing the tool list invalidates the cached prefix once (@sec-vol3-context-engineering-staging), a cost worth paying at this point. The halt stage enters `FINALIZING`, which cancels open jobs, keeps the workspace snapshot and any partial artifacts for the caller, and records which dimension ran out, so that the trajectory's record shows why it failed as well as that it failed.
+
+The thresholds in @tbl-vol3-budget-triggers are illustrative, and the ceilings themselves should be measured rather than guessed. The method is to run a representative task suite with generous budgets, record for every accepted task the turns and dollars it took to finish, and plot the fraction of tasks accepted within a budget $b$ as a function of $b$. The curve rises steeply and then flattens. A ceiling well past the knee buys little additional success and a great deal of spend on trajectories that were never going to finish. Because the curve differs by task class, so should the ceilings. @Sec-vol3-evaluation-rigor supplies the statistics for reading such curves from a finite number of trials, and @sec-vol3-agent-economics-accounting prices the result as cost per accepted task.
+
+A budget knows how much a trajectory has spent, not whether it is getting anywhere, so a looping trajectory is caught only when it reaches a ceiling. Catching it earlier, by recognizing repeated identical calls or test results that stop changing, requires judging progress from the environment's state; @sec-vol3-sagas-watchdogs develops that detection as part of failure recovery. Money that must be reserved across a parent and its subagents, and spend-rate limits across a fleet, are governed in @sec-vol3-agent-economics-governance. Within one trajectory, the budget completes the harness. The record describes the trajectory, the state machine constrains how it changes, control actions and approval gates let people intervene at safe moments, the scheduler shares the node, and the budget guarantees that the loop ends.
+
+## Fallacies and Pitfalls {#sec-vol3-agent-harness-fallacies}
+
+The mistakes in building a harness come from treating it as plumbing around the model rather than as the place where every cross-turn guarantee is enforced.
+
+::: {.fallacy-pitfall}
+**Fallacy:** *Running the agent loop as async coroutines turns it into a harness.*
+
+Moving the prototype loop onto an event loop fixes one defect, because a coroutine awaiting a tool no longer pins a worker. It fixes nothing else. The trajectory's state, pending calls, spend, and grants still live in coroutine locals, where no scheduler or operator can read them without resuming the coroutine, and no guard checks a transition before it happens. A late tool reply resumes whichever coroutine awaited it, which is exactly the observation crossing the pending-ID guard rejects. Canceling the task raises an exception wherever the model call happens to be, which can tear a streaming tool call in half. The coroutine also dies with its process and records nothing about what it intended. Asynchronous I/O is how a harness waits efficiently; the trajectory record, the guarded state machine, and turn-boundary control are what make it a harness.
+:::
+
+::: {.fallacy-pitfall}
+**Fallacy:** *A budget stated in the system prompt bounds what a trajectory spends.*
+
+An instruction such as "do not spend more than five dollars" makes the bound depend on the model's compliance, which invariant closure (principle \ref{pri-invariant-closure}) rules out. The model does not see its own token counts or the provider's prices, so it cannot compute its spend even when the instruction sits near the end of its context. The trajectories most likely to overspend are the ones in an error-recovery loop, whose contexts fill with failures that push the instruction further from the current turn. The runaway loop of @fig-vol3-epistemic-attractor-cycle is well formed on every turn, and nothing in its context tells it to stop. A budget is a ceiling the harness meters from usage reports and enforces by changing the grant or finalizing the trajectory, not a sentence the model reads.
+:::
+
+::: {.fallacy-pitfall}
+**Pitfall:** *Dispatching a tool call from a truncated or canceled model reply.*
+
+A reply that stopped at its output limit, or a stream aborted by a cancel, can end partway through a tool call. Some parsers repair the fragment by closing brackets and supplying defaults, which turns a half-written `drop_table` into a complete call with arguments the model never produced. The quarantining invariant (principle \ref{pri-02-quarantining-invariant}) forbids dispatching any output that did not end cleanly. The harness returns a truncation notice as an observation, counts repeated truncations against the budget, and, if truncation recurs, raises the output ceiling for that call type or asks the model to split its output across turns.
+:::
+
+::: {.fallacy-pitfall}
+**Pitfall:** *Approving an irreversible call without an expiry or a precondition re-check.*
+
+An approval request without an expiry leaves its trajectory parked indefinitely when a notification is lost or a reviewer changes shifts, and abandoned requests accumulate with their workspace leases and credentials still held. An approval without a re-check is worse. A reviewer who approves a table drop on Monday approves the table as it was on Monday; if the harness dispatches the call on Wednesday, after other processes have written new rows, it executes an action nobody reviewed. Every request needs an expiry that defaults to denial, a digest that binds the approval to one exact call, and a re-check of the recorded preconditions, grant, and budget immediately before dispatch.
+:::
+
+::: {.fallacy-pitfall}
+**Pitfall:** *Setting the turn cap from intuition instead of from the cost-vs.-success curve.*
+
+A turn cap chosen because "fifty turns sounds generous" fails in both directions. For simple tasks it lets failing trajectories spend long after the curve of accepted tasks has flattened. For hard tasks it cuts off trajectories that a measured curve would show finishing successfully a few turns later. Because the curve differs by task class, one global cap is wrong for most classes. Ceilings should be read from the knee of each class's curve, measured with the statistics of @sec-vol3-evaluation-rigor, and revisited whenever the model, the tools, or the context policy change.
+:::
+
+## Summary {#sec-vol3-agent-harness-summary}
+[]{#sec-vol3-controlplane-summary}
+
+A prototype agent loop keeps everything that matters about a trajectory (its state, its spend, what it is waiting for, and what it may do) inside the loop and the model's context, so nothing outside can pause it, bound it, or stop it. The harness moves that control state into a trajectory record it owns and changes the record only through guarded transitions over a closed set of states. The guards reject late tool results, keep held calls from dispatching without approval, route every exit through a cleanup barrier, and make terminal states final.
+
+On that record the harness builds the controls a long-running trajectory needs. Control requests are recorded on arrival and applied at turn boundaries, with streaming cancellation and output ceilings bounding the wait and kill reserved for cases where finishing the turn is itself the hazard. Stop reasons tell the harness which state each reply leaves the trajectory in. Waiting trajectories hold a record rather than a worker, and irreversible calls wait in escrow for an approval that expires, binds to one exact call, and is re-checked before dispatch. A scheduler shares the node fairly across trajectories, and a metered, multi-dimensional budget steers, restricts, and finally halts a trajectory that will not finish, with ceilings read from measured cost-vs.-success curves.
+
+::: {.callout-takeaways title="Control lives outside the model"}
+
+* **The record, not the transcript, is the trajectory**: Status, spend, grants, and pending work live in a small record the harness owns, so every control decision reads a few fields rather than a transcript, and nothing the model emits changes them directly.
+* **Guarded transitions make states mean something**: A closed state set with guards rejects late tool results, blocks dispatch from an approval wait, routes every exit through cleanup, and turns every retry into a new trajectory.
+* **Requests arrive anytime; they act at turn boundaries**: Cancel, pause, and budget actions wait for a moment when nothing is half done, streaming cancellation and output ceilings keep that wait short, and only a kill breaks a turn, leaving in-doubt calls to settlement.
+* **Irreversible calls wait in escrow, bound to one exact action**: An approval gate holds the call, expires into denial, re-checks the recorded preconditions before dispatch, and returns a refusal observation the model can plan around.
+* **Budgets are metered ceilings read from success curves**: Turns, tokens, wall-clock time, and dollars are metered from usage reports; caching can change a trajectory's dollar share several-fold; steer, restrict, and halt stages escalate from requests to guarantees.
+
+:::
+
+The harness never asks the model to stop, yield, or count. Control requests take effect at turn boundaries, per-call ceilings bound each model call, and the budget bounds the whole trajectory, which is out-of-band preemption (principle \ref{pri-vol3-preemptive-interrupts}) made into mechanisms a runtime can execute. Every one of those mechanisms reads or writes a single record the model cannot touch, the concrete form of trajectory-level encapsulation (principle \ref{pri-vol3-trajectory-encapsulation}). The approval gate adds the forward-only step of the pivot boundary (principle \ref{pri-vol3-reversibility-sagas}) at the one moment it can still be applied, before dispatch. Together they close the horizon exposure for a trajectory that runs on one live host.
+
+::: {.callout-chapter-connection title="From a live record to a durable one"}
+When the host running a trajectory loses power at turn forty, what must already be written down? The trajectory record built here lives in memory, and every guarantee in this chapter assumes the harness process survives. A crash erases the pending call IDs that reject late results, the held approval and its recorded preconditions, and the spend that enforces the budget, and it leaves unanswered whether the tool call dispatched just before the crash took effect. @Sec-vol3-durable-execution makes the record a projection of an append-only trajectory log, writes each intent before its effect (principle \ref{pri-vol3-intent-before-effect}), and shows how a trajectory resumes, or is replayed for debugging, without repeating a side effect it has already caused.
+:::

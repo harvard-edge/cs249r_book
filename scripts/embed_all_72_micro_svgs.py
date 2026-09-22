@@ -14,22 +14,22 @@ BOOKS = BASE / "books" / "vol3"
 
 CHAPTER_FILES = {
     1: ("01_introduction", "01_introduction.qmd"),
-    2: ("02_processor", "02_processor.qmd"),
-    3: ("03_deliberation", "03_deliberation.qmd"),
-    4: ("04_working_sets", "04_working_sets.qmd"),
-    5: ("05_virtual_memory", "05_virtual_memory.qmd"),
-    6: ("06_episodic_memory", "06_episodic_memory.qmd"),
-    7: ("07_actuation", "07_actuation.qmd"),
-    8: ("08_virtualization", "08_virtualization.qmd"),
-    9: ("09_checkpointing", "09_checkpointing.qmd"),
-    10: ("10_interrupts", "10_interrupts.qmd"),
-    11: ("11_scheduling", "11_scheduling.qmd"),
-    12: ("12_data_flywheel", "12_data_flywheel.qmd"),
-    13: ("13_sft", "13_sft.qmd"),
-    14: ("14_rlvr", "14_rlvr.qmd"),
-    15: ("15_multi_agent", "15_multi_agent.qmd"),
-    16: ("16_observability", "16_observability.qmd"),
-    17: ("17_tokenomics", "17_tokenomics.qmd"),
+    2: ("02_foundation_model", "02_foundation_model.qmd"),
+    3: ("03_test_time_compute", "03_test_time_compute.qmd"),
+    4: ("04_context_engineering", "04_context_engineering.qmd"),
+    5: ("05_kv_cache", "05_kv_cache.qmd"),
+    6: ("06_long_term_memory", "06_long_term_memory.qmd"),
+    7: ("07_tool_calling", "07_tool_calling.qmd"),
+    8: ("08_sandboxes", "08_sandboxes.qmd"),
+    9: ("09_agent_harness", "09_agent_harness.qmd"),
+    10: ("10_durable_execution", "10_durable_execution.qmd"),
+    11: ("11_failure_recovery", "11_failure_recovery.qmd"),
+    12: ("13_trajectory_curation", "13_trajectory_curation.qmd"),
+    13: ("14_fine_tuning", "14_fine_tuning.qmd"),
+    14: ("15_rlvr", "15_rlvr.qmd"),
+    15: ("16_multi_agent", "16_multi_agent.qmd"),
+    16: ("12_evaluation", "12_evaluation.qmd"),
+    17: ("17_agent_economics", "17_agent_economics.qmd"),
     18: ("18_conclusion", "18_conclusion.qmd"),
 }
 
@@ -116,7 +116,7 @@ ALL_FIGURES = [
         "file": "vol3_deliberation_margin_001.svg",
         "alt": "Exponential decay curve showing trajectory success dropping from 95% at step 1 down to 13% at step 40 for per-step error probability p=0.95.",
         "caption": "In unverified execution, compounding errors drive trajectory survival below 15% after 40 steps.",
-        "anchor": "## Why One Candidate Can Fail {#sec-vol3-deliberation-insufficient-response}",
+        "anchor": "## Why One Candidate Can Fail {#sec-vol3-test-time-compute-insufficient-response}",
     },
     {
         "chapter": 3,
@@ -132,7 +132,7 @@ ALL_FIGURES = [
         "file": "vol3_deliberation_margin_003.svg",
         "alt": "Scatter and calibration curve comparing process reward model step scores against sparse terminal outcome labels.",
         "caption": "Step-level process reward models localize reasoning faults before terminal execution failure occurs.",
-        "anchor": "## Process Verification {#sec-vol3-deliberation-verification}",
+        "anchor": "## Process Verification {#sec-vol3-test-time-compute-verification}",
     },
     {
         "chapter": 3,
@@ -168,7 +168,7 @@ ALL_FIGURES = [
         "file": "vol3_working_sets_margin_003.svg",
         "alt": "A budget comparison bar diagram showing 57.6 gigabytes of unpruned reasoning scratchpad memory overflowing the 10 gigabyte GPU limit, compared to 0.96 gigabytes under the Two-Phase Commit protocol.",
         "caption": "Two-Phase Commit purges ephemeral scratchpads post-action, slashing 30-turn reasoning memory from 57.6 GB to 0.96 GB.",
-        "anchor": "## Context Compaction {#sec-vol3-working-sets-compaction}",
+        "anchor": "## Context Compaction {#sec-vol3-context-engineering-compaction}",
     },
     {
         "chapter": 4,
@@ -268,7 +268,7 @@ ALL_FIGURES = [
         "file": "vol3_actuation_margin_002.svg",
         "alt": "Segmented stream buffer diagram contrasting a 4.2 MB unconstrained tool output against a 4 KB sandwich-truncated window preserving head and tail lines.",
         "caption": "Sandwich truncation discards intermediate execution noise while pinning critical head schemas and tail stack traces.",
-        "anchor": "## Observation Stream Truncation {#sec-vol3-actuation-streaming}",
+        "anchor": "## Observation Stream Truncation {#sec-vol3-tool-calling-streaming}",
     },
     {
         "chapter": 7,
@@ -276,7 +276,7 @@ ALL_FIGURES = [
         "file": "vol3_actuation_margin_003.svg",
         "alt": "Logarithmic timescale ladder comparing 20 ms GPU token generation against 1,200 ms subprocess build execution.",
         "caption": "External tool execution outlasts neural token generation by up to five orders of magnitude, dominating end-to-end makespan.",
-        "anchor": "## Idempotent Action Execution {#sec-vol3-actuation-idempotency}",
+        "anchor": "## Idempotent Action Execution {#sec-vol3-tool-calling-idempotency}",
     },
     {
         "chapter": 7,
@@ -296,7 +296,7 @@ ALL_FIGURES = [
         "file": "vol3_virtualization_margin_001.svg",
         "alt": "Horizontal bar ladder showing host system calls exposed to untrusted code: Container at 450, gVisor at 50, Firecracker at 35, and WebAssembly at 0.",
         "caption": "MicroVMs and WebAssembly collapse host kernel syscall exposure by over 90% compared to containers.",
-        "anchor": "## Adversarial Threat Models {#sec-vol3-virtualization-threat-model}",
+        "anchor": "## Adversarial Threat Models {#sec-vol3-sandboxes-threat-model}",
     },
     {
         "chapter": 8,
@@ -304,7 +304,7 @@ ALL_FIGURES = [
         "file": "vol3_virtualization_margin_002.svg",
         "alt": "A latency curve plotting file mutation stall against file size; latency remains sub-millisecond up to 1 megabyte, then steepens to a 10.97-second stall at 1.2 gigabytes under parallel worker contention, with the region past 100 megabytes shaded red.",
         "caption": "Modifying a single byte triggers full-file copy-up, turning sub-millisecond writes into multi-second NVMe stalls for gigabyte assets.",
-        "anchor": "## Copy-on-Write Filesystem Overlays {#sec-vol3-virtualization-cow}",
+        "anchor": "## Copy-on-Write Filesystem Overlays {#sec-vol3-sandboxes-cow}",
     },
     {
         "chapter": 8,
@@ -312,7 +312,7 @@ ALL_FIGURES = [
         "file": "vol3_virtualization_margin_003.svg",
         "alt": "Two log-scale horizontal bars comparing covert DNS exfiltration bandwidth: an unrestricted channel at 234 kilobytes per second exfiltrates in 0.28 seconds, while a rate-clamped resolver drops bandwidth to 30 bytes per second, stretching exfiltration to 36.4 minutes.",
         "caption": "Rate-clamping DNS queries chokes covert exfiltration bandwidth by 7,800x, expanding the anomaly detection window from 0.28 seconds to 36 minutes.",
-        "anchor": "## Network Egress Firewalls {#sec-vol3-virtualization-network}",
+        "anchor": "## Network Egress Firewalls {#sec-vol3-sandboxes-network}",
     },
     {
         "chapter": 8,
@@ -320,7 +320,7 @@ ALL_FIGURES = [
         "file": "vol3_virtualization_margin_004.svg",
         "alt": "Log-scale latency ladder comparing sandbox acquisition times: Cold MicroVM boot at 450 milliseconds, Eager Snapshot restore at 35 milliseconds, and Pre-Warmed CoW Pool with UFFD at 3 milliseconds, matching container speeds without sacrificing hardware isolation.",
         "caption": "Pre-warmed memory pooling with on-demand userfaultfd paging delivers 3 ms microVM acquisition, matching container speed while preserving hardware isolation.",
-        "anchor": "## MicroVM Kernel Isolation {#sec-vol3-virtualization-microvms}",
+        "anchor": "## MicroVM Kernel Isolation {#sec-vol3-sandboxes-microvms}",
     },
 
     # -------------------------------------------------------------------------
@@ -476,7 +476,7 @@ ALL_FIGURES = [
         "file": "vol3_sft_margin_001.svg",
         "alt": "Four-rung logarithmic memory ladder showing prompt prefix reduction: naive serialization at 16,384 tokens down to compiled prefix at 128 tokens, shrinking per-instance KV cache from 10.5 GB to 0.08 GB.",
         "caption": "Context compilation compresses runtime prompt prefixes by 128×, reducing 70B model per-instance KV-cache consumption from 10.5 GB down to 0.08 GB.",
-        "anchor": "## Trajectory Example Serialization {#sec-vol3-sft-serialization}",
+        "anchor": "## Trajectory Example Serialization {#sec-vol3-fine-tuning-serialization}",
     },
     {
         "chapter": 13,
@@ -492,7 +492,7 @@ ALL_FIGURES = [
         "file": "vol3_sft_margin_003.svg",
         "alt": "Validation error curve across LoRA rank dimensions showing syntax error knee collapsing at rank 16.",
         "caption": "Low-rank adapters require rank 16 to stabilize structural JSON syntax before semantic task adaptation converges.",
-        "anchor": "## Parameter-Efficient Memory Bounds {#sec-vol3-sft-peft}",
+        "anchor": "## Parameter-Efficient Memory Bounds {#sec-vol3-fine-tuning-peft}",
     },
     {
         "chapter": 13,
@@ -500,7 +500,7 @@ ALL_FIGURES = [
         "file": "vol3_sft_margin_004.svg",
         "alt": "Divergence sparkline comparing quadratic compounding error under naive behavioral cloning against bounded linear drift under interactive DAGGER training.",
         "caption": "Supervised behavioral cloning suffers quadratic error compounding without interactive DAGGER data aggregation.",
-        "anchor": "## Autoregressive Exposure Bias {#sec-vol3-sft-exposure-bias}",
+        "anchor": "## Autoregressive Exposure Bias {#sec-vol3-fine-tuning-exposure-bias}",
     },
 
     # -------------------------------------------------------------------------
@@ -584,7 +584,7 @@ ALL_FIGURES = [
         "file": "vol3_observability_margin_001.svg",
         "alt": "Log-scale column chart comparing trajectory telemetry footprints: 100 MB raw trace in-band vs. 17 MB zstd compressed blob vs. 100 KB OTLP metadata index, achieving a 99.9% wire reduction.",
         "caption": "Asynchronous payload offloading and tail-based sampling compress active trajectory telemetry indexes from 100 MB down to 25 KB, averting gRPC frame exhaustion while preserving 100% of production failure traces.",
-        "anchor": "## Distributed Trajectory Tracing {#sec-vol3-observability-tracing}",
+        "anchor": "## Distributed Trajectory Tracing {#sec-vol3-evaluation-tracing}",
     },
     {
         "chapter": 16,
@@ -592,7 +592,7 @@ ALL_FIGURES = [
         "file": "vol3_observability_margin_002.svg",
         "alt": "Hyperbolic curve of 95 percent confidence interval half-width dropping from plus minus 16.4 percent at N=30 down to plus minus 2.4 percent at N=1,430 tasks under binomial benchmark sampling.",
         "caption": "Evaluating on fewer than 200 tasks produces wide confidence intervals (plus minus 16%) that obscure true model regressions behind statistical noise.",
-        "anchor": "### Finite-Sample Uncertainty and the Wilson Score Interval {#sec-vol3-observability-wilson}",
+        "anchor": "### Finite-Sample Uncertainty and the Wilson Score Interval {#sec-vol3-evaluation-wilson}",
     },
     {
         "chapter": 16,
@@ -600,7 +600,7 @@ ALL_FIGURES = [
         "file": "vol3_observability_margin_003.svg",
         "alt": "Sequential hypothesis testing corridor showing log-likelihood ratio boundaries: candidate routing breaches the upper abort threshold at sample 8, terminating rollout without waiting for fixed sample batching.",
         "caption": "Wald sequential probability ratio testing detects degraded candidate policies within 8 turns, cutting canary rollout blast radius by 80%.",
-        "anchor": "## Staged Canary Deployments {#sec-vol3-observability-releases}",
+        "anchor": "## Staged Canary Deployments {#sec-vol3-evaluation-releases}",
     },
     {
         "chapter": 16,
@@ -608,7 +608,7 @@ ALL_FIGURES = [
         "file": "vol3_observability_margin_004.svg",
         "alt": "Amdahl speedup curves showing overall agent speedup capped at 1.54x when accelerating model inference alone, versus 1.73x when optimizing system scaffolding tools.",
         "caption": "Because foundation model inference accounts for only 35% of trajectory duration, accelerating host scaffolding tools yields higher end-to-end speedups than model optimization alone.",
-        "anchor": "## The Multi-Layer Evaluation Contract {#sec-vol3-observability-contract}",
+        "anchor": "## The Multi-Layer Evaluation Contract {#sec-vol3-evaluation-contract}",
     },
 
     # -------------------------------------------------------------------------
@@ -620,7 +620,7 @@ ALL_FIGURES = [
         "file": "vol3_tokenomics_margin_001.svg",
         "alt": "Hyperbolic curve plotting effective cost multiplier against task acceptance rate, showing a sharp upward inflection into a red failure-odds wash below 50 percent acceptance.",
         "caption": "Sub-50% task acceptance triggers a hyperbolic cost cliff that overwhelms nominal per-token discounts.",
-        "anchor": "## Task Cost Accounting {#sec-vol3-tokenomics-accounting}",
+        "anchor": "## Task Cost Accounting {#sec-vol3-agent-economics-accounting}",
     },
     {
         "chapter": 17,
@@ -628,7 +628,7 @@ ALL_FIGURES = [
         "file": "vol3_tokenomics_margin_002.svg",
         "alt": "Three horizontal bars decomposing trajectory wall-clock latency: pytest sandbox tool execution dominates at 78.6 percent, container lifecycle takes 11.9 percent, and model inference accounts for only 9.4 percent.",
         "caption": "Tool sandbox execution dominates trajectory wall-clock time, capping the system speedup achievable from GPU model acceleration.",
-        "anchor": "## Critical Path Latency {#sec-vol3-tokenomics-criticalpath}",
+        "anchor": "## Critical Path Latency {#sec-vol3-agent-economics-criticalpath}",
     },
     {
         "chapter": 17,
@@ -636,7 +636,7 @@ ALL_FIGURES = [
         "file": "vol3_tokenomics_margin_003.svg",
         "alt": "Logarithmic horizontal ladder comparing per-task serving costs: Frontier monolithic at 60.00 dollars per thousand tasks versus expected cascade at 8.40 dollars, achieving an 86 percent cost reduction.",
         "caption": "Tiered model cascading resolves 88% of tasks on lightweight models, cutting expected cost by 86% against monolithic frontier routing.",
-        "anchor": "## Tiered Model Cascades {#sec-vol3-tokenomics-cascades}",
+        "anchor": "## Tiered Model Cascades {#sec-vol3-agent-economics-cascades}",
     },
     {
         "chapter": 17,
@@ -644,7 +644,7 @@ ALL_FIGURES = [
         "file": "vol3_tokenomics_margin_004.svg",
         "alt": "Budget envelope bars showing committed spend of 4.00 dollars and active in-flight escrow of 2.40 dollars totaling 6.40 dollars against a hard 10.00 dollar spending ceiling.",
         "caption": "Hierarchical ledgers hold in-flight funds in escrow, preventing concurrent child subagents from violating the root spending ceiling.",
-        "anchor": "## Monotonic Spending Governance {#sec-vol3-tokenomics-governance}",
+        "anchor": "## Monotonic Spending Governance {#sec-vol3-agent-economics-governance}",
     },
 
     # -------------------------------------------------------------------------

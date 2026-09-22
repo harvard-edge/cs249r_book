@@ -121,7 +121,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 340" 
 </svg>"""
 
 from pathlib import Path
-out_path = str(Path(__file__).resolve().parent.parent / "books/vol3/06_episodic_memory/images/svg/hnsw_hierarchical_routing.svg")
+out_path = str(Path(__file__).resolve().parent.parent / "books/vol3/06_long_term_memory/images/svg/hnsw_hierarchical_routing.svg")
 with open(out_path, "w") as f:
     f.write(svg_content)
 print("Wrote hnsw_hierarchical_routing.svg successfully")

@@ -472,7 +472,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '02_processor',
+        'slug': '02_foundation_model',
         'prefix': 'processor',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -485,7 +485,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '03_deliberation',
+        'slug': '03_test_time_compute',
         'prefix': 'deliberation',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -498,7 +498,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '04_working_sets',
+        'slug': '04_context_engineering',
         'prefix': 'working_sets',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -511,7 +511,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '05_virtual_memory',
+        'slug': '05_kv_cache',
         'prefix': 'virtual_memory',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -524,7 +524,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '06_episodic_memory',
+        'slug': '06_long_term_memory',
         'prefix': 'episodic_memory',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -576,7 +576,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '10_interrupts',
+        'slug': '10_durable_execution',
         'prefix': 'interrupts',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -589,7 +589,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '11_scheduling',
+        'slug': '11_failure_recovery',
         'prefix': 'scheduling',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -602,7 +602,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '12_data_flywheel',
+        'slug': '13_trajectory_curation',
         'prefix': 'data_flywheel',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -615,7 +615,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '13_sft',
+        'slug': '14_fine_tuning',
         'prefix': 'sft',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -628,7 +628,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '14_rlvr',
+        'slug': '15_rlvr',
         'prefix': 'rlvr',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -641,7 +641,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '15_multi_agent',
+        'slug': '16_multi_agent',
         'prefix': 'multi_agent',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -654,7 +654,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '16_observability',
+        'slug': '12_evaluation',
         'prefix': 'observability',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -667,7 +667,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '17_tokenomics',
+        'slug': '17_agent_economics',
         'prefix': 'tokenomics',
         'font': FONT_ARIAL_BOLD,
         'labels': [
