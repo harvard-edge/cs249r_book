@@ -125,7 +125,7 @@ class ModuleResetCommand(BaseCommand):
         console.print()
 
         # Convert src/ to notebook in modules/
-        tier = "student" if exercise else "instructor"
+        tier = "student" if exercise else None
         success = convert_py_to_notebook(
             src_path, self.venv_path, console,
             release_tier=tier, project_root=self.config.project_root,
@@ -156,7 +156,7 @@ class ModuleResetCommand(BaseCommand):
         """Reset all modules to pristine state."""
         console = self.console
         module_mapping = get_module_mapping()
-        tier = "student" if exercise else "instructor"
+        tier = "student" if exercise else None
 
         console.print()
         console.print(

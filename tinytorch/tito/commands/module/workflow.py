@@ -344,7 +344,7 @@ class ModuleWorkflowCommand(BaseCommand):
                 return 1
 
             self.console.print(f"[cyan]📝 Creating module from source...[/cyan]")
-            tier = "student" if exercise else "instructor"
+            tier = "student" if exercise else None
             if not self._create_module_from_src(module_name, release_tier=tier):
                 self.console.print(f"[red]❌ Failed to create module {module_name}[/red]")
                 return 1
@@ -451,11 +451,12 @@ class ModuleWorkflowCommand(BaseCommand):
 
         return self._open_jupyter(module_name)
 
-    def _create_module_from_src(self, module_name: str, release_tier: str = "instructor") -> bool:
+    def _create_module_from_src(self, module_name: str, release_tier: Optional[str] = None) -> bool:
         """Create the module notebook in modules/ from src/.
 
-        Default ('instructor') provides the full working reference notebook with
-        clean solution regions and all tests passing, suitable for early preview.
+        Default (release_tier=None) provides the full working reference notebook
+        matching the original source, with solution markers (### BEGIN/END SOLUTION)
+        and all educational walkthroughs (APPROACH, EXAMPLE, HINTS) intact.
 
         'student' (via --exercise) clears student-core solution regions to
         nbgrader stubs with clear # BEGIN / # END delimiters, while keeping
