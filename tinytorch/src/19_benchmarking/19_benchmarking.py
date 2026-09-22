@@ -2113,7 +2113,7 @@ def benchsuite_generate_report(self) -> str:
     # Save report
     report_text = "\n".join(report_lines)
     report_path = self.output_dir / 'benchmark_report.md'
-    with open(report_path, 'w') as f:
+    with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report_text)
 
     print(f"📄 Report saved to {report_path}")

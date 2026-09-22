@@ -214,7 +214,6 @@ Volume IV: Physical AI Systems
 *Focus: Shared authority, bumpless transfer, Mode 2 automation surprise, forensic logging.*
 - [x] **`fig14_authority_handshake_fsm.svg`** (Type A): Request, ACK, atomic commit, enforcer-owned blend, manual lease, and fallback states.
 - [x] **`fig14_bumpless_transfer_dynamics.svg`** (Type A): Illustrative command step versus fixed-endpoint $C^2$ quintic command and their derivatives; plant response is not measured.
-- [x] **`fig14_real_ntsb_telemetry.png`** (Type B): NTSB preliminary Figure 2 overhead playback still near 1.3 seconds before the Tempe impact, not a telemetry trace; NTSB U.S. public-domain image via Wikimedia Commons.
 - [x] **`fig14_real_teach_pendant.jpg`** (Type B): Front view of ABB teach pendant; rear enabling grip and wiring are not visible. Auledas, [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Teach_Pendant_ABB.JPG), CC BY-SA 4.0; local copy re-encoded. The annotated derivative is legacy and is not used in this chapter.
 
 #### Chapter 15: Verification

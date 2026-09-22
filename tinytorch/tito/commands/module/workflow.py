@@ -561,7 +561,7 @@ class ModuleWorkflowCommand(BaseCommand):
         if not pid_file.exists():
             return None
         try:
-            pid = int(pid_file.read_text().strip())
+            pid = int(pid_file.read_text(encoding='utf-8').strip())
         except (ValueError, OSError):
             return None
 
@@ -709,7 +709,7 @@ class ModuleWorkflowCommand(BaseCommand):
 
             pid_file = self._jupyter_pid_file()
             pid_file.parent.mkdir(parents=True, exist_ok=True)
-            pid_file.write_text(str(process.pid))
+            pid_file.write_text(str(process.pid), encoding='utf-8')
 
             # Give Jupyter a moment to start and capture the URL
             time.sleep(2)

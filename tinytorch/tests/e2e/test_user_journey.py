@@ -162,7 +162,7 @@ class TestModuleFlow:
         """'tito module start 01' works (first module, no prerequisites)."""
         code, stdout, stderr = run_tito(["module", "start", "01", "--no-jupyter"])
         assert code == 0, stdout + stderr
-        progress = json.loads((PROJECT_ROOT / ".tito" / "progress.json").read_text())
+        progress = json.loads((PROJECT_ROOT / ".tito" / "progress.json").read_text(encoding='utf-8'))
         assert "01" in progress["started_modules"]
         assert list((PROJECT_ROOT / "modules" / "01_tensor").glob("*.ipynb"))
 
@@ -174,7 +174,7 @@ class TestModuleFlow:
         assert "Locked" in stdout + stderr
         progress_file = PROJECT_ROOT / ".tito" / "progress.json"
         if progress_file.exists():
-            assert "02" not in json.loads(progress_file.read_text()).get("started_modules", [])
+            assert "02" not in json.loads(progress_file.read_text(encoding='utf-8')).get("started_modules", [])
 
     @pytest.mark.module_flow
     def test_module_complete_runs_tests(self):
@@ -186,25 +186,25 @@ class TestModuleFlow:
         )
         assert code == 0, stdout + stderr
         assert "passed" in stdout.lower()
-        progress = json.loads((PROJECT_ROOT / ".tito" / "progress.json").read_text())
+        progress = json.loads((PROJECT_ROOT / ".tito" / "progress.json").read_text(encoding='utf-8'))
         assert "01" in progress["completed_modules"]
 
     @pytest.mark.module_flow
     def test_failed_notebook_cannot_complete_module(self):
         """A real notebook assertion failure must leave the module incomplete."""
         notebook = next((PROJECT_ROOT / "modules" / "01_tensor").glob("*.ipynb"))
-        document = json.loads(notebook.read_text())
+        document = json.loads(notebook.read_text(encoding='utf-8'))
         graded_cell = next(cell for cell in document["cells"]
                            if cell.get("metadata", {}).get("nbgrader", {}).get("grade"))
         graded_cell["source"] = ["".join(graded_cell["source"]), "\nraise AssertionError('deliberate journey failure')\n"]
-        notebook.write_text(json.dumps(document))
+        notebook.write_text(json.dumps(document), encoding='utf-8')
 
         code, stdout, stderr = run_tito(["module", "complete", "01"], timeout=120)
         assert code != 0, stdout + stderr
         assert "deliberate journey failure" in stdout + stderr
         progress_file = PROJECT_ROOT / ".tito" / "progress.json"
         if progress_file.exists():
-            assert "01" not in json.loads(progress_file.read_text()).get("completed_modules", [])
+            assert "01" not in json.loads(progress_file.read_text(encoding='utf-8')).get("completed_modules", [])
 
     @pytest.mark.module_flow
     def test_progress_tracking_persists(self):
@@ -218,7 +218,7 @@ class TestModuleFlow:
             "started_modules": ["01"],
             "completed_modules": [],
             "last_worked": "01"
-        }))
+        }), encoding='utf-8')
 
         # Run status command
         code, stdout, stderr = run_tito(["module", "status"])
@@ -284,7 +284,7 @@ class TestMilestoneFlow:
         progress_file = tito_dir / "progress.json"
         progress_file.write_text(json.dumps({
             "completed_modules": []
-        }))
+        }), encoding='utf-8')
 
         # Try to run milestone 03 (requires many modules)
         code, stdout, stderr = run_tito(["milestone", "run", "03"], timeout=30)
@@ -292,7 +292,7 @@ class TestMilestoneFlow:
         assert code == 1, stdout + stderr
         assert "Prerequisites Not Met" in stdout
         assert "Missing Required Modules" in stdout
-        assert json.loads(progress_file.read_text()) == {"completed_modules": []}
+        assert json.loads(progress_file.read_text(encoding='utf-8')) == {"completed_modules": []}
 
 
 class TestFullJourney:
@@ -319,7 +319,7 @@ class TestFullJourney:
         )
         assert code == 0, stdout + stderr
         assert "passed" in stdout.lower()
-        progress = json.loads((PROJECT_ROOT / ".tito" / "progress.json").read_text())
+        progress = json.loads((PROJECT_ROOT / ".tito" / "progress.json").read_text(encoding='utf-8'))
         assert "01" in progress["completed_modules"]
 
         # Step 3: Verify tinytorch imports work

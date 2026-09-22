@@ -10,7 +10,7 @@ def main():
         sys.exit("Narrative PDF requires LuaLaTeX and kpsewhich on PATH (TeX Live or TinyTeX).")
     missing = []
     for font in ("DejaVuSans.ttf", "NotoEmoji-Regular.ttf", "NotoColorEmoji.ttf"):
-        result = subprocess.run(["kpsewhich", font], capture_output=True, text=True)
+        result = subprocess.run(["kpsewhich", font], capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode or not result.stdout.strip():
             missing.append(font)
     if missing:
