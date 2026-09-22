@@ -79,7 +79,7 @@ def _compile():
     for openmp, flags in attempts:
         cmd = ["c++"] + flags + [_CPP_SOURCE, "-o", tmp]
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True)
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         except OSError as e:  # no compiler on PATH
             _build_info["error"] = str(e)
             return False
