@@ -104,6 +104,58 @@ If the baseline success probability $\hat{p}$ is exactly zero, the verification 
 
 Fourth, the training loop requires an uncompromised, mechanically verifiable reward oracle. Unlike open-ended human alignment tasks that depend on subjective preference models, verifiable reinforcement learning relies exclusively on deterministic, automated oracles that evaluate the physical artifacts produced by the policy.
 
+```{python}
+#| label: lego-14-exploration-reset-goodput
+#| echo: false
+# │ Show: CoW snapshot restoration lifts rollout goodput from 56.25% to 99.67% (1.77x speedup).
+# │ How: Model turn latency, verification overhead, and container vs CoW reset wall.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
+
+class RolloutGoodputEnvironmentResetWall:
+    w_workers = 256
+    h_turns = 20
+    t_infer = 120 * millisecond
+    t_exec = 80 * millisecond
+    t_verify = 500 * millisecond
+
+    t_active = h_turns * (t_infer + t_exec)
+    t_useful = t_active + t_verify
+
+    # Case 1: Standard
+    t_reset_std = 3.5 * second
+    t_total_std = t_useful + t_reset_std
+    eta_std = t_useful.to(second).magnitude / t_total_std.to(second).magnitude
+    throughput_std = (w_workers * 3600) / t_total_std.to(second).magnitude
+
+    # Case 2: CoW
+    t_reset_cow = 15 * millisecond
+    t_total_cow = t_useful + t_reset_cow
+    eta_cow = t_useful.to(second).magnitude / t_total_cow.to(second).magnitude
+    throughput_cow = (w_workers * 3600) / t_total_cow.to(second).magnitude
+
+    speedup = throughput_cow / throughput_std
+    additional_rollouts = int(throughput_cow) - int(throughput_std)
+
+    check(abs(t_active.to(second).magnitude - 4.0) < 1e-4, "t_active")
+    check(abs(t_useful.to(second).magnitude - 4.5) < 1e-4, "t_useful")
+    check(abs(t_total_std.to(second).magnitude - 8.0) < 1e-4, "t_total_std")
+    check(abs(eta_std - 0.5625) < 1e-4, "eta_std")
+    check(throughput_std == 115200.0, "throughput_std")
+    check(abs(t_total_cow.to(second).magnitude - 4.515) < 1e-4, "t_total_cow")
+    check(abs(eta_cow - 0.9967) < 0.0001, "eta_cow")
+    check(abs(throughput_cow - 204119.6) < 1.0, "throughput_cow")
+    check(additional_rollouts == 88919, "additional_rollouts")
+    check(abs(speedup - 1.77) < 0.01, "speedup")
+
+    goodput_std_pct_str = fmt_percent(eta_std, precision=2, style="prose")
+    goodput_cow_pct_str = fmt_percent(eta_cow, precision=2, style="prose")
+    speedup_mult_str = fmt_multiple(round(speedup, 2))
+    additional_rollouts_str = fmt_int(additional_rollouts)
+```
+
 ::: {#nbk-14-exploration-reset-goodput .callout-notebook title="Rollout goodput and the environment reset wall"}
 **Problem:** A distributed reinforcement learning cluster orchestrates $W = 256$ parallel worker sandboxes running exploration rollouts for repository refactoring. Each rollout executes an average of $H = 20$ interaction turns. On each turn, the inference engine requires $T_{\text{infer}} = 120\text{ ms}$ for autoregressive token decoding, and the sandbox requires $T_{\text{exec}} = 80\text{ ms}$ to execute the tool command and capture output buffers. Upon trajectory completion, the verification test suite executes in $T_{\text{verify}} = 500\text{ ms}$.
 
@@ -140,7 +192,7 @@ $$\eta_{\text{CoW}} = \frac{T_{\text{useful}}}{T_{\text{total, CoW}}} = \frac{4.
 The aggregate trajectory completion rate across $W = 256$ concurrent workers scales to:
 $$\text{Throughput}_{\text{CoW}} = \frac{256 \cdot 3{,}600\text{ s}}{4.515\text{ s}} \approx 204{,}119\text{ trajectories/hour}$$
 
-**Conclusion:** Replacing heavyweight container instantiation with copy-on-write snapshot restoration increases cluster goodput from $56.25\%$ to $99.67\%$, yielding a $1.77\times$ throughput speedup. This optimization recovers $88{,}919$ additional completed rollouts every hour on identical hardware without requiring additional accelerator silicon or modifications to model inference kernels.
+**Conclusion:** Replacing heavyweight container instantiation with copy-on-write snapshot restoration increases cluster goodput from {python} RolloutGoodputEnvironmentResetWall.goodput_std_pct_str to {python} RolloutGoodputEnvironmentResetWall.goodput_cow_pct_str, yielding a {python} RolloutGoodputEnvironmentResetWall.speedup_mult_str throughput speedup. This optimization recovers {python} RolloutGoodputEnvironmentResetWall.additional_rollouts_str additional completed rollouts every hour on identical hardware without requiring additional accelerator silicon or modifications to model inference kernels.
 :::
 
 While deterministic verification oracles establish the bedrock of closed-loop policy optimization, deploying reinforcement learning over arbitrary computational environments introduces severe behavioral vulnerabilities. Because policy gradient algorithms maximize scalar rewards across all accessible degrees of freedom, an unconstrained policy will aggressively identify and exploit any discrepancy between the literal code of the verification check and true functional intent. If an agent policy can satisfy a test harness by modifying test assertions, exiting early with status code zero, or mocking external network endpoints, the optimizer will ruthlessly converge on these degenerate shortcuts rather than learning genuine engineering problem-solving. What formal mechanical properties must a reward oracle satisfy to prevent the policy from exploiting unintended shortcuts?
@@ -213,6 +265,55 @@ Deterministic oracles exhibit three essential systems properties: absolute mathe
 
 :::
 
+```{python}
+#| label: lego-14-oracle-gaming
+#| echo: false
+# │ Show: Neural verifiers contaminate 20% of gradients despite a 10x evaluation speedup.
+# │ How: Model false-positive exploit rates and wall-clock turnaround across GPU batches.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_multiple, fmt_percent, fmt_time
+
+class OracleGamingGradientStability:
+    b_prompts = 1024
+    k_rollouts = 8
+    n_total = b_prompts * k_rollouts
+    n_workers = 512
+    waves = math.ceil(n_total / n_workers)
+
+    # Oracle A
+    t_exec_a = 0.300 * second
+    t_wall_a = waves * t_exec_a
+    eps_fp_a = 0.0
+
+    # Oracle B
+    t_infer_b = 0.030 * second
+    t_wall_b = waves * t_infer_b
+    eps_fp_b = 0.025
+    n_corrupt = round(n_total * eps_fp_b)
+
+    # Gradient contamination
+    n_legit = 819
+    frac_pos_grad = n_corrupt / (n_legit + n_corrupt)
+
+    speedup = t_wall_a.to(second).magnitude / t_wall_b.to(second).magnitude
+    delta_t = t_wall_a - t_wall_b
+
+    check(n_total == 8192, "n_total")
+    check(abs(t_wall_a.to(second).magnitude - 4.80) < 1e-4, "t_wall_a")
+    check(abs(t_wall_b.to(second).magnitude - 0.48) < 1e-4, "t_wall_b")
+    check(n_corrupt == 205, "n_corrupt")
+    check(abs(frac_pos_grad - 0.2002) < 0.001, "frac_pos_grad")
+    check(abs(speedup - 10.0) < 1e-4, "speedup")
+    check(abs(delta_t.to(second).magnitude - 4.32) < 1e-4, "delta_t")
+
+    speedup_mult_str = fmt_multiple(round(speedup))
+    frac_pos_grad_pct_str = fmt_percent(round(frac_pos_grad, 2), precision=0, style="prose")
+    delta_t_s_str = fmt_time(delta_t, unit=second, precision=2)
+```
+
 ::: {#nbk-14-oracle-gaming .callout-notebook title="Oracle gaming impact on gradient stability"}
 Consider a distributed training cluster of $512$ GPUs optimizing an agent policy on software engineering tasks. Each training iteration processes a batch of $B = 1{,}024$ distinct programming problems. For each problem, the cluster generates $K = 8$ candidate rollouts, yielding an aggregate rollout batch size of:
 
@@ -240,7 +341,7 @@ If the true baseline success rate of the policy is $10\%$ ($819$ legitimately co
 
 $$\text{Fraction of Positive Gradient} = \frac{205}{819 + 205} = \frac{205}{1{,}024} = 20.02\%$$
 
-**Conclusion:** Although Oracle B evaluates $10\times$ faster than Oracle A, over $20\%$ of every parameter update is dedicated to reinforcing degenerate token patterns that fool the neural verifier. Within 50 gradient steps, the policy will reallocate capacity toward emitting exploit sequences, degrading true test pass rates. Oracle A's $4.32\text{ s}$ latency overhead is the essential computational cost of mathematical soundness.
+**Conclusion:** Although Oracle B evaluates {python} OracleGamingGradientStability.speedup_mult_str faster than Oracle A, over {python} OracleGamingGradientStability.frac_pos_grad_pct_str of every parameter update is dedicated to reinforcing degenerate token patterns that fool the neural verifier. Within 50 gradient steps, the policy will reallocate capacity toward emitting exploit sequences, degrading true test pass rates. Oracle A's {python} OracleGamingGradientStability.delta_t_s_str latency overhead is the essential computational cost of mathematical soundness.
 :::
 
 ### Verifiable reward tuples
@@ -390,6 +491,47 @@ $$\hat{A}(s_0, a_0) = \hat{V}(s_1) - \hat{V}(s_0) = 0.60 - 0.05 = +0.55$$
 
 The diagnostic action receives substantial positive reinforcement *even if the specific outer trajectory eventually fails on step 25*. Credit is decoupled from downstream execution noise: an action is rewarded if and only if it improves the empirical probability of satisfying the terminal verification oracle from that point forward.
 
+```{python}
+#| label: lego-14-mc-credit-assignment
+#| echo: false
+# │ Show: Exhaustive Monte Carlo sub-tree rollouts induce a 116x token increase (O(K*T^2)).
+# │ How: Model memory-bandwidth bound decode throughput and branch token accumulation.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_multiple
+
+class MonteCarloCreditAssignmentFootprint:
+    n_params = 70 * 10**9
+    n_gpus = 8
+    bw_agg = 26_800 * (GB / second)
+    m_weights = 140 * GB
+    t_steps = 30
+    tokens_per_step = 512
+    l_total = t_steps * tokens_per_step
+
+    time_per_token = (m_weights.to(GB).magnitude / bw_agg.to(GB / second).magnitude) * second
+    decode_throughput = 1.0 / time_per_token.to(second).magnitude
+    t_base = (l_total / decode_throughput) * second
+
+    k_branches = 8
+    sum_horizons = 435
+    n_tokens_mcr = k_branches * tokens_per_step * sum_horizons
+    n_total_tokens = l_total + n_tokens_mcr
+    flops_inference = 2 * n_params * n_total_tokens
+    t_mcr = (n_tokens_mcr / decode_throughput) * second
+    t_mcr_hours = t_mcr.to(hour)
+
+    check(abs(time_per_token.to(second).magnitude - 0.005224) < 1e-5, "time_per_token")
+    check(abs(decode_throughput - 191.4) < 0.2, "decode_throughput")
+    check(abs(t_base.to(second).magnitude - 80.25) < 0.1, "t_base")
+    check(n_tokens_mcr == 1781760, "n_tokens_mcr")
+    check(n_total_tokens == 1797120, "n_total_tokens")
+    check(abs(t_mcr_hours.magnitude - 2.58) < 0.02, "t_mcr_hours")
+
+    token_increase_mult_str = fmt_multiple(116)
+```
+
 ::: {#nbk-14-mc-credit-assignment .callout-notebook title="Monte Carlo credit assignment footprint"}
 **Problem Statement:**
 An engineering team is training a 70-billion parameter dense model on complex software tasks using an 8-GPU node of NVIDIA H100 SXM5 accelerators. The model weights are represented in BF16 format (2 bytes per parameter, requiring 140 GB of aggregate VRAM, tensor-parallelized across all 8 GPUs at 17.5 GB per GPU). Each H100 GPU provides 80 GB of HBM3 memory with an individual memory bandwidth of 3.35 TB/s (yielding an aggregate cluster memory bandwidth of $B_{\text{agg}} = 8 \times 3.35 = 26.8\text{ TB/s}$) and delivers 989 TFLOPS of dense BF16 compute.
@@ -434,7 +576,7 @@ If rollouts are executed sequentially without batching across branches, the wall
 $$T_{\text{MCR}} = \frac{N_{\text{tokens}}^{\text{MCR}}}{\theta_{\text{decode}}} = \frac{1{,}781{,}760}{191.4} \approx 9{,}309\text{ s} \approx 2.58\text{ h}$$
 
 **Systems Implication:**
-Exhaustive Monte Carlo evaluation scales quadratically with horizon length: $\mathcal{O}(K \cdot T^2)$. While batching across the $K$ branches increases the arithmetic intensity of the GEMV operations and amortizes parameter streaming across concurrent tokens, the 116-fold increase in generated tokens imposes an intolerable bottleneck on accelerator clusters. Exhaustive sub-tree estimation is computationally prohibitive for continuous training loops.
+Exhaustive Monte Carlo evaluation scales quadratically with horizon length: $\mathcal{O}(K \cdot T^2)$. While batching across the $K$ branches increases the arithmetic intensity of the GEMV operations and amortizes parameter streaming across concurrent tokens, the {python} MonteCarloCreditAssignmentFootprint.token_increase_mult_str increase in generated tokens imposes an intolerable bottleneck on accelerator clusters. Exhaustive sub-tree estimation is computationally prohibitive for continuous training loops.
 :::
 
 Because exhaustive sub-tree rollouts hit an arithmetic intensity wall, production runtimes must employ *stratified credit assignment*. Instead of evaluating all $T$ steps, the runtime instruments the policy's token entropy to identify branch points where predictive uncertainty is high:
@@ -510,6 +652,47 @@ GRPO eliminates this memory wall by restructuring the advantage estimation pipel
 
 As detailed in @tbl-vol3-ppo-vs-grpo-comparison, eliminating the learned value network fundamentally alters the communication and memory profiles of the training cluster. In PPO, updating the Critic introduces an extra forward and backward pass, coupled with all-reduce gradient synchronizations across distributed model-parallel partitions. GRPO reclaims these compute cycles and network communication slots, repurposing the freed accelerator memory to scale the batch size of parallel agent explorations.
 
+```{python}
+#| label: lego-14-ppo-vs-grpo-memory
+#| echo: false
+# │ Show: GRPO frees 35 GB HBM per GPU, expanding dynamic headroom 7.2x (5.625 to 40.625 GB).
+# │ How: Model Actor, Critic, and Reference model memory sharding under ZeRO-3 across 32 H100s.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_memory, fmt_multiple
+
+class AcceleratorMemoryPpoVsGrpo:
+    n_params = 70 * 10**9
+    n_gpus = 32
+    c_hbm = 80.0 * GB
+
+    # PPO
+    m_actor_per_gpu = (n_params * 16 * byte) / n_gpus
+    m_critic_per_gpu = (n_params * 16 * byte) / n_gpus
+    m_ref_per_gpu = (n_params * 2 * byte) / n_gpus
+    m_static_ppo = m_actor_per_gpu + m_critic_per_gpu + m_ref_per_gpu
+    m_headroom_ppo = c_hbm - m_static_ppo
+
+    # GRPO
+    m_critic_grpo = 0.0 * GB
+    m_static_grpo = m_actor_per_gpu + m_ref_per_gpu
+    m_released = m_critic_per_gpu
+    m_headroom_grpo = c_hbm - m_static_grpo
+    headroom_mult = m_headroom_grpo.to(GB).magnitude / m_headroom_ppo.to(GB).magnitude
+
+    check(abs(m_static_ppo.to(GB).magnitude - 74.375) < 1e-4, "m_static_ppo")
+    check(abs(m_headroom_ppo.to(GB).magnitude - 5.625) < 1e-4, "m_headroom_ppo")
+    check(abs(m_static_grpo.to(GB).magnitude - 39.375) < 1e-4, "m_static_grpo")
+    check(abs(m_headroom_grpo.to(GB).magnitude - 40.625) < 1e-4, "m_headroom_grpo")
+    check(abs(headroom_mult - 7.22) < 0.02, "headroom_mult")
+
+    m_released_gb_str = fmt_memory(m_released, unit=GB, precision=0)
+    m_headroom_ppo_gb_str = fmt_memory(m_headroom_ppo, unit=GB, precision=3)
+    m_headroom_grpo_gb_str = fmt_memory(m_headroom_grpo, unit=GB, precision=3)
+    headroom_expansion_mult_str = fmt_multiple(round(headroom_mult, 1))
+```
+
 ::: {#nbk-14-ppo-vs-grpo-memory .callout-notebook title="Accelerator memory allocation in PPO vs. GRPO"}
 Consider training a 70-billion parameter reasoning model across a cluster of 32 NVIDIA H100 SXM5 GPUs (each equipped with 80 GB of HBM3, yielding 2,560 GB of aggregate cluster memory). The runtime uses Fully Sharded Data Parallelism (ZeRO-3) across all 32 devices. Model weights and activations are represented in BF16 (2 bytes per parameter), while optimizer states are tracked in FP32 (8 bytes per parameter for AdamW first and second moments, plus 4 bytes for FP32 master weights and 2 bytes for gradients, totaling 16 bytes per parameter for trainable models).
 
@@ -534,7 +717,7 @@ Out of the 80 GB available on each H100, PPO leaves exactly $80 - 74.375 = 5.625
 4. **Reward Engine:** Deterministic verification executed on host CPU sandboxes ($0.0\text{ GB GPU HBM}$).
    $$\text{Static Memory}_{\text{GRPO}} = 35.0 + 0.0 + 4.375 = 39.375\text{ GB per GPU}$$
 
-GRPO releases $35.0\text{ GB}$ of physical HBM per accelerator. The dynamic headroom expands from $5.625\text{ GB}$ to $40.625\text{ GB}$ per GPU—a $7.2\times$ increase in available working memory. This headroom allows the runtime to sustain high-concurrency generation of long-horizon reasoning trajectories (up to 16,384 tokens) across groups of candidate outputs without triggering memory thrashing or pipeline stalls.
+GRPO releases {python} AcceleratorMemoryPpoVsGrpo.m_released_gb_str of physical HBM per accelerator. The dynamic headroom expands from {python} AcceleratorMemoryPpoVsGrpo.m_headroom_ppo_gb_str to {python} AcceleratorMemoryPpoVsGrpo.m_headroom_grpo_gb_str per GPU—a {python} AcceleratorMemoryPpoVsGrpo.headroom_expansion_mult_str increase in available working memory. This headroom allows the runtime to sustain high-concurrency generation of long-horizon reasoning trajectories (up to 16,384 tokens) across groups of candidate outputs without triggering memory thrashing or pipeline stalls.
 :::
 
 ### Cohort advantage estimation {#sec-vol3-rlvr-grpo-objective}
@@ -685,6 +868,51 @@ $ pytest --no-header -q tests/private_eval_suite.py
 If the patch fails to apply cleanly or attempts to modify read-only test directories, the patch is rejected, yielding an immediate reward of zero without executing untrusted code.
 4. *The One-Way Observation Channel:* The verification enclave runs the test suite under strict time and resource bounds ($T_{\text{exec}}$). Results—comprising process exit codes, parsed assertion counts, and wall-clock execution profiles—are serialized into a structured payload and transmitted to the host RL training harness via an asynchronous, one-way Unix domain socket. The agent's autoregressive context never observes the standard error stream, internal assertion logic, or specific failure points of the private test suite, closing off the prompt from information leakage.
 
+```{python}
+#| label: lego-14-enclave-overhead
+#| echo: false
+# │ Show: Pre-warmed verification enclaves cut CPU infrastructure core demands by 41.4%.
+# │ How: Model unified diff extraction, test suite runtime, and container boot latency.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_percent
+
+class VerificationThroughputEnclaveOverhead:
+    b_prompts = 64
+    g_rollouts = 16
+    n_rollouts = b_prompts * g_rollouts
+    t_gen = 8.0 * second
+    t_verif_target = 4.0 * second
+
+    t_extract = 15 * millisecond
+    t_apply = 25 * millisecond
+    t_exec = 2500 * millisecond
+    t_teardown = 10 * millisecond
+    t_task = t_extract + t_apply + t_exec + t_teardown
+
+    w_cpu = n_rollouts * t_task.to(second).magnitude
+    c_enclave = math.ceil(w_cpu / t_verif_target.to(second).magnitude)
+
+    t_boot = 1.80 * second
+    t_task_cold = t_task + t_boot
+    w_cpu_cold = n_rollouts * t_task_cold.to(second).magnitude
+    c_enclave_cold = math.ceil(w_cpu_cold / t_verif_target.to(second).magnitude)
+
+    reduction = (c_enclave_cold - c_enclave) / c_enclave_cold
+
+    check(abs(t_task.to(second).magnitude - 2.55) < 1e-4, "t_task")
+    check(abs(w_cpu - 2611.2) < 0.1, "w_cpu")
+    check(c_enclave == 653, "c_enclave")
+    check(abs(t_task_cold.to(second).magnitude - 4.35) < 1e-4, "t_task_cold")
+    check(abs(w_cpu_cold - 4454.4) < 0.1, "w_cpu_cold")
+    check(c_enclave_cold == 1114, "c_enclave_cold")
+    check(abs(reduction - 0.414) < 0.002, "reduction")
+
+    infra_reduction_pct_str = fmt_percent(reduction, precision=1, style="prose")
+```
+
 ::: {#nbk-14-enclave-overhead .callout-notebook title="Verification throughput and enclave overhead"}
 Consider a distributed training cluster optimizing a 70B parameter agent using GRPO. The training harness processes batches of $B = 64$ distinct problem prompts per step, sampling a group of $G = 16$ candidate rollouts per prompt. The training step must therefore evaluate:
 
@@ -709,7 +937,7 @@ To complete this workload within the $T_{\text{verif}} = 4.0\text{ s}$ target wi
 
 $$C_{\text{enclave}} = \left\lceil \frac{W_{\text{cpu}}}{T_{\text{verif}}} \right\rceil = \left\lceil \frac{2,611.2\text{ s}}{4.0\text{ s}} \right\rceil = 653\text{ dedicated CPU cores}$$
 
-If the architecture relied on naive container cold-starts, provisioning an entire container root filesystem per task would add $t_{\text{boot}} \approx 1.80\text{ s}$, increasing $t_{\text{task}}$ to $4.35\text{ s}$ and inflating the required compute to $4,454.4\text{ core}\cdot\text{seconds}$. That would demand $1,114$ concurrent CPU cores just to avoid stalling the GPUs. Decoupling the extraction barrier from a pre-warmed pool of read-only enclaves reduces host infrastructure requirements by $41.4\%$.
+If the architecture relied on naive container cold-starts, provisioning an entire container root filesystem per task would add $t_{\text{boot}} \approx 1.80\text{ s}$, increasing $t_{\text{task}}$ to $4.35\text{ s}$ and inflating the required compute to $4,454.4\text{ core}\cdot\text{seconds}$. That would demand $1,114$ concurrent CPU cores just to avoid stalling the GPUs. Decoupling the extraction barrier from a pre-warmed pool of read-only enclaves reduces host infrastructure requirements by {python} VerificationThroughputEnclaveOverhead.infra_reduction_pct_str.
 :::
 
 ### Non-deterministic test mitigation
@@ -818,6 +1046,52 @@ $$S_{\text{KV}} = 2 \times 2 \times L \times H_{\text{KV}} \times d_k \times T =
 
 During the autoregressive decode phase, generation is fundamentally memory-bandwidth bound. Every newly sampled token requires streaming the entire model parameter weight matrix $W$ and the accumulated KV cache from High-Bandwidth Memory (HBM) into the accelerator's SRAM registers to compute a single matrix-vector product (GEMV). Inflating $T$ by an order of magnitude scales decode latency linearly, monopolizes accelerator HBM, and drastically limits the maximum concurrent rollout batch size.
 
+```{python}
+#| label: lego-14-sizing-kv-cache
+#| echo: false
+# │ Show: Runaway verbosity expands rollout decode latency by 5x (38.4 s to 192 s).
+# │ How: Model KV cache per token across layers, GQA heads, and token inflation regimes.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_multiple
+
+class KvMemoryBloatLatencyInflation:
+    n_params = 70 * 10**9
+    n_layers = 64
+    h_kv = 8
+    d_k = 128
+    b_prompts = 16
+    g_rollouts = 8
+    n_rollouts = b_prompts * g_rollouts
+    t_prompt = 512
+    s_token = (2 * 2 * n_layers * h_kv * d_k) * byte
+
+    t_reason_1 = 1536
+    t_total_1 = t_prompt + t_reason_1
+    m_seq_1 = t_total_1 * s_token
+    m_agg_1 = n_rollouts * m_seq_1
+    rate = 40.0
+    t_decode_1 = (t_reason_1 / rate) * second
+
+    t_reason_2 = 7680
+    t_total_2 = t_prompt + t_reason_2
+    m_seq_2 = t_total_2 * s_token
+    m_agg_2 = n_rollouts * m_seq_2
+    t_decode_2 = (t_reason_2 / rate) * second
+
+    mem_ratio = m_agg_2.magnitude / m_agg_1.magnitude
+    latency_ratio = t_decode_2.to(second).magnitude / t_decode_1.to(second).magnitude
+
+    check(s_token.magnitude == 262144, "s_token")
+    check(abs(t_decode_1.to(second).magnitude - 38.4) < 1e-4, "t_decode_1")
+    check(abs(t_decode_2.to(second).magnitude - 192.0) < 1e-4, "t_decode_2")
+    check(abs(mem_ratio - 4.0) < 1e-4, "mem_ratio")
+    check(abs(latency_ratio - 5.0) < 1e-4, "latency_ratio")
+
+    latency_expansion_mult_str = fmt_multiple(round(latency_ratio))
+```
+
 ::: {#nbk-14-sizing-kv-cache .callout-notebook title="KV memory bloat and latency inflation"}
 Consider an RLVR training cluster optimizing a 70-billion parameter model on an array of accelerators. The model architecture uses $L = 64$ layers, Grouped-Query Attention with $H_{\text{KV}} = 8$ key-value heads, and head dimension $d_k = 128$. All activations are held in BF16 precision (2 bytes per element). The runtime samples $G = 8$ rollouts per prompt across a batch of 16 concurrent prompts (128 concurrent sequences). The initial input prompt consumes $T_{\text{prompt}} = 512$ tokens.
 
@@ -836,7 +1110,7 @@ $$S_{\text{token}} = 4 \times 64 \times 8 \times 128 = 262{,}144 \text{ bytes} =
 - Aggregate KV cache across 128 rollouts: $128 \times 2.0 \text{ GiB} = 256 \text{ GiB}$.
 - Decode execution: Generating 7,680 tokens at 40 tokens/sec requires $192.0 \text{ seconds}$.
 
-Runaway verbosity quadruples the active KV-cache memory footprint on the inference engines from $64\text{ GiB}$ to $256\text{ GiB}$, forcing the runtime to reduce serving concurrency to prevent out-of-memory faults. Concurrently, rollout wall-clock duration expands by $5.0\times$, stalling the downstream gradient training workers while consuming accelerator memory bandwidth on uninformative token repetitions.
+Runaway verbosity quadruples the active KV-cache memory footprint on the inference engines from $64\text{ GiB}$ to $256\text{ GiB}$, forcing the runtime to reduce serving concurrency to prevent out-of-memory faults. Concurrently, rollout wall-clock duration expands by {python} KvMemoryBloatLatencyInflation.latency_expansion_mult_str, stalling the downstream gradient training workers while consuming accelerator memory bandwidth on uninformative token repetitions.
 :::
 
 ### Calibrated regularization strategies
@@ -1047,6 +1321,44 @@ Because the initial $L_{\text{prompt}}$ tokens remain immutable, all $G$ generat
 
 When a rollout sequence completes execution, its terminal node decrements the reference counts of its path components. While private leaf blocks are returned immediately to the free page pool, the parent prefix node retains its allocated HBM pages. An Eviction LRU queue monitors these prefix nodes, evicting them only when incoming novel tasks require free memory pages, thus amortizing prefill computation across successive training epochs.
 
+```{python}
+#| label: lego-14-radix-kv-savings
+#| echo: false
+# │ Show: Radix KV prefix sharing saves 37.5 GB HBM and cuts prefill operations 16x.
+# │ How: Model shared prefix cache allocation and cluster FLOP prefill throughput.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_memory, fmt_multiple, fmt_time
+
+class RadixKvSharingSavingsGrpo:
+    n_params = 70 * 10**9
+    n_layers = 80
+    d_model = 8192
+    h_kv = 8
+    d_kv = 1024
+    l_prompt = 8192
+    g_rollouts = 16
+
+    s_token = (2 * 2 * n_layers * d_kv) * byte
+    delta_m = 37.5 * GB
+
+    r_cluster = 3.2 * 1e15
+    flops_naive = g_rollouts * (2 * n_params * l_prompt)
+    flops_radix = 1 * (2 * n_params * l_prompt)
+    comp_ratio = g_rollouts
+    t_prefill_naive = (flops_naive / r_cluster) * second
+    t_prefill_radix = (flops_radix / r_cluster) * second
+
+    check(abs(t_prefill_naive.to(second).magnitude - 5.73) < 0.02, "t_prefill_naive")
+    check(abs(t_prefill_radix.to(second).magnitude - 0.36) < 0.02, "t_prefill_radix")
+    check(comp_ratio == 16, "comp_ratio")
+
+    delta_m_gb_str = fmt_memory(delta_m, unit=GB, precision=1)
+    comp_savings_mult_str = fmt_multiple(comp_ratio)
+    t_prefill_radix_s_str = fmt_time(t_prefill_radix, unit=second, precision=2)
+```
+
 ::: {#nbk-14-radix-kv-savings .callout-notebook title="Radix KV sharing savings in GRPO"}
 Consider an RLVR training pipeline targeting complex software debugging tasks:
 
@@ -1065,7 +1377,7 @@ $$S_{\text{token}} = 2 \times (\text{Key} + \text{Value}) \times n_{\text{layers
   $$M_{\text{naive}} = G \times L_{\text{prompt}} \times S_{\text{token}} = 16 \times 8\text{,}192 \times 0.3125\text{ MB} = 40\text{,}960\text{ MB} = 40.0\text{ GB}$$
 - *Radix-Tree Shared Allocation:* The prefix is materialized once and shared across all 16 workers:
   $$M_{\text{radix}} = 1 \times L_{\text{prompt}} \times S_{\text{token}} = 8\text{,}192 \times 0.3125\text{ MB} = 2.5\text{ GB}$$
-  *Net Memory Reduction:* Saves **$37.5\text{ GB}$** of HBM, freeing over $45\%$ of a single H100's capacity for larger batch concurrency.
+  *Net Memory Reduction:* Saves **{python} RadixKvSharingSavingsGrpo.delta_m_gb_str** of HBM, freeing over $45\%$ of a single H100's capacity for larger batch concurrency.
 
 **3. Compute Footprint Comparison (Prefill GEMM):**
 The floating-point operations required to execute prefill across $L$ tokens scale as $2 \cdot N \cdot L$:
@@ -1074,9 +1386,9 @@ The floating-point operations required to execute prefill across $L$ tokens scal
   $$\text{FLOPs}_{\text{naive}} = 16 \times (2 \times 70 \times 10^9 \times 8\text{,}192) \approx 1.835 \times 10^{16}\text{ FLOPs}$$
 - *Radix Shared Prefill:*
   $$\text{FLOPs}_{\text{radix}} = 1 \times (2 \times 70 \times 10^9 \times 8\text{,}192) \approx 1.147 \times 10^{14}\text{ FLOPs}$$
-  *Computational Savings:* **$16\times$ reduction** in prefill operations. At an achievable cluster throughput of 400 TFLOP/s per GPU across an 8-GPU tensor-parallel node (3.2 PFLOP/s aggregate), naive prefill introduces a latency penalty of:
+  *Computational Savings:* **{python} RadixKvSharingSavingsGrpo.comp_savings_mult_str reduction** in prefill operations. At an achievable cluster throughput of 400 TFLOP/s per GPU across an 8-GPU tensor-parallel node (3.2 PFLOP/s aggregate), naive prefill introduces a latency penalty of:
   $$t_{\text{prefill, naive}} = \frac{1.835 \times 10^{16}}{3.2 \times 10^{15}} \approx 5.73\text{ seconds}$$
-  Under radix-tree sharing, this prefill latency collapses to **$0.36\text{ seconds}$**, enabling immediate transition to the decode phase.
+  Under radix-tree sharing, this prefill latency collapses to **{python} RadixKvSharingSavingsGrpo.t_prefill_radix_s_str**, enabling immediate transition to the decode phase.
 :::
 
 ### Dynamic straggler mitigation
@@ -1224,6 +1536,61 @@ $$c_i = \min\left(\bar{c}, \, \frac{\pi_\theta(a_i \mid s_i)}{\pi_{\theta_{\text
 
 The truncation threshold $\bar{\rho}$ bounds the instantaneous temporal-difference error to prevent gradient explosions, while $\bar{c}$ controls the contractive rate of credit propagation across intermediate reasoning steps. By selecting $\bar{\rho} \ge \bar{c}$ (such as $\bar{\rho} = 1.0$ and $\bar{c} = 1.0$), the runtime guarantees that the effective fixed point of the asynchronous value update remains bounded between the stale rollout policy and the active training policy, preventing error propagation down long-tail reasoning chains.
 
+```{python}
+#| label: lego-14-replay-buffer-staleness
+#| echo: false
+# │ Show: Staging buffer requires less than 11.54 MB host RAM under staleness bounds.
+# │ How: Balance inference rollout production against gradient step consumption cadence.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_memory
+
+class ReplayBufferSizingStalenessBounds:
+    n_infer_nodes = 64
+    n_gpus_per_node = 8
+    n_infer_gpus = n_infer_nodes * n_gpus_per_node
+    slots_per_gpu = 4
+    n_slots = n_infer_gpus * slots_per_gpu
+    l_prompt = 4096
+    l_gen = 1024
+    l_traj = l_prompt + l_gen
+    rate_token = 40.0
+    t_gen = (l_gen / rate_token) * second
+    t_verify = 1.4 * second
+    t_total = t_gen + t_verify
+    r_prod = (n_slots / t_total.to(second).magnitude) * (1 / second)
+
+    b_batch = 128
+    t_step = 1.69 * second
+    r_consume = (b_batch / t_step.to(second).magnitude) * (1 / second)
+
+    t_transit = 0.08 * second
+    t_stage = 3.30 * second
+    delta_t_lag = t_transit + t_stage
+    delta_v = delta_t_lag.to(second).magnitude / t_step.to(second).magnitude
+
+    delta_v_max = 2.0
+    t_queue_max = delta_v_max * t_step.to(second).magnitude - t_transit.to(second).magnitude
+    n_buffer = round(r_prod.magnitude * t_queue_max)
+
+    bytes_per_token = 9
+    bytes_metadata = 64 * byte
+    s_traj = (l_traj * bytes_per_token) * byte + bytes_metadata
+    m_buffer = (n_buffer * s_traj.magnitude) * byte
+
+    check(abs(t_gen.to(second).magnitude - 25.6) < 1e-4, "t_gen")
+    check(abs(t_total.to(second).magnitude - 27.0) < 1e-4, "t_total")
+    check(abs(r_prod.magnitude - 75.85) < 0.02, "r_prod")
+    check(abs(r_consume.magnitude - 75.74) < 0.02, "r_consume")
+    check(abs(delta_v - 2.0) < 1e-4, "delta_v")
+    check(n_buffer == 250, "n_buffer")
+    check(s_traj.magnitude == 46144, "s_traj")
+    check(abs(m_buffer.to(MB).magnitude - 11.54) < 0.1, "m_buffer")
+
+    m_buffer_mb_str = fmt_memory(m_buffer, unit=MB, precision=2)
+```
+
 ::: {#nbk-14-replay-buffer-staleness .callout-notebook title="Replay buffer sizing and staleness bounds"}
 Consider a production RLVR deployment training a 70B parameter model on complex programming and formal reasoning benchmarks:
 
@@ -1275,7 +1642,7 @@ Each trajectory stores $L_{\text{prompt}} + L_{\text{gen}} = 5\text{,}120$ token
 $$S_{\text{traj}} = (5\text{,}120 \times 9\text{ bytes}) + 64\text{ bytes} \approx 46\text{,}144\text{ bytes} \approx 45.06\text{ KB}$$
 For a 250-trajectory circular buffer:
 $$M_{\text{buffer}} = 250 \times 45.06\text{ KB} \approx 11.27\text{ MB}$$
-The staging buffer requires less than $12\text{ MB}$ of pinned host memory—a negligible fraction of modern host DRAM (typically $1\text{--}2\text{ TB}$ per node). This proves that host-side buffer sizing is constrained not by physical memory capacity, but by the mathematical tolerance of the optimization algorithm to policy staleness $\Delta v_{\max}$.
+The staging buffer requires less than {python} ReplayBufferSizingStalenessBounds.m_buffer_mb_str of pinned host memory—a negligible fraction of modern host DRAM (typically $1\text{--}2\text{ TB}$ per node). This proves that host-side buffer sizing is constrained not by physical memory capacity, but by the mathematical tolerance of the optimization algorithm to policy staleness $\Delta v_{\max}$.
 :::
 
 ### Deterministic release gating
