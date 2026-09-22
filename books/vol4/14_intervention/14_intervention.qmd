@@ -311,6 +311,181 @@ In Mode 2 at the aisle speed, the machine would reach a static obstacle at the r
 **Systems Insight**: Passive monitoring inflates the takeover delay from `{python} InterventionTakeoverBudget.t_in_str` to `{python} InterventionTakeoverBudget.t_ool_str` and grows the stop from `{python} InterventionTakeoverBudget.d_stop_in_str` to `{python} InterventionTakeoverBudget.d_stop_ool_str`, `{python} InterventionTakeoverBudget.stop_mult_str` longer. Neither fits the `{python} InterventionTakeoverBudget.d_clear_str` clear distance at the aisle speed, which is why the machine slows before it asks for either one. For the kinematic derivation of these stopping distances, see @sec-appendix-systems-stopping.
 :::
 
+The physical tension between human reaction latency and stopping distance extends across every mobile embodied system, from indoor warehouse manipulators to highway-speed autonomous vehicles (@fig-14-human-takeover-reaction-margin). Stopping distance decomposes into two fundamentally distinct kinematic regimes: linear reaction drift distance $d_{\mathrm{drift}} = v \cdot (T_{\Sigma} + \tau_{\mathrm{delay}})$ during which the machine travels unbraked under sensory, cognitive, and network delay, followed by quadratic kinetic dissipation $d_{\mathrm{brake}} = v^2 / (2 a_{\mathrm{eff}})$. Because reaction drift scales linearly with velocity while braking scales quadratically, an out-of-loop supervisor monitoring passively from a remote console ($T_{\Sigma} \approx 2.5\ \text{s}$) accumulates over 72 meters of blind drift at 100 km/h before the physical brake pads engage. When evaluated against a fixed forward visibility clearance ($d_{\mathrm{clear}} = 60\ \text{m}$), the remaining clearance margin $M = d_{\mathrm{clear}} - d_{\mathrm{stop}}$ defines a hard operational ceiling. Beyond critical velocity thresholds—ranging from 33.7 km/h for remote teleoperation to 78.3 km/h for an alert in-loop operator—the clearance margin becomes negative ($M < 0$), rendering high-speed collision physically inevitable regardless of braking force.
+
+::: {#fig-14-human-takeover-reaction-margin fig-env="figure" fig-pos="htb" fig-cap="**Human supervisory takeover reaction budget versus stopping clearance margin**: Two-panel kinematic analysis across vehicle velocity under four supervisory engagement modes ($T_\\Sigma \\in [0.8, 1.5, 2.5, 4.0]\\ \\text{s}$) with 100 ms onboard bus delay and $a_{\\mathrm{eff}} = 6.0\\ \\text{m/s}^2$ braking. Left: Stopping distance decomposition into linear reaction drift and quadratic braking distance against urban (30 m), suburban (60 m), and highway (100 m) headways. Right: Remaining clearance margin $M = d_{\\mathrm{clear}} - d_{\\mathrm{stop}}$ under a 60 m forward sightline. Intercepts denote critical speed ceilings beyond which collision is physically inevitable before coming to rest." fig-alt="Two-panel chart showing human takeover reaction budget versus stopping margin for velocities 5 to 120 km/h. Left panel decomposes stopping distance into linear reaction drift and quadratic braking across four reaction modes from 0.8 seconds to 4.0 seconds, showing out-of-loop drift exceeding 70 meters at 100 km/h. Right panel plots remaining clearance margin given a 60 meter sightline, marking critical collision ceilings at 33.7 km/h for remote teleop, 45.4 km/h for out-of-loop, 60.1 km/h for alerted driver, and 78.3 km/h for direct in-loop."}
+
+```{python}
+#| label: fig-14-human-takeover-reaction-margin
+#| echo: false
+#| message: false
+#| warning: false
+
+import matplotlib as mpl
+
+mpl.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Publication styling
+plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
+plt.rcParams["axes.edgecolor"] = "#334155"
+plt.rcParams["axes.linewidth"] = 1.0
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15.0, 7.2), dpi=300, facecolor="#FFFFFF")
+for ax in (ax1, ax2):
+    ax.set_facecolor("#FFFFFF")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#334155")
+    ax.spines["bottom"].set_color("#334155")
+    ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5, color="#E2E8F0")
+    ax.set_axisbelow(True)
+
+# Physical parameters
+v_kmh = np.linspace(5, 120, 300)
+v_mps = v_kmh / 3.6
+tau_delay = 0.10  # 100 ms onboard perception lease and brake bus delay
+a_eff = 6.0  # effective emergency braking acceleration (m/s^2, ~0.61g)
+delta_buf = 1.0  # physical safety buffer (m)
+d_clear = 60.0  # clear line-of-sight / headway clearance (m)
+
+modes = [
+    {"name": r"Direct In-Loop: $T_\Sigma = 0.8\,\mathrm{s}$", "T": 0.8, "color": "#047857", "ls": "-"},
+    {"name": r"Alerted Driver: $T_\Sigma = 1.5\,\mathrm{s}$", "T": 1.5, "color": "#1E3A8A", "ls": "-"},
+    {"name": r"Out-of-Loop (NDRT): $T_\Sigma = 2.5\,\mathrm{s}$", "T": 2.5, "color": "#D97706", "ls": "-"},
+    {"name": r"Remote Teleoperation: $T_\Sigma = 4.0\,\mathrm{s}$", "T": 4.0, "color": "#DC2626", "ls": "-"},
+]
+
+# --- Panel (a): Stopping Distance Breakdown ---
+t_base = 2.5
+d_react = v_mps * (t_base + tau_delay)
+d_brake = (v_mps**2) / (2 * a_eff)
+d_total_base = d_react + d_brake + delta_buf
+
+ax1.fill_between(v_kmh, 0, d_react, color="#FEF3C7", alpha=0.65, label=r"Reaction Drift ($v \cdot [T_\Sigma + \tau]$)")
+ax1.fill_between(v_kmh, d_react, d_total_base, color="#FEE2E2", alpha=0.65, label=r"Braking Distance ($v^2 / 2a_{\mathrm{eff}}$)")
+
+for m in modes:
+    d_tot = v_mps * (m["T"] + tau_delay) + (v_mps**2) / (2 * a_eff) + delta_buf
+    ax1.plot(v_kmh, d_tot, color=m["color"], linewidth=2.3, linestyle=m["ls"], label=m["name"])
+
+# Reference Headways / Sight Clearances
+ax1.axhline(30, color="#94A3B8", linestyle=":", linewidth=1.2)
+ax1.text(8, 32, "Urban Clear Sight (30 m)", fontsize=8.5, color="#64748B", fontweight="bold")
+ax1.axhline(60, color="#94A3B8", linestyle=":", linewidth=1.2)
+ax1.text(8, 62, "Suburban Headway (60 m)", fontsize=8.5, color="#64748B", fontweight="bold")
+ax1.axhline(100, color="#94A3B8", linestyle=":", linewidth=1.2)
+ax1.text(8, 102, "Highway Headway (100 m)", fontsize=8.5, color="#64748B", fontweight="bold")
+
+ax1.set_xlim(5, 120)
+ax1.set_ylim(0, 205)
+ax1.set_xlabel(r"Vehicle Velocity $v$ (km/h)", fontsize=11, fontweight="bold", color="#1E293B")
+ax1.set_ylabel("Total Stopping Distance (meters)", fontsize=11, fontweight="bold", color="#1E293B")
+ax1.set_title(
+    "(a) Stopping Distance Decomposition vs. Speed\nLinear Drift + Quadratic Braking", fontsize=12.0, fontweight="bold", pad=12, color="#1E293B"
+)
+ax1.legend(loc="upper left", fontsize=8.8, framealpha=0.92, edgecolor="#CBD5E1")
+
+badge_box = dict(boxstyle="round,pad=0.35", facecolor="#FFFFFF", edgecolor="#CBD5E1", alpha=0.95, linewidth=0.8)
+ax1.text(
+    42,
+    145,
+    "Kinetic Reality:\nDrift scales linearly ($v \\cdot T_\\Sigma$);\nBraking scales quadratically ($v^2 / 2a$).\nAt 100 km/h, out-of-loop drift alone is >72 m!",
+    fontsize=8.4,
+    color="#1E293B",
+    bbox=badge_box,
+    va="center",
+)
+
+# --- Panel (b): Remaining Stopping Margin & Crash Horizon ---
+ax2.axhspan(-120, 0, color="#FEE2E2", alpha=0.55, label=r"Inevitable Collision Zone ($M < 0$)")
+ax2.axhline(0, color="#DC2626", linestyle="-", linewidth=1.6, alpha=0.85)
+
+crit_speeds = {}
+for m in modes:
+    d_tot = v_mps * (m["T"] + tau_delay) + (v_mps**2) / (2 * a_eff) + delta_buf
+    margin = d_clear - d_tot
+    ax2.plot(v_kmh, margin, color=m["color"], linewidth=2.4, linestyle=m["ls"], label=m["name"])
+
+    # Calculate critical speed where margin == 0
+    A = 1.0 / (2.0 * a_eff)
+    B = m["T"] + tau_delay
+    C = delta_buf - d_clear
+    v_crit_mps = (-B + np.sqrt(B**2 - 4 * A * C)) / (2 * A)
+    v_crit_kmh = v_crit_mps * 3.6
+    crit_speeds[m["T"]] = v_crit_kmh
+    ax2.plot(v_crit_kmh, 0, marker="o", markersize=7.5, color=m["color"], zorder=5)
+
+ax2.set_xlim(10, 120)
+ax2.set_ylim(-100, 65)
+ax2.set_xlabel(r"Vehicle Velocity $v$ (km/h)", fontsize=11, fontweight="bold", color="#1E293B")
+ax2.set_ylabel(r"Remaining Clearance Margin $M = d_{\mathrm{clear}} - d_{\mathrm{stop}}$ (m)", fontsize=11, fontweight="bold", color="#1E293B")
+ax2.set_title(
+    r"(b) Clearance Margin & Collision Horizon" + "\n" + r"(Given $d_{\mathrm{clear}} = 60\,\mathrm{m}$ sightline)",
+    fontsize=12.0,
+    fontweight="bold",
+    pad=12,
+    color="#1E293B",
+)
+ax2.legend(loc="lower left", fontsize=8.8, framealpha=0.92, edgecolor="#CBD5E1")
+
+summary_text = (
+    "Takeover Speed Ceilings ($d_{\\mathrm{clear}} = 60\\,\\mathrm{m}$):\n"
+    f"  • Direct In-Loop (0.8s):    {crit_speeds[0.8]:.1f} km/h\n"
+    f"  • Alerted Driver (1.5s):   {crit_speeds[1.5]:.1f} km/h\n"
+    f"  • Out-of-Loop NDRT (2.5s): {crit_speeds[2.5]:.1f} km/h\n"
+    f"  • Remote Teleop (4.0s):    {crit_speeds[4.0]:.1f} km/h\n"
+    "Beyond these ceilings, crash occurs before rest!"
+)
+ax2.text(
+    88,
+    38,
+    summary_text,
+    fontsize=8.3,
+    color="#1E293B",
+    bbox=badge_box,
+    va="center",
+    ha="center",
+)
+
+intercept_tags = [
+    (crit_speeds[4.0], f"{crit_speeds[4.0]:.1f}", "#DC2626", -16),
+    (crit_speeds[2.5], f"{crit_speeds[2.5]:.1f}", "#D97706", -16),
+    (crit_speeds[1.5], f"{crit_speeds[1.5]:.1f}", "#1E3A8A", -16),
+    (crit_speeds[0.8], f"{crit_speeds[0.8]:.1f} km/h", "#047857", -16),
+]
+for spd, txt, col, y_pos in intercept_tags:
+    ax2.plot([spd, spd], [0, y_pos + 6], color=col, linestyle=":", linewidth=1.0)
+    ax2.text(
+        spd,
+        y_pos,
+        txt,
+        fontsize=8.0,
+        fontweight="bold",
+        color=col,
+        ha="center",
+        va="center",
+        bbox=dict(boxstyle="round,pad=0.2", facecolor="#FFFFFF", edgecolor=col, alpha=0.9, linewidth=0.6),
+    )
+
+ax2.text(
+    80,
+    -78,
+    "Collision Horizon ($M < 0$):\nKinetic stopping distance exceeds sightline;\nimpact is physically inevitable regardless of brake force.",
+    fontsize=8.3,
+    color="#DC2626",
+    bbox=dict(boxstyle="round,pad=0.35", facecolor="#FFFFFF", edgecolor="#DC2626", alpha=0.95, linewidth=0.8),
+    va="center",
+    ha="center",
+)
+
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+:::
+
 ```{python}
 #| label: calc-intervention-takeover-ladder
 #| echo: false
