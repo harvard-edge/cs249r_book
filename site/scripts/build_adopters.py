@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import struct
 import sys
 import time
@@ -81,33 +82,48 @@ def monogram(name: str, short: str | None) -> str:
     return "".join(w[0] for w in words[:3]).upper()
 
 
-def teaching() -> list[dict]:
-    """Curated schools, one entry per domain.
+def hidden() -> set[str]:
+    """Domains and course links kept off the site (`hidden:` in adopters.yml)."""
+    data = yaml.safe_load(DATA.read_text(encoding="utf-8")) or {}
+    return {str(h).strip().lower() for h in data.get("hidden") or []}
 
-    The intake workflow appends a new block for every submitted course, so a
-    school can appear more than once in adopters.yml; its courses merge here.
+
+def teaching(extra: list[dict] | None = None) -> list[dict]:
+    """Schools that teach from the book, one entry per domain.
+
+    The curated schools in adopters.yml come first; `extra` adds the courses
+    the scheduled refresh found on its own (self-reported submissions and
+    strong-evidence GitHub finds). Entries sharing a domain merge, courses
+    dedupe by link, and anything under `hidden:` is dropped.
     """
+    hide = hidden()
+    curated = yaml.safe_load(DATA.read_text(encoding="utf-8"))["schools"]
     out: list[dict] = []
     by_domain: dict[str, dict] = {}
-    for s in yaml.safe_load(DATA.read_text(encoding="utf-8"))["schools"]:
+    for s in curated + list(extra or []):
+        if s["domain"].lower() in hide:
+            continue
+        courses = [{"title": c["title"], "term": str(c["term"]) if c.get("term") else None,
+                    "url": c.get("url")} for c in s.get("courses", [])
+                   if (c.get("url") or "").lower() not in hide]
         if s["domain"] in by_domain:
             prev = by_domain[s["domain"]]
             urls = {c.get("url") for c in prev["courses"]}
-            prev["courses"] += [{"title": c["title"], "term": str(c["term"]) if c.get("term") else None,
-                                 "url": c.get("url")} for c in s.get("courses", []) if c.get("url") not in urls]
+            prev["courses"] += [c for c in courses if c.get("url") not in urls]
             if prev["kind"] == "acknowledged" and s["kind"] != "acknowledged":
                 prev["kind"] = s["kind"]
+            continue
+        if s.get("source") and not courses:
             continue
         logo = LOGO_DIR / f"{s['domain']}.png"
         out.append({
             "name": s["name"], "short": s.get("short"), "domain": s["domain"],
-            "city": s["city"], "country": s["country"], "latlon": s["latlon"],
+            "city": s.get("city", ""), "country": s["country"], "latlon": s["latlon"],
             "kind": s["kind"], "acknowledged": bool(s.get("acknowledged")) or s["kind"] == "acknowledged",
             "logo": (f"assets/images/adopters/{s['domain']}.png"
                      if logo.exists() and png_width(logo) >= MIN_LOGO_PX else None),
             "mono": monogram(s["name"], s.get("short")),
-            "courses": [{"title": c["title"], "term": str(c["term"]) if c.get("term") else None,
-                         "url": c.get("url")} for c in s.get("courses", [])],
+            "courses": courses,
         })
         by_domain[s["domain"]] = out[-1]
     return out
@@ -167,9 +183,39 @@ def gather() -> int:
 
     # The Hipo list can file a school under a different domain than
     # adopters.yml does (iisc.ernet.in vs iisc.ac.in), so match names too.
-    taught = {s["domain"] for s in teaching()}
+    # Courses the refresh lists on its own: self-reported submissions (the
+    # "Add your course" issues) and strong-evidence GitHub finds. Each source
+    # fails soft; a failure keeps the previous run's courses.
+    import adopters_discover as ad
+    import adopters_intake as ai
+    geo_all = json.loads(GEO_CACHE.read_text(encoding="utf-8")) if GEO_CACHE.exists() else {}
+    known = {s["domain"]: s for s in teaching()}
+    prev_extra = (json.loads(CACHE.read_text(encoding="utf-8")) if CACHE.exists() else {}).get("extra", [])
+    extra: list[dict] = []
+    ctx = dict(known=known, matcher=matcher, geo=geo_all, geocode=geocode)
+    try:
+        tok = affiliations._token()
+        subs, sub_log = ai.submissions(lambda path: ad.api(tok, path), affiliations.REPO,
+                                       hipo=hipo_by_domain, **ctx)
+        extra += subs
+        log(f"submissions: {len(subs)} listed" + (f" ({'; '.join(sub_log)})" if sub_log else ""))
+    except Exception as exc:  # noqa: BLE001
+        log(f"! submissions unavailable ({exc}); keeping previous")
+        extra += [e for e in prev_extra if e.get("source") == "self-reported"]
+    try:
+        disc_tok = os.environ.get("DISCOVERY_TOKEN") or affiliations._token()
+        found, notes = ad.discovered(disc_tok, **ctx)
+        extra += found
+        log(f"discovered: {len(found)} listed" + (f"; {len(notes)} note(s)" if notes else ""))
+        for n in notes[:12]:
+            log(f"  {n}")
+    except Exception as exc:  # noqa: BLE001
+        log(f"! discovery unavailable ({exc}); keeping previous")
+        extra += [e for e in prev_extra if e.get("source") == "discovered"]
+
+    taught = {s["domain"] for s in teaching(extra)}
     taught_names = {affiliations.norm(s[k]) for s in teaching() for k in ("name", "short") if s.get(k)}
-    geo = json.loads(GEO_CACHE.read_text(encoding="utf-8")) if GEO_CACHE.exists() else {}
+    geo = geo_all
     readers, used = [], {}
     for dom, n in sorted(signal.items(), key=lambda kv: -kv[1]):
         if n < MIN_READERS or dom in taught:
@@ -183,11 +229,14 @@ def gather() -> int:
         if not latlon:
             continue
         readers.append({**s, "latlon": latlon})
-    # Keep only lookups still in use, so the committed file tracks the list.
+    # Keep every lookup: readers, submissions and finds all reuse them.
+    for key, val in geo_all.items():
+        used.setdefault(key, val)
     GEO_CACHE.write_text(json.dumps(used, indent=1, ensure_ascii=False, sort_keys=True) + "\n",
                          encoding="utf-8")
     CACHE.write_text(json.dumps({
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "extra": extra,
         "readers": readers,
     }, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     log(f"adopters cache: {len(readers)} reader schools at >= {MIN_READERS}")
@@ -200,8 +249,10 @@ def gather() -> int:
 
 def payload() -> dict:
     cache = json.loads(CACHE.read_text(encoding="utf-8")) if CACHE.exists() else {}
-    t = teaching()
-    readers = cache.get("readers", [])
+    t = teaching(cache.get("extra"))
+    taught = {s["domain"] for s in t}
+    hide = hidden()
+    readers = [r for r in cache.get("readers", []) if r["domain"] not in taught and r["domain"].lower() not in hide]
     return {
         "generated": cache.get("generated", ""),
         "counts": {

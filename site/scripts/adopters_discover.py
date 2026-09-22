@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""Find course repositories that use the book, for a maintainer to review.
+"""Course repositories that use the book, found on GitHub.
 
-Run weekly by .github/workflows/site-adopters-discover.yml. Searches GitHub
-for repositories that link or fork the book, keeps the ones that look like a
-course (a course code, course words, an organization owner, an academic
-profile), drops anything already in community/adopters.yml or reported in an
-earlier discovery issue, and writes a markdown checklist of what is left.
+build_adopters.py gather calls discovered() on the scheduled refresh. It
+searches GitHub for repositories that link, name, or fork the book and lists
+a repository as a course only on strong evidence, all three of:
+  - it links the book in a file, or names it in its README or description;
+  - it carries a course code of its own (not the book's "cs249r");
+  - its owner's profile names a school in the university list.
+Weaker leads are not published. Nothing is committed: the courses go into
+adopters.json with the rest of the refresh. A domain or link listed under
+`hidden:` in community/adopters.yml keeps a course off the site.
 
-Nothing here changes the site. A maintainer reads the list and, for the real
-courses, opens the "Add your course" form or edits adopters.yml.
+Code search across public repositories needs a personal or fine-grained
+token (DISCOVERY_TOKEN in the workflow); with the Actions token alone, code
+search may be refused and only repository search and forks are used.
 
-Needs a token in GITHUB_TOKEN (or `gh auth`). Code search across public
-repositories needs a personal or fine-grained token; with the Actions token
-alone, code search may be refused and the run falls back to repository search
-and forks, which it says in the report.
-
-Usage:
-  python3 site/scripts/adopters_discover.py --out report.md [--dry-run]
+Review the full candidate list, strong and weak, by hand:
+  python3 site/scripts/adopters_discover.py --out report.md
 """
 
 from __future__ import annotations
@@ -38,7 +38,6 @@ sys.path.insert(0, str(SCRIPTS))
 import build_adopters as ba  # noqa: E402
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "harvard-edge/cs249r_book")
-ISSUE_PREFIX = "[Course discovery]"
 CODE_QUERIES = ['"mlsysbook.ai"', '"harvard-edge.github.io/cs249r_book"', '"cs249r_book"']
 REPO_QUERIES = ["mlsysbook in:readme,description", "cs249r in:readme,description",
                 "\"machine learning systems\" janapa in:readme"]
@@ -83,16 +82,6 @@ def listed_repos() -> set[str]:
     text = ba.DATA.read_text(encoding="utf-8")
     return {m.lower() for m in re.findall(r"github\.com/([\w.-]+/[\w.-]+)", text)} | \
            {m.lower() for m in re.findall(r"https?://([\w-]+)\.github\.io", text)}
-
-
-def reported_repos(tok: str) -> set[str]:
-    """Slugs listed in earlier discovery issues, open or closed."""
-    seen: set[str] = set()
-    q = urllib.parse.quote(f'repo:{REPO} is:issue in:title "{ISSUE_PREFIX}"')
-    _, res = api(tok, f"search/issues?q={q}&per_page=50")
-    for it in (res or {}).get("items", []):
-        seen |= {m.lower() for m in re.findall(r"github\.com/([\w.-]+/[\w.-]+)", it.get("body") or "")}
-    return seen
 
 
 def gather(tok: str) -> tuple[dict[str, dict], list[str]]:
@@ -180,15 +169,75 @@ def score(tok: str, found: dict[str, dict], owners: dict[str, dict]) -> list[dic
     return sorted(out, key=lambda c: (-c["weight"], c["slug"].lower()))
 
 
+def resolve_school(c: dict, prof: dict, matcher, known: dict) -> str | None:
+    """The school behind a candidate repository, or None.
+
+    Tried from most to least specific: the owner's profile (company, blog
+    host), then the school named in the repository itself or the owner's
+    bio ("Lecture notes for COE 379L at UT Austin", "Ursinus-CS477"), by
+    alias, by a listed school's domain stem, or by a full university name.
+    """
+    import affiliations
+
+    blog_host = (urllib.parse.urlsplit(prof.get("blog") or "").hostname or "").removeprefix("www.")
+    for piece in filter(None, [prof.get("company"), blog_host]):
+        dom = matcher.match(piece) or (piece if piece in matcher.by_domain else None)
+        if dom:
+            return dom
+    text = " ".join(filter(None, [c["slug"].split("/")[1], c["desc"], prof.get("bio"),
+                                  prof.get("company"), prof.get("location")]))
+    # The book's home is named by every fan repo ("labs from Harvard's
+    # CS249r"); it says nothing about who runs the repo, and Harvard's own
+    # courses are curated. Strip it before matching.
+    words = affiliations.norm(re.sub(r"[_\-/]+", " ", text))
+    words = re.sub(r"\bharvard\b[\w' ]{0,40}|\bcs\s?249r?\b|\bseas\b", " ", words)
+    for alias, dom in sorted(affiliations.ALIAS.items(), key=lambda kv: -len(kv[0])):
+        if len(alias) >= 3 and re.search(rf"\b{re.escape(alias)}\b", words):
+            return dom
+    for dom in known:
+        if dom == "harvard.edu":
+            continue
+        stem = dom.split(".")[0]
+        if len(stem) >= 5 and re.search(rf"\b{re.escape(stem)}\b", words):
+            return dom
+    best = max((n for n in matcher.long_names if n in words), key=len, default=None)
+    return matcher.by_name[best]["domains"][0].lower() if best else None
+
+
+def discovered(tok: str, *, matcher, known: dict, geo: dict, geocode) -> tuple[list[dict], list[str]]:
+    """Course entries for candidates with strong evidence (see module doc)."""
+    found, notes = gather(tok)
+    skip = listed_repos()
+    found = {k: v for k, v in found.items() if k.lower() not in skip and k.split("/")[0].lower() not in skip}
+    owners: dict[str, dict] = {}
+    entries = []
+    for c in score(tok, found, owners):
+        linked = any(v.startswith(("links the book", "names the book")) for v in c["via"])
+        if not linked or "course code in name or description" not in c["signals"]:
+            continue
+        prof = owners.get(c["slug"].split("/")[0], {})
+        domain = resolve_school(c, prof, matcher, known)
+        if not domain:
+            notes.append(f"{c['slug']}: strong course signals but no identifiable school")
+            continue
+        school = known.get(domain) or matcher.school(domain)
+        latlon = school.get("latlon") or geocode(f"{school['name']}, {school['country']}", geo)
+        if not latlon:
+            continue
+        title = c["desc"] or c["slug"].split("/")[1].replace("-", " ").replace("_", " ")
+        entries.append({"name": school["name"], "domain": domain, "city": school.get("city", ""),
+                        "country": school["country"], "latlon": latlon, "kind": "course",
+                        "source": "discovered",
+                        "courses": [{"title": title[:120], "term": None, "url": c["url"]}]})
+    return entries, notes
+
+
 def report(cands: list[dict], notes: list[str]) -> str:
     esc = lambda s: s.replace("|", "\\|").replace("\n", " ")  # noqa: E731
     lines = [
-        f"Weekly search for courses that use the book. {len(cands)} new candidate(s), not already listed "
-        "in `site/community/adopters.yml` or in an earlier discovery issue.",
-        "",
-        "For each real course: check it assigns or links the book, then add it with the "
-        f"[Add your course](https://github.com/{REPO}/issues/new?template=add_course.yml) form or by editing `adopters.yml`. "
-        "Close this issue when done; anything left unticked is not reported again.",
+        f"Candidate courses that use the book: {len(cands)}, not already in `site/community/adopters.yml`. "
+        "Only those with a course code, a link to the book, and an identifiable school are published "
+        "automatically; the rest are listed here for review.",
         "",
     ]
     for c in cands:
@@ -205,11 +254,10 @@ def report(cands: list[dict], notes: list[str]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--dry-run", action="store_true", help="skip the earlier-issue filter's API call")
     args = ap.parse_args()
     tok = token()
     found, notes = gather(tok)
-    skip = listed_repos() | (set() if args.dry_run else reported_repos(tok))
+    skip = listed_repos()
     found = {k: v for k, v in found.items()
              if k.lower() not in skip and k.split("/")[0].lower() not in skip}
     cands = score(tok, found, {})
