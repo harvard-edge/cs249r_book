@@ -171,6 +171,49 @@ def calc_max_permitted_velocity(
     return (v_mps * (ureg.meter / ureg.second)).to(ureg.meter / ureg.second)
 
 
+def calc_c2_stop_suffix(entry_velocity, peak_deceleration):
+    """
+    Calculate the duration and distance of a C2-continuous stop from cruise.
+
+    A stop that begins and ends at zero acceleration, entered from constant
+    velocity v_c, follows the minimum-order polynomial
+
+        q(u) = q_c + v_c * T * (u - u^3 + u^4 / 2),  u = t / T in [0, 1],
+
+    whose peak deceleration is 1.5 * v_c / T and whose distance is v_c * T / 2.
+    Setting the peak equal to the credible deceleration a gives
+
+        T = 1.5 * v / a,    d = 0.75 * v^2 / a,
+
+    which is 1.5 times the constant-deceleration distance v^2 / (2 * a).
+
+    Source: derived here. The polynomial satisfies q' = v_c, q'' = 0 at u = 0
+    and q' = 0, q'' = 0 at u = 1; peak |q''| occurs at u = 1/2 (minimum of
+    q''(u) = v_c / T * (-6u + 6u^2)).
+
+    Parameters
+    ----------
+    entry_velocity : Quantity
+        Cruise velocity at the start of the stop (e.g. m/s).
+    peak_deceleration : Quantity
+        Credible peak deceleration the stop may reach (e.g. m/s^2).
+
+    Returns
+    -------
+    dict
+        duration (ms) and distance (m).
+    """
+    validate_positive(entry_velocity, "entry_velocity")
+    validate_positive(peak_deceleration, "peak_deceleration")
+
+    v = entry_velocity.to(ureg.meter / ureg.second)
+    a = peak_deceleration.to(ureg.meter / ureg.second**2)
+    return {
+        "duration": (1.5 * v / a).to(ureg.millisecond),
+        "distance": (0.75 * v**2 / a).to(ureg.meter),
+    }
+
+
 def calc_kinetic_energy(mass, velocity):
     """
     Calculate kinetic energy of a translating body.

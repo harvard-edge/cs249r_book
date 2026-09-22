@@ -6,6 +6,10 @@ from ..core.units import ureg
 from ..core import provenance_catalog as pc
 from ..hardware.registry import Hardware
 from .types import EmbodiedPlatform
+from ..core.provenance import sourced_qty
+from ..sensors.registry import Sensors
+from ..models.registry import Models
+from .types import MobileManipulatorPlatform, EmbodiedSiteScenario
 
 
 class Quadrupeds(Registry):
@@ -202,6 +206,105 @@ class ContinuousProcesses(Registry):
     )
 
 
+class MobileManipulators(Registry):
+    """Composite mobile manipulators: a Class 1 base carrying a Class 2 arm."""
+
+    WarehouseMobileManipulator = MobileManipulatorPlatform(
+        name="Warehouse mobile manipulator",
+        archetype="Class 1: Mobility + Class 2: Manipulation",
+        base=AMRs.WarehouseAMR,
+        arm=Manipulators.Panda,
+        onboard_payload_capacity=50.0 * ureg.kg,               # chosen tote-rack capacity
+        footprint_width=1.00 * ureg.meter,
+        brain_soc=Hardware.Edge.JetsonAGXOrin,
+        permission_mcu=Hardware.Tiny.LockstepSafetyMCU_Reference,
+        permission_rate=1000.0 * ureg.Hz,                      # chosen
+        current_loop_rate=20_000.0 * ureg.Hz,                  # chosen
+        fieldbus_cycle=1.0 * ureg.millisecond,                 # EtherCAT, illustrative
+        servo_axes=9,                                          # 7 arm joints + 2 drive wheels
+        nav_camera=Sensors.Camera.Sony_IMX477,
+        wrist_camera=Sensors.Camera.Sony_IMX296,
+        lidar=Sensors.LiDAR.Ouster_OS1_64,
+        imu=Sensors.IMU.Bosch_BMI088,
+        intent_model=Models.Embodied.OpenVLA_7B,
+        chunk_model=Models.Embodied.ACT_ALOHA,
+        intent_rate=5.0 * ureg.Hz,                             # chosen
+        intent_inference_latency=160.0 * ureg.millisecond,     # illustrative
+        chunk_rate=20.0 * ureg.Hz,                             # chosen
+        chunk_inference_latency=40.0 * ureg.millisecond,       # illustrative P99 incl. vision
+        chunk_step=20.0 * ureg.millisecond,                    # chosen setpoint period
+        chunk_horizon=16,                                      # chosen
+        dram_efficiency=0.70,                                  # sustained fraction of peak
+        tcp_speed_limit=1.0 * (ureg.meter / ureg.second),      # chosen free-space limit
+        control_rail_nominal=24.0 * ureg.volt,                 # chosen control-rail voltage
+        control_rail_battery_low=21.5 * ureg.volt,             # illustrative depleted battery
+        control_rail_resistance=60.0 * ureg.milliohm,          # illustrative harness resistance
+        control_rail_dropout=18.0 * ureg.volt,                 # illustrative regulator dropout
+        permission_rail_holdup=2.0 * ureg.second,              # chosen hold-up time
+        permission_rail_load=70.0 * ureg.watt,                 # illustrative permission-path load
+        spring_brake_engage_min=30.0 * ureg.millisecond,       # illustrative spring-brake engage, fast end
+        spring_brake_engage_max=80.0 * ureg.millisecond,       # illustrative spring-brake engage, slow end
+        metadata=Metadata(provenance=pc.WAREHOUSE_MOBILE_MANIPULATOR),
+    )
+
+
+class SiteScenarios(Registry):
+    """Budget terms for an embodied machine at a named site (illustrative unless sourced)."""
+
+    WarehouseAisle = EmbodiedSiteScenario(
+        name="Warehouse aisle",
+        machine=MobileManipulators.WarehouseMobileManipulator,
+        delta_loc=0.050 * ureg.meter,                          # illustrative
+        delta_margin=0.100 * ureg.meter,                       # chosen
+        eps_track=0.040 * ureg.meter,                          # illustrative
+        t_brake_onset=20.0 * ureg.millisecond,                 # illustrative
+        t_lease=60.0 * ureg.millisecond,                       # chosen
+        t_bus=MobileManipulators.WarehouseMobileManipulator.fieldbus_cycle,
+        t_transport=0.8 * ureg.millisecond,                    # illustrative
+        t_dma=1.2 * ureg.millisecond,                          # illustrative
+        t_isp=2.5 * ureg.millisecond,                          # illustrative
+        t_backbone=22.0 * ureg.millisecond,                    # illustrative
+        t_ipc=0.5 * ureg.millisecond,                          # illustrative
+        heartbeat_rate=100.0 * ureg.Hz,                        # chosen
+        heartbeat_timeout=30.0 * ureg.millisecond,             # chosen
+        mcu_self_watchdog=5.0 * ureg.millisecond,              # chosen
+        enforcer_unloaded=135.0 * ureg.microsecond,            # illustrative
+        enforcer_wcet=250.0 * ureg.microsecond,                # chosen (declared)
+        enforcer_deadline=400.0 * ureg.microsecond,            # chosen
+        v_human_approach=sourced_qty(
+            1.6 * (ureg.meter / ureg.second), pc.ISO_13855_APPROACH_SPEED,
+            name="ISO 13855 walking approach speed K",
+        ),
+        d_clear=1.10 * ureg.meter,                             # illustrative rack-end clear distance
+        v_aisle=1.3 * (ureg.meter / ureg.second),              # chosen, below the derived ceiling
+        aisle_width=1.30 * ureg.meter,
+        aisle_length=30.0 * ureg.meter,
+        side_clearance=0.15 * ureg.meter,
+        mu_dry=0.60,
+        mu_inspected_floor=0.12,
+        mu_oil_film=0.05,
+        k_latch=4.0e5 * (ureg.newton / ureg.meter),
+        v_latch_approach=0.03 * (ureg.meter / ureg.second),
+        v_latch_high=0.10 * (ureg.meter / ureg.second),
+        f_latch_tripwire=15.0 * ureg.newton,
+        t_contact_response=2.0 * ureg.millisecond,
+        f_latch_limit=100.0 * ureg.newton,
+        v_conveyor=0.20 * (ureg.meter / ureg.second),
+        a_conveyor_slip=0.50 * (ureg.meter / ureg.second**2),
+        grasp_tolerance=15.0 * ureg.millimeter,
+        grasp_initial_error=3.0 * ureg.millimeter,
+        k_contact_human=15_000.0 * (ureg.newton / ureg.meter),
+        f_contact_criterion=50.0 * ureg.newton,                # chosen
+        v_handover=0.10 * (ureg.meter / ureg.second),          # chosen coworker handover TCP speed
+        t_takeover_in_loop=150.0 * ureg.millisecond,           # illustrative in-loop takeover
+        t_takeover_out_of_loop=2.0 * ureg.second,              # illustrative out-of-loop takeover
+        v_takeover_in_loop=1.2 * (ureg.meter / ureg.second),   # chosen slow-down before an in-loop request
+        v_takeover_out_of_loop=0.3 * (ureg.meter / ureg.second),  # chosen crawl before an out-of-loop request
+        i_rail_transient=70.0 * ureg.ampere,                   # illustrative coincident inference + drive transient
+        metadata=Metadata(provenance=pc.WAREHOUSE_AISLE_SCENARIO),
+    )
+
+
 class Embodied(Registry):
     """Authoritative registry of embodied AI platforms, cyber-physical machines, and robotic embodiments."""
 
@@ -212,3 +315,5 @@ class Embodied(Registry):
     AMR = AMRs
     Vehicle = Vehicles
     ContinuousProcess = ContinuousProcesses
+    MobileManipulator = MobileManipulators
+    Scenario = SiteScenarios

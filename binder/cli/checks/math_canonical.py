@@ -59,7 +59,7 @@ CANONICAL_STR_CALL = re.compile(
     r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
     r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
-    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_jerk"
+    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_jerk"
     r"|fmt_inertia|fmt_voltage|fmt_current|fmt_resistance"
     r"|MarkdownStr)\s*\("
 )

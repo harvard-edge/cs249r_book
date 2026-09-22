@@ -454,6 +454,76 @@ HEAVY_AMR = _est(
     verified="2026-09-18",
 )
 
+# Volume IV running machine (added 2026-09-21, vol4 flow canon section 3.3).
+WAREHOUSE_MOBILE_MANIPULATOR = _est(
+    "prov:warehouse-mobile-manipulator",
+    "Representative warehouse mobile manipulator: WarehouseAMR base, Panda arm, "
+    "Jetson AGX Orin application processor, lockstep safety MCU",
+    notes=(
+        "Composite of existing registry entries; component values carry their own "
+        "records. Illustrative or chosen here: 50 kg tote-rack capacity, 1.00 m "
+        "footprint width, 1 kHz permission loop, 20 kHz current loop, 1 ms EtherCAT "
+        "cycle, 9 servo axes, 5 Hz / 160 ms intent model, 20 Hz / 40 ms chunk policy, "
+        "20 ms setpoint period, chunk horizon 16, 0.70 sustained DRAM efficiency, "
+        "1.0 m/s free-space TCP limit. The WarehouseAMR record calls 300 kg gross, so "
+        "the loaded mass is an upper bound."
+        " Control rail: 24 V nominal is a design choice; the 21.5 V depleted-battery "
+        "voltage, 60 mOhm shared harness resistance, and 18.0 V point-of-load "
+        "regulator dropout are illustrative."
+        " Permission-path rail isolated and held up (round-3 D15): isolated from the "
+        "application processor's supply and held up by a supercapacitor store behind "
+        "an ideal-diode controller, feeding the safety MCU, drive-logic and gate-driver "
+        "supplies, encoder interfaces, and all spring-brake coils. The 2.0 s hold-up is "
+        "a design choice; the 70 W permission-path load and the 30-80 ms spring-brake "
+        "engage window are illustrative. The permission loads are assumed to share the "
+        "18.0 V regulator dropout."
+    ),
+    verified="2026-09-21",
+)
+
+WAREHOUSE_AISLE_SCENARIO = _est(
+    "prov:warehouse-aisle-scenario",
+    "Illustrative warehouse aisle site scenario: delay, clearance, friction, contact, "
+    "and conveyor budget terms for the warehouse mobile manipulator",
+    notes=(
+        "No row is measured. Clearances, delays, friction coefficients, latch, "
+        "conveyor, coworker-contact, and remote-takeover times are illustrative; the "
+        "lease, margin, aisle speed, heartbeat, enforcer deadline, handover speed, and "
+        "the slow-down speeds before a takeover request are design choices. The human "
+        "approach speed carries ISO_13855_APPROACH_SPEED."
+        " The 70 A coincident control-rail transient (inference burst plus drive "
+        "motors on the door threshold) is illustrative."
+    ),
+    verified="2026-09-21",
+)
+
+LOCKSTEP_SAFETY_MCU_REFERENCE = _est(
+    "prov:lockstep-safety-mcu-reference",
+    "Reference-class dual-core lockstep real-time MCU (200–400 MHz class)",
+    notes=(
+        "Not a single product. 400 MHz x 2 FLOP/cycle peak, 4 MiB on-chip flash, "
+        "1 MiB tightly coupled SRAM, about 1 W; values are representative of the "
+        "class, not a datasheet."
+        " The registry clock_rate (400 MHz) is the upper end of the class."
+    ),
+    verified="2026-09-21",
+)
+
+ISO_13855_APPROACH_SPEED = _ds(
+    "prov:iso-13855-approach-speed",
+    "ISO 13855:2010 walking approach speed K = 1600 mm/s, applied over the whole "
+    "stopping time T in S = K*T + C",
+    "https://www.iso.org/standard/42845.html",
+    verified="2026-09-21",
+    notes=(
+        "ISO 13855:2010 (Safety of machinery: positioning of safeguards with respect "
+        "to the approach speeds of parts of the human body); the URL is that edition. "
+        "The standard's text is paywalled, so the value was checked against secondary "
+        "sources that quote it, not the standard itself, and not against the 2024 "
+        "edition."
+    ),
+)
+
 AUTONOMOUS_VEHICLE_ROBOTAXI = _est(
     "prov:autonomous-vehicle-robotaxi",
     "Representative Level 4 robotaxi class profile (not a single vehicle)",
