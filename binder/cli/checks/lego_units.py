@@ -26,7 +26,7 @@ class LintIssue:
 
 RULES = (
     "L001", "L002", "L003", "L004", "L006", "L007", "L008", "L009",
-    "L011", "L014", "L015", "L016", "L019",
+    "L011", "L014", "L015", "L016", "L019", "L020",
 )
 
 L014_CLOSED_FMT = re.compile(
@@ -54,6 +54,12 @@ MASG_TO_CLOSED = re.compile(
 )
 FMT_QTY_SCALAR = re.compile(
     r"fmt_qty\s*\(\s*\w+\.(?:m_as\s*\(|to\([^)]+\)\.magnitude)"
+)
+FMT_QTY_DOMAIN_UNIT = re.compile(
+    r"\bfmt_qty\s*\([^;\n]+?,\s*(?:unit\s*=\s*)?(?:"
+    r"[TGKM]B\s*/\s*(?:second|s)|[TGKM]bps|[PEGT]FLOPs?\s*/\s*(?:second|s)|flops_per_second|"
+    r"(?<![/\w])(?:W|kW|MW|GW|watt|kilowatt|megawatt)(?!\s*/\s*s)(?![a-zA-Z0-9_])|"
+    r"(?<![/\w])(?:GB|MB|KB|TB|gigabyte|terabyte|megabyte|kilobyte)(?!\s*/\s*s)(?![a-zA-Z0-9_]))\b"
 )
 RAW_FMT_SUFFIX = re.compile(
     r"fmt\s*\([^)]*suffix\s*=\s*['\"]\s*(?:GB|TB|MB|kWh|MWh|TFLOP|W|MW|ms|s)\b"
@@ -162,6 +168,12 @@ def lint_file(path: Path, root: Path) -> list[LintIssue]:
                     "Use .to(unit).magnitude instead of .m_as() in LEGO cells.",
                     severity="error",
                 ))
+            if FMT_QTY_DOMAIN_UNIT.search(line):
+                if not re.search(r"/\s*(?:[TGKM]B|byte)", line.split("fmt_qty")[-1]):
+                    issues.append(LintIssue(
+                        "L020", rel, lineno,
+                        "Prefer domain formatter (fmt_bandwidth, fmt_memory, fmt_power, fmt_flop_rate) over fmt_qty.",
+                    ))
 
         for match in L014_CLOSED_FMT.finditer(block):
             lineno = base_line + block[: match.start()].count("\n")
