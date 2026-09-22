@@ -82,7 +82,7 @@ def check_code_exec(path: Path, text: str | None = None) -> List[CodeExecIssue]:
                     warnings.simplefilter("ignore")
                     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                         exec(code, scope)
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:
                 first_code_line = next((l.strip() for l in clean_lines if l.strip()), "")
                 issues.append(
                     CodeExecIssue(
