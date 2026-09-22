@@ -95,7 +95,7 @@ plt.close()
 
 :::
 
-The plotted points are workload regimes (illustrative; see the Reader Guide), not measurements on a common device or input, and parameter count alone cannot determine update rate.
+The plotted points are workload regimes (illustrative; see the Reader Guide) rather than runs on a common device, and parameter count alone does not determine update rate.
 
 @Sec-brain-classical-wall shows why pipelines built on hand-authored geometry and state machines lose coverage outside the factory cell, and @sec-brain-learned-representations shows what learned representations recover and what they cost in tokens and memory traffic. @Sec-brain-cognitive-pipeline turns that cost into the machine's numbers: the memory wall that bounds how often its intent model can run, the action chunking that keeps the arm supplied between evaluations, and the drift that bounds how long each chunk stays true. @Sec-brain-cognitive-vulnerabilities then takes up the ways a proposal can arrive on time and still be wrong, each of which leaves the permission path with a proposal it must be able to refuse.
 
@@ -172,7 +172,7 @@ Rather than an opaque monolith, an embodied foundation model is a four-stage neu
      In a longer-horizon configuration than the mobile manipulator's, a backbone may evaluate one new camera observation, then a smaller decoder may perform several denoising iterations to propose $H=32$ waypoints at $20\text{ ms}$ spacing. That is one $640\text{ ms}$ candidate horizon, not 32 fresh observations. The next backbone evaluation must arrive before the accepted execution window expires; downstream interpolation and feedback run at their own rates.
 
 4. **The Proposal Boundary (Isolation from Actuators):**
-   Whether the model is a VLN mobility planner or a VLA manipulation policy, its output is strictly an **unprivileged candidate proposal**\index{Unprivileged proposal!proposal boundary} ($p_t$). Under the machine model of @sec-boundary-machine-model, the foundation model operates in unprivileged user space on the application processor and possesses **zero direct hardware authority** to write pulse-width modulation (PWM) registers or physically switch current into the motor coils.
+   Whether the model is a VLN mobility planner or a VLA manipulation policy, its output is a candidate proposal ($p_t$) on the unprivileged side of the proposal boundary (\ref{dfn-boundary-proposal-boundary}).\index{Unprivileged proposal!proposal boundary} Under the machine model of @sec-boundary-machine-model, the foundation model runs in user space on the application processor and has no path to the pulse-width modulation (PWM) registers or to the current in the motor coils.
 
    The design rule for this deliberative boundary is that learned models operating at the Brain's inference cadences ($1\text{--}50\text{ Hz}$) propose kinematic setpoints ($\mathbf{q}, \dot{\mathbf{q}}, \ddot{\mathbf{q}}$ or Cartesian poses), **never unbuffered, open-loop motor torques ($\boldsymbol{\tau}$)** directly to inverter switches. Motor torque is directly coupled to continuous plant dynamics:
    $$\boldsymbol{\tau} = \mathbf{M}(\mathbf{q}) \ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) + \boldsymbol{\tau}_{\text{contact}}$$
@@ -210,17 +210,13 @@ Four stages turn camera frames into those proposals (@fig-cognitive-pipeline), a
 
 ### The memory wall {.unnumbered}
 
-Consider what happens if a robot attempts to generate continuous motor actions one discrete step at a time through an autoregressive foundation model (such as a 7-billion parameter Vision-Language-Action network). In single-step autoregressive decoding, each sequential token may require another backbone evaluation and associated weight traffic when weights cannot remain on chip. The actual traffic depends on caching and the decoder architecture. For detailed memory wall derivations and roofline hardware models, see @sec-appendix-systems.
+Consider what happens if a robot attempts to generate continuous motor actions one discrete step at a time through an autoregressive foundation model (such as a 7-billion parameter Vision-Language-Action network). A model whose weights cannot remain on chip must stream them across the external DRAM bus once per evaluation, so the bus bandwidth $B_{\text{mem}}$ bounds its evaluation rate at $f_{\max} = B_{\text{mem}} / M_{\text{weights}}$ before tokenization, attention, or decoding adds any time. In single-step autoregressive decoding, each sequential token may require another such evaluation; the actual traffic depends on caching and the decoder architecture. For detailed memory wall derivations and roofline hardware models, see @sec-appendix-systems.
 
-Token-by-token execution of a nonresident model can require repeated gigabyte-scale weight traffic if the controller requests a fresh action every millisecond (see @fig-patterson-roofline) [@williams2009roofline]. This memory wall bottleneck[^fn-hw-dram-bandwidth] can limit fresh policy updates to single-digit frequencies on a bandwidth-constrained implementation. If an embodied manipulator attempted to control moving mass at $5\text{ Hz}$, the actuators would stutter across discrete steps, inducing contact instability and mechanical chatter.
+This memory wall[^fn-hw-dram-bandwidth] holds a nonresident model's fresh updates to single-digit rates, while a joint controller asks for a new command every millisecond (see @fig-patterson-roofline) [@williams2009roofline]. A model renewed that slowly can say where the arm should go, but it cannot close the loop on moving mass, so it proposes waypoints and a faster loop below it tracks them.
 
 This continuous data movement also carries an energy penalty. Fetching weights from off-chip DRAM consumes orders of magnitude more energy than the arithmetic computation itself. That energy drains battery reserves, and the heat it leaves in the chassis raises the local ambient of the joint actuators, shrinking the winding margins of @sec-body-thermal-duty-cycles.
 
-::: {#psp-brain-memory-wall-ceiling .callout-perspective title="Memory walls in embodied inference"}
-For a model whose weights must be streamed once per evaluation, the memory wall gives a lower bound on transfer time and hence an upper bound on evaluation frequency ($f_{\max} = B_{\text{mem}} / M_{\text{weights}}$) imposed by external DRAM bus bandwidth when streaming non-resident neural network weights into on-chip vector registers. For an illustrative single-token weight sweep, arithmetic intensity can approach $I \approx 1.0\text{ FLOP/byte}$, which can leave arithmetic units waiting for data; actual model latency also includes tokenization, attention, and decoding.
-:::
-
-::: {#fig-patterson-roofline fig-env="figure" fig-pos="t" fig-cap="**Illustrative embodied roofline**: Arithmetic intensity against attainable throughput for an example edge accelerator. Single-token weight streaming can be memory-bound; reuse across a chunk may increase work per byte. The plotted positions illustrate possible workloads, not measured policy cadence. A separate real-time loop executes accepted waypoints between fresh model updates." fig-alt="Illustrative roofline diagram plotting arithmetic intensity against attainable throughput, with example points for token decoding and action chunking; plotted positions are not measured policy update rates."}
+::: {#fig-patterson-roofline fig-env="figure" fig-pos="t" fig-cap="**Illustrative embodied roofline**: Arithmetic intensity against attainable throughput for an example edge accelerator. Single-token weight streaming can be memory-bound; reuse across a chunk may increase work per byte. A separate real-time loop executes accepted waypoints between fresh model updates." fig-alt="Illustrative roofline diagram plotting arithmetic intensity against attainable throughput, with example points for token decoding and action chunking."}
 
 ```{python}
 #| echo: false
@@ -314,7 +310,7 @@ Instead of fetching billions of weights from DRAM to predict a single scalar act
 
 ***Temporal action chunking***\index{Temporal action chunking!definition}\index{Action chunking!definition} is the policy formulation that predicts an entire horizon of $H$ future continuous actions $\mathbf{A}_{t:t+H-1} = [\mathbf{a}_t, \dots, \mathbf{a}_{t+H-1}]$ in a single neural evaluation or diffusion rollout, amortizing parameter memory transfers across extended physical execution windows.
 
-1.  **Significance**: On the illustrative bandwidth-limited device, repeating a full model evaluation for every action can be too slow for millisecond control. Temporal action chunking can reuse a backbone evaluation across multiple waypoints; it does not make fresh observations or policy decisions arrive at the waypoint rate. A downstream controller tracks the accepted trajectory between model updates.
+1.  **Significance**: On a bandwidth-limited device, repeating a full model evaluation for every action can be too slow for millisecond control. Temporal action chunking can reuse a backbone evaluation across multiple waypoints; it does not make fresh observations or policy decisions arrive at the waypoint rate. A downstream controller tracks the accepted trajectory between model updates.
 2.  **Distinction**: Unlike single-step Markovian policies $\mathbf{a}_t \sim \pi(\cdot \mid \mathbf{o}_t)$ that re-evaluate the full neural network at every control step, action chunking deliberately generates multi-step feedforward trajectories, utilizing receded-horizon execution and temporal ensembling to reconcile slow neural deliberation with fast closed-loop reflexes.
 3.  **Common pitfall**: Executing action chunks open-loop without continuous temporal smoothing or runtime safety filtering. Without smooth blending across overlapping chunk boundaries, switching between independently generated horizons injects acceleration jumps and torque shocks that excite mechanical gearbox resonances.
 
@@ -656,7 +652,7 @@ A deep neural network is a high-dimensional, non-linear statistical function. Wi
 
 [^fn-math-lipschitz-calibration]: **Lipschitz Continuity in Neural Policies**\index{Lipschitz continuity!policy sensitivity}\index{Adversarial vulnerability!perturbation bounds}: Although neural networks with smooth activations are continuous on compact domains, a bound $L = \sup_{\mathbf{x}_1 \ne \mathbf{x}_2} \frac{\lVert \pi(\mathbf{x}_1) - \pi(\mathbf{x}_2) \rVert}{\lVert \mathbf{x}_1 - \mathbf{x}_2 \rVert}$ must be established over a specified operating domain. If a valid bound exists, sensor error $\lVert \delta \mathbf{x} \rVert \le \epsilon$ implies $\lVert \delta \mathbf{a} \rVert \le L\epsilon$; an unverified $L$ supplies no usable action-error guarantee. Mathematical formulations appear in @sec-appendix-ml.
 
-A learned proposer operates through statistical approximation, leading to failure modes distinct from traditional software defects. A classical program fails by throwing an exception, hanging in an infinite loop, or crashing. A neural network fails silently instead, as the mug chunk did, with output that passes every format check. An independent permission path must reject a detected violation before those values can become actuator commands. Systems architects must design around four primary cognitive vulnerabilities:
+A learned proposer operates through statistical approximation, leading to failure modes distinct from traditional software defects. A classical program fails by throwing an exception, hanging in an infinite loop, or crashing. A neural network fails silently instead, as the mug chunk did, with output that passes every format check. An independent permission path must reject a detected violation before those values can become actuator commands. Systems architects must design around four primary cognitive vulnerabilities.
 
 ### Semantic hallucinations {.unnumbered}
 
@@ -691,15 +687,7 @@ Ambiguous images can make successive object classifications change rapidly. If a
 
 ### Temporal expiration of intent {.unnumbered}
 
-Physical reality is dynamic, making a cognitive thought valid only for a finite duration ($\tau_{\text{valid}}$). If the mobile manipulator's intent model needs `{python} ActionChunkingLPDDR5.intent_latency_str` to deliberate, the people and carts in the aisle, the arm itself, and the mug on the conveyor have already moved by the time the plan is ready. Delayed downstream communication or execution leads to acting on an expired intent lease (@sec-intent-lease), commanding the physical body based on an obsolete mental representation.
-
-::: {#ws-brain-drc-2015-deliberation-fall .callout-war-story title="DARPA robotics falls and balance timing (2015)"}
-**Context**: The 2015 DARPA Robotics Challenge Finals tested robots, most of them humanoid in layout, on disaster-response tasks under intentionally degraded communications [@krotkov2017darpa].\index{Incidents!DARPA Robotics Challenge}
-
-**Observation**: Several robots fell or needed intervention during the event. Published team accounts describe varied causes; the competition record does not establish planner stalls as a common cause or a universal controller rate.
-
-**Systems lesson**: A fall can develop on the scale of a few hundred milliseconds for a standing biped. High-level planning cannot be the sole balance response; a local controller needs current state, sufficient torque and contact authority, and a feasible recovery action when a proposal stalls.\index{Proposal boundary!DRC dynamic balance}
-:::
+Physical reality is dynamic, making a cognitive thought valid only for a finite duration ($\tau_{\text{valid}}$). If the mobile manipulator's intent model needs `{python} ActionChunkingLPDDR5.intent_latency_str` to deliberate, the people and carts in the aisle, the arm itself, and the mug on the conveyor have already moved by the time the plan is ready. Delayed downstream communication or execution leads to acting on an expired intent lease (@sec-intent-lease), commanding the physical body based on an obsolete mental representation. A proposer that stalls outright leaves the plant moving with no plan at all, so recovery must live in a local controller below it, a requirement the 2015 DARPA Robotics Challenge Finals imposed on legged entrants by degrading communications deliberately [@krotkov2017darpa].\index{Incidents!DARPA Robotics Challenge}
 
 The four vulnerabilities, with the memory wall of @sec-brain-cognitive-pipeline, give three independent reasons against granting a learned proposer actuator authority. The memory wall means the most capable model cannot renew a proposal as fast as the machine consumes one. Hallucination, overconfidence, and chattering mean that a proposal can be wrong or unstable while its reported confidence stays high, so confidence cannot certify it. Expiry means that even a correct proposal stops being correct once the world has moved. @Tbl-03-classical-vs-learned sets the learned proposer's limits beside those of the classical methods the chapter began with and shows which side of the proposal boundary each capability occupies.
 
@@ -712,17 +700,6 @@ The four vulnerabilities, with the memory wall of @sec-brain-cognitive-pipeline,
 | **Failure Modes & Fallback**      | Boolean branch crashes; failure on uncataloged objects; rule exhaustion           | Semantic hallucinations; out-of-distribution overconfidence; cognitive drift                | **Conditional Fallback:** Reject detected violations and execute a feasible response  |
 
 : **Master comparison: classical analytical methods vs. learned foundation models in Physical AI**: Architectural trade-offs across generalizability, sensory robustness, verifiability, pacing, and fallback modes, highlighting the physical AI synthesis that partitions proposal capability from execution authority. {#tbl-03-classical-vs-learned tbl-colwidths="[20,26,26,28]"}
-
-What the Brain supplies, the permission path must be able to refuse; @sec-nervous derives how fast it must refuse and on how old a proposal.
-
-::: {#chk-brain-vulnerabilities-twospeed-recovery .callout-checkpoint title="Cognitive vulnerabilities, calibration collapse, and refusal"}
-
-Before the fallacies, verify your understanding of runtime failure modes and how the permission path refuses a proposal:
-
-- [ ] **The Softmax illusion and calibration collapse**: Can you explain why a single confidence–success gap is not ECE, and why abstention thresholds must be chosen from operational evidence rather than an unsupported universal cutoff?
-- [ ] **Refusing stale proposals**: Can you trace what the permission loop does when a proposal from the intent model or the chunk policy arrives expired or outside its limits, and why that refusal cannot wait for the proposer to respond?
-
-:::
 
 ## Fallacies and Pitfalls {#sec-brain-fallacies-pitfalls}
 
@@ -778,7 +755,7 @@ Learned representations give the mobile manipulator what hand-authored geometry 
 * **Size a chunk between starvation and drift**: The replanning period plus inference latency (`{python} ConveyorChunkSizing.open_loop_str`) sets the minimum supply, and target drift sets the evidence horizon (`{python} ConveyorChunkSizing.tau_ev_str`). Setpoints beyond the next renewal are a buffer that the lease ends, not a plan.
 * **Retained context is paid for twice**: Keeping `{python} ActionChunkingLPDDR5.history_window_str` of multi-camera history adds `{python} ActionChunkingLPDDR5.kv_history_str` of key-value cache, which with the weights claims about half the processor's memory, and every read of it is traffic on the bus that real-time transfers share.
 * **Confidence is not calibration**: Softmax scores sum to one by construction, so reported confidence can stay high while task success collapses under distribution shift. Only calibration measured over the operating domain can justify an abstention threshold.
-* **A proposal is true only for a while**: Intent and chunks expire with the evidence behind them, and a smooth, in-range, on-time proposal can still be stale or wrong. That is why the permission path, never the proposer, decides whether the machine acts.
+* **A proposal is true only for a while**: Intent and chunks expire with the evidence behind them, and a smooth, in-range, on-time proposal can still be stale or wrong.
 :::
 
 Every limit this chapter derived is a limit of supply or of truth, never of authority. Weight traffic fixes how often the intent model can look, chunking fixes how long the arm stays supplied between looks, and drift, calibration, and expiry fix how long what the Brain proposes remains true. None of these numbers decides whether a proposal may reach the motors. They are the proposer limits that the permission path takes as inputs when it makes that decision.

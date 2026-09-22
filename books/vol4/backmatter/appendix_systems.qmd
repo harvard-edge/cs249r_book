@@ -21,6 +21,7 @@ Consult this appendix when diagnosing physical systems bottlenecks, timing jitte
 | Monocular 3D bounding boxes distort and depth covariance diverges           | @sec-appendix-systems-vision       | Pinhole intrinsic projection, Zhang's calibration, and metric unprojection covariance |
 | A mobile base breaches clearance buffers under surface wetness              | @sec-appendix-systems-stopping     | Kinematic stopping envelopes, information age lag, and velocity clamps                |
 | A record must be laid out for a fixed-size mailbox or log                   | @sec-appendix-systems-wire-formats | Proposal and record byte layouts; manifest and register field orders                  |
+| A handover, fault trial, or release gate must be implemented step by step   | @sec-appendix-systems-wire-formats | Authority-transfer, fault-injection, and release-gate protocols beside their records  |
 
 ## Real-Time Timers, Watchdogs, and Schedulability {#sec-appendix-systems-timers}
 
@@ -417,7 +418,7 @@ This clamp is valid only when $D_{\text{clear}}$ exceeds the three fixed allowan
 
 ## Wire Formats for the Record Chain {#sec-appendix-systems-wire-formats}
 
-The chapters name each record's fields by meaning and state the invariant the record enforces. This section gives the byte layouts for records that must fit a fixed-size mailbox or log, and the canonical field order for the offline records that are stored and bound by digest. Every absolute time is an unsigned 64-bit count of nanoseconds on the permission processor's monotonic clock, every duration is an unsigned count of nanoseconds, and `sync_error_ns` carries the conversion bound for evidence captured on another clock. The clock and integrity policies themselves belong to @sec-nervous-cadences; the layouts here fix the algorithm for each integrity job. Corruption detection uses a CRC-32 (IEEE 802.3) over header and payload, lineage uses a SHA-256 digest of the consumed record, and authority uses HMAC-SHA-256 on operator commands, a keyed hash chain on the forensic log, and Ed25519 signatures on fault records and release artifacts.
+The chapters name each record's fields by meaning and state the invariant the record enforces. This section gives the byte layouts for records that must fit a fixed-size mailbox or log, and the canonical field order for the offline records that are stored and bound by digest. Every absolute time is an unsigned 64-bit count of nanoseconds on the permission processor's monotonic clock, every duration is an unsigned count of nanoseconds, and `sync_error_ns` carries the conversion bound for evidence captured on another clock. The clock and integrity policies themselves belong to @sec-nervous-cadences; the layouts here fix the algorithm for each integrity job. Corruption detection uses a CRC-32 (IEEE 802.3) over header and payload, lineage uses a SHA-256 digest of the consumed record, and authority uses HMAC-SHA-256 on operator commands, a keyed hash chain on the forensic log, and Ed25519 signatures on fault records and release artifacts. The authority, fault, and release records are each followed by the protocol that writes or checks them.
 
 Fixed layouts are little-endian and packed in the order listed. Offsets are hexadecimal byte positions from the start of the record, and every multibyte field sits on its natural alignment, so no field needs hidden padding. A field whose length depends on a count comes after every fixed field, and its offset is written in terms of that count. The record itself carries $K$ waypoints, $N_j$ commanded joints, and $K_b$ barrier constraints; the static authority manifest fixes $N_c$ command components and $N_s$ state components. Offline records (placement, fault, release) are identified by the SHA-256 digest of their canonical encoding, and the record that consumes one stores that digest under the consumed record's name.
 
@@ -510,21 +511,21 @@ The enforcement record of @sec-enforcement-telemetry is configuration, not a pro
 
 ### Placement record {#sec-appendix-systems-wire-placement}
 
-The placement record of @sec-placement-hardware-allocation is offline evidence with a fixed header and a linked test ledger (@tbl-appendix-systems-wire-placement). It carries no signature of its own; the signed release manifest binds it through `placement_record_digest`. `enforcement_record_digest` names the enforcement record whose `deadline_ns` was tested, and `test_ledger_digest` identifies the external ledger of distributions, sample counts, test conditions, mitigations, and untested states. A maximum that has not been measured is stored as all ones, never zero, the same unavailable-value convention the fault record uses.
+The placement record of @sec-placement-hardware-allocation is offline evidence with a fixed header and a linked test ledger (@tbl-appendix-systems-wire-placement). It carries no signature of its own; the signed release manifest binds it through `placement_record_digest`. `enforcement_record_digest` names the enforcement record whose `deadline_ns` was tested, and `test_ledger_digest` identifies the external ledger that states the declared worst-case execution time the loaded test must not exceed, together with distributions, sample counts, test conditions, mitigations, and untested states. A maximum that has not been measured is stored as all ones, never zero, the same unavailable-value convention the fault record uses.
 
-| Offset | Field                        | Scalar type   | Unit            | Invariant and check                                                                                                                            |
-|:-------|:-----------------------------|:--------------|:----------------|:-----------------------------------------------------------------------------------------------------------------------------------------------|
-| `0x00` | `execution_domain_id`        | `uint64_t`    | enumeration     | Must match the declared topology (MPU, NPU, GPU, MCU, lockstep controller).                                                                    |
-| `0x08` | `privilege_and_ring`         | `uint64_t`    | privilege level | Proposer at EL0; enforcer at EL1 or above, or in the secure world.                                                                             |
-| `0x10` | `nominal_period_ns`          | `uint32_t`    | ns              | Enforcer tick; equal to the enforcement record's `loop_period_ns`.                                                                             |
-| `0x14` | `hard_deadline_ns`           | `uint32_t`    | ns              | The permission path's deadline inside the tick; equal to the enforcement record's `deadline_ns`.                                               |
-| `0x18` | `unloaded_observed_max_ns`   | `uint64_t`    | ns              | Largest response observed without competing load; a sample maximum, not a WCET.                                                                |
-| `0x20` | `loaded_observed_max_ns`     | `uint64_t`    | ns              | Largest response under the declared load; all ones until a loaded test runs. Independence stands only while it stays below `hard_deadline_ns`. |
-| `0x28` | `shared_axi_channel_qos`     | `uint64_t`    | configured QoS  | Arbitration priority per claimant; controller semantics verified by register capture and a stress test.                                        |
-| `0x30` | `max_pdn_droop_thermal_trip` | `uint32_t[2]` | mV; m°C         | Configured rail-droop and thermal trip thresholds; the ledger records the tests behind them.                                                   |
-| `0x38` | `hardware_mitigation_flags`  | `uint8_t[32]` | bitfield        | Active mitigations, such as a TCM snapshot, memory partitioning, or an isolated rail; register-locked after boot.                              |
-| `0x58` | `enforcement_record_digest`  | `uint8_t[32]` | SHA-256         | Enforcement record whose `loop_period_ns` and `deadline_ns` this record tests.                                                                 |
-| `0x78` | `test_ledger_digest`         | `uint8_t[32]` | SHA-256         | External test ledger, including the model and firmware digests under test.                                                                     |
+| Offset | Field                        | Scalar type   | Unit            | Invariant and check                                                                                                                          |
+|:-------|:-----------------------------|:--------------|:----------------|:---------------------------------------------------------------------------------------------------------------------------------------------|
+| `0x00` | `execution_domain_id`        | `uint64_t`    | enumeration     | Must match the declared topology (MPU, NPU, GPU, MCU, lockstep controller).                                                                  |
+| `0x08` | `privilege_and_ring`         | `uint64_t`    | privilege level | Proposer at EL0; enforcer at EL1 or above, or in the secure world.                                                                           |
+| `0x10` | `nominal_period_ns`          | `uint32_t`    | ns              | Enforcer tick; equal to the enforcement record's `loop_period_ns`.                                                                           |
+| `0x14` | `hard_deadline_ns`           | `uint32_t`    | ns              | The permission path's deadline inside the tick; equal to the enforcement record's `deadline_ns`.                                             |
+| `0x18` | `unloaded_observed_max_ns`   | `uint64_t`    | ns              | Largest response observed without competing load; a sample maximum, not a WCET.                                                              |
+| `0x20` | `loaded_observed_max_ns`     | `uint64_t`    | ns              | Largest response under the declared load; all ones until a loaded test runs. Independence stands only while it is at most the declared WCET. |
+| `0x28` | `shared_axi_channel_qos`     | `uint64_t`    | configured QoS  | Arbitration priority per claimant; controller semantics verified by register capture and a stress test.                                      |
+| `0x30` | `max_pdn_droop_thermal_trip` | `uint32_t[2]` | mV; m°C         | Configured rail-droop and thermal trip thresholds; the ledger records the tests behind them.                                                 |
+| `0x38` | `hardware_mitigation_flags`  | `uint8_t[32]` | bitfield        | Active mitigations, such as a TCM snapshot, memory partitioning, or an isolated rail; register-locked after boot.                            |
+| `0x58` | `enforcement_record_digest`  | `uint8_t[32]` | SHA-256         | Enforcement record whose `loop_period_ns` and `deadline_ns` this record tests.                                                               |
+| `0x78` | `test_ledger_digest`         | `uint8_t[32]` | SHA-256         | External test ledger, including the model and firmware digests under test.                                                                   |
 
 : **Placement record header**: Configuration values and observed maxima, with digests linking the tested enforcement record and the external test ledger. The header alone does not establish freedom from interference. {#tbl-appendix-systems-wire-placement tbl-colwidths="[9,26,13,14,38]"}
 
@@ -565,6 +566,24 @@ The forensic authority record (@tbl-appendix-systems-wire-authority) is a log re
 
 : **Forensic authority record**: One record per tick of the permission loop. A missing record is a gap in the chain, never an implied pass, and the record is a sampled decision trace, not proof of delivered force or contact. {#tbl-appendix-systems-wire-authority tbl-colwidths="[16,21,12,13,38]"}
 
+### Authority-transfer protocol {#sec-appendix-systems-authority-protocol}
+
+Used in @sec-intervention-authority-transitions and @sec-intervention-bumpless-transfer. The protocol runs in the enforcer's $1\text{ kHz}$ loop on the permission processor, where the four-phase handshake, integrator pre-biasing, and the $\mathcal{C}^2$ quintic blend become one sequence of per-state steps. Each tick writes the forensic record of @tbl-appendix-systems-wire-authority under the state names used below.
+
+**Cadence and invariants.**
+
+- *Execution cadence:* Hard real-time periodic timer interrupt ($f = 1000\text{ Hz}$, period $T_{\text{loop}} = 1.0\text{ ms}$, hardware timing jitter $< 1.0\,\mu\text{s}$).
+- *Memory invariant:* Zero dynamic heap allocation (`malloc`/`free` forbidden; all state variables, mailboxes, and circular log buffers statically pre-allocated in DTCM SRAM).
+- *Hardware authority:* Exclusive write of the admitted setpoints staged for the next EtherCAT frame to the drives, and of the safe torque off (STO)\index{Safe torque off} hardware cutoffs.
+
+**Execution protocol.**
+
+1. Sample and validate plant state, available stopping reserve, independent protective inputs, and the current authority lease. An independent protective input selects its validated, state-matched stop path of @sec-enforcement-fallback-ladder.
+2. In `AUTO`, a manual request or policy handover request enters `PEND`; the policy may propose only while its existing permission remains valid. Set $T_{\text{timeout}}$ to the smaller of the protocol ceiling and clearance-derived deadline. No later than the last permission tick before $T_{\text{timeout}}$, transfer to the MCU-owned fallback. An invalid network packet is rejected and logged, not interpreted as a stop request.
+3. In `PEND`, verify the operator credential, nonce, enabling input, target freshness, actuator limits, and full transfer-plus-stop clearance. On `ACK`, at the next qualified **Commit** tick, revoke the policy execution token on the masked channels, latch $\mathbf u_0$ as its last *admitted* command, latch a checked human target $\mathbf u_1$, and set `BLEND`. The enforcer remains the only actuator writer. If admission fails, retain or enter the independently validated fallback.
+4. In `BLEND`, evaluate $s=\min(1,(t-t_0)/T)$ and $\alpha(s)=6s^5-15s^4+10s^3$. The enforcer proposes $\mathbf u_{\text{blend}}=(1-\alpha)\mathbf u_0+\alpha\mathbf u_1$, then checks that candidate against current state, torque/rate, and stopping limits before dispatch. These are **latched endpoints**, not simultaneous live policy and human actuator streams. If the lease, clearance, or tracking assumption fails, use a state-matched MCU fallback. At $s=1$ with a live manual lease, set `MAN` and confirm that state to the operator.
+5. In `MAN`, the enforcer checks each live human proposal. Lease expiry or enabling-device loss revokes manual proposals and transfers to the validated fallback. Log request, ACK, commit, candidate, admitted command, measured response, and clock uncertainty separately; the bounded high-rate record must not block the control tick.
+
 ### Fault record {#sec-appendix-systems-wire-fault}
 
 The fault record of @sec-verification-fault-manifest is offline evidence, a fixed header signed with Ed25519 that links to the retained evidence bundle by digest (@tbl-appendix-systems-wire-fault). The fault-ledger root that the release manifest binds is computed over the canonical encodings of these headers. `envelope_point` has a per-machine definition in the versioned fault-class manifest; for the mobile manipulator its four values are aisle speed (m/s), payload (kg), floor friction coefficient, and ambient temperature (K).
@@ -590,6 +609,49 @@ The fault record of @sec-verification-fault-manifest is offline evidence, a fixe
 
 For a trial aborted before injection, detector time, takeover time, and robustness margin are unavailable rather than zero. The layout stores all ones (`0xFFFFFFFF`) in an unavailable `uint32_t` time slot and a canonical quiet NaN in an unavailable `float32` margin slot, and the signed evidence bundle records a validity flag for each measured field and why it is absent. The oracle checks those flags and the verdict before doing arithmetic, and excludes unavailable slots from pass counts and from latency or margin statistics. The versioned manifest fixes the NaN bit pattern so that hashing remains reproducible.
 
+### Fault-injection protocol {#sec-appendix-systems-fault-protocol}
+
+Used in @sec-verification-hardware-fault-injection. The protocol runs one hardware-in-the-loop trial on target silicon, from the precondition audit to the signed header of @tbl-appendix-systems-wire-fault, and every exit it takes sets one value of that header's `verdict_status`.
+
+**Substrate and invariants.**
+
+- *Execution substrate:* Hard real-time field-programmable gate array (FPGA) plant rig and testbed orchestrator ($f = 1000\text{ Hz}$, hardware timestamping jitter $< 500\text{ ns}$).
+- *Memory invariant:* Pre-allocated static DMA buffers in the host test orchestrator; zero runtime dynamic heap allocation on the safety MCU.
+- *Safety interlock authority:* Independent optical or laser truth sensors wired to hardware crowbar relays capable of cutting target actuator power within $2.0\text{ ms}$ of a physical envelope breach.
+
+**Execution protocol.**
+
+1. **Precondition audit (stage 1).**
+   Sample baseline environmental sensors via $\mathcal{I}_{\text{truth}}$ (temperature, rail voltage, and wheel speed). Compare each measurement with its declared same-unit tolerance; do not take one norm across kelvin, volts, and meters per second. If any precondition fails, log `ERR_PRECONDITION_OUT_OF_SPEC`, set the verdict to `INVALID`, and abort.
+
+2. **Synchronization and steady-state arming (stage 2).**
+   Arm the FPGA plant simulator, power up the target two-processor system, and start the periodic control loop ($1000\text{ Hz}$). Establish a synchronized reference clock across the logic analyzer, FPGA plant, and truth digitizers via a $10\text{ MHz}$ PXI clock. Allow the physical plant state $\mathbf{x}(t)$ to stabilize in the nominal operating envelope for $t_{\text{settle}} = 2.000\text{ s}$. If baseline tracking error $\|e_{\text{track}}\| > \epsilon_{\text{nom}}$, assert `ERR_BENCH_INSTABILITY`, set the verdict to `INVALID`, and abort.
+
+3. **Fault injection trigger (stage 3).**
+   At monotonic test epoch $t_{\text{inject}}$, the hardware test orchestrator asserts the trigger line to the inline injection rig:
+
+   - *Proposer stall (F1):* The orchestrator kills the chunk-policy task one tick after a lease renewal.
+   - *Sensor latency or bias (F2):* An FPGA interceptor latches a navigation-camera frame or holds a stale encoder payload while preserving its valid hardware timestamp.
+   - *Frame loss (F3):* A fieldbus disturbance node drops or corrupts EtherCAT frames at a drive's slave port.
+   - *Control-rail droop (F4a):* A programmable electronic load draws the F4a transient of @tbl-15-fault-classification from the shared control rail at its battery-low point for $\Delta t_{\text{duration}} = 5.0\text{ ms}$, while an independent digitizer records the permission rail and the permission path's heartbeat.
+   - *Permission-rail feed loss (F4b):* A solid-state switch opens the permission rail's feed as the resident stop from the inspected-floor ceiling begins.
+   - *Actuator mechanical stall:* A four-quadrant dynamometer applies step counter-torque $\tau_{\text{stall}} = 3.5 \times \tau_{\text{rated}}$.
+
+   Record the injection timestamp $t_{\text{fault\_start}} \leftarrow t_{\text{now}}$ in nanoseconds on the reference clock.
+
+4. **Enforcer response and takeover audit (stage 4).**
+   Monitor the target MCU's safety enforcer pins, CAN bus telemetry, and gate-driver PWM lines via an isolated logic analyzer:
+
+   - Detect assertion of the non-maskable interrupt (NMI) or diagnostic flag: $t_{\text{det}} \leftarrow t_{\text{now}} \implies \Delta t_{\text{det}} = t_{\text{det}} - t_{\text{fault\_start}}$.
+   - Detect hardware multiplexer preemption of the motor driver: $t_{\text{takeover}} \leftarrow t_{\text{now}} \implies \Delta t_{\text{takeover}} = t_{\text{takeover}} - t_{\text{fault\_start}}$.
+   - Detect the physical plant's transition to its safe bounded regime: $t_{\text{bounded}} \leftarrow t_{\text{now}} \implies \Delta t_{\text{bounded}} = t_{\text{bounded}} - t_{\text{fault\_start}}$.
+
+   If the external containment rig trips on a structural envelope breach, the hardware crowbar cuts actuator power; assert `ERR_PHYSICAL_BREACH` and carry the trial to stage 5, where the violated containment predicate returns `FAIL`.
+
+5. **Robustness evaluation and ledger serialization (stage 5).**
+   Ingest the truth trajectory $\mathbf{x}_{\text{obs}}(t)$ from independent instrumentation over the declared trial window. If required truth frames are missing, set the verdict to `UNOBSERVABLE` and retain the partial trace. For an observable trial, compute each precommitted predicate's signed margin in its own unit, as the STL robustness of @sec-appendix-ml-stl defines it.
+   Return `PASS` only when every required margin is nonnegative and both measured fault-to-detection and fault-to-drive-takeover times satisfy their declared bounds; otherwise return `FAIL`. A dimensionless aggregate may be computed only after predeclared per-predicate normalization. Link the fixed fault-record header to the variable-length evidence bundle by digest, sign the header under the specified custody scheme, and retain both.
+
 ### Release manifest {#sec-appendix-systems-wire-release}
 
 The release manifest of @sec-release-manifest is a signed offline artifact, not a mailbox record, so it has a canonical encoding in place of fixed offsets. Fields appear in the order that @tbl-appendix-systems-wire-release lists, each variable-length field carries a length prefix, and the adjudicator's Ed25519 signature covers the encoding of every preceding field. Every digest is SHA-256. The expiry is the one calendar time in the record chain, and it is checked against a tamper-resistant real-time clock rather than the permission processor's monotonic clock.
@@ -614,6 +676,19 @@ The release manifest of @sec-release-manifest is a signed offline artifact, not 
 | `adjudicator_signature`     | key identifier plus `uint8_t[64]` Ed25519 signature  | The whole manifest                                                                                           | Verifies under an authorized, unrevoked adjudicator key.                                |
 
 : **Release manifest**: Canonical field order of the signed release artifact. A new signed version can supersede a manifest only after the current physical conditions are checked, and the hardware root anchors keys rather than storing mutable digests. {#tbl-appendix-systems-wire-release tbl-colwidths="[21,25,24,30]"}
+
+### Release-gate protocol {#sec-appendix-systems-release-protocol}
+
+Used in @sec-release-manifest. Before the motor power stages are energized, the release gate attests the silicon state, verifies the manifest of @tbl-appendix-systems-wire-release and its image digests, and audits the standing conditions, in the order below.
+
+**Substrate and signature.** The hardware root of trust anchors an authorized, revocable adjudicator verification-key chain. Protected storage holds the signed manifest and signed evidence graph. The signature covers every versioned manifest field, including the identity of the signing key, and the verifier checks the key chain and its revocation state before trusting the signature. The individually signed fault records of @sec-appendix-systems-wire-fault enter the manifest as one digest over the complete ledger in its declared order. The verifier checks each record signature, the ordering, completeness, and that root against the reviewed evidence index. A digest alone establishes neither record validity nor test adequacy.
+
+**Fail-closed authorization.** Begin with `Permit_gate = 0` and the physical plant in its assessed nonoperating state. All returned decisions use the signed enum `UNCOND`, `COND`, or `REFUSE`; an implementation may log a reason code separately.
+
+1. Verify the adjudicator key chain and revocation status, the manifest signature, expiry, signed operating-hour and cycle budgets, and every active image digest. Any invalid, missing, or expired item returns `REFUSE`. A different software bank requires its own signed case and a new check of physical conditions.
+2. Authenticate the complete fault ledger and calibration references against the signed graph. A missing ledger, bad record signature, or root mismatch returns `REFUSE`, even if the manifest says `UNCOND`. Stale calibration also returns `REFUSE` under the full case. It can support `COND` only when a *separately signed* restricted case explicitly covers that calibration state and all of its evidence and limits still validate.
+3. Check the state-dependent standing conditions, including brake test, separation, timebase, and monitoring health. `KNOWN_FALSE` and `UNKNOWN` both return `REFUSE` while retaining distinct logged causes. Apply the approved state-matched stop or hold of @sec-enforcement-fallback-ladder.
+4. If every check passes and the signed verdict is `UNCOND`, load the signed full envelope and return `UNCOND`. If every restricted condition passes under a signed `COND` case, load its signed reduced envelope and return `COND`. A signed `REFUSE` case or any other state returns `REFUSE`. In both operating modes the learned policy only *proposes* actions; the independent enforcer checks each candidate and controls actuator permission. Force trip thresholds must include measured detection and response headroom below the contact criterion.
 
 ### Residual-claims register {#sec-appendix-systems-wire-residual-claims}
 
