@@ -219,6 +219,27 @@ def build():
     # 3. Down and right
     p.append(f'<path d="M {node_out_x} {node_out_y} L {node_out_x + 40} {node_out_y} Q {node_out_x + 60} {node_out_y} {node_out_x + 60} {node_out_y + 25} L {node_out_x + 60} {node_out_y + 25} Q {node_out_x + 60} {node_out_y + 50} {node_out_x + 80} {node_out_y + 50} L {node_out_x + 100} {node_out_y + 50}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
     p.append(_t(node_out_x + 130, node_out_y + 50 + 8, "Distributed", MONO, 26, ACCENT, weight="bold"))
+    # Sub-branches to imply infinite fractal expansion
+    # We use a thinner stroke (2) and tighter dash (4,4)
+    x_s = node_out_x + 370
+    x_m = x_s + 40
+    x_e = x_s + 120
+    
+    # 1. Top (Compile)
+    y1 = node_out_y - 50
+    p.append(f'<path d="M {x_s} {y1} Q {x_m} {y1} {x_m} {y1 - 15} T {x_e} {y1 - 25}" fill="none" stroke="{ACCENT}" stroke-width="2" stroke-dasharray="4,4" />')
+    p.append(f'<path d="M {x_s} {y1} Q {x_m} {y1} {x_m} {y1 + 15} T {x_e} {y1 + 25}" fill="none" stroke="{ACCENT}" stroke-width="2" stroke-dasharray="4,4" />')
+
+    # 2. Mid (LoRA)
+    y2 = node_out_y
+    p.append(f'<path d="M {x_s - 20} {y2} Q {x_m - 20} {y2} {x_m - 20} {y2 - 15} T {x_e - 20} {y2 - 25}" fill="none" stroke="{ACCENT}" stroke-width="2" stroke-dasharray="4,4" />')
+    p.append(f'<path d="M {x_s - 20} {y2} Q {x_m - 20} {y2} {x_m - 20} {y2 + 15} T {x_e - 20} {y2 + 25}" fill="none" stroke="{ACCENT}" stroke-width="2" stroke-dasharray="4,4" />')
+
+    # 3. Bottom (Distributed)
+    y3 = node_out_y + 50
+    p.append(f'<path d="M {x_s} {y3} Q {x_m} {y3} {x_m} {y3 - 15} T {x_e} {y3 - 25}" fill="none" stroke="{ACCENT}" stroke-width="2" stroke-dasharray="4,4" />')
+    p.append(f'<path d="M {x_s} {y3} Q {x_m} {y3} {x_m} {y3 + 15} T {x_e} {y3 + 25}" fill="none" stroke="{ACCENT}" stroke-width="2" stroke-dasharray="4,4" />')
+
 
     # --- author -------------------------------------------------------------
     p.append(f'<rect x="{L}" y="2780" width="120" height="4" fill="{ACCENT}"/>')
