@@ -13,7 +13,7 @@ Consult this appendix when encountering specific learning systems bottlenecks, s
 | Multi-camera extrinsics, 2D tokenization, or 3D scene geometry drift           | @sec-appendix-ml-spatial     | $SE(3)$ transforms, patch embeddings, attention, and metric 3D lifting    |
 | Camera features must be placed in one metric ground-plane grid                 | @sec-appendix-ml-bev-lifting | Lift-Splat depth hypotheses, frustum size, and BEV splatting              |
 | Differentiable 3D scene reconstruction diverges during real-time tracking      | @sec-appendix-ml-3dgs        | 3D Gaussian Splatting parameters and covariance projection                |
-| Occupancy mapping retains phantom obstacles after objects move                 | @sec-appendix-ml-voxels      | Recursive Bayesian log-odds voxel updates and TSDF fusion                 |
+| Occupancy mapping retains phantom obstacles after objects move                 | @sec-appendix-ml-voxels      | Log-odds voxel updates, TSDF fusion, and raycast DRAM traffic             |
 | Small sensor noise produces explosive, unconstrained actuator commands         | @sec-appendix-ml-lipschitz   | Lipschitz continuity bounds and spectral normalization                    |
 | A behavioral cloning policy drifts into unrecoverable off-trajectory states    | @sec-appendix-ml-compounding | $\mathcal{O}(T^2 \epsilon)$ compounding error and DAgger linear reduction |
 | L2 regression averages bimodal demonstrations into a path between the modes    | @sec-appendix-ml-multimodal  | Conditional expectation proof and the decoder families that avoid it      |
@@ -222,6 +222,10 @@ class AppxBevFrustum:
    $$ \mathbf{V}_{\text{BEV}}(X, Y) = \sum_{(u, v, k) \in \text{Pillar}(X, Y)} \mathbf{c}_{u, v, k} $$
    The splat aligns the cameras' hypotheses in one metric frame. It cannot fill a region no camera saw or remove depth-scale error, so the footprint it assigns to a pedestrian still depends on the depth hypotheses and the calibration.
 
+::: {#fig-08-ray-frustum-voxel-lifting fig-env="figure" fig-pos="t" fig-cap="**Camera ray frustum lifting and BEV splatting**: LSS [@philion2020lift] places learned depth hypotheses from each camera in a shared metric BEV frame; that coordinate transform does not resolve monocular depth ambiguity. The final clearance inset requires separately validated metric residuals, bias, and a chosen tail quantile or deterministic error bound before permission. (Architecture adapted from @philion2020lift.)" fig-alt="Four stages show image features, a ray with several learned depth hypotheses, a shared bird's-eye-view grid, and a clearance decision. The last panel labels depth as estimated and the inset as checked; learned depth-bin weights alone do not establish a metric error bound."}
+![](../08_perception/images/svg/fig08_ray_frustum_voxel_lifting.svg){width="100%"}
+:::
+
 The softmax over depth bins expresses weights the model assigns, and its entropy is not a calibrated metric covariance. The clearance inset of @sec-perception-error-clearance therefore rests on separately validated spatial residuals, not on the lifted weights.
 
 ### Inverse-depth parameterization
@@ -248,7 +252,57 @@ During real-time rendering, 3D Gaussians are projected onto camera coordinate fr
 $$ \boldsymbol{\Sigma}_{2D} = \mathbf{J} \mathbf{W} \boldsymbol{\Sigma} \mathbf{W}^\top \mathbf{J}^\top $$
 where $\mathbf{W}\in SO(3)$ is the rotational part of the world-to-camera transform; the translation enters the projected mean, not this covariance. Differentiable tile-based rasterization sorts Gaussians by depth and evaluates alpha-blended color accumulation:
 $$ C = \sum_{i \in \mathcal{N}} c_i \alpha_i \prod_{j=1}^{i-1} (1 - \alpha_j) $$
-Storage per primitive depends on its packing and spherical-harmonic degree, so a map's footprint is its primitive count times that packing; @sec-memory-scene-attention-buffers sizes a Gaussian map this way and sets it beside dense and sparse grids. These differentiable parameters support novel-view rendering. Neither the Gaussian density nor its spatial derivative is a conservative collision surface, so clearance permission needs a separately validated geometric extraction, occupancy/ESDF conversion, or independent range sensor that accounts for unknown space and geometric error.
+These differentiable parameters support novel-view rendering. Neither the Gaussian density nor its spatial derivative is a conservative collision surface, so clearance permission needs a separately validated geometric extraction, occupancy/ESDF conversion, or independent range sensor that accounts for unknown space and geometric error (@fig-3dgs-slam-splatam). Rendering rate and collision-query latency are separate measurements. @Sec-memory-scene-attention-buffers relies on this distinction when it refuses to let a rendered view stand in for a clearance bound.
+
+::: {#fig-3dgs-slam-splatam fig-env="figure" fig-pos="t" fig-cap="**Gaussian memory and clearance handoff**: Camera observations update a Gaussian scene for novel-view rendering. Its visual output does not directly supply conservative collision distance; a separately validated geometry or occupancy conversion and permission check are required [@kerbl20233d; @matsuki2024gaussian]." fig-alt="Three-stage schematic: sensor and pose input, a Gaussian scene, then two outputs. The upper branch renders novel views for deliberation. The lower branch requires validated geometric conversion before the permission path can use clearance; Gaussian derivatives alone do not establish it."}
+![](../09_memory/images/svg/fig09_canonical_3dgs_memory.svg){width="100%"}
+:::
+
+Storage per primitive depends on its packing and spherical-harmonic degree, so a map's footprint is its primitive count times that packing. A dense cubic grid instead stores $O(N^3)$ cells, and a sparse occupancy map stores only allocated structure, whose size depends on the observed geometry and the accuracy target. @Fig-09-volumetric-memory-scaling sets the three storage models side by side.
+
+::: {#fig-09-volumetric-memory-scaling fig-env="figure" fig-pos="htb" fig-cap="**Constructed spatial-memory storage scenarios**: A dense cube uses four bytes per voxel, the octree allocates one 32-byte surface cell per squared grid dimension, and the Gaussian scene holds a fixed count and packing while grid resolution varies. These are storage models, not equal-fidelity or measured runtime benchmarks; Gaussian count must rise if a stricter geometry target requires it." fig-alt="Log-scale plot of calculated storage against grid cells per dimension for a dense cubic voxel grid, an assumed surface-allocated octree, and a Gaussian scene held at a fixed primitive count. The fixed Gaussian line is an assumption, not a claim of constant cost at equal geometric fidelity."}
+
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+from mlsysim import viz, calc_3dgs_memory_footprint, GB, MB
+from mlsysim.fmt import fmt_memory, fmt_int
+
+# Constructed storage model; equal geometric fidelity is not assumed.
+data = pd.read_csv("vol4/09_memory/data/volumetric_memory_scaling.csv")
+N = data["Resolution"].to_numpy()
+gaussian_count = 500_000  # category: illustrative (fixed primitive count)
+gaussian_bytes = 56  # category: illustrative (assumed position/shape/opacity/color packing)
+memory_gaussian = calc_3dgs_memory_footprint(gaussian_count, gaussian_bytes)
+appx_gaussian_mem_str = fmt_memory(memory_gaussian, unit=MB, precision=0)
+appx_gaussian_count_str = fmt_int(gaussian_count, commas=True)
+appx_gaussian_bytes_str = fmt_int(gaussian_bytes)
+dense_bytes_per_voxel = 4  # category: illustrative (assumed dense voxel packing)
+octree_bytes_per_cell = 32  # category: illustrative (assumed octree surface-cell packing)
+dense_gb = dense_bytes_per_voxel * N**3 / 1e9
+octree_gb = octree_bytes_per_cell * N**2 / 1e9  # assumed N^2 allocated surface cells
+three_dgs_gb = [memory_gaussian.to(GB).magnitude] * len(N)
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5))
+ax.plot(N, dense_gb, marker='o', linewidth=2.5, label=f'Dense: {dense_bytes_per_voxel}N³ B', color=COLORS["RedLine"])
+ax.plot(N, octree_gb, marker='s', linewidth=2.5, label=f'Assumed surface: {octree_bytes_per_cell}N² B', color=COLORS["BlueLine"])
+ax.plot(
+    N, three_dgs_gb, marker='^', linewidth=2.5, label=f'Fixed {gaussian_count // 1000}k Gaussians × {gaussian_bytes} B', color=COLORS["GreenLine"]
+)
+ax.set_xscale('log', base=2)
+ax.set_yscale('log', base=10)
+ax.set_xlabel('Grid cells per dimension N', fontsize=11, fontweight='bold')
+ax.set_ylabel('Constructed storage (decimal GB)', fontsize=11, fontweight='bold')
+ax.legend(fontsize=9)
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
+
+For the Gaussian packing in the plot, `{python} appx_gaussian_count_str` primitives at `{python} appx_gaussian_bytes_str` bytes each require `{python} appx_gaussian_mem_str`. A deployment chooses its representation after measuring map completeness, update time, query time, and the conversion needed for conservative clearance.
 
 ### Log-odds occupancy and signed-distance fusion {#sec-appendix-ml-voxels}
 
@@ -260,13 +314,187 @@ where $P(m_i \mid z_t)$ is the inverse sensor model and $P(m_i)$ the prior. Alon
 
 [^fn-ml-log-odds]: **Recursive Log-Odds Occupancy**\index{Log-odds transformation!occupancy mapping}: The log-odds formulation maps probability values from the bounded unit interval to the unbounded real line, turning nonlinear Bayesian product updates into fast additions. Dynamic ranges are clamped by upper and lower saturation bounds to prevent saturation lockup. Failure to clamp log-odds values delays the clearing of dynamic obstacles when physical objects vacate the workspace.
 
+#### Octree occupancy and free-space raycasting
+
+Occupancy grid mapping [@elfes1989using] tessellates space into cells and applies this update to every cell a ray touches.\index{Occupancy grid mapping!octree storage} A volumetric raycast walks each return's sightline with the three-dimensional digital differential analyzer (3D-DDA) traversal [@amanatides1987fast].\index{Volumetric free-space raycasting!3D-DDA traversal} Hierarchical stores such as OctoMap [@hornung2013octomap] and OpenVDB [@museth2013vdb] allocate cells only where rays have passed, so storage follows the observed volume rather than the bounding cube (@fig-09-octomap-volumetric-mapping). Free-space evidence lets the map retire a phantom obstacle once the same region is seen empty, while a never-observed cell stays unknown however long the map runs. @Sec-memory-scene-attention-buffers applies this rule to the aisle, where only fresh free-space evidence can vouch that a path is clear.
+
+::: {#fig-09-octomap-volumetric-mapping fig-env="figure" fig-pos="t" fig-cap="**Probabilistic octree volumetric mapping**: A corridor traversal reconstructed from raw point cloud into a probabilistic octree and then into explicit free, occupied, and unknown space [@hornung2013octomap]. The third panel is what distinguishes spatial memory from an accumulated point cloud, because raycasting records evidence of emptiness along sightlines, letting the map actively retire a phantom obstacle track instead of waiting for a timeout to expire it. (Credit: Hornung et al. / Autonomous Intelligent Systems Lab, University of Freiburg, CC BY 3.0)." fig-alt="Probabilistic 3D Volumetric Mapping and Hierarchical Octree Space Subdivision. Empirical 3D spatial memory representation reconstructed from a physical mobile robot traversing an indoor corridor with a tilting LiDAR scanner [@hornung2013octomap]. (a) Raw 3D point cloud acquired during robot motion, subject to sensor noise and finite field-of-view occlusions. (b) Volumetric OctoMap voxel representation modeling 3D space as an 8-ary hierarchical tree, where occupied volumes are probabilistically updated and stored across variable resolutions. (c) Explicit free-space raycasting and lossless octree pruning, differentiating observed free cells (white voxels) from occupied obstacles (dark voxels) and unobserved unknown regions; free evidence alone does not certify traversability for a particular robot. By maintaining explicit free-space evidence along sensor sightlines, spatial memory actively invalidates phantom obstacle tracks without waiting for arbitrary software timeouts. (Credit: Hornung et al. / Autonomous Intelligent Systems Lab, University of Freiburg, CC BY 3.0)."}
+![](../09_memory/images/png/fig09_real_octomap_volumetric_mapping.png){width="95%"}
+:::
+
 #### Truncated signed distance fusion
 
-A truncated signed distance field (TSDF) stores in each voxel $\mathbf{v}$ a *metric projective distance* $D(\mathbf{v}) \in [-\mu, +\mu]$, positive in front of an observed return along its sensing ray, and a dimensionless fusion weight $W(\mathbf{v})$.\index{Truncated signed distance field!projective fusion} For a calibrated depth image, transform the voxel center into camera coordinates $\mathbf{p} = [p_x, p_y, p_z]^\top$ and project it to pixel $(u, v)$. Its projective sample is $s = Z_{\text{meas}}(u, v) - p_z$. For a range ray, the equivalent along-ray sample is $s = r_{\text{hit}} - r_{\text{voxel}}$; both are positive before the hit. Near the return, the sample is clamped in meters and fused into the running weighted average:
+A truncated signed distance field (TSDF), fused volumetrically at camera rate by KinectFusion [@newcombe2011kinectfusion] and incrementally on robots by Voxblox [@oleynikova2017voxblox], stores in each voxel $\mathbf{v}$ a *metric projective distance* $D(\mathbf{v}) \in [-\mu, +\mu]$, positive in front of an observed return along its sensing ray, and a dimensionless fusion weight $W(\mathbf{v})$.\index{Truncated signed distance field!projective fusion} For a calibrated depth image, transform the voxel center into camera coordinates $\mathbf{p} = [p_x, p_y, p_z]^\top$ and project it to pixel $(u, v)$. Its projective sample is $s = Z_{\text{meas}}(u, v) - p_z$. For a range ray, the equivalent along-ray sample is $s = r_{\text{hit}} - r_{\text{voxel}}$; both are positive before the hit. Near the return, the sample is clamped in meters and fused into the running weighted average:
 $$ d_{\mu}(\mathbf{v}) = \max(-\mu, \min(\mu, s)), \qquad D_t(\mathbf{v}) = \frac{W_{t-1}(\mathbf{v}) D_{t-1}(\mathbf{v}) + w_t d_{\mu}(\mathbf{v})}{W_{t-1}(\mathbf{v}) + w_t} $$
 where $w_t$ is the dimensionless observation weight and the stored weight $W_t = W_{t-1} + w_t$ is capped at $W_{\max}$. Fusion uses a valid capture-time pose and refuses a sample older than the voxel's last evidence epoch. A negative sample just behind the measured return contributes to the local zero crossing under the surface model; it does not certify an unseen obstacle interior.
 
-Interpolating observed samples gives an approximate gradient near a zero crossing, limited by unknown voxels, projective bias, discretization, and moving objects. A projective TSDF is therefore not the nearest-surface Euclidean distance a clearance decision needs. @Sec-memory-scene-attention-buffers keeps occupancy and the TSDF as separate fields and converts them to a validated occupancy or Euclidean signed distance field (ESDF), with an unknown-space policy, before the permission path queries clearance.
+Interpolating observed samples gives an approximate gradient near a zero crossing, limited by unknown voxels, projective bias, discretization, and moving objects. A projective TSDF is therefore not the nearest-surface Euclidean distance a clearance decision needs. A clearance query therefore reads a validated occupancy or Euclidean signed distance field (ESDF) with an unknown-space policy, the conversion @sec-memory-scene-attention-buffers requires of every scene representation before the permission path relies on it.
+
+#### One frame's update and its memory traffic
+
+@Algo-volumetric-tsdf-raycast applies both updates for one depth frame, and the notebook after it prices the update traffic that @sec-memory-scene-attention-buffers charges against the memory bus. It rejects the frame before touching the map when its capture epoch is too old or older than the last evidence of any cell it would update, then clears and marks occupancy along each ray and fuses TSDF samples only inside the truncation band. Every updated cell takes the capture epoch, not the update time, so a later consumer can judge each cell's freshness.
+
+```pseudocode
+#| label: algo-volumetric-tsdf-raycast
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{Occupancy Raycast and Metric TSDF Fusion}
+\begin{algorithmic}
+\Require returns $\mathcal{P}$ captured at $t_0$ in one capture clock; valid pose; occupancy $\mathcal{O}$; metric TSDF $\mathcal{V}$; truncation $\mu$; evidence half-life $t_{1/2}$; per-cell serialized updates
+\Ensure observed free/occupied cells and near-surface TSDF samples updated without refreshing unseen cells
+\State $(t_{0,c},\epsilon_{\text{sync}})\gets\Call{ConvertCaptureToControllerClock}{t_0}$
+\If{clock conversion invalid or $t_{\text{now},c}-t_{0,c}+\epsilon_{\text{sync}}>\tau_{\max,\text{age}}$}
+    \State \Return $\text{STATUS\_FRAME\_TOO\_STALE}$
+\EndIf
+\If{any target occupancy or TSDF cell has $t_{\text{last}}>t_0$}
+    \State \Return $\text{STATUS\_OUT\_OF\_ORDER}$ \Comment{preflight before modifying the map}
+\EndIf
+\For{\textbf{each} return $\mathbf{p}_k\in\mathcal{P}$}
+    \State $(\mathbf{r}_{\text{dir}},r_{\text{hit}})\gets\Call{RayFromPoseAndReturn}{\mathbf{p}_k}$
+    \Statex \Comment{Occupancy: measured free ray and hit, not TSDF distance}
+    \For{\textbf{each} cell $c$ traversed before the hit}
+        \State $c\gets\Call{GetOrAllocateOccupancy}{\mathcal{O},c}$
+        \State $c.L\gets\Call{ClampLogOdds}{c.L+L_{\text{free}}}$; $c.t_{\text{last}}\gets t_0$
+    \EndFor
+    \State update the observed hit cell with $L_{\text{occupied}}$ and epoch $t_0$
+    \Statex \Comment{TSDF: fuse metric samples only in a narrow surface band}
+    \For{\textbf{each} voxel $v$ with $|r_{\text{hit}}-r_v|\le\mu$}
+        \State $\text{vox}\gets\Call{GetOrAllocateTSDF}{\mathcal{V},v}$
+        \State $d_\mu\gets\Call{Clamp}{r_{\text{hit}}-r_v,-\mu,+\mu}$ \Comment{positive before hit}
+        \State $W_{\text{old}}\gets 0$ if $\text{vox}.W=0$, else $\text{vox}.W\,2^{-(t_0-\text{vox}.t_{\text{last}})/t_{1/2}}$
+        \State $w_{\text{obs}}\gets 1$ \Comment{dimensionless illustrative confidence}
+        \State $\text{vox}.D\gets(W_{\text{old}}\text{vox}.D+w_{\text{obs}}d_\mu)/(W_{\text{old}}+w_{\text{obs}})$
+        \State $\text{vox}.W\gets\min(W_{\text{old}}+w_{\text{obs}},W_{\max})$; $\text{vox}.t_{\text{last}}\gets t_0$
+    \EndFor
+\EndFor
+\State \Return $\text{STATUS\_MAP\_UPDATED}$
+\end{algorithmic}
+\end{algorithm}
+```
+
+```{python}
+#| label: calc-appendix-ml-tsdf-voxel-grid
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TSDF VOXEL GRID PAYLOAD AND RAYCAST DRAM TRAFFIC
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: \ref{nbk-memory-memory-footprint-dram-bandwidth-3d-tsdf} in
+# │          @sec-appendix-ml-voxels.
+# │ Goal: Show that sparse allocation shrinks the TSDF payload while the raycast
+# │       traversal and its occupancy updates still set the bus demand.
+# │ Show: dense and sparse payloads at two pitches, ray rate, updates per ray,
+# │       DRAM demand with no caching and at an assumed hit rate.
+# │ How: calc_tsdf_voxel_grid_budget (distance-and-weight payload only).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.physics.robotics import calc_tsdf_voxel_grid_budget
+
+class AppxTsdfVoxelGrid:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    side_x = 10.0 * meter  # category: illustrative (workcell length)
+    side_y = 10.0 * meter  # category: illustrative (workcell width)
+    side_z = 3.0 * meter  # category: illustrative (workcell height)
+    pitch_coarse = 0.01 * meter  # category: chosen (grid pitch)
+    pitch_fine = 0.005 * meter  # category: chosen (refined pitch for tool contact)
+    bytes_per_voxel = 4  # category: illustrative (16-bit distance + 16-bit weight)
+    band_fraction = 0.03  # category: illustrative (assumed TSDF-band fraction of the volume)
+    block_voxels = 512  # category: chosen (8 x 8 x 8 leaf block)
+    block_header_bytes = 32  # category: illustrative (leaf header)
+    depth_w = 640  # category: illustrative (depth image width, pixels)
+    depth_h = 480  # category: illustrative (depth image height, pixels)
+    depth_rate = 60 * Hz  # category: illustrative (depth frame rate)
+    ray_range = 3.0 * meter  # category: illustrative (ray length)
+    band_voxels_per_ray = 6  # category: illustrative (TSDF-band cells per ray)
+    bytes_per_update = 8  # category: illustrative (read/write traffic per cell update)
+    hit_rate = 0.95  # category: illustrative (cache hit fraction, to be measured)
+    mem_budget = 8 * GB  # category: illustrative (application-processor memory budget)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    workspace = side_x * side_y * side_z
+    ray_rate = (depth_w * depth_h * depth_rate).to(1 / second)
+    cells_per_ray = round((ray_range / pitch_coarse).to("dimensionless").magnitude)
+    free_per_ray = cells_per_ray - band_voxels_per_ray
+    coarse = calc_tsdf_voxel_grid_budget(
+        workspace_volume=workspace,
+        voxel_size=pitch_coarse,
+        bytes_per_voxel=bytes_per_voxel,
+        sparsity_ratio=band_fraction,
+        block_size_voxels=block_voxels,
+        block_header_bytes=block_header_bytes,
+        ray_rate=ray_rate,
+        dense_voxels_per_ray=cells_per_ray,
+        sparse_voxels_per_ray=band_voxels_per_ray,
+        free_voxels_per_ray=free_per_ray,
+        bytes_per_ray_voxel=bytes_per_update,
+        cache_hit_rate=hit_rate,
+    )
+    fine = calc_tsdf_voxel_grid_budget(
+        workspace_volume=workspace,
+        voxel_size=pitch_fine,
+        bytes_per_voxel=bytes_per_voxel,
+        sparsity_ratio=band_fraction,
+        block_size_voxels=block_voxels,
+        block_header_bytes=block_header_bytes,
+    )
+    mem_ratio = (coarse["dense_memory"] / coarse["sparse_memory"]).to_base_units().magnitude
+    bw_ratio = (coarse["dense_dram_bandwidth"] / coarse["sparse_dram_bandwidth"]).to_base_units().magnitude
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(coarse["dense_voxel_count"] == 300_000_000, f"dense voxels {coarse['dense_voxel_count']}")
+    check(coarse["sparse_block_count"] == 17_579, f"sparse blocks {coarse['sparse_block_count']}")
+    check(cells_per_ray == 300 and free_per_ray == 294, f"cells per ray {cells_per_ray}")
+    check(fine["dense_memory"] > mem_budget, "the fine dense payload must exceed the memory budget")
+    check(round(mem_ratio) == 33 and round(bw_ratio) == 20, f"ratios {mem_ratio}, {bw_ratio}")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    workspace_str = fmt_qty(workspace, meter**3, precision=0)
+    side_x_str = fmt_qty(side_x, meter, precision=0)
+    side_y_str = fmt_qty(side_y, meter, precision=0)
+    side_z_str = fmt_qty(side_z, meter, precision=0)
+    pitch_coarse_str = fmt_qty(pitch_coarse, ureg.cm, precision=0)
+    pitch_fine_str = fmt_qty(pitch_fine, ureg.mm, precision=0)
+    bytes_per_voxel_str = fmt_int(bytes_per_voxel)
+    band_pct_str = fmt_percent(band_fraction, precision=0)
+    block_voxels_str = fmt_int(block_voxels)
+    block_header_str = fmt_int(block_header_bytes)
+    mem_budget_str = fmt_memory(mem_budget, unit=GB, precision=0)
+    dense_voxels_coarse_str = fmt_int(coarse["dense_voxel_count"], commas=True)
+    dense_mem_coarse_str = fmt_memory(coarse["dense_memory"], unit=GB, precision=2)
+    dense_voxels_fine_str = fmt_int(fine["dense_voxel_count"], commas=True)
+    dense_mem_fine_str = fmt_memory(fine["dense_memory"], unit=GB, precision=2)
+    sparse_blocks_coarse_str = fmt_int(coarse["sparse_block_count"], commas=True)
+    sparse_mem_coarse_str = fmt_memory(coarse["sparse_memory"], unit=MB, precision=1)
+    sparse_mem_fine_str = fmt_memory(fine["sparse_memory"], unit=MB, precision=1)
+    depth_w_str = fmt_int(depth_w)
+    depth_h_str = fmt_int(depth_h)
+    depth_rate_str = fmt_qty(depth_rate, Hz, precision=0)
+    ray_rate_str = fmt_count(ray_rate.magnitude, scale="M", precision=3, scale_style="word")
+    ray_range_str = fmt_qty(ray_range, meter, precision=0)
+    cells_per_ray_str = fmt_int(cells_per_ray)
+    free_per_ray_str = fmt_int(free_per_ray)
+    band_per_ray_str = fmt_int(band_voxels_per_ray)
+    bytes_per_update_str = fmt_int(bytes_per_update)
+    hit_pct_str = fmt_percent(hit_rate, precision=0)
+    dense_bw_str = fmt_bandwidth(coarse["dense_dram_bandwidth"], unit=GB / second, precision=1)
+    sparse_bw_str = fmt_bandwidth(coarse["sparse_dram_bandwidth"], unit=GB / second, precision=2)
+    mem_mult_str = fmt_multiple(round(mem_ratio))
+    bw_mult_str = fmt_multiple(round(bw_ratio))
+```
+
+::: {#nbk-memory-memory-footprint-dram-bandwidth-3d-tsdf .callout-notebook title="DRAM bandwidth of 3D TSDF voxel grids"}
+**Practical Engineering Question**\index{Practical Engineering Question}: What are the distance-and-weight payload and modeled DRAM bandwidth of sparse versus dense TSDF representations?
+
+*1. Dense allocation.* A manipulation workcell of `{python} AppxTsdfVoxelGrid.side_x_str` $\times$ `{python} AppxTsdfVoxelGrid.side_y_str` $\times$ `{python} AppxTsdfVoxelGrid.side_z_str` (`{python} AppxTsdfVoxelGrid.workspace_str`) at `{python} AppxTsdfVoxelGrid.pitch_coarse_str` pitch holds `{python} AppxTsdfVoxelGrid.dense_voxels_coarse_str` voxels. At `{python} AppxTsdfVoxelGrid.bytes_per_voxel_str` bytes per voxel (16-bit distance plus 16-bit fusion weight), excluding occupancy, per-cell evidence epochs, and allocator overhead, the distance-and-weight payload is `{python} AppxTsdfVoxelGrid.dense_mem_coarse_str`. Refining the pitch to `{python} AppxTsdfVoxelGrid.pitch_fine_str` for tool contact raises the count to `{python} AppxTsdfVoxelGrid.dense_voxels_fine_str` voxels and the partial payload to `{python} AppxTsdfVoxelGrid.dense_mem_fine_str`, which alone exceeds an illustrative `{python} AppxTsdfVoxelGrid.mem_budget_str` memory budget.
+
+*2. Sparse allocation.* Surfaces occupy a thin manifold within the volume. Grouping voxels into `{python} AppxTsdfVoxelGrid.block_voxels_str`-voxel leaf blocks and allocating only within the truncation band, assumed to be `{python} AppxTsdfVoxelGrid.band_pct_str` percent of the volume, gives `{python} AppxTsdfVoxelGrid.sparse_blocks_coarse_str` blocks. With a `{python} AppxTsdfVoxelGrid.block_header_str`-byte leaf header, the payload is `{python} AppxTsdfVoxelGrid.sparse_mem_coarse_str` at `{python} AppxTsdfVoxelGrid.pitch_coarse_str` and `{python} AppxTsdfVoxelGrid.sparse_mem_fine_str` at `{python} AppxTsdfVoxelGrid.pitch_fine_str`. A full map must also budget the separate occupancy layer, per-cell epochs, block lookup and allocator metadata, and capacity for the unknown-space policy.
+
+*3. Traversal and DRAM traffic.* A `{python} AppxTsdfVoxelGrid.depth_w_str` $\times$ `{python} AppxTsdfVoxelGrid.depth_h_str` depth stream at `{python} AppxTsdfVoxelGrid.depth_rate_str` supplies `{python} AppxTsdfVoxelGrid.ray_rate_str` rays per second. Along a `{python} AppxTsdfVoxelGrid.ray_range_str` ray at `{python} AppxTsdfVoxelGrid.pitch_coarse_str` pitch the traversal visits `{python} AppxTsdfVoxelGrid.cells_per_ray_str` cells. The `{python} AppxTsdfVoxelGrid.free_per_ray_str` cells before the hit receive occupancy free-ray updates, and the `{python} AppxTsdfVoxelGrid.band_per_ray_str` cells near the return receive TSDF fusion. Sparse TSDF allocation saves map capacity; it removes neither the traversal nor the occupancy updates. At `{python} AppxTsdfVoxelGrid.bytes_per_update_str` bytes of assumed read/write traffic per update, sending every update to DRAM costs `{python} AppxTsdfVoxelGrid.dense_bw_str`. At an assumed `{python} AppxTsdfVoxelGrid.hit_pct_str` percent cache hit fraction for both occupancy and TSDF updates, the modeled DRAM demand falls to `{python} AppxTsdfVoxelGrid.sparse_bw_str`, a `{python} AppxTsdfVoxelGrid.bw_mult_str` reduction. The hit rate depends on ray overlap, atomics, evictions, and writeback on the chosen hardware; it is an input to measure, not a property of the map structure.
+
+**Systems insight**: Sparse allocation yields `{python} AppxTsdfVoxelGrid.mem_mult_str` less modeled TSDF payload in this surface-fraction scenario, while bus demand depends on measured locality and on all traversed-cell work. Whether that demand fits beside policy inference on a shared bus is the contention question of @sec-placement-resource-contention.
+:::
 
 ## Function Approximation and Sensitivity Bounds {#sec-appendix-ml-sensitivity}
 
