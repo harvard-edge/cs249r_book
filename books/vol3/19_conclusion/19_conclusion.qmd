@@ -50,65 +50,36 @@ Every earlier chapter built one part of an agentic system and tested it on its o
 
 @Sec-vol3-intro established why a model that holds zero ambient authority and fails plausibly cannot carry out a task by itself, and @sec-vol3-intro-invariant-closure established that the runtime, not the model, must close the task's bounds and judge its completion. Parts I through VI then built that runtime one subsystem at a time, each tested on its own terms.
 
-This chapter asks who owns each transition once every mechanism acts on the same trajectory, and which work no mechanism can absorb. It answers by following one incident-remediation trajectory from the first alert to an accepted fix through the complete architecture (@fig-vol3-capstone-reference-architecture), naming the owner and the audit record of every step. The rest of the chapter then examines where the principles of different parts meet, where they strain against each other, and where the machine stops.
+This chapter asks who owns each transition once every mechanism acts on the same trajectory, and which work no mechanism can absorb. It answers by establishing the complete capstone architecture (@fig-vol3-capstone-reference-architecture) and tracing a representative incident-remediation trajectory through every subsystem, naming the owner and the audit record of every step. The rest of the chapter then examines where the principles of different parts meet, where they strain against each other, and where the machine stops.
 
-@Fig-vol3-capstone-reference-architecture places each subsystem where the chapter that built it left it. The runtime encapsulates the model call (@sec-vol3-foundation-model) and its test-time deliberation (@sec-vol3-test-time-compute), pages the KV cache and shares prefixes (@sec-vol3-kv-cache), retrieves durable state (@sec-vol3-long-term-memory), dispatches typed tool calls (@sec-vol3-tool-calling) into isolated microVM sandboxes (@sec-vol3-sandboxes), commits each step to an append-only log (@sec-vol3-durable-execution), compensates failed external steps through Sagas (@sec-vol3-failure-recovery), harvests verified traces (@sec-vol3-trajectory-curation) to adapt the policy (@sec-vol3-fine-tuning; @sec-vol3-rlvr), coordinates agent fleets (@sec-vol3-multi-agent), and reconstructs causal traces after the fact (@sec-vol3-evaluation).
+@Fig-vol3-capstone-reference-architecture places each subsystem where the chapter that built it left it. The architecture partitions responsibilities between two decoupled operational horizons: the live execution loop and across-task lifecycle infrastructure. The live loop runs in seconds to minutes, encapsulating the unprivileged model call (@sec-vol3-foundation-model) and its test-time deliberation (@sec-vol3-test-time-compute), paging the physical KV cache and sharing prefixes (@sec-vol3-kv-cache), retrieving durable state (@sec-vol3-long-term-memory), dispatching typed tool calls (@sec-vol3-tool-calling) into isolated microVM sandboxes (@sec-vol3-sandboxes), committing each step to an append-only log (@sec-vol3-durable-execution), and compensating failed external mutations through Sagas (@sec-vol3-failure-recovery). Across tasks, the lifecycle infrastructure operates over hours to days, harvesting verified execution traces (@sec-vol3-trajectory-curation), adapting policy checkpoints via post-training pipelines (@sec-vol3-fine-tuning; @sec-vol3-rlvr), coordinating multi-agent fleets (@sec-vol3-multi-agent), and certifying releases through causal telemetry (@sec-vol3-evaluation).
 
-::: {#fig-vol3-capstone-reference-architecture fig-env="figure" fig-pos="htb" fig-cap="**The Capstone Reference Architecture of the Agentic System**: Complete trajectory orchestration integrating the unprivileged inference engine, tiered memory hierarchy, sandboxed execution harness, supervisory control plane, Write-Ahead Log (WAL), compensating Sagas, telemetry fabric, and closed-loop policy compiler." fig-alt="Comprehensive architectural blueprint of the agentic system showing the interaction between the supervisory runtime, inference engine, memory hierarchy, tool execution sandbox, telemetry fabric, and offline policy compiler."}
+::: {#fig-vol3-capstone-reference-architecture fig-env="figure" fig-pos="htb" fig-cap="**The Capstone Reference Architecture of the Agentic System**: Complete trajectory orchestration integrating the unprivileged inference engine, tiered memory hierarchy, sandboxed execution harness, supervisory control plane, Write-Ahead Log (WAL), compensating Sagas, telemetry fabric, and unified production lifecycle management infrastructure." fig-alt="Comprehensive architectural blueprint of the agentic system showing the interaction between the supervisory runtime, inference engine, memory hierarchy, tool execution sandbox, telemetry fabric, and offline trajectory post-training and lifecycle management infrastructure."}
 ![](images/svg/five_part_agent_runtime_architecture_v2.svg){width="100%"}
 :::
 
-The trajectory, an automated incident remediation triggered by a production database latency alert, begins when the Distributed Fleet and Telemetry Fabric detects an SLA breach, capturing metric anomalies and trace spans via OpenTelemetry collectors. The cluster coordinator routes the incident payload to the Supervisory Runtime, which instantiates an Agent Control Block (ACB) in volatile host memory. The ACB initializes the trajectory state: assigning a unique process identifier, setting a monotonic token and wall-clock budget, and committing the task's five-part contract to the append-only Write-Ahead Log (WAL).
-
-Next, the Memory Hierarchy stages the task context. The context manager allocates the working context for the task contract, the incident payload, and current environment descriptors. The Key-Value (KV) cache manager maps physical accelerator memory using PagedAttention and indexes shared prompt prefixes in a Radix tree, avoiding redundant prefill computation. Simultaneously, the context manager queries durable storage, issuing semantic lookups against vector indexes and relational databases to retrieve relevant service runbooks and prior incident post-mortems, injecting authoritative source excerpts into the prompt while establishing cryptographic provenance hashes.
-
-The Computational Engine—the unprivileged foundation model engine—then evaluates the staged context buffer. Operating across distributed GPU accelerators, the inference runtime executes the prefill GEMM phase followed by autoregressive decode GEMV iterations. During generation, grammar-constrained logit masking restricts token emission strictly to valid tool invocation schemas. If the task requires deep planning, the deliberation engine executes bounded test-time search rollouts, scoring candidate reasoning paths before committing an unprivileged action proposal $a_t$ to the proposal port.
-
-The Supervisory Runtime intercepts $a_t$ from the proposal port, holding it in memory escrow. The runtime's capability firewall evaluates the action against active Macaroon leases and security policies. If the proposed action involves an irreversible mutation—such as dropping a database table or restarting a core cluster node—the control plane suspends execution and requests a cryptographic human countersignature. For authorized tool actions, the runtime marshals the typed parameters and dispatches them across the $W \oplus X$ (Write XOR Execute) isolation barrier into an ephemeral microVM sandbox (such as Firecracker).
-
-Inside the microVM sandbox, the tool executes within an isolated network namespace and overlay filesystem. The execution harness captures stdout, stderr, and the integer return code, packaging them into a normalized observation record $o_{t+1}$. If an action mutates persistent external state, the transaction is registered as an active Saga step. Should downstream operations fail or trigger invariant violations, the control plane executes registered compensating actions $C_i$ in reverse chronological order, restoring external state consistency.
-
-Upon receiving observation $o_{t+1}$, the supervisor appends the transition $(a_t, o_{t+1})$ to the Write-Ahead Log, invalidates every derived view of the files the action touched, and appends the normalized observation to the working context. This closed-loop cycle repeats until the agent emits a candidate deliverable (such as a pull request containing a configuration fix).
-
-Crucially, acceptance of the deliverable is governed by external verification oracles, not the agent's verbal claims. The Telemetry and Verification Gate executes deterministic acceptance tests: running unit test suites in sealed test harnesses, executing static analysis linters, checking database consistency assertions, and monitoring staging canary metrics. Only when the verification oracle evaluates to exit code 0 does the supervisor mark the trajectory as committed, updating SRE canary gates and closing the operational ticket.
-
-Concurrently, across-task lifecycle infrastructure harvests the trajectory for long-term learning. The Trajectory Data Engine reads the finalized Write-Ahead Log, applies rejection sieves to isolate successful trajectories, and formats golden execution traces. The offline Policy Compiler generates action-targeted loss masks and executes Reinforcement Learning with Verifiable Rewards (RLVR) or supervised fine-tuning loops. This optimization compiles expensive multi-step deliberative reasoning into efficient single-turn model weights, deploying updated parameter checkpoints via canary rollouts to improve future fleet performance.
-
-The walkthrough crosses the line that @sec-vol3-intro-live-loop and @sec-vol3-intro-across-task drew. Everything up to acceptance belongs to live runtime owners, which hold the trajectory for seconds to minutes. The harvest, the policy compiler, fleet telemetry, and the canary gates belong to across-task infrastructure, which works over hours to days on trajectories that have already finished.
-
-This division of ownership is the one the book has used since @sec-vol3-intro-stochastic-computer, where the Stochastic Computer names which part owns the model call, context state, the action boundary, the runtime, the policy compiler, and the fleet. What the synthesis borrows from classical computer systems are disciplines, such as coherence, write-ahead logging, Sagas, capabilities, and the end-to-end argument, not component identities, so the model is not a processor and the context window is not a cache.
-
-Every step of that trajectory applies the invariant closure principle (\ref{pri-invariant-closure}). The runtime closes the task's bounds mechanically, through the budgets, the capability check, the escrow, and the sandbox, and the principle's end-to-end half governs acceptance, because no report from the model can establish that the task is complete. Only the sealed tests, static checks, and consistency assertions the host ran can do that, and @sec-vol3-intro-closure-evidence ranks what each of them is worth.
-
-The agentic system is an accountable execution loop whose model invocation, state, action boundary, supervisor, learning pipeline, and fleet operations can all be traced to a task contract and tested against accepted outcomes.
+What this synthesis borrows from classical computer systems are architectural disciplines—such as cache coherence, write-ahead logging, Sagas, capabilities, and the end-to-end argument—not component identities. The neural model is not a central processor, context memory is not physical RAM, and prompts are not machine instructions. Rather, the agentic architecture is an engineered feedback loop where unprivileged stochastic token generation is constrained, mediated, and verified by an authoritative host runtime.
 
 ### Dynamic trajectory orchestration and ownership {#sec-vol3-conclusion-trajectory-owners}
 
-A latency alert fires on a production database, and an on-call agent receives the incident. Over the next several minutes it will read metrics, retrieve runbooks, query logs, propose a configuration rollback, wait for a human to approve a node restart, and report the incident resolved. Every subsystem the book built touches that trajectory, and each was tested alone. The question this chapter asks is who owns each transition once all of them act on the same trajectory, and what work none of them can absorb.
+To ground these subsystem responsibilities in a concrete execution trace, consider an automated incident-remediation task triggered by a production database latency alert. Over several minutes, the agent must inspect performance metrics, retrieve diagnostic runbooks, query slow-query logs, propose a configuration rollback, hold execution for an authenticated human approval before restarting a database primary node, and verify that query latency returns to normal.
 
-@Fig-vol3-trajectory-lifecycle places each part of the book where its chapters left it. The engineer writes the contract at the top. The live loop runs the model call, context assembly, tool calls, and the sandbox inside a harness that owns budgets, the log, and recovery. Acceptance sits below the loop, and learning and scale work across many trajectories rather than inside one.
+@Fig-vol3-trajectory-lifecycle maps this trajectory across the full system lifecycle, identifying the owner, boundary interface, and evidentiary artifacts produced at each stage.
 
 ::: {#fig-vol3-trajectory-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**One Trajectory Through the Whole System**: The engineer's task contract governs a live loop in which context assembly (Part II) feeds a model call (Part I) whose proposal becomes a validated, granted tool call run in a sandbox (Part III), with the observation returning to the context as data. The harness (Part IV) wraps every step with budgets, the approval gate, the write-ahead log, and recovery. Sealed checks decide acceptance; verified trajectories feed learning (Part V), and scale (Part VI) multiplies the loop across agents and trajectories." fig-alt="Layered diagram. A red box at the top labeled Task contract, written by the engineer, lists goal, environment, permitted actions, observations, and completion criteria and carries a Part VII badge. An arrow leads down to a card labeled Live loop, one trajectory, seconds to hours, containing four boxes left to right: Context assembly (Part II), Model call (Part I), Tool call (Part III), and Sandbox (Part III), joined by arrows, with a dashed arrow from the sandbox back to context assembly labeled observation returns as data. A purple strip inside the card, Harness around every step (Part IV), lists budgets and approval gate, write-ahead log and resume, compensation and loop detection, and the trajectory record. Below the card an Acceptance box reads sealed checks, not the agent's report. An arrow labeled verified trajectories leads to a Learning card (Part V) reading curate, fine-tune, optimize against verifiers. A Scale card (Part VI) reads split only when the coordination tax pays, and price and provision per accepted task."}
 ![](images/svg/capstone_trajectory_owners.svg){width="100%"}
 :::
 
-The trajectory starts before any model call. The harness opens a trajectory record for the incident (@sec-vol3-agent-harness), writes the task contract to the trajectory log (@sec-vol3-durable-execution), and sets the budgets that will bound it. The contract also fixes the task's H·S·A position. The incident runs for about ten turns, carries durable state it does not own (production metrics, runbooks, a configuration repository), and reaches the highest authority level at the one step that changes production.
+1. **Admission and ACB Initialization:** The trajectory begins when the distributed telemetry fabric detects a service level agreement (SLA) breach, capturing metric anomalies and trace spans through OpenTelemetry collectors.[^fn-telemetry-sampling-budgets] The cluster coordinator routes the incident payload to the host supervisor, which instantiates an Agent Control Block (ACB) in host memory (@sec-vol3-agent-harness). The ACB assigns a monotonic process identifier, establishes hard ceilings on wall-clock time $T_{\max}$, turns $H_{\max}$, and token budget $M$, and records the task contract to the durable Write-Ahead Log (WAL; @sec-vol3-durable-execution).
+2. **Context Staging and Memory Tiering:** Context assembly organizes the initial prompt buffer, combining the task contract, the incident alert, and relevant runbook excerpts retrieved under a typed retrieval contract with cryptographic source provenance hashes (@sec-vol3-long-term-memory). The context manager structures the prompt with static prefixes placed leftmost (@sec-vol3-context-engineering), enabling the serving engine's PagedAttention KV-cache manager to share prefix pages via a Radix tree (@sec-vol3-kv-cache), eliminating redundant prefill general matrix multiply (GEMM) latency across subsequent turns.
+3. **Unprivileged Inference and Deliberation:** Operating on accelerator hardware, the unprivileged foundation model processes the staged context buffer (@sec-vol3-foundation-model). Pushdown automata compile grammar constraints directly into GPU decode kernels, enforcing valid tool call schemas during autoregressive generation. When diagnosing complex multi-variable faults, the deliberation engine executes bounded search rollouts (@sec-vol3-test-time-compute), ranking candidate hypotheses against verifiable separation predicates (principle \ref{pri-vol3-test-time-scaling}) before emitting an unprivileged action proposal $a_t$ to the proposal port.
+4. **Capability Gating and Sandboxed Actuation:** The supervisor intercepts $a_t$ from the proposal port, holding it in memory escrow. The capability monitor evaluates the proposed action against cryptographically attenuated Macaroon leases.[^fn-macaroon-capability-attenuation] Read-only diagnostic queries against the slow-query log are authorized within bounded resource quotas (@sec-vol3-tool-calling). If the agent proposes an irreversible operation—such as restarting the primary database node—the supervisor halts execution and requires an out-of-band cryptographic signature from an authorized human operator (@sec-vol3-agent-harness). Authorized actions are dispatched across the $W \oplus X$ isolation barrier into an ephemeral microVM sandbox (@sec-vol3-sandboxes).[^fn-microvm-seccomp-filtering]
+5. **Observation Normalization, WAL Commit, and Sagas:** Inside the microVM sandbox, the tool executes within an isolated network and filesystem namespace. The execution harness normalizes stdout, stderr, and the return code into an observation record $o_{t+1}$. For mutations that alter external state (such as rolling back a database configuration flag), the runtime registers a compensating Saga transaction (@sec-vol3-failure-recovery).[^fn-saga-compensating-idempotency] When network timeouts occur, the runtime enforces settlement before retry under idempotency keys (principle \ref{pri-vol3-exactly-once-settlement}). The supervisor logs the transition $(a_t, o_{t+1})$ to the WAL, invalidates derived memory views, and appends $o_{t+1}$ to the working context.
+6. **Deterministic Verification and Acceptance:** When the agent emits a candidate deliverable reporting the incident resolved, the report is treated as an unverified proposal. The verification oracle executes deterministic acceptance tests (@sec-vol3-evaluation): evaluating whether query latency has returned below SLA thresholds for a sustained measurement window, confirming error rates remain nominal, and verifying configuration diffs against signed approvals. Only when all mechanical checks evaluate to exit code 0 does the supervisor commit the trajectory, update SRE canary metrics, and close the incident ticket.
+7. **Across-Task Trajectory Learning and Fleet Telemetry:** Once accepted, the trajectory enters the across-task lifecycle pipeline. The trajectory data engine ingests the finalized WAL trace, applies rejection sieves to filter suboptimal paths (@sec-vol3-trajectory-curation), formats golden traces with action-targeted loss masks (principle \ref{pri-vol3-action-masked-loss}), and executes supervised fine-tuning (@sec-vol3-fine-tuning) or reinforcement learning with verifiable rewards (@sec-vol3-rlvr).[^fn-continuous-trajectory-distillation] This offline adaptation internalizes multi-step deliberative reasoning into model weights, deploying updated parameter checkpoints via canary rollouts to improve future fleet performance.[^fn-canary-sequential-testing]
+8. **Fleet Economics and Multi-Cloud Arbitrage:** Across the fleet, routing arbiters distribute incoming agent workloads across heterogeneous on-premise accelerator clusters and commercial model providers to minimize the cost per accepted task while adhering to tail-latency constraints (@sec-vol3-agent-economics).[^fn-multicloud-routing-arbitrage]
 
-Context assembly then decides what the first call sees. It stages the contract, the alert, and runbook excerpts retrieved under a typed retrieval contract with their sources attached (@sec-vol3-long-term-memory), and it lays the stable material first so that later turns reuse the same prefix (@sec-vol3-context-engineering). The serving system keeps the attention state for that prefix (@sec-vol3-kv-cache), so each later turn pays mainly for the observation it appends rather than for the whole context again.
-
-The model call returns a structured tool call and a stop reason (@sec-vol3-foundation-model), and nothing in the world has changed yet. When the diagnosis is ambiguous, the harness can pay for several candidate hypotheses and rank them against a check that separates them (@sec-vol3-test-time-compute), which helps only when the check acquires new evidence (principle \ref{pri-vol3-test-time-scaling}).
-
-A proposal to query the database's slow-query log is validated against the tool's schema and checked against the task's grant (@sec-vol3-tool-calling). It runs in a sandbox whose envelope the model cannot widen (@sec-vol3-sandboxes), and its output returns to the context as untrusted data, cut to the observation budget and tagged with its source. When the query times out, the runtime does not simply resend it. It settles whether the first attempt took effect before it retries (principle \ref{pri-vol3-exactly-once-settlement}), using the idempotency key the call carried.
-
-A few turns later the agent proposes two changes, a rollback of a recent configuration change, which a later action can compensate, and a restart of the primary node, which nothing can undo. The harness writes each intent to the log before the effect leaves the runtime (principle \ref{pri-vol3-intent-before-effect}). It registers a compensation for the rollback and holds the restart at the approval gate until a human signs it (@sec-vol3-agent-harness), and it orders that irreversible pivot after every compensable step (principle \ref{pri-vol3-reversibility-sagas}; @sec-vol3-failure-recovery). If the process dies between the two, recovery reads the log and resumes rather than repeating the rollback. If the agent starts reissuing a failing query, progress detection stops it long before the budget would (principle \ref{pri-vol3-preemptive-interrupts}).
-
-The agent then reports the incident resolved, and the report is only another proposal. Acceptance comes from checks the runtime runs itself: query latency back under its objective for a sustained window, error rates within bounds, and a configuration diff that matches what the human approved. @Sec-vol3-evaluation grades trajectories this way, and the trace it records joins every span of the incident into one causal record.
-
-The live trajectory ends at acceptance, but the system keeps working on it. Because it was verified, the trajectory becomes eligible for curation (@sec-vol3-trajectory-curation). Fine-tuning trains on the tokens the policy emitted and masks the observations it read (principle \ref{pri-vol3-action-masked-loss}; @sec-vol3-fine-tuning), and where a sealed check exists, reinforcement learning optimizes against it with the verifier isolated from the policy (principle \ref{pri-vol3-verifiable-rewards}; @sec-vol3-rlvr). The updated model reaches production only through the same release gates that certify any change. None of this moves an exposure. A better model proposes better actions inside exactly the same envelope.
-
-Scale enters in two places. If the incident had spanned several services, the harness could have delegated diagnosis per service to child agents, but only where partitioning the context or attenuating authority pays the coordination tax (principle \ref{pri-vol3-coordination-tax}; @sec-vol3-multi-agent), and each child would hold a subset of the parent's authority, time, and budget (principle \ref{pri-vol3-monotonic-delegation}). Across the fleet, this trajectory is one unit in the cost per accepted task that routing, caching, and capacity decisions minimize (@sec-vol3-agent-economics).
-
-@Tbl-vol3-capstone-owners condenses the walkthrough into owners and records. The walkthrough also crosses the line between live and across-task work that the introduction drew (@sec-vol3-intro-across-task). Everything up to acceptance belongs to live owners that hold the trajectory for seconds to hours. Curation, training, release gating, and fleet provisioning belong to across-task infrastructure that works over hours to days on trajectories that have already finished.
+@Tbl-vol3-capstone-owners condenses this walkthrough into formal subsystem owners and audit records.
 
 | **Transition**                   | **Owner**                                        | **Record it leaves**                                    |
 |:---------------------------------|:-------------------------------------------------|:--------------------------------------------------------|
@@ -124,7 +95,21 @@ Scale enters in two places. If the incident had spanned several services, the ha
 
 : **Owners and Records Along One Trajectory**: Each transition of the incident trajectory, the subsystem that owns it, and the record that lets an auditor reconstruct it after the fact. {#tbl-vol3-capstone-owners tbl-colwidths="[28,34,38]"}
 
-Every row applies the invariant closure principle (\ref{pri-invariant-closure}). The runtime closes the task's bounds mechanically, through budgets, grants, the approval gate, and the sandbox, and the principle's end-to-end half governs acceptance, because no report from the model can establish that the task is complete. Only the checks the runtime ran can do that, and @sec-vol3-intro-closure-evidence ranks what each kind of check is worth.
+Every row in @tbl-vol3-capstone-owners applies the invariant closure principle (\ref{pri-invariant-closure}). The runtime closes the task's bounds mechanically through budgets, capability gates, memory escrow, and sandboxes, while the end-to-end half of invariant closure governs task acceptance: no report from the model can certify completion, which must be proved through external, deterministic evidence collected at the verification gate (@sec-vol3-intro-closure-evidence).
+
+[^fn-telemetry-sampling-budgets]: **SRE Telemetry Storage Budgets**: Production agent observability platforms enforce dynamic tail-sampling and span quotas on OpenTelemetry collectors, retaining 100 percent of anomalous or error traces while aggressively downsampling nominal trajectory spans to cap centralized storage expenditures.
+
+[^fn-macaroon-capability-attenuation]: **Cryptographic Macaroon Attenuation**: Capability tokens use HMAC-SHA256 chained caveats to cryptographically restrict execution authority by path, operational verb, and expiration epoch without requiring centralized authorization database lookups at tool dispatch time.
+
+[^fn-microvm-seccomp-filtering]: **Kernel Seccomp Filtering**: In addition to hypervisor virtualization, microVM guest kernels apply strict BPF seccomp filters that deny raw socket creation and unauthorized ioctl calls, restricting tool code execution strictly to standard input and output streams.
+
+[^fn-saga-compensating-idempotency]: **Saga Compensation Idempotency**: Because network failures during unwinding can cause compensating RPCs to be dispatched multiple times, every compensation handler must be strictly idempotent and track external transaction identifiers to avoid duplicate reversals.
+
+[^fn-continuous-trajectory-distillation]: **Continuous Trajectory Distillation**: Offline learning pipelines ingest golden execution traces filtered by deterministic verifiers, training compact student policies via action-masked loss to match frontier-model reasoning traces while reducing inference costs and decode latencies.
+
+[^fn-canary-sequential-testing]: **Sequential Testing for Canary Rollouts**: Production canary gates employ Wald's Sequential Probability Ratio Test (SPRT) to continuously evaluate error-budget depletion and latency percentiles, aborting rollouts early when failure rates exceed nominal baselines at the 99 percent confidence level.
+
+[^fn-multicloud-routing-arbitrage]: **Multi-Cloud Model Arbitrage**: Enterprise orchestration gateways route unprivileged prompt requests across competing hyperscaler endpoints based on real-time spot pricing, queue wait times, and SLA latency targets, automatically falling back to secondary providers during regional degradation.
 
 ### The principle ledger {#sec-vol3-conclusion-principle-ledger}
 
@@ -157,7 +142,7 @@ Every principle in the volume has a place in this architecture, and @tbl-vol3-pr
 | \ref{pri-vol3-trajectory-post-training}  | Verified trajectory post-training                      | V            | None moved (changes the model)            | Weight change is the last rung, trained on externally verified trajectories                              |
 | \ref{pri-vol3-action-masked-loss}        | Observation loss masking                               | V            | None moved                                | Loss covers only tokens the policy emits; observations stay in context without loss                      |
 | \ref{pri-vol3-verifiable-rewards}        | Reinforcement learning against isolated verifiers      | V            | None moved                                | Training learns whatever the check rewards; isolate the verifier and hold out tests                      |
-| \ref{pri-15-tri-axial-evaluation}        | Tri-axial multi-agent evaluation frontier              | VI           | All three, multiplied                     | At equal budget, a topology must be no worse on quality, makespan, and cost per accepted task            |
+| \ref{pri-17-tri-axial-evaluation}        | Tri-axial multi-agent evaluation frontier              | VI           | All three, multiplied                     | At equal budget, a topology must be no worse on quality, makespan, and cost per accepted task            |
 | \ref{pri-vol3-coordination-tax}          | The coordination tax                                   | VI           | All three, multiplied                     | Splitting a task pays only through partitioning, attenuation, or independent exploration                 |
 | \ref{pri-vol3-monotonic-delegation}      | Monotonic delegation                                   | VI           | Authority across agents                   | A child's authority, time, and budget are a subset of what the parent still holds                        |
 | \ref{pri-vol3-release-evidence}          | Causal and statistical release evidence                | VI           | Closure evidence at fleet scale           | Releases are gated statistically on verified state changes joined by one causal trace                    |
@@ -166,6 +151,23 @@ Every principle in the volume has a place in this architecture, and @tbl-vol3-pr
 | \ref{pri-vol3-specification-boundary}    | The specification boundary                             | VII          | Outside the machine                       | The agent can realize a design but cannot author the contract that governs it                            |
 
 : **Principles by Exposure**: The twenty-six principles of this book in the order they were introduced, with the H·S·A exposure each one closes and its invariant in brief. {#tbl-vol3-principle-ledger tbl-colwidths="[4,24,9,21,42]"}
+
+### Quantitative synthesis of agent systems {#sec-vol3-conclusion-pareto-frontier}
+
+The ultimate objective of agentic machine learning systems engineering is co-optimizing execution latency, token expenditure, and task reliability across heterogeneous trajectory workloads. Formally, given a distribution of task contracts $\mathcal{D}$, the runtime supervisor $\mathcal{S}$ and underlying policy weights $\theta$ must solve the joint multi-objective optimization problem defined by the unified Latency-Cost-Reliability Pareto Frontier (@eq-vol3-pareto-frontier):
+
+$$\min_{\theta, \mathcal{S}} \quad \mathbb{E}_{\tau \sim \mathcal{D}} \left[ \mathcal{L}_{\text{latency}}(\tau) + \lambda_{\text{cost}} \cdot \mathcal{C}_{\text{tokens}}(\tau) + \lambda_{\text{rel}} \cdot (1 - \mathcal{R}_{\text{task}}(\tau)) \right]$$ {#eq-vol3-pareto-frontier}
+
+where $\mathcal{L}_{\text{latency}}(\tau)$ denotes end-to-end wall-clock turnaround duration across $H$ interaction turns, $\mathcal{C}_{\text{tokens}}(\tau)$ represents total input and output token consumption amortized over inference serving rates, and $\mathcal{R}_{\text{task}}(\tau) \in \{0, 1\}$ represents the deterministic binary outcome of the external verification oracle. The scalarization multipliers $\lambda_{\text{cost}}$ and $\lambda_{\text{rel}}$ formalize operational trade-offs, weighting token expenditures against latency budgets and unreliability penalties.[^fn-pareto-frontier-cooptimization]
+
+No single architectural mechanism can optimize this tripartite objective in isolation. Instead, the subsystems developed across this book co-optimize @eq-vol3-pareto-frontier through synergistic hardware and software interventions:
+
+1. **Prompt Prefix Caching (Latency-Cost Co-Optimization):** Autoregressive decode iterations are fundamentally bounded by accelerator memory bandwidth (principle \ref{pri-vol3-memory-bandwidth-decoding}), while prefill phases are compute-intensive GEMM operations. By organizing context memory so that static task definitions and tool schemas occupy the leftmost token prefix (@sec-vol3-context-engineering), the serving engine shares physical KV-cache pages across turns via Radix-tree structures (@sec-vol3-kv-cache). This eliminates redundant prefill FLOPs, shrinking per-turn latency $\mathcal{L}_{\text{latency}}(\tau)$ and slashing cumulative prompt token processing charges in $\mathcal{C}_{\text{tokens}}(\tau)$ without truncating working context.
+2. **MicroVM Sandbox Sandboxing (Reliability and Blast-Radius Closure):** Unchecked model actuation creates catastrophic operational hazards, where unhandled tool errors or infinite loops compound failure rates $(1 - \mathcal{R}_{\text{task}})$. Enforcing ephemeral microVM containment beneath the execution layer (principle \ref{pri-vol3-zero-trust-sandboxing}; @sec-vol3-sandboxes) bounds tool execution within strict cgroup memory quotas, network namespaces, and copy-on-write storage layers. If an action fails or corrupts local state, the host supervisor resets the sandbox in milliseconds, preventing trajectory collapse and enabling forward progress.
+3. **Trajectory Post-Training (Deliberation-to-Weight Compilation):** Multi-step test-time deliberation across extended search trees expands both turn count $H$ and cumulative token consumption $\mathcal{C}_{\text{tokens}}(\tau)$. By harvesting golden execution traces from durable transaction logs (@sec-vol3-trajectory-curation) and applying action-masked supervised fine-tuning and reinforcement learning with verifiable rewards (principles \ref{pri-vol3-trajectory-post-training}, \ref{pri-vol3-action-masked-loss}, \ref{pri-vol3-verifiable-rewards}; @sec-vol3-fine-tuning, @sec-vol3-rlvr), the offline lifecycle pipeline distills recurring multi-turn reasoning paths directly into policy weights $\theta$. This parameter adaptation reduces the average turns required to complete tasks, dramatically lowering both token cost $\mathcal{C}_{\text{tokens}}(\tau)$ and turnaround latency $\mathcal{L}_{\text{latency}}(\tau)$ while simultaneously increasing task success $\mathcal{R}_{\text{task}}(\tau)$.
+4. **Verification Enclaves (Sound Invariant Closure):** Relying on subjective model self-evaluation to determine task completion drives unreliability $(1 - \mathcal{R}_{\text{task}})$ toward unacceptable levels due to plausible hallucination. Placing deterministic verification suites (compilers, type checkers, and hermetic integration test harnesses) in sealed execution enclaves out of reach of agent write operations enforces the verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}; @sec-vol3-evaluation). Task deliverables are accepted and committed to production only when mechanical predicates evaluate to exit code 0, driving the empirical unreliability term $(1 - \mathcal{R}_{\text{task}}(\tau))$ to zero for accepted commits.
+
+[^fn-pareto-frontier-cooptimization]: **Pareto Multi-Objective Optimization**: The scalarization weights $\lambda_{\text{cost}}$ and $\lambda_{\text{rel}}$ represent the marginal dollar value of accelerator compute and the economic cost of SLA violations, establishing a rigorous dual decomposition for fleet resource allocation.
 
 Formalizing that ownership starts with the contract every trajectory runs under.
 
@@ -184,10 +186,10 @@ When an unconstrained agent runtime receives an open-ended natural language prom
 
 Each of those questions becomes a bound the runtime enforces before it allocates compute or provisions a sandbox. Horizon becomes three ceilings. A wall-clock timeout $T_{\max}$ keeps hung connections, deadlocked compilers, and slow inference workers from holding a sandbox hostage. A turn ceiling $H_{\max}$ caps the model-environment round trips, because generation has no intrinsic halt condition and a loop that keeps emitting valid tool calls can run indefinitely. A cumulative token cap $M$ across prefill and decode keeps the task from evading its budget by filling its context with retrieval payloads on every turn.
 
-State becomes explicit write boundaries between ephemeral working memory (the context buffer and its KV cache), the durable log that records every model output, tool payload, return code, and runtime intervention, and the authoritative artifacts the task modifies, so that scratchpad reasoning is never mistaken for a modification. Authority becomes capability tokens attenuated to the task's lifetime, a whitelist of tools, mount namespaces, and egress rules, and escrow that holds any irreversible action until an authenticated human signs it. Closure evidence becomes a deterministic predicate the host can evaluate, such as zero exit codes from the compiler and linters, structured test logs, AST invariant checks, and hashes of the generated artifacts. If the host cannot evaluate such a predicate, the task cannot be accepted as complete, whatever the model reports.
+State becomes explicit write boundaries between ephemeral working memory (the context buffer and its KV cache), the durable log that records every model output, tool payload, return code, and runtime intervention, and the authoritative artifacts the task modifies, so that scratchpad reasoning is never mistaken for a modification. Authority becomes capability tokens attenuated to the task's lifetime, a whitelist of tools, mount namespaces, and egress rules, and escrow that holds any irreversible action until an authenticated human signs it. Closure evidence becomes a deterministic predicate the host can evaluate, such as zero exit codes from the compiler and linters, structured test logs, abstract syntax tree (AST) invariant checks, and hashes of the generated artifacts. If the host cannot evaluate such a predicate, the task cannot be accepted as complete, whatever the model reports.
 
 ```{python}
-#| label: lego-18-operating-envelope
+#| label: lego-19-operating-envelope
 #| echo: false
 # │ Show: Sizing the physical resource envelope for containerized agent execution.
 # │ How: Model weights, KV cache per GPU, and inference vs sandbox latency breakdown.
@@ -243,7 +245,7 @@ class SizingPhysicalOperatingEnvelope:
     disk_overlay_str = fmt_memory(disk_overlay, unit="GB", precision=0)
 ```
 
-::: {#nbk-18-operating-envelope .callout-notebook title="Sizing the physical operating envelope"}
+::: {#nbk-19-operating-envelope .callout-notebook title="Sizing the physical operating envelope"}
 Consider an autonomous code-repair agent dispatched to resolve a regression bug in a large C++ service. We must calculate the physical resource envelope required to guarantee containment while providing sufficient operational headroom.
 
 **Given Parameters:**
@@ -358,7 +360,7 @@ By establishing the five-part contract and enforcing its operational envelope at
 
 When an autonomous coding or refactoring agent executes across dozens of iterative turns, state corruption rarely arises from mathematical faults within the transformer's multi-head attention calculations. Instead, it stems from silent cache divergence across uncoordinated memory boundaries. Consider an agent tasked with updating an enterprise software service: at Turn 4, the agent invokes an external tool to refactor a core data structure in a header file. The filesystem snapshot updates immediately, establishing a new authoritative ground truth. Yet, unless the host supervisor enforces an active cache coherence protocol, the system enters a split-brain state. The agent's logical working context retains the pre-mutation snippet extracted at Turn 1; the inference serving engine preserves pre-computed Key-Value (KV) cache activations for the invalidated prompt prefix; and the external retrieval index continues to return vector embeddings representing deprecated method signatures. In the subsequent turn, the model autoregressively generates diffs targeting identifiers that no longer exist on disk. When the compiler rejects the hallucinated diff, the agent generates further speculative compensations, compounding error across tiers until the interaction turn ceiling $H_{\max}$ or token budget $M$ is exhausted.
 
-**An end-to-end design assigns different ownership and lifetime rules to selected context, physical KV state, authoritative artifacts, and durable indexes or logs.** In an agentic computing architecture, memory cannot be modeled as a homogeneous flat buffer or an unstructured append-only chat history. Robust execution requires synthesizing four distinct physical and logical state layers—spanning volatile accelerator High-Bandwidth Memory (HBM), host DRAM, durable retrieval indices, and persistent filesystem artifacts—under explicit ownership domains, deterministic invalidation protocols, and cryptographic provenance guarantees.
+**An end-to-end design assigns different ownership and lifetime rules to selected context, physical KV state, authoritative artifacts, and durable indexes or logs.** In an agentic computing architecture, memory cannot be modeled as a homogeneous flat buffer or an unstructured append-only chat history. Robust execution requires synthesizing four distinct physical and logical state layers—spanning volatile accelerator HBM, host DRAM, durable retrieval indices, and persistent filesystem artifacts—under explicit ownership domains, deterministic invalidation protocols, and cryptographic provenance guarantees.
 
 ::: {.column-margin}
 Alan Jay Smith's foundational survey on cache memories (1982) demonstrated that hierarchical storage systems function by exploiting spatial and temporal locality to present the illusion of a single, uniformly fast, and unbounded memory space. In agentic machine learning systems, this hierarchy bridges the orders-of-magnitude performance and volatility gap between microsecond accelerator tensor memory and persistent, authoritative external environments.
@@ -370,7 +372,7 @@ The memory architecture of an agentic system decomposes into four discrete layer
 
 The first layer is the Logical Working Context, measured in discrete Byte-Pair Encoding (BPE) tokens. This layer constitutes the active evidence window presented directly to the foundation model for its next forward pass. The logical context resides in host system memory during orchestration and is strictly bounded by the model's physical sequence length limit $L_{\max}$ and the task contract's active window budget $S_{\max}$. Owned exclusively by the host agent supervisor runtime, the logical context is ephemeral and mutable across turns. The supervisor continuously manipulates this buffer through structured compaction, sliding-window truncation, observation filtering, and working set selection. The logical context does not represent durable storage; rather, it is a transient, highly selective viewport over the task's broader historical trajectory and environmental state.
 
-The second layer is the Physical Key-Value (KV) Cache, composed of continuous floating-point activation tensors ($\mathbf{K}, \mathbf{V} \in \mathbb{R}^{B \times L \times H \times d_k}$) allocated across the High-Bandwidth Memory (HBM) and host DRAM of the inference serving engine (such as vLLM or SGLang). While the logical context represents discrete symbolic tokens, the physical KV cache materializes the intermediate linear projections computed across every attention layer during the prefill phase (GEMM). Owned entirely by the inference serving engine rather than the agent supervisor, this layer is optimized for high-throughput tensor parallel execution. Modern runtimes manage these tensors through PagedAttention, mapping non-contiguous physical memory pages to logical sequence positions, and structure multi-turn conversations into Radix-tree prefix hierarchies to facilitate zero-copy prefix sharing. The lifecycle of physical KV blocks is decoupled from task logic: blocks are dynamically retained, paged across PCIe buses, or evicted under Least Recently Used (LRU) policies when GPU memory pools face pressure.
+The second layer is the Physical Key-Value (KV) Cache, composed of continuous floating-point activation tensors ($\mathbf{K}, \mathbf{V} \in \mathbb{R}^{B \times L \times H \times d_k}$) allocated across the HBM and host DRAM of the inference serving engine (such as vLLM or SGLang). While the logical context represents discrete symbolic tokens, the physical KV cache materializes the intermediate linear projections computed across every attention layer during the prefill phase (GEMM). Owned entirely by the inference serving engine rather than the agent supervisor, this layer is optimized for high-throughput tensor parallel execution. Modern runtimes manage these tensors through PagedAttention, mapping non-contiguous physical memory pages to logical sequence positions, and structure multi-turn conversations into Radix-tree prefix hierarchies to facilitate zero-copy prefix sharing. The lifecycle of physical KV blocks is decoupled from task logic: blocks are dynamically retained, paged across PCIe buses, or evicted under Least Recently Used (LRU) policies when GPU memory pools face pressure.
 
 The third layer comprises Authoritative External Artifacts, representing the absolute ground-truth state of the external environment. This layer includes the target software repository managed under version control, production database tables, containerized filesystems, and live operating system processes. Authoritative artifacts reside on durable non-volatile media, such as local NVMe arrays or distributed cloud storage. Unlike internal model representations, authoritative artifacts are permanent across agent restarts and can be mutated *strictly* through sandboxed, mediated tool actuation, because the model holds zero ambient authority. The host supervisor must treat this layer as the sole source of truth for task completion; candidate patches, generated reports, or proposed database edits remain speculative until verified against these authoritative records.
 
@@ -420,7 +422,7 @@ Simultaneously, the supervisor invalidates the physical accelerator cache. If th
 Finally, the supervisor enforces coherence across derivative retrieval indexes. Dense vector indices and lexical stores cannot be recomputed synchronously across gigabytes of code within the latency budget of a single interaction turn. To resolve this temporal mismatch, the supervisor applies write-through tombstones to all index entries matching the mutated URI. When the agent subsequently performs semantic retrieval queries, the retrieval gateway filters out tombstoned chunks, ensuring that obsolete embeddings are never returned to the active context buffer. Asynchronous background workers pull modified files from the re-indexing queue, extract updated syntactic chunks, compute fresh embedding vectors, and update the index graph out of band.
 
 ```{python}
-#| label: lego-18-cache-invalidation
+#| label: lego-19-cache-invalidation
 #| echo: false
 # │ Show: Quantitative costs of memory allocation and prefix cache invalidation.
 # │ How: Radix cache hit (512 tokens) vs prefix severing re-prefill (29,184 tokens).
@@ -461,7 +463,7 @@ class CacheInvalidationAgentHierarchy:
     gpu_mem_str = fmt_memory(gpu_mem, unit="GB", precision=0)
 ```
 
-::: {#nbk-18-cache-invalidation .callout-notebook title="Cache invalidation across agent hierarchy"}
+::: {#nbk-19-cache-invalidation .callout-notebook title="Cache invalidation across agent hierarchy"}
 Consider an autonomous software maintenance agent executing on an 8x NVIDIA H100 GPU serving node ({python} CacheInvalidationAgentHierarchy.gpu_mem_str HBM3 per GPU, $3.35\text{ TB/s}$ memory bandwidth per GPU, connected via PCIe Gen5 to host DRAM). We evaluate the quantitative costs of memory allocation and cache invalidation during an iterative refactoring task.
 
 **System Parameters:**
@@ -662,7 +664,7 @@ When an unrecoverable failure occurs at step $k$—such as a non-advancing loop,
 2. *Forward Recovery (Checkpoint Retry):* Alternatively, if the failure was transient (such as a network socket timeout or temporary rate limit), the supervisor inspects the WAL, restores the agent's logical context to the exact snapshot preceding turn $k$, modifies execution parameters (e.g., backing off or selecting an alternate mirror), and resumes forward execution.
 
 ```{python}
-#| label: lego-18-latency-overhead-mediation
+#| label: lego-19-latency-overhead-mediation
 #| echo: false
 # │ Show: Latency overhead of six-stage defensive harness (126.3 ms vs 2560 ms model decode).
 # │ How: Grammar masking, capability tokens, WAL fsync, microVM, sanitization, Saga.
@@ -698,7 +700,7 @@ class OverheadDefensiveExecutionMediation:
     overhead_pct_str = fmt_percent(overhead_pct, precision=1, style="symbol")
 ```
 
-::: {#nbk-18-latency-overhead-mediation .callout-notebook title="Overhead of defensive execution mediation"}
+::: {#nbk-19-latency-overhead-mediation .callout-notebook title="Overhead of defensive execution mediation"}
 A senior systems engineer must determine whether routing every model action through a six-stage defensive harness introduces unacceptable latency compared to running unconstrained shell commands. Assume an agent executes a {python} OverheadDefensiveExecutionMediation.n_turns_str-turn refactoring task. The foundation model emits an average of 80 completion tokens per turn at an autoregressive decode speed of $32\,\text{ms}$ per token.
 
 The physical hardware environment features an 8-core host CPU with PCIe 4.0 NVMe storage and an isolated microVM pool:
@@ -773,7 +775,7 @@ By decoupling execution monitoring from the probabilistic neural engine, the Sem
 
 Synthesizing an execution harness—with grammar logit constraints, capability gates, write-ahead logging, isolated microVM actuation, observation normalization, compensating Sagas, and semantic watchdogs—solves the mechanical dilemma of safe real-world actuation. Yet, an execution harness merely enforces constraints and bounds failure; it does not expand the underlying problem-solving capability of the agent. When an agent operating within a hardened harness consistently trips circuit breakers or fails its task contracts, systems engineers face an architectural challenge: at what layer of the system should engineering effort be invested? Rather than naively jumping to expensive foundation model fine-tuning or uncoordinated multi-agent swarms, an engineering discipline requires ascending an evidence-based intervention ladder—progressing methodically from context engineering and tool schema redesign through runtime guards, weight adaptation, and multi-agent delegation. This decision hierarchy is synthesized next.
 
-::: {#chk-18-intervention-ladder .callout-checkpoint title="Evaluating the systems intervention ladder and failure remediation"}
+::: {#chk-19-intervention-ladder .callout-checkpoint title="Evaluating the systems intervention ladder and failure remediation"}
 Before examining empirical safety cases and multi-tier verification pyramids, verify your understanding of architectural escalation:
 
 - [ ] **Escalation hierarchy**: Why must systems engineers exhaust prompt optimization and tool schema refinement before considering weight adaptation?
@@ -995,7 +997,7 @@ class WeightBreakEven:
     payback_months_str = fmt(payback_months, precision=1)
 ```
 
-::: {#nbk-18-break-even-weight-adaptation .callout-notebook title="When fine-tuning pays"}
+::: {#nbk-19-break-even-weight-adaptation .callout-notebook title="When fine-tuning pays"}
 **Problem**: A code-review agent handles a steady stream of pull requests. After context and tool fixes, it still needs a long system prompt with tool definitions and worked demonstrations. A team proposes fine-tuning a smaller model to absorb that prompt. At the volume the team expects, does the investment pay back within a quarter?
 
 **Variables** (illustrative scenario values):
@@ -1010,106 +1012,7 @@ class WeightBreakEven:
 **Systems insight**: The margin is thin, and the answer turns on inputs the team controls. Doubling the volume halves the payback, while a change to the tool definitions that forces retraining resets it, so the stability of the task contract matters as much as the per-task saving.
 :::
 
-The third decision is knowing what a climb cannot buy. However thoroughly a model is fine-tuned or optimized, it still samples from a distribution with nonzero support over every continuation at any finite temperature $\tau$:
-
-$$P(a_t = w_i \mid s_t) = \frac{\exp\left(z_i / \tau\right)}{\sum_j \exp\left(z_j / \tau\right)}$$
-
-Over a horizon of $H$ turns, the probability that some turn violates an invariant therefore stays strictly positive:
-
-$$P(\text{violation} \mid H) = 1 - \prod_{t=1}^{H} \left(1 - P_{\text{error}}(t)\right) > 0$$
-
-Training lowers $P_{\text{error}}$ and never drives it to zero. It therefore cannot be how a system meets the invariant closure principle (\ref{pri-invariant-closure}). Bounds on spend, isolation, and irreversible action stay with the runtime at every rung, and task correctness still requires evidence collected at acceptance. A better model reduces how often those mechanisms fire. It does not let the system remove them.
-
-The top rung carries its own warning. Splitting a failing task across agents turns a local loop into a distributed system, with messages, partial failure, and reconciliation on the critical path. Under the coordination tax (principle \ref{pri-vol3-coordination-tax}), that cost is repaid only by partitioning context, attenuating authority, or exploring independently. When a single agent fails because its task is ambiguous, more agents inherit the same ambiguity and add disagreement to it.
-
 If the total projected task volume across the operational lifecycle of the agent is less than $N^*$, escalating to weight adaptation is economically irrational: the engineering organization expends more capital building and maintaining the fine-tuning pipeline than it recovers in token savings. Conversely, if $N \gg N^*$, every incremental task executed past $N^*$ yields pure marginal margin expansion and latency reductions.
-
-```{python}
-#| label: lego-18-break-even-weight-adaptation
-#| echo: false
-# │ Show: Economic break-even analysis of supervised fine-tuning vs prompt engineering.
-# │ How: Fixed upfront investment ($12,504) amortized over per-task savings ($0.1712).
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-from mlsysim.core.units import *
-from mlsysim.fmt import check, fmt_count, fmt_usd
-
-class BreakEvenWeightAdaptation:
-    t_base_in = 12_000
-    h_base = 5
-    t_base_out = 800
-    p_in = 2.50e-6
-    p_out = 10.00e-6
-
-    c_step_base = (t_base_in * p_in) + (t_base_out * p_out)
-    c_task_base = h_base * c_step_base
-
-    c_data = 4000.0
-    c_compute = 8 * 18 * 3.50
-    c_human = 8000.0
-    c_invest = c_data + c_compute + c_human
-
-    t_adapt_in = 1500
-    h_adapt = 4
-    t_adapt_out = 800
-    p_in_adapt = 1.00e-6
-    p_out_adapt = 4.00e-6
-
-    c_step_adapt = (t_adapt_in * p_in_adapt) + (t_adapt_out * p_out_adapt)
-    c_task_adapt = h_adapt * c_step_adapt
-
-    delta_c_task = c_task_base - c_task_adapt
-    n_star = c_invest / delta_c_task
-
-    monthly_requests = 20_000
-    payback_months = n_star / monthly_requests
-    monthly_savings = monthly_requests * delta_c_task
-
-    check(abs(c_task_base - 0.190) < 1e-4, "c_task_base")
-    check(abs(c_invest - 12504.0) < 1e-4, "c_invest")
-    check(abs(c_task_adapt - 0.0188) < 1e-4, "c_task_adapt")
-    check(abs(delta_c_task - 0.1712) < 1e-4, "delta_c_task")
-    check(abs(n_star - 73038) < 2, "n_star")
-
-    payback_months_str = fmt_count(payback_months, label="month", precision=2, allow_fractional=True)
-    monthly_savings_str = fmt_usd(3400, precision=0)
-```
-
-::: {#nbk-18-break-even-weight-adaptation .callout-notebook title="Break-even analysis of weight adaptation"}
-An enterprise deployment processes continuous pull requests using an automated code-review and bug-fixing agent.
-
-**Baseline Architecture (Level 1 + Level 3):**
-To reliably format patches and call repository search tools, the base foundation model requires a system prompt containing extensive schema definitions and three complete repository repair demonstrations, totaling $T_{\text{base, in}} = 12{,}000$ input tokens. Over an average task of $H = 5$ tool-interaction steps, the agent emits $T_{\text{base, out}} = 800$ output tokens per step. The commercial inference API charges $p_{\text{in}} = \$2.50 \times 10^{-6}$ per token and $p_{\text{out}} = \$10.00 \times 10^{-6}$ per token.
-$$\begin{aligned}
-C_{\text{step, base}} &= (12{,}000 \times \$2.50 \times 10^{-6}) + (800 \times \$10.00 \times 10^{-6}) \\
-&= \$0.030 + \$0.008 = \$0.038\text{ per step} \\
-C_{\text{task, base}} &= 5 \times \$0.038 = \$0.190\text{ per pull request}
-\end{aligned}$$
-
-**Escalated Architecture (Level 4 SFT):**
-The systems team fine-tunes an open-weights model to internalize the tool interfaces and patch-generation syntax.
-- Dataset curation and synthetic generation: $C_{\text{data}} = \$4{,}000$
-- Cloud GPU cluster fine-tuning (8 $\times$ H100 SXM5 for 18 hours at $\$3.50/\text{GPU-hr}$): $C_{\text{compute}} = 8 \times 18 \times \$3.50 = \$504$
-- Engineering validation and red-teaming: $C_{\text{human}} = \$8{,}000$
-- Total upfront investment: $C_{\text{invest}} = \$4{,}000 + \$504 + \$8{,}000 = \$12{,}504$
-
-Because tool schemas are compiled into weights, the prompt overhead drops to $T_{\text{adapt, in}} = 1{,}500$ input tokens. Due to superior compliance, average steps drop to $H_{\text{adapt}} = 4$ steps, with identical output generation ($T_{\text{out}} = 800$). The self-hosted inference cluster amortizes to an equivalent token cost of $p_{\text{in}}' = \$1.00 \times 10^{-6}$ and $p_{\text{out}}' = \$4.00 \times 10^{-6}$.
-$$\begin{aligned}
-C_{\text{step, adapt}} &= (1{,}500 \times \$1.00 \times 10^{-6}) + (800 \times \$4.00 \times 10^{-6}) \\
-&= \$0.0015 + \$0.0032 = \$0.0047\text{ per step} \\
-C_{\text{task, adapt}} &= 4 \times \$0.0047 = \$0.0188\text{ per pull request}
-\end{aligned}$$
-
-**Break-Even Evaluation:**
-$$\begin{aligned}
-\Delta C_{\text{task}} &= \$0.190 - \$0.0188 = \$0.1712\text{ saved per task} \\
-N^* &= \frac{\$12{,}504}{\$0.1712} \approx 73{,}038\text{ pull requests}
-\end{aligned}$$
-
-*Systems Conclusion:* If the enterprise processes $20{,}000$ pull requests per month, the upfront fine-tuning investment breaks even in approximately {python} BreakEvenWeightAdaptation.payback_months_str. Beyond this request volume, the organization saves over {python} BreakEvenWeightAdaptation.monthly_savings_str monthly while reducing end-to-end task turnaround latency by $62\%$ due to the drastically reduced prefill GEMM computation on input tokens.
-:::
-
----
 
 ### Architectural trade-offs
 
@@ -1123,9 +1026,9 @@ Because the softmax distribution has nonzero support across the entire vocabular
 
 $$P(\text{violation} \mid H) = 1 - \prod_{t=1}^{H} \left(1 - P_{\text{error}}(t)\right) > 0$$
 
-No amount of policy gradient optimization can drive $P(\text{violation})$ to absolute zero across an infinite operational horizon. Consequently, relying on fine-tuned weights to guarantee that an agent will never drop database tables or bypass security checks is fundamentally flawed. Training therefore cannot be how a system meets the invariant closure principle (\ref{pri-invariant-closure}). Its bounded safety, resource, and isolation properties must be closed mechanically, by Level 3 runtime guards, capability boundaries that leave the model zero ambient authority, and grammar-constrained decoding in the host harness, and task correctness still requires evidence collected at the endpoint.
+Training lowers $P_{\text{error}}$ and never drives it to zero. It therefore cannot be how a system meets the invariant closure principle (\ref{pri-invariant-closure}). Bounds on spend, isolation, and irreversible action stay with the runtime at every rung, and task correctness still requires evidence collected at acceptance. A better model reduces how often those mechanisms fire; it does not let the system remove them.
 
-Similarly, the impulse to deploy Level 6 multi-agent swarms frequently violates the classical software engineering dictum articulated by Frederick P. Brooks Jr. [@brooks1987no]: *never mistake accidental complexity for essential complexity*. When a single-agent system fails to converge, the failure often reflects accidental complexity introduced by poor working memory hygiene, noisy retrieval logs, or ambiguous tool documentation. Fragmenting this poorly specified task across multiple autonomous agents does not eliminate the underlying ambiguity; it compounds the problem by introducing distributed consensus overhead, state divergence, and cascading failure modes.
+The top rung carries its own warning. Splitting a failing task across agents turns a local loop into a distributed system, with messages, partial failure, and reconciliation on the critical path. Under the coordination tax (principle \ref{pri-vol3-coordination-tax}), that cost is repaid only by partitioning context, attenuating authority, or exploring independently. Similarly, the impulse to deploy Level 6 multi-agent swarms frequently violates the classical software engineering dictum articulated by Frederick P. Brooks Jr. [@brooks1987no]: *never mistake accidental complexity for essential complexity*. When a single-agent system fails to converge, the failure often reflects accidental complexity introduced by poor working memory hygiene, noisy retrieval logs, or ambiguous tool documentation. Fragmenting this poorly specified task across multiple autonomous agents does not eliminate the underlying ambiguity; it compounds the problem by introducing distributed consensus overhead, state divergence, and cascading failure modes.
 
 Before any systems engineer authorizes the escalation of a failing agentic pipeline to higher intervention tiers, the failure mode must pass through the formal triage protocol formalized in @lst-vol3-ladder-triage.
 
@@ -1233,13 +1136,15 @@ While Tier 1 guarantees that an action does not violate static syntax or securit
 **Statistical Release Gates:** As established in @sec-vol3-evaluation, point estimates of agent success rates are statistically meaningless without confidence bounds. Release criteria must be formulated over the lower bound of the two-sided Wilson score interval at confidence level $1 - \alpha$.
 :::
 
-A hermetic gym provides a fully isolated, snapshot-isolated replica of the target operating environment—containing ephemeral databases, synthetic API endpoints, mock file systems, and deterministic network latency simulators. The candidate agent is executed across $N$ independent, randomized test fixtures representing both nominal workflows and adversarial edge cases (e.g., network partitions, corrupted input schemas, and hallucination-inducing tool observations).
+A hermetic gym provides a fully isolated, snapshot-isolated replica of the target operating environment—containing ephemeral databases, synthetic API endpoints, mock file systems, and deterministic network latency simulators.[^fn-stateless-verifier-sandboxes] The candidate agent is executed across $N$ independent, randomized test fixtures representing both nominal workflows and adversarial edge cases (e.g., network partitions, corrupted input schemas, and hallucination-inducing tool observations).
 
 Evaluation across Tier 2 produces statistical pass rates. To guarantee that a model checkpoint or prompt configuration does not introduce subtle regressions, systems engineers establish strict statistical release criteria based on the lower bound of the Wilson score confidence interval $\hat{p}_{\text{lower}}$:
 
 $$\hat{p}_{\text{lower}} \ge \Theta_{\text{target}}$$
 
-If an agent requires an empirical task success rate of $95\%$ with $99\%$ statistical confidence ($\alpha = 0.01$), and testing across $N = 500$ held-out fixtures yields 480 successes, the empirical pass rate is $\hat{p} = 0.960$. Calculating the Wilson lower bound yields $\hat{p}_{\text{lower}} \approx 0.934$. Because $0.934 < 0.950$, the candidate release fails the Tier 2 gate, compelling the engineering team to expand the test corpus or harden the policy before production promotion.
+If an agent requires an empirical task success rate of 95 percent with 99 percent statistical confidence ($\alpha = 0.01$), and testing across $N = 500$ held-out fixtures yields 480 successes, the empirical pass rate is $\hat{p} = 0.960$. Calculating the Wilson lower bound yields $\hat{p}_{\text{lower}} \approx 0.934$. Because $0.934 < 0.950$, the candidate release fails the Tier 2 gate, compelling the engineering team to expand the test corpus or harden the policy before production promotion.
+
+[^fn-stateless-verifier-sandboxes]: **Stateless Verifier Sandboxes**: Acceptance verification suites execute within ephemeral microVM containers provisioned with read-only root filesystems, preventing compromised agent artifacts from poisoning host testing environments or mutating evaluation fixtures.
 
 #### Tier 3: Canary runtime containment {.unnumbered}
 
@@ -1254,7 +1159,7 @@ No offline benchmark suite, however extensive, captures the full entropy of live
 
 : **Canary Containment Controls**: Tier 3 Canary Containment Subsystem Specifications and Enforcement Controls. {#tbl-vol3-canary-containment-architecture}
 
-When a candidate agent configuration passes Tiers 1 and 2, it is deployed to a minimal canary cohort processing a tiny fraction (e.g., $1\%$ to $5\%$) of production traffic. As formalized in @tbl-vol3-canary-containment-architecture, Tier 3 wraps the live agent inside three non-negotiable containment mechanisms:
+When a candidate agent configuration passes Tiers 1 and 2, it is deployed to a minimal canary cohort processing a tiny fraction (e.g., 1 percent to 5 percent) of production traffic. As formalized in @tbl-vol3-canary-containment-architecture, Tier 3 wraps the live agent inside three non-negotiable containment mechanisms:
 
 1. **MicroVM Isolation and Syscall Traps:** As analyzed in @sec-vol3-sandboxes, the agent runtime executes within an unprivileged MicroVM (e.g., Firecracker) or user-space kernel sandbox (e.g., gVisor). A restrictive `seccomp-bpf` filter intercepts and logs all system calls. Any unauthorized syscall (such as an attempt to invoke `ptrace` or bind to an unapproved network interface) immediately triggers an asynchronous kernel trap, freezing the container image for forensic analysis.
 2. **Shadow Execution and Read-Only Dry Runs:** Where operational semantics permit, the canary agent runs in *shadow mode*: it receives real production observations and computes candidate actions, but all state-mutating tool calls are rerouted to a mock execution layer or evaluated as dry runs. The shadow outputs are diffed asynchronously against the actions taken by the stable production system.
@@ -1273,7 +1178,7 @@ When a candidate agent configuration passes Tiers 1 and 2, it is deployed to a m
 : **Verification Pyramid Comparison**: Operational comparison of the Three-Tier Verification Pyramid. {#tbl-verification-pyramid}
 
 ```{python}
-#| label: lego-18-canary-cohorts-error-budget
+#| label: lego-19-canary-cohorts-error-budget
 #| echo: false
 # │ Show: Sizing canary cohorts and error-budget burn rate (14.4 hours to trip).
 # │ How: 2% fleet budget limit (60 failures) vs 5% canary regression (100 failures/day).
@@ -1308,12 +1213,12 @@ class CanaryCohortsErrorBudget:
     failures_contained_str = fmt_int(failures_contained)
 ```
 
-::: {#nbk-18-canary-cohorts-error-budget .callout-notebook title="Sizing canary cohorts and error-budget depletion"}
-A large-scale enterprise agent fleet executes $100{,}000$ automated administrative workflows per day. The service-level objective (SLO) guarantees that $99.9\%$ of all workflow trajectories complete without safety violations or human intervention, corresponding to an allowable 30-day error budget of:
+::: {#nbk-19-canary-cohorts-error-budget .callout-notebook title="Sizing canary cohorts and error-budget depletion"}
+A large-scale enterprise agent fleet executes $100{,}000$ automated administrative workflows per day. The service-level objective (SLO) guarantees that 99.9 percent of all workflow trajectories complete without safety violations or human intervention, corresponding to an allowable 30-day error budget of:
 
 $$E_{\text{budget}} = 30 \times 100{,}000 \times (1 - 0.999) = 3{,}000 \text{ allowed trajectory failures}$$
 
-The systems team deploys a newly fine-tuned policy checkpoint $\pi_{\theta_{\text{new}}}$ to a canary cohort handling a traffic fraction $f_c = 0.02$ ($2{,}000$ workflows/day). Unknown to the operators, a subtle alignment regression causes $\pi_{\theta_{\text{new}}}$ to fail on $5\%$ of real-world trajectories (a failure rate $p_f = 0.05$). The telemetry engine is configured to trigger an automated rollback circuit breaker if the canary burns more than $2\%$ of the fleet's total 30-day error budget.
+The systems team deploys a newly fine-tuned policy checkpoint $\pi_{\theta_{\text{new}}}$ to a canary cohort handling a traffic fraction $f_c = 0.02$ ($2{,}000$ workflows/day). Unknown to the operators, a subtle alignment regression causes $\pi_{\theta_{\text{new}}}$ to fail on 5 percent of real-world trajectories (a failure rate $p_f = 0.05$). The telemetry engine is configured to trigger an automated rollback circuit breaker if the canary burns more than 2 percent of the fleet's total 30-day error budget.
 
 We compute the physical detection latency and total failure exposure before the system terminates the rollout:
 
@@ -1329,7 +1234,7 @@ We compute the physical detection latency and total failure exposure before the 
 4. **Blast-Radius Containment:**
    Across the {python} CanaryCohortsErrorBudget.trip_time_hours_str of execution, exactly {python} CanaryCohortsErrorBudget.failures_contained_str failures occur before the canary is automatically severed and drained. Had this policy been released directly to the entire fleet ($f_c = 1.0$), the system would have generated:
    $$\text{Failures}_{\text{uncontained}} = 100{,}000 \times 0.05 \times 0.60 = 3{,}000 \text{ failures}$$
-   The multi-tier canary gate successfully restricts failure exposure to $2\%$ of the total error budget, preventing catastrophic exhaustion of the fleet's operational reliability buffer.
+   The multi-tier canary gate successfully restricts failure exposure to 2 percent of the total error budget, preventing catastrophic exhaustion of the fleet's operational reliability buffer.
 :::
 
 ### Blast-radius minimization
@@ -1344,7 +1249,7 @@ Finally, the architecture establishes formal *operational escalation paths*. Whe
 
 As we reflect on the capabilities of the agentic system, what timeless software engineering principles govern what AI can and cannot solve? The architecture of safety cases, mechanical verifiers, and sandboxed runtimes underscores a profound reality: automating the generation of code and actions does not eliminate the intellectual burden of software engineering. To understand the fundamental limits of agentic delegation, we must return to Frederick Brooks’ classic distinction between accidental and essential complexity.
 
-::: {#chk-18-safety-cases-and-blast-radius .callout-checkpoint title="Evaluating empirical safety cases and blast-radius containment"}
+::: {#chk-19-safety-cases-and-blast-radius .callout-checkpoint title="Evaluating empirical safety cases and blast-radius containment"}
 Before examining essential complexity and the limits of autonomous code generation, verify your understanding of assurance architectures:
 
 - [ ] **Multi-tier verification**: How do deterministic mechanical verifiers, statistical evaluation gyms, and canary telemetry combine into an auditable safety case?
@@ -1372,7 +1277,7 @@ Four decades ago, Frederick P. Brooks Jr. established the foundational distincti
 ![](images/svg/ch18/brooks_essential_complexity.svg){width="95%"}
 :::
 
-The mathematical implications of Brooks' dichotomy for modern agentic computing are plotted in @fig-vol3-brooks-essential-complexity. In Panel A, total project engineering duration $T$ is decomposed into accidental implementation friction and irreducible essential architecture ($T_{\text{ess}} = 48\text{ hours}$ for the LSM tree storage engine refactor analyzed in \ref{nbk-18-compression-complexity}). As the model's accidental acceleration factor $S_{\text{acc}}$ scales from $1\times$ to $20\times$, the ideal turnaround curve (solid blue line) rapidly flattens against the horizontal asymptote $T_{\text{ess}}$: driving syntax generation time to zero cannot compress the human intellectual effort required to prove state invariants, verify recovery semantics, and design threat boundaries. Moreover, when empirical realities are accounted for (dashed orange curve), auditing high-volume candidate pull requests and constructing non-circular integration fixtures introduces an auditing overhead that prevents total duration from ever reaching the theoretical minimum. In Panel B, Amdahl's Law formalizes the resulting net speedup ceilings $S_{\text{net}} = 1 / [(1 - f_{\text{acc}}) + f_{\text{acc}} / S_{\text{acc}}]$. For tasks where accidental friction accounts for $60\%$ of effort ($f_{\text{acc}} = 0.60$), the maximum productivity speedup is mathematically capped at $2.5\times$, while deep architectural workloads ($f_{\text{acc}} = 0.40$) hit an unyielding ceiling of $1.67\times$, demonstrating why scaling token emission rates alone cannot revolutionize systems software delivery.
+The mathematical implications of Brooks' dichotomy for modern agentic computing are plotted in @fig-vol3-brooks-essential-complexity. In Panel A, total project engineering duration $T$ is decomposed into accidental implementation friction and irreducible essential architecture ($T_{\text{ess}} = 48\text{ hours}$ for the LSM tree storage engine refactor analyzed in \ref{nbk-19-compression-complexity}). As the model's accidental acceleration factor $S_{\text{acc}}$ scales from $1\times$ to $20\times$, the ideal turnaround curve (solid blue line) rapidly flattens against the horizontal asymptote $T_{\text{ess}}$: driving syntax generation time to zero cannot compress the human intellectual effort required to prove state invariants, verify recovery semantics, and design threat boundaries. Moreover, when empirical realities are accounted for (dashed orange curve), auditing high-volume candidate pull requests and constructing non-circular integration fixtures introduces an auditing overhead that prevents total duration from ever reaching the theoretical minimum. In Panel B, Amdahl's Law formalizes the resulting net speedup ceilings $S_{\text{net}} = 1 / [(1 - f_{\text{acc}}) + f_{\text{acc}} / S_{\text{acc}}]$. For tasks where accidental friction accounts for 60 percent of effort ($f_{\text{acc}} = 0.60$), the maximum productivity speedup is mathematically capped at $2.5\times$, while deep architectural workloads ($f_{\text{acc}} = 0.40$) hit an unyielding ceiling of $1.67\times$, demonstrating why scaling token emission rates alone cannot revolutionize systems software delivery.
 
 ::: {.column-margin}
 **Peter Naur on Theory Building (1985):**
@@ -1407,7 +1312,7 @@ Even if the agent runtime drives the accidental realization time to zero ($S_{\t
 $$\lim_{S_{\text{acc}} \to \infty} S_{\text{net}} = \frac{1}{1 - f_{\text{acc}}}$$
 
 ```{python}
-#| label: lego-18-compression-complexity
+#| label: lego-19-compression-complexity
 #| echo: false
 # │ Show: Brooks' Amdahl limit when accelerating accidental vs essential software complexity.
 # │ How: 12x accidental acceleration yields only 2.0x net speedup due to 6-hour auditing overhead.
@@ -1443,7 +1348,7 @@ class CompressionAccidentalComplexity:
     audit_time_str = fmt_time(t_audit, "h", style="word", precision=0)
 ```
 
-::: {#nbk-18-compression-complexity .callout-notebook title="Compression of accidental complexity"}
+::: {#nbk-19-compression-complexity .callout-notebook title="Compression of accidental complexity"}
 **Problem Statement:**
 A systems engineering team is refactoring a high-throughput Log-Structured Merge (LSM) tree storage engine to support transactional snapshots with multi-version concurrency control (MVCC).
 
@@ -1565,7 +1470,7 @@ The third digital challenge is the combinatorial difficulty of assigning blame o
 At step $t = 840$, an end-to-end load test fails with an out-of-memory crash. Determining which prior action precipitated the failure represents an ill-conditioned inverse problem. Did the failure stem from an erroneous kernel tunable introduced at step $t = 42$, a misparsed metrics log at step $t = 310$, or an inherently flawed architectural hypothesis formed at step $t = 2$?
 
 ```{python}
-#| label: lego-18-backtracking-cost
+#| label: lego-19-backtracking-cost
 #| echo: false
 # │ Show: Combinatorial cost of backtracking search and intermediate checkpointing.
 # │ How: 4^50 global search space reduced to 1,024 stage paths (1,244 s recovery).
@@ -1593,7 +1498,7 @@ class CombinatorialCostBacktrackingSearch:
     recovery_time_min_str = fmt_time(recovery_time_min, "min", style="word", precision=0)
 ```
 
-::: {#nbk-18-backtracking-cost .callout-notebook title="Combinatorial cost of backtracking search"}
+::: {#nbk-19-backtracking-cost .callout-notebook title="Combinatorial cost of backtracking search"}
 To appreciate the systems cost of credit assignment failure, consider an agent executing a software migration task with a maximum horizon of $T_{\max} = 50$ steps. At each state $s_t$, the model evaluates an average branching factor of $B = 4$ candidate tool actions.
 
 Assume the host harness detects an invariant violation only at the terminal boundary $t = T_{\max}$ through an end-to-end integration test. If the supervisor must identify the root-cause failure via unguided retrospective search, the theoretical state space is:
@@ -1775,7 +1680,23 @@ Empirical profiling of failed agent trajectories reveals that the vast majority 
 The architectural mitigation is strict adherence to the Systems Intervention Ladder. Systems engineers must exhaustively evaluate and optimize lower-tier interventions before ascending to higher-complexity tiers. Teams must first refine in-context state management, pruning obsolete observation tokens and enriching the prompt with authoritative system state. Second, they must redesign the tool interface: decomposing composite actions into orthogonal, atomic RPC endpoints with explicit schemas and rich, structured error returns. Third, they must implement deterministic runtime guards that intercept and repair predictable execution mistakes. Only when these low-overhead, highly inspectable systems mechanisms have been provably exhausted should the engineering team contemplate model fine-tuning, RLVR, or multi-agent delegation for isolated, heterogeneous security domains.
 :::
 
-Having confronted the operational fallacies and architectural pitfalls that destabilize production deployments, we are prepared to synthesize the volume's complete conceptual architecture into an integrated operational ledger. We now distill these design principles into a unified structural summary, connecting each subsystem to the foundational engineering invariants that govern dependable agent design.
+Having confronted the operational fallacies and architectural pitfalls that destabilize production deployments, we are prepared to synthesize this book's complete conceptual architecture into an integrated operational ledger. We now distill these design principles into a unified structural summary, connecting each subsystem to the foundational engineering invariants that govern dependable agent design.
+
+## The Machine Learning Systems Curriculum Arc {#sec-vol3-conclusion-curriculum-arc}
+
+The architectural progression developed across this series reflects a fundamental shift in the primary unit of computation, formal system abstractions, and physical governing laws of machine learning systems (@fig-vol3-conclusion-curriculum-arc). Across each tier of the curriculum, the systems stack advances to support higher-level computational autonomy while systematically closing new physical bottlenecks and failure modes.
+
+In *Model Architectures & Training Foundations*, the design center is single-node execution. The primary unit of computation is the stateless tensor operation executing over nanosecond-to-microsecond intervals. Systems optimization is governed by the classical roofline model ($I = \text{FLOP/Byte}$ operational intensity), bounded by the physical wall of high-bandwidth memory (HBM) bandwidth and SRAM register spills, and structured around fail-stop IEEE 754 floating-point kernel determinism.
+
+In *Distributed Systems & Scalable Inference*, the execution unit expands to batched training steps and multi-tenant inference requests executing over millisecond time horizons. The core abstractions shift to 3D tensor, pipeline, and data-parallel meshes (TP/PP/DP), iteration-level continuous batch schedulers, and paged Key-Value attention blocks. Serving efficiency is governed by inter-node bisection bandwidth and pipeline bubbles ($F_{\text{bubble}}$), constrained by fabric network skew and accelerator capacity stranding, under Byzantine and straggler fault models.
+
+This text, *Agentic Machine Learning Systems*, unifies those single-node and distributed serving foundations into the stateful, self-directing Stochastic Computer. Here, the execution unit shifts from isolated batches to multi-turn trajectories spanning seconds to hours ($10^1$ to $10^4\text{ s}$). The core systems abstractions become the Agent Control Block (ACB), Radix prefix attention trees, append-only Write-Ahead Logs (WAL), and compensating Saga ledgers. System reliability is no longer governed by tensor floating-point accuracy, but by compounding multi-step error rates ($p^H$), action reversibility gradients ($A^{-1}$), context rot, and irreversible physical side effects. The central engineering challenge is enforcing invariant closure around an unprivileged inference engine that holds zero ambient authority.
+
+Looking across the horizon, *Physical AI: Embodied and Real-Time Systems* projects these principles across the digital-physical divide. When the Stochastic Computer acts not upon isolated microVM containers, ephemeral filesystems, or digital APIs, but on continuous physical environments—such as autonomous vehicles, kinetic manipulators, and robotic drones—the execution model changes fundamentally. The execution unit shrinks to real-time sensorimotor feedback cycles ($10^{-2}\text{ s}$), discrete tool RPCs are replaced by continuous cyber-physical control loops, and latencies become safety-critical deadlines ($\tau$). In physical embodiment, thermodynamic dissipation and kinetic momentum cannot be undone by a compensating database transaction: once an actuator coil is energized, physical state transitions irreversibly. The architectural rigor established in this book—unprivileged proposal generation, rigid sandboxed containment, out-of-band supervisory watchdogs, and deterministic verification gates—serves as the indispensable software foundation for dependable embodied AI.
+
+::: {#fig-vol3-conclusion-curriculum-arc fig-env="figure" fig-pos="htb" fig-cap="**The Machine Learning Systems Curriculum Dependency Spine**: Curricular progression across the machine learning systems curriculum, tracing the evolution from single-node tensor operations and distributed serving clusters to stateful agentic runtimes and real-time physical AI systems." fig-alt="Comparison matrix showing the progression across the Machine Learning Systems curriculum, detailing execution units, core abstractions, governing laws, physical walls, and fault models."}
+![](images/svg/mlsys_curriculum_arc.svg){width="100%"}
+:::
 
 ## Summary {#sec-vol3-conclusion-summary}
 
@@ -1793,7 +1714,7 @@ This division of labor resolves the core architectural dilemma of agentic machin
 
 Running every subsystem on one trajectory sharpened three principles. Because sampling at any finite temperature leaves a violation with nonzero probability at every horizon, training cannot meet the invariant closure principle (\ref{pri-invariant-closure}), and closure stays mechanical however capable the model becomes. The Saga registration stage and the frontier analysis placed the pivot boundary (principle \ref{pri-vol3-reversibility-sagas}) on a gradient, with sandbox writes invertible, external digital actions at best compensable, and physical actuation neither. The Brooks analysis showed that the verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) pays off only after someone has stated what the check must cover, and that statement is work the machine leaves with the engineer.
 
-::: {#psp-18-architect-responsibility .callout-perspective title="The architect's responsibility: From Wilkes to Software 3.0"}
+::: {#psp-19-architect-responsibility .callout-perspective title="The architect's responsibility: From Wilkes to Software 3.0"}
 In 1949, Maurice Wilkes climbed the stairs to the Cambridge University Mathematical Laboratory and realized with sudden clarity that a good part of the remainder of his life was going to be spent in finding errors in his own programs. In the era of Software 3.0, the systems engineer confronts a transformation of that realization. Our challenge is no longer merely diagnosing logic defects in deterministic code authored line by line; it is architecting, governing, and verifying systems that write and execute their own programs under stochastic uncertainty.
 
 The foundation model supplies learned computation—pattern completion, inductive generalization, and speculative synthesis—while the surrounding computer system supplies state selection, controlled interaction, supervision, transactional recovery, and empirical evidence of completion. Treating those responsibilities as one unified, accountable trajectory is the central discipline of the agentic machine learning system.

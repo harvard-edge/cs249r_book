@@ -64,7 +64,9 @@ The left panel of @fig-vol3-task-cost-treemap decomposes one illustrative task. 
 
 $$C_{\text{attempt}} = \sum_{k=1}^K \left( C_{\text{in}, k} + C_{\text{out}, k} + C_{\text{tools}, k} + C_{\text{sandbox}, k} \right) + C_{\text{verify}} + C_{\text{human}}$$ {#eq-vol3-attempt-cost}
 
-where $C_{\text{in}, k}$ pays for the context sent on turn $k$ (system prompt, tool definitions, the transcript so far, and the newest tool result), $C_{\text{out}, k}$ pays for the tokens the model generates, including reasoning tokens and tool-call arguments, $C_{\text{tools}, k}$ covers fees charged by external services, $C_{\text{sandbox}, k}$ covers the isolated environment that executes the agent's commands, $C_{\text{verify}}$ covers the tests and checks that decide acceptance, and $C_{\text{human}}$ covers review when the runtime escalates. The input term of @eq-vol3-attempt-cost grows with every turn, because the model keeps nothing between calls and each turn re-sends a longer context (@sec-vol3-foundation-model-cost). That growth is why the next section treats caching as the first lever.
+where $C_{\text{in}, k}$ pays for the context sent on turn $k$ (system prompt, tool definitions, the transcript so far, and the newest tool result), $C_{\text{out}, k}$ pays for the tokens the model generates, including reasoning tokens and tool-call arguments, $C_{\text{tools}, k}$ covers fees charged by external services, $C_{\text{sandbox}, k}$ covers the isolated environment that executes the agent's commands, $C_{\text{verify}}$ covers the tests and checks that decide acceptance, and $C_{\text{human}}$ covers review when the runtime escalates.[^fn-token-pricing-asymmetry] The input term of @eq-vol3-attempt-cost grows with every turn, because the model keeps nothing between calls and each turn re-sends a longer context (@sec-vol3-foundation-model-cost). That growth is why the next section treats caching as the first lever.
+
+[^fn-token-pricing-asymmetry]: **Token Pricing Asymmetry**: Commercial model APIs price output generation three to five times higher than input prefill. During prompt prefill, high arithmetic intensity saturates matrix multiplication units on Tensor Cores, amortizing memory reads across large token batches. Autoregressive decode operates at an arithmetic intensity near unity, stalling tensor pipelines on high-bandwidth memory (HBM) bandwidth and driving up hosting costs per emitted token.
 
 One attempt is not one accepted task. The right panel of @fig-vol3-task-cost-treemap shows why. If each step of an eight-step task succeeds independently with probability $p$, the whole task succeeds with probability $p^8$, and every failed attempt is paid for in full before it is discarded. Trajectory goodput and the accepted task (principle \ref{pri-vol3-trajectory-goodput}) names what a fleet must therefore minimize, the effective cost per accepted task. If a fleet makes $N$ attempts and $N_{\text{acc}}$ of them are accepted,
 
@@ -168,7 +170,7 @@ class TokenPriceFallacy:
     b_odds_str = fmt_int(b_odds)
 ```
 
-::: {#nbk-17-the-token-price-fallacy-in-automated .callout-notebook title="The token-price fallacy in automated bug repair"}
+::: {#nbk-18-the-token-price-fallacy-in-automated .callout-notebook title="The token-price fallacy in automated bug repair"}
 
 **Problem**: A bug-fixing agent can run on a frontier model or on a low-cost model whose input tokens are `{python} TokenPriceFallacy.in_discount_mult_str` cheaper. The illustrative workload in @tbl-vol3-token-price-fallacy retries each ticket until an attempt passes the regression tests. Which model costs less per accepted fix?
 
@@ -200,7 +202,23 @@ By turn thirty, a coding agent sends the model a context of tens of thousands of
 
 ### What a cache hit is worth
 
-Providers that support prompt caching bill input tokens read from a cached prefix at a fraction of the normal input price, and bill only the tokens after the prefix at full price. With an append-only transcript, turn $k$ extends turn $k-1$, so under ideal reuse each turn pays full price only for what it appended. The same trajectory that @sec-vol3-foundation-model-cost counted in tokens can now be priced.
+Providers that support prompt caching bill input tokens read from a cached prefix at a fraction of the normal input price, and bill only the tokens after the prefix at full price.[^fn-prefix-cache-routing] With an append-only transcript, turn $k$ extends turn $k-1$, so under ideal reuse each turn pays full price only for what it appended. The same trajectory that @sec-vol3-foundation-model-cost counted in tokens can now be priced.
+
+[^fn-prefix-cache-routing]: **Prefix Cache Routing Optimization**: Multi-tenant serving gateways maximize prefix cache reuse across distributed worker pools by deploying tenant-aware consistent hashing on prompt SHA-256 prefixes. Route-level affinity directs subsequent agent turns to the physical node hosting the warm radix-tree attention state in GPU memory. Random round-robin dispatch across nodes drops effective prefix cache hit rates toward zero in large clusters.
+
+To formalize token expenditure across a multi-turn trajectory, consider an agent executing over a session horizon of $T$ turns. On turn $t \in \{1, \dots, T\}$, the agent submits an input prompt of length $L_{\text{prompt}, t}$ and generates an output sequence of length $L_{\text{gen}, t}$. Given unit pricing rates $C_{\text{in}}$ for input tokens and $C_{\text{out}}$ for output tokens, the cumulative token cost of the session is:
+
+$$C_{\text{session}} = \sum_{t=1}^T \left( C_{\text{in}} \cdot L_{\text{prompt}, t} + C_{\text{out}} \cdot L_{\text{gen}, t} \right)$$ {#eq-vol3-multiturn-session-cost}
+
+In an uncompacted, append-only trajectory, the model preserves no internal KV-cache state across discrete invocation boundaries. Consequently, the input prompt at turn $t$ must explicitly retransmit the immutable base system prompt and tool declarations of length $L_0$, concatenated with the complete chronological history of all preceding model completions and tool environment observations:
+
+$$L_{\text{prompt}, t} = L_0 + \sum_{i=1}^{t-1} \left( L_{\text{gen}, i} + L_{\text{tool\_obs}, i} \right)$$ {#eq-vol3-context-growth-recurrence}
+
+Assuming that each turn produces an average incremental payload of $\Delta L = \bar{L}_{\text{gen}} + \bar{L}_{\text{tool\_obs}}$ tokens, the input prompt length expands linearly as $L_{\text{prompt}, t} = L_0 + (t - 1)\Delta L$. Substituting the recurrence of @eq-vol3-context-growth-recurrence into @eq-vol3-multiturn-session-cost demonstrates that the cumulative prompt tokens ingested by the serving cluster scale quadratically with the trajectory horizon:
+
+$$\sum_{t=1}^T L_{\text{prompt}, t} = \sum_{t=1}^T \Big( L_0 + (t - 1)\Delta L \Big) = T \cdot L_0 + \Delta L \cdot \frac{T(T - 1)}{2} = \mathcal{O}(T^2)$$ {#eq-vol3-quadratic-context-growth}
+
+As formalized in @eq-vol3-quadratic-context-growth, without prefix caching or active compaction, the cost of multi-turn inference is dominated by redundant prefill processing that scales as $\mathcal{O}(T^2)$. Prefix caching mitigates this quadratic penalty: by storing the intermediate Key-Value (KV) attention states of the invariant prefix in accelerator memory, turns $t \ge 2$ incur full input pricing $C_{\text{in}}$ only on the fresh delta $\Delta L$, while reading the cached history at a substantial discount $\beta \cdot C_{\text{in}}$ ($\beta \in [0.10, 0.50]$).
 
 ```{python}
 #| label: calc-vol3-agent-economics-prefix-cache
@@ -295,7 +313,7 @@ class PrefixCacheCost:
     breakeven_turns_str = fmt_int(breakeven_turns)
 ```
 
-::: {#nbk-17-prefix-cache-dollars .callout-notebook title="Pricing a thirty-turn trajectory with and without a cache"}
+::: {#nbk-18-prefix-cache-dollars .callout-notebook title="Pricing a thirty-turn trajectory with and without a cache"}
 
 **Problem**: The coding agent of @sec-vol3-foundation-model-cost runs `{python} PrefixCacheCost.turns_str` turns. Its first prompt is `{python} PrefixCacheCost.s0_str` tokens, each turn appends `{python} PrefixCacheCost.delta_str` tokens, and each turn emits `{python} PrefixCacheCost.k_turn_str` output tokens. Input costs `{python} PrefixCacheCost.p_in_str` and output `{python} PrefixCacheCost.p_out_str` per million tokens, and cached input is billed at `{python} PrefixCacheCost.cached_pct_str` percent of the input price. What does the trajectory cost with and without prefix caching?
 
@@ -309,9 +327,23 @@ The layout rules of @sec-vol3-context-engineering-staging exist to protect this 
 
 ### The price of compaction
 
-Compaction (@sec-vol3-context-engineering-compaction) shrinks the context when it grows too long, usually by replacing old turns with a summary. On a cached trajectory, compaction has a price that is easy to miss. The summary is new text, so the turn after compaction reads its whole context at full price, and the summary itself costs a model call. In the notebook's trajectory, suppose the runtime compacts at turn `{python} PrefixCacheCost.compact_turn_str`, when the context holds `{python} PrefixCacheCost.ctx_at_str` tokens, down to `{python} PrefixCacheCost.compact_to_str` tokens, with a summary call that emits `{python} PrefixCacheCost.summary_out_str` tokens. Without compaction, the remaining `{python} PrefixCacheCost.rest_str` turns cost `{python} PrefixCacheCost.keep_cost_str` in input. With it, they cost `{python} PrefixCacheCost.comp_cost_str`, plus `{python} PrefixCacheCost.summary_cost_str` for the summary, `{python} PrefixCacheCost.comp_total_str` in all. Compaction pays back its cache miss and its summary call only after about `{python} PrefixCacheCost.breakeven_turns_str` more turns.
+Compaction (@sec-vol3-context-engineering-compaction) shrinks the context when it grows too long, usually by replacing old turns with a summary.[^fn-kvcache-compression-lossiness] On a cached trajectory, compaction has a price that is easy to miss. The summary is new text, so the turn after compaction reads its whole context at full price, and the summary itself costs an auxiliary model invocation.
+
+To prove when context compaction is economically justified, consider an agent trajectory where the active context has accumulated to $L_{\text{current}}$ tokens. A compaction call invokes a summarization model, consuming $L_{\text{current}}$ input tokens and emitting a condensed summary of length $L_{\text{summary}}$ tokens at cost $C_{\text{compaction\_call}}$:
+
+$$C_{\text{compaction\_call}} = C_{\text{in}} \cdot L_{\text{current}} + C_{\text{out}} \cdot L_{\text{summary}}$$ {#eq-vol3-compaction-call-cost}
+
+The compacted prompt contains $L_{\text{compact}} < L_{\text{current}}$ tokens, yielding a per-turn context reduction of $\Delta L_{\text{tokens}} = L_{\text{current}} - L_{\text{compact}}$. On each subsequent turn, the runtime avoids processing $\Delta L_{\text{tokens}}$ input tokens, saving $C_{\text{in\_token}} \cdot \Delta L_{\text{tokens}}$ per turn, where $C_{\text{in\_token}}$ represents the effective marginal cost of prompt tokens. Compaction amortizes its upfront execution overhead across future trajectory steps. Equating the upfront compaction expenditure in @eq-vol3-compaction-call-cost with the cumulative downstream savings over $T^*$ subsequent turns, $C_{\text{compaction\_call}} = T^* \cdot (C_{\text{in\_token}} \cdot \Delta L_{\text{tokens}})$, yields the compaction break-even horizon:
+
+$$T^* = \frac{C_{\text{compaction\_call}}}{C_{\text{in\_token}} \cdot \Delta L_{\text{tokens}}}$$ {#eq-vol3-compaction-breakeven}
+
+If the expected remaining trajectory horizon $T_{\text{remaining}}$ is less than the break-even threshold ($T_{\text{remaining}} < T^*$), executing compaction increases the net financial cost of the session. Compaction is economically viable only when $T_{\text{remaining}} \ge T^*$, or when the physical context window limit of the accelerator cluster necessitates eviction to prevent out-of-memory faults.
+
+In the notebook's trajectory, suppose the runtime compacts at turn `{python} PrefixCacheCost.compact_turn_str`, when the context holds `{python} PrefixCacheCost.ctx_at_str` tokens, down to `{python} PrefixCacheCost.compact_to_str` tokens, with a summary call that emits `{python} PrefixCacheCost.summary_out_str` tokens. Without compaction, the remaining `{python} PrefixCacheCost.rest_str` turns cost `{python} PrefixCacheCost.keep_cost_str` in input. With it, they cost `{python} PrefixCacheCost.comp_cost_str`, plus `{python} PrefixCacheCost.summary_cost_str` for the summary, `{python} PrefixCacheCost.comp_total_str` in all. Guided by @eq-vol3-compaction-breakeven, compaction pays back its cache miss and its summary call only after about `{python} PrefixCacheCost.breakeven_turns_str` more turns.
 
 Two consequences follow. Compacting early in a long trajectory saves money, and compacting near the end costs money, so a runtime that compacts on a fixed schedule should at least compare the expected remaining horizon against the break-even. More often the decision is not about money at all. Compaction is justified by the context window and by decision quality as the context fills with stale material (@sec-vol3-context-engineering-context-rot), and the dollar account only says what that quality costs.
+
+[^fn-kvcache-compression-lossiness]: **KV-Cache Compression Lossiness**: Compressing key-value states via 4-bit integer or FP8 quantization reduces memory capacity demands by up to 75 percent, but introduces precision degradation in long-context attention scores. Similarly, lossy eviction policies that discard intermediate attention keys compromise associative recall on code syntax and variable bindings. Runtimes must calibrate quantization schemes to ensure needle-in-a-haystack retrieval accuracy remains intact.
 
 ### Reasoning and retry budgets
 
@@ -539,7 +571,9 @@ If the draft proposes $\gamma$ tokens per round, a draft token costs a fraction 
 
 $$S_{\text{spec}} = \frac{\bar{\alpha} + 1}{\gamma r + 1}$$ {#eq-vol3-spec-speedup}
 
-and the technique pays only when $\bar{\alpha} > \gamma r$. Acceptance depends on how predictable the output is. Structured output and code scaffolding are predictable, and a draft model agrees with the target on most tokens. Open-ended planning and high-temperature sampling are not, and the draft's work is wasted. @Tbl-speculative-entropy-profiles evaluates @eq-vol3-spec-speedup for illustrative acceptance rates across agent workloads.
+and the technique pays only when $\bar{\alpha} > \gamma r$. Acceptance depends on how predictable the output is.[^fn-speculative-verification-efficiency] Structured output and code scaffolding are predictable, and a draft model agrees with the target on most tokens. Open-ended planning and high-temperature sampling are not, and the draft's work is wasted. @Tbl-speculative-entropy-profiles evaluates @eq-vol3-spec-speedup for illustrative acceptance rates across agent workloads.
+
+[^fn-speculative-verification-efficiency]: **Speculative Verification Efficiency**: In tool-actuation phases, structured token sequences such as JSON syntax, schema parameter keys, and delimiter tags exhibit low Shannon entropy. Small draft models predict these deterministic tokens with acceptance rates exceeding 85 percent, allowing the target model to verify multiple tokens in a single forward pass. This shifts the execution regime from memory-bandwidth-bound decode toward compute-bound parallel verification.
 
 ```{python}
 #| label: calc-vol3-agent-economics-spec-gate
@@ -603,7 +637,7 @@ class SpecGate:
 
 Two conditions outside the table decide whether to turn speculation on. The first is the critical path. A `{python} SpecGate.s_code_mult_str` faster generator applied to a trajectory whose model share is under a tenth changes its duration by a few percent, so speculation belongs on the latency-critical calls that the trace shows on the path, not everywhere. The second is load. Speculation spends extra arithmetic to save time for one stream, which is free only while the serving system has idle arithmetic. Under heavy batching the arithmetic is no longer idle, the draft model also occupies memory that would otherwise hold other trajectories' attention state, and speculation can lower the throughput of the whole fleet. Serving systems therefore enable it when queues are short and a request is latency-critical, and disable it when the batch is full. The same rule applies to every acceleration in this section, which pays only on the critical path and only while its resource cost is slack.
 
-::: {#chk-17-whole-trajectory-economics .callout-checkpoint title="Cost and time per accepted task"}
+::: {#chk-18-whole-trajectory-economics .callout-checkpoint title="Cost and time per accepted task"}
 
 Before routing calls across models, check the accounting so far:
 
@@ -640,7 +674,17 @@ A production runtime typically has three kinds of callee, summarized in @tbl-vol
 
 A runtime can choose a tier in two ways. Static routing classifies each call before it is made, from the task description or the call's features, and sends it to one tier. It adds almost nothing to latency, and it fails in a predictable way. A request that looks simple ("fix the failing assertion in the lock test") may require tracing a race across many files, and a router that judges by the request sends it to a model that loops until the budget runs out. Escalation routing tries the cheapest plausible tier and moves up only when that tier's output fails a check. It pays for the failed attempts, and in return its decisions rest on evidence about the output rather than a guess about the input.
 
-Learned routers sit between the two. The harness's own logs (@sec-vol3-evaluation-tracing) record which tier's output passed verification on which kind of call, which is exactly the labeled data a router needs, and a classifier trained on it predicts whether a cheap tier is likely to pass. The router's errors have asymmetric costs. Routing down wrongly costs one failed cheap attempt plus the escalation. Routing up wrongly costs the price difference between tiers. Its threshold should be set from those two costs, and its predictions still feed an escalation gate, so a router that is wrong costs money but not correctness.
+Learned routers sit between the two. The harness's own logs (@sec-vol3-evaluation-tracing) record which tier's output passed verification on which kind of call, which is exactly the labeled data a router needs, and a classifier trained on it predicts whether a cheap tier is likely to pass. The router's errors have asymmetric costs.[^fn-bayes-cost-asymmetry] Routing down wrongly costs one failed cheap attempt plus the escalation. Routing up wrongly costs the price difference between tiers. Its threshold should be set from those two costs, and its predictions still feed an escalation gate, so a router that is wrong costs money but not correctness.
+
+To derive the Bayes optimal model routing threshold, let $C_{\text{small}}$ and $C_{\text{frontier}}$ denote the invocation costs of an inexpensive local or specialized model and an expensive frontier model, respectively ($C_{\text{frontier}} \gg C_{\text{small}}$). Let $V_{\text{task\_success}}$ represent the gross economic value realized when an agent completes a task successfully. The expected economic return from dispatching directly to the frontier model is $\mathbb{E}[\Pi_{\text{frontier}}] = V_{\text{task\_success}} \cdot P(\text{success} \mid \text{frontier}) - C_{\text{frontier}}$, while dispatching to the small model yields $\mathbb{E}[\Pi_{\text{small}}] = V_{\text{task\_success}} \cdot P(\text{success} \mid \text{small}) - C_{\text{small}}$.
+
+Routing directly to the frontier model is Bayes optimal if and only if its expected return exceeds that of the smaller model: $\mathbb{E}[\Pi_{\text{frontier}}] > \mathbb{E}[\Pi_{\text{small}}]$. Defining the marginal capability gain as $\Delta P(\text{success}) = P(\text{success} \mid \text{frontier}) - P(\text{success} \mid \text{small})$, this inequality rearranges to define the Bayes optimal routing threshold $\tau^*$:
+
+$$\tau^* = \frac{C_{\text{frontier}} - C_{\text{small}}}{V_{\text{task\_success}} \cdot \Delta P(\text{success})}$$ {#eq-vol3-bayes-routing-threshold}
+
+A learned routing classifier that estimates task difficulty should route to the frontier model whenever the predicted marginal probability of success $\Delta P(\text{success})$ satisfies $\Delta P(\text{success}) > \frac{C_{\text{frontier}} - C_{\text{small}}}{V_{\text{task\_success}}}$, or equivalently when the normalized routing metric exceeds $\tau^* \le 1$ in @eq-vol3-bayes-routing-threshold. When the task stakes $V_{\text{task\_success}}$ are high, $\tau^*$ drops, making aggressive frontier routing economically rational; for routine, low-stakes subtasks, $\tau^*$ rises, mandating execution on the inexpensive tier.
+
+[^fn-bayes-cost-asymmetry]: **Asymmetric Routing Loss**: In model cascades, classification errors exhibit pronounced financial asymmetry. Misclassifying an easy subtask as requiring frontier intelligence incurs a bounded cost penalty equal to the tier price differential. Conversely, routing a difficult multi-file diagnostic task to a small model induces complete trajectory failure, wasting sandbox runtime, tool tokens, and downstream human remediation fees.
 
 ::: {#fig-vol3-model-cascade-flowchart fig-env="figure" fig-pos="htb" fig-cap="**A Verifier-Gated Model Cascade**: Tasks enter a small-model tier whose output must pass a schema and syntax gate; failures escalate with only the verifier's diagnostic to a generalist tier gated by builds and fast tests, and remaining failures escalate to a frontier tier gated by the full regression suite. In this illustrative example 60 percent of tasks exit at tier 1 and 28 percent at tier 2, so the expected cost is \\$0.0084 per task against \\$0.0600 for sending every task to the frontier model, with a mean latency of 1.32 s." fig-alt="Flowchart of a three-tier cascade. Tier 1, a 3-billion-parameter model with a schema gate, passes 60 percent of tasks and escalates 40 percent. Tier 2, a 14-billion-parameter generalist with a build and unit-test gate, passes 70 percent of what it receives, 28 percent of all tasks, and escalates 12 percent. Tier 3, a frontier model with a full regression gate, passes 95 percent of what it receives and leaves 0.6 percent unresolved. A ledger below compares an expected cascade cost of 0.0084 dollars per task with a monolithic frontier cost of 0.06 dollars."}
 ![](images/svg/multi_agent_token_cascade_routing_v2.svg)
@@ -734,7 +778,7 @@ class CascadeCost:
     tail_rise_str = fmt_percent(round(tail_rise, 2), precision=0)
 ```
 
-::: {#nbk-17-cost-and-latency-trade-offs-in .callout-notebook title="Cost and latency in a three-tier cascade"}
+::: {#nbk-18-cost-and-latency-trade-offs-in .callout-notebook title="Cost and latency in a three-tier cascade"}
 
 **Problem**: A coding fleet serves `{python} CascadeCost.tasks_str` small editing tasks a day. Tier calls cost `{python} CascadeCost.c1_str`, `{python} CascadeCost.c2_str`, and `{python} CascadeCost.c3_str` and take `{python} CascadeCost.t1_str`, `{python} CascadeCost.t2_str`, and `{python} CascadeCost.t3_str` ms. The tier 1 and tier 2 gates take `{python} CascadeCost.v1_str` and `{python} CascadeCost.v2_str` ms. Tier 1 fails with probability `{python} CascadeCost.f1_str`, and tier 2 fails `{python} CascadeCost.f2_str` of what it receives. Should the fleet cascade, and what does it cost in latency?
 
@@ -868,7 +912,9 @@ Two consequences follow from how trajectories issue calls. Calls arrive in corre
 
 ### Provider rate limits
 
-For a team that calls a hosted model, the first capacity limit it meets is usually not hardware but the provider's quota, expressed as tokens per minute and requests per minute. The quota caps the rate at which trajectories can run, not how many can be open. Each trajectory needs a fixed number of tokens to finish, so in steady state token demand is the trajectory rate times tokens per trajectory, whatever the trajectories' lifetimes. Suppose trajectories start at `{python} TrajectoryCapacity.lam_str` per minute, and each makes `{python} TrajectoryCapacity.calls_str` calls of `{python} TrajectoryCapacity.tok_call_str` input tokens, `{python} TrajectoryCapacity.tok_traj_str` tokens per trajectory. Against a limit of `{python} TrajectoryCapacity.tpm_limit_str` tokens per minute, demand uses `{python} TrajectoryCapacity.util_str` percent of the quota, and the fleet can sustain at most `{python} TrajectoryCapacity.lam_max_str` trajectories per minute. With a lifetime of `{python} TrajectoryCapacity.life_min_str` minutes, Little's law puts `{python} TrajectoryCapacity.conc_str` trajectories in flight, each issuing about `{python} TrajectoryCapacity.per_traj_rate_str` calls per minute.
+For a team that calls a hosted model, the first capacity limit it meets is usually not hardware but the provider's quota, expressed as tokens per minute and requests per minute.[^fn-token-bucket-policing] The quota caps the rate at which trajectories can run, not how many can be open. Each trajectory needs a fixed number of tokens to finish, so in steady state token demand is the trajectory rate times tokens per trajectory, whatever the trajectories' lifetimes. Suppose trajectories start at `{python} TrajectoryCapacity.lam_str` per minute, and each makes `{python} TrajectoryCapacity.calls_str` calls of `{python} TrajectoryCapacity.tok_call_str` input tokens, `{python} TrajectoryCapacity.tok_traj_str` tokens per trajectory. Against a limit of `{python} TrajectoryCapacity.tpm_limit_str` tokens per minute, demand uses `{python} TrajectoryCapacity.util_str` percent of the quota, and the fleet can sustain at most `{python} TrajectoryCapacity.lam_max_str` trajectories per minute. With a lifetime of `{python} TrajectoryCapacity.life_min_str` minutes, Little's law puts `{python} TrajectoryCapacity.conc_str` trajectories in flight, each issuing about `{python} TrajectoryCapacity.per_traj_rate_str` calls per minute.
+
+[^fn-token-bucket-policing]: **Token Bucket Gateway Policing**: Provider rate limits enforce dual token-bucket constraints governing both requests per minute (RPM) and tokens per minute (TPM). Because multi-turn agent trajectories submit prompts that expand monotonically, an agent fleet can exhaust TPM quotas while consuming less than 10 percent of allocated RPM headroom. Runtimes maintain client-side token-bucket emulators to shape traffic and prevent HTTP 429 backoff storms.
 
 Running this close to a quota has the same consequence as running a server close to saturation. Throttled calls retry after backoff, trajectories live longer, they hold sandboxes and cache longer, and their deadlines slip. Three levers apply. Prefix caching lowers the bill, and whether it also lowers usage against the quota depends on how the provider counts cached tokens, which the capacity plan must check rather than assume. Short, reliable trajectories consume fewer tokens per accepted task, which raises the accepted-task rate under a fixed quota as directly as a higher quota would. Discounted batch endpoints, which return results within hours, suit single-call work such as offline evaluation runs, trajectory scoring, and curation, but not a multi-turn loop in which each turn must wait for the previous one.
 
@@ -908,7 +954,7 @@ $$P(\text{Tail Incident}) = 1 - (1 - 0.01)^{30} = 1 - 0.7397 \approx 0.26$$
 
 More than one-quarter of all executed agent trajectories will suffer an extreme tail delay. Because an agent trajectory executes synchronously across sequential turns, a single tail delay on turn 7 cascades directly into the total time-to-completion, often causing the host orchestrator to breach its global Service Level Objective (SLO).
 
-::: {#nbk-17-sizing-queue-capacity-and-tail .callout-notebook title="Queue sizing under heavy-tailed traffic"}
+::: {#nbk-18-sizing-queue-capacity-and-tail .callout-notebook title="Queue sizing under heavy-tailed traffic"}
 An infrastructure team operates an inference cluster dedicated to serving intermediate agent reasoning loops. The cluster processes an aggregate arrival rate of $\lambda = 160\text{ requests/sec}$ distributed across pooled accelerator workers. Profiling reveals that the mean model service time is $\mathbb{E}[S] = 20\text{ ms}$ ($\mu = 50\text{ req/sec/worker}$), but the workload exhibits extreme bimodality: 80 percent of requests are fast JSON schema evaluations ($\mathbb{E}[S_1] = 5\text{ ms}$), while 20 percent are extended chain-of-thought generations ($\mathbb{E}[S_2] = 80\text{ ms}$). Empirical measurements indicate an arrival coefficient of variation $C_a = 1.4$ and a service coefficient of variation $C_s = 2.2$.
 
 The engineering lead proposes provisioning $k = 4$ worker nodes to run at an average utilization of $\rho = \frac{\lambda}{k \mu} = \frac{160}{4 \times 50} = 0.80$. Compute the expected queue wait time $W_q$ under this configuration using the Allen-Cunneen approximation, and contrast it with an alternative provisioning plan of $k = 5$ workers ($\rho = 0.64$).
@@ -961,9 +1007,9 @@ The agent-aware MLFQ structures accelerator capacity into distinct priority tier
 
 To maintain architectural stability, an agent MLFQ must resolve two critical systems challenges: *starvation* and *KV-cache memory churn*.
 
-If high-priority interactive traffic in $Q_0$ and $Q_1$ saturates the cluster, long-running batch trajectories in $Q_2$ will starve indefinitely. To enforce forward progress invariants, the scheduler implements periodic *priority boosting*. At regular time intervals $T_{\text{boost}}$ (e.g., every 60 seconds), all unserviced tasks across all priority tiers are flushed back into $Q_0$, resetting their elapsed quantum counters and ensuring that background trajectories periodically advance (\ref{not-17-mlfq-transition-protocol}).
+If high-priority interactive traffic in $Q_0$ and $Q_1$ saturates the cluster, long-running batch trajectories in $Q_2$ will starve indefinitely. To enforce forward progress invariants, the scheduler implements periodic *priority boosting*. At regular time intervals $T_{\text{boost}}$ (e.g., every 60 seconds), all unserviced tasks across all priority tiers are flushed back into $Q_0$, resetting their elapsed quantum counters and ensuring that background trajectories periodically advance (\ref{not-18-mlfq-transition-protocol}).
 
-::: {#not-17-mlfq-transition-protocol .callout-note title="Multi-level feedback queue discipline"}
+::: {#not-18-mlfq-transition-protocol .callout-note title="Multi-level feedback queue discipline"}
 The cluster scheduler partitions agent inference jobs into prioritized execution tiers with deterministic transition rules:
 
 1. **Ingress Allocation:** All incoming invocations enter highest-priority queue $Q_0$ allocated an initial token quantum of $\Delta_0 = 64$ tokens.
@@ -975,7 +1021,7 @@ The cluster scheduler partitions agent inference jobs into prioritized execution
 5. **Tiered Memory Retention:** Preempted $Q_1$ tasks retain physical HBM allocations during grace interval $\tau_{\text{grace}}$; prolonged memory pressure migrates $Q_2$ blocks to host memory via PagedAttention.
 :::
 
-The second challenge involves physical memory management during preemption. When a $Q_2$ job is preempted to free tensor cores for an incoming $Q_0$ burst, evicting its accumulated 4,000-token KV cache to host CPU RAM consumes valuable interconnect bandwidth. If the preempted task is re-admitted milliseconds later, swapping those physical pages back into HBM creates severe PCIe/NVLink thrashing. The MLFQ scheduler mitigates this via *tiered eviction thresholds*: preempted $Q_1$ tasks retain their physical HBM page allocations in a suspended state for a grace period $\tau_{\text{grace}}$. Only if memory pressure persists and $Q_0$ exhausts the free HBM frame pool does the PagedAttention memory manager trigger asynchronous page migration to host DDR5 memory. The comparative trade-offs among classical and adaptive queueing disciplines are evaluated in @tbl-vol3-scheduling-disciplines.
+The second challenge involves physical memory management during preemption. When a $Q_2$ job is preempted to free tensor cores for an incoming $Q_0$ burst, evicting its accumulated 4,000-token KV cache to host CPU RAM consumes valuable interconnect bandwidth. If the preempted task is re-admitted milliseconds later, swapping those physical pages back into HBM creates severe PCIe/NVLink thrashing. The MLFQ scheduler mitigates this via *tiered eviction thresholds*: preempted $Q_1$ tasks retain their physical HBM page allocations in a suspended state for a grace period $\tau_{\text{grace}}$. Only if memory pressure persists and $Q_0$ exhausts the free HBM frame pool does the PagedAttention memory manager trigger asynchronous page migration to host DDR5 memory.[^fn-paged-attention-swapping] The comparative trade-offs among classical and adaptive queueing disciplines are evaluated in @tbl-vol3-scheduling-disciplines.
 
 | Scheduling Discipline                 | Mean Wait ($W_q$) | Tail Latency ($P_{99}$)                | Starvation Risk                | Preemption Overhead                  | Memory Efficiency (KV Cache)   |
 |:--------------------------------------|:------------------|:---------------------------------------|:-------------------------------|:-------------------------------------|:-------------------------------|
@@ -985,11 +1031,37 @@ The second challenge involves physical memory management during preemption. When
 
 : **Comparative Analysis of Cluster Scheduling Disciplines for Agent Inferences**: Mean wait times, tail latency bounds, starvation risks, preemption overheads, and memory retention characteristics. {#tbl-vol3-scheduling-disciplines}
 
+#### PagedAttention memory tiering break-even {.unnumbered}
+
+To formulate the break-even economics of memory tiering across GPU High-Bandwidth Memory (HBM), host system DDR5 DRAM, and local NVMe solid-state drives, consider an agent holding an active context of $L$ tokens. In PagedAttention runtimes, the key-value cache footprint $S_{\text{KV}}$ (in bytes) across $N_{\text{layers}}$ transformer layers with hidden head dimension $d_{\text{head}}$ and $N_{\text{heads}}$ key-value heads is given by @eq-vol3-kvcache-footprint:
+
+$$S_{\text{KV}} = 2 \times N_{\text{layers}} \times d_{\text{head}} \times N_{\text{heads}} \times L \times \text{sizeof}(\text{dtype})$$ {#eq-vol3-kvcache-footprint}
+
+When an agent yields its generation slot for an idle interval $T_{\text{idle}}$ (such as during sandbox tool execution or human review), holding $S_{\text{KV}}$ resident in GPU HBM incurs an opportunity cost rate $c_{\text{HBM}}$ (measured in dollars per gigabyte-second, reflecting high accelerator capital amortization):
+
+$$C_{\text{HBM}}(T_{\text{idle}}) = T_{\text{idle}} \cdot c_{\text{HBM}} \cdot S_{\text{KV}}$$ {#eq-vol3-hbm-retention-cost}
+
+Alternatively, swapping those pages to host DDR5 memory over a PCIe Gen5 $\times 16$ interconnect ($B_{\text{PCIe}} \approx 64\text{ GB/s}$) incurs round-trip bus transfer latency $t_{\text{swap}} = 2 \cdot S_{\text{KV}} / B_{\text{PCIe}}$ at bandwidth cost rate $c_{\text{bus}}$, plus host DRAM retention cost rate $c_{\text{DRAM}} \ll c_{\text{HBM}}$:
+
+$$C_{\text{swap, DRAM}}(T_{\text{idle}}) = \frac{2 \cdot S_{\text{KV}}}{B_{\text{PCIe}}} \cdot c_{\text{bus}} + T_{\text{idle}} \cdot c_{\text{DRAM}} \cdot S_{\text{KV}}$$ {#eq-vol3-dram-swap-cost}
+
+Equating the retention cost in @eq-vol3-hbm-retention-cost with the swapping cost in @eq-vol3-dram-swap-cost yields the PagedAttention HBM-to-DRAM migration break-even threshold $T_{\text{HBM}\to\text{DRAM}}^*$:
+
+$$T_{\text{HBM}\to\text{DRAM}}^* = \frac{2 \cdot c_{\text{bus}}}{B_{\text{PCIe}} \cdot (c_{\text{HBM}} - c_{\text{DRAM}})}$$ {#eq-vol3-pagedattention-tiering-breakeven}
+
+For idle durations $T_{\text{idle}} < T_{\text{HBM}\to\text{DRAM}}^* \approx 70\text{ ms}$, eviction causes bus thrashing and degrades throughput; the scheduler enforces the grace period $\tau_{\text{grace}} \ge T_{\text{HBM}\to\text{DRAM}}^*$ before initiating DMA transfers. If tool execution latency extends across multiple seconds, host DRAM can in turn be offloaded to local NVMe storage ($B_{\text{NVMe}} \approx 7\text{ GB/s}$, holding rate $c_{\text{NVMe}} \ll c_{\text{DRAM}}$). The corresponding DRAM-to-NVMe break-even threshold is:
+
+$$T_{\text{DRAM}\to\text{NVMe}}^* = \frac{2 \cdot c_{\text{NVMe\_bus}}}{B_{\text{NVMe}} \cdot (c_{\text{DRAM}} - c_{\text{NVMe}})}$$ {#eq-vol3-nvme-tiering-breakeven}
+
+Tiering memory according to @eq-vol3-pagedattention-tiering-breakeven and @eq-vol3-nvme-tiering-breakeven protects scarce GPU HBM for active decodes while preserving prefill attention history for long-horizon agent trajectories.
+
+[^fn-paged-attention-swapping]: **PagedAttention Swapping Bandwidth**: Migrating virtual KV-cache blocks between accelerator HBM and host system DDR5 RAM is governed by PCIe 5.0 $\times 16$ interconnect bandwidth, nominally 64 GB/s bidirectional. Transferring an 8 GB attention cache for an active 32,000-token session consumes approximately 125 ms of link time. The memory manager stages transfers asynchronously via direct memory access (DMA) engines to avoid blocking concurrent decode iterations.
+
 ### Dedicated capacity versus per-token APIs
 
 A team can pay for model calls per token or reserve dedicated serving capacity and run models itself. Per-token pricing converts every cost into a variable one and hands queueing, throttling, and multi-tenant interference to the provider. Dedicated capacity costs the same per hour whether it is busy or idle, and in return removes the quota, fixes the tail, and allows serving choices such as speculation and cache policy to be tuned to the workload. Which is cheaper depends on how busy the dedicated capacity would be.
 
-Let $C_{\text{node}}$ be the hourly cost of a dedicated node, including amortized hardware or lease, power, and operations, and let the node sustain $R_{\text{out}}$ output tokens per second on the workload's traces. If the workload sends $\kappa$ input tokens for each output token and the API charges $P_{\text{in}}$ and $P_{\text{out}}$ per token, the hour of work that a fully busy node does would cost
+Let $C_{\text{node}}$ be the hourly cost of a dedicated node, including amortized hardware or lease, power, and operations,[^fn-cloud-compute-amortization] and let the node sustain $R_{\text{out}}$ output tokens per second on the workload's traces. If the workload sends $\kappa$ input tokens for each output token and the API charges $P_{\text{in}}$ and $P_{\text{out}}$ per token, the hour of work that a fully busy node does would cost
 
 $$V_{\text{node}} = 3600 \cdot R_{\text{out}} \cdot \left( P_{\text{out}} + \kappa \cdot P_{\text{in}} \right)$$ {#eq-vol3-node-value}
 
@@ -998,6 +1070,8 @@ at API prices. A node busy a fraction $\rho$ of the time does $\rho V_{\text{nod
 $$\rho^* = \frac{C_{\text{node}}}{3600 \cdot R_{\text{out}} \cdot \left( P_{\text{out}} + \kappa \cdot P_{\text{in}} \right)}$$ {#eq-vol3-breakeven-utilization}
 
 The input term deserves care. Agent workloads have large $\kappa$ because every turn re-sends its context, and an API's cached-input discount lowers the effective $P_{\text{in}}$, which raises $\rho^*$ and makes dedicated capacity harder to justify. The comparison should use the cached input price the workload actually pays, not the list price.
+
+[^fn-cloud-compute-amortization]: **Cloud Compute Amortization Models**: Dedicated accelerator costs reflect three-year straight-line hardware depreciation combined with power, cooling, and data center overheads. For an eight-GPU HGX H100 server costing approximately 300,000 dollars, standard amortization yields an operational floor near 25 to 30 dollars per node-hour. Cloud providers add margin to cover multi-tenant virtualization, network fabric provisioning, and idle capacity risk.
 
 ```{python}
 #| label: calc-vol3-agent-economics-breakeven
@@ -1050,7 +1124,7 @@ class DedicatedBreakEven:
     saving_pct_str = fmt_percent(round(saving_share, 2), precision=0)
 ```
 
-::: {#nbk-17-financial-break-even-utilization-for-dedicated .callout-notebook title="Break-even for dedicated serving capacity"}
+::: {#nbk-18-financial-break-even-utilization-for-dedicated .callout-notebook title="Break-even for dedicated serving capacity"}
 
 **Problem**: A software-engineering agent fleet sends `{python} DedicatedBreakEven.kappa_str` input tokens per output token. The API charges `{python} DedicatedBreakEven.p_in_str` per million input and `{python} DedicatedBreakEven.p_out_str` per million output tokens. A reserved node costs `{python} DedicatedBreakEven.c_node_str` per hour and sustains `{python} DedicatedBreakEven.r_out_str` output tokens per second on the fleet's traces. The fleet's load would keep dedicated nodes busy `{python} DedicatedBreakEven.rho_str` of the time. Should it reserve capacity?
 
@@ -1069,7 +1143,7 @@ Most fleets end up with both, as @tbl-vol3-hybrid-fleet-provisioning shows. A de
 
 : **Hybrid Provisioning**: A dedicated pool for base load with per-token overflow for bursts. {#tbl-vol3-hybrid-fleet-provisioning}
 
-::: {#chk-17-mlfq-scheduling .callout-checkpoint title="Capacity for trajectories"}
+::: {#chk-18-mlfq-scheduling .callout-checkpoint title="Capacity for trajectories"}
 
 Before governing spend, check the capacity model:
 
@@ -1083,6 +1157,12 @@ Before governing spend, check the capacity model:
 Capacity bounds how fast a fleet can spend. It does not bound how much. A trajectory stuck in a loop, or a tree of subagents that keeps delegating, will spend whatever capacity it is given, and the runtime needs limits on money itself.
 
 ## Spending Governance {#sec-vol3-agent-economics-governance}
+
+::: {.column-margin}
+![](images/svg/vol3_tokenomics_margin_004.svg){width="100%" fig-alt="Budget envelope bars showing committed spend of 4.00 dollars and active in-flight escrow of 2.40 dollars totaling 6.40 dollars against a hard 10.00 dollar spending ceiling."}
+
+*Hierarchical ledgers hold in-flight funds in escrow, preventing concurrent child subagents from violating the root spending ceiling.*
+:::
 
 The harness budget of @sec-vol3-controlplane-accounting stops one trajectory's runaway loop (@fig-vol3-epistemic-attractor-cycle). Delegation opens a failure that no single-trajectory budget sees. A coordinator with two dollars left launches two subagents. Each reads the shared balance, sees two dollars free, and starts a call that costs almost two dollars. Both checks pass, both calls run, and together they spend nearly twice what the parent had. A sandbox write can be rolled back, but money spent on tokens and tool fees cannot, which makes spending the one resource an agent consumes that no recovery mechanism restores. Invariant closure (principle \ref{pri-invariant-closure}) applies directly. The model cannot be trusted to meter its own spending or to notice when it should stop, so the bound must come from a check the runtime makes before each dispatch. This section extends the dollar budget of @sec-vol3-controlplane-accounting to many agents spending concurrently from one allocation, and adds a limit on the rate of spending.
 
@@ -1175,7 +1255,7 @@ class BudgetLedger:
     f_final_str = fmt_usd(f_final, precision=3)
 ```
 
-::: {#nbk-17-hierarchical-multi-agent-budget-allocation-and .callout-notebook title="A budget ledger through a failed subagent"}
+::: {#nbk-18-hierarchical-multi-agent-budget-allocation-and .callout-notebook title="A budget ledger through a failed subagent"}
 
 **Problem**: An operator authorizes `{python} BudgetLedger.b_root_str` for a repair task. The coordinator plans with one frontier call of `{python} BudgetLedger.plan_in_str` input and `{python} BudgetLedger.plan_out_str` output tokens, then delegates a trace analysis with a `{python} BudgetLedger.b_trace_str` reservation and a fuzzing run with `{python} BudgetLedger.b_fuzz_str`. The trace agent finds the fault for `{python} BudgetLedger.e_trace_str`. The fuzzing agent hits a sandbox timeout, retries in a loop, and is stopped by progress detection (@sec-vol3-sagas-watchdogs) after spending `{python} BudgetLedger.e_fuzz_str`. What does the root ledger hold at the end?
 
@@ -1242,7 +1322,7 @@ The cumulative breaker enforces the hard boundary condition $C(t) + R(t) \ge B_{
 #### Marginal epistemic utility decay {.unnumbered}
 The most subtle and destructive failure mode in autonomous systems is the *epistemic loop*: an agent remains well within its financial velocity limit and has consumed only a fraction of its total budget, but it has ceased making measurable progress toward task completion. The agent generates code, runs a unit test, observes an assertion error, modifies an unrelated comment or variable name, runs the test again, and repeats the cycle indefinitely.
 
-To detect this pathology, the runtime evaluates the *marginal epistemic utility* of the trajectory. Let $\mathcal{S}_t$ represent the observable state of the environment at turn $t$ (e.g., the directory tree of source code, compiler diagnostic vectors, and test execution outcomes). We define a progress metric $\mathcal{M}(\mathcal{S}_t) \in [0, 1]$ that measures objective proximity to goal invariants:
+To detect this pathology, the runtime evaluates the *marginal epistemic utility* of the trajectory.[^fn-circuit-breaker-hysteresis] Let $\mathcal{S}_t$ represent the observable state of the environment at turn $t$ (e.g., the directory tree of source code, compiler diagnostic vectors, and test execution outcomes). We define a progress metric $\mathcal{M}(\mathcal{S}_t) \in [0, 1]$ that measures objective proximity to goal invariants:
 
 $$\mathcal{M}(\mathcal{S}_t) = w_1 \cdot \text{PassRatio}(\mathcal{S}_t) + w_2 \cdot (1 - \text{LintErrors}(\mathcal{S}_t)) + w_3 \cdot \text{DiffConvergence}(\mathcal{S}_t)$$
 
@@ -1263,6 +1343,8 @@ the epistemic decay breaker trips to `OPEN`. The runtime halts the loop, diagnos
 | **Epistemic Decay**  | Marginal Utility $\frac{\Delta \mathcal{M}}{\Delta C}$ | $\Delta \mathcal{M}_K \le \epsilon$ while $\Delta C_K > \theta_C$ | Flailing retry loops; cosmetic code shuffling; cyclic reasoning traps  |
 
 : **Multi-Rate Circuit Breaker Triggers and Failure-Mode Mitigations**: Monitored metrics, mathematical trigger conditions, and primary failure modes for agent financial safety. {#tbl-vol3-circuit-breakers}
+
+[^fn-circuit-breaker-hysteresis]: **Circuit Breaker Hysteresis**: Financial circuit breakers must implement stateful hysteresis to prevent oscillation between dispatch admission and tripping. When an agent trajectory encounters stagnant epistemic utility, the governor triggers an exponential cool-down window before permitting further tool actions. Resetting the trip threshold requires consecutive turns of verified invariant progress, protecting cluster budgets from infinite error-recovery loops.
 
 Once spending is mathematically bounded by monotonic ledgers, hierarchical escrow, and multi-rate circuit breakers, the systems engineer can safely deploy autonomous agents into production environments. However, enforcing spending bounds addresses only the negative risk of fleet operations—preventing economic catastrophe. The positive design challenge remains: given a specific production task with known latency, budget, and accuracy constraints, how does an architect determine whether to solve it with a deterministic compiler script, a single model invocation with structured outputs, a sequential chain of specialized models, or a fully dynamic multi-agent system? Synthesizing these operational variables into a principled selection rubric is the subject of the next section.
 
@@ -1384,7 +1466,7 @@ class ArchitectureChoice:
     save_vs_rules_str = fmt_percent(round(save_vs_rules, 2), precision=0)
 ```
 
-::: {#nbk-17-architectural-frontier-migration-under-cost .callout-notebook title="Pricing three designs for dependency upgrades"}
+::: {#nbk-18-architectural-frontier-migration-under-cost .callout-notebook title="Pricing three designs for dependency upgrades"}
 
 **Problem**: A team handles `{python} ArchitectureChoice.tickets_str` security-advisory tickets a month, each requiring a dependency upgrade, edits to deprecated calls, and a passing build and test run. A ticket that automation fails costs `{python} ArchitectureChoice.c_human_str` to fix by hand. A rule-based rewriter costs `{python} ArchitectureChoice.c_rules_str` per ticket and succeeds with probability `{python} ArchitectureChoice.p_rules_str`. One frontier call that proposes a diff costs `{python} ArchitectureChoice.c_call_str` and succeeds with probability `{python} ArchitectureChoice.p_call_str`. A bounded loop around a cheaper model costs `{python} ArchitectureChoice.c_turn_str` per turn plus `{python} ArchitectureChoice.c_ver_str` per test run, runs at most three turns, and succeeds on each turn, given earlier failures, with probability `{python} ArchitectureChoice.r1_str`, `{python} ArchitectureChoice.r2_str`, and `{python} ArchitectureChoice.r3_str`. Which design costs least per ticket?
 
@@ -1396,7 +1478,7 @@ class ArchitectureChoice:
 
 Several agents follow the same logic one step further. A multi-agent design earns its place only by beating one agent with the same total budget on cost per accepted task, time, or acceptance without losing on the others (principle \ref{pri-vol3-tri-axial-evaluation}), and it pays the coordination tax (principle \ref{pri-vol3-coordination-tax}) whether or not it does. Autonomy should grow only while the returns on accepted tasks exceed the added cost of turns, verification, coordination, and governance, and the accounting of this chapter is how to tell.
 
-## Serving economics synthesis {#sec-vol3-agent-economics-synthesis}
+## Serving Economics Synthesis {#sec-vol3-agent-economics-synthesis}
 
 A cluster administrator who independently optimizes model serving, tool execution, and scheduling policies inevitably discovers that local efficiencies compound into catastrophic fleet-level inefficiencies. Accelerating an autoregressive decode kernel via custom flash-attention or speculative verification reduces GPU-bound decode latency by $2.5\times$, yet total trajectory wall-clock time drops by less than $6\%$ if the agent runtime spends $82\%$ of its critical path stalled on synchronous container re-imaging and external sandbox RPCs. Similarly, deploying aggressive model cascades that route queries to sub-billion-parameter models slashes nominal token inference fees, but if the cheaper model's lower instruction compliance triggers repeated syntax retries and trajectory rollbacks, the cumulative cost per accepted task explodes.
 
@@ -1456,7 +1538,25 @@ Here, $\text{Verified}(i)$ is a binary indicator denoting that the task's final 
 The definitive economic objective metric $\text{GP}_{\$} = \frac{N_{\text{acceptable}}}{\sum_{i=1}^M C_{\text{task}}^{(i)}}$ that quantifies the number of verified, defect-free agent task completions achieved per unit of total financial expenditure. By coupling deterministic post-condition verification with whole-trajectory cost accounting, goodput per dollar aligns accelerator scheduling, model selection, and execution caching with true enterprise utility.
 :::
 
-::: {#nbk-17-quantitative-evaluation-of-fleet-goodput .callout-notebook title="Evaluation of fleet goodput per dollar"}
+#### Fleet return on investment {.unnumbered}
+
+Connecting Goodput per Dollar to enterprise profitability requires formalizing the Fleet Return on Investment ($\text{ROI}_{\text{fleet}}$). Over an accounting epoch, let an enterprise admit $M$ candidate tasks to the agent cluster, resulting in $N_{\text{acceptable}}$ verified, defect-free completions. Each accepted task delivers an average enterprise economic value $V_{\text{task}}$ (for instance, the baseline engineering labor cost required to accomplish the repair manually). The gross economic value produced by the fleet is $V_{\text{fleet}} = N_{\text{acceptable}} \cdot V_{\text{task}}$.
+
+The total infrastructure cost $C_{\text{infrastructure}} = \sum_{i=1}^M C_{\text{task}}^{(i)}$ aggregates all model token charges, dedicated GPU node leases, sandbox container runtimes, external tool fees, verification test suites, and human escalation triage. The Fleet Return on Investment is defined as net economic value divided by infrastructure expenditure:
+
+$$\text{ROI}_{\text{fleet}} = \frac{V_{\text{fleet}} - C_{\text{infrastructure}}}{C_{\text{infrastructure}}} = \frac{N_{\text{acceptable}} \cdot V_{\text{task}} - \sum_{i=1}^M C_{\text{task}}^{(i)}}{\sum_{i=1}^M C_{\text{task}}^{(i)}}$$ {#eq-vol3-fleet-roi}
+
+Substituting the Goodput per Dollar definition $\text{GP}_{\$} = N_{\text{acceptable}} / C_{\text{infrastructure}}$ into @eq-vol3-fleet-roi establishes the direct equivalence between serving goodput and fleet financial return:
+
+$$\text{ROI}_{\text{fleet}} = \text{GP}_{\$} \cdot V_{\text{task}} - 1$$ {#eq-vol3-fleet-roi-goodput}
+
+As revealed by @eq-vol3-fleet-roi-goodput, an autonomous agent fleet achieves positive economic return on investment ($\text{ROI}_{\text{fleet}} > 0$) if and only if its Goodput per Dollar exceeds the reciprocal of task value:
+
+$$\text{GP}_{\$} > \frac{1}{V_{\text{task}}}$$ {#eq-vol3-fleet-breakeven-goodput}
+
+When task value is modest (for example, $V_{\text{task}} = \$5.00$ for automated routine dependency updates), the cluster must achieve $\text{GP}_{\$} > 0.20\text{ accepted tasks / dollar}$ to avoid operating at a financial loss. Conversely, for high-value enterprise incidents ($V_{\text{task}} = \$500.00$), the break-even threshold falls to $\text{GP}_{\$} > 0.002$, justifying extensive multi-agent verification and frontier model deliberation under @eq-vol3-fleet-breakeven-goodput.
+
+::: {#nbk-18-quantitative-evaluation-of-fleet-goodput .callout-notebook title="Evaluation of fleet goodput per dollar"}
 Consider an enterprise software engineering benchmark consisting of $M = 1{,}000$ code repair tasks. We compare two operational configurations: a *Naive Monolithic Architecture* that routes every interaction directly to an unassisted frontier model, and a *Synthesized Control-Loop Architecture* that deploys profiling, MLFQ scheduling, tiered cascades, and speculative decoding.
 
 **1. Hardware and Provider Pricing Basis:**
@@ -1517,9 +1617,11 @@ $$C(N) = \frac{N}{1 + \sigma(N - 1) + \kappa N(N - 1)}$$
 where $\sigma$ measures contention for serialization bottlenecks and $\kappa$ measures crosstalk or coherency delays.
 :::
 
-When modeling fleet scaling, simple linear capacity assumptions fail. We apply Neil J. Gunther's Universal Scalability Law (USL) to characterize the effective capacity $C(N)$ of an agent serving cluster under concurrent trajectory load $N$. In an agentic system, the contention parameter $\sigma$ captures queuing for shared physical resources: high-bandwidth memory (HBM) on GPU worker nodes, limits on concurrent container instantiations within the container hypervisor, and provider rate limits on external tool APIs. The coherency parameter $\kappa$ captures retrograde effects arising from coordination and crosstalk: distributed lock contention in shared budget ledgers, context cache invalidations across cluster nodes, and database serialization during parallel state commits.
+When modeling fleet scaling, simple linear capacity assumptions fail. We apply Neil J. Gunther's Universal Scalability Law (USL) to characterize the effective capacity $C(N)$ of an agent serving cluster under concurrent trajectory load $N$.[^fn-universal-scalability-contention] In an agentic system, the contention parameter $\sigma$ captures queuing for shared physical resources: high-bandwidth memory (HBM) on GPU worker nodes, limits on concurrent container instantiations within the container hypervisor, and provider rate limits on external tool APIs. The coherency parameter $\kappa$ captures retrograde effects arising from coordination and crosstalk: distributed lock contention in shared budget ledgers, context cache invalidations across cluster nodes, and database serialization during parallel state commits.
 
-If an operator pushes concurrency $N$ beyond the peak of the USL curve ($N_{\max} = \lfloor \sqrt{(1 - \sigma)/\kappa} \rfloor$), the system enters a retrograde collapse regime. Queues back up, prefill activations spill from GPU SRAM to host system DRAM, and sandbox initialization times experience extreme tail latency amplification. Because agent trajectories are governed by sequential dependency chains, a latency spike in turn $k$ delays turns $k+1$ through $K$. If the latency exceeds client timeouts, the entire trajectory aborts, reducing $N_{\text{acceptable}}$ to zero while retaining $100\%$ of the incurred cost.
+If an operator pushes concurrency $N$ beyond the peak of the USL curve ($N_{\max} = \lfloor \sqrt{(1 - \sigma)/\kappa} \rfloor$), the system enters a retrograde collapse regime. Queues back up, prefill activations spill from GPU SRAM to host system DRAM, and sandbox initialization times experience extreme tail latency amplification. Because agent trajectories are governed by sequential dependency chains, a latency spike in turn $k$ delays turns $k+1$ through $K$. If the latency exceeds client timeouts, the entire trajectory aborts, reducing $N_{\text{acceptable}}$ to zero while retaining 100 percent of the incurred cost.
+
+[^fn-universal-scalability-contention]: **Contention and Coherency Scaling Limits**: In Neil J. Gunther's Universal Scalability Law, the contention parameter $\sigma$ captures serialized access to shared GPU worker nodes and container daemon locks. The coherency parameter $\kappa$ captures quadratic crosstalk penalties arising from distributed state synchronization and cache coherency broadcasts across nodes. Beyond the peak concurrency $N_{\max}$, crosstalk delays dominate, causing aggregate fleet goodput to decline precipitously.
 
 To enforce operation strictly within the stable envelope, the synthesized runtime implements three hard boundary invariants:
 
@@ -1539,7 +1641,7 @@ By continuously balancing admission rates, model tiers, decode acceleration, and
 
 Yet, translating these architectural principles into production systems is fraught with hazard. When system designers move from theoretical formulations to practical implementations, they frequently fall victim to intuitive but catastrophic operational traps. Refuting these common systems misconceptions and delineating the precise physical fallacies of foundation model deployment is the necessary final step in mastering serving economics.
 
-## Fallacies and pitfalls {#sec-vol3-agent-economics-fallacies}
+## Fallacies and Pitfalls {#sec-vol3-agent-economics-fallacies}
 
 Designing and operating production agent systems requires navigating the treacherous gap between micro-benchmarked inference latency and macroeconomic fleet stability. Hardware accelerators, network fabrics, and foundation model APIs exhibit non-linear cost surfaces that punish naive operational assumptions. When systems engineers treat non-deterministic agent trajectories as equivalent to traditional stateless Remote Procedure Calls (RPCs), the resulting architectures suffer catastrophic financial runaway, severe throughput collapse, and wasted engineering effort. The following fallacies and pitfalls illuminate the specific physical and economic failure modes that emerge across agent serving infrastructures.
 
