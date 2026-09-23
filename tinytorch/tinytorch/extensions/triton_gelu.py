@@ -79,26 +79,38 @@ def has_triton_support() -> bool:
     return _HAS_TRITON
 
 
-def triton_fused_gelu(x: np.ndarray, bias: np.ndarray | None = None) -> np.ndarray:
+def _is_tensor(obj):
+    return obj is not None and type(obj).__name__ == "Tensor"
+
+
+def triton_fused_gelu(x, bias=None):
     """GELU(x + bias) in one Triton kernel on an NVIDIA GPU (tanh approximation).
 
     Args:
-        x: array [..., D]
-        bias: optional vector [D]
+        x: array or Tensor [..., D]
+        bias: optional vector or Tensor [D]
 
     Returns:
-        float32 array with the shape of x. Computed in NumPy without Triton.
+        float32 array or Tensor with the shape of x. Computed in NumPy without Triton.
     """
-    if not _HAS_TRITON:
-        val = np.asarray(x, dtype=np.float32)
-        if bias is not None:
-            val = val + np.asarray(bias, dtype=np.float32)
-        inner = np.sqrt(2.0 / np.pi) * (val + 0.044715 * np.power(val, 3))
-        return (0.5 * val * (1.0 + np.tanh(inner))).astype(np.float32)
+    is_tensor = _is_tensor(x) or (bias is not None and _is_tensor(bias))
+    x_arr = x.data if _is_tensor(x) else x
+    bias_arr = bias.data if (bias is not None and _is_tensor(bias)) else bias
 
-    x_torch = torch.from_numpy(np.ascontiguousarray(x, dtype=np.float32)).cuda()
-    if bias is not None:
-        bias_torch = torch.from_numpy(np.ascontiguousarray(bias, dtype=np.float32)).cuda()
+    if not _HAS_TRITON:
+        val = np.asarray(x_arr, dtype=np.float32)
+        if bias_arr is not None:
+            val = val + np.asarray(bias_arr, dtype=np.float32)
+        inner = np.sqrt(2.0 / np.pi) * (val + 0.044715 * np.power(val, 3))
+        out = (0.5 * val * (1.0 + np.tanh(inner))).astype(np.float32)
+        if is_tensor:
+            from tinytorch.core.tensor import Tensor
+            return Tensor(out)
+        return out
+
+    x_torch = torch.from_numpy(np.ascontiguousarray(x_arr, dtype=np.float32)).cuda()
+    if bias_arr is not None:
+        bias_torch = torch.from_numpy(np.ascontiguousarray(bias_arr, dtype=np.float32)).cuda()
     else:
         bias_torch = torch.zeros(x_torch.shape[-1], device=x_torch.device, dtype=torch.float32)
     out_torch = torch.empty_like(x_torch)
@@ -116,4 +128,8 @@ def triton_fused_gelu(x: np.ndarray, bias: np.ndarray | None = None) -> np.ndarr
         inner_dim,
         BLOCK_SIZE=BLOCK_SIZE,
     )
-    return out_torch.cpu().numpy()
+    out = out_torch.cpu().numpy()
+    if is_tensor:
+        from tinytorch.core.tensor import Tensor
+        return Tensor(out)
+    return out
