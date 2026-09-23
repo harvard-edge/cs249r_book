@@ -29,29 +29,20 @@ from tinytorch.core.layers import Layer
 # =====================================================================
 
 class CustomScaledShift(Function):
-    """Example autograd operation: y = alpha * x + beta.
-
-    Demonstrates the Function lifecycle:
-    - forward() receives raw NumPy arrays (unwrapped by apply()).
-    - backward() receives the incoming gradient (as a NumPy array or Tensor)
-      and returns downstream gradients matching each input Tensor.
-    - Hyperparameters (e.g. alpha, beta) are passed as keyword arguments to apply()
-      and stored on the node instance.
-    """
+    """Example autograd operation: y = alpha * x + beta."""
 
     def forward(self, x: np.ndarray) -> np.ndarray:
-        # Hyperparameters passed to apply() are bound as attributes on self
         alpha = getattr(self, "alpha", 2.0)
         beta = getattr(self, "beta", 1.0)
         return alpha * x + beta
 
-    def backward(self, grad_output: Union[np.ndarray, Tensor]) -> Tuple[np.ndarray]:
-        # Unwrap grad_output to a NumPy array if needed
-        g = grad_output.data if isinstance(grad_output, Tensor) else grad_output
+    def backward(self, grad_output):
+        # Unwrap grad_output to NumPy array
+        is_t = isinstance(grad_output, Tensor)
+        g = grad_output.data if is_t else grad_output
         alpha = getattr(self, "alpha", 2.0)
-        # Derivative w.r.t x is alpha * grad_output
+        # Derivative w.r.t x is alpha * grad
         dx = alpha * g
-        # Return a tuple of gradients corresponding to each input Tensor
         return (dx,)
 
 
@@ -71,29 +62,29 @@ def custom_scaled_shift(
 # =====================================================================
 
 class CustomResidualBlock(Layer):
-    """Example custom neural network module.
-
-    Demonstrates how to register parameters and compose forward operations
-    using TinyTorch primitives while maintaining clean parameter tracking.
-    """
+    """Example custom neural network module."""
 
     def __init__(self, dim: int):
         super().__init__()
-        # Initialized trainable parameters registered on the layer
+        std = 1.0 / np.sqrt(dim)
+        w_init = np.random.randn(dim, dim) * std
         self.weight = Tensor(
-            np.random.randn(dim, dim).astype(np.float32) / np.sqrt(dim),
+            w_init.astype(np.float32),
             requires_grad=True,
         )
-        self.bias = Tensor(np.zeros(dim, dtype=np.float32), requires_grad=True)
+        self.bias = Tensor(
+            np.zeros(dim, dtype=np.float32),
+            requires_grad=True,
+        )
 
     def parameters(self):
-        """Return list of learnable parameters for optimizer traversal."""
+        """Return list of learnable parameters."""
         return [self.weight, self.bias]
 
     def forward(self, x: Tensor) -> Tensor:
         # Residual branch: x + Linear(x)
-        linear_out = x.matmul(self.weight) + self.bias
-        return x + linear_out
+        linear_out = x.matmul(self.weight)
+        return x + linear_out + self.bias
 
 
 # =====================================================================

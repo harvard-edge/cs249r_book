@@ -61,35 +61,28 @@ To preserve stability, TinyTorch enforces a strict structural separation between
 ```text
 tinytorch/
 ├── tinytorch/
-│   ├── core/                      # Immutable 20-Module Core Engine
-│   │   ├── tensor.py              #   Tensors & autograd graph nodes
-│   │   ├── autograd.py            #   Topological tape & backpropagation
-│   │   ├── activations.py         #   Activation functions (ReLU, GELU, etc.)
-│   │   ├── layers.py              #   Linear, Sequential, Module
-│   │   ├── losses.py              #   Loss functions (MSE, CrossEntropy)
-│   │   ├── optimizers.py          #   Optimizers (SGD, Adam, AdamW)
-│   │   ├── dataloader.py          #   Dataset, DataLoader, Samplers
-│   │   ├── spatial.py             #   Conv2d, MaxPool2d, BatchNorm2d
-│   │   ├── tokenization.py        #   Character & BPE tokenizers
-│   │   ├── attention.py           #   Multi-Head Self-Attention
-│   │   └── transformers.py        #   TransformerBlock, GPT architecture
-│   ├── perf/                      # Baseline Profiling & Measurement
-│   │   ├── profiling.py           #   FLOP counters, memory profilers
-│   │   ├── benchmarking.py        #   Timer, MemoryTracker, MLPerf
-│   │   └── quantization.py        #   INT8 uniform quantization
-│   └── extensions/                # The Pluggable Contrib Ecosystem
-│       ├── template.py            #   Canonical starter extension template
-│       ├── lora.py                #   Parameter-efficient fine-tuning
-│       ├── checkpoint.py          #   Activation checkpointing (recomputation)
-│       ├── loss_scaler.py         #   FP16 dynamic/static loss scaling
-│       ├── compile.py             #   Graph AST capture & operator fusion
-│       ├── simd_ops.py            #   Vectorized CPU C++ bindings
-│       ├── cpp_simd_gemm.cpp      #   AVX2/NEON cache-tiled C++ kernels
-│       ├── mps_ops.py             #   Apple Silicon Metal Performance Shaders
-│       └── triton_gelu.py         #   NVIDIA Triton GPU block shaders
-└── tests/
-    ├── core/                      # Unit tests for core engine
-    └── extensions/                # Verification tests for extensions ecosystem
+│   ├── core/           # 20-module core engine
+│   │   ├── tensor.py   # Tensor memory & autograd
+│   │   ├── autograd.py # Topological tape
+│   │   ├── layers.py   # Linear, Sequential, etc.
+│   │   ├── losses.py   # MSE & CrossEntropy
+│   │   ├── optimizers.py
+│   │   ├── dataloader.py
+│   │   ├── attention.py
+│   │   └── transformers.py
+│   ├── perf/           # Baseline profiling
+│   │   ├── profiling.py
+│   │   └── benchmarking.py
+│   └── extensions/     # Contrib ecosystem
+│       ├── template.py # Starter template
+│       ├── lora.py     # Parameter-efficient adapters
+│       ├── checkpoint.py
+│       ├── loss_scaler.py
+│       ├── compile.py  # Kernel fusion compiler
+│       ├── simd_ops.py # Vectorized C++ kernels
+│       ├── mps_ops.py  # Apple Silicon MPS
+│       └── triton_gelu.py
+└── tests/extensions/   # Parity test suite
 ```
 
 The `tinytorch/core/` and `tinytorch/perf/` directories contain the standard library built in Chapters 1 through 20. The `tinytorch/extensions/` directory is the open workshop: every optimization lives as an isolated, importable Python or C++ module that plugs into the core boundaries without modifying core source files.
@@ -387,20 +380,14 @@ As predicted by our napkin math ($n/6$ FLOP/byte), offloading small matrices los
 When you author a new systems extension, how do you verify its correctness, benchmark its performance, and study its real-world impact? In production systems engineering, an optimization cannot be evaluated in a vacuum. TinyTorch provides a structured **3-Tier Evaluation Ladder** that guides you from unit verification to full end-to-end model training:
 
 ```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                   3-Tier Systems Evaluation Ladder                     │
-│                                                                        │
-│   [ Tier 3: Custom Ingestion ]                                         │
-│   Train end-to-end with Trainer on custom datasets via DataLoader      │
-│   ▲                                                                    │
-│   │                                                                    │
-│   [ Tier 2: Historical Milestones ]                                    │
-│   Macro-benchmark on stock models (Milestone 4 CNN, Milestone 5 GPT)   │
-│   ▲                                                                    │
-│   │                                                                    │
-│   [ Tier 1: Micro-benchmarking ]                                       │
-│   Verify unit correctness (pytest) and measure latency/memory (Timer)  │
-└────────────────────────────────────────────────────────────────────────┘
+[ Tier 3: Custom Ingestion ]
+  └─ Train with Trainer on custom data via DataLoader
+     ▲
+[ Tier 2: Historical Milestones ]
+  └─ Macro-benchmark on Milestone 4 (CNN) & 5 (GPT)
+     ▲
+[ Tier 1: Micro-benchmarking ]
+  └─ Unit parity (pytest) & isolated latency (Timer)
 ```
 
 ### Tier 1: Numerical Correctness and Synthetic Micro-benchmarks
@@ -410,17 +397,23 @@ Before measuring execution time, you must guarantee numerical correctness. Never
 1. **Unit Test Parity:** Write unit tests in `tests/extensions/test_<name>.py`. Compare your extension's forward outputs and backward gradients against a high-precision reference (such as float64 NumPy):
    ```python
    # Verify outputs agree within float32 tolerance
-   assert np.allclose(out_extension.data, out_reference, atol=1e-5)
+   assert np.allclose(
+       out_extension.data, out_reference, atol=1e-5
+   )
    ```
 2. **Synthetic Micro-benchmarks:** Use the built-in profiling tools from `tinytorch.perf.benchmarking` (`Timer` and `MemoryTracker`) to isolate the operator across power-of-two shapes ($N \in \{128, 256, 512, 1024, 2048\}$):
    ```python
-   from tinytorch.perf.benchmarking import Timer, MemoryTracker
+   from tinytorch.perf.benchmarking import (
+       Timer,
+       MemoryTracker,
+   )
 
    tracker = MemoryTracker()
    with Timer() as t, tracker:
        y = my_extension_op(x)
 
-   print(f"Latency: {t.elapsed_ms:.2f} ms | Peak Memory: {tracker.peak_mb:.2f} MB")
+   print(f"Latency:  {t.elapsed_ms:.2f} ms")
+   print(f"Peak RAM: {tracker.peak_mb:.2f} MB")
    ```
    Quantify execution speedup, memory reduction, and arithmetic intensity.
 
@@ -447,7 +440,10 @@ To evaluate an extension on your own domain-specific problem, plug your raw data
 
 1. **Vision or Tabular Data:** Subclass `Dataset` from `tinytorch.core.dataloader`, implement `__len__()` and `__getitem__()`, and instantiate a `DataLoader`:
    ```python
-   from tinytorch.core.dataloader import Dataset, DataLoader
+   from tinytorch.core.dataloader import (
+       Dataset,
+       DataLoader,
+   )
 
    class CustomArrayDataset(Dataset):
        def __init__(self, features, targets):
@@ -457,7 +453,11 @@ To evaluate an extension on your own domain-specific problem, plug your raw data
        def __getitem__(self, idx):
            return self.x[idx], self.y[idx]
 
-   loader = DataLoader(CustomArrayDataset(x_data, y_data), batch_size=32, shuffle=True)
+   loader = DataLoader(
+       CustomArrayDataset(x_data, y_data),
+       batch_size=32,
+       shuffle=True,
+   )
    ```
 2. **Text Corpora:** Pass raw text to `Tokenizer` from `tinytorch.core.tokenization` to construct tokenized input-target sequences for autoregressive language modeling.
 3. **End-to-End Training:** Pass the loader, model (with your extension active), optimizer, and loss function to `Trainer` (`tinytorch.core.training.Trainer`). Run `trainer.fit(epochs=5)` and log training throughput and loss progression.
@@ -485,7 +485,7 @@ Rather than attempting massive, disconnected projects, the most effective way to
 ### 3. Model-Wide LoRA Injection Hook (Building on Extension 1: `LoRALinear`)
 
 * **Systems Limitation:** Stock `LoRALinear` requires manually instantiating adapter layers by hand in your model definition. In deep models with dozens of projection matrices, manual replacement is tedious and fragile.
-* **The Project:** Author an automated helper function `inject_lora(model, target_layer_names=["q_proj", "v_proj"], rank=8, alpha=16.0)`:
+* **The Project:** Author an automated helper function `inject_lora(model, target_layers, rank=8)`:
   1. Recursively traverse the model's module hierarchy.
   2. For each layer matching a target name, replace the existing `Linear` layer with a corresponding `LoRALinear` instance initialized with the pre-trained weights.
   3. Set `requires_grad = False` on all non-adapter parameters.
