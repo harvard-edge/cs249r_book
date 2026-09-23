@@ -187,7 +187,7 @@ class CallPrice:
 *A single call runs one turn, carries no state, and holds zero ambient authority.*
 :::
 
-The fail-plausible fault model (@sec-vol3-intro-fail-plausible) and zero ambient authority (@sec-vol3-intro-operational-incident) already tell the runtime not to trust what the model emits. They do not say where a call goes, what it returns, or which component owns each decision along the way. A single call runs one turn, keeps nothing between calls, and acts on nothing, so it adds none of the H·S·A exposures (@sec-vol3-intro-hsa) and is the origin from which every later part measures them.
+The fail-plausible fault model and zero ambient authority already tell the runtime not to trust what the model emits. They do not say where a call goes, what it returns, or which component owns each decision along the way. A single call runs one turn, keeps nothing between calls, and acts on nothing, so it adds none of the H·S·A exposures and is the origin from which every later part measures them.
 
 **Follow one call from the runtime to the accelerator and back, and three components appear, each with a different job and a different way to fail.** The runtime stages the prompt and judges the result, a serving daemon schedules the accelerator, and the model, a frozen collection of parameter weights $\Theta$ evaluated by matrix-multiplication pipelines, computes a distribution over the next token. Machine learning vocabulary hides this division of labor, and @tbl-vol3-ml-systems-rosetta names what each familiar model term becomes once it is placed on this path.
 
@@ -206,7 +206,11 @@ On this path, zero ambient authority has a precise physical meaning. When a mode
 
 This physical boundary separates the modern agent runtime into a clean three-tier architecture (@fig-vol3-three-tier-architecture). At the foundation sits the **Neural Core**, consisting of dense matrix-multiplication hardware units (such as GPU Streaming Multiprocessors or TPU Tensor Cores) executing low-level tensor contractions over static parameter matrices $\mathbf{\Theta}$ resident in high-bandwidth memory (HBM). Mediating access to the Neural Core is the **Inference Service Daemon**, a high-performance system service (such as vLLM, SGLang, or an optimized vendor runtime) that manages physical accelerator allocation, schedules batched inference requests, manages key-value tensor memory via PagedAttention, and coordinates the autoregressive generation loop. Finally, running in host user space sits the **Host Agent Runtime**, the authoritative supervisor. The host runtime owns the environmental state, holds administrative credentials, stages the model context, enforces hardware resource and latency budgets, and validates all candidate outputs before granting them execution authority.
 
-As mapped in @fig-vol3-three-tier-architecture, these tiers are separated by physical hardware and transport interfaces. Tier 1 (Host Agent Runtime) dispatches typed RPC requests across a local IPC or network boundary (HTTP/2 or gRPC) to Tier 2 (Inference Service Daemon). Tier 2 translates requests into batched compute streams, launching CUDA kernels across PCIe Gen5 or NVLink interconnects to drive Tier 3 (Neural Core). Tier 3 holds zero ambient authority. Its compute units emit only sampled token identifiers ($y_t$), which return across the interconnect to the daemon for envelope packaging and then to the host runtime for verification, on the host side of the accelerator-host boundary described in @sec-vol3-intro-accelerator-host.
+As mapped in @fig-vol3-three-tier-architecture, these tiers are separated by physical hardware and transport interfaces. Tier 1 (Host Agent Runtime) dispatches typed RPC requests across a local IPC or network boundary (HTTP/2 or gRPC) to Tier 2 (Inference Service Daemon). Tier 2 translates requests into batched compute streams, launching CUDA kernels across PCIe Gen5 or NVLink interconnects to drive Tier 3 (Neural Core). Tier 3 holds zero ambient authority. Its compute units emit only sampled token identifiers ($y_t$), which return across the interconnect to the daemon for envelope packaging and then to the host runtime for verification on the host side of the physical boundary.
+
+::: {.column-margin .margin-pointer}
+↩ The fail-plausible fault model, zero ambient authority, and the stochastic computer architecture are established in @sec-vol3-intro.
+:::
 
 ::: {#fig-vol3-three-tier-architecture fig-env="figure" fig-pos="htb" fig-cap="**Three-Tier Machine Learning Systems Architecture**: Physical privilege boundaries and execution separation in agent runtimes. The Host Agent Runtime operates as the authoritative supervisor in host user space (Ring 3), staging context buffers, enforcing resource ceilings, and verifying tool actuation. The Inference Service Daemon coordinates continuous batching queues, logical-to-physical PagedAttention block tables, and pushdown automata logit masks. The Neural Core executes raw tensor math on accelerator silicon and holds zero ambient authority." fig-alt="Systems architecture diagram illustrating three functional tiers: Tier 1 Host Agent Runtime in user space, Tier 2 Inference Service Daemon across network/IPC, and Tier 3 Neural Core on accelerator silicon connected via PCIe Gen5 and NVLink."}
 ![](images/svg/ch02-three-tier-architecture.svg)
@@ -1005,6 +1009,10 @@ Nominal streaming continues until token `{python} CallPrice.k_cut_str`, where th
 
 The systems consequence of this early cancellation on accelerator silicon is immediate and profound. Upon receiving the cancellation frame, the inference daemon aborts the decode worker thread, evicts the sequence identifier from the continuous batch scheduler, and releases all physical KV cache pages back to the accelerator's memory allocator. As derived in \ref{nbk-02-memory-and-bandwidth-reclamation-via}, with an output limit of `{python} CallPrice.k_cap_str` tokens, cancellation at token `{python} CallPrice.k_cut_str` spares up to `{python} CallPrice.cancel_steps_str` further decode steps, about `{python} CallPrice.cancel_s_str` seconds at the single-stream rate of @sec-vol3-foundation-model-cost.
 
+::: {.column-margin .margin-pointer}
+↪ Reactive stream cancellation, transport-level aborts, and supervisory traps are developed in @sec-vol3-agent-harness and @sec-vol3-failure-recovery.
+:::
+
 ::: {#fig-vol3-streaming-token-cancellation fig-env="figure" fig-pos="htb" fig-cap="**Streaming Token Validation and Transport Cancellation Protocol**: Incremental token streaming across HTTP/2 or gRPC multiplexed channels enables the host runtime to validate candidate sequences on-the-fly. At decode steps $t=1$ and $t=2$, sampled tokens cross the network socket in DATA frames, where an incremental partial-validation state machine validates syntax prefixes and holds candidates in host memory escrow. When step $t=96$ emits an illegal token sequence violating schema invariants, the host immediately dispatches an `HTTP/2 RST_STREAM` cancellation frame. The inference service terminates the decode worker thread, evicts the request from the continuous batch queue, and instantly deallocates physical KV cache pages from GPU high-bandwidth memory." fig-alt="Systems protocol sequence diagram between Host Agent Runtime and Inference Service & Neural Core across an HTTP/2 transport boundary. As incremental tokens stream across the socket, an invariant violation at step t=96 triggers an immediate RST_STREAM cancellation frame, terminating the GPU decode loop and freeing 1.22 GB of KV cache memory in HBM."}
 ![](images/svg/streaming_token_cancellation.svg)
 :::
@@ -1587,7 +1595,11 @@ $$S_{\text{sent}} = \sum_{t=0}^{N-1} \left(S_0 + t\Delta\right) = N S_0 + \Delta
 
 prompt tokens in total, which grows with the square of the number of turns.
 
-A service can avoid most of that work. When a new prompt begins with exactly the same tokens as an earlier one, the service can reuse the KV cache it built for that shared prefix and run prefill only on the new suffix. This is **prefix caching**\index{Prefix caching!economics} [@zheng2024sglang]. In an agent loop almost every prompt extends the previous one, so with caching each turn prefills only its $\Delta$ new tokens. The saving depends on the prefix staying byte-for-byte identical. An edit early in the context, such as a timestamp in the system prompt or a reordered tool list, invalidates the cache from that point on. How to lay out the context so the prefix stays stable is the subject of @sec-vol3-context-engineering, and how the service stores and matches cached prefixes is the subject of @sec-vol3-kvcache-radix-tree. The notebook below prices one trajectory with and without it.
+A service can avoid most of that work. When a new prompt begins with exactly the same tokens as an earlier one, the service can reuse the KV cache it built for that shared prefix and run prefill only on the new suffix. This is **prefix caching**\index{Prefix caching!economics} [@zheng2024sglang]. In an agent loop almost every prompt extends the previous one, so with caching each turn prefills only its $\Delta$ new tokens. The saving depends on the prefix staying byte-for-byte identical. An edit early in the context, such as a timestamp in the system prompt or a reordered tool list, invalidates the cache from that point on. Context layout must keep prefixes stable, while the serving service stores and matches cached prefixes using prefix radix trees. The notebook below prices one trajectory with and without it.
+
+::: {.column-margin .margin-pointer}
+↪ Context ordering, prefix stability invariants, and radix-tree prefix caching are developed in @sec-vol3-context-engineering and @sec-vol3-kv-cache.
+:::
 
 ::: {#nbk-02-price-of-a-trajectory .callout-notebook title="The price of a thirty-turn trajectory"}
 
@@ -1599,9 +1611,13 @@ A service can avoid most of that work. When a new prompt begins with exactly the
 
 :::
 
-The two views of cost answer different questions. Latency is what the agent's own trajectory experiences, and on that path the agent runs as a single stream. Each call must wait for the previous tool result, so the agent cannot batch its own steps, and batching, the usual remedy for memory-bound decode, does not shorten its critical path. Cost is what the serving fleet experiences. A fleet batches many agents' decode steps together, so the weights read in each step are shared across many streams, and the cost of a generated token falls toward its arithmetic, about $2P$ operations, the same as a prompt token's. At that point the fleet's bill follows the total number of tokens processed, and for an agent that number is mostly re-sent input. Output sets latency, and re-sent input sets cost. Fleet batching and its queueing effects are derived in @sec-vol3-appendix-inference-queueing, and pricing a trajectory in dollars per accepted task is the work of @sec-vol3-agent-economics.
+The two views of cost answer different questions. Latency is what the agent's own trajectory experiences, and on that path the agent runs as a single stream. Each call must wait for the previous tool result, so the agent cannot batch its own steps, and batching, the usual remedy for memory-bound decode, does not shorten its critical path. Cost is what the serving fleet experiences. A fleet batches many agents' decode steps together, so the weights read in each step are shared across many streams, and the cost of a generated token falls toward its arithmetic, about $2P$ operations, the same as a prompt token's. At that point the fleet's bill follows the total number of tokens processed, and for an agent that number is mostly re-sent input. Output sets latency, and re-sent input sets cost. Fleet batching and continuous serving queues amortize memory reads across concurrent streams, grounding trajectory costs in verified task completion rates.
 
-Long contexts also cost memory. The KV cache of the final turn in the notebook is a sizable fraction of the model's own weights, enough that one accelerator cannot hold both, and it stays resident for as long as the service keeps it, including while the agent waits for a slow tool. A service that runs many trajectories therefore spreads the model across the accelerators of a serving node and sizes memory at the node level, and deciding whether to keep, evict, or recompute that state belongs to @sec-vol3-kv-cache.
+Long contexts also cost memory. The KV cache of the final turn in the notebook is a sizable fraction of the model's own weights, enough that one accelerator cannot hold both, and it stays resident for as long as the service keeps it, including while the agent waits for a slow tool. A service that runs many trajectories spreads the model across the accelerators of a serving node and sizes memory at the node level, deciding whether to keep, evict, or recompute that state.
+
+::: {.column-margin .margin-pointer}
+↪ Batch serving queues, macroeconomic trade-offs, and dollars per verified task completion are analyzed in @sec-vol3-agent-economics.
+:::
 
 ::: {#chk-02-price-of-a-call .callout-checkpoint title="Pricing calls and trajectories"}
 
@@ -1697,6 +1713,10 @@ where $T_{\text{mask}}$ is the per-step cost of applying a grammar mask, near ze
 $$\text{PASS} = \frac{1}{N} \sum_{i=1}^N \mathbb{I}\Big(\text{verify}\big(\text{exec}(\mathbf{x}, \text{parse}(\mathbf{y}_i))\big) = \text{PASS}\Big)$$
 
 Here, $\text{exec}$ executes the parsed payload inside an isolated workspace, and $\text{verify}$ subjects the resulting environment state to sealed regression tests, static linters, and runtime integration checks. A candidate sequence that fails $R_{\text{syntax}}$ immediately scores zero, but a sequence that achieves $R_{\text{syntax}} = 1.0$ yet fails compilation or breaks invariant test suites similarly scores zero.
+
+::: {.column-margin .margin-pointer}
+↪ Deterministic verification oracles, sandbox test isolation, and evaluation harness gates are developed in @sec-vol3-sandboxes and @sec-vol3-evaluation.
+:::
 
 Optimizing an interface exclusively for Level 1 or Level 2 metrics while neglecting Level 3 represents a fundamental architectural error. The following worked example illustrates how an interface engineered for structural simplicity can paralyze an accelerator cluster while lowering verified task closure.
 

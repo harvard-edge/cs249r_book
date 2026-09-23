@@ -65,16 +65,16 @@ Dumping raw, uncurated production telemetry directly into training datasets crea
 **Gate rejections in telemetry:** Because the model holds zero ambient authority, every tool call it emits is a proposal the runtime may refuse. A recorded failure in an operational trace often reflects a rejection by the runtime's verification gate rather than an environmental failure, and telemetry must classify the two separately.
 :::
 
-Harvesting inherits two facts from @sec-vol3-intro-fail-plausible and @sec-vol3-intro-invariant-closure. A failed trajectory rarely announces its cause, because a fail-plausible model emits well-formed calls built on false assumptions about host state, and a model's claim of success carries no evidential weight. A failure therefore does not by itself show which layer must change.
+Harvesting inherits two operational facts: a failed trajectory rarely announces its cause, because a fail-plausible model emits well-formed calls built on false assumptions about host state, and a model's claim of success carries no evidential weight. A failure therefore does not by itself show which layer must change.
 
 To prevent premature parameter updates and guide trajectory harvesting, an agent runtime must subject every anomalous execution trace to systematic forensic triage across four mutually exclusive root causes, summarized in @tbl-vol3-failure-taxonomy:
 
-| Failure Class           | Subsystem Root Cause                                                                    | Observable Telemetry Signature                                                 | Empirical Diagnostic Probe                                                    | Minimum-Cost Remediation                                                                        |
-|:------------------------|:----------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|:------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------|
-| **Context Deficit**     | Working Set / Memory (§[-@sec-vol3-context-engineering; §-@sec-vol3-long-term-memory])  | Tool fails due to missing file paths, environment flags, or config state.      | Inject gold context snippet into prompt buffer; measure pass rate $\Delta$.   | Enrich retrieval index, refine context compaction, pin critical state.                          |
-| **Interface Ambiguity** | Tool Virtualization (§[-@sec-vol3-tool-calling])                                        | Schema parse errors, missing required parameters, or invalid enum values.      | Replay trace using explicit JSON Schema with strict enum constraints.         | Add strict type definitions, parameter bounds, and explicit docstrings.                         |
-| **Runtime Defect**      | Sandbox Substrate (§[-@sec-vol3-sandboxes; §-@sec-vol3-agent-harness])                  | Subprocess timeouts ($T > T_{\text{limit}}$), network packet drops, OOM kills. | Execute identical tool payload in clean host container with increased limits. | Harden sandbox isolation, tune watchdog timeouts, implement backoff retries.                    |
-| **Policy Incapability** | Neural Core Policy (§[-@sec-vol3-foundation-model-role; §-@sec-vol3-test-time-compute]) | Multi-step logic errors, plan loops, failure to recover from tool errors.      | Provide full gold context and schemas; model still fails multi-step task.     | Harvest recovery trajectories for SFT (§[-@sec-vol3-fine-tuning]) or RLVR (§[-@sec-vol3-rlvr]). |
+| Failure Class           | Subsystem Root Cause | Observable Telemetry Signature                                                 | Empirical Diagnostic Probe                                                    | Minimum-Cost Remediation                                                     |
+|:------------------------|:---------------------|:-------------------------------------------------------------------------------|:------------------------------------------------------------------------------|:-----------------------------------------------------------------------------|
+| **Context Deficit**     | Working Set / Memory | Tool fails due to missing file paths, environment flags, or config state.      | Inject gold context snippet into prompt buffer; measure pass rate $\Delta$.   | Enrich retrieval index, refine context compaction, pin critical state.       |
+| **Interface Ambiguity** | Tool Virtualization  | Schema parse errors, missing required parameters, or invalid enum values.      | Replay trace using explicit JSON Schema with strict enum constraints.         | Add strict type definitions, parameter bounds, and explicit docstrings.      |
+| **Runtime Defect**      | Sandbox Substrate    | Subprocess timeouts ($T > T_{\text{limit}}$), network packet drops, OOM kills. | Execute identical tool payload in clean host container with increased limits. | Harden sandbox isolation, tune watchdog timeouts, implement backoff retries. |
+| **Policy Incapability** | Neural Core Policy   | Multi-step logic errors, plan loops, failure to recover from tool errors.      | Provide full gold context and schemas; model still fails multi-step task.     | Harvest recovery trajectories for SFT or RLVR.                               |
 
 : **The Four Root Causes of Trajectory Failure**: Forensic classification of execution anomalies across runtime layers before initiating model adaptation. {#tbl-vol3-failure-taxonomy}
 
@@ -87,7 +87,7 @@ $$\text{Context Injection} \prec \text{Tool and Schema Redesign} \prec \text{Run
 
 This progression directly instantiates the seminal **End-to-End Argument in System Design** formulated by Saltzer, Reed, and Clark [@saltzer1984endtoend]: a system function should not be implemented at a lower, heavier layer of an architecture if it can be implemented completely and correctly with lightweight mechanisms at the application boundary. Attempting to "teach" an agent an API signature by fine-tuning model weights when the underlying tool schema lacks explicit type constraints directly violates this principle. Fine-tuning models to compensate for upstream interface defects produces fragile memorization: the moment the downstream API changes, the trained weights become obsolete. A typed action contract (principle \ref{pri-vol3-strict-action-abi}) and a complete context instead establish invariants that hold for any model behind them.
 
-The triage itself cannot be delegated to the model. Self-report sits at the bottom of the closure evidence levels (@sec-vol3-intro-closure-evidence), and a prompt that asks the model to "reflect on your previous answer" only issues another call subject to the same limits. Each triage verdict therefore rests on checks outside the model, such as compilers that enforce type soundness, linters that verify syntactic invariants, security monitors that audit syscalls, and sandboxed test suites that evaluate state deltas.
+The triage itself cannot be delegated to the model. Self-report sits at the bottom of the closure evidence levels, and a prompt that asks the model to "reflect on your previous answer" only issues another call subject to the same limits. Each triage verdict therefore rests on checks outside the model, such as compilers that enforce type soundness, linters that verify syntactic invariants, security monitors that audit syscalls, and sandboxed test suites that evaluate state deltas.
 
 ::: {#fig-vol3-failure-diagnostic-tree fig-env="figure" fig-pos="htb" fig-cap="**Diagnostic Decision Tree for Agent Execution Failures**: Systematic triage cascade mapping intercepted trajectory anomalies through substrate telemetry, context assembly, tool schema validation, and state invariant oracles to determine the minimum-cost remediation layer." fig-alt="Flowchart showing diagnostic triage gates: from Trajectory Anomaly Intercepted down through Gate 1 Execution Substrate Telemetry (branching to Runtime Defect), Gate 2 Context Window and Working Set (branching to Context Deficit), Gate 3 Tool Interface and Schema Typing (branching to Interface Ambiguity), and Gate 4 Invariant Oracle and State Delta (branching to Policy Incapability), concluding at Deterministic Verification Closure."}
 ![](images/svg/fig-vol3-failure-diagnostic-tree.svg)
@@ -100,6 +100,10 @@ The triage cascade formalized in @fig-vol3-failure-diagnostic-tree operationaliz
 - Gate 3 (**Tool Interface & Schema Typing**) evaluates emitted arguments against strict JSON Schema and parameter bounds to isolate *Interface Ambiguities* at the tool contract boundary.
 - Gate 4 (**Invariant Oracle & State Delta**) executes hermetic test suites and state difference audits ($\Delta_{\text{fs}}$) to differentiate harmless retry loops from genuine *Policy Incapabilities*.
 Only execution traces that pass all four gates achieve *Deterministic Verification Closure* and enter the training corpus; traces failing earlier gates trigger immediate low-cost systems remedies—runtime hardening, context injection, or schema redesign—avoiding unnecessary model retraining.
+
+::: {.column-margin .margin-pointer}
+↩ Ephemeral isolation, container namespaces, and execution watchdogs are established in @sec-vol3-sandboxes.
+:::
 
 ::: {#exmp-12-quantitative-trade-offs-in-the-systems .callout-example title="Systems intervention ladder trade-offs"}
 **Problem:** An autonomous software maintenance runtime deployed across an enterprise cluster processes $N = 50{,}000$ agent trajectories per month. Telemetry indicates a steady failure rate of $f = 6\%$, corresponding to $M = 3{,}000$ failed trajectories per month. Forensic analysis reveals that $70\%$ of these failures stem from interface ambiguities in newly added git-tool schemas, $20\%$ stem from sandbox container startup timeouts ($T > 10\text{ s}$) on heavily loaded worker nodes, and only $10\%$ ($300$ trajectories) represent true policy capability gaps in complex multi-file refactoring logic.
@@ -146,7 +150,7 @@ The *sub-second reset harness* ($\mathcal{H}_{\text{reset}}$) governs the physic
 
 ::: {.column-margin}
 **Completion evidence:**
-A model's declaration that it finished ("I have completed the task") carries no evidential weight (@sec-vol3-intro-closure-evidence). The oracle inspects the state the trajectory left behind.
+A model's declaration that it finished ("I have completed the task") carries no evidential weight. The oracle inspects the state the trajectory left behind.
 :::
 
 The *mechanical verification oracle* ($\mathcal{O}_{\text{verify}}$) provides the objective ground truth that classifies a harvested trajectory as a success or a failure. The invariant closure principle (\ref{pri-invariant-closure}) requires that evidence to come from outside the model's authority, so the verification oracle is completely decoupled from the model's self-assessment. It consists of automated test suites, Abstract Syntax Tree (AST) linters, binary execution checks, or database state assertions executed within a separate, privileged supervisor process. The oracle evaluates the mutated environment against sealed acceptance invariants, emitting a deterministic binary score $y \in \{0, 1\}$ or a structured diagnostic vector. If an oracle relies on an unpinned LLM-as-a-judge to grade trajectory completion, it re-introduces stochastic drift into the evaluation boundary, compromising the integrity of the data flywheel.
@@ -288,7 +292,7 @@ A trajectory harvesting engine that samples tasks uniformly from a monolithic re
 *Training moves no exposure, so the harvest must sample every exposure the agent meets.*
 :::
 
-To systematically populate the training distribution, runtime engineers organize fixtures into a *stratified task matrix*. This matrix organizes environment instances along the three H·S·A exposures of @sec-vol3-intro-hsa:
+To systematically populate the training distribution, runtime engineers organize fixtures into a *stratified task matrix*. This matrix organizes environment instances along the three human, system, and agent exposures:
 
 - *Horizon ($H$):* Stratified into shallow single-turn commands ($H = 1$), localized multi-turn workflows ($H \in [2, 5]$), and deep exploratory problem-solving ($H \in [10, 50]$).
 - *State ($S$):* Every fixture carries an $S_1$ context and $S_2$ working files, so the matrix stratifies state by the staged context length $M$, partitioned into compact contexts ($2\text{k}$ tokens, focusing on localized AST refactoring), intermediate contexts ($8\text{k}\text{--}16\text{k}$ tokens, typical of multi-file module navigation), and massive repository-scale contexts ($32\text{k}\text{--}128\text{k}$ tokens, requiring hierarchical search and external memory retrieval).
@@ -335,9 +339,13 @@ As detailed in @fig-vol3-verifier-cascade, the harvesting pipeline structures va
 - **Stage 4 (State Delta Audit)**: Inspects filesystem copy-on-write snapshots ($c_4 = 450\,\text{ms}$, $p_4 = 0.85$) to quarantine test tampering or out-of-tree file modifications into the Tamper Quarantine Sink, yielding $5.5\%$ survival.
 - **Stage 5 (Semantic Triage)**: Applies advisory model scoring and human audit ($c_5 = 15.0\,\text{s}$, $p_5 = 0.70$) to suppress tautological solutions, with every rejection at this stage a human audit decision, culminating in a Golden Training Corpus with a final yield of $Y = 3.87\% \approx 3.9\%$ ($3{,}867$ of $100{,}000$ rollouts) at an amortized evaluation cost of $C_{\text{attempt}} = 3.15\,\text{s}$ per candidate.
 
-Raw execution traces cannot be admitted into training corpora on self-reported completion or a single evaluation pass. Candidate trajectories instead traverse an escalating cascade of independent verifiers, from microsecond syntactic validation to multi-second dynamic isolation, and each stage filters invalid proposals at minimal computational cost. The stages climb the closure evidence levels of @sec-vol3-intro-closure-evidence. Stages 1 and 2 are static checks, Stage 3 runs tests, and the out-of-tree test mounts of @sec-vol3-verifier-gaming make those tests sealed rather than visible to the agent. Acceptance through this pipeline never establishes metaphysical correctness; it proves only that a trajectory has survived a finite sequence of rigorous empirical falsification checks.
+Raw execution traces cannot be admitted into training corpora on self-reported completion or a single evaluation pass. Candidate trajectories instead traverse an escalating cascade of independent verifiers, from microsecond syntactic validation to multi-second dynamic isolation, and each stage filters invalid proposals at minimal computational cost. The stages climb the closure evidence levels: Stages 1 and 2 are static checks, Stage 3 runs tests, and out-of-tree test mounts make those tests sealed rather than visible to the agent. Acceptance through this pipeline never establishes metaphysical correctness; it proves only that a trajectory has survived a finite sequence of rigorous empirical falsification checks.
 
 Following the classic formulation of Karl Popper (1959), empirical systems engineering cannot establish the absolute correctness of an unprivileged model rollout; it can only fail to falsify the candidate across a battery of critical tests. The verifier cascade operationalizes this principle by organizing tests into an ordered sequence of rejection filters. A candidate trajectory is promoted to the training corpus if and only if it survives every gate in the sequence. By ordering gates strictly by ascending computational cost per rejected proposal, the runtime shields high-fidelity, high-cost evaluation environments behind layers of inexpensive deterministic checks.
+
+::: {.column-margin .margin-pointer}
+↩ Hermetic evaluation gyms, Wilson score bounds, and post-condition verifiers are established in @sec-vol3-evaluation.
+:::
 
 ### The five-stage verification architecture {#sec-vol3-verifier-funnel}
 
@@ -540,15 +548,15 @@ The mathematical reality captured in @eq-verifier-cost-cascade dictates the sche
 
 ### Learned rankers beneath the gate {#sec-vol3-trajectory-curation-rankers}
 
-Deterministic checks say whether a trajectory satisfied the oracle. They say nothing about which of eight passing trajectories for the same task is the best one to train on, whether a passing refund conversation was courteous, or at which turn a failing trajectory went wrong. Learned models answer those questions: reward models trained on human preferences, process reward models that score individual steps [@uesato2022solving; @lightman2023let], and large language model (LLM) judges prompted with a rubric. @Sec-vol3-test-time-compute-verification introduced these as verifiers and showed that their errors are exploitable under selection. @Sec-vol3-evaluation measures their calibration, bias, and agreement with deterministic checks.
+Deterministic checks say whether a trajectory satisfied the oracle. They say nothing about which of eight passing trajectories for the same task is the best one to train on, whether a passing refund conversation was courteous, or at which turn a failing trajectory went wrong. Learned models answer those questions: reward models trained on human preferences, process reward models that score individual steps [@uesato2022solving; @lightman2023let], and large language model (LLM) judges prompted with a rubric. Test-time compute verification introduced these as verifiers and showed that their errors are exploitable under selection, while empirical evaluation measures their calibration, bias, and agreement with deterministic checks.
 
 In curation they sit beneath the gate, never in it. A learned ranker may do three jobs:
 
 - *Order the audit queue*, so that Stage 5 reviewers see the most doubtful candidates first.
 - *Choose among passing trajectories*, preferring the shortest or cleanest of several that all passed Stages 1 to 4.
-- *Locate the divergence turn* in a failing trajectory, which labels hard negatives and recovery points for @sec-vol3-flywheel-curation.
+- *Locate the divergence turn* in a failing trajectory, which labels hard negatives and recovery points for recovery demonstration curation.
 
-It may not admit a trajectory that failed a deterministic stage, and it may not be the sole reason a trajectory is admitted where no deterministic oracle exists. The reason is repeated selection. A ranker with a small, systematic preference for fluent but wrong trajectories adds a small bias to one decision. Used as the admission gate across several training rounds, the same preference compounds, because each round's policy is trained to produce more of what the ranker favors. That is the overoptimization @sec-vol3-test-time-compute-verification warned about [@gao2023scaling], now applied to the training data itself. Where the task has no deterministic oracle at all, as with the tone of a refund conversation, the ranker's verdict still goes to a human who samples its decisions, and the ranker is recalibrated against those samples whenever its agreement with the human reviewers drops.
+It may not admit a trajectory that failed a deterministic stage, and it may not be the sole reason a trajectory is admitted where no deterministic oracle exists. The reason is repeated selection. A ranker with a small, systematic preference for fluent but wrong trajectories adds a small bias to one decision. Used as the admission gate across several training rounds, the same preference compounds, because each round's policy is trained to produce more of what the ranker favors. That is the overoptimization under search and selection warned about [@gao2023scaling], now applied to the training data itself. Where the task has no deterministic oracle at all, as with the tone of a refund conversation, the ranker's verdict still goes to a human who samples its decisions, and the ranker is recalibrated against those samples whenever its agreement with the human reviewers drops.
 
 ::: {#chk-12-harvesting-cascade .callout-checkpoint title="Admission cascades and their limits"}
 Before moving on to what the admitted trajectories should contain, check your understanding of the cascade:
@@ -652,11 +660,15 @@ To understand how these trajectories are differentiated in storage, consider the
 }
 ```
 
+::: {.column-margin .margin-pointer}
+↩ Tool fault injection, synthetic exceptions, and compensating saga recovery are established in @sec-vol3-failure-recovery.
+:::
+
 ### Fault-injection synthesis
 
 In a well-designed production staging environment, natural errors are rare. Waiting for organic network dropouts, stale lockfiles, or permission misconfigurations to generate recovery trajectories yields an impractically low sampling rate. An industrial trajectory harvesting system must therefore incorporate an active *Fault-Injection Synthesis Harness* that deliberately perturbs the sandboxed execution environment during rollout generation.
 
-Recoveries are rare in a well-run environment. Waiting for organic permission errors or rate limits yields too few, so collection injects faults deliberately. The fault-injection harness of @sec-vol3-sagas-case-study, built there to test the runtime's recovery paths, doubles as a generator of recovery traces. At the tool boundary it returns one of the fault classes of @tbl-vol3-fault-injection-taxonomy on a configured schedule, and the rollouts that recover become candidates for the recovery class.
+Recoveries are rare in a well-run environment. Waiting for organic permission errors or rate limits yields too few, so collection injects faults deliberately. The runtime's fault-injection harness, built to test recovery paths, doubles as a generator of recovery traces. At the tool boundary it returns one of the fault classes of @tbl-vol3-fault-injection-taxonomy on a configured schedule, and the rollouts that recover become candidates for the recovery class.
 
 | **Fault class**                 | **Injected anomaly**                                                      | **Recovery the trajectory should show**                                 |
 |:--------------------------------|:--------------------------------------------------------------------------|:------------------------------------------------------------------------|
@@ -812,7 +824,7 @@ A team fine-tunes on the passing rollouts of its current model, gains several po
 
 ### Rejection sampling and expert iteration
 
-The loop has four steps. The current policy $\pi_n$ attempts each fixture $k$ times. The cascade admits the passing attempts. Training on them produces $\pi_{n+1}$ (@sec-vol3-fine-tuning). The new policy is evaluated on the held-out split and, if it passes the release gates, becomes the sampler for the next round. Filtering sampled outputs through a verifier and training on the survivors is rejection sampling fine-tuning. Repeating it with each new policy as the sampler is expert iteration, and the same pattern, with the model's own successful reasoning as the training signal, underlies bootstrapped reasoning methods [@zelikman2022star]. The verifier plays the role an expert demonstrator would play, which is why the soundness of the cascade bounds what the loop can learn.
+The loop has four steps. The current policy $\pi_n$ attempts each fixture $k$ times. The cascade admits the passing attempts. Training on them produces $\pi_{n+1}$. The new policy is evaluated on the held-out split and, if it passes the release gates, becomes the sampler for the next round. Filtering sampled outputs through a verifier and training on the survivors is rejection sampling fine-tuning. Repeating it with each new policy as the sampler is expert iteration, and the same pattern, with the model's own successful reasoning as the training signal, underlies bootstrapped reasoning methods [@zelikman2022star]. The verifier plays the role an expert demonstrator would play, which is why the soundness of the cascade bounds what the loop can learn.
 
 ### Where the training signal lives
 
@@ -820,15 +832,19 @@ Not every fixture contributes. If the policy succeeds on a task with probability
 
 $$P_{\text{inform}}(p, k) = 1 - (1-p)^k - p^k$$ {#eq-vol3-trajectory-curation-informative}
 
-With $k = 8$, @eq-vol3-trajectory-curation-informative says that a task the policy solves 5 percent of the time is informative with probability about 0.34, a task it solves half the time with probability about 0.99, and a task it solves 95 percent of the time again with probability about 0.34. Tasks the policy never solves contribute no successes, and tasks it always solves contribute trajectories it already produces. The signal is concentrated in a middle band of difficulty, and the loop's sampling budget belongs there. Per-task pass rates from @sec-vol3-evaluation-pass-k identify the band, and fixture generation should keep it populated as the policy improves.
+With $k = 8$, @eq-vol3-trajectory-curation-informative says that a task the policy solves 5 percent of the time is informative with probability about 0.34, a task it solves half the time with probability about 0.99, and a task it solves 95 percent of the time again with probability about 0.34. Tasks the policy never solves contribute no successes, and tasks it always solves contribute trajectories it already produces. The signal is concentrated in a middle band of difficulty, and the loop's sampling budget belongs there. Per-task pass rates across repeated attempts identify the band, and fixture generation should keep it populated as the policy improves.
 
 ### Staleness and refresh
 
-Trajectories sampled from $\pi_n$ describe what $\pi_n$ does. Once training produces $\pi_{n+1}$, the corpus is off-policy. Tasks that sat in the informative band have moved toward the solved end, and the mistakes worth recovering from are no longer the ones $\pi_{n+1}$ makes. Supervised training tolerates a round or two of staleness, but a corpus reused across many rounds keeps teaching the old model's behavior. The practical rule is to resample every fixture in the band with the new policy before each training round, and to record the sampling policy's digest on every trajectory (@sec-vol3-flywheel-provenance) so that stale trajectories can be found and retired. @Sec-vol3-rlvr confronts the same problem at a much shorter timescale, where the gap between sampler and learner is measured in gradient steps.
+Trajectories sampled from $\pi_n$ describe what $\pi_n$ does. Once training produces $\pi_{n+1}$, the corpus is off-policy. Tasks that sat in the informative band have moved toward the solved end, and the mistakes worth recovering from are no longer the ones $\pi_{n+1}$ makes. Supervised training tolerates a round or two of staleness, but a corpus reused across many rounds keeps teaching the old model's behavior. The practical rule is to resample every fixture in the band with the new policy before each training round, and to record the sampling policy's digest on every trajectory so that stale trajectories can be found and retired. Reinforcement learning with verifiable rewards confronts the same problem at a much shorter timescale, where the gap between sampler and learner is measured in gradient steps.
+
+::: {.column-margin .margin-pointer}
+↪ Online policy iteration, group relative advantage estimation, and rule-based verifiers are developed in @sec-vol3-rlvr.
+:::
 
 ### Collapse
 
-A model trained repeatedly on its own outputs loses the tails of its distribution. Rare but valid strategies are sampled less, admitted less, and trained on less, until they disappear [@shumailov2024]. For an agent the symptoms are measurable. The number of distinct action sequences per fixture falls. Pass@1 rises while pass@$k$ at large $k$ stays flat, which @sec-vol3-evaluation-pass-k reads as a policy concentrating on strategies it already had rather than acquiring new ones. Performance on held-out task families stalls while performance on the training families still climbs.
+A model trained repeatedly on its own outputs loses the tails of its distribution. Rare but valid strategies are sampled less, admitted less, and trained on less, until they disappear [@shumailov2024]. For an agent the symptoms are measurable. The number of distinct action sequences per fixture falls. Pass@1 rises while pass@$k$ at large $k$ stays flat, indicating a policy concentrating on strategies it already had rather than acquiring new ones. Performance on held-out task families stalls while performance on the training families still climbs.
 
 Four measures keep the loop healthy:
 
@@ -837,23 +853,23 @@ Four measures keep the loop healthy:
 - *Keep an anchor of external data*, human and expert demonstrations that no round replaces.
 - *Track diversity and held-out families*, and stop the loop when they stall even if the training-family pass rate still rises.
 
-Verifier weaknesses are amplified the same way. A shortcut the cascade misses in round one is admitted, trained on, and produced more often in round two, which is Goodhart's law under selection (@sec-vol3-test-time-compute-verification) applied across rounds. Auditing a sample of admitted trajectories every round, not only at the start, is how such a shortcut is caught before it becomes the policy's preferred behavior.
+Verifier weaknesses are amplified the same way. A shortcut the cascade misses in round one is admitted, trained on, and produced more often in round two, which is Goodhart's law under selection applied across rounds. Auditing a sample of admitted trajectories every round, not only at the start, is how such a shortcut is caught before it becomes the policy's preferred behavior.
 
 ### Production feedback signals
 
 Deployed agents produce signals that no fixture does. Users accept, edit, or revert what the agent produced. They correct it mid-conversation, retry the same request, abandon sessions, or press a rating button. These signals arrive without an oracle and carry biases of their own, summarized in @tbl-vol3-trajectory-curation-feedback-signals.
 
-| **Signal**                 | **What It Suggests**                                    | **Bias or Blind Spot**                                    | **Admissible Use**                                                         |
-|:---------------------------|:--------------------------------------------------------|:----------------------------------------------------------|:---------------------------------------------------------------------------|
-| **Accepted without edits** | The output was usable as delivered.                     | Users accept plausible output they did not check.         | Ranking signal; candidate for conversion into a fixture.                   |
-| **Edited or reverted**     | The output was wrong or incomplete; the edit shows how. | Edits mix correction with personal preference.            | Source of new fixtures, with the edit as a reference solution.             |
-| **Mid-task correction**    | The agent misread intent or state at a specific turn.   | Marks the turn, not the cause.                            | Triage input (@sec-vol3-flywheel-gap); marks a candidate $t_{\text{div}}$. |
-| **Retry or abandonment**   | The attempt did not meet the need.                      | Also caused by latency, cost, or the user changing plans. | Triage input only.                                                         |
-| **Explicit rating**        | Overall satisfaction.                                   | Sparse, skewed toward extremes, sensitive to tone.        | Calibration data for rankers; never an admission label alone.              |
+| **Signal**                 | **What It Suggests**                                    | **Bias or Blind Spot**                                    | **Admissible Use**                                             |
+|:---------------------------|:--------------------------------------------------------|:----------------------------------------------------------|:---------------------------------------------------------------|
+| **Accepted without edits** | The output was usable as delivered.                     | Users accept plausible output they did not check.         | Ranking signal; candidate for conversion into a fixture.       |
+| **Edited or reverted**     | The output was wrong or incomplete; the edit shows how. | Edits mix correction with personal preference.            | Source of new fixtures, with the edit as a reference solution. |
+| **Mid-task correction**    | The agent misread intent or state at a specific turn.   | Marks the turn, not the cause.                            | Triage input; marks a candidate $t_{\text{div}}$.              |
+| **Retry or abandonment**   | The attempt did not meet the need.                      | Also caused by latency, cost, or the user changing plans. | Triage input only.                                             |
+| **Explicit rating**        | Overall satisfaction.                                   | Sparse, skewed toward extremes, sensitive to tone.        | Calibration data for rankers; never an admission label alone.  |
 
 : **Production Feedback Signals**: Each signal suggests something about a trajectory, carries its own bias, and has a limited admissible use. None admits a trajectory by itself; the strongest route converts the underlying task into a fixture with an oracle. {#tbl-vol3-trajectory-curation-feedback-signals}
 
-Production signals come from outside the model, which makes them better evidence than self-report. They are still too noisy and too biased to admit a trajectory alone. Their best use is to find tasks worth fixturing. An edited output identifies a real task, a real failure, and often a reference solution, so the task becomes a new fixture whose oracle the edit helps define, and the incident becomes a regression task in the sense of @sec-vol3-evaluation-postmortems. Human labeling closes the remaining gap. A labeling queue ordered by the ranker of @sec-vol3-trajectory-curation-rankers sends reviewers the trajectories whose labels would change the corpus most, and its throughput, measured in reviewed trajectories per hour, is one of the budgets the next section sizes.
+Production signals come from outside the model, which makes them better evidence than self-report. They are still too noisy and too biased to admit a trajectory alone. Their best use is to find tasks worth fixturing. An edited output identifies a real task, a real failure, and often a reference solution, so the task becomes a new fixture whose oracle the edit helps define, and the incident becomes a regression task for evaluation post-mortems. Human labeling closes the remaining gap. A labeling queue ordered by learned rankers sends reviewers the trajectories whose labels would change the corpus most, and its throughput, measured in reviewed trajectories per hour, is one of the budgets the next section sizes.
 
 The loop runs continuously and at scale, and its cost is set by whichever stage is slowest. Generating rollouts is fast and parallel. Verifying them is bursty and heavy-tailed. When the two drift apart, the pipeline either stalls or drowns.
 
@@ -896,11 +912,11 @@ To prevent agent actions from contaminating the host or cross-pollinating concur
 
 Upon trajectory completion—triggered by an explicit stop token, budget exhaustion, or an unrecoverable sandbox fault—the rollout worker serializes the full event sequence $\tau = (s_0, a_0, o_0, \dots, a_T, o_T)$ into a compact protocol buffer and enqueues it onto the verification staging bus. The rollout worker immediately releases its microVM back to the sandbox manager for background teardown, decoupling inference hardware from post-processing evaluation.
 
-The **Verification Worker Pool** dequeues raw trajectories and subjects them to the staged cascades established in @sec-vol3-flywheel-verification:
+The **Verification Worker Pool** dequeues raw trajectories and subjects them to staged cascades:
 
 1. Stage 1 executes fast static verification ($V_1$), verifying JSON formatting, patch syntax, and AST validity. Trajectories that fail $V_1$ are triaged immediately as hard negative training candidates or discarded, bypassing expensive downstream stages.
 2. Stage 2 instantiates a hermetic test container to execute deterministic unit and regression test suites ($V_2$).
-3. Stage 3 (if applicable) runs semantic checks ($V_3$) with isolated compiler toolchains. A secondary discriminator model may also score the trajectory to order human review, but, as @sec-vol3-verifier-funnel requires, it never admits or rejects a trajectory on its own.
+3. Stage 3 (if applicable) runs semantic checks ($V_3$) with isolated compiler toolchains. A secondary discriminator model may also score the trajectory to order human review, but, as the verification funnel requires, it never admits or rejects a trajectory on its own.
 
 Trajectories passing the verification threshold $c^*$ are tagged with comprehensive execution metadata (exit statuses, execution wall times, patch diffs, and verifier scorecards) and handed to the **Storage Sink**. The storage sink maintains memory-mapped ring buffers that batch incoming traces into columnar Apache Arrow record batches, periodically flushing compressed Parquet files to distributed object storage. This columnar format aligns token sequences, tool call payloads, and verifier labels into contiguous byte vectors, optimizing downstream I/O throughput during distributed training.
 
@@ -1405,7 +1421,7 @@ Consider three candidate training mixtures, each calibrated to an identical comp
 
 1. *Uncurated Rollouts:* Raw trajectories accepted solely by passing terminal verifiers ($V_3$), containing arbitrary exploratory wandering, redundant operations, and inefficient tool loops.
 2. *Pristine-Only Demonstrations:* Trajectories where every step is optimal, generated by high-capability frontier models or human experts executing shortest-path solutions without missteps.
-3. *Recovery-Augmented Mixture:* A curated balance consisting of 70 percent pristine trajectories and 30 percent structured recovery demonstrations (synthesized via the divergence and checkpoint rollback techniques established in @sec-vol3-flywheel-curation).
+3. *Recovery-Augmented Mixture:* A curated balance consisting of 70 percent pristine trajectories and 30 percent structured recovery demonstrations (synthesized via divergence and checkpoint rollback techniques).
 
 The quantitative dynamics of this trade-off are traced in @fig-vol3-data-composition-ablation across three distinct benchmark task regimes:
 
@@ -1978,6 +1994,10 @@ A deployed agent's log is not a training set. Most of its failures belong to the
 
 The chapter turned verified trajectory post-training (principle \ref{pri-vol3-trajectory-post-training}) from a rule into a procedure. Triage puts weights last, the cascade admits a trajectory only on evidence produced outside the model, and the mix keeps the recovery traces a clean corpus would lose. The tampering defense and the ranker boundary showed that the invariant closure principle (\ref{pri-invariant-closure}) governs training data as strictly as it governs live actions. A check the agent can edit, or a judge the loop can learn to please, admits exactly the trajectories a policy should never learn from, and the verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) holds only while the check stays out of the agent's reach.
 
+::: {.column-margin .margin-pointer}
+↪ Supervised fine-tuning, action loss masking, and sequence packing are developed in @sec-vol3-fine-tuning.
+:::
+
 ::: {.callout-chapter-connection title="From admitted trajectories to supervised training"}
-What does a model actually learn from an admitted trajectory? Only what the loss is aimed at. A trajectory interleaves the model's actions with the environment's observations, the system prompt, and tool schemas the model will read again at run time, and training on all of it would teach the model to write observations it should wait for. @Sec-vol3-fine-tuning takes the curated mix and its labels as a data contract. It first settles what fine-tuning can and cannot change, then serializes trajectories into the chat and tool-call formats the model reads, masks the loss so that only the model's own actions are trained, packs trajectories without letting them see one another, and evaluates the trained model against the cheaper fixes this chapter's triage considered.
+What does a model actually learn from an admitted trajectory? Only what the loss is aimed at. A trajectory interleaves the model's actions with the environment's observations, the system prompt, and tool schemas the model will read again at run time, and training on all of it would teach the model to write observations it should wait for. Supervised fine-tuning takes the curated mix and its labels as a data contract. It first settles what fine-tuning can and cannot change, then serializes trajectories into the chat and tool-call formats the model reads, masks the loss so that only the model's own actions are trained, packs trajectories without letting them see one another, and evaluates the trained model against the cheaper fixes this chapter's triage considered.
 :::
