@@ -181,7 +181,7 @@ svg_1 = """<?xml version="1.0" encoding="UTF-8"?>
       <text x="14" y="92" font-family="monospace" font-size="7" fill="#7f1d1d">}</text>
       <text x="8" y="104" font-family="monospace" font-size="7" fill="#7f1d1d">}</text>
       <rect x="8" y="110" width="218" height="16" rx="2" fill="#fee2e2"/>
-      <text x="117" y="121" font-size="6.5" font-weight="700" fill="#991b1b" text-anchor="middle">Syntax: Schema Valid | Status: Compromised</text>
+      <text x="117" y="121" font-size="6.5" font-weight="700" fill="#991b1b" text-anchor="middle">Syntax: Schema Valid • Status: Compromised</text>
     </g>
 
     <!-- Sub-box 2: Why Naive Execution Fails -->
@@ -308,7 +308,7 @@ svg_2 = """<?xml version="1.0" encoding="UTF-8"?>
       <text x="8" y="13" font-size="7.5" font-weight="700" fill="#0f766e">Signed Capability Descriptor C = ⟨ToolID, Scope, τ_expire, σ_host⟩</text>
       <text x="8" y="32" font-family="monospace" font-size="7.2" fill="#334155">ToolID: "db_query" (Read-only subset)</text>
       <text x="8" y="44" font-family="monospace" font-size="7.2" fill="#334155">Scope: {path: "issues/*", verbs: [SELECT], max_rows: 50}</text>
-      <text x="8" y="56" font-family="monospace" font-size="7.2" fill="#334155">τ_expire: monotonic_now() + 30s | σ_host: HMAC-SHA256(K_sup, ...)</text>
+      <text x="8" y="56" font-family="monospace" font-size="7.2" fill="#334155">τ_expire: monotonic_now() + 30s • σ_host: HMAC-SHA256(K_sup, ...)</text>
       <rect x="8" y="66" width="394" height="16" rx="2" fill="#f0fdf4"/>
       <text x="205" y="78" font-size="6.8" font-weight="700" fill="#166534" text-anchor="middle">Zero Ambient Credentials in Guest: Secrets Stored in External Vault</text>
     </g>
@@ -508,7 +508,7 @@ svg_3 = """<?xml version="1.0" encoding="UTF-8"?>
       <text x="8" y="88" font-size="7.2" font-weight="700" fill="#0f766e">Enforced Systems Control:</text>
       <text x="8" y="102" font-size="7" fill="#334155">1. Link-local filter: Block 169.254.169.254/32</text>
       <text x="8" y="114" font-size="7" fill="#334155">2. IMDSv2 mandatory: Hop limit = 1 prevents VM leap</text>
-      <text x="8" y="126" font-size="7" fill="#334155">3. Egress proxy: Whitelist destinations strictly</text>
+      <text x="8" y="126" font-size="7" fill="#334155">3. Egress proxy: Allowlist destinations strictly</text>
       <rect x="8" y="136" width="264" height="18" rx="2" fill="#f0fdf4"/>
       <text x="140" y="148" font-size="6.8" font-weight="700" fill="#166534" text-anchor="middle">Verdict: TCP Connection Refused</text>
     </g>
@@ -924,7 +924,7 @@ svg_6 = """<?xml version="1.0" encoding="UTF-8"?>
         <text x="55" y="278" font-size="8" font-weight="700" fill="#1e293b" text-anchor="middle">Tier 0: Baseline</text>
         <text x="55" y="290" font-size="7" fill="#64748b" text-anchor="middle">Naive Single Prompt</text>
         <text x="55" y="304" font-size="6.8" fill="#475569" text-anchor="middle">ASRR: 0.0% (Ref)</text>
-        <text x="55" y="316" font-size="6.8" fill="#475569" text-anchor="middle">ΔT: 0 ms | ODR: 0.0%</text>
+        <text x="55" y="316" font-size="6.8" fill="#475569" text-anchor="middle">ΔT: 0 ms • ODR: 0.0%</text>
       </g>
 
       <!-- Bar 2: System Prompt Hardening (ASR = 48.6%, height = 126) -->
@@ -934,7 +934,7 @@ svg_6 = """<?xml version="1.0" encoding="UTF-8"?>
         <text x="55" y="278" font-size="8" font-weight="700" fill="#1e293b" text-anchor="middle">Tier 1: Hardened Prompt</text>
         <text x="55" y="290" font-size="7" fill="#64748b" text-anchor="middle">Negative Instructions</text>
         <text x="55" y="304" font-size="6.8" font-weight="700" fill="#92400e" text-anchor="middle">ASRR: 34.5%</text>
-        <text x="55" y="316" font-size="6.8" fill="#475569" text-anchor="middle">ΔT: +45 ms | ODR: 1.2%</text>
+        <text x="55" y="316" font-size="6.8" fill="#475569" text-anchor="middle">ΔT: +45 ms • ODR: 1.2%</text>
       </g>
 
       <!-- Bar 3: External Guardrail Classifier (ASR = 28.4%, height = 74) -->
@@ -944,7 +944,7 @@ svg_6 = """<?xml version="1.0" encoding="UTF-8"?>
         <text x="55" y="278" font-size="8" font-weight="700" fill="#1e293b" text-anchor="middle">Tier 2: Guardrail Model</text>
         <text x="55" y="290" font-size="7" fill="#64748b" text-anchor="middle">Front-Door Filter</text>
         <text x="55" y="304" font-size="6.8" font-weight="700" fill="#a16207" text-anchor="middle">ASRR: 61.7%</text>
-        <text x="55" y="316" font-size="6.8" fill="#475569" text-anchor="middle">ΔT: +180 ms | ODR: 4.8%</text>
+        <text x="55" y="316" font-size="6.8" fill="#475569" text-anchor="middle">ΔT: +180 ms • ODR: 4.8%</text>
       </g>
 
       <!-- Bar 4: Quarantined Reader Architecture (ASR = 2.1%, height = 5.5) -->
@@ -954,7 +954,7 @@ svg_6 = """<?xml version="1.0" encoding="UTF-8"?>
         <text x="55" y="278" font-size="8" font-weight="700" fill="#1e293b" text-anchor="middle">Tier 3: Dual-LLM Reader</text>
         <text x="55" y="290" font-size="7" fill="#64748b" text-anchor="middle">Grammar Extraction</text>
         <text x="55" y="304" font-size="6.8" font-weight="700" fill="#0f766e" text-anchor="middle">ASRR: 97.2%</text>
-        <text x="55" y="316" font-size="6.8" fill="#475569" text-anchor="middle">ΔT: +420 ms | ODR: 0.3%</text>
+        <text x="55" y="316" font-size="6.8" fill="#475569" text-anchor="middle">ΔT: +420 ms • ODR: 0.3%</text>
       </g>
 
       <!-- Bar 5: Full Invariant Architecture (ASR = 0.08%, height = 1) -->
@@ -964,7 +964,7 @@ svg_6 = """<?xml version="1.0" encoding="UTF-8"?>
         <text x="55" y="278" font-size="8" font-weight="700" fill="#1e293b" text-anchor="middle">Tier 4: Full Invariant</text>
         <text x="55" y="290" font-size="7" fill="#64748b" text-anchor="middle">Quarantine + Taint + JIT</text>
         <text x="55" y="304" font-size="6.8" font-weight="700" fill="#166534" text-anchor="middle">ASRR: 99.89%</text>
-        <text x="55" y="316" font-size="6.8" fill="#475569" text-anchor="middle">ΔT: +460 ms | ODR: 0.4%</text>
+        <text x="55" y="316" font-size="6.8" fill="#475569" text-anchor="middle">ΔT: +460 ms • ODR: 0.4%</text>
       </g>
     </g>
 
@@ -972,8 +972,8 @@ svg_6 = """<?xml version="1.0" encoding="UTF-8"?>
     <g transform="translate(20, 376)">
       <rect width="872" height="32" rx="3" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
       <text x="14" y="20" font-size="7.5" font-weight="700" fill="#1e293b">SYSTEM TRADE-OFF SUMMARY:</text>
-      <text x="160" y="20" font-size="7.2" fill="#475569">Moving from Tier 0 to Tier 4 drives Attack Surface Reduction Ratio (ASRR) from 0% to 99.89% (&gt;900× safety boost),</text>
-      <text x="730" y="20" font-size="7.2" font-weight="700" fill="#0f766e">Over-Defense Rate (ODR) capped at 0.4%.</text>
+      <text x="160" y="20" font-size="7.2" fill="#475569">Moving from Tier 0 to Tier 4 drives Attack Surface Reduction Ratio (ASRR) from 0% to 99.89% (&gt;900× safety boost)</text>
+      <text x="858" y="20" font-size="7.2" font-weight="700" fill="#0f766e" text-anchor="end">ODR capped at 0.4% • Latency overhead: +460 ms</text>
     </g>
   </g>
 </svg>
