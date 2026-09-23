@@ -143,18 +143,26 @@ def _ptr(arr: np.ndarray):
     return arr.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
 
-def simd_matmul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+def _is_tensor(obj):
+    return obj is not None and type(obj).__name__ == "Tensor"
+
+
+def simd_matmul(a, b):
     """Cache-blocked, SIMD-vectorized matrix multiply (multi-threaded when built with OpenMP).
 
     Args:
-        a: 2D array [M, K]; converted to contiguous float32
-        b: 2D array [K, N]; converted to contiguous float32
+        a: 2D array or Tensor [M, K]
+        b: 2D array or Tensor [K, N]
 
     Returns:
-        c: 2D float32 array [M, N]. Falls back to np.matmul if the library is unavailable.
+        2D float32 array or Tensor [M, N]. Falls back to np.matmul if the library is unavailable.
     """
-    a_c = np.ascontiguousarray(a, dtype=np.float32)
-    b_c = np.ascontiguousarray(b, dtype=np.float32)
+    is_tensor = _is_tensor(a) or _is_tensor(b)
+    a_arr = a.data if _is_tensor(a) else a
+    b_arr = b.data if _is_tensor(b) else b
+
+    a_c = np.ascontiguousarray(a_arr, dtype=np.float32)
+    b_c = np.ascontiguousarray(b_arr, dtype=np.float32)
     M, K = a_c.shape
     K_b, N = b_c.shape
     if K != K_b:
@@ -162,31 +170,46 @@ def simd_matmul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
     lib = compile_and_load_simd()
     if lib is None:
-        return np.matmul(a_c, b_c).astype(np.float32)
+        out = np.matmul(a_c, b_c).astype(np.float32)
+    else:
+        c = np.empty((M, N), dtype=np.float32)
+        lib.tinytorch_cpp_gemm(_ptr(a_c), _ptr(b_c), _ptr(c), M, K, N)
+        out = c
 
-    c = np.empty((M, N), dtype=np.float32)
-    lib.tinytorch_cpp_gemm(_ptr(a_c), _ptr(b_c), _ptr(c), M, K, N)
-    return c
+    if is_tensor:
+        from tinytorch.core.tensor import Tensor
+        return Tensor(out)
+    return out
 
 
-def simd_fused_bias_gelu(x: np.ndarray, bias: np.ndarray) -> np.ndarray:
+def simd_fused_bias_gelu(x, bias):
     """y = GELU(x + bias) in one pass over memory (tanh approximation).
 
     Args:
-        x: array [..., D]; converted to contiguous float32
-        bias: array [D]
+        x: array or Tensor [..., D]
+        bias: vector or Tensor [D]
 
     Returns:
-        float32 array with the shape of x.
+        float32 array or Tensor with the shape of x.
     """
-    x_c = np.ascontiguousarray(x, dtype=np.float32)
-    b_c = np.ascontiguousarray(bias, dtype=np.float32)
+    is_tensor = _is_tensor(x) or _is_tensor(bias)
+    x_arr = x.data if _is_tensor(x) else x
+    b_arr = bias.data if _is_tensor(bias) else bias
+
+    x_c = np.ascontiguousarray(x_arr, dtype=np.float32)
+    b_c = np.ascontiguousarray(b_arr, dtype=np.float32)
     if b_c.shape != (x_c.shape[-1],):
         raise ValueError(f"bias must have shape ({x_c.shape[-1]},), got {b_c.shape}")
     lib = compile_and_load_simd()
     if lib is None:
         val = x_c + b_c
-        return (0.5 * val * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (val + 0.044715 * val ** 3)))).astype(np.float32)
-    y = np.empty_like(x_c)
-    lib.tinytorch_cpp_fused_bias_gelu(_ptr(x_c), _ptr(b_c), _ptr(y), x_c.size, x_c.shape[-1])
-    return y
+        out = (0.5 * val * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (val + 0.044715 * val ** 3)))).astype(np.float32)
+    else:
+        y = np.empty_like(x_c)
+        lib.tinytorch_cpp_fused_bias_gelu(_ptr(x_c), _ptr(b_c), _ptr(y), x_c.size, x_c.shape[-1])
+        out = y
+
+    if is_tensor:
+        from tinytorch.core.tensor import Tensor
+        return Tensor(out)
+    return out

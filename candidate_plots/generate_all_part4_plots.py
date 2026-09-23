@@ -162,11 +162,17 @@ def generate_ch14_plot():
         arrow=False,
     )
 
-    fig.suptitle("Human Supervisory Takeover Reaction Budget vs. Stopping Clearance Margin", fontsize=14, fontweight="bold", y=0.98, color=PALETTE["charcoal"])
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.tight_layout()
     
     out_path = os.path.join(SCRIPT_DIR, "ch14_human_takeover_reaction_margin.png")
     plt.savefig(out_path, dpi=200)
+
+    repo_root = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+    book_path = os.path.join(repo_root, "books/vol4/14_intervention/images/png/fig14_human_takeover_reaction_margin.png")
+    if os.path.exists(os.path.dirname(book_path)):
+        plt.savefig(book_path, dpi=200)
+        print(f"Saved copy to {book_path}")
+
     plt.close()
     print(f"Generated Chapter 14 plot: {out_path}")
     return out_path
@@ -272,12 +278,18 @@ def generate_ch15_plot():
 
     ax.set_xlabel("Target Failure Rate $\\lambda$ per Operating Hour (Failures / Hour, log scale)", fontsize=11, fontweight="bold", color=PALETTE["charcoal"])
     ax.set_ylabel("Required Zero-Failure Operating Hours ($N = 3 / \\lambda$, log scale)", fontsize=11, fontweight="bold", color=PALETTE["charcoal"])
-    ax.set_title("The Astronomical Exposure Wall: Target Failure Rates vs. Required Zero-Failure Operating Hours", fontsize=13.5, fontweight="bold", pad=16, color=PALETTE["charcoal"])
     ax.legend(loc="lower left", fontsize=9.2, framealpha=0.95, edgecolor="#CBD5E1")
 
-    plt.tight_layout(rect=[0, 0, 0.98, 1])
+    plt.tight_layout()
     out_path = os.path.join(SCRIPT_DIR, "ch15_astronomical_exposure_wall.png")
     plt.savefig(out_path, dpi=200)
+
+    repo_root = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+    book_path = os.path.join(repo_root, "books/vol4/15_verification/images/png/fig15_astronomical_exposure_wall.png")
+    if os.path.exists(os.path.dirname(book_path)):
+        plt.savefig(book_path, dpi=200)
+        print(f"Saved copy to {book_path}")
+
     plt.close()
     print(f"Generated Chapter 15 plot: {out_path}")
     return out_path
@@ -450,7 +462,6 @@ def generate_ch16_plot():
     ax.set_xticks(range(2015, 2026))
     ax.set_xlabel("Reporting Year (Dec 1 – Nov 30)", fontsize=11, fontweight="bold", color=PALETTE["charcoal"])
     ax.set_ylabel("Miles Between Disengagements (MPI, log scale)", fontsize=11, fontweight="bold", color=PALETTE["charcoal"])
-    ax.set_title("A Decade of California Autonomous Vehicle Disengagements (2015–2025)", fontsize=13.5, fontweight="bold", pad=16, color=PALETTE["charcoal"])
     ax.legend(loc="lower right", fontsize=9.2, framealpha=0.95, edgecolor="#CBD5E1")
 
     fig.text(0.12, 0.015, "*Data Source: California DMV Annual Autonomous Vehicle Disengagement Reports (2015–2025). DMV sunsetting traditional disengagement reporting in 2025/2026.", fontsize=8.2, color="#64748B", style="italic")
@@ -458,6 +469,14 @@ def generate_ch16_plot():
     plt.tight_layout(rect=[0, 0.03, 1, 1])
     out_path = os.path.join(SCRIPT_DIR, "ch16_decade_california_dmv_disengagements.png")
     plt.savefig(out_path, dpi=200)
+
+    repo_root = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+    for name in ["fig16_decade_california_dmv_disengagements.png", "ch16_decade_california_dmv_disengagements.png"]:
+        book_path = os.path.join(repo_root, f"books/vol4/16_release/images/png/{name}")
+        if os.path.exists(os.path.dirname(book_path)):
+            plt.savefig(book_path, dpi=200)
+            print(f"Saved copy to {book_path}")
+
     plt.close()
     print(f"Generated Chapter 16 plot: {out_path}")
     return out_path
@@ -566,12 +585,18 @@ def generate_ch17_plot():
 
     ax.set_xlabel("State-Space Dimensionality $d$ (Degrees of Freedom / State Variables)", fontsize=11, fontweight="bold", color=PALETTE["charcoal"])
     ax.set_ylabel("Verification / Safety Synthesis Computation Time (seconds, log scale)", fontsize=11, fontweight="bold", color=PALETTE["charcoal"])
-    ax.set_title("Formal Verification Tractability Frontier: Hamilton-Jacobi vs. Sampling vs. Neural Barrier Certificates", fontsize=13.0, fontweight="bold", pad=16, color=PALETTE["charcoal"])
     ax.legend(loc="upper left", fontsize=9.2, framealpha=0.95, edgecolor="#CBD5E1")
 
-    plt.tight_layout(rect=[0, 0, 0.98, 1])
+    plt.tight_layout()
     out_path = os.path.join(SCRIPT_DIR, "ch17_state_space_formal_verification_frontier.png")
     plt.savefig(out_path, dpi=200)
+
+    repo_root = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+    book_path = os.path.join(repo_root, "books/vol4/17_frontier/images/png/fig17_state_space_formal_verification_frontier.png")
+    if os.path.exists(os.path.dirname(book_path)):
+        plt.savefig(book_path, dpi=200)
+        print(f"Saved copy to {book_path}")
+
     plt.close()
     print(f"Generated Chapter 17 plot: {out_path}")
     return out_path

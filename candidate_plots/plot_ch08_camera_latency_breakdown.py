@@ -64,8 +64,6 @@ def generate_ch08_plot():
     ax.invert_yaxis()  # Event camera at top, USB 3.0 at bottom
     
     ax.set_xlabel("Photon-to-Actuator Pipeline Latency (milliseconds)", fontsize=11.5, fontweight="bold", color=PALETTE["charcoal"], labelpad=10)
-    ax.set_title("Photon-to-Actuator Latency Waterfall Across Camera Interfaces",
-                 fontsize=14.5, fontweight="bold", color=PALETTE["charcoal"], pad=24)
     
     ax.set_xlim(0, 72)
     ax.set_ylim(3.7, -0.7)  # Generous vertical margins
@@ -95,8 +93,10 @@ def generate_ch08_plot():
     plt.tight_layout()
     output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ch08_perception_camera_latency_breakdown.png")
     plt.savefig(output_path, dpi=300)
+    book_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "books", "vol4", "08_perception", "images", "png", "fig08_perception_camera_latency_breakdown.png")
+    plt.savefig(book_path, dpi=300)
     plt.close()
-    print(f"Generated {output_path}")
+    print(f"Generated {output_path} and {book_path}")
 
 if __name__ == "__main__":
     generate_ch08_plot()

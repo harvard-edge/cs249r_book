@@ -184,12 +184,6 @@ def generate_plot():
     ax.set_xlabel("Foundation Policy Parameter Count $M_{\\mathrm{weights}}$ (log scale)", fontsize=11, fontweight="bold", labelpad=8)
     ax.set_ylabel("Onboard Physical Action Frequency (Hz, log scale)", fontsize=11, fontweight="bold", labelpad=8)
     
-    # Title block
-    fig.suptitle("The Embodied Brain Frontier: Parameter Scaling vs Physical Action Frequency (2020–2026)",
-                 fontsize=14, fontweight="bold", x=0.08, y=0.98, ha="left", color=PALETTE["charcoal"])
-    ax.set_title("Overcoming the deliberation wall: how continuous action chunking and flow matching break the memory wall ($1\\,\\mathrm{Hz} \\rightarrow 100\\,\\mathrm{Hz}$)",
-                 fontsize=9.5, color="#475569", loc="left", pad=14)
-    
     # Legend - placed at bottom left
     from matplotlib.lines import Line2D
     legend_elements = [
@@ -206,12 +200,14 @@ def generate_plot():
     legend.set_zorder(15)
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.90, bottom=0.10, left=0.08, right=0.94)
+    plt.subplots_adjust(top=0.95, bottom=0.10, left=0.08, right=0.94)
     
     out_path = os.path.join(os.path.dirname(__file__), "ch03_vla_scaling_timeline.png")
     fig.savefig(out_path, dpi=300)
+    book_path = os.path.join(os.path.dirname(__file__), "..", "books", "vol4", "03_brain", "images", "png", "fig03_vla_scaling_timeline.png")
+    fig.savefig(book_path, dpi=300)
     plt.close(fig)
-    print(f"Saved: {out_path}")
+    print(f"Saved: {out_path} and {book_path}")
 
 if __name__ == "__main__":
     generate_plot()

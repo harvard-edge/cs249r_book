@@ -19,6 +19,7 @@ Key Historical Insights:
    Wall (1-3 Hz), overcome by Diffusion/Flow Matching action chunking reaching 30-50 Hz.
 """
 
+import os
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -106,8 +107,8 @@ ax1.set_yscale("log")
 ax1.set_ylim(0.2, 2e12)
 ax1.set_ylabel("Quantity / Frequency / Power\n(Logarithmic Scale)", fontsize=11, fontweight="bold", color="#1E293B")
 ax1.legend(loc="lower right", frameon=True, facecolor="#FFFFFF", edgecolor="#CBD5E1", fontsize=9.5)
-ax1.set_title("Fifty Years of Microprocessor Scaling & Physical AI Compute (1975–2025)",
-              fontsize=14, fontweight="bold", color="#0F172A", pad=14)
+ax1.set_title("(a) Microprocessor scaling, clock saturation, and mobile robot thermal budget",
+              fontsize=11.5, fontweight="bold", color="#0F172A", pad=12)
 
 # -----------------------------------------------------------------------------
 # BOTTOM PANEL: Embodied Compute Density (TOPS) vs Closed-Loop Control Cadence
@@ -174,6 +175,16 @@ ax2.legend(loc="lower right", frameon=True, facecolor="#FFFFFF", edgecolor="#CBD
 ax2.set_xticks(range(1975, 2026, 5))
 ax2.set_xticklabels([str(y) for y in range(1975, 2026, 5)], fontsize=10)
 
+ax2.set_title("(b) Onboard embodied compute density and perception-to-action cadence",
+              fontsize=11.5, fontweight="bold", color="#0F172A", pad=12)
+
 output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ch13_50yr_microprocessor_robotics_trend.png")
 plt.savefig(output_path, dpi=200, bbox_inches="tight")
 print(f"Plot saved successfully to {output_path}")
+
+repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+for name in ["fig13_50yr_microprocessor_robotics_trend.png", "ch13_50yr_microprocessor_robotics_trend.png"]:
+    book_path = os.path.join(repo_root, f"books/vol4/13_placement/images/png/{name}")
+    if os.path.exists(os.path.dirname(book_path)):
+        plt.savefig(book_path, dpi=200, bbox_inches="tight")
+        print(f"Saved copy to {book_path}")

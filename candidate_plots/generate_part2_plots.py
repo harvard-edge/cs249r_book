@@ -21,7 +21,7 @@ from plot_style import PALETTE, ERA_COLORS, setup_canvas, add_badge
 def generate_ch05_data_scaling():
     """Chapter 5: Robot Demonstration Hours vs Out-of-Distribution Generalization Success Rate."""
     fig, ax = setup_canvas(figsize=(14.0, 8.2), dpi=300)
-    fig.subplots_adjust(top=0.88, bottom=0.10, left=0.08, right=0.96)
+    fig.subplots_adjust(top=0.95, bottom=0.10, left=0.08, right=0.96)
 
     # Set generous headroom so phase pills never collide with top axis
     ax.set_ylim(0, 108)
@@ -191,13 +191,6 @@ def generate_ch05_data_scaling():
     ax.set_yticks(np.arange(0, 101, 10))
     ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda y, loc: f"{int(y)}%"))
 
-    # Title & Subtitle at very top outside the plot
-    fig.text(0.08, 0.958, "The Robotics Data Engine: Demonstration Hours vs. Out-of-Distribution Generalization",
-             fontsize=13.5, fontweight="bold", color=PALETTE["charcoal"], va="top")
-    fig.text(0.08, 0.922,
-             "Empirical scaling of real-world robot learning across single-task setups, multi-scene corpora (DROID), and cross-embodiment pools (Open X, π₀)",
-             fontsize=8.8, color="#475569", va="top")
-
     # Legend
     legend = ax.legend(loc="lower right", bbox_to_anchor=(0.99, 0.03), frameon=True, facecolor="#FFFFFF",
                        edgecolor="#CBD5E1", fontsize=8.5, framealpha=0.95)
@@ -205,14 +198,16 @@ def generate_ch05_data_scaling():
 
     output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ch05_data_scaling.png")
     plt.savefig(output_path, dpi=300, facecolor="#FFFFFF")
+    book_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "books", "vol4", "05_data", "images", "png", "fig05_data_scaling.png")
+    plt.savefig(book_path, dpi=300, facecolor="#FFFFFF")
     plt.close()
-    print(f"Saved Chapter 5 plot to: {output_path}")
+    print(f"Saved Chapter 5 plot to: {output_path} and {book_path}")
 
 
 def generate_ch06_compounding_error():
     """Chapter 6: Rollout Horizon T vs Task Survival Rate (O(T^2 epsilon) vs DAgger vs Action Chunking / Diffusion)."""
     fig, ax = setup_canvas(figsize=(14.0, 8.2), dpi=300)
-    fig.subplots_adjust(top=0.88, bottom=0.10, left=0.08, right=0.96)
+    fig.subplots_adjust(top=0.95, bottom=0.10, left=0.08, right=0.96)
 
     # Set generous headroom so title/subtitle never collide with curves
     ax.set_xlim(-5, 515)
@@ -295,13 +290,6 @@ def generate_ch06_compounding_error():
     ax.set_yticks(np.arange(0, 101, 10))
     ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda y, loc: f"{int(y)}%"))
 
-    # Title & Subtitle at very top outside the plot
-    fig.text(0.08, 0.958, "Compounding Covariate Shift: Rollout Horizon vs. Task Survival Rate",
-             fontsize=13.5, fontweight="bold", color=PALETTE["charcoal"], va="top")
-    fig.text(0.08, 0.922,
-             "Theoretical error compounding vs. empirical survival curves across imitation learning paradigms (Ross & Bagnell 2011, Chi et al. 2023, Zhao et al. 2023)",
-             fontsize=8.8, color="#475569", va="top")
-
     # Legend at lower left
     legend = ax.legend(loc="lower left", bbox_to_anchor=(0.02, 0.22), frameon=True, facecolor="#FFFFFF",
                        edgecolor="#CBD5E1", fontsize=7.8, framealpha=0.95)
@@ -309,14 +297,16 @@ def generate_ch06_compounding_error():
 
     output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ch06_compounding_error.png")
     plt.savefig(output_path, dpi=300, facecolor="#FFFFFF")
+    book_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "books", "vol4", "06_training", "images", "png", "fig06_compounding_error.png")
+    plt.savefig(book_path, dpi=300, facecolor="#FFFFFF")
     plt.close()
-    print(f"Saved Chapter 6 plot to: {output_path}")
+    print(f"Saved Chapter 6 plot to: {output_path} and {book_path}")
 
 
 def generate_ch07_sim_to_real_proxy_transfer():
     """Chapter 7: Sim-to-Real Proxy Transfer Law (SIMPLER Benchmark vs Real-World Robot Success Rate)."""
     fig, ax = setup_canvas(figsize=(14.0, 8.2), dpi=300)
-    fig.subplots_adjust(top=0.88, bottom=0.10, left=0.08, right=0.96)
+    fig.subplots_adjust(top=0.95, bottom=0.10, left=0.08, right=0.96)
 
     # Set generous headroom so title/subtitle never collide
     ax.set_xlim(-3, 105)
@@ -455,13 +445,6 @@ def generate_ch07_sim_to_real_proxy_transfer():
     ax.set_yticks(np.arange(0, 101, 10))
     ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda y, loc: f"{int(y)}%"))
 
-    # Title & Subtitle at very top outside the plot
-    fig.text(0.08, 0.958, "The Sim-to-Real Proxy Transfer Law: Simulation vs. Physical Robot Performance",
-             fontsize=13.5, fontweight="bold", color=PALETTE["charcoal"], va="top")
-    fig.text(0.08, 0.922,
-             "Paired real-world and simulated manipulation evaluations across Google Robot and WidowX embodiments (Li et al. 2024 / CoRL)",
-             fontsize=8.8, color="#475569", va="top")
-
     # Legend at bottom-center formatted with 2 columns
     handles, labels = ax.get_legend_handles_labels()
     custom_handles = [
@@ -480,8 +463,10 @@ def generate_ch07_sim_to_real_proxy_transfer():
 
     output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ch07_sim_to_real_proxy_transfer.png")
     plt.savefig(output_path, dpi=300, facecolor="#FFFFFF")
+    book_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "books", "vol4", "07_evaluation", "images", "png", "fig07_sim_to_real_proxy_transfer.png")
+    plt.savefig(book_path, dpi=300, facecolor="#FFFFFF")
     plt.close()
-    print(f"Saved Chapter 7 plot to: {output_path}")
+    print(f"Saved Chapter 7 plot to: {output_path} and {book_path}")
 
 
 if __name__ == "__main__":

@@ -149,8 +149,8 @@ def generate_ch11_plot():
     ax1.set_ylabel("GPU Compute Duty Cycle (%)", fontsize=10.5, fontweight="bold", color=PALETTE["crimson"])
     ax1_twin.set_ylabel("Mean Reaction Delay to Obstacle (ms)", fontsize=10.5, fontweight="bold", color=PALETTE["dark_blue"])
     
-    ax1.set_title("System Trade-off: Compute Amortization vs. Reaction Delay across Action Horizon (H)",
-                  fontsize=12.5, fontweight="bold", color=PALETTE["charcoal"], pad=14)
+    ax1.set_title("(a) Compute amortization vs. obstacle reaction delay",
+                  fontsize=11.5, fontweight="bold", color=PALETTE["charcoal"], pad=12)
     
     # Zone headers in top panel
     ax1.text(5.0, 148, "Compute Starvation\n(Robot Stalls / Freezes)", ha="center", va="top", fontsize=8.2, fontweight="bold", color="#B91C1C")
@@ -185,8 +185,8 @@ def generate_ch11_plot():
     ax2.set_xlabel("Action Chunk Horizon H (Predicted Steps at 50 Hz Control Cadence, Δt = 20 ms)",
                    fontsize=11.0, fontweight="bold", color=PALETTE["charcoal"], labelpad=10)
     ax2.set_ylabel("Closed-Loop Success Rate (%)", fontsize=10.5, fontweight="bold", color=PALETTE["charcoal"])
-    ax2.set_title("Empirical Task Success Rate: Static Environment vs. Dynamic Perturbations",
-                  fontsize=12.5, fontweight="bold", color=PALETTE["charcoal"], pad=14)
+    ax2.set_title("(b) Closed-loop task success in static vs. dynamic environments",
+                  fontsize=11.5, fontweight="bold", color=PALETTE["charcoal"], pad=12)
     
     # Annotations / Badges in bottom panel positioned without crossing any curves
     # 1. Single-Step Failure: positioned below curves in bottom-left whitespace
@@ -220,6 +220,13 @@ def generate_ch11_plot():
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "ch11_planning_action_chunk_horizon.png")
     plt.savefig(out_path, dpi=300, facecolor="#FFFFFF", bbox_inches="tight")
+
+    repo_root = os.path.abspath(os.path.join(out_dir, ".."))
+    book_path = os.path.join(repo_root, "books/vol4/11_planning/images/png/fig11_planning_action_chunk_horizon.png")
+    if os.path.exists(os.path.dirname(book_path)):
+        plt.savefig(book_path, dpi=300, facecolor="#FFFFFF", bbox_inches="tight")
+        print(f"Saved copy to {book_path}")
+
     plt.close()
     print(f"Generated {out_path}")
 

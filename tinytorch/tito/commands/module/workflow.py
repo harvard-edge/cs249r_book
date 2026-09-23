@@ -667,6 +667,62 @@ class ModuleWorkflowCommand(BaseCommand):
             return False
         return "jupyter" in probe.stdout.lower()
 
+    def _stop_jupyter(self) -> bool:
+        """Stop the running Jupyter Lab server launched by tito, if any."""
+        pid = self._running_jupyter_pid()
+        pid_file = self._jupyter_pid_file()
+
+        if pid is None:
+            if pid_file.exists():
+                try:
+                    pid_file.unlink()
+                except OSError:
+                    pass
+            return False
+
+        stopped = False
+        try:
+            if sys.platform == "win32":
+                import ctypes
+                PROCESS_TERMINATE = 0x0001
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+                if handle:
+                    try:
+                        kernel32.TerminateProcess(handle, 0)
+                        stopped = True
+                    finally:
+                        kernel32.CloseHandle(handle)
+            else:
+                import signal
+                import time
+                os.kill(pid, signal.SIGTERM)
+                # Give it up to 2 seconds to terminate cleanly
+                for _ in range(20):
+                    time.sleep(0.1)
+                    if not self._pid_is_running_jupyter(pid):
+                        stopped = True
+                        break
+                else:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                        stopped = True
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+
+        try:
+            if pid_file.exists():
+                pid_file.unlink()
+        except OSError:
+            pass
+
+        if stopped:
+            self.console.print("[dim]🛑 Stopped Jupyter Lab server for completed module.[/dim]")
+
+        return stopped
+
     def _open_jupyter(self, module_name: str) -> int:
         """Open Jupyter Lab for a module."""
         import time
@@ -925,7 +981,7 @@ class ModuleWorkflowCommand(BaseCommand):
         if success:
             self._check_milestone_unlocks(module_name)
             self._trigger_submission()
-
+            self._stop_jupyter()
 
         return 0 if success else 1
 
