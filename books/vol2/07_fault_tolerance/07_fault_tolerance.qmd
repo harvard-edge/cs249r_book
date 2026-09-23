@@ -642,7 +642,11 @@ $$ \tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{s
 
 $T_{\text{write}}$ in distributed ML training is not the time to flush a small process state, it is the time required to transfer hundreds of gigabytes of FP32 optimizer state (momentum and variance tensors for every trainable parameter) plus model weights to durable storage. For a 70B-parameter model with full Adaptive Moment Estimation (Adam) state, a single checkpoint can reach several hundred gigabytes; for the later 175B-parameter running example, that figure exceeds a terabyte. Compressing $T_{\text{write}}$ therefore requires purpose-built high-bandwidth storage, and $T_{\text{write}}$ itself is the central constraint that determines how tightly the checkpoint interval can be set before I/O overhead displaces productive training compute.
 
-The optimal interval balances the cost of writing checkpoints against the expected cost of reworking lost progress, the U-shaped trade-off @fig-young-daly plots. Its scaling consequence is the one to carry forward: as clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage (@sec-data-storage) to keep $T_{\text{write}}$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth. @Sec-appdx-reliability-foundations-young-daly carries out the full derivation and the tighter second-order bounds; the later checkpointing section (@sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d) applies the formula to the local cluster once its system MTBF is in hand.
+The optimal interval balances the cost of writing checkpoints against the expected cost of reworking lost progress, the U-shaped trade-off @fig-young-daly plots. Its scaling consequence is the one to carry forward: as clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage to keep $T_{\text{write}}$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth. @Sec-appdx-reliability-foundations-young-daly carries out the full derivation and the tighter second-order bounds; the later checkpointing section applies the formula to the local cluster once its system MTBF is in hand.
+
+::: {.column-margin .margin-pointer}
+↩ High-throughput storage hierarchies and parallel checkpoint I/O are analyzed in @sec-data-storage.
+:::
 
 [^fn-young-daly-formula]: **Young-Daly formula**\index{Young-Daly Formula!history}: @young1974 derived the first-order optimal checkpoint interval, and @daly2006 independently refined it with tighter second-order bounds. The formula's square-root relationship $(\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}})$ means that halving system MTBF only increases optimal checkpoint frequency by $\sqrt{2}\approx 1.4\times$, explaining why doubling cluster size does not demand doubling checkpoint I/O bandwidth.
 
@@ -3598,7 +3602,11 @@ Built-in self-test (BIST) [@bushnell2002] incorporates additional circuitry for 
 
 [^fn-scanchains-hardware-testing]: **Scan chains**\index{Scan Chain!manufacturing test}: Test infrastructure linking internal flip-flops into shift registers, developed in the 1970s for IC design-for-testability. The trade-off is concrete: 5--15 percent silicon area overhead buys 95 percent+ manufacturing fault coverage. For ML accelerators with billions of transistors in matrix-multiply units, scan-based testing during burn-in catches the stuck-at faults that would otherwise silently corrupt weight and gradient computations in production.
 
-Error detection and correction codes[^fn-hamming-ecc-memory] [@hamming1950] add redundant bits to detect and correct bit errors. @Fig-parity illustrates the simplest form: parity checks append an extra bit to each data word, enabling immediate detection when a bit flip occurs. More advanced codes such as CRC[^fn-crc-packet-validation] compute checksums that detect over 99.9 percent of transmission errors, a capability critical for validating gradient payloads during the distributed AllReduce operations covered in @sec-collective-communication.\index{Parity Bit Error Detection}
+Error detection and correction codes[^fn-hamming-ecc-memory] [@hamming1950] add redundant bits to detect and correct bit errors. @Fig-parity illustrates the simplest form: parity checks append an extra bit to each data word, enabling immediate detection when a bit flip occurs. More advanced codes such as CRC[^fn-crc-packet-validation] compute checksums that detect over 99.9 percent of transmission errors, a capability critical for validating gradient payloads during distributed AllReduce operations.\index{Parity Bit Error Detection}
+
+::: {.column-margin .margin-pointer}
+↩ AllReduce collective topologies and gradient synchronization algorithms are analyzed in @sec-collective-communication.
+:::
 
 ::: {#fig-parity fig-env="figure" fig-pos="htb" fig-cap="**Parity-bit error detection and trade-offs**: Even-parity bit check scheme where an extra parity bit detects single-bit inversions during data transmission or memory storage. While parity detects single-bit errors with minimal overhead, it cannot locate or correct errors, and double-bit flips cancel out undetected—motivating multi-bit SECDED ECC in high-density accelerator memory." fig-alt="Even parity bit check scheme showing a valid 8-bit word with matching parity bit, a corrupted word where bit 5 is inverted causing a parity mismatch, and a comparison table of detection capabilities and limitations versus ECC."}
 ```{=latex}
@@ -5387,7 +5395,11 @@ Asynchronous checkpointing reduces training disruption but requires tracking whi
 
 #### Checkpoint storage and recovery {#sec-fault-tolerance-reliability-reliability-checkpoint-storage-recovery-6634}
 
-The tiered checkpoint storage architecture described in @sec-storage-checkpointing, with local NVMe for speed, distributed filesystem for durability, and object storage for long-term retention, provides the storage foundation on which recovery mechanisms operate. The fault-tolerance question is how recovery mechanisms use that infrastructure rather than how the storage hierarchy is designed.
+Tiered checkpoint storage architectures, with local NVMe for speed, distributed filesystems for durability, and object storage for long-term retention, provide the storage foundation on which recovery mechanisms operate. The fault-tolerance question is how recovery mechanisms use that infrastructure rather than how the storage hierarchy is designed.
+
+::: {.column-margin .margin-pointer}
+↩ Tiered checkpoint storage designs and asynchronous write pipelines are analyzed in @sec-storage-checkpointing.
+:::
 
 For fault tolerance, the critical concern is not where checkpoints are stored but how quickly they can be read during recovery. Recovery time depends on storage tier bandwidth: local NVMe enables fastest recovery (5--10 GB/s per node), distributed filesystems provide moderate speed with durability (50--200 GB/s aggregate), while object storage offers slowest recovery but highest durability for disaster recovery scenarios.
 
@@ -6460,7 +6472,11 @@ The stateless pattern appears when the input itself carries all context: an imag
 
 The simplicity of stateless serving makes it the simpler architecture when the application permits it. However, many ML applications inherently require state across requests. Consider a chatbot: a single-turn question-answering system can operate statelessly, processing each question independently. A conversational assistant that remembers previous exchanges, however, must maintain conversation history, transforming fault tolerance from simple retry to state preservation.
 
-Stateful serving appears wherever the current request depends on earlier requests. LLM conversations accumulate KV cache (the cached key and value projections for all prior tokens, whose management @sec-inference-scale develops in full) across turns, streaming speech recognition maintains context from previous audio, recommendation sessions accumulate user context, and interactive editing maintains document state across edits. The fault-tolerance consequence is that failure loses quality-bearing state, not just serving capacity. KV cache loss requires reprocessing previous turns, session context loss forces users to repeat previous interactions, and accumulated user state loss degrades quality when context is unavailable. The mitigation choice follows the size, update rate, and quality value of that state: session affinity routes a session to the same replica, state checkpointing periodically saves session state, state replication maintains a standby copy, and graceful degradation keeps the service available at reduced quality if state cannot be recovered.
+Stateful serving appears wherever the current request depends on earlier requests. LLM conversations accumulate KV cache across turns, streaming speech recognition maintains context from previous audio, recommendation sessions accumulate user context, and interactive editing maintains document state across edits. The fault-tolerance consequence is that failure loses quality-bearing state, not just serving capacity. KV cache loss requires reprocessing previous turns, session context loss forces users to repeat previous interactions, and accumulated user state loss degrades quality when context is unavailable. The mitigation choice follows the size, update rate, and quality value of that state: session affinity routes a session to the same replica, state checkpointing periodically saves session state, state replication maintains a standby copy, and graceful degradation keeps the service available at reduced quality if state cannot be recovered.
+
+::: {.column-margin .margin-pointer}
+↪ KV cache management, paged attention, and continuous batching are developed in @sec-inference-scale.
+:::
 
 @Tbl-stateless-stateful-comparison contrasts stateless and stateful serving fault tolerance, showing how the fundamental difference manifests in every aspect of design, from request routing to recovery complexity.
 
@@ -7751,8 +7767,12 @@ Resilience becomes tractable when the cost of failure can be bounded. Checkpoint
 
 ::: {.callout-chapter-connection title="From resilience to resource management"}
 
-Keeping the fleet running despite inevitable hardware failures requires three layers: checkpointing preserves progress, elasticity absorbs node losses, and redundancy protects stateful serving sessions. A fault-tolerant cluster still needs orchestration, however, to decide which jobs run where, when to preempt, and how to share resources fairly among competing workloads. @Sec-fleet-orchestration examines the orchestration layer, from Slurm and Kubernetes scheduling to gang scheduling, multi-tenancy, and capacity planning, that transforms a collection of fault-tolerant nodes into a managed production system.
+Keeping the fleet running despite inevitable hardware failures requires three layers: checkpointing preserves progress, elasticity absorbs node losses, and redundancy protects stateful serving sessions. A fault-tolerant cluster still needs orchestration, however, to decide which jobs run where, when to preempt, and how to share resources fairly among competing workloads.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Fleet orchestration, Slurm and Kubernetes scheduling, and multi-tenant policies are examined in @sec-fleet-orchestration.
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->

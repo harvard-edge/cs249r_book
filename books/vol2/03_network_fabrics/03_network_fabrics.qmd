@@ -226,11 +226,15 @@ At scale, communication cost can dominate computation cost. The fleet-law decomp
 
 The physical network fabric exists to carry three fundamental collective communication patterns:
 
-- **AllReduce**\index{AllReduce!definition}: An AllReduce (see @sec-collective-communication for algorithmic cost models) sums gradients across thousands of GPUs so that every device holds the identical average, forming the heartbeat of synchronous training.
-- **AllGather**\index{AllGather!definition}: An AllGather (see @sec-collective-communication) collects different model portions so that every GPU can reconstruct the full model state.
-- **AllToAll**\index{AllToAll!definition}: An AllToAll, the most demanding pattern, requires every GPU to send unique data to every other GPU, a requirement critical to expert parallelism (see @sec-inference-scale-expert-parallelism-moe-models-55f6).
+- **AllReduce**\index{AllReduce!definition}: An AllReduce sums gradients across thousands of GPUs so that every device holds the identical average, forming the heartbeat of synchronous training.
+- **AllGather**\index{AllGather!definition}: An AllGather collects different model portions so that every GPU can reconstruct the full model state.
+- **AllToAll**\index{AllToAll!definition}: An AllToAll, the most demanding pattern, requires every GPU to send unique data to every other GPU, a requirement critical to expert parallelism.
 
-@Sec-collective-communication covers the *algorithms* that orchestrate these patterns; the fabric layer supplies the *physics* of the wires and switches that carry them. The distinction matters because the fabric's physical properties (bandwidth, latency, and topology) determine which patterns are efficient and which become bottlenecks.
+The collective communication algorithms orchestrate these patterns, while the fabric layer supplies the physical wires and switches that carry them. The distinction matters because the fabric's physical properties (bandwidth, latency, and topology) determine which patterns are efficient and which become bottlenecks.
+
+::: {.column-margin .margin-pointer}
+↪ Algorithmic cost models and collective communication schedules are developed in @sec-collective-communication.
+:::
 
 ::: {#psp-network-fabrics-network-as-gradient-bus .callout-perspective title="The network as a gradient bus"}
 
@@ -319,7 +323,11 @@ class NetworkFabricsContextScenario:
     h100_mem_bw_tb_per_s_str = fmt_bandwidth(h100_mem_bw_raw, unit=TB / second, precision=2, commas=False)
 ```
 
-The concrete bandwidth cliff that separates intra-node from inter-node communication makes this gradient bus analogy precise. @Sec-compute-infrastructure established that a single H100 delivers `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str` of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` of aggregate bidirectional bandwidth. The moment computation crosses a node boundary, however, the available per-direction bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str`, from `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of NVLink (one direction of that bidirectional link) to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. @Sec-appdx-fleet-foundations-numbers-to-know collects the canonical NVLink and InfiniBand bandwidth specifications and the 1K-GPU cluster reference configuration that anchor these figures. For the 175B model, moving `{python} NetworkRunningExampleCluster.grad_gb_str` of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation. @Fig-bandwidth-hierarchy makes this hierarchy concrete by plotting the bandwidth at each level across four GPU generations.
+The concrete bandwidth cliff that separates intra-node from inter-node communication makes this gradient bus analogy precise. A single H100 delivers `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str` of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` of aggregate bidirectional bandwidth. The moment computation crosses a node boundary, however, the available per-direction bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str`, from `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of NVLink (one direction of that bidirectional link) to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. @Sec-appdx-fleet-foundations-numbers-to-know collects the canonical NVLink and InfiniBand bandwidth specifications and the 1K-GPU cluster reference configuration that anchor these figures. For the 175B model, moving `{python} NetworkRunningExampleCluster.grad_gb_str` of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation. @Fig-bandwidth-hierarchy makes this hierarchy concrete by plotting the bandwidth at each level across four GPU generations.
+
+::: {.column-margin .margin-pointer}
+↩ Single-node accelerator throughput and intra-node interconnect scaling are established in @sec-compute-infrastructure.
+:::
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -2099,7 +2107,11 @@ The top-of-rack (ToR)\index{Top-of-Rack switch!failure domain} switch serves as 
 
 To mitigate congestion at this edge, network architects maximize the switch **radix**\index{Radix!definition}, the number of ports available. A high-radix switch with 64 ports allocates 32 ports downlink to the servers (ensuring full bandwidth for the 32 GPUs) and 32 ports uplink to the spine. This 1:1 subscription ratio guarantees non-blocking performance at the rack level. For a cluster of `{python} NetworkTopologyRadixRecap.n_gpus_str`, the physical topology comprises approximately 32 such racks.
 
-The same rack boundary also shapes recovery. The job scheduler must be topology-aware for performance, while reliable replica placement must keep redundant state and replacement capacity outside the same rack failure domain so that a single lost rack does not take down the entire training run (see @sec-fault-tolerance-reliability-reliability-replica-placement-failure-domains-73a7).
+The same rack boundary also shapes recovery. The job scheduler must be topology-aware for performance, while reliable replica placement must keep redundant state and replacement capacity outside the same rack failure domain so that a single lost rack does not take down the entire training run.
+
+::: {.column-margin .margin-pointer}
+↪ Failure domain isolation and replica placement policies are analyzed in @sec-fault-tolerance-reliability-reliability-replica-placement-failure-domains-73a7.
+:::
 
 ### Fat-tree (Clos) networks {#sec-network-fabrics-fat-tree}
 
@@ -4288,8 +4300,12 @@ Standard benchmarks like `iperf` measure kernel-based TCP/IP performance. Becaus
 
 **Pitfall**: *Relying on adaptive routing instead of topology-aware placement.*
 
-Adaptive routing distributes traffic across available paths, but it cannot create bandwidth that does not exist. If a scheduler places a 1,024-GPU job across two oversubscribed spine groups, adaptive routing will balance the traffic, but it will still be throttled by the group-to-group links. Topology-aware placement, discussed in @sec-fleet-orchestration-topology-aware, and adaptive routing are complementary: the former ensures bandwidth exists, while the latter ensures it is used efficiently.
+Adaptive routing distributes traffic across available paths, but it cannot create bandwidth that does not exist. If a scheduler places a 1,024-GPU job across two oversubscribed spine groups, adaptive routing will balance the traffic, but it will still be throttled by the group-to-group links. Topology-aware placement and adaptive routing are complementary: the former ensures bandwidth exists, while the latter ensures it is used efficiently.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Topology-aware gang scheduling and contention minimization are explored in @sec-fleet-orchestration-topology-aware.
 :::
 
 ::: {.fallacy-pitfall}
@@ -4334,8 +4350,12 @@ Link speed alone does not determine whether a fleet computes as one machine. Bis
 
 ::: {.callout-chapter-connection title="From wires to data pipelines"}
 
-The network fabric now binds compute nodes into a fleet, and every byte of gradient data and activation tensor flows through it. The fleet, however, also needs to move massive datasets and enormous checkpoints. @Sec-data-storage examines the parallel storage systems and data-loading architectures that keep the fleet supplied with data.
+The network fabric now binds compute nodes into a fleet, and every byte of gradient data and activation tensor flows through it. The fleet, however, also needs to move massive datasets and enormous checkpoints. Parallel storage systems and caching hierarchies keep the fleet supplied with data.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Parallel storage systems and high-throughput data-loading pipelines are examined in @sec-data-storage.
 :::
 
 ::: { .quiz-end }

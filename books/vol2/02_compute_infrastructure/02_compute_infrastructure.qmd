@@ -3516,7 +3516,11 @@ The inference workload itself bifurcates into two distinct phases with opposing 
 
 #### The accelerator decision matrix {#sec-compute-infrastructure-accelerator-decision-matrix-8bba}
 
-A practical decision framework synthesizes these workload-specific characteristics by mapping each archetype (@sec-vol2-introduction-archetypes) to the hardware resource that dominates its performance and cost. @Tbl-accelerator-decision makes the selection rule explicit: choose for the binding constraint, not the largest advertised peak number.
+A practical decision framework synthesizes these workload-specific characteristics by mapping each archetype to the hardware resource that dominates its performance and cost. @Tbl-accelerator-decision makes the selection rule explicit: choose for the binding constraint, not the largest advertised peak number.
+
+::: {.column-margin .margin-pointer}
+↩ The four canonical fleet workload archetypes are classified in @sec-vol2-introduction-archetypes.
+:::
 
 | **Workload**                      |    **Binding constraint**    |      **Key metric**     |   **Recommended class**   |
 |:----------------------------------|:----------------------------:|:-----------------------:|:-------------------------:|
@@ -4780,7 +4784,7 @@ For language model training, the training throughput determines the data consump
 
 The critical design goal is to make the data pipeline invisible to the GPU: the prefetching must be deep enough that a batch is always ready when the GPU needs it, regardless of transient variations in storage bandwidth or preprocessing time. When this pipeline is well-tuned, the GPU utilization is limited only by compute and communication, not by data loading. When it is poorly tuned, the GPU can spend 10--30 percent of its time waiting for data, which directly reduces training throughput.
 
-The traditional data path routes every byte through the host CPU: storage controller to host DRAM (one PCIe traversal), then host DRAM to GPU HBM (a second PCIe traversal). This "bounce buffer" architecture doubles the traffic on the PCIe root complex and makes the CPU a bottleneck for I/O-intensive workloads, capping effective bandwidth at 3--4 GB/s per NVMe drive due to kernel context switching and interrupt handling overhead. **GPUDirect Storage (GDS)**\index{GPUDirect Storage} eliminates this inefficiency by establishing a direct DMA path between the NVMe controller and GPU memory, bypassing the host CPU entirely. A single NVMe drive can deliver 5--7 GB/s directly to GPU HBM through GDS, saturating the drive's internal bandwidth rather than the host's I/O subsystem. For a standard node equipped with four NVMe drives, GDS unlocks an aggregate storage-to-GPU bandwidth of 20--28 GB/s, freeing the CPU to focus exclusively on preprocessing tasks like tokenization and sequence packing. The storage chapter's GPUDirect Storage discussion in @sec-storage-gds examines this direct path in detail.
+The traditional data path routes every byte through the host CPU: storage controller to host DRAM (one PCIe traversal), then host DRAM to GPU HBM (a second PCIe traversal). This "bounce buffer" architecture doubles the traffic on the PCIe root complex and makes the CPU a bottleneck for I/O-intensive workloads, capping effective bandwidth at 3--4 GB/s per NVMe drive due to kernel context switching and interrupt handling overhead. **GPUDirect Storage (GDS)**\index{GPUDirect Storage} eliminates this inefficiency by establishing a direct DMA path between the NVMe controller and GPU memory, bypassing the host CPU entirely. A single NVMe drive can deliver 5--7 GB/s directly to GPU HBM through GDS, saturating the drive's internal bandwidth rather than the host's I/O subsystem. For a standard node equipped with four NVMe drives, GDS unlocks an aggregate storage-to-GPU bandwidth of 20--28 GB/s, freeing the CPU to focus exclusively on preprocessing tasks like tokenization and sequence packing.
 
 The required prefetch depth is not arbitrary but follows from the statistics of I/O latency variance. If the GPU processes one batch every $T_{\text{compute}}$ seconds and the storage system delivers a batch every $T_{\text{I/O}}$ seconds with standard deviation $\sigma_{\text{I/O}}$, the minimum prefetch depth $k$ required to maintain a 99.7 percent probability of zero stalls is $k \ge \lceil T_{\text{I/O}} / T_{\text{compute}} + 3\sigma_{\text{I/O}} / T_{\text{compute}} \rceil$. For our 175B model training run where $T_{\text{compute}} = 2.0$ seconds and the storage layer delivers batches at $T_{\text{I/O}} = 1.5 \pm 0.5$ seconds, the required depth is $\lceil 0.75 + 0.75 \rceil = 2$ batches. In production environments where "noisy neighbors" on shared file systems induce heavy tail latencies, engineers typically over-provision this buffer to 4--8 batches to insulate the GPU from the erratic physics of distributed storage. The memory cost of this prefetch buffer is negligible compared to the cost of a GPU stall for tokenized language workloads, though multimodal pipelines must budget larger host-side batch buffers.
 
@@ -4797,8 +4801,12 @@ As cluster sizes expand, a new storage bottleneck emerges. When training our `{p
 
 ::: {#psp-compute-infrastructure-data-loading-trap .callout-perspective title="The data loading trap"}
 
-A subtle failure mode occurs when a local data-loading benchmark satisfies the node but the shared path cannot satisfy the fleet. The hardware contract is end-to-end sustained bandwidth at the intended concurrency, including storage servers, network paths, preprocessing, host memory, and accelerator transfer. @Sec-data-storage develops the storage tiers and data paths that must meet this contract.
+A subtle failure mode occurs when a local data-loading benchmark satisfies the node but the shared path cannot satisfy the fleet. The hardware contract is end-to-end sustained bandwidth at the intended concurrency, including storage servers, network paths, preprocessing, host memory, and accelerator transfer.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Storage tiers, caching architectures, and sustained fleet I/O contracts are developed in @sec-data-storage.
 :::
 
 ```{python}
@@ -4902,7 +4910,11 @@ For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, trai
 
 The rack opener promised that the laws of heat transfer become a dominant design force at this level. Air has much lower volumetric heat capacity than liquid, so an air-cooled rack needs sufficient airflow, pressure, and temperature rise to carry away its heat. There is no universal 30 kW cutoff: the practical limit depends on server and facility design. The chapter's `{python} RackPowerRackRecap.rack_power_kw_str` scenario can use engineered air cooling in a suitable facility; denser systems can make liquid cooling the practical choice.
 
-Cooling selection is therefore configuration-dependent rather than a consequence of one rack-power threshold. Direct-to-chip liquid cooling raises heat-removal capacity and can reduce fan energy, while engineered air remains viable for systems and facilities designed for its airflow requirements. @Sec-sustainable-ai-cooling compares these architectures and the facility-power overhead each choice carries every hour the cluster runs.
+Cooling selection is therefore configuration-dependent rather than a consequence of one rack-power threshold. Direct-to-chip liquid cooling raises heat-removal capacity and can reduce fan energy, while engineered air remains viable for systems and facilities designed for its airflow requirements.
+
+::: {.column-margin .margin-pointer}
+↪ Direct-to-chip liquid cooling and facility PUE trade-offs are evaluated in @sec-sustainable-ai-cooling.
+:::
 
 ### Rack design considerations {#sec-compute-rack-design}
 
@@ -4980,7 +4992,11 @@ The **top-of-rack (ToR) switch**\index{Top-of-rack switch} deserves special atte
 
 The placement and configuration of ToR switches directly affects the network topology. Rail-optimized designs (used by Meta and others) assign each GPU within a node to a specific "rail" that connects to a dedicated ToR switch. In a conventional design, all 8 GPUs in a node connect to the same ToR switch, creating a potential bottleneck when multiple GPUs simultaneously send AllReduce traffic. In a rail-optimized design, GPU 0 in every node connects to ToR switch 0, GPU 1 to ToR switch 1, and so on. This ensures that AllReduce traffic within a parallelism group (where all participants are the same GPU index across different nodes) is confined to a single switch rather than traversing the full fabric.
 
-The rail-optimized design spends additional switches, ports, and cabling to align communication paths with accelerator rails. Its benefit depends on the collective traffic matrix, routing, oversubscription, and job placement rather than a fixed efficiency gain. @Sec-network-fabrics develops those conditions and the fabric metrics needed to evaluate them.
+The rail-optimized design spends additional switches, ports, and cabling to align communication paths with accelerator rails. Its benefit depends on the collective traffic matrix, routing, oversubscription, and job placement rather than a fixed efficiency gain.
+
+::: {.column-margin .margin-pointer}
+↪ Rail-optimized fabric topologies and collective communication routing are developed in @sec-network-fabrics.
+:::
 
 #### Facility reliability and environmental controls {#sec-compute-infrastructure-physical-security-environmental-controls-7132}
 
@@ -5440,9 +5456,9 @@ In a traditional data center, each server is an independent unit with its own op
 
 In a WSC, the individual server is analogous to a core in a multicore processor: it has no independent utility and exists only as part of the larger system. A DGX H100 node running in isolation cannot train a 175B model; it becomes useful only when connected to hundreds of other nodes through a carefully designed network fabric, with a distributed storage system providing training data and checkpoint storage, and a fleet orchestrator coordinating the work across all nodes.
 
-Two physical consequences follow directly from this reframing. The first is that the network, not the compute, sets the ceiling: within a single node NVLink supplies enough bandwidth for tensor parallelism, but across nodes the fabric must carry gradient tensors, activation checkpoints, and pipeline stage outputs, so a building-scale machine is only as fast as the wires that bind its cores. @Sec-network-fabrics develops that fabric in full; the WSC reframing makes the interconnect a first-class architectural component rather than a peripheral.
+Two physical consequences follow directly from this reframing. The first is that the network, not the compute, sets the ceiling: within a single node NVLink supplies enough bandwidth for tensor parallelism, but across nodes the fabric must carry gradient tensors, activation checkpoints, and pipeline stage outputs, so a building-scale machine is only as fast as the wires that bind its cores. The WSC reframing makes the interconnect a first-class architectural component rather than a peripheral.
 
-The second consequence is that *failure is a physical certainty, not an exceptional event*. A single GPU has an **MTBF**\index{MTBF} of approximately 50,000 hours (the canonical GPU mean time to failure (MTTF) anchor this book uses throughout, revisited in @sec-fault-tolerance-reliability), but reliability degrades linearly with component count: a cluster of 10,000 such GPUs experiences a failure roughly once every five hours. @Sec-appdx-reliability-foundations-mtbf-cascade derives why the fleet-level rate is simply the per-component lifetime divided by the component count. This is a building-level property of the physical machine, and it is why a WSC must be designed from the start so that individual component failures degrade rather than halt the running workload, with dual-path power feeds, redundant switch fabrics, and persistent checkpoint storage at every level.
+The second consequence is that *failure is a physical certainty, not an exceptional event*. A single GPU has an **MTBF**\index{MTBF} of approximately 50,000 hours, but reliability degrades linearly with component count: a cluster of 10,000 such GPUs experiences a failure roughly once every five hours. This is a building-level property of the physical machine, and it is why a WSC must be designed from the start so that individual component failures degrade rather than halt the running workload, with dual-path power feeds, redundant switch fabrics, and persistent checkpoint storage at every level.
 
 The third consequence is that the building blocks combine differently depending on the workload they must carry. A pod is not assembled from a single canonical part list; the interconnect, the switching, and the memory placement are each chosen against the communication and capacity pattern the dominant workload imposes. @Tbl-pod-comparison contrasts three production pods to make the point: an NVIDIA SuperPOD wires GPUs through an InfiniBand fat-tree for any-to-any flexibility, a Google TPU pod hard-wires chips into a torus for dataflow throughput, and Meta's Grand Teton arranges the same class of accelerators around embedding memory rather than raw compute.
 
@@ -5458,7 +5474,11 @@ The third consequence is that the building blocks combine differently depending 
 
 Grand Teton\index{Grand Teton} is the clearest case of memory placement, not compute, driving the layout. Meta's recommendation and ranking models use embedding tables that can reach terabytes, far exceeding the HBM capacity of any single accelerator, while the dense neural-network layers that operate on those embeddings are comparatively small. The design splits the two across the memory hierarchy: the terabyte-scale embedding tables reside in host CPU DRAM (roughly \$3--5/GB), and the dense layers execute on GPUs, where the compute density justifies the \$10--15/GB cost of HBM. The embedding lookups are memory-capacity-bound but not bandwidth-bound: each request touches only a small slice of a vast table, so cheap, high-capacity DRAM is the right home for them, and the expensive accelerator memory is reserved for the work that saturates it. The systems lesson is that optimal infrastructure is workload-specific, not specification-maximizing: deploying compute-optimized nodes for a memory-capacity-bound workload would strand most of the accelerator's throughput on a problem its silicon was never the bottleneck for.
 
-The physical design supplies constraints, not an operating policy. Later chapters use its power, capacity, topology, reliability, and sustained-throughput measurements to derive placement, recovery, monitoring, and ownership decisions; @sec-ops-scale-fleet-economics owns the full build-vs.-buy and capacity-planning analysis.
+The physical design supplies constraints, not an operating policy. Later chapters use its power, capacity, topology, reliability, and sustained-throughput measurements to derive placement, recovery, monitoring, and ownership decisions.
+
+::: {.column-margin .margin-pointer}
+↪ Fleet capacity planning and build-versus-buy economics are analyzed in @sec-ops-scale-fleet-economics.
+:::
 
 These physical constraints define warehouse-scale computer design. New technologies do not remove the walls; they move them. The technologies in @sec-compute-emerging matter because they change where the memory, communication, or power constraint binds.
 
