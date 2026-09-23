@@ -80,15 +80,15 @@ $$
 $$
 Within this unified dense matrix, an adversarial injection can steer the next-token distribution toward generating well-formed, schema-valid tool invocations that execute with the ambient privileges of the runtime supervisor. The threat vectors separating classical OS processes from autonomous agent execution planes are summarized in @tbl-vol3-threat-domains.
 
-| Protection Dimension             | Classical Operating System (Saltzer & Schroeder 1975)                                  | Autonomous Agentic Runtime                                                                                                       |
-|:---------------------------------|:---------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------|
-| **Instruction-Data Segregation** | Hardware-enforced ($W \oplus X$, MMU page tables, separate code/data segments).        | Non-existent; instruction-data co-inhabitation in flat transformer token context.                                                |
-| **Authority Model**              | Ambient authority derived from process UID/GID and parent process inheritance.         | Zero ambient authority; candidate proposals held in host memory escrow.                                                          |
-| **Failure Mode & Signaling**     | Fail-stop; hardware traps, segmentation faults, synchronous POSIX signals (`SIGSEGV`). | Fail-plausible (@sec-vol3-intro-fail-plausible); fluent, syntactically valid commands masking catastrophic semantic destruction. |
-| **Reference Monitor**            | Kernel space (Ring 0 / EL1) mediating access to hardware resources via syscall table.  | Host agent runtime supervisor intercepting typed tool proposals before execution dispatch.                                       |
-| **Containment Perimeter**        | Process virtual address space, memory segmentation, hardware privilege rings.          | Multi-tier virtualization: namespace isolation, seccomp-bpf, microVMs, egress proxies.                                           |
+| Protection Dimension             | Classical Operating System (Saltzer & Schroeder 1975)                                                                        | Autonomous Agentic Runtime                                                                                                       |
+|:---------------------------------|:-----------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------|
+| **Instruction-Data Segregation** | Hardware-enforced ($W \oplus X$, MMU page tables, separate code/data segments).                                              | Non-existent; instruction-data co-inhabitation in flat transformer token context.                                                |
+| **Authority Model**              | Ambient authority derived from process UID/GID and parent process inheritance.                                               | Zero ambient authority; candidate proposals held in host memory escrow.                                                          |
+| **Failure Mode & Signaling**     | Fail-stop; hardware traps, segmentation faults, synchronous Portable Operating System Interface (POSIX) signals (`SIGSEGV`). | Fail-plausible (@sec-vol3-intro-fail-plausible); fluent, syntactically valid commands masking catastrophic semantic destruction. |
+| **Reference Monitor**            | Kernel space (Ring 0 / EL1) mediating access to hardware resources via syscall table.                                        | Host agent runtime supervisor intercepting typed tool proposals before execution dispatch.                                       |
+| **Containment Perimeter**        | Process virtual address space, memory segmentation, hardware privilege rings.                                                | Multi-tier virtualization: namespace isolation, seccomp-bpf, microVMs, egress proxies.                                           |
 
-: **Structural comparison of classical operating system protection boundaries versus autonomous agent execution threat planes**: Protection dimensions across instruction-data segregation, authority models, failure modes, reference monitors, and containment perimeters. {#tbl-vol3-threat-domains}
+: **Structural Comparison of Classical Operating System Protection Boundaries versus Autonomous Agent Execution Threat Planes**: Protection dimensions across instruction-data segregation, authority models, failure modes, reference monitors, and containment perimeters. {#tbl-vol3-threat-domains}
 
 ::: {#dfn-blast-radius .callout-definition title="Blast radius"}
 
@@ -107,7 +107,7 @@ The authority levels of @sec-vol3-intro-hsa rank what a task may do to the world
 | Authority level                                | What a wrong proposal can damage                                      | Containment the runtime must supply                                                    |
 |:-----------------------------------------------|:----------------------------------------------------------------------|:---------------------------------------------------------------------------------------|
 | **$A_0$ (read access)**                        | Confidentiality: anything read can leave through any outbound channel | Scoped read capabilities, no secrets in the sandbox, default-deny egress, taint checks |
-| **$A_1$ (sandboxed mutation)**                 | Only the discardable workspace, and only while the envelope holds     | An isolation envelope, a copy-on-write workspace, reset between tenants                |
+| **$A_1$ (sandboxed mutation)**                 | Only the discardable workspace, and only while the envelope holds     | An isolation envelope, a copy-on-write (COW) workspace, reset between tenants          |
 | **$A_2$ (retry-safe or compensable external)** | External systems, reached through credentials                         | Brokered, scoped credentials plus settlement and compensation                          |
 | **$A_3$ (irreversible external)**              | External systems, permanently                                         | All of the above plus an approval gate that no sandboxed code path can bypass          |
 
@@ -254,7 +254,7 @@ Furthermore, when an agent delegates tasks to sub-agents, authority must attenua
 $$
 C_{\text{child}} \sqsubseteq C_{\text{parent}} \iff C_{\text{child}}.O \subseteq C_{\text{parent}}.O \land C_{\text{child}}.R \subseteq C_{\text{parent}}.R \land C_{\text{child}}.E \le C_{\text{parent}}.E
 $$
-A child context can never acquire rights exceeding those held by its creator. Any attempt to escalate privileges triggers an immediate supervisory fault:
+A child context can never acquire rights exceeding those held by its creator. Any attempt to escalate privileges triggers an immediate supervisory fault, preventing unprivileged guest code from overriding sandbox boundaries established via capability mechanisms or kernel security modules.[^fn-landlock-lsm-isolation]
 
 ```bash
 # Attempted privilege escalation trapped at the supervisory boundary
@@ -262,6 +262,8 @@ A child context can never acquire rights exceeding those held by its creator. An
 [2026-09-19T10:14:22.402Z] ERROR supervisor: Capability check failed: target privilege exceeds parent grant
 [2026-09-19T10:14:22.402Z] INFO  supervisor: Revoking execution token; terminating sandbox instance
 ```
+
+[^fn-landlock-lsm-isolation]: **Landlock LSM Isolation**: Landlock is a Linux Security Module (LSM) that allows unprivileged processes to enforce their own access control policies without requiring root privileges or external supervisor daemons. By constructing rulesets over file system hierarchies and network ports via the `landlock_create_ruleset` system call, an agent process can irreversibly drop its own ambient authority prior to executing untrusted code.
 
 ### Attenuation within a trajectory
 
@@ -317,13 +319,15 @@ A **microVM** runs the code behind its own guest kernel, isolated by hardware vi
 
 The spectrum of systems isolation envelopes is contrasted across attack surfaces in @fig-vol3-isolation-spectrum.
 
-::: {#fig-vol3-isolation-spectrum fig-env="figure" fig-pos="htb" fig-cap="**Operating Systems Isolation Spectrum for Agent Runtimes**: Architectural boundaries and host attack surfaces across four isolation paradigms: OS Containers (Docker/runC), User-Space Kernels (gVisor Sentry), Software Fault Isolation (Wasm SFI), and Hardware MicroVMs (Firecracker). While containers expose the full monolithic host kernel (~450 syscalls) directly across Ring 3 to Ring 0 transitions, hardware microVMs trap execution in hardware via VT-x VMCS exits, presenting only ~35 minimal KVM ioctls to the host kernel." fig-alt="Systems architecture diagram comparing four isolation columns: OS Containers exposing 450 host syscalls to the host Linux kernel, gVisor Sentry filtering syscalls down to 50 via user-space Go runtime, Wasm SFI isolating computation in a 4 GB linear memory sandbox with zero host syscalls, and Firecracker microVM enforcing hardware VT-x non-root boundaries with two-dimensional EPT paging and only 35 host syscalls."}
+::: {#fig-vol3-isolation-spectrum fig-env="figure" fig-pos="htb" fig-cap="**Operating Systems Isolation Spectrum for Agent Runtimes**: Architectural boundaries and host attack surfaces across four isolation paradigms: OS Containers (Docker/runC Open Container Initiative (OCI) runtime), User-Space Kernels (gVisor Sentry), Software Fault Isolation (Wasm SFI), and Hardware MicroVMs (Firecracker). While containers expose the full monolithic host kernel (~450 syscalls) directly across Ring 3 to Ring 0 transitions, hardware microVMs trap execution in hardware via VT-x VMCS exits, presenting only ~35 minimal Kernel-based Virtual Machine (KVM) ioctls to the host kernel." fig-alt="Systems architecture diagram comparing four isolation columns: OS Containers exposing 450 host syscalls to the host Linux kernel, gVisor Sentry filtering syscalls down to 50 via user-space Go runtime, Wasm SFI isolating computation in a 4 GB linear memory sandbox with zero host syscalls, and Firecracker microVM enforcing hardware VT-x non-root boundaries with two-dimensional EPT paging and only 35 host syscalls."}
 ![](images/svg/isolation_spectrum_v2.svg)
 :::
 
 ### Kernel attack surface: Shared kernels versus hardware traps
 
-Operating system containers rely on the `clone(2)` system call with flags such as `CLONE_NEWPID`, `CLONE_NEWNET`, `CLONE_NEWNS`, and `CLONE_NEWUSER` to construct isolated namespaces. These namespaces are logical bookkeeping structures internal to the host kernel; they do not alter the fundamental execution model of user space code. Whenever an agentic tool execution inside a container issues a system call, the CPU transitions directly from Ring 3 (user space) to Ring 0 (kernel space) on the host processor. The host kernel's system call dispatcher validates arguments, executes the requested driver or memory management routine, and returns control to the process. Because the host kernel performs all mediation in software, any logical vulnerability in the kernel's memory management, IPC, or filesystem subsystems allows user-space code to execute arbitrary instructions with full supervisor privileges.
+Operating system containers rely on the `clone(2)` system call with flags such as `CLONE_NEWPID`, `CLONE_NEWNET`, `CLONE_NEWNS`, and `CLONE_NEWUSER` to construct isolated namespaces. These namespaces are logical bookkeeping structures internal to the host kernel; they do not alter the fundamental execution model of user space code. Whenever an agentic tool execution inside a container issues a system call, the CPU transitions directly from Ring 3 (user space) to Ring 0 (kernel space) on the host processor. The host kernel's system call dispatcher validates arguments, executes the requested driver or memory management routine, and returns control to the process. Because the host kernel performs all mediation in software, any logical vulnerability in the kernel's memory management, inter-process communication (IPC), or filesystem subsystems allows user-space code to execute arbitrary instructions with full supervisor privileges.[^fn-container-breakout-vectors]
+
+[^fn-container-breakout-vectors]: **Container Breakout Vectors**: Historical container breakouts frequently exploit shared kernel memory management bugs, such as the Dirty COW (CVE-2016-5195) race condition in copy-on-write page fault handling that allowed unprivileged containers to overwrite read-only host binaries. Similar privilege escalations have stemmed from Open Container Initiative (OCI) runtime defects, including runc directory traversal flaws (CVE-2019-5736 and CVE-2024-21626) that allowed container processes to overwrite the host runc binary via leaked file descriptors.
 
 Hardware-assisted virtualization changes this boundary by utilizing hardware extensions such as Intel VT-x or AMD-V. The physical CPU operates in two distinct modes: VMX root operation and VMX non-root operation. The host hypervisor operates in VMX root mode, while the guest software—including both the guest operating system kernel and its sandboxed user processes—executes in VMX non-root mode. Within VMX non-root mode, standard computational instructions execute at native hardware speeds. However, sensitive operations—such as modifying control registers (`CR0`, `CR3`, `CR4`), executing privileged instructions (`CPUID`, `INVD`, `VMXON`), or attempting to program physical interrupt controllers—are intercepted directly by processor hardware. When a guest instruction violates an execution rule, the CPU suspends guest execution, stores the guest state in a physical memory structure known as the Virtual Machine Control Structure (VMCS), and initiates a `VM-Exit` trap back to the hypervisor in VMX root mode.
 
@@ -333,6 +337,12 @@ $$\text{Guest Virtual Address (GVA)} \xrightarrow{\text{Guest Page Table}} \text
 
 The guest kernel possesses full administrative control over its internal page tables, allowing it to allocate virtual memory to its sub-processes without host intervention. However, the guest cannot modify the EPT root pointer (`EPTP`), which is configured and write-protected by the hypervisor in VMX root mode. Even if an adversarial agent payload executes an exploit that achieves complete root control over the guest Linux kernel, it remains physically trapped within its assigned GPA space. The guest kernel cannot address, inspect, or corrupt any host physical memory frame ($HPA$) outside the explicit ranges mapped by the host's EPT structures, establishing the boundary transitions compared in @tbl-vol3-isolation-transitions.
 
+::: {.column-margin}
+![](images/svg/vol3_virtualization_margin_001.svg){width="100%" fig-alt="Horizontal bar ladder showing host system calls exposed to untrusted code: Container at 450, gVisor at 50, Firecracker at 35, and WebAssembly at 0."}
+
+*MicroVMs and WebAssembly collapse host kernel syscall exposure by over 90 percent compared to monolithic containers.*
+:::
+
 | Isolation Layer                | Transition Mechanism            | Trapping Entity     | Attack Surface              |
 |:-------------------------------|:--------------------------------|:--------------------|:----------------------------|
 | **Container (runC)**           | `syscall` (Ring 3 $\to$ 0)      | Host Linux Kernel   | $\approx 450$ host syscalls |
@@ -340,6 +350,33 @@ The guest kernel possesses full administrative control over its internal page ta
 | **MicroVM (Firecracker)**      | `VM-Exit` (Non-Root $\to$ Root) | KVM Hypervisor      | $\approx 35$ host syscalls  |
 
 : **Isolation Boundary Transition Mechanisms**: Comparison of transition mechanisms and host privilege exposure across isolation boundaries. {#tbl-vol3-isolation-transitions}
+
+### The system call CPU tax: Trapping, filtering, and context switches {#sec-vol3-sandboxes-syscall-tax}
+
+Every boundary that interposes between untrusted agent code and physical hardware levies a performance tax on system calls. When an agent compiles a repository, runs a test harness, or installs package dependencies, it executes thousands of system calls per second—querying clocks, opening file descriptors, reading source trees, and spawning subprocesses. The runtime overhead of mediating these invocations decomposes into three additive terms in @eq-vol3-syscall-tax:
+
+$$T_{\text{syscall}} = T_{\text{trap}} + T_{\text{filter}} + T_{\text{context\_switch}} {#eq-vol3-syscall-tax}$$
+
+where:
+
+1. **Trap Latency ($T_{\text{trap}}$):** The architectural penalty required to transition the processor across privilege boundaries. In native Linux execution, an unprivileged thread transitions from user mode (Ring 3) to supervisor mode (Ring 0) using the `syscall` instruction (and returns via `sysret`), taking $\approx 50\text{--}70\text{ ns}$ on modern x86-64 microarchitectures. Under hardware-assisted virtualization (KVM), guest user code invoking guest kernel code executes this exact same `syscall` sequence natively within VMX non-root mode, completing in $\approx 50\text{--}70\text{ ns}$ with zero host intervention. However, when an operation necessitates hypervisor mediation (such as accessing paravirtualized I/O registers), the CPU triggers a hardware `VM-Exit` transition back to VMX root mode. This costs $\approx 350\text{--}650\text{ ns}$ because the processor must serialize guest registers into the VMCS, switch host-guest Translation Lookaside Buffer (TLB) address space identifiers (PCID/VPID), and reload supervisor control registers. In software-intercepted user-space kernels operating via `ptrace` (`PTRACE_SYSCALL`), each invocation triggers a kernel software trap and POSIX `SIGTRAP` signal dispatch.
+2. **Filter Latency ($T_{\text{filter}}$):** The computational cost of inspecting system call identity and arguments. For in-kernel `seccomp-bpf`, the host kernel executes an in-kernel classic BPF (cBPF) bytecode filter or JIT-compiled extended Berkeley Packet Filter (eBPF) program against the system call arguments, completing allowlist evaluations in $\approx 20\text{--}80\text{ ns}$.[^fn-seccomp-bpf-overhead] In contrast, a user-space kernel such as gVisor Sentry decodes CPU register contents in Go, resolves pathnames across its internal virtual file system (VFS), and evaluates virtual POSIX state machines, consuming $\approx 1.0\text{--}2.5\text{ }\mu\text{s}$ per call.
+3. **Context Switch Latency ($T_{\text{context\_switch}}$):** The scheduling and memory hierarchy disruption incurred when passing control across process boundaries. For native Linux and `seccomp-bpf`, $T_{\text{context\_switch}} = 0$ because security checks execute synchronously on the current thread's kernel stack without thread rescheduling. For `ptrace`-based interception, each system call forces two full context switches between the sandboxed application thread and the supervisory tracer process (one at system call entry to inspect arguments, and a second at system call exit to inspect return values). These switches incur $\approx 1.5\text{--}4.0\text{ }\mu\text{s}$ of scheduler latency, evicting L1 instruction and data cache lines and polluting the branch target buffer. For KVM-based VMMs, a vCPU thread yielding to host user space (`ioctl(KVM_RUN)` exiting to the VMM event loop) requires $\approx 0.8\text{--}1.8\text{ }\mu\text{s}$.
+
+The fundamental architectural advantage of hardware microVMs like Firecracker is that they decouple internal guest system calls from host hypervisor traps. When an agent script executes `getpid()`, `clock_gettime()`, or allocates memory via `mmap()`, the system call executes entirely inside the guest kernel in VMX non-root mode ($T_{\text{trap}} \approx 60\text{ ns}$, $T_{\text{context\_switch}} = 0$). Only I/O operations directed to VirtIO devices trigger a hardware `VM-Exit` to the host monitor. User-space kernels, by contrast, must intercept and emulate 100 percent of all system calls, imposing user-space scheduling and trapping taxes on every single operation, as benchmarked in @tbl-vol3-syscall-overhead-breakdown.
+
+| Isolation Primitive                   | Transition Mechanism              | $T_{\text{trap}}$ | $T_{\text{filter}}$ | $T_{\text{context\_switch}}$ | Total $T_{\text{syscall}}$  | Relative Slowdown |
+|:--------------------------------------|:----------------------------------|:------------------|:--------------------|:-----------------------------|:----------------------------|:------------------|
+| **Native Linux (Baseline)**           | `syscall` / `sysret`              | $60\text{ ns}$    | $0\text{ ns}$       | $0\text{ ns}$                | $\approx 60\text{ ns}$      | $1.0\times$       |
+| **Container + Seccomp-BPF**           | `syscall` + cBPF filter           | $60\text{ ns}$    | $45\text{ ns}$      | $0\text{ ns}$                | $\approx 105\text{ ns}$     | $1.75\times$      |
+| **User-Space Kernel (gVisor ptrace)** | `ptrace` + Sentry Go VFS          | $450\text{ ns}$   | $1{,}200\text{ ns}$ | $2{,}800\text{ ns}$          | $\approx 4{,}450\text{ ns}$ | $74.2\times$      |
+| **User-Space Kernel (gVisor KVM)**    | KVM stub + Sentry Go VFS          | $380\text{ ns}$   | $1{,}100\text{ ns}$ | $950\text{ ns}$              | $\approx 2{,}430\text{ ns}$ | $40.5\times$      |
+| **MicroVM (Firecracker Guest Call)**  | In-guest `syscall` (VMX non-root) | $60\text{ ns}$    | $0\text{ ns}$       | $0\text{ ns}$                | $\approx 60\text{ ns}$      | $1.0\times$       |
+| **MicroVM (Firecracker VirtIO-MMIO)** | Hardware `VM-Exit` to host VMM    | $480\text{ ns}$   | $150\text{ ns}$     | $1{,}100\text{ ns}$          | $\approx 1{,}730\text{ ns}$ | $28.8\times$      |
+
+: **System Call Interception Overhead Breakdown**: Microbenchmarked latency decomposition across execution boundary transitions, security filter inspection, and process context switches. {#tbl-vol3-syscall-overhead-breakdown}
+
+[^fn-seccomp-bpf-overhead]: **Seccomp BPF Overhead**: Compiling security policies into classic BPF bytecode enables in-kernel filtering directly within the system call dispatch vector without process context switching. While evaluating the system call number against an allowlist introduces minimal overhead (approximately 20 to 50 nanoseconds per invocation), deep argument inspection requires dereferencing user-space pointers. This creates time-of-check to time-of-use (TOCTOU) race conditions that BPF filters cannot safely resolve without memory copying.
 
 ### Minimalist virtual machine architecture: The Firecracker design
 
@@ -380,6 +417,45 @@ To neutralize this escalation vector, Firecracker enforces a defense-in-depth ar
 
 : **Sequential Privilege Demotion and Containment Pipeline of the Firecracker Jailer**: Seven-stage hardening sequence executed prior to microVM initialization. {#tbl-vol3-jailer-pipeline}
 
+By hard-capping the process count with `pids.max`, the Jailer prevents rogue code from exhausting host thread structures via unconstrained fork bombs, while host-level sub-reapers ensure clean process teardown.[^fn-pid-exhaustion-reaping]
+
+[^fn-pid-exhaustion-reaping]: **PID Namespace Reaping**: In Linux, the first process inside a PID namespace (PID 1) inherits orphaned child processes and must explicitly call `waitpid` to reap zombie entries from the kernel process table. If an agent executes scripts that fork background processes without proper sub-reaping supervision, accumulated zombie processes rapidly exhaust the host or namespace PID quota (`pids.max`), preventing subsequent tool invocations from spawning.
+
+### User-space kernel architecture and process virtualization {#sec-vol3-sandboxes-gvisor-vs-microvm}
+
+While Firecracker leverages hardware CPU virtualization to run a full Linux kernel in VMX non-root mode, Google's gVisor [@google2019gvisor] adopts an alternative systems design: an application-level user-space kernel that reimplements Linux system call abstractions in a memory-safe language (Go). Untrusted agent binaries execute inside a multi-tier containment boundary split into two distinct cooperative processes: the *Sentry* and the *Gofer*.
+
+#### The sentry user-space kernel
+
+The Sentry acts as the guest operating system kernel. When an untrusted agent process executes a system call, gVisor traps the invocation using either `systrap` (a specialized engine combining `seccomp-bpf` and a dedicated stub thread in the application's address space) or a lightweight KVM hypervisor stub. Rather than passing the system call to the host Linux kernel, the trap transfers control to the Sentry.
+
+The Sentry implements approximately 300 of the roughly 450 Linux system calls entirely in user space. It manages virtual memory address spaces, handles signal generation and dispatch, schedules application threads, and maintains an internal networking stack (Netstack) implementing TCP/IP and UDP protocols. By implementing these primitives in memory-safe Go, the Sentry ensures that even if an adversary crafts a malicious exploit that corrupts application state, the payload cannot execute native machine code in supervisor mode or manipulate host page tables directly. The Sentry itself issues only a restricted allowlist of roughly 50 host system calls (primarily memory management and event notification primitives such as `futex`, `epoll_wait`, and `madvise`).
+
+#### The gofer filesystem mediator
+
+A critical architectural invariant in gVisor is that the Sentry is forbidden from holding direct open file descriptors to the host filesystem. If the Sentry were compromised, any ambient host file access could permit arbitrary data exfiltration.
+
+To enforce strict file mediation, filesystem access is delegated to a separate, unprivileged host daemon called the *Gofer*. For each sandboxed instance, a Gofer daemon runs in an isolated mount namespace with access restricted to the designated sandbox workspace. Whenever an application thread in the Sentry executes a filesystem operation—such as `open(2)`, `stat(2)`, or `read(2)`—the Sentry serializes the request into a remote procedure call (RPC) using the 9P or a custom UNIX domain socket IPC protocol. The Gofer validates the path against access control policies, executes the file operation on behalf of the sandbox, and returns the data across the socket.
+
+#### Comparing user-space emulation and hardware virtualization
+
+The architectural trade-offs between gVisor's software-emulated kernel and Firecracker's hardware-isolated microVM are summarized in @tbl-vol3-gvisor-microvm.
+
+| Architectural Dimension   | User-Space Kernel (gVisor Sentry + Gofer)                                       | Hardware MicroVM (Firecracker)                                                                     |
+|:--------------------------|:--------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|
+| **Kernel Implementation** | Emulated user-space kernel written in memory-safe Go                            | Upstream monolithic Linux kernel (`vmlinux`) written in C                                          |
+| **Isolation Boundary**    | Software process boundary + host `seccomp-bpf` filter                           | Hardware CPU virtualization (Intel VT-x / AMD-V VMX non-root)                                      |
+| **Host Syscall Exposure** | $\approx 50$ host syscalls issued by Sentry and Gofer                           | $\approx 35$ host syscalls issued by Jailer and Rust VMM                                           |
+| **POSIX ABI Fidelity**    | Partial emulation ($\approx 300$ of $\approx 450$ Linux system calls)           | Full 100% Linux ABI compatibility (unmodified upstream kernel)                                     |
+| **Filesystem Mediation**  | Out-of-process RPC via Gofer daemon over UNIX domain socket                     | Direct paravirtualized block device via `virtio-block` / OverlayFS                                 |
+| **Syscall-Heavy Tax**     | High ($2\times\text{--}5\times$ slowdown on compilation, git, package installs) | Negligible (in-guest syscalls run at native CPU speed)                                             |
+| **Cold Startup Latency**  | $50\text{--}150\text{ ms}$ (Sentry Go runtime bootstrap + Gofer socket wire-up) | $5\text{--}30\text{ ms}$ (direct kernel boot) / $<2\text{ ms}$ (snapshot resume)                   |
+| **Baseline Host RAM**     | $\approx 15\text{--}30\text{ MB}$ per sandbox process                           | $\approx 5\text{ MB}$ (Rust VMM) + guest RAM ($\approx 20\text{--}35\text{ MB}$ private CoW pages) |
+
+: **Architectural Comparison of gVisor and Firecracker**: Structural boundaries, POSIX fidelity, system call handling, and memory characteristics across user-space emulation and hardware microVMs. {#tbl-vol3-gvisor-microvm}
+
+While gVisor offers a lightweight footprint well suited for short-lived, interpreted workloads (such as executing isolated Python data scripts), autonomous coding agents that compile native code, clone Git repositories, and run integration test suites frequently encounter gVisor's compatibility and performance cliffs. Firecracker's authentic Linux kernel executes internal system calls at native hardware speeds, ensuring that complex toolchains run without semantic mismatch or IPC serialization bottlenecks.
+
 ### Bytecode sandboxes and capability mediation {#sec-vol3-sandboxes-wasm}
 
 A **bytecode sandbox** such as WebAssembly [@haas2017bringing] confines code to a bounded linear memory that the runtime validates before execution, and the code has no system-call instruction at all. Linear memory is allocated as a contiguous, unaliased array of bytes spanning up to 4 GB in Wasm32. Every load and store instruction operates on zero-based unsigned 32-bit offsets relative to this base pointer. During compilation or ahead-of-time (AOT) translation, the WebAssembly engine inserts hardware or software bounds checks on every memory dereference, or sandwiches the 4 GB allocation between unmapped virtual memory guard pages. Any attempt by guest code to dereference an out-of-bounds pointer triggers an immediate hardware `SIGSEGV` caught by the host runtime, aborting execution before foreign memory can be inspected or corrupted.
@@ -399,6 +475,48 @@ To interact with the outside world, a WebAssembly module relies on the WebAssemb
 [2026-09-19T10:18:04.214Z] ERROR wasm_runtime: Module invoked path_open(fd=3, path="../../etc/shadow", flags=0)
 [2026-09-19T10:18:04.215Z] SECURITY_FAULT wasm_runtime: Path traversal escape detected; trapped with WASI_ERRNO_NOTCAPABLE
 ```
+
+### Hardware accelerator virtualization and GPU sandboxing {#sec-vol3-sandboxes-gpu}
+
+Modern autonomous agents increasingly execute hardware-accelerated workloads: running local embedding models to index codebase syntax trees, executing multimodal vision models to verify browser DOM renderings, or invoking small language models (SLMs) to grade candidate unit test patches. Providing sandboxed agent code with access to physical GPUs (such as NVIDIA Ampere, Hopper, or Blackwell devices) introduces unique systems failure modes that bypass CPU-level isolation boundaries.
+
+#### Attack vectors and noisy-neighbor hazards on shared GPUs
+
+When multiple agent execution envelopes share a physical GPU without hardware-enforced partitioning, three critical failure modes emerge:
+
+1. **GPU Context Invalidation via Fault Cascades:** In standard NVIDIA driver architectures (`nvidia.ko`), multiple processes sharing a physical GPU allocate memory from a unified device pool and communicate with the driver via shared ioctls (`/dev/nvidia*`). If an untrusted agent payload executes a malformed CUDA kernel that triggers an out-of-bounds memory access (`cudaErrorIllegalAddress`) or exhausts physical VRAM (GPU Out-Of-Memory, or OOM), the driver invalidates the entire hardware context. This abruptly crashes all co-located tenant threads running on that physical GPU, violating multi-tenant fault isolation.
+2. **Cross-Tenant Memory Residue and Data Leakage:** High-Bandwidth Memory (HBM) allocators in device drivers prioritize allocation throughput over scrub latency. When an agent deallocates device buffers via `cudaFree`, the driver frequently reassigns physical HBM pages to subsequent processes without zero-initialization. A prompt-injected script executing raw pointer offsets or custom Parallel Thread Execution (PTX) assembly can read residual device memory, recovering private model weights, activations, or unredacted conversation tokens from previous tenant trajectories.
+3. **Compute Starvation and CTA Monopolization:** GPU Streaming Multiprocessors (SMs) schedule Cooperative Thread Arrays (CTAs, or thread blocks) using hardware warp schedulers. Unlike host operating system kernels that preempt CPU threads on millisecond timer interrupts, GPU kernels historically ran cooperatively to completion. A rogue agent script executing an infinite kernel loop (`while (true) {}`) monopolizes SM execution pipelines, starving co-located agent workloads and causing catastrophic scheduling jitter.
+
+#### Hardware accelerator sandboxing spectrum
+
+To contain untrusted GPU code, runtimes select from four isolation paradigms, contrasted in @tbl-vol3-gpu-isolation-spectrum:
+
+1. **Software API Remoting (vCUDA / Driver Interception):** User-space shim libraries intercept CUDA Runtime API (`libcudart.so`) or Driver API (`libcuda.so`) calls within the sandbox, serializing arguments across UNIX domain sockets or shared memory to a host daemon. While this prevents the sandbox from directly accessing GPU device nodes, it levies an extreme performance penalty ($50\text{--}200\text{ }\mu\text{s}$ per API call) and exposes a sprawling, complex API surface susceptible to host privilege escalation vulnerabilities.
+2. **Time-Sliced Driver Sharing (NVIDIA MPS):** NVIDIA Multi-Process Service (MPS) multiplexes multiple client processes into a single shared CUDA server context. MPS allows concurrent kernel execution across shared SMs and reduces context switch latency. However, MPS provides zero fault isolation: an illegal address fault or driver crash in one client destroys the shared server process and terminates all co-located sandboxes.
+3. **Multi-Instance GPU (MIG) Hardware Partitioning:** Available on NVIDIA Ampere (A100), Hopper (H100), and Blackwell architectures, Multi-Instance GPU (MIG) physically partitions a physical GPU into up to seven independent GPU Instances (GIs) and Compute Instances (CIs). Each MIG partition operates as a fully isolated GPU at the silicon level:
+   - Dedicated Streaming Multiprocessors (SMs) with private register files and instruction dispatchers.
+   - Dedicated HBM crossbar paths, memory controllers, and physical capacity.
+   - Dedicated, private L2 cache slices.
+   - True fault containment: an invalid memory access or unhandled exception in one partition resets only that specific hardware slice, leaving adjacent tenants entirely unaffected.
+4. **Hardware I/O Virtualization (SR-IOV):** Supported by PCIe enterprise GPUs (such as AMD ROCm Instinct and Intel Data Center GPUs), Single Root I/O Virtualization (SR-IOV) partitions a physical PCIe device (Physical Function, PF) into multiple lightweight PCIe Virtual Functions (VFs). Each VF exposes dedicated Base Address Registers (BARs), configuration registers, and MSI-X interrupt vectors. The host Input-Output Memory Management Unit (IOMMU) translates and remaps Direct Memory Access (DMA) transactions directly, preventing rogue device DMA transfers from corrupting host physical memory.
+5. **Direct Device Pass-Through (VFIO):** The Linux Virtual Function I/O (VFIO) framework (`vfio-pci`) assigns an entire physical GPU or a virtual PCIe endpoint (SR-IOV VF or MIG instance via vGPU) directly to a microVM or QEMU guest. The hypervisor leverages hardware IOMMU page tables (Intel VT-d or AMD-Vi) to map device DMA transactions directly into the guest physical address space ($GPA \to HPA$). Even if the guest operating system kernel is completely compromised, the hardware IOMMU blocks the GPU from issuing DMA transfers outside its allocated host memory pages.
+
+| Virtualization Strategy         | Isolation Mechanism                      | Fault Containment                         | Memory QoS Guarantees                  | Preemption Latency                                                   | Hardware Scope                   |
+|:--------------------------------|:-----------------------------------------|:------------------------------------------|:---------------------------------------|:---------------------------------------------------------------------|:---------------------------------|
+| **Software API Remoting**       | User-space library RPC forwarding        | Poor (driver crash cascades to host)      | None (shared DRAM/HBM buffer pool)     | Coarse kernel boundary ($> 1\text{ ms}$)                             | Any GPU (software emulation)     |
+| **Driver Multiplexing (MPS)**   | Shared host driver context + MPS         | Moderate (OOM crash terminates client)    | Soft memory limits only                | Cooperative CTA switch ($10\text{--}100\text{ }\mu\text{s}$)         | NVIDIA Kepler and newer          |
+| **Hardware Partitioning (MIG)** | Silicon-level SM, L2 cache, HBM slicing  | Full (hardware fault resets only slice)   | Guaranteed hard bandwidth and capacity | Zero contention (dedicated hardware SMs)                             | NVIDIA Ampere, Hopper, Blackwell |
+| **I/O Virtualization (SR-IOV)** | PCIe Virtual Functions + IOMMU DMA       | Full (hardware DMA boundary via IOMMU)    | Dedicated PCIe BARs; scheduled memory  | Hardware instruction preemption ($10\text{--}50\text{ }\mu\text{s}$) | AMD ROCm, Intel Data Center GPU  |
+| **Device Pass-Through (VFIO)**  | Dedicated PCIe device attached via IOMMU | Full (hardware-enforced hypervisor bound) | 100% dedicated physical GPU            | Native hardware execution                                            | Any PCIe GPU with VT-d / AMD-Vi  |
+
+: **GPU Virtualization and Sandboxing Spectrum**: Comparison of hardware partitioning, I/O virtualization, device pass-through, and API remoting across isolation, fault containment, and performance dimensions. {#tbl-vol3-gpu-isolation-spectrum}
+
+#### Compute preemption latency and scheduling jitter
+
+When hardware partitioning like MIG is unavailable and multiple agent sandboxes must time-slice a GPU, scheduling latency is dominated by CUDA context switching. Unlike host CPU cores that support preemption at millisecond scheduler ticks, GPU compute preemption has historically operated at coarse kernel boundaries. Modern hardware architectures provide instruction-level and thread block preemption, but context switching still requires evicting large register files and shared memory states to device memory, introducing latency penalties ranging from 10 to over 100 microseconds.[^fn-gpu-preemption-latency] Consequently, multi-tenant agent execution on non-partitioned GPUs suffers from unpredictable tail latencies whenever concurrent processes contend for streaming multiprocessors.
+
+[^fn-gpu-preemption-latency]: **GPU Preemption Latency**: Unlike host CPU cores that support preemption at millisecond scheduler ticks, GPU compute preemption has historically operated at coarse kernel boundaries. Modern hardware architectures provide instruction-level and thread block preemption, but context switching still requires evicting large register files and shared memory states to device memory, introducing latency penalties ranging from 10 to over 100 microseconds. Consequently, multi-tenant agent execution on non-partitioned GPUs suffers from unpredictable tail latencies whenever concurrent processes contend for streaming multiprocessors.
 ### Matching the envelope to the action {#sec-vol3-sandboxes-envelope-choice}
 
 @Tbl-vol3-isolation-taxonomy summarizes the four envelopes. Representative start-up and memory measurements for current implementations appear in @tbl-vol3-app-ref-arch-sandboxes; the orders of magnitude are what drive the choice.
@@ -532,7 +650,7 @@ class WorkspaceCost:
 
 ### Layered virtual filesystem topologies and copy-up mechanics
 
-Modern Linux execution sandboxes implement copy-on-write storage isolation primarily through *OverlayFS*, a kernel union filesystem integrated into the upstream Linux virtual file system (VFS). OverlayFS multiplexes two or more directory trees into a unified namespace presented to user space:
+Modern Linux execution sandboxes implement copy-on-write storage isolation primarily through *OverlayFS*, a kernel union filesystem integrated into the upstream Linux VFS. OverlayFS multiplexes two or more directory trees into a unified namespace presented to user space:
 
 1. **`lowerdir`:** One or more read-only underlying directories containing the base operating system rootfs, language runtimes, and baseline Git repository checkout.
 2. **`upperdir`:** A private, writable directory where all file modifications, creations, and deletion markers are recorded.
@@ -576,6 +694,12 @@ Subsequent path lookups encountering the `0/0` character device mask the lower f
 
 #### The copy-up write amplification trap
 
+::: {.column-margin}
+![](images/svg/vol3_virtualization_margin_002.svg){width="100%" fig-alt="A latency curve plotting file mutation stall against file size; latency remains sub-millisecond up to 1 megabyte, then steepens to a 10.97-second stall at 1.2 gigabytes under parallel worker contention, with the region past 100 megabytes shaded red."}
+
+*Modifying a single byte triggers full-file copy-up, turning sub-millisecond writes into multi-second NVMe stalls for gigabyte assets.*
+:::
+
 The copy-up mechanism introduces a subtle but severe performance pitfall: write amplification on large fixtures. If a coding agent appends a single byte to a 5 GB SQLite database, machine learning model weight file, or binary test fixture residing in `lowerdir`, OverlayFS must copy all 5 GB to `upperdir` before executing the 1-byte append:
 
 ```bash
@@ -597,7 +721,9 @@ xfs_quota -x -c 'limit -p bsoft=2g bhard=2g 42' /sandboxes
 
 ### Workspace leases per trajectory, reset per tenant {#sec-vol3-sandboxes-lease}
 
-The workspace's lifetime follows from the horizon exposure. The runtime binds the workspace, the envelope, the egress identity, and the brokered credentials into one *workspace lease* scoped to the trajectory. Unlike the in-flight lease of @sec-vol3-tool-calling-idempotency, which guards one call against duplicate execution, a workspace lease owns an environment for a whole trajectory. Everything in the lease persists across turns, because a multi-turn agent needs its earlier edits and its warmed build cache, and everything ends when the trajectory ends. The lease carries a hard expiry so that an abandoned trajectory cannot hold a sandbox indefinitely, and the trajectory record that holds it belongs to the harness (@sec-vol3-controlplane-acb). When the lease ends, the runtime exports the upper layer as a diff for evaluation or approval and then discards it. Nothing in a workspace is ever handed to another trajectory or tenant. What must survive a crash of the harness itself, rather than the normal end of a lease, is the subject of @sec-vol3-durable-execution.
+The workspace's lifetime follows from the horizon exposure. The runtime binds the workspace, the envelope, the egress identity, and the brokered credentials into one *workspace lease* scoped to the trajectory. Unlike the in-flight lease of @sec-vol3-tool-calling-idempotency, which guards one call against duplicate execution, a workspace lease owns an environment for a whole trajectory. Everything in the lease persists across turns, because a multi-turn agent needs its earlier edits and its warmed build cache, and everything ends when the trajectory ends. The lease carries a hard expiry so that an abandoned trajectory cannot hold a sandbox indefinitely, and the trajectory record that holds it belongs to the harness (@sec-vol3-controlplane-acb). When the lease ends, the runtime exports the upper layer as a diff for evaluation or approval and then discards it, tearing down ephemeral directory trees and mount namespaces.[^fn-overlayfs-discard-latency] Nothing in a workspace is ever handed to another trajectory or tenant. What must survive a crash of the harness itself, rather than the normal end of a lease, is the subject of @sec-vol3-durable-execution.
+
+[^fn-overlayfs-discard-latency]: **OverlayFS Discard Latency**: Discarding an ephemeral workspace by recursively unlinking millions of inodes during `rm -rf` UpperDir teardown causes severe file system lock contention in the host VFS layer. High-throughput agent execution platforms avoid recursive deletion on the request path by detaching the mount point asynchronously with `umount -l` (lazy unmount) and delegating directory tree erasure to background worker pools, or by backing the upper layer with an ephemeral tmpfs whose memory is freed instantaneously upon unmount.
 
 Three further rules make the workspace safe to hand to model-written code. The upper layer sits on a filesystem with a storage and file-count quota, so a runaway build or a deliberate disk-filling loop exhausts only its own allowance. The envelope's control groups cap CPU, memory, and process count for the same reason. Test fixtures and grading scripts are mounted read-only from outside the writable layer, so the agent can run its verifier but cannot edit it, which is the workspace half of the sealed evaluation built in @sec-vol3-evaluation-gyms.
 
@@ -641,7 +767,9 @@ By default, an agent sandbox network interface must drop all outbound packets. T
 $ curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/HostRole
 ```
 
-Host packet filters (using `nftables` or `iptables`) must unconditionally drop all traffic destined for `169.254.169.254` as well as RFC 1918 private IPv4 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), preventing lateral movement into internal cluster infrastructure.
+Host packet filters (using `nftables`, `iptables`, or eBPF programs attached to early network hooks) must unconditionally drop all traffic destined for `169.254.169.254` as well as RFC 1918 private IPv4 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), preventing lateral movement into internal cluster infrastructure.[^fn-ebpf-xdp-filtering]
+
+[^fn-ebpf-xdp-filtering]: **Packet Filtering via eBPF and XDP**: The eXpress Data Path (XDP) provides a programmable packet processing framework that executes eBPF bytecode directly at the network interface card driver level before the Linux network stack allocates a socket buffer. By dropping unauthorized agent egress packets or metadata service probes at the XDP ingress hook, the host prevents packet processing overhead from degrading supervisor throughput under high-frequency exfiltration attacks.
 
 ### Transparent forward proxying and credential injection
 
@@ -774,6 +902,12 @@ Two extremes bracket the design. A fresh envelope for every tool call gives the 
 
 ### Restoring from a snapshot {#sec-vol3-sandboxes-pooling-snapshots}
 
+::: {.column-margin}
+![](images/svg/vol3_virtualization_margin_004.svg){width="100%" fig-alt="Log-scale latency ladder comparing sandbox acquisition times: Cold MicroVM boot at 450 milliseconds, Eager Snapshot restore at 35 milliseconds, and Pre-Warmed CoW Pool with UFFD at 3 milliseconds, matching container speeds without sacrificing hardware isolation."}
+
+*Pre-warmed memory pooling with on-demand userfaultfd paging delivers 3 ms microVM acquisition, matching container speed while preserving hardware isolation.*
+:::
+
 Holding many fully booted guests idle would cost the full guest memory of each one. Snapshot restore avoids that. The runtime boots one golden guest to its ready state, with the kernel up, the interpreter started, and the task's dependencies loaded, and then saves its memory and device state. A new envelope maps the saved memory copy-on-write and fetches pages lazily as the guest touches them, so an idle envelope costs little more than page tables and monitor state. Pages that no guest writes, such as kernel text, shared libraries, and loaded bytecode, exist once in host memory for the whole pool, and only the pages a trajectory writes become private to it. In the illustrative coding-agent sandbox profile this chapter uses, acquiring an envelope from a warm pool takes `{python} SandboxPoolSizing.t_acquire_str` ms, restoring a fresh one from its snapshot takes `{python} SandboxPoolSizing.t_restore_str` ms, and a full guest image occupies `{python} SandboxPoolSizing.m_guest_str` GB.
 
 ### Snapshot rehydration via userfaultfd on-demand paging
@@ -782,7 +916,9 @@ Re-hydrating an instance from a memory snapshot avoids the entire kernel boot se
 
 $$\text{HVA} = \text{mmap}\left(\text{NULL}, M_{\text{guest}}, \text{PROT\_READ} \mid \text{PROT\_WRITE}, \text{MAP\_PRIVATE}, \text{fd}_{\text{snapshot}}, 0\right)$$
 
-Under `MAP_PRIVATE`, the host operating system kernel does not copy physical memory pages into the new process address space during initialization. Instead, it creates page table entries referencing the read-only file cache pages of the golden template snapshot. Multiple concurrent sandboxes share the exact same underlying physical RAM pages for all read-only operations, including kernel text, shared libraries, and Python bytecode.
+Under `MAP_PRIVATE`, the host operating system kernel does not copy physical memory pages into the new process address space during initialization. Instead, it creates page table entries referencing the read-only file cache pages of the golden template snapshot. Multiple concurrent sandboxes share the exact same underlying physical RAM pages for all read-only operations, including kernel text, shared libraries, and Python bytecode.[^fn-ksm-sidechannel-risks]
+
+[^fn-ksm-sidechannel-risks]: **Memory Deduplication Risks**: Kernel Samepage Merging (KSM) scans physical memory to merge identical anonymous pages across distinct virtual machines into shared, copy-on-write frames. However, write-timing variations during subsequent page faults reveal whether an adjacent tenant has allocated identical memory patterns, introducing cache side-channel attacks that can leak cryptographic keys across microVM boundaries. Production agent runtimes therefore avoid dynamic KSM across untrusted tenants, relying instead on read-only golden snapshots.
 
 For distributed or network-backed snapshots, Linux's `userfaultfd` (UFFD) mechanism enables lazy, demand-driven page loading. When the guest vCPU attempts to execute code or read memory on an unmapped guest physical page, an EPT violation traps to the host kernel. The host kernel suspends the vCPU thread and dispatches a page-fault notification over the `userfaultfd` file descriptor to a user-space page provider daemon. The daemon fetches the 4 KB page over the network or local NVMe storage, registers it with `ioctl(uffd, UFFDIO_COPY)`, and resumes vCPU execution, following the lifecycle mapped in @tbl-vol3-uffd-states.
 
@@ -794,6 +930,65 @@ For distributed or network-backed snapshots, Linux's `userfaultfd` (UFFD) mechan
 | **Dirty Private CoW Page**   | Private host DRAM frame           | `PTE_PRESENT = 1`, `PROT_WRITE` | Guest write intent (`store`, stack/heap) | Host MMU write fault; transparently duplicates 4 KiB frame into private DRAM.     |
 
 : **userfaultfd On-Demand Page Lifecycle and State Transitions**: Memory states, fault interception, and copy-on-write page duplication dynamics during microVM execution. {#tbl-vol3-uffd-states}
+
+### Provisioning rooflines: Cold boot versus snapshot rehydration {#sec-vol3-sandboxes-provisioning-roofline}
+
+When an evaluation suite or reinforcement learning harness spawns a sudden burst of $N$ agent trajectories, the platform's provisioning latency is governed by physical hardware rooflines. The time required to initialize a sandbox depends critically on whether the instance boots from scratch or rehydrates from a golden snapshot.
+
+#### The cold boot latency breakdown
+
+A cold microVM boot executes four sequential phases whose aggregate latency is modeled in @eq-vol3-cold-boot-tax:
+
+$$T_{\text{cold\_boot}} = T_{\text{vmm\_init}} + T_{\text{kernel\_init}} + T_{\text{userspace\_init}} {#eq-vol3-cold-boot-tax}$$
+
+where:
+
+1. **VMM Initialization ($T_{\text{vmm\_init}}$):** The hypervisor creates KVM virtual machine descriptors (`KVM_CREATE_VM`), allocates host virtual address space for guest physical RAM, creates vCPU threads (`KVM_CREATE_VCPU`), and configures VirtIO-MMIO transport registers ($3\text{--}8\text{ ms}$).
+2. **Direct Kernel Initialization ($T_{\text{kernel\_init}}$):** In Firecracker, the direct kernel boot path writes an uncompressed 64-bit Linux kernel (`vmlinux`) into guest memory alongside boot parameters. When `KVM_RUN` is invoked, the guest kernel initializes memory allocators, calibrates clock sources, sets up interrupt handlers, and binds VirtIO device drivers ($10\text{--}25\text{ ms}$).
+3. **Userspace Runtime Bootstrap ($T_{\text{userspace\_init}}$):** A minimal static init binary finishes in $2\text{--}5\text{ ms}$, bringing total minimal microVM boot to $15\text{--}35\text{ ms}$. However, in realistic agent execution environments requiring Python runtimes, system daemons, and pre-warmed language libraries, userspace initialization climbs to $150\text{--}450\text{ ms}$.
+
+#### Snapshot resume mechanics
+
+In contrast, restoring an existing microVM from an immutable memory snapshot bypasses kernel and userspace initialization entirely, as modeled in @eq-vol3-snapshot-resume-tax:
+
+$$T_{\text{resume}} = T_{\text{mmap}} + T_{\text{vmcs\_restore}} + T_{\text{device\_restore}} + T_{\text{vcpu\_resume}} {#eq-vol3-snapshot-resume-tax}$$
+
+where:
+
+1. **Memory Mapping ($T_{\text{mmap}}$):** Mapping the snapshot file into host memory via `mmap` with `MAP_PRIVATE` takes $150\text{--}300\text{ }\mu\text{s}$.
+2. **VMCS and Register Restoration ($T_{\text{vmcs\_restore}}$):** Restoring vCPU control registers, EPT root pointers, and general-purpose registers requires $250\text{--}500\text{ }\mu\text{s}$.
+3. **Device Queue State Restoration ($T_{\text{device\_restore}}$):** Reloading paravirtualized VirtIO ring offsets and interrupt state takes $300\text{--}700\text{ }\mu\text{s}$.
+4. **vCPU Execution Dispatch ($T_{\text{vcpu\_resume}}$):** Triggering `ioctl(KVM_RUN)` takes $\approx 50\text{ }\mu\text{s}$.
+
+The entire snapshot restoration completes in $T_{\text{resume}} < 2\text{ ms}$, delivering a sub-millisecond execution handoff.
+
+#### Memory bandwidth roofline during burst provisioning
+
+The starkest contrast between cold boot and snapshot rehydration manifests under concurrent burst provisioning. When $N$ trajectories arrive simultaneously, the required host memory bandwidth is bounded by @eq-vol3-provisioning-roofline:
+
+$$B_{\text{cold}} = \frac{N \cdot M_{\text{guest}}}{T_{\text{cold\_boot}}}, \qquad B_{\text{snapshot}} = \frac{N \cdot M_{\text{dirty}}}{T_{\text{resume}}} {#eq-vol3-provisioning-roofline}$$
+
+Consider a burst of $N = 100$ agent sandboxes launched simultaneously on a multi-core host. If each sandbox executes a cold boot requiring $M_{\text{guest}} = 1.0\text{ GB}$ of physical RAM allocated and zeroed across $T_{\text{cold\_boot}} = 0.45\text{ s}$, the host memory subsystem must sustain:
+
+$$B_{\text{cold}} = \frac{100 \times 1.0\text{ GB}}{0.45\text{ s}} \approx 222.2\text{ GB/s}$$
+
+This bandwidth demand exceeds the sequential throughput of multi-channel DDR4 and saturates PCIe Gen4 storage buses, causing extreme scheduling delays and memory bus stalls.
+
+With snapshot restore and on-demand `userfaultfd` demand paging, read-only memory pages (kernel code, C libraries, and Python bytecode) reside in the host page cache and are mapped into all $N$ instances without physical replication. Only private pages dirtied by each trajectory ($M_{\text{dirty}} \approx 30\text{ MB}$) require physical host DRAM allocation. The total memory bandwidth demand across $N = 100$ sandboxes is:
+
+$$B_{\text{snapshot}} = \frac{100 \times 30\text{ MB}}{1.0\text{ s}} = 3.0\text{ GB/s}$$
+
+This represents a 74-fold reduction in host memory traffic, easily fitting within commodity DRAM channels and enabling immediate burst rehydration, as compared in @tbl-vol3-provisioning-roofline.
+
+| Provisioning Mechanism         | Execution Primitive                              | Initialization Latency ($T_{\text{init}}$) | Per-Instance Host RAM                        | Host Memory Traffic ($N = 100$)            | Isolation Perimeter           |
+|:-------------------------------|:-------------------------------------------------|:-------------------------------------------|:---------------------------------------------|:-------------------------------------------|:------------------------------|
+| **Cold Boot (Minimalist)**     | Direct uncompressed kernel boot + static init    | $15\text{--}35\text{ ms}$                  | Full guest RAM ($1.0\text{ GB}$)             | $100\text{ GB}$                            | Hardware (Intel VT-x / AMD-V) |
+| **Cold Boot (Full Distro)**    | Kernel boot + systemd + Python imports           | $200\text{--}450\text{ ms}$                | Full guest RAM ($1.0\text{ GB}$)             | $100\text{ GB}$                            | Hardware (Intel VT-x / AMD-V) |
+| **Eager Snapshot Restore**     | Serialized snapshot deserialized from SSD        | $25\text{--}45\text{ ms}$                  | Full guest RAM ($1.0\text{ GB}$)             | $100\text{ GB}$                            | Hardware (Intel VT-x / AMD-V) |
+| **Pre-Warmed Pool (UFFD)**     | Lazy demand-paged CoW snapshot via `userfaultfd` | **$< 2\text{ ms}$**                        | Private dirty pages ($\approx 30\text{ MB}$) | **$3.0\text{ GB}$** ($74\times$ reduction) | Hardware (Intel VT-x / AMD-V) |
+| **Container Scratchpad Reuse** | In-place directory scrub + process kill          | $1\text{--}3\text{ ms}$                    | Process heap only ($\approx 20\text{ MB}$)   | $2.0\text{ GB}$                            | Compromised (state leak)      |
+
+: **Sandbox Provisioning and Rehydration Performance**: Comparison of cold boot, eager snapshot restoration, and on-demand userfaultfd demand paging across initialization latency, memory traffic, and isolation strength. {#tbl-vol3-provisioning-roofline}
 
 ### The reset contract {#sec-vol3-sandboxes-pooling-reset}
 

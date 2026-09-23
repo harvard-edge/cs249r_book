@@ -16,6 +16,7 @@ Strictly conforms to MLSysBook / MIT Press systems architecture standards:
 """
 
 import os
+import sys
 from pathlib import Path
 
 OUT_DIR = Path("books/vol3/09_security/images/svg")
@@ -987,6 +988,15 @@ files = {
     "quarantined_reader.svg": svg_4,
     "taint_tracking_pipeline.svg": svg_5,
 }
+
+dual_llm_script = Path(__file__).parent / "generate_dual_llm_gpu_serving_svg.py"
+if dual_llm_script.exists():
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from generate_dual_llm_gpu_serving_svg import svg as svg_dual_llm
+        files["dual_llm_gpu_serving.svg"] = svg_dual_llm
+    except Exception as e:
+        print(f"Warning: could not import dual_llm_gpu_serving: {e}")
 
 for name, content in files.items():
     p = OUT_DIR / name
