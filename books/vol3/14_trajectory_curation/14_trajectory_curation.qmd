@@ -57,7 +57,7 @@ A deployed agent writes a trajectory for every task it attempts, and a team that
 
 **Before selecting policy adaptation, runtime engineers must rigorously diagnose whether an observed failure stems from an information deficit, an ambiguous tool interface, a runtime defect, or a true model capability deficit.** Treating parameter adaptation as the first-line remediation mechanism is an architectural anti-pattern known as the *Premature Fine-Tuning Trap*. In computer systems design, adapting the parameter weights $\Theta$ of a foundation model is the slowest ($T_{\text{train}} \ge 10^4\text{ s}$), most capital-intensive, least observable, and least reversible intervention available in the entire agent software stack. While modifying an in-context prompt, enriching a retrieval query, or patching a tool schema operates with near-zero deployment latency ($T_{\text{deploy}} \le 1\text{ s}$) and deterministic git-level rollback, retraining a neural policy consumes vast accelerator cluster hours, invalidates downstream inference cache structures, and introduces the severe operational risk of catastrophic forgetting across previously validated capabilities.
 
-A running agent fleet leaves a continuous record of attempts, and most of that record is not training signal. A trace can fail because the context lacked a fact, because a tool schema was ambiguous, because a sandbox timed out, or because the policy could not do the task, and only the last cause is repaired by changing weights. A trace can also succeed for the wrong reason, by luck or by editing its own test. This chapter treats harvesting as the admission stage of the policy compiler. It asks which failures earn a place in a training corpus, and what the runtime must build before any trace does, namely reproducible fixtures, an ordered cascade of verifiers, a channel for recovery traces, and evaluation splits that cannot leak.
+A running agent fleet leaves a continuous record of attempts, and most of that record is not training signal. A trace can fail because the context lacked a fact, because a tool schema was ambiguous, because a sandbox timed out, or because the policy could not do the task, and only the last cause is repaired by changing weights. A trace can also succeed for the wrong reason, by luck or by editing its own test. This chapter treats harvesting as the admission stage of the trajectory validation and curation pipeline. It asks which failures earn a place in a training corpus, and what the runtime must build before any trace does, namely reproducible fixtures, an ordered cascade of verifiers, a channel for recovery traces, and evaluation splits that cannot leak.
 
 Dumping raw, uncurated production telemetry directly into training datasets creates a catastrophic, self-reinforcing failure loop. Unfiltered execution traces are dominated by transient infrastructure failures, retry thrashing, inefficient search paths, and plausible-sounding hallucinations. If an engineering team naively trains a model on its own unverified operational traces, the fine-tuned policy simply memorizes its historical inefficiencies and learns to mimic its past failure modes with higher confidence. Trajectory harvesting therefore cannot function as a passive logging sink. It must triage every observed anomaly before any trace is admitted into an offline learning pipeline.
 
@@ -101,7 +101,7 @@ The triage cascade formalized in @fig-vol3-failure-diagnostic-tree operationaliz
 - Gate 4 (**Invariant Oracle & State Delta**) executes hermetic test suites and state difference audits ($\Delta_{\text{fs}}$) to differentiate harmless retry loops from genuine *Policy Incapabilities*.
 Only execution traces that pass all four gates achieve *Deterministic Verification Closure* and enter the training corpus; traces failing earlier gates trigger immediate low-cost systems remedies—runtime hardening, context injection, or schema redesign—avoiding unnecessary model retraining.
 
-::: {#exmp-12-quantitative-trade-offs-in-the-systems .callout-example title="Systems intervention ladder trade-offs"}
+::: {#exmp-14-systems-intervention-tradeoffs .callout-example title="Systems intervention ladder trade-offs"}
 **Problem:** An autonomous software maintenance runtime deployed across an enterprise cluster processes $N = 50{,}000$ agent trajectories per month. Telemetry indicates a steady failure rate of $f = 6\%$, corresponding to $M = 3{,}000$ failed trajectories per month. Forensic analysis reveals that $70\%$ of these failures stem from interface ambiguities in newly added git-tool schemas, $20\%$ stem from sandbox container startup timeouts ($T > 10\text{ s}$) on heavily loaded worker nodes, and only $10\%$ ($300$ trajectories) represent true policy capability gaps in complex multi-file refactoring logic.
 
 An engineering team evaluates two remediation paths. Under Strategy A (The Systems Intervention Ladder), engineers resolve interface ambiguities via strict JSON Schema contracts, harden the sandbox runtime with asynchronous container pooling, and isolate the remaining $300$ genuine policy failures. Under Strategy B (Premature Fine-Tuning), engineers collect all $3{,}000$ raw failed trajectories, generate synthetic corrections, and perform a full Supervised Fine-Tuning (SFT) run on an open-weight 70B parameter model across an 8-GPU node.
@@ -142,7 +142,9 @@ The *tool interface manifest* ($\mathcal{M}_{\text{tool}}$) establishes the form
 
 The *task specification prompt* ($P_{\text{task}}$) encapsulates the user intent presented to the policy. Architectural rigor requires that this specification clearly articulate the objective, operational boundaries, and completion expectations without leaking privileged solution paths or step-by-step rationales. The prompt must avoid ambiguous demonstrative pronouns ("fix this issue" without referencing the relevant module) while preserving the authentic ambiguity encountered in real-world environments. Crucially, the prompt must define what constitutes non-continuation, providing the policy with unambiguous criteria for when to yield execution rather than looping indefinitely in an exploratory decode state.
 
-The *sub-second reset harness* ($\mathcal{H}_{\text{reset}}$) governs the physical mechanics of restoring the environment to $S_0$ between consecutive episodes. In large-scale trajectory collection, workers generate millions of rollout steps across thousands of parallel environments. If resetting an environment requires a cold container launch, full disk clone, or multi-gigabyte dependency installation, environment setup latency dominates GPU inference time, cratering cluster utilization. High-performance harvesting engines implement sub-second reset mechanisms via layered Copy-on-Write (CoW) overlays. By stacking a transient, memory-backed tmpfs or sparse block device atop a shared, read-only lower base layer, a rollout worker can discard all mutations, clear active kernel processes, and remount a pristine execution layer in under $500\text{ ms}$.
+The *sub-second reset harness* ($\mathcal{H}_{\text{reset}}$) governs the physical mechanics of restoring the environment to $S_0$ between consecutive episodes. In large-scale trajectory collection, workers generate millions of rollout steps across thousands of parallel environments. If resetting an environment requires a cold container launch, full disk clone, or multi-gigabyte dependency installation, environment setup latency dominates GPU inference time, cratering cluster utilization. High-performance harvesting engines implement sub-second reset mechanisms via layered Copy-on-Write (CoW) overlays. By stacking a transient, memory-backed tmpfs or sparse block device atop a shared, read-only lower base layer, a rollout worker can discard all mutations, clear active kernel processes, and remount a pristine execution layer in under $500\text{ ms}$.[^fn-cow-storage-reclamation]
+
+[^fn-cow-storage-reclamation]: **Copy-on-write Storage Reclamation**: Layered OverlayFS mounts decouple base operating system snapshots from mutable task workspaces, allowing worker threads to discard writes by unmounting the ephemeral upper directory. Because hundreds of concurrent microVMs can contend for underlying file system journal locks during high-frequency unmounts, enterprise harvesting engines back the upper directory with in-memory tmpfs partitions. This architecture isolates metadata churn to host RAM and prevents physical NVMe write amplification during multi-thousand rollout sweeps.
 
 ::: {.column-margin}
 **Completion evidence:**
@@ -183,7 +185,7 @@ mount -t overlay overlay \
 ```
 
 ```{python}
-#| label: lego-12-storage-io-and-reset-latency
+#| label: lego-14-storage-io-and-reset-latency
 #| echo: false
 # │ Show: CoW OverlayFS cuts write bandwidth by 121.3x and recovers 1,117 worker-hours.
 # │ How: Model cold re-cloning vs ephemeral upper layer mutation throughput.
@@ -238,7 +240,7 @@ class RolloutClusterStorageResetLatency:
     bandwidth_ratio_mult_str = fmt_multiple(bandwidth_ratio, precision=1)
 ```
 
-::: {#nbk-12-storage-io-and-reset-latency .callout-notebook title="Rollout cluster storage I/O and latency"}
+::: {#nbk-14-storage-io-and-reset-latency .callout-notebook title="Rollout cluster storage I/O and latency"}
 **Problem Statement:** An AI engineering team operates a distributed trajectory harvesting cluster containing $W = 512$ parallel rollout workers. Each worker runs on an independent CPU core driving an unprivileged execution sandbox against a standard enterprise software fixture (repository size $S_{\text{repo}} = 2.4\text{ GB}$). An average trajectory episode consists of $T = 15$ interaction turns and completes in $T_{\text{exec}} = 120\text{ seconds}$.
 
 Evaluate the storage I/O bandwidth and cluster throughput under two architectural designs:
@@ -321,7 +323,9 @@ Once robust task fixtures reliably generate candidate execution traces across st
 
 ## Staged verifier cascades {#sec-vol3-flywheel-verification}
 
-High-throughput trajectory harvesting platforms generate rollouts at rates that quickly overwhelm downstream compute budgets. When hundreds of parallel worker processes sample thousands of candidate trajectories per hour, submitting every raw proposal to an un-staged, comprehensive validation pipeline saturates container runtimes, locks compilation daemons, and inflates cluster operational costs. Worse still, an agent navigating an unconstrained environment frequently produces trajectories that appear successful under superficial observation—such as returning an exit code of zero—while harboring malformed syntax, dangling database locks, or deliberate tampering with the test harness itself. Submitting every raw trace to end-to-end dynamic testing squanders cluster resources on programs that could have been rejected by an abstract syntax tree parser in microseconds.
+High-throughput trajectory harvesting platforms generate rollouts at rates that quickly overwhelm downstream compute budgets. When hundreds of parallel worker processes sample thousands of candidate trajectories per hour, submitting every raw proposal to an un-staged, comprehensive validation pipeline saturates container runtimes, locks compilation daemons, and inflates cluster operational costs. Worse still, an agent navigating an unconstrained environment frequently produces trajectories that appear successful under superficial observation—such as returning an exit code of zero—while harboring malformed syntax, dangling database locks, or deliberate tampering with the test harness itself. Submitting every raw trace to end-to-end dynamic testing squanders cluster resources on programs that could have been rejected by an abstract syntax tree parser in microseconds.[^fn-sandbox-container-churn]
+
+[^fn-sandbox-container-churn]: **Sandbox Container Churn**: Rapid instantiation and teardown of disposable containers stresses host Linux kernel subsystems, notably the memory cgroup controller and namespace allocation tables. Unreaped zombie processes and lingering network sockets create kernel slab fragmentation that degrades system-call latency across adjacent worker threads. Production harvesting clusters mitigate this degradation by recycling warm container pools and amortizing initialization overhead through pre-forked execution harnesses.
 
 ::: {#fig-vol3-verifier-cascade fig-env="figure" fig-pos="htb" fig-cap="**The Five-Stage Trajectory Acceptance Funnel**: Progressive mechanical and dynamic rejection pipeline filtering raw agent proposals across five escalating latency tiers, showing survival fractions at each gate, stage costs, and dedicated sinks for malformed payloads, static lint failures, mined hard negatives, and tamper quarantines." fig-alt="Flow diagram illustrating the five-stage verifier cascade: from 100% Raw Rollouts passing through Stage 1 Syntactic and AST (survival 65.0%, discarding to Syntax Reject Sink), Stage 2 Static Invariants (survival 26.0%, discarding to Static Violation Sink), Stage 3 Dynamic Sandbox (survival 6.5%, routing 19.5% to Hard Negative Sink tau-), Stage 4 State Delta Audit (survival 5.5%, routing to Tamper Quarantine Sink), and Stage 5 Semantic Triage (survival 3.87%, routing to Advisory Reject Sink), resulting in a Golden Training Corpus with a 3.9% final yield (3,867 of 100,000 accepted) at an average cost of 3.15 seconds per attempt."}
 ![](images/svg/fig-vol3-verifier-cascade.svg)
@@ -329,11 +333,11 @@ High-throughput trajectory harvesting platforms generate rollouts at rates that 
 
 As detailed in @fig-vol3-verifier-cascade, the harvesting pipeline structures validation into five escalating rejection stages, each paired with an isolated discard sink:
 
-- **Stage 1 (Syntactic & AST)**: Runs in-memory at $c_1 = 50\,\mu\text{s}$, evaluating JSON schema conformance and AST validity. With a conditional pass rate of $p_1 = 0.65$, it sheds $35\%$ of raw proposals into the Syntax Reject Sink, leaving $65.0\%$ surviving.
-- **Stage 2 (Static Invariants)**: Executes host-side linters (`ruff`) and type analyzers (`mypy`) at $c_2 = 120\,\text{ms}$ ($p_2 = 0.40$), discarding another $39.0\%$ of the initial volume to the Static Violation Sink and leaving $26.0\%$ cumulative survival.
-- **Stage 3 (Dynamic Sandbox)**: Dispatches surviving candidates to disposable microVMs ($c_3 = 8.5\,\text{s}$, $p_3 = 0.25$). Crucially, candidates failing unit assertions ($19.5\%$ of raw volume) are not discarded; instead, they are routed to the *Hard Negative Sink* ($\tau^-$) to supply contrastive training signal for preference optimization. Only $6.5\%$ of proposals survive this dynamic crucible.
-- **Stage 4 (State Delta Audit)**: Inspects filesystem copy-on-write snapshots ($c_4 = 450\,\text{ms}$, $p_4 = 0.85$) to quarantine test tampering or out-of-tree file modifications into the Tamper Quarantine Sink, yielding $5.5\%$ survival.
-- **Stage 5 (Semantic Triage)**: Applies advisory model scoring and human audit ($c_5 = 15.0\,\text{s}$, $p_5 = 0.70$) to suppress tautological solutions, with every rejection at this stage a human audit decision, culminating in a Golden Training Corpus with a final yield of $Y = 3.87\% \approx 3.9\%$ ($3{,}867$ of $100{,}000$ rollouts) at an amortized evaluation cost of $C_{\text{attempt}} = 3.15\,\text{s}$ per candidate.
+- **Stage 1 (Syntactic / Schema Validation)**: Runs in-memory at $c_1 = 50\,\mu\text{s}$, evaluating JSON schema conformance, AST syntax, and unified diff validity. With a conditional pass rate of $p_1 = 0.65$, it sheds $35\%$ of raw proposals into the Syntax Reject Sink, leaving $65.0\%$ surviving.
+- **Stage 2 (Deterministic Sandbox Execution)**: Provisions disposable sandbox containers at $c_2 = 120\,\text{ms}$ ($p_2 = 0.40$) to verify clean container boot, environment setup, and basic script invocation without startup timeouts, out-of-memory crashes, or exit signal faults, discarding $39.0\%$ of initial proposals to the Execution Failure Sink and leaving $26.0\%$ cumulative survival.
+- **Stage 3 (Unit / Regression Test Suites)**: Dispatches surviving candidates to isolated microVM test runners ($c_3 = 8.5\,\text{s}$, $p_3 = 0.25$). Crucially, candidates failing functional assertions ($19.5\%$ of raw volume) are not discarded; instead, they are routed to the *Hard Negative Sink* ($\tau^-$) to supply contrastive training signal for preference optimization. Only $6.5\%$ of proposals survive this dynamic test suite crucible.
+- **Stage 4 (Invariant and Security Taint Checks)**: Inspects filesystem copy-on-write snapshots ($c_4 = 450\,\text{ms}$, $p_4 = 0.85$) to quarantine test tampering, license copyleft contamination, or out-of-tree file modifications into the Tamper Quarantine Sink, yielding $5.5\%$ survival.
+- **Stage 5 (Model-Based Semantic Quality Gating)**: Applies advisory model scoring and human audit ($c_5 = 15.0\,\text{s}$, $p_5 = 0.70$) to suppress tautological solutions, with every rejection at this stage an audit decision, culminating in a Golden Training Corpus with a final yield of $Y = 3.87\% \approx 3.9\%$ ($3{,}867$ of $100{,}000$ rollouts) at an amortized evaluation cost of $C_{\text{attempt}} = 3.15\,\text{s}$ per candidate.
 
 Raw execution traces cannot be admitted into training corpora on self-reported completion or a single evaluation pass. Candidate trajectories instead traverse an escalating cascade of independent verifiers, from microsecond syntactic validation to multi-second dynamic isolation, and each stage filters invalid proposals at minimal computational cost. The stages climb the closure evidence levels of @sec-vol3-intro-closure-evidence. Stages 1 and 2 are static checks, Stage 3 runs tests, and the out-of-tree test mounts of @sec-vol3-verifier-gaming make those tests sealed rather than visible to the agent. Acceptance through this pipeline never establishes metaphysical correctness; it proves only that a trajectory has survived a finite sequence of rigorous empirical falsification checks.
 
@@ -343,25 +347,25 @@ Following the classic formulation of Karl Popper (1959), empirical systems engin
 
 The verification lifecycle divides into five discrete stages, each characterized by a distinct latency regime, execution isolation boundary, and failure classification target. @Tbl-vol3-verifier-cascade-stages summarizes the operational characteristics of this five-stage hierarchy.
 
-| Stage            | Target Latency                       | Dominant Rejection Mechanism                           | Execution Boundary           |
-|:-----------------|:-------------------------------------|:-------------------------------------------------------|:-----------------------------|
-| **1. Syntactic** | $1\text{--}10\,\mu\text{s}$          | AST parsing, JSON schema validation                    | In-process memory            |
-| **2. Invariant** | $1\text{--}100\,\text{ms}$           | Static typing (`mypy`), linting (`ruff`), AST security | Host daemon                  |
-| **3. Dynamic**   | $1\text{--}10\,\text{s}$             | Sandbox test execution (`pytest`), timeout bounds      | Disposable microVM           |
-| **4. Delta**     | $100\,\text{ms}\text{--}2\,\text{s}$ | Structural diff validation, schema integrity checks    | Isolated filesystem snapshot |
-| **5. Semantic**  | $5\text{--}30\,\text{s}$             | Advisory stylistic triage, human expert audit          | Offline review queue         |
+| Stage                                      | Target Latency                       | Dominant Rejection Mechanism                           | Execution Boundary           |
+|:-------------------------------------------|:-------------------------------------|:-------------------------------------------------------|:-----------------------------|
+| **1. Syntactic / Schema validation**       | $1\text{--}10\,\mu\text{s}$          | AST parsing, JSON schema validation                    | In-process memory            |
+| **2. Deterministic Sandbox execution**     | $1\text{--}100\,\text{ms}$           | Environment boot, build invocation, runtime checks     | Disposable sandbox daemon    |
+| **3. Unit / Regression test suites**       | $1\text{--}10\,\text{s}$             | Sandbox test execution (`pytest`), timeout bounds      | Disposable microVM           |
+| **4. Invariant and security taint checks** | $100\,\text{ms}\text{--}2\,\text{s}$ | State delta audit, anti-tamper, license taint analysis | Isolated filesystem snapshot |
+| **5. Model-based semantic quality gating** | $5\text{--}30\,\text{s}$             | Advisory stylistic triage, human expert audit          | Offline review queue         |
 
 : **The Five-Stage Verifier Cascade Architecture**: Escalating latency regimes, rejection mechanisms, and execution boundaries across trajectory validation stages. {#tbl-vol3-verifier-cascade-stages}
 
-Stage 1 enforces Syntactic and Schema Validation in memory at microsecond latencies. Before any environment state is queried or modified, the verifier validates the structural layout of the trajectory. If the agent invoked a tool call, the payload must conform strictly to the expected JSON schema; if the agent generated source code, the code must parse into a valid Abstract Syntax Tree (AST). Empty output buffers, truncated generations, unclosed delimiter strings, and malformed parameter encodings are rejected immediately in host memory, which applies the quarantining invariant (principle \ref{pri-02-quarantining-invariant}) to harvested traces. This early filter ensures that the runtime never provisions a container or spawns a background shell to evaluate a script that cannot survive basic lexical analysis.
+Stage 1 enforces Syntactic / Schema Validation in memory at microsecond latencies. Before any environment state is queried or modified, the verifier validates the structural layout of the trajectory. If the agent invoked a tool call, the payload must conform strictly to the expected JSON schema; if the agent generated source code, the code must parse into a valid Abstract Syntax Tree (AST). Empty output buffers, truncated generations, unclosed delimiter strings, and malformed parameter encodings are rejected immediately in host memory, which applies the quarantining invariant (principle \ref{pri-02-quarantining-invariant}) to harvested traces. This early filter ensures that the runtime never provisions a container or spawns a background shell to evaluate a script that cannot survive basic lexical analysis.
 
-Stage 2 executes Deterministic Invariant Checks within a millisecond time window. This phase deploys fast static analyzers—such as `ruff` for code style and syntax consistency, `mypy` or `pyright` for static type resolution, and `bandit` for security scanning—against the patched workspace. The verifier inspects source files for unresolved symbols, invalid import statements, deprecated type signatures, and obvious security vulnerabilities such as hard-coded credentials or unauthorized subprocess invocations. Crucially, Stage 2 executes entirely within host memory or reusable background daemons without running untrusted code. By enforcing language-level structural invariants before dynamic execution, the pipeline prunes structurally flawed proposals that would otherwise waste dynamic execution time failing on trivial import errors.
+Stage 2 executes Deterministic Sandbox Execution within a millisecond time window. This phase provisions lightweight container sandboxes or reusable execution daemons to verify runtime initialization, dependency imports, build commands, and static environment invariants. The verifier checks that source modifications compile cleanly, imports resolve without circular dependencies, and no immediate segmentation faults or unhandled system signals occur. Crucially, Stage 2 executes entirely within host memory or reusable background daemons without running long-running untrusted integration suites. By enforcing language-level structural invariants and environment boot viability before dynamic test suites, the pipeline prunes structurally flawed proposals that would otherwise waste dynamic execution time failing on trivial import errors.
 
-Stage 3 transitions into Dynamic Sandbox Test Execution, operating across a latency scale of one to ten seconds. The workspace patch produced by the candidate trajectory is applied to a pristine snapshot of the task environment hosted within an isolated microVM or container. The verifier then runs the pre-configured test suite using an external test runner such as `pytest`. Stage 3 monitors standard operating system signals: the process exit code, standard output and error streams, memory usage bounds, and a strict wall-clock timeout. If a trajectory introduces an infinite loop, triggers an uncaught runtime exception, exhausts allocated memory, or fails an existing unit assertion, the test harness catches the failure, terminates the sandbox, and records the specific failure trace for downstream error categorization.
+Stage 3 transitions into Unit / Regression Test Suites, operating across a latency scale of one to ten seconds. The workspace patch produced by the candidate trajectory is applied to a pristine snapshot of the task environment hosted within an isolated microVM or container. The verifier then runs the pre-configured test suite using an external test runner such as `pytest`. Stage 3 monitors standard operating system signals: the process exit code, standard output and error streams, memory usage bounds, and a strict wall-clock timeout. If a trajectory introduces an infinite loop, triggers an uncaught runtime exception, exhausts allocated memory, or fails an existing unit assertion, the test harness catches the failure, terminates the sandbox, and records the specific failure trace for downstream error categorization.
 
-Stage 4 performs State Delta Verification over a duration of several hundred milliseconds to two seconds. Passing the unit tests in Stage 3 is a necessary but insufficient condition for admittance: an unconstrained agent might pass unit tests while introducing destructive side effects into the environment. Stage 4 audits the state delta ($\Delta S = S_{\text{post}} - S_0$) across the environment boundaries. The verifier computes the exact filesystem diff against the base commit, validating that only files within the task's allowable edit manifest were modified. It checks for dangling child processes, lingering temporary files, uncommitted Git artifacts, and database foreign key integrity. If the trajectory resolved the unit tests but left orphan lockfiles or modified unmapped files outside the permitted workspace directory, Stage 4 rejects the candidate.
+Stage 4 performs Invariant and Security Taint Checks over a duration of several hundred milliseconds to two seconds. Passing the unit tests in Stage 3 is a necessary but insufficient condition for admittance: an unconstrained agent might pass unit tests while introducing destructive side effects into the environment. Stage 4 audits the state delta ($\Delta S = S_{\text{post}} - S_0$) across the environment boundaries. The verifier computes the exact filesystem diff against the base commit, validating that only files within the task's allowable edit manifest were modified. It checks for dangling child processes, lingering temporary files, uncommitted Git artifacts, license copyleft contamination, and database foreign key integrity. If the trajectory resolved the unit tests but left orphan lockfiles or modified unmapped files outside the permitted workspace directory, Stage 4 rejects the candidate.
 
-Stage 5 concludes the pipeline with Non-Gating Semantic Triage and Human Audit, operating on a multi-second to multi-minute timescale. In this stage, candidate trajectories are evaluated for code maintainability, stylistic consistency, architectural elegance, and semantic documentation. A critical architectural invariant governs this layer: stochastic large language models serving as automated judges must remain strictly non-gating advisory signals. While an auxiliary model may compute a readability score or prioritize review queues, an automated neural judge must never possess unilateral authority to admit or reject a candidate trajectory. Authoritative admission into gold-standard model training corpora is reserved exclusively for the intersection of deterministic mechanical verifiers (Stages 1 through 4) and calibrated human expert audit. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) draws this line, because the commit gate must be a deterministic check the agent cannot modify, and a second model acting as judge does not supply one.
+Stage 5 concludes the pipeline with Model-Based Semantic Quality Gating, operating on a multi-second to multi-minute timescale. In this stage, candidate trajectories are evaluated for code maintainability, stylistic consistency, architectural elegance, and semantic documentation. A critical architectural invariant governs this layer: stochastic large language models serving as automated judges must remain strictly non-gating advisory signals. While an auxiliary model may compute a readability score or prioritize review queues, an automated neural judge must never possess unilateral authority to admit or reject a candidate trajectory. Authoritative admission into gold-standard model training corpora is reserved exclusively for the intersection of deterministic mechanical verifiers (Stages 1 through 4) and calibrated human expert audit. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) draws this line, because the commit gate must be a deterministic check the agent cannot modify, and a second model acting as judge does not supply one.
 
 ### Verifier gaming defense {#sec-vol3-verifier-gaming}
 
@@ -397,7 +401,7 @@ Defending against harness subversion extends containment beneath the model (prin
 
 :::
 
-::: {#psp-12-bohrbugs-vs-heisenbugs-in-verification .callout-perspective title="Bohrbugs vs. Heisenbugs in automated trajectory verification"}
+::: {#psp-14-bohrbugs-vs-heisenbugs-in-verification .callout-perspective title="Bohrbugs vs. Heisenbugs in automated trajectory verification"}
 In his classic 1986 treatise on computer system reliability, Jim Gray established the fundamental distinction between Bohrbugs—deterministic software faults that manifest consistently under identical execution conditions—and Heisenbugs—transient, non-reproducible bugs whose symptoms disappear or mutate whenever one attempts to isolate them. In the context of autonomous agent trajectory harvesting, this distinction defines the boundary between sound curriculum generation and silent data contamination.
 
 When an automated harvesting cluster evaluates thousands of candidate rollouts per day, environmental flakiness—such as network socket timeouts, DNS query jitter, unpinned dependency cache updates, and multi-threaded race conditions in the test suite—manifests as synthetic Heisenbugs. If the verification harness naively treats every test pass or failure as an authoritative signal, two catastrophic failure modes emerge. First, false negatives discard valid, innovative trajectories, wasting the GPU FLOPs invested in exploratory search. Second, and far more insidiously, false positives admit trajectories where tests passed due to timing flukes or skipped assertions, poisoning the supervised fine-tuning corpus with corrupted reasoning patterns.
@@ -407,7 +411,9 @@ An unprivileged foundation model trained on contaminated trajectories rapidly in
 **Systems insight**: Flaky tests are not minor testing nuisances; in autonomous data flywheels, they act as an adversarial entropy vector that corrupts downstream policy weights. Sound harvesting pipelines must isolate Heisenbugs through hermetic sandbox isolation, local dependency mirrors, and multi-pass re-execution before admitting any trajectory into the training distribution.
 :::
 
-Beyond active tampering, the dynamic verifier must defend against environmental flakiness and transient resource contention. A candidate trajectory that fails due to a network socket timeout during dependency resolution or a thread preemption spike does not reflect an intrinsic policy capability failure. Verifiers mitigate environmental non-determinism by using clean-slate container resets between runs, pre-caching all dependencies locally to eliminate external network calls, and enforcing multi-pass verification on borderline timing-sensitive failures.
+Beyond active tampering, the dynamic verifier must defend against environmental flakiness and transient resource contention. A candidate trajectory that fails due to a network socket timeout during dependency resolution or a thread preemption spike does not reflect an intrinsic policy capability failure. Verifiers mitigate environmental non-determinism by using clean-slate container resets between runs, pre-caching all dependencies locally to eliminate external network calls, and enforcing multi-pass verification on borderline timing-sensitive failures.[^fn-flakiness-amplification-dynamics]
+
+[^fn-flakiness-amplification-dynamics]: **Flakiness Amplification Dynamics**: Non-deterministic evaluation outcomes act as an entropy vector in iterative policy self-improvement loops. When a policy samples against an oracle with even a 2 percent flakiness rate, the probability of admitting at least one spurious trajectory across a batch of 16 rollouts escalates to over 27 percent. Left unchecked, policy gradients reinforce the stochastic timing artifacts required to pass flaky checks rather than invariant problem-solving behaviors.
 
 ### Cost-yield formulations {#sec-vol3-verifier-economics}
 
@@ -429,7 +435,7 @@ $$Y = \prod_{i=1}^K p_i$$ {#eq-verifier-cumulative-yield}
 The central optimization objective of the trajectory harvesting pipeline is to minimize the total compute cost incurred per accepted high-quality trajectory, $C_{\text{accepted}} = C_{\text{attempt}} / Y$. Inspecting @eq-verifier-cost-cascade reveals the mathematical justification for the five-stage architecture: because dynamic sandbox execution ($c_3$) and semantic triage ($c_5$) are orders of magnitude more expensive than syntactic and static analysis ($c_1, c_2$), the conditional pass rates $p_1$ and $p_2$ must act as aggressive filters. If a runtime engineer incorrectly schedules an expensive test suite ahead of static linting, candidates harboring syntax errors will consume full sandbox execution budgets before being discarded, driving $C_{\text{attempt}}$ to prohibitive levels.
 
 ```{python}
-#| label: lego-12-verification-cascade-economics-and-throughput
+#| label: lego-14-verification-cascade-economics-and-throughput
 #| echo: false
 # │ Show: Staged cascade cuts verifier compute by 68.6%, saving 191 core-hours/day.
 # │ How: Microsecond AST checks and static filters shed 74% before microVM sandbox.
@@ -484,7 +490,7 @@ class VerificationCascadeEconomicsThroughput:
     core_hours_saved_str = fmt_int(round(core_hours_saved))
 ```
 
-::: {#nbk-12-verification-cascade-economics-and-throughput .callout-notebook title="Verification cascade economics and throughput"}
+::: {#nbk-14-verification-cascade-economics-and-throughput .callout-notebook title="Verification cascade economics and throughput"}
 **Problem Statement:**
 An autonomous software engineering harvesting cluster produces $N = 100{,}000$ raw candidate trajectory rollouts per day. The runtime engineer must choose between two pipeline architectures:
 
@@ -548,9 +554,11 @@ In curation they sit beneath the gate, never in it. A learned ranker may do thre
 - *Choose among passing trajectories*, preferring the shortest or cleanest of several that all passed Stages 1 to 4.
 - *Locate the divergence turn* in a failing trajectory, which labels hard negatives and recovery points for @sec-vol3-flywheel-curation.
 
-It may not admit a trajectory that failed a deterministic stage, and it may not be the sole reason a trajectory is admitted where no deterministic oracle exists. The reason is repeated selection. A ranker with a small, systematic preference for fluent but wrong trajectories adds a small bias to one decision. Used as the admission gate across several training rounds, the same preference compounds, because each round's policy is trained to produce more of what the ranker favors. That is the overoptimization @sec-vol3-test-time-compute-verification warned about [@gao2023scaling], now applied to the training data itself. Where the task has no deterministic oracle at all, as with the tone of a refund conversation, the ranker's verdict still goes to a human who samples its decisions, and the ranker is recalibrated against those samples whenever its agreement with the human reviewers drops.
+It may not admit a trajectory that failed a deterministic stage, and it may not be the sole reason a trajectory is admitted where no deterministic oracle exists. The reason is repeated selection. A ranker with a small, systematic preference for fluent but wrong trajectories adds a small bias to one decision. Used as the admission gate across several training rounds, the same preference compounds, because each round's policy is trained to produce more of what the ranker favors. That is the overoptimization @sec-vol3-test-time-compute-verification warned about [@gao2023scaling], now applied to the training data itself. Where the task has no deterministic oracle at all, as with the tone of a refund conversation, the ranker's verdict still goes to a human who samples its decisions, and the ranker is recalibrated against those samples whenever its agreement with the human reviewers drops.[^fn-vector-bandwidth-saturation]
 
-::: {#chk-12-harvesting-cascade .callout-checkpoint title="Admission cascades and their limits"}
+[^fn-vector-bandwidth-saturation]: **Vector Memory Bandwidth Saturation**: Evaluating dense embedding similarity across millions of candidate action traces requires streaming dense parameter matrices across off-chip memory buses. Because modern GPUs execute floating-point matrix operations orders of magnitude faster than host DRAM can transfer vector coordinates, unindexed all-pairs trajectory comparison quickly bottlenecks on memory bandwidth. Structured Locality-Sensitive Hashing skirts this physical roofline by projecting high-dimensional trajectories into discrete hash buckets in sub-linear time.
+
+::: {#chk-14-admission-cascades-limits .callout-checkpoint title="Admission cascades and their limits"}
 Before moving on to what the admitted trajectories should contain, check your understanding of the cascade:
 
 - [ ] **Cascade ordering**: Why does moving the sealed tests after the static checks change the cost per admitted trajectory but not the yield?
@@ -561,7 +569,7 @@ Before moving on to what the admitted trajectories should contain, check your un
 
 The cascade answers whether a trajectory is admissible. It does not answer what the admitted set should look like as a whole. A corpus made only of the cleanest successes can pass every check and still produce a policy that falls apart at the first error message it has never seen.
 
-::: {#chk-12-harvesting-cascade .callout-checkpoint title="Evaluating verifier cascades and harness defenses"}
+::: {#chk-14-evaluating-verifier-cascades .callout-checkpoint title="Evaluating verifier cascades and harness defenses"}
 Before analyzing recovery demonstration curation and corpus balancing, verify your understanding of staged verifier economics:
 
 - [ ] **Cascade ordering**: Why must low-cost syntactic checks and static linters precede expensive dynamic microVM sandbox execution?
@@ -612,7 +620,7 @@ To eliminate the brittle failure modes of pristine-only corpora, an agentic data
 
 The state-action topologies of these three classes are directly contrasted in @fig-vol3-trajectory-typology:
 
-- **Pristine Demonstrations** ($\tau_{\text{pristine}}$, left column) traverse a strictly monotonic state path from the initial task fixture $s_0$ through grounded AST context ($s_1$) and hermetic workspace mutations ($s_2$) to verifier passage ($s_{\text{goal}}$), satisfying $\text{Passed}(V_3) \land \text{Error}(o_t) = \emptyset$ within tight turn limits ($T \le 1.2 \cdot T_{\min}$). These form $60\text{--}70\%$ of the target SFT corpus.
+- **Pristine Demonstrations** ($\tau_{\text{pristine}}$, left column) traverse a strictly monotonic state path from the initial task fixture $s_0$ through grounded AST context ($s_1$) and hermetic workspace mutations ($s_2$) to verifier passage ($s_{\text{goal}}$), satisfying $\text{Passed}(V_1 \dots V_5) \land \text{Error}(o_t) = \emptyset$ within tight turn limits ($T \le 1.2 \cdot T_{\min}$). These form $60\text{--}70\%$ of the target SFT corpus.
 - **Recovery Demonstrations** ($\tau_{\text{recover}}$, center column) execute a closed four-phase self-healing cycle: an environmental fault injected at $t_{\text{div}}$ (`errno 13: Permission denied`) shifts the agent into an error state ($s_{\text{err}}$); the policy issues read-only diagnostic probes (`stat`) to discover the root cause ($s_{\text{diag}}$); applies an atomic remediation (`chmod +x`); and rectifies state at $t_{\text{rec}}$ ($s_{\text{healed}}$) to achieve verifier satisfaction. Comprising $20\text{--}30\%$ of the corpus, recovery traces provide the causal tokens that bound quadratic error compounding ($O(\epsilon T^2)$).
 - **Hard Negatives** ($\tau_{\text{negative}}$, right column) initiate with valid, plausible steps ($s_0 \to a_1$) but suffer fatal divergence at step $t_{\text{div}}$—such as deleting assertions or generating invalid arguments—collapsing into an autoregressive spin trap ($h(s_t) == h(s_{t-k})$) before halting in a terminal sink ($\tau^-$). Accounting for $\sim 10\%$ of preference datasets, these negative pairs train contrastive objectives (such as DPO and RLVR unlikelihood loss) to penalize deceptive completion patterns.
 1. **Pristine Demonstrations ($\mathcal{T}_{\text{pristine}}$):** These trajectories represent minimal-turn, monotonically progressing paths from the initial task fixture $S_0$ to verified goal satisfaction. Every tool invocation succeeds on its first attempt; arguments are syntactically and semantically optimal; no diagnostic backtracking occurs. Pristine demonstrations establish the model's fundamental inductive bias for tool grammar, API schema compliance, and token-efficient planning. Without them, the agent becomes excessively verbose, executing redundant checks before taking routine actions.
@@ -678,7 +686,9 @@ The fault-injection harness operates as a deterministic proxy layer interposed b
 A fault injection is valid if and only if the post-fault environment state $S'$ preserves a non-empty set of reachability paths to the goal: $\text{Paths}(S' \to S_{\text{goal}}) \neq \emptyset$. Injecting unrecoverable faults degrades dataset quality into random noise.
 :::
 
-A critical engineering constraint governs fault injection: the invariant of *structural reachability*. A synthesized fault must be recoverable using the tools available in the agent's manifest $\mathcal{M}_{\text{tool}}$. If the harness simulates a missing library by deleting the package manager or completely severing the network interface without a local fallback, the agent cannot possibly resolve the dilemma. Injecting an unrecoverable fault does not produce a recovery trace; it wastes compute cycles and generates only uninformative negative samples. The harness must maintain a deterministic verification check confirming that a verified recovery sequence exists for every injected fault profile.
+A critical engineering constraint governs fault injection: the invariant of *structural reachability*. A synthesized fault must be recoverable using the tools available in the agent's manifest $\mathcal{M}_{\text{tool}}$. If the harness simulates a missing library by deleting the package manager or completely severing the network interface without a local fallback, the agent cannot possibly resolve the dilemma. Injecting an unrecoverable fault does not produce a recovery trace; it wastes compute cycles and generates only uninformative negative samples. The harness must maintain a deterministic verification check confirming that a verified recovery sequence exists for every injected fault profile.[^fn-token-boundary-artifacts]
+
+[^fn-token-boundary-artifacts]: **Tokenization Boundary Artifacts**: Byte-pair encoding algorithms tokenize structured text, diff patches, and JSON schemas into subword fragments that depend heavily on whitespace and indentation offsets. Slicing tool payloads or injecting synthetic errors across arbitrary token boundaries can bifurcate multi-byte delimiters or alter identifier merges, corrupting model attention patterns. Robust trajectory synthesis engines enforce schema-aware token masking that respects AST syntax boundaries rather than arbitrary token indices.
 
 ### Corpus composition ratios
 
@@ -704,7 +714,7 @@ $$\alpha \in [0.60, 0.70], \quad \beta \in [0.20, 0.30], \quad \gamma \approx 0.
 This distribution ensures that the forward, optimal execution path remains the dominant mode of the model's policy distribution, while dedicating nearly a third of the training curriculum to diagnostic hypothesis generation, error correction, and explicit boundary awareness.
 
 ```{python}
-#| label: lego-12-sizing-and-token-budget-allocation
+#| label: lego-14-sizing-and-token-budget-allocation
 #| echo: false
 # │ Show: Recovery traces generate 44.97% of supervised tokens despite 25% trace count.
 # │ How: Model pristine, recovery, and hard negative sequence length distribution.
@@ -759,7 +769,7 @@ class MixedCurationTokenBudgetAllocation:
     s_packed_gb_str = fmt_memory(s_packed_gb, unit=GB, precision=3)
 ```
 
-::: {#nbk-12-sizing-and-token-budget-allocation .callout-notebook title="Mixed curation token budget allocation"}
+::: {#nbk-14-sizing-and-token-budget-allocation .callout-notebook title="Mixed curation token budget allocation"}
 **Problem Statement:** An AI systems engineering team is assembling a fine-tuning dataset of $N = 50{,}000$ validated trajectories for a 70-billion-parameter coding agent. The serving infrastructure enforces a maximum context window of $T_{\max} = 32{,}768$ tokens.
 
 The empirical profiling of harvested traces reveals the following characteristics across classes:
@@ -874,7 +884,7 @@ To achieve high hardware utilization across heterogeneous compute resources, the
 - **Stage 1 (Task Dispatcher)** manages the repo fixture store ($S_0$), task specs ($P_{\text{task}}$), and tool manifests ($\mathcal{M}_{\text{tool}}$), issuing pull-based leases ($T_{\text{lease}} = 2 \times T_{\max}$) via a priority engine with an active *Lease Rate Governor* ($P_{50} = 2\,\text{ms}$).
 - **Stage 2 (Rollout Fleet)** hosts unprivileged agent supervisors interfacing with vLLM continuous-batching GPU decoders ($P_{50} = 8\,\text{s}$). The supervisor holds the model to zero ambient authority, delegating all shell and compiler executions across mediated RPC boundaries.
 - **Stage 3 (Ephemeral Sandbox Pool)** maintains warm, paused Firecracker microVM snapshots ($P_{50} = 8\,\text{ms}$). Using copy-on-write (CoW) page tables and local NVMe overlays, workers resume clean fixtures in sub-$10\,\text{ms}$, return observation deltas ($\Delta_{\text{fs}}$) to the supervisor, and undergo async teardown.
-- **Stage 4 (Staging Bus & Verifiers)** buffers raw payloads ($\tau_{\text{raw}} \approx 8.5\,\text{MB}$) into a durable Kafka ring buffer ($P_{50} = 120\,\text{ms}$) while CPU workers execute the multi-tier verifier cascade ($V_1 \to V_2 \to V_3$). When queue backlog depth $L_q > Q_{\max}$ (traffic intensity $\rho = \lambda/\mu \ge 0.85$), the verifier stage activates a *Closed-Loop Backpressure Feedback* loop, signaling the dispatcher's Lease Rate Governor to throttle rollout lease rate $\lambda_{\text{rollout}}$.
+- **Stage 4 (Staging Bus & Verifiers)** buffers raw payloads ($\tau_{\text{raw}} \approx 8.5\,\text{MB}$) into a durable Kafka ring buffer ($P_{50} = 120\,\text{ms}$) while CPU workers execute the five-stage verifier cascade ($V_1 \to \dots \to V_5$). When queue backlog depth $L_q > Q_{\max}$ (traffic intensity $\rho = \lambda/\mu \ge 0.85$), the verifier stage activates a *Closed-Loop Backpressure Feedback* loop, signaling the dispatcher's Lease Rate Governor to throttle rollout lease rate $\lambda_{\text{rollout}}$.
 - **Stage 5 (Storage Sink & Splits)** ingests verified traces ($\tau_{\text{ver}}$) into columnar Apache Arrow / Parquet datasets ($P_{50} = 50\,\text{ms}$), computes HMAC lineage seals ($H_{\text{lineage}}$), and partitions data into repo-family disjoint splits between the clean training store ($\mathcal{D}_{\text{train}}$) and the hard negative quarantine sink ($\tau^-$).
 Each stage scales independently, isolates its specific failure domains, and enforces strict operational contracts at its ingress and egress boundaries, as detailed in @tbl-vol3-pipeline-stages.
 
@@ -898,9 +908,11 @@ Upon trajectory completion—triggered by an explicit stop token, budget exhaust
 
 The **Verification Worker Pool** dequeues raw trajectories and subjects them to the staged cascades established in @sec-vol3-flywheel-verification:
 
-1. Stage 1 executes fast static verification ($V_1$), verifying JSON formatting, patch syntax, and AST validity. Trajectories that fail $V_1$ are triaged immediately as hard negative training candidates or discarded, bypassing expensive downstream stages.
-2. Stage 2 instantiates a hermetic test container to execute deterministic unit and regression test suites ($V_2$).
-3. Stage 3 (if applicable) runs semantic checks ($V_3$) with isolated compiler toolchains. A secondary discriminator model may also score the trajectory to order human review, but, as @sec-vol3-verifier-funnel requires, it never admits or rejects a trajectory on its own.
+1. Stage 1 executes fast static schema and AST verification ($V_1$), verifying JSON formatting, patch syntax, and AST validity. Trajectories that fail $V_1$ are triaged immediately as hard negative training candidates or discarded, bypassing expensive downstream stages.
+2. Stage 2 executes deterministic sandbox initialization and build checks ($V_2$).
+3. Stage 3 executes hermetic unit and regression test suites inside isolated microVMs ($V_3$).
+4. Stage 4 audits filesystem state deltas and enforces invariant and security taint checks ($V_4$).
+5. Stage 5 runs model-based semantic quality gating ($V_5$) with non-gating evaluator models. An auxiliary discriminator model may also score the trajectory to order human review, but, as @sec-vol3-verifier-funnel requires, it never admits or rejects a trajectory on its own.
 
 Trajectories passing the verification threshold $c^*$ are tagged with comprehensive execution metadata (exit statuses, execution wall times, patch diffs, and verifier scorecards) and handed to the **Storage Sink**. The storage sink maintains memory-mapped ring buffers that batch incoming traces into columnar Apache Arrow record batches, periodically flushing compressed Parquet files to distributed object storage. This columnar format aligns token sequences, tool call payloads, and verifier labels into contiguous byte vectors, optimizing downstream I/O throughput during distributed training.
 
@@ -923,7 +935,7 @@ where $C_a^2$ and $C_s^2$ represent the squared coefficients of variation for th
 Because each raw trajectory protocol buffer encapsulates full multi-turn execution histories—including environmental stdout/stderr dumps, intermediate git diffs, and high-resolution telemetry—the serialized in-memory footprint of a single trajectory averages $\bar{S}_{\text{traj}} \approx 8.5\text{ MB}$, reaching up to $64\text{ MB}$ for large multi-file refactoring runs. An unmanaged staging queue holding $10{,}000$ backlog trajectories will consume over $85\text{ GB}$ of volatile system memory, precipitating kernel out-of-memory (OOM) faults on the message broker.
 
 ```{python}
-#| label: lego-12-sizing-intermediate-staging-buffers-and
+#| label: lego-14-sizing-intermediate-staging-buffers-and
 #| echo: false
 # │ Show: Staging buffer caps queue at 3,855 traces with high watermark at 2,891.
 # │ How: Model rollout rate, nominal vs degraded verification, and RAM growth.
@@ -982,7 +994,7 @@ class StagingBuffersBackpressureSizing:
     q_high_str = fmt_int(q_high)
 ```
 
-::: {#nbk-12-sizing-intermediate-staging-buffers-and .callout-notebook title="Staging buffers and backpressure sizing"}
+::: {#nbk-14-sizing-intermediate-staging-buffers-and .callout-notebook title="Staging buffers and backpressure sizing"}
 Consider an industrial trajectory collection cluster operating $N_{\text{roll}} = 1{,}024$ concurrent rollout workers. Each worker completes an agent trajectory with an average duration of $T_{\text{roll}} = 45\text{ s}$ ($\lambda_{\text{rollout}} = 1{,}024 / 45 \approx 22.75\text{ trajectories/s}$). The raw serialized payload averages $\bar{S}_{\text{traj}} = 8.5\text{ MB}$.
 
 The downstream verification pool consists of $N_{\text{ver}} = 512$ CPU worker slots. The verifier cascade exhibits a bimodal service time:
@@ -1045,7 +1057,7 @@ where $Q_{\text{target}}$ is the optimal queue depth required to hide verificati
 |:------------------------------|:-----------------------------------------------------------------------------------------------------------------------------|:-------------------------------|:------------------------------------------------------------------------------|
 | **Rollout Worker Fleet**      | Generates candidate trajectories ($T_{\text{rollout}}$); requests execution credits from lease pool before initiating steps. | Blocked when credits $\le 0$   | Never overruns downstream buffer memory.                                      |
 | **Intermediate Queue**        | High-throughput in-memory message broker (Kafka / Redis Streams) buffering unverified traces.                                | Bounded by $Q_{\text{target}}$ | Queue memory overhead strictly capped to $M_{\text{queue}} \le 4\ \text{GB}$. |
-| **Verifier Worker Fleet**     | Executes staged verifiers ($V_1 \to V_2 \to V_3$); releases credits back to pool upon record sink.                           | Dynamic concurrency scaling    | Verification throughput matches downstream consumer rate.                     |
+| **Verifier Worker Fleet**     | Executes staged verifiers ($V_1 \to \dots \to V_5$); releases credits back to pool upon record sink.                         | Dynamic concurrency scaling    | Verification throughput matches downstream consumer rate.                     |
 | **Storage Sink & Partitions** | Routes verified successes to Training Sink, verified failures to Hard Negatives, and corrupt traces to Discard.              | Constant streaming append      | Partitions data deterministically for balanced fine-tuning mixture.           |
 
 : **Credit-Based Backpressure Pipeline Protocol**: Coordination between rollout generator fleets and downstream verification stages under strict token-bucket leasing. {#tbl-vol3-backpressure-pipeline}
@@ -1089,7 +1101,7 @@ echo 1 > /sys/fs/cgroup/agent/sandbox_1042/cgroup.kill
 
 Unlike sending a positional `kill -9` to the process identifier (which risks leaving orphaned child processes if the agent spawned background daemons that detached from the parent process tree), `cgroup.kill` invokes the kernel's internal task-killer across every thread sharing the cgroup leaf atomically.
 
-To eliminate network interface leakage, the host supervisor wraps network creation in an explicit context manager that pairs the generation of every virtual interface with a guaranteed finalizer. The supervisor tracks the lifecycle using an append-only in-memory lease registry:
+To eliminate network interface leakage, the host supervisor wraps network creation in an explicit context manager that pairs the generation of every virtual interface with a guaranteed finalizer.[^fn-network-veth-exhaustion] The supervisor tracks the lifecycle using an append-only in-memory lease registry:
 
 ```python
 # Host-side virtual interface lease teardown with error resilience
@@ -1102,6 +1114,8 @@ def release_sandbox_network(sandbox_id: str, veth_host: str) -> None:
         # Force reconciliation: move interface to fallback janitor namespace for background purge
         quarantine_network_interface(veth_host)
 ```
+
+[^fn-network-veth-exhaustion]: **Virtual Ethernet Exhaustion**: Abandoned veth pairs retain netfilter state and Linux bridge port slots, saturating the default 1,024 port limit per bridge device. Automated garbage collectors must prune unreferenced network namespaces via `ip netns del` to avert kernel socket allocation failures.
 
 Finally, a low-priority host daemon (the *Janitor Agent*) runs out-of-band on every physical hypervisor node. The janitor scans system tables every $30\text{ seconds}$ to reconcile active sandbox identifiers against host resource leases. Any network namespace, overlay mount point, or `/dev/shm` allocation lacking an active lease in the task dispatcher is immediately unmounted, unlinked, and reclaimed. By insulating the host hypervisors from cumulative execution artifacts, the distributed pipeline can sustain continuous harvesting loops across millions of trajectory rollouts without maintenance outages.
 
@@ -1168,7 +1182,7 @@ The complete structure of this cryptographic binding and its downstream redactio
 - On the right, the **Three-Pass Syntactically Invariant Sanitization Flow** scrubs incoming traces without syntactic corruption. A raw observation exposing credentials (such as an AWS key `AKIAIOSFODNN7EXAMPLE`, employee email, and RFC 1918 IP `10.240.0.12`) traverses Pass 1 (DFA regex matching and sliding-window Shannon entropy filtering for $H(S) \ge 4.5\,\text{bits/char}$); Pass 2 (quantized DistilBERT NER and CIDR subnet detection); and Pass 3 (AST string literal masking with salted pseudonyms `HMAC(K_salt, secret)[:12]`). The resulting columnar record retains bitwise valid JSON grammar and token sequence lengths while enforcing zero token leakage ($\Lambda_{\text{leak}} = 0.00\%$) into the downstream model weights.
 
 ```{python}
-#| label: lego-12-storage-overhead-and-ingestion-latency
+#| label: lego-14-storage-overhead-and-ingestion-latency
 #| echo: false
 # │ Show: Lineage envelope adds 2.32% storage overhead with 65.2 us SHA-256 latency.
 # │ How: Merkle tree intermediate node digests, environment hashes, and streaming.
@@ -1217,7 +1231,7 @@ class LineageEnvelopeStorageLatency:
     throughput_str = fmt_int(round(throughput))
 ```
 
-::: {#nbk-12-storage-overhead-and-ingestion-latency .callout-notebook title="Lineage envelope storage and latency"}
+::: {#nbk-14-storage-overhead-and-ingestion-latency .callout-notebook title="Lineage envelope storage and latency"}
 Consider an industrial trajectory harvesting cluster processing $N = 100{,}000$ completed trajectories per day. Each trajectory records an average of $T = 32$ interaction steps.
 
 *Trajectory Characteristics:*
@@ -1319,9 +1333,11 @@ To enforce legal fencing, the trajectory harvesting runtime executes automated l
 
 : **Legal Provenance Classification Matrix**: Regulatory rules governing how software licenses dictate the ingestion, masking, and downstream training usage of agent trajectories. {#tbl-vol3-license-matrix}
 
-When an agent executes within a Tier 3 or Tier 4 repository, the harvesting pipeline activates an AST-level taint tracker. If the agent's observation window captures raw source code from a copyleft file, any subsequent code-generation action $a_t$ that exhibits high n-gram overlap ($n \ge 7$) or AST subtree isomorphism with the observation is flagged. The pipeline marks the trajectory metadata envelope with an explicit contamination flag (`license_taint: RECIPROCAL_COPYLEFT`), segregating the trace into a quarantined partition of the data lake. Enterprise training harnesses can then enforce compile-time dataset exclusion filters, guaranteeing that commercial policies are trained exclusively on Tier 1 permissive codebases.
+When an agent executes within a Tier 3 or Tier 4 repository, the harvesting pipeline activates an AST-level taint tracker. If the agent's observation window captures raw source code from a copyleft file, any subsequent code-generation action $a_t$ that exhibits high n-gram overlap ($n \ge 7$) or AST subtree isomorphism with the observation is flagged. The pipeline marks the trajectory metadata envelope with an explicit contamination flag (`license_taint: RECIPROCAL_COPYLEFT`), segregating the trace into a quarantined partition of the data lake. Enterprise training harnesses can then enforce ingestion-time dataset exclusion filters, guaranteeing that commercial policies are trained exclusively on Tier 1 permissive codebases.[^fn-context-taint-tracking]
 
-::: {#chk-12-exposure-bias .callout-checkpoint title="Evaluating recovery curation and pipeline hygiene"}
+[^fn-context-taint-tracking]: **Context Taint Tracking**: AST subtree tracking across multi-turn context windows detects verbatim token propagation from copyleft licensed dependencies into agent generated diffs. Quarantining contaminated trajectories prevents copyright infringement claims from attaching to downstream model weights.
+
+::: {#chk-14-recovery-curation-hygiene .callout-checkpoint title="Evaluating recovery curation and pipeline hygiene"}
 Before examining split partitioning and environment contamination vectors, verify your understanding of trajectory curation:
 
 - [ ] **Covariate shift**: Why does fine-tuning exclusively on error-free golden trajectories cause policies to collapse when encountering runtime tool errors?
@@ -1352,7 +1368,7 @@ In agentic execution, however, data leakage is an *environmental* phenomenon rat
 1. *Codebase and Repository Topography:* The hierarchical tree of files, module import graphs, build scripts (`Makefile`, `CMakeLists.txt`, `pyproject.toml`), and commit histories. A policy that encounters repository $R$ during training retains an implicit parametric memory of where utility functions reside, which files contain core business logic, and how the test runner is invoked. When evaluated on $R$, it bypasses exploratory discovery entirely, generating targeted filesystem operations that it cannot reproduce on an unfamiliar system.
 2. *Mock API Behavioral Quirks:* Synthetic tool backends and mock HTTP services constructed to insulate the harvesting pipeline from rate limits or non-deterministic third-party APIs. Mocks often implement simplified response schemas, omit transient HTTP errors, or return deterministic edge-case payloads. A policy exposed to these behaviors memorizes the mock's idealized contract, succeeding in evaluation only because the test fixture shares the identical artificial stub.
 3. *Diagnostic and Error Signatures:* The formatting, tracebacks, and warning patterns emitted by execution tools. When a Python runtime throws an exception or a compiler emits an error, the specific wording often reflects exact compiler versions, installed linters, or custom logging wrappers. If both splits run on identical base container layers with identical tool binaries, the policy learns to overfit to localized compiler quirks rather than parsing standard language errors.
-4. *Test Harness and Verification Artifacts:* The concrete assertions, fixtures, and mock inputs used by the staged verifier cascade ($V_1, V_2, V_3$). If the unit tests used to accept a trajectory into the training set share helper functions, test data generators, or assertion structures with the evaluation harness, the model learns the test style rather than the underlying specification.
+4. *Test Harness and Verification Artifacts:* The concrete assertions, fixtures, and mock inputs used by the staged verifier cascade ($V_1 \dots V_5$). If the unit tests used to accept a trajectory into the training set share helper functions, test data generators, or assertion structures with the evaluation harness, the model learns the test style rather than the underlying specification.
 
 ```bash
 # Observable Failure Trace: Environmental Memorization Collapse
@@ -1391,6 +1407,40 @@ These evaluation tools provide equivalent functional access to the underlying OS
 
 Finally, the pipeline must enforce *Domain Isolation*. If the training corpus contains 5,000 trajectories fixing race conditions in concurrent Go programs, an evaluation split composed of additional Go race conditions evaluates interpolation within a narrow algorithmic manifold. To validate genuine operational generalization, evaluation partitions must segregate tasks by functional problem domains: database schema migrations, resource leak debugging, network protocol deserialization, and distributed synchronization.
 
+### Trajectory structural deduplication and AST MinHash {#sec-vol3-trajectory-dedup-minhash}
+
+Even after hierarchical partitioning isolates repository and tool families, an automated trajectory harvesting pipeline faces an internal data efficiency challenge: within a given partition, stochastic rollouts frequently rediscover identical execution trajectories with only incidental variations in whitespace, variable names, or logging timestamps. Training on near-duplicate trajectories squanders precious token budget and concentrates probability mass on over-represented paths. However, classical pretraining deduplication—which operates on lexical $n$-grams via MinHash Locality-Sensitive Hashing (LSH)—fails on agent traces. Two trajectories that execute the exact same structural refactoring or shell debugging sequence often exhibit less than 35 percent lexical token similarity due to non-deterministic process identifiers, dynamic file paths, and rambling chain-of-thought scratchpads.
+
+To capture structural operational similarity rather than superficial token overlap, the harvesting pipeline extracts Abstract Syntax Tree (AST) representations from the trajectory's tool actions and environment diffs. The AST nodes are normalized by stripping identifier names, variable bindings, and literal values, replacing them with typed grammar nodes (e.g., `FunctionDef`, `ForLoop`, `SubprocessCall`). The normalized AST is then decomposed into a multi-set of structural subtrees of depth $d=3$, yielding an AST shingle set $S(T)$ for each trajectory $T$.[^fn-ast-subtree-shingling]
+
+The structural similarity between two trajectories $T_1$ and $T_2$ is governed by the Jaccard similarity of their AST shingle sets, which can be estimated via MinHash collisions:
+
+$$J(T_1, T_2) = \frac{|S(T_1) \cap S(T_2)|}{|S(T_1) \cup S(T_2)|}, \quad P\left(\min_{h \in \mathcal{H}} h(S(T_1)) = \min_{h \in \mathcal{H}} h(S(T_2))\right) = J(T_1, T_2)$$ {#eq-vol3-trajectory-curation-minhash}
+
+Under the MinHash formulation in @eq-vol3-trajectory-curation-minhash, evaluating a random permutation hash function $h \in \mathcal{H}$ chosen from a 2-universal hash family guarantees that the probability of two shingle sets yielding the identical minimum hash equals their true Jaccard similarity.
+
+To approximate trajectory structural diversity across millions of candidate traces without computing exhaustive pairwise tree-edit distances, the harvesting engine computes a signature vector using $k$ independent universal hash functions $\mathbf{h} = [h_1, h_2, \dots, h_k]$:
+
+$$\mathbf{s}(T) = \left[ \min_{x \in S(T)} h_1(x), \, \min_{x \in S(T)} h_2(x), \, \dots, \, \min_{x \in S(T)} h_k(x) \right]^\top \in \mathbb{Z}^k$$
+
+The collision frequency across the $k$ hashes provides an unbiased estimator of structural similarity:
+
+$$\hat{J}(T_1, T_2) = \frac{1}{k} \sum_{i=1}^k \mathbb{I}\left[ s_i(T_1) = s_i(T_2) \right], \quad \mathrm{Var}\left(\hat{J}\right) = \frac{J(1 - J)}{k}$$
+
+Evaluating $k = 128$ independent hash functions bounds the standard error of the similarity estimate to $\sigma \le \frac{0.5}{\sqrt{128}} \approx 0.044$, providing high structural resolution while requiring only $512\text{ bytes}$ per trajectory signature.
+
+To execute deduplication at line-rate during streaming ingestion, the pipeline groups the $k$ signature components into $b$ bands of $r$ rows such that $k = b \cdot r$. Two trajectories collide in at least one band with probability:
+
+$$P_{\text{collision}} = 1 - \left(1 - J(T_1, T_2)^r\right)^b$$
+
+This banding structure produces a sharp S-curve threshold centered at $t \approx (1/b)^{1/r}$. Candidate pairs colliding within any hash bucket are projected into a deduplication lattice, where near-duplicate traces are pruned according to token economy and reward dominance.[^fn-minhash-lsh-bucketing] By indexing integer signatures in contiguous memory-mapped arrays rather than executing quadratic pairwise diffs, the ingestion engine preserves structural diversity while drastically compressing the deduplication memory footprint.[^fn-dedup-memory-footprints]
+
+[^fn-ast-subtree-shingling]: **Abstract Syntax Tree Shingling**: AST subtree shingling traverses parsed action payloads to extract normalized subtrees of fixed depth, masking variable names and literal scalars into canonical type placeholders. This normalizes cosmetic identifier variations while preserving algorithmic structure across agent steps.
+
+[^fn-minhash-lsh-bucketing]: **Locality-Sensitive Hashing Bucketing**: Partitioning $k$ hash signatures into $b$ bands of $r$ rows maps near-duplicate trajectories into identical hash buckets with sub-quadratic $O(N)$ candidate generation. Tuning $b$ and $r$ shapes the collision S-curve to suppress false positives below the similarity threshold $t$.
+
+[^fn-dedup-memory-footprints]: **Deduplication Memory Footprint**: In-memory integer signature matrices consume $O(N \cdot k)$ bytes (e.g., $100{,}000$ traces at $k=128$ uint32 hashes occupy $51.2\text{ MB}$), avoiding the catastrophic memory and compute overhead of $O(N^2)$ pairwise tree edit distance computations.
+
 ### Empirical data mixture ablations
 
 Once environmental boundaries are enforced, how do we confirm that a harvested trajectory corpus actually elevates policy performance? In classical pretraining, datasets are often ranked by the loss convergence rate on held-out text. In agentic systems, token perplexity correlates weakly with task execution success. A policy may exhibit lower cross-entropy loss on tool-calling arguments while failing to complete multi-step tasks due to unrecoverable compounding errors.
@@ -1403,7 +1453,7 @@ Therefore, trajectory dataset quality must be evaluated through *empirical mixtu
 
 Consider three candidate training mixtures, each calibrated to an identical computational budget of $10^9$ tokens:
 
-1. *Uncurated Rollouts:* Raw trajectories accepted solely by passing terminal verifiers ($V_3$), containing arbitrary exploratory wandering, redundant operations, and inefficient tool loops.
+1. *Uncurated Rollouts:* Raw trajectories accepted solely by passing the terminal verifier cascade ($V_1 \to \dots \to V_5$), containing arbitrary exploratory wandering, redundant operations, and inefficient tool loops.
 2. *Pristine-Only Demonstrations:* Trajectories where every step is optimal, generated by high-capability frontier models or human experts executing shortest-path solutions without missteps.
 3. *Recovery-Augmented Mixture:* A curated balance consisting of 70 percent pristine trajectories and 30 percent structured recovery demonstrations (synthesized via the divergence and checkpoint rollback techniques established in @sec-vol3-flywheel-curation).
 
@@ -1428,7 +1478,7 @@ where $N_{\text{accepted}}$ represents the raw count of candidate trajectories t
 If an organization runs a sloppy collection pipeline with a 30 percent leakage rate—meaning 30 percent of its collected tasks inadvertently duplicate repositories, schemas, or fixtures reserved for evaluation—the denominator shrinks, dramatically inflating the amortized unit cost of every valid training token.
 
 ```{python}
-#| label: lego-12-the-economic-cost-of-contaminated
+#| label: lego-14-the-economic-cost-of-contaminated
 #| echo: false
 # │ Show: 25% evaluation leakage inflates cost by 33.3% and wastes $22,917 on 50k traces.
 # │ How: Amortize generation, verification, and sanitization across usable yield.
@@ -1483,7 +1533,7 @@ class ContaminatedYieldEconomics:
     waste_50k_str = fmt_usd(round(waste_50k), precision=0)
 ```
 
-::: {#nbk-12-the-economic-cost-of-contaminated .callout-notebook title="The economic cost of contaminated yield"}
+::: {#nbk-14-the-economic-cost-of-contaminated .callout-notebook title="The economic cost of contaminated yield"}
 **Scenario:** An engineering team constructs an automated trajectory harvesting pipeline targeting a 70B parameter open-weights policy. The generation phase runs an unprivileged inference model to produce candidate rollouts across thousands of synthetic programming tasks.
 
 **Pipeline Parameters:**
@@ -1492,7 +1542,7 @@ class ContaminatedYieldEconomics:
 - *Sampling cost per task:* The generator explores $K = 5$ parallel rollout attempts per task fixture. Thus, each task consumes:
   $$C_{\text{generation}} = 5 \times (40{,}000 \times 10^{-6} \times \$0.75) = 5 \times \$0.030 = \$0.150$$
 
-- *Verification cost:* Each generated attempt that reaches a terminal state is executed inside an ephemeral microVM sandbox across a three-stage verifier cascade ($V_1, V_2, V_3$). MicroVM allocation and execution costs average $\$0.020$ per checked rollout. With 5 attempts:
+- *Verification cost:* Each generated attempt that reaches a terminal state is executed inside an ephemeral microVM sandbox across a five-stage verifier cascade ($V_1 \to \dots \to V_5$). MicroVM allocation and execution costs average $\$0.020$ per checked rollout. With 5 attempts:
   $$C_{\text{verification}} = 5 \times \$0.020 = \$0.100$$
 
 - *Sanitization compute:* Cryptographic hashing, AST parsing, and secret entropy filtering cost $\$0.005$ per attempt:
@@ -1527,9 +1577,9 @@ Task fixtures define reproducible starting sandbox states; staged verifier casca
 
 Operating a distributed cluster of unprivileged agent runtimes without an automated, strictly gated harvesting harness produces an immediate systems failure: the pipeline either drowns in an unverified multi-terabyte swamp of degenerate interaction logs that silently poison downstream training corpora, or it collapses under manual inspection bottlenecks that starve policy optimization of diverse execution signals. When autonomous agents interact with realistic development environments—invoking shell commands, compiling code, reading documentation, and editing source files—the overwhelming majority of generated trajectories are unusable. Agents encounter infinite loops, generate syntactically invalid tool invocations, game static test suites by asserting trivial tautologies, or leak production API tokens directly into the interaction context.
 
-**Industrial trajectory curation requires synthesizing reproducible fixtures, staged verification, recovery curation, and sanitization into a unified, versioned data pipeline evaluated against empirical yield and task transfer metrics.** If an engineering organization treats trajectory harvesting as an informal collection of offline shell scripts or ad-hoc log scrapers, the resulting dataset inevitably suffers from the classic failure modes cataloged by @sculley2015hidden: pipeline jungles, hidden data dependencies, and feedback loops where an agent's historical mistakes are amplified rather than extinguished. Borrowing the core design principles of scientific data repositories—specifically, write-once immutable storage, continuous lineage auditing, and automated data quality verification—an industrial harvesting pipeline must function as a closed-loop runtime compiler. It ingests non-deterministic, raw execution logs from the agent supervisor's Write-Ahead Log (WAL) and Agent Control Block (ACB), submits each candidate trace to an escalating sequence of physical invariant checks, scrubs sensitive operational data, and outputs cryptographically sealed, split-isolated training corpora.
+**Industrial trajectory curation requires synthesizing reproducible fixtures, staged verification, recovery curation, and sanitization into a unified, versioned data pipeline evaluated against empirical yield and task transfer metrics.** If an engineering organization treats trajectory harvesting as an informal collection of offline shell scripts or ad-hoc log scrapers, the resulting dataset inevitably suffers from the classic failure modes cataloged by @sculley2015hidden: pipeline jungles, hidden data dependencies, and feedback loops where an agent's historical mistakes are amplified rather than extinguished. Borrowing the core design principles of scientific data repositories—specifically, write-once immutable storage, continuous lineage auditing, and automated data quality verification—an industrial harvesting pipeline must function as an automated, closed-loop trajectory validation and ingestion pipeline. It ingests non-deterministic, raw execution logs from the agent supervisor's Write-Ahead Log (WAL) and Agent Control Block (ACB), submits each candidate trace to an escalating sequence of physical invariant checks, scrubs sensitive operational data, and outputs cryptographically sealed, split-isolated training corpora.
 
-::: {#fig-vol3-harvesting-synthesis fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Trajectory Harvesting Architecture and Flywheel Retention**: Closed-loop data curation lifecycle (top) transitioning raw runtime WAL telemetry through verifier cascades, role partitioners, AST secret redaction, cryptographic lineage stamping, and split isolation back into policy adaptation retraining; paired with empirical pipeline retention curves (bottom) demonstrating how aggressive verification filtering drives accepted corpus yield down to $12.8\%$ while boosting downstream task pass rate from $11.2\%$ to a peak $42.5\%$." fig-alt="Systems architecture diagram and empirical curve. Top panel illustrates the six-stage harvesting lifecycle: Stage 1 Runtime Capture (WAL/ACB hooks, CoW diffs), Stage 2 Verifier Cascade (static schema, sandbox tests, anti-tamper), Stage 3 Role Labeling (pristine 70%, recovery 30%, hard negatives), Stage 4 3-Pass Redaction (DFA regex/entropy, NER, AST token masking), Stage 5 Provenance Seal (Merkle root, SHA-256 digests, HMAC key), and Stage 6 Split Partition (repo-family disjoint, AST dedup), returning via a green dashed flywheel feedback arc to policy retraining. Bottom panel plots Accepted Corpus Yield (orange curve, dropping from 100% to 12.8%) against Downstream Task Pass Rate (blue curve, rising from 11.2% to 42.5%) across the five configurations from Table 12.5, highlighting the Unfiltered Log Hazard and Recovery Mining Inflection."}
+::: {#fig-vol3-harvesting-synthesis fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Trajectory Harvesting Architecture and Flywheel Retention**: Closed-loop data curation lifecycle (top) transitioning raw runtime WAL telemetry through verifier cascades, role partitioners, AST secret redaction, cryptographic lineage stamping, and split isolation back into policy adaptation retraining; paired with empirical pipeline retention curves (bottom) demonstrating how aggressive verification filtering drives accepted corpus yield down to $12.8\%$ while boosting downstream task pass rate from $11.2\%$ to a peak $42.5\%$." fig-alt="Systems architecture diagram and empirical curve. Top panel illustrates the six-stage harvesting lifecycle: Stage 1 Runtime Capture (WAL/ACB hooks, CoW diffs), Stage 2 Verifier Cascade (static schema, sandbox tests, anti-tamper), Stage 3 Role Labeling (pristine 70%, recovery 30%, hard negatives), Stage 4 3-Pass Redaction (DFA regex/entropy, NER, AST token masking), Stage 5 Provenance Seal (Merkle root, SHA-256 digests, HMAC key), and Stage 6 Split Partition (repo-family disjoint, AST dedup), returning via a green dashed flywheel feedback arc to policy retraining. Bottom panel plots Accepted Corpus Yield (orange curve, dropping from 100% to 12.8%) against Downstream Task Pass Rate (blue curve, rising from 11.2% to 42.5%) across the five configurations from @tbl-vol3-dataset-scorecard, highlighting the Unfiltered Log Hazard and Recovery Mining Inflection."}
 ![](images/svg/vol3-harvesting-synthesis.svg)
 :::
 
@@ -1560,11 +1610,13 @@ The runtime streams $\tau_{\text{raw}}$ over high-throughput messaging queues (e
 
 #### Stage 2: Staged verification cascade {.unnumbered}
 
-Raw traces enter an escalating verification cascade designed to filter out non-viable trajectories at the lowest possible computational cost. As formalized in the verifier cascade economics, evaluating every trajectory against a full integration test suite or dynamic property test inside a live microVM is computationally prohibitive. The pipeline applies a three-tiered sieve:
+Raw traces enter an escalating verification cascade designed to filter out non-viable trajectories at the lowest possible computational cost. As formalized in the verifier cascade economics, evaluating every trajectory against a full integration test suite or dynamic property test inside a live microVM is computationally prohibitive. The pipeline applies a five-stage verification cascade ($V_1 \to \dots \to V_5$):
 
-- **Stage $V_1$ (Static Schema & Syntax Validation):** Operating purely in CPU memory at sub-millisecond latencies ($c_1 \approx 0.5\text{ ms}$), $V_1$ parses the raw transcript to ensure well-formedness. It validates that every model action adheres to the JSON schema of $\mathcal{M}_{\text{tool}}$, verifies that file patches conform to unified diff syntax, and checks that code modifications compile or parse into an Abstract Syntax Tree (AST) without syntax errors. Traces with malformed tokens, hallucinated tool identifiers, or truncated control blocks are dropped immediately.
-- **Stage $V_2$ (Hermetic Sandbox Execution):** Traces surviving $V_1$ proceed to containerized sandboxes ($c_2 \approx 5\text{–}30\text{ s}$) where the final workspace diff $\Delta_{\text{fs}}$ is applied against the pristine starting fixture $S_0$. The verifier runs pre-existing unit tests, linters, and type checkers. Crucially, the verifier verifies diff safety: the agent must not have modified test fixtures, disabled linting rules, or added trivial assertion pass-throughs.
-- **Stage $V_3$ (Dynamic Flakiness and Mutation Auditing):** To eliminate false positives from non-deterministic test suites, $V_3$ executes the test suite across $K$ independent seeds ($K \ge 3$) under CPU throttling and network isolation. Furthermore, semantic property tests and mutation checks are injected to ensure the agent's patch actually resolves the underlying problem rather than over-fitting to surface-level assertions.
+- **Stage $V_1$ (Syntactic & Schema Validation):** Operating purely in CPU memory at sub-millisecond latencies ($c_1 \approx 0.5\text{ ms}$), $V_1$ parses the raw transcript to ensure well-formedness. It validates that every model action adheres to the JSON schema of $\mathcal{M}_{\text{tool}}$, verifies that file patches conform to unified diff syntax, and checks that code modifications compile or parse into an Abstract Syntax Tree (AST) without syntax errors. Traces with malformed tokens, hallucinated tool identifiers, or truncated control blocks are dropped immediately.
+- **Stage $V_2$ (Deterministic Sandbox Execution):** Traces surviving $V_1$ proceed to containerized sandboxes or microVMs where the starting fixture snapshot $S_0$ is restored and workspace dependencies and build environments are deterministically re-initialized.
+- **Stage $V_3$ (Unit & Regression Test Suites):** Hermetic unit and regression test suites evaluate the final workspace diff $\Delta_{\text{fs}}$ inside the sandbox ($c_3 \approx 5\text{--}30\text{ s}$). Multi-seed execution ($K \ge 3$) prunes non-deterministic assertions, ensuring that test pass signals reflect true resolution rather than test flakiness.
+- **Stage $V_4$ (Invariant & Security Taint Checks):** The verifier audits filesystem state deltas and enforces diff safety: the agent must not have modified test fixtures, disabled linting rules, added trivial assertion pass-throughs, or ingested copyleft source code that introduces license contamination.
+- **Stage $V_5$ (Model-Based Semantic Quality Gating):** An auxiliary evaluator model scores the trajectory for coherence, semantic conciseness, and exploration economy, ranking candidate traces for human inspection without holding unilateral admission authority.
 
 #### Stage 3: Behavioral role labeling {.unnumbered}
 
@@ -1572,13 +1624,13 @@ Trajectories that clear the verifier cascade do not all serve the same pedagogic
 
 The synthesis engine classifies accepted trajectories into three structural behavioral categories, detailed in @tbl-vol3-synthesis-trajectory-roles:
 
-| Behavioral Category                                               | Structural Signature                                                                                                                                   | Primary Policy Utility                                                           | Pipeline Acceptance Condition                                                                                                   |
-|:------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------|
-| **Pristine Expert Path** ($\tau \in \mathcal{T}_{\text{expert}}$) | Monotonic progression; zero tool errors; minimal token length ($T \le 1.2 \cdot T_{\text{optimal}}$).                                                  | Maximizes forward execution efficiency and direct task solving.                  | $\text{Passed}(V_3) \land \forall t, \text{Error}(o_t) = \emptyset$.                                                            |
-| **Recovery Path** ($\tau \in \mathcal{T}_{\text{recovery}}$)      | Non-monotonic; contains environmental failure ($o_{t_{\text{div}}} = \text{Error}$), followed by diagnosis, corrective patch, and eventual validation. | Teaches error localization, diagnostic replanning, and self-healing.             | $\text{Passed}(V_3) \land \exists t_{\text{div}}, \text{Error}(o_{t_{\text{div}}}) \land \text{Rectified}(\Delta_{\text{fs}})$. |
-| **Hard Negative Path** ($\tau \in \mathcal{T}_{\text{negative}}$) | High confidence; syntactically flawless; fails semantic acceptance or violates safety invariants.                                                      | Calibrates preference models; suppresses deceptive alignment and reward hacking. | $\text{Passed}(V_1) \land \neg \text{Passed}(V_2) \land \text{TrivialExploit}(\Delta_{\text{fs}})$.                             |
+| Behavioral Category                                               | Structural Signature                                                                                                                                   | Primary Policy Utility                                                           | Pipeline Acceptance Condition                                                                                                             |
+|:------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------|
+| **Pristine Expert Path** ($\tau \in \mathcal{T}_{\text{expert}}$) | Monotonic progression; zero tool errors; minimal token length ($T \le 1.2 \cdot T_{\text{optimal}}$).                                                  | Maximizes forward execution efficiency and direct task solving.                  | $\text{Passed}(V_1 \dots V_5) \land \forall t, \text{Error}(o_t) = \emptyset$.                                                            |
+| **Recovery Path** ($\tau \in \mathcal{T}_{\text{recovery}}$)      | Non-monotonic; contains environmental failure ($o_{t_{\text{div}}} = \text{Error}$), followed by diagnosis, corrective patch, and eventual validation. | Teaches error localization, diagnostic replanning, and self-healing.             | $\text{Passed}(V_1 \dots V_5) \land \exists t_{\text{div}}, \text{Error}(o_{t_{\text{div}}}) \land \text{Rectified}(\Delta_{\text{fs}})$. |
+| **Hard Negative Path** ($\tau \in \mathcal{T}_{\text{negative}}$) | High confidence; syntactically flawless; fails semantic acceptance or violates safety invariants.                                                      | Calibrates preference models; suppresses deceptive alignment and reward hacking. | $\text{Passed}(V_1) \land \neg \text{Passed}(V_2 \dots V_5) \land \text{TrivialExploit}(\Delta_{\text{fs}})$.                             |
 
-: **Taxonomy of curated trajectory roles within the synthesized data pipeline**: Structural signatures, policy utilities, and pipeline acceptance conditions across pristine, recovery, and hard negative paths. {#tbl-vol3-synthesis-trajectory-roles}
+: **Taxonomy of Curated Trajectory Roles within the Synthesized Data Pipeline**: Structural signatures, policy utilities, and pipeline acceptance conditions across pristine, recovery, and hard negative paths. {#tbl-vol3-synthesis-trajectory-roles}
 
 For recovery trajectories, the pipeline stamps the divergence index $t_{\text{div}}$ where the agent deviated into an error state, alongside the recovery inflection point $t_{\text{rec}}$ where the agent identified the root cause and initiated corrective action. This metadata enables downstream curation stages to extract targeted sub-trajectories focusing exclusively on the error-recovery transition.
 
@@ -1639,7 +1691,7 @@ A high raw generation rate is useless if the verifier cascade exhibits low selec
 
 #### Formal mathematical metrics {.unnumbered}
 
-We define four primary systems metrics to govern the harvesting pipeline:
+We define five primary systems metrics to govern the harvesting pipeline:
 
 1. **Trajectory Yield ($\eta$):** The ratio of verified, fully sanitized, accepted trajectories to the total number of raw episodes initiated by the runtime:
 $$\eta = \frac{N_{\text{accepted}}}{N_{\text{generated}}} = \prod_{i=1}^{M} p(V_i \mid V_{<i})$$
@@ -1657,8 +1709,14 @@ A healthy pipeline maintains $\Lambda_{\text{leak}} \equiv 0$ against synthetic 
 $$Q_{\text{verify}} = \frac{\text{FLOPs}_{\text{verification}}}{\text{FLOPs}_{\text{generation}}}$$
 Because verification relies primarily on fast CPU microVMs and static analysis rather than dense tensor accelerators, maintaining $Q_{\text{verify}} < 0.10$ in total hardware cost ensures that data curation does not dominate the infrastructure budget.
 
+5. **Trajectory Throughput Roofline ($\Theta_{\text{pipeline}}$):** The maximum sustainable trajectory processing throughput bounded by storage bandwidth, sandbox execution parallelism, and accelerator token processing capacity:
+$$\Theta_{\text{pipeline}} = \min\left( \frac{B_{\text{storage}}}{S_{\text{traj}}}, \, \frac{N_{\text{vcpus}} \cdot \mu_{\text{sandbox}}}{T_{\text{exec}}}, \, \frac{N_{\text{accelerators}} \cdot \mathcal{P}_{\text{tok}}}{L_{\text{tok}}} \right)$$ {#eq-vol3-trajectory-curation-throughput-roofline}
+where $B_{\text{storage}}$ is the aggregate sequential I/O bandwidth to the storage sink, $S_{\text{traj}}$ is the average serialized trajectory size, $N_{\text{vcpus}}$ is the CPU core allocation for ephemeral sandbox execution, $\mu_{\text{sandbox}}$ is the sandbox container utilization efficiency factor, $T_{\text{exec}}$ is the mean sandbox test execution latency per trajectory, $N_{\text{accelerators}}$ is the number of inference accelerator chips, $\mathcal{P}_{\text{tok}}$ is the sustained token generation throughput per accelerator, and $L_{\text{tok}}$ is the average token length per trajectory.
+
+Under the roofline formulation in @eq-vol3-trajectory-curation-throughput-roofline, production harvesting pipelines frequently discover that data pipelines bottleneck between sandbox execution throughput and token processing. While modern accelerator clusters scale token throughput $\mathcal{P}_{\text{tok}}$ into tens of thousands of tokens per second, sandbox execution is strictly CPU- and I/O-bound. If $N_{\text{vcpus}} \cdot \mu_{\text{sandbox}} / T_{\text{exec}} < N_{\text{accelerators}} \cdot \mathcal{P}_{\text{tok}} / L_{\text{tok}}$, the verification pool starves downstream training ingestion, forcing rollout workers into backpressure throttling. Conversely, when fast microVM snapshots slash $T_{\text{exec}}$ from minutes to seconds, the throughput ceiling shifts to token inference or storage sink ingest serialization.
+
 ```{python}
-#| label: lego-12-sizing-an-industrial-trajectory-harvester
+#| label: lego-14-sizing-an-industrial-trajectory-harvester
 #| echo: false
 # │ Show: 122 CPU workers verify 50k traces for $0.0165/trace vs $0.2952 generation.
 # │ How: Model V1-V3 cascade work, 14.11% yield, and 24-hour throughput limits.
@@ -1721,7 +1779,7 @@ class IndustrialTrajectoryHarvesterSizing:
     defective_eliminated_pct_str = fmt_percent(defective_eliminated, precision=1, style="prose")
 ```
 
-::: {#nbk-12-sizing-an-industrial-trajectory-harvester .callout-notebook title="Sizing an industrial trajectory harvester"}
+::: {#nbk-14-sizing-an-industrial-trajectory-harvester .callout-notebook title="Sizing an industrial trajectory harvester"}
 **Problem:** An AI systems engineering team operates a cluster of 1,000 parallel sandboxed agents tasked with automated software bug fixing. The agents interact with a 70B parameter dense model running on an inference cluster (FP8 weights, $140\text{ GB}$ VRAM per instance).
 
 The workload parameters are:
@@ -1796,7 +1854,7 @@ Before committing millions of tokens of curated trajectories to full-scale train
 | **Baseline: Unfiltered Logs**                 |        $100.0\%$        |                   $14.2\%$                  |               $18.4\%$               |              $11.2\%$ (Degraded)              |          $\$0.04$         |
 | **Static Filtering Only ($V_1$)**             |         $58.2\%$        |                   $3.1\%$                   |               $17.9\%$               |                    $18.6\%$                   |          $\$0.08$         |
 | **Mechanical Cascade ($V_1 \to V_2$)**        |         $17.4\%$        |                   $0.8\%$                   |               $6.2\%$                |                    $27.4\%$                   |          $\$0.26$         |
-| **Cascade + Recovery Mining ($V_1 \to V_3$)** |         $14.1\%$        |                  $< 0.01\%$                 |               $0.4\%$                |                    $36.8\%$                   |          $\$0.31$         |
+| **Cascade + Recovery Mining ($V_1 \to V_5$)** |         $14.1\%$        |                  $< 0.01\%$                 |               $0.4\%$                |                    $36.8\%$                   |          $\$0.31$         |
 | **Synthesized Harvester (Full Pipeline)**     |         $12.8\%$        |              $\mathbf{0.00\%}$              |           $\mathbf{0.1\%}$           |               $\mathbf{42.5\%}$               |          $\$0.34$         |
 
 : **Dataset Quality Scorecard**: Evaluation of candidate harvesting pipeline configurations across yield, secret leakage, test gaming, downstream task pass rate, and unit cost. {#tbl-vol3-dataset-scorecard}
@@ -1805,7 +1863,7 @@ As demonstrated by the empirical results in @tbl-vol3-dataset-scorecard, there i
 
 The static filter ($V_1$) removes syntax errors but leaves the corpus vulnerable to test-suite gaming and flaky assertions. Only when the full staged cascade is synthesized with behavioral recovery mining and strict split isolation does the downstream agent achieve state-of-the-art task transfer ($42.5\%$). The injection of curated recovery trajectories proves particularly decisive: agents trained on the full pipeline do not simply avoid errors; when an environmental error inevitably occurs in a novel, held-out environment, they exhibit the precise self-healing behaviors captured and labeled during Stage 3.
 
-By treating trajectory harvesting not as an incidental data-collection chore, but as an engineered, verifiable systems compiler, the host architecture establishes a self-sustaining data flywheel. Raw execution traces are transformed into clean, cryptographically auditable, high-yield training distributions, providing the essential foundation for behavioral adaptation.
+By treating trajectory harvesting not as an incidental data-collection chore, but as an engineered, verifiable trajectory validation pipeline, the host architecture establishes a self-sustaining data flywheel. Raw execution traces are transformed into clean, cryptographically auditable, high-yield training distributions, providing the essential foundation for behavioral adaptation.
 
 Yet, even when the data harvesting architecture is engineered with complete mechanical and cryptographic rigor, systems designers routinely succumb to insidious conceptual pitfalls. Having assembled the data engine, we must examine the pervasive fallacies that undermine agent data flywheels in production.
 
@@ -1824,20 +1882,20 @@ In closed-loop agentic systems, this belief is fundamentally false. Uncurated tr
 2. *Superficial Heuristic Amplification:* Large unverified trace corpora contain hundreds of trajectories that completed successfully through accidental side effects, exploratory flailing, or brute-force trial and error. When an agent spends forty unproductive tool invocations before inadvertently finding the correct file path, a naive policy optimization objective rewards the thirty-nine hallucinated commands with positive likelihood. The resulting policy learns to mimic these noisy, bloated exploration traces, destroying inference latency and driving decoding costs to the context window limit $T_{\max}$ without improving task completion rates.
 3. *Data Pollution from Corrupt Runtime Artifacts:* Without active deduplication and strict semantic clustering, large scraping pipelines over-represent trivial, easily solved tasks while under-representing complex, multi-step debugging tasks. The policy becomes hyper-specialized in shallow tool calls (such as reading a single known file) while remaining brittle across long-horizon causal chains. The architectural trade-offs between uncurated trace scaling and staged systems curation are contrasted in @tbl-vol3-curation-tradeoffs.
 
-| Architectural Dimension   | Uncurated Trace Scaling                                                        | Staged Systems Curation                                                                            | Impact on Downstream Policy                                                     |
-|:--------------------------|:-------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------|
-| **Ingestion Filter**      | Zero filtering; 100k raw traces ingested directly into fine-tuning corpus.     | Staged verifier cascade ($V_1 \to V_2 \to V_3$) validates syntax, execution, and state invariants. | Eliminates corrupt executions and unexecutable tool calls.                      |
-| **Task Distribution**     | 68% trivial tasks, 24% flailing loops, 8% complex multi-step tasks.            | Balanced corpus: 30% pristine, 50% multi-turn recovery, 20% hard negatives.                        | Prevents mode collapse on shallow tasks; forces robust multi-turn reasoning.    |
-| **Deduplication**         | Unconstrained lexical matching; amplifies high-frequency accidental successes. | AST-level normalized action sequence clustering and semantic compression.                          | Slashes redundant context bloat; focuses training on novel decision boundaries. |
-| **Inference Performance** | Hallucinated command exploration; high decoding latency ($T \to T_{\max}$).    | Crisp, efficient tool dispatches; optimal exploration-exploitation balance.                        | Achieves higher task completion at 60% lower token consumption.                 |
+| Architectural Dimension   | Uncurated Trace Scaling                                                        | Staged Systems Curation                                                                              | Impact on Downstream Policy                                                     |
+|:--------------------------|:-------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------|
+| **Ingestion Filter**      | Zero filtering; 100k raw traces ingested directly into fine-tuning corpus.     | Staged verifier cascade ($V_1 \to \dots \to V_5$) validates syntax, execution, and state invariants. | Eliminates corrupt executions and unexecutable tool calls.                      |
+| **Task Distribution**     | 68% trivial tasks, 24% flailing loops, 8% complex multi-step tasks.            | Balanced corpus: 30% pristine, 50% multi-turn recovery, 20% hard negatives.                          | Prevents mode collapse on shallow tasks; forces robust multi-turn reasoning.    |
+| **Deduplication**         | Unconstrained lexical matching; amplifies high-frequency accidental successes. | AST-level normalized action sequence clustering and semantic compression.                            | Slashes redundant context bloat; focuses training on novel decision boundaries. |
+| **Inference Performance** | Hallucinated command exploration; high decoding latency ($T \to T_{\max}$).    | Crisp, efficient tool dispatches; optimal exploration-exploitation balance.                          | Achieves higher task completion at 60% lower token consumption.                 |
 
 : **Trajectory Curation Architectural Trade-Offs**: Comparative analysis of uncurated trace scaling versus staged systems curation for policy adaptation. {#tbl-vol3-curation-tradeoffs}
 
-The architectural defense requires treating the collection pipeline as a staged, selective compiler rather than an indiscriminate log aggregator. Raw traces must pass through an escalating verifier cascade ($V_1 \to V_2 \to V_3$) that prunes syntactically invalid tool invocations, verifies sandbox state deltas, and validates end-to-end task completion against immutable specifications. Furthermore, data ingestion must enforce strict semantic clustering and deduplication based on normalized tool action sequences, compressing redundant successes while preserving high-leverage recovery paths. A curated corpus of 5,000 verified, deduplicated trajectories spanning diverse fault topologies systematically outperforms an uncurated pool of 500,000 raw execution logs in both downstream task completion and rollout efficiency.
+The architectural defense requires treating the collection pipeline as a tiered validation funnel and deduplication lattice rather than an indiscriminate log aggregator. Raw traces must pass through an escalating verifier cascade ($V_1 \to \dots \to V_5$) that prunes syntactically invalid tool invocations, verifies sandbox state deltas, and validates end-to-end task completion against immutable specifications. Furthermore, data ingestion must enforce strict semantic clustering and deduplication based on normalized tool action sequences, compressing redundant successes while preserving high-leverage recovery paths. A curated corpus of 5,000 verified, deduplicated trajectories spanning diverse fault topologies systematically outperforms an uncurated pool of 500,000 raw execution logs in both downstream task completion and rollout efficiency.
 :::
 
 ```{python}
-#| label: lego-12-sample-efficiency-and-compute-budgets
+#| label: lego-14-sample-efficiency-and-compute-budgets
 #| echo: false
 # │ Show: Staged verification cuts training compute by 29.5x with 43.6% zero-shot pass.
 # │ How: Compare 100k raw traces at 6.5k tokens vs 10k curated traces at 2.2k tokens.
@@ -1877,11 +1935,11 @@ class TrajectoryDistillationComputeBudgets:
     fraction_b_upper_pct_str = fmt_percent(0.04, precision=0, style="prose")
 ```
 
-::: {#nbk-12-sample-efficiency-and-compute-budgets .callout-notebook title="Trajectory distillation compute budgets"}
+::: {#nbk-14-sample-efficiency-and-compute-budgets .callout-notebook title="Trajectory distillation compute budgets"}
 Consider an engineering team curating a trajectory dataset to train a $70\text{B}$ parameter agent policy $\pi_\theta$ using supervised fine-tuning across an 8,192-token context window. The team evaluates two data acquisition strategies:
 
 - **Strategy A (Unfiltered Raw Ingestion):** Ingest $100{,}000$ raw, unfiltered execution traces harvested directly from production developer sessions. Due to flailing and exploratory tool loops, the mean trajectory length is $\bar{L}_A = 6{,}500$ tokens. Verification against ground-truth unit tests reveals that only $18\%$ of these traces represent correct, non-hallucinatory solutions ($N_{\text{valid}} = 18{,}000$), while $82\%$ contain redundant tool thrashing, abandoned attempts, or unverified workarounds.
-- **Strategy B (Staged Verifier Cascade and Deduplication):** Route all raw rollouts through a three-stage verifier harness ($V_1$ syntax, $V_2$ execution in ephemeral sandboxes, $V_3$ semantic diff inspection). The cascade aggressively prunes invalid steps, deduplicates identical action sequences via AST-based normalization, and discards all unverified traces. This yields exactly $N_B = 10{,}000$ high-quality trajectories ($3{,}000$ pristine expert demonstrations and $7{,}000$ verified error-recovery traces). Through algorithmic step-pruning, the mean trajectory length is compressed to $\bar{L}_B = 2{,}200$ tokens.
+- **Strategy B (Staged Verifier Cascade and Deduplication):** Route all raw rollouts through a five-stage verifier cascade ($V_1$ syntax, $V_2$ sandbox initialization, $V_3$ unit tests, $V_4$ invariant checks, $V_5$ semantic gating). The cascade aggressively prunes invalid steps, deduplicates identical action sequences via AST-based normalization, and discards all unverified traces. This yields exactly $N_B = 10{,}000$ high-quality trajectories ($3{,}000$ pristine expert demonstrations and $7{,}000$ verified error-recovery traces). Through algorithmic step-pruning, the mean trajectory length is compressed to $\bar{L}_B = 2{,}200$ tokens.
 
 We evaluate the training compute footprint and empirical sample efficiency across both strategies. Assuming standard transformer fine-tuning compute costs of $6 \times P$ floating-point operations (FLOPs) per token for a model with $P = 70 \times 10^9$ parameters:
 
