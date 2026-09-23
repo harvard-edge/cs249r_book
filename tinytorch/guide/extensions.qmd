@@ -18,58 +18,46 @@ We divide TinyTorch into two sovereign layers:
 2. **The Extensions Ecosystem (`tinytorch.extensions`):** Modular plugins that live alongside the core. They demonstrate how production techniques—such as hardware acceleration kernels, parameter-efficient fine-tuning, activation checkpointing, graph compilation, and mixed-precision arithmetic—interface with the engine.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                 TinyTorch Extensions Ecosystem               │
-├──────────────────────────────┬──────────────────────────────┤
-│  Track A: Hardware Kernels   │  Track B: Systems Ecosystem  │
-│  • C++ SIMD GEMM & Fused GELU│  • Activation Checkpointing  │
-│  • Apple Silicon Metal (MPS) │  • Low-Rank Adaptation (LoRA)│
-│  • NVIDIA GPU Triton Kernels │  • Graph Capture & Fusion    │
-│                              │  • Mixed-Precision Scaling   │
-└───────────────┬──────────────┴──────────────┬───────────────┘
-                │                             │
-                ▼                             ▼
-┌─────────────────────────────────────────────────────────────┐
-│             TinyTorch Core Engine (Modules 01–20)           │
-│         Tensor  •  Autograd  •  Layer  •  Optimizer         │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     TinyTorch Extension Ecosystem                       │
+│                                                                         │
+│   • Parameter-Efficient Fine-Tuning (LoRALinear)                        │
+│   • Activation Checkpointing (checkpoint)                              │
+│   • Mixed-Precision Training (LossScaler)                               │
+│   • Graph Compilation & Operator Fusion (compile_graph)                 │
+│   • Vectorized CPU Kernels (simd_matmul, simd_fused_bias_gelu)          │
+│   • GPU Accelerator Dispatch (mps_matmul, triton_fused_gelu)            │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 TinyTorch Core Engine (Modules 01–20)                   │
+│             Tensor  •  Autograd  •  Layer  •  Optimizer                 │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Two Complementary Extension Tracks
+## The Extension Catalog
 
-TinyTorch ships with seven reference extensions organized into two distinct tracks:
+Extensions are not divided into separate silos; hardware acceleration kernels and systems optimization layers are simply different extensions in the same unified ecosystem. Every extension connects to TinyTorch's standard abstractions—taking and returning `Tensor` objects or subclassing `Layer` and `Function`—while demonstrating how production frameworks solve real-world scale and latency bottlenecks.
 
-### Track A: Native Hardware Acceleration
-
-Every standard TinyTorch module bottoms out in NumPy. When TinyTorch multiplies two matrices, it calls `np.matmul`. Hardware extensions venture one level down: bypassing interpreted runtimes to compile and execute custom kernels directly on physical CPU vector units and GPU streaming multiprocessors.
-
-| Extension | Interface | Target Hardware | Mechanism |
+| Extension | Interface | Category | Systems Problem Solved |
 | :--- | :--- | :--- | :--- |
-| **SIMD GEMM** | `simd_matmul(a, b)` | CPU (x86 AVX2 / ARM NEON) | C++ cache-blocked loop compiled via `ctypes` with auto-vectorization and OpenMP. |
-| **Fused Bias + GELU** | `simd_fused_bias_gelu(x, bias)` | CPU (x86 AVX2 / ARM NEON) | Fused C++ kernel eliminating intermediate DRAM round-trips for $x + \text{bias} \rightarrow \text{GELU}$. |
-| **Apple MPS GEMM** | `mps_matmul(a, b)` | Apple Silicon GPU | Metal Performance Shaders dispatch via PyTorch backend. |
-| **Triton Fused GELU** | `triton_fused_gelu(x, bias)` | NVIDIA GPU | SPMD block-level GPU kernel written in OpenAI Triton. |
+| **LoRA (Low-Rank Adaptation)** | `LoRALinear(in, out, rank)` | Model Adaptation | Freezes pre-trained base weights (`requires_grad=False`) and trains low-rank adapter matrices $A$ and $B$, saving up to 75% of optimizer state memory. |
+| **Activation Checkpointing** | `checkpoint(fn, *args)` | Memory Optimization | Eliminates activation memory bottlenecks ($O(N) \rightarrow O(\sqrt{N})$) by dropping forward activations and recomputing them during backward pass. |
+| **Mixed Precision Loss Scaler** | `LossScaler(scale)` | Numerical Stability | Scales loss before backward pass and unscales parameter gradients before optimizer step, preventing IEEE 754 float16 gradient underflow. |
+| **Graph Capture & Fusion** | `compile_graph(fn, *args)` | Execution Engine | Captures dynamic define-by-run execution tapes into an intermediate representation (IR) and emits fused single-loop kernels. |
+| **SIMD GEMM** | `simd_matmul(a, b)` | Hardware Acceleration | C++ cache-blocked loop compiled via `ctypes` with CPU SIMD auto-vectorization (AVX2 / ARM NEON) and OpenMP multithreading. |
+| **Fused Bias + GELU** | `simd_fused_bias_gelu(x, bias)` | Hardware Acceleration | Fused C++ kernel eliminating intermediate DRAM round-trips for $x + \text{bias} \rightarrow \text{GELU}$. |
+| **Apple MPS GEMM** | `mps_matmul(a, b)` | Hardware Acceleration | Metal Performance Shaders dispatch on Apple Silicon GPUs. |
+| **Triton Fused GELU** | `triton_fused_gelu(x, bias)` | Hardware Acceleration | SPMD block-level GPU kernel written in OpenAI Triton for NVIDIA GPUs. |
 
-: Hardware acceleration extensions. {#tbl-hardware-extensions tbl-colwidths="[22,28,24,26]"}
+: The TinyTorch extensions catalog. {#tbl-extensions-catalog tbl-colwidths="[22,25,20,33]"}
 
-:::{.callout-note title="Safe Hardware Fallbacks"}
-All hardware extensions detect local compiler and accelerator availability on first call. If a C++ compiler, Apple GPU, or NVIDIA Triton environment is absent, the function falls back transparently to NumPy without raising an error.
+:::{.callout-note title="Consistent Tensor Interfaces & Safe Fallbacks"}
+Every extension in `tinytorch.extensions` speaks the common language of TinyTorch. Hardware acceleration kernels accept either TinyTorch `Tensor` instances or raw NumPy arrays, returning `Tensor` when called on `Tensor`s. If an external compiler or GPU device is unavailable, hardware kernels fall back transparently to NumPy without interrupting execution.
 :::
-
-### Track B: Systems and Scale Ecosystem
-
-Systems extensions operate directly within Python by subclassing TinyTorch's core abstractions (`Tensor`, `Layer`, `Function`, `Optimizer`). They solve the memory and compute bottlenecks that arise when scaling deep learning models.
-
-| Extension | Class / Function | Systems Challenge Solved |
-| :--- | :--- | :--- |
-| **Activation Checkpointing** | `checkpoint(fn, *args)` | Eliminates activation memory bottlenecks ($O(N) \rightarrow O(\sqrt{N})$) by dropping forward activations and recomputing them during backward pass. |
-| **LoRA (Low-Rank Adaptation)** | `LoRALinear(in, out, rank)` | Freezes pre-trained base weights (`requires_grad=False`) and trains low-rank adapter matrices $A$ and $B$, saving up to 75% of optimizer state memory. |
-| **Graph Capture & Fusion** | `compile_graph(fn, *args)` | Captures dynamic define-by-run execution tapes into an intermediate representation (IR) and emits fused single-loop kernels. |
-| **Mixed Precision Loss Scaler** | `LossScaler(scale)` | Scales loss before backward pass and unscales parameter gradients before optimizer step, preventing IEEE 754 float16 gradient underflow. |
-
-: Systems ecosystem extensions. {#tbl-systems-extensions tbl-colwidths="[25,28,47]"}
 
 ---
 
