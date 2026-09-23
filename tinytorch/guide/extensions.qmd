@@ -1,0 +1,239 @@
+---
+title: "Extending TinyTorch"
+---
+
+TinyTorch's core—its tensor striding, autograd tape, and execution engine—is intentionally kept minimal. This minimalism is an architectural feature, not a limitation. In industrial machine learning, monolithic frameworks often turn into opaque black boxes. In TinyTorch, the framework is the foundation, and you are the systems architect.
+
+Because operations inherit from a clean `Function` base class, neural network blocks inherit from `Layer`, and optimizers subclass `Optimizer`, TinyTorch is designed from first principles to be extended. You do not need to fork or rewrite the core engine to test a new systems theory; you plug directly into it.
+
+---
+
+## The Extensibility Philosophy
+
+TinyTorch follows the **xv6 pedagogical model**. MIT's xv6 operating system succeeded because professors and students at universities worldwide could write modular assignments—such as adding a thread scheduler, a copy-on-write allocator, or a crash-resilient file system—without modifying the 10,000-line kernel core.
+
+We divide TinyTorch into two sovereign layers:
+
+1. **The Core Standard Library (Modules 01–20):** The immutable, semester-long curriculum. It implements foundational tensors, backpropagation, layers, convolutions, attention, transformers, and performance profiling.
+2. **The Extensions Ecosystem (`tinytorch.extensions`):** Modular plugins that live alongside the core. They demonstrate how production techniques—such as hardware acceleration kernels, parameter-efficient fine-tuning, activation checkpointing, graph compilation, and mixed-precision arithmetic—interface with the engine.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 TinyTorch Extensions Ecosystem               │
+├──────────────────────────────┬──────────────────────────────┤
+│  Track A: Hardware Kernels   │  Track B: Systems Ecosystem  │
+│  • C++ SIMD GEMM & Fused GELU│  • Activation Checkpointing  │
+│  • Apple Silicon Metal (MPS) │  • Low-Rank Adaptation (LoRA)│
+│  • NVIDIA GPU Triton Kernels │  • Graph Capture & Fusion    │
+│                              │  • Mixed-Precision Scaling   │
+└───────────────┬──────────────┴──────────────┬───────────────┘
+                │                             │
+                ▼                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│             TinyTorch Core Engine (Modules 01–20)           │
+│         Tensor  •  Autograd  •  Layer  •  Optimizer         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Two Complementary Extension Tracks
+
+TinyTorch ships with seven reference extensions organized into two distinct tracks:
+
+### Track A: Native Hardware Acceleration
+
+Every standard TinyTorch module bottoms out in NumPy. When TinyTorch multiplies two matrices, it calls `np.matmul`. Hardware extensions venture one level down: bypassing interpreted runtimes to compile and execute custom kernels directly on physical CPU vector units and GPU streaming multiprocessors.
+
+| Extension | Interface | Target Hardware | Mechanism |
+| :--- | :--- | :--- | :--- |
+| **SIMD GEMM** | `simd_matmul(a, b)` | CPU (x86 AVX2 / ARM NEON) | C++ cache-blocked loop compiled via `ctypes` with auto-vectorization and OpenMP. |
+| **Fused Bias + GELU** | `simd_fused_bias_gelu(x, bias)` | CPU (x86 AVX2 / ARM NEON) | Fused C++ kernel eliminating intermediate DRAM round-trips for $x + \text{bias} \rightarrow \text{GELU}$. |
+| **Apple MPS GEMM** | `mps_matmul(a, b)` | Apple Silicon GPU | Metal Performance Shaders dispatch via PyTorch backend. |
+| **Triton Fused GELU** | `triton_fused_gelu(x, bias)` | NVIDIA GPU | SPMD block-level GPU kernel written in OpenAI Triton. |
+
+: Hardware acceleration extensions. {#tbl-hardware-extensions tbl-colwidths="[22,28,24,26]"}
+
+:::{.callout-note title="Safe Hardware Fallbacks"}
+All hardware extensions detect local compiler and accelerator availability on first call. If a C++ compiler, Apple GPU, or NVIDIA Triton environment is absent, the function falls back transparently to NumPy without raising an error.
+:::
+
+### Track B: Systems and Scale Ecosystem
+
+Systems extensions operate directly within Python by subclassing TinyTorch's core abstractions (`Tensor`, `Layer`, `Function`, `Optimizer`). They solve the memory and compute bottlenecks that arise when scaling deep learning models.
+
+| Extension | Class / Function | Systems Challenge Solved |
+| :--- | :--- | :--- |
+| **Activation Checkpointing** | `checkpoint(fn, *args)` | Eliminates activation memory bottlenecks ($O(N) \rightarrow O(\sqrt{N})$) by dropping forward activations and recomputing them during backward pass. |
+| **LoRA (Low-Rank Adaptation)** | `LoRALinear(in, out, rank)` | Freezes pre-trained base weights (`requires_grad=False`) and trains low-rank adapter matrices $A$ and $B$, saving up to 75% of optimizer state memory. |
+| **Graph Capture & Fusion** | `compile_graph(fn, *args)` | Captures dynamic define-by-run execution tapes into an intermediate representation (IR) and emits fused single-loop kernels. |
+| **Mixed Precision Loss Scaler** | `LossScaler(scale)` | Scales loss before backward pass and unscales parameter gradients before optimizer step, preventing IEEE 754 float16 gradient underflow. |
+
+: Systems ecosystem extensions. {#tbl-systems-extensions tbl-colwidths="[25,28,47]"}
+
+---
+
+## Quickstart & Code Examples
+
+All extensions are importable directly from `tinytorch.extensions`.
+
+### 1. Parameter-Efficient Fine-Tuning with LoRA
+
+Instead of updating all weights in a dense layer, `LoRALinear` freezes the pre-trained weight $W$ and trains small adapter matrices $A$ and $B$ such that $\Delta W = A \times B$:
+
+```python
+import numpy as np
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.optimizers import SGD
+from tinytorch.extensions import LoRALinear
+
+# Create a LoRA linear layer: 512 -> 256 with rank 4
+layer = LoRALinear(in_features=512, out_features=256, rank=4)
+
+# Base weights are frozen; adapters are trainable
+assert layer.weight.requires_grad is False
+assert layer.A.requires_grad is True
+assert layer.B.requires_grad is True
+
+# Forward pass: base(x) + adapter(x)
+x = Tensor(np.random.randn(16, 512).astype(np.float32))
+out = layer(x)
+
+# Only adapters receive gradients during optimizer step
+optimizer = SGD([layer.A, layer.B], lr=1e-3)
+```
+
+### 2. Activation Checkpointing for Deep Models
+
+When training deep networks, caching all intermediate activations causes out-of-memory (OOM) errors. `checkpoint()` discards activations during the forward pass and recomputes them on the fly during backpropagation:
+
+```python
+from tinytorch.core.tensor import Tensor
+from tinytorch.extensions import checkpoint
+
+def deep_block(x):
+    # Multiple expensive forward activations
+    h = x.matmul(w1) + b1
+    return h.matmul(w2) + b2
+
+x = Tensor(np.random.randn(32, 128).astype(np.float32), requires_grad=True)
+
+# Activations are dropped from memory, recomputed during .backward()
+out = checkpoint(deep_block, x)
+out.backward(Tensor(np.ones_like(out.data)))
+
+print("Gradient computed with recomputation:", x.grad.shape)
+```
+
+### 3. Mixed Precision Training with `LossScaler`
+
+In FP16 training, small gradient values drop below $2^{-24} \approx 5.96 \times 10^{-8}$ and underflow to zero. `LossScaler` multiplies the loss by a constant factor (e.g., $65,536$) before calling `.backward()`, then unscales the parameter gradients before the optimizer updates them:
+
+```python
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.optimizers import Adam
+from tinytorch.extensions import LossScaler
+
+scaler = LossScaler(scale=65536.0)
+optimizer = Adam(model.parameters(), lr=1e-3)
+
+# Forward pass
+loss = criterion(model(inputs), targets)
+
+# 1. Scale loss and propagate scaled gradients
+scaler.backward(loss)
+
+# 2. Divide gradients back down by scale factor
+scaler.unscale_(optimizer)
+
+# 3. Optimizer steps with correct, un-underflowed gradients
+optimizer.step()
+optimizer.zero_grad()
+```
+
+### 4. Running Native SIMD and GPU Kernels
+
+Hardware extensions accept both TinyTorch `Tensor` instances and raw NumPy arrays:
+
+```python
+from tinytorch.core.tensor import Tensor
+from tinytorch.extensions import simd_matmul, simd_fused_bias_gelu, mps_matmul
+
+A = Tensor(np.random.randn(1024, 1024).astype(np.float32))
+B = Tensor(np.random.randn(1024, 1024).astype(np.float32))
+
+# Vectorized C++ SIMD matrix multiply (AVX2 / ARM NEON)
+C_simd = simd_matmul(A, B)
+
+# Fused bias + GELU in a single memory traversal
+bias = Tensor(np.zeros(1024, dtype=np.float32))
+out_fused = simd_fused_bias_gelu(A, bias)
+
+# Apple Silicon GPU matrix multiply via Metal Performance Shaders
+C_mps = mps_matmul(A, B)
+```
+
+---
+
+## Systems Napkin Math: When Does Offloading Pay Off?
+
+Offloading computation to a hardware accelerator (like an NVIDIA GPU or Apple Silicon MPS) requires copying data across a bus. Offloading is only profitable when the time saved by the accelerator exceeds the cost of data transfer.
+
+We evaluate this using **arithmetic intensity** (operations per byte transferred):
+
+* **Matrix Multiplication ($N \times N$ by $N \times N$ in float32):**
+  $$\text{Arithmetic Intensity} = \frac{2N^3 \text{ operations}}{3N^2 \times 4 \text{ bytes}} = \frac{N}{6} \text{ FLOP/byte}$$
+  For $N = 256$, arithmetic intensity is $\approx 43$ FLOP/byte. At $N = 4096$, it reaches $\approx 683$ FLOP/byte. The larger the matrix, the more computation covers the transfer overhead.
+
+* **Elementwise Activation (Bias + GELU on $M \times D$ float32):**
+  $$\text{Arithmetic Intensity} \approx \frac{12 \text{ operations}}{8 \text{ bytes transferred}} \approx 1.5 \text{ FLOP/byte}$$
+  The ratio remains constant regardless of array size. A lone GELU call almost never pays for its own device transfer round-trip unless it is fused directly into preceding and following operations.
+
+:::{.callout-important title="The Production Rule"}
+In production frameworks, model weights and intermediate tensors stay resident on the accelerator memory across layers. In isolated extension calls, data travels round-trip between CPU host memory and accelerator buffers.
+:::
+
+---
+
+## Recommended Extensions for Student Projects (RFCs)
+
+Looking for capstone projects, advanced graduate assignments, or open-source contributions? The following extensions are designed to build directly on TinyTorch:
+
+### 1. KV-Cache for Autoregressive Generation
+* **Systems Challenge:** During LLM inference, re-encoding all previous tokens at each step scales quadratic in context length ($O(T^2)$).
+* **The Extension:** Add a `KVCache` class to `tinytorch.core.attention` that caches projected Key and Value tensors across decoding steps, reducing per-token generation complexity to $O(1)$ arithmetic per cached token.
+
+### 2. FlashAttention SRAM Tiling
+* **Systems Challenge:** Standard attention materializes an $S \times S$ attention weight matrix in high-bandwidth memory (DRAM), causing excessive memory traffic.
+* **The Extension:** Implement an SRAM-aware tiled attention kernel in Python/C++ using the online softmax algorithm (Dao et al.), computing attention block-by-block without ever materializing the full $S \times S$ matrix.
+
+### 3. Modern Optimizers: Lion and Muon
+* **Systems Challenge:** Adam tracks first and second raw moments, requiring 8 bytes of optimizer state per parameter.
+* **The Extension:** Implement the **Lion** optimizer (which tracks only momentum with a sign operation, halving state memory) and the **Muon** optimizer (matrix-orthogonal Newton-Schulz updates).
+
+### 4. Gradient Accumulation
+* **Systems Challenge:** Effective batch sizes of 1,024 or 4,096 cannot fit in memory simultaneously.
+* **The Extension:** Create a wrapper around `Trainer` or `Optimizer` that accumulates gradients over $K$ forward-backward micro-batches before executing `optimizer.step()`.
+
+### 5. Distributed Data Parallel (DDP) Simulation
+* **Systems Challenge:** Training across multiple workers requires coordinating gradient synchronization.
+* **The Extension:** Build a multi-process simulation using Python `multiprocessing` that runs Ring-AllReduce gradient averaging across rank workers at the end of each backward pass.
+
+---
+
+## How to Author and Test a New Extension
+
+Adding a new extension to TinyTorch is straightforward:
+
+1. **Place your implementation in `tinytorch/extensions/`**:
+   Create a new file (e.g. `tinytorch/extensions/kv_cache.py`).
+2. **Expose it in `tinytorch/extensions/__init__.py`**:
+   Add your public functions and classes to `__all__`.
+3. **Add unit tests in `tests/extensions/`**:
+   Create a matching test file (e.g. `tests/extensions/test_kv_cache.py`). Verify numerical parity against an un-optimized or baseline reference.
+4. **Run the test suite**:
+   ```bash
+   python -m pytest tests/extensions/ -v
+   ```
+5. **Open a Pull Request**:
+   Share your extension with the TinyTorch community on GitHub!
