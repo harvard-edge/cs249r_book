@@ -20,6 +20,17 @@ Autonomous agent architectures possess their own rigorous systems principles. **
 - **Yes:** Use native Machine Learning Systems terminology: *inference serving engines, fused logit masking, PagedAttention block tables, Radix prefix trees, trajectory supervision, RLVR verification enclaves, asynchronous rollout engines, tool dispatch protocols (MCP), and multi-agent consensus topologies.*
 - **Level of Abstraction:** The reader is an advanced MLSys practitioner, graduate student, or systems researcher. Do not re-derive basic self-attention or gradient descent (Volume I). Do not write raw CUDA ptx or low-level ring-allreduce kernels (Volume II). Focus on **systems bottlenecks, memory scaling, latency breakdowns, state coherence, error cascades, and empirical efficiency trade-offs**.
 
+### 1.3 Pedagogical Scaffolding & Multi-Tier Accessibility
+The textbook must be intellectually rigorous yet broadly accessible. It is designed to serve a multi-tier audience:
+- **Primary Learners:** Senior undergraduates, master's students, and early graduate students in computer science, computer engineering, and machine learning, alongside practicing software and systems engineers transitioning into MLSys.
+- **Advanced Specialists:** PhD researchers and production infrastructure architects seeking formal quantitative formulations and boundary trade-offs.
+
+To achieve this dual accessibility without compromising technical rigor:
+1. **Concrete Motivation Before Abstract Formalism:** Every chapter must open with an intuitive, tangible systems failure or tension (e.g., an agent trapped in an infinite tool retry loop, an out-of-memory crash from an unmanaged KV cache, or severe latency spikes during prefill/decode contention) before deriving formal equations and state machines.
+2. **Transparent Notation & Zero-Jargon Gates:** Every mathematical symbol and system term must be cleanly unpacked on first appearance. Never assume familiarity with ephemeral industry acronyms without defining them.
+3. **Scholarly Footnotes as the Depth Valve:** The main narrative prose remains focused, readable, and pedagogically clear for undergraduates. Specialized implementation errata, specific GPU SKU quirks (e.g., Hopper TMA vs. Blackwell asynchronous copy engines), historical lineage, and edge cases are systematically routed to **scholarly footnotes**.
+4. **Concrete Trace Walkthroughs:** Whenever introducing an abstract protocol (such as tool dispatch via MCP, speculative decoding verification loops, or Radix tree prefix caching), include a concrete, step-by-step trace showing the exact data flow.
+
 ---
 
 ## 2. The 8-Stage Execution Pipeline
@@ -166,16 +177,21 @@ EVALUATION CRITERIA:
 
 ---
 
-### Stage 5: Simulated Graduate MLSys Classroom Reading & Footnote Tuning
+### Stage 5: Simulated Classroom Pedagogy (19 Sequential Dual-Persona Student Reads)
 
-**Objective:** Simulate a semester-long advanced graduate seminar (19 sequential lecture sessions) where student personas read and annotate the chapters. Identify points of pedagogical friction and establish clean separation between core prose and scholarly footnotes.
+**Objective:** Simulate a semester-long advanced course (19 sequential lecture readings) where two distinct student personas read and critically evaluate each chapter. Identify points of pedagogical friction, clarify terminology leaps, and tune the balance between main prose and footnotes.
 
 #### Simulation Protocol (19 Iterative Student Read Sessions):
-- **Student Persona:** First-year graduate student in Computer Science / MLSys with strong systems programming background (C++, Linux runtimes, distributed systems) and foundational ML knowledge (Volume I level), but seeking deep intuition on autonomous agent system dynamics.
+- **Persona A: The Senior Undergraduate / Early Graduate Student:**
+  - *Background:* Solid grasp of core computer science (operating systems, data structures, algorithms) and foundational deep learning (Volume I level). Has written Python and C++, but has never engineered production agent loops or high-throughput LLM serving clusters.
+  - *Evaluation Lens:* "Where do I get lost? Which transitions feel like magic or hand-waving? Are acronyms, equations, or hardware concepts introduced without adequate intuition? Does the chapter build a crystal-clear mental model?"
+- **Persona B: The Advanced MLSys Researcher / Production Systems Architect:**
+  - *Background:* Experienced with modern GPU/TPU accelerators, distributed systems, and real-world agent orchestration.
+  - *Evaluation Lens:* "Are the hardware numbers and roofline bounds accurate? Are trade-offs properly nuanced? Are subtle race conditions and failure modes captured? Are deep technical rabbit holes placed in footnotes rather than cluttering the narrative?"
 - **Audit Directives:**
-  1. *Comprehension Roadblocks:* Where does the prose assume tacit knowledge that should be explicitly bridged?
+  1. *Comprehension Roadblocks:* Identify where tacit knowledge is assumed and insert intuitive bridging explanations.
   2. *Narrative Cleanliness vs Footnotes:*
-     - Keep the main prose focused on the primary architectural principle and systems trade-off.
+     - Keep the main prose focused on the primary architectural principle and systems trade-off so it remains accessible to undergraduate learners.
      - Move specialized implementation errata, specific hardware SKU quirks (e.g., Hopper vs Blackwell TMA differences), historical trivia, and tangential algorithmic variants into **scholarly footnotes**.
   3. *Worked Examples:* Ensure abstract system protocols (e.g., MCP handshake, GRPO rollout gathering, Radix tree evictions) feature concrete, step-by-step trace examples.
 
