@@ -70,7 +70,7 @@ TinyTorch exposes four native extension points that correspond to the four funda
 1. **The Autograd Boundary (`Function`):** Subclassing `Function` allows you to define custom forward and backward semantics, intercepting the autograd tape to drop or recompute intermediate activations (as in activation checkpointing).
 2. **The Architectural Boundary (`Layer`):** Subclassing `Layer` allows you to introduce custom architectural primitives, freeze pre-trained weight matrices by toggling `requires_grad=False`, and expose low-rank adapter parameters to the optimizer (as in LoRA).
 3. **The Training Dynamics Boundary (`Optimizer`):** Interfacing with `optimizer.params` enables custom gradient transformations, loss scaling for mixed-precision arithmetic, gradient clipping, and advanced update rules (such as Lion or Muon).
-4. **The Silicon Boundary (Backend FFI):** Extracting contiguous memory pointers from `Tensor.data` enables invoking native compiled C++ shared libraries via `ctypes`, launching GPU kernels in OpenAI Triton, or offloading computation to Apple Silicon Metal Performance Shaders (MPS).
+4. **The Silicon Boundary (Backend FFI):** Extracting contiguous memory pointers from `Tensor.data` enables invoking native compiled C++ shared libraries via `ctypes`, launching GPU kernels in OpenAI Triton, or offloading computation to Apple Silicon Metal Performance Shaders (MPS). TinyTorch deliberately selects `ctypes` over `pybind11` so students confront the raw C-ABI pointer boundary, contiguous strides, and memory alignment without opaque C++ template wrappers.
 
 ### Repository Architecture: Core versus Extensions
 
@@ -467,6 +467,8 @@ Each project below takes a real systems bottleneck and demonstrates how you can 
 * **The Project:** Implement a custom `FlashAttentionFunction` subclassing `Function`. Tile the $Q, K, V$ matrices into blocks ($B_r \times d$ and $B_c \times d$) sized to fit entirely inside fast on-chip memory (CPU L1/L2 cache or GPU shared memory). Instead of materializing the $S \times S$ matrix, use the **online softmax** algorithm (maintaining running maximum scalars $m_i$ and running sum scalars $l_i$ per row block) to incrementally update the output accumulator $O_i$ as column blocks of $K$ and $V$ stream through:
   $$m_i^{\text{new}} = \max(m_i, \max(S_i)), \quad l_i^{\text{new}} = e^{m_i - m_i^{\text{new}}} l_i + \sum e^{S_i - m_i^{\text{new}}}$$
   $$O_i^{\text{new}} = \text{diag}(e^{m_i - m_i^{\text{new}}}) O_i + e^{S_i - m_i^{\text{new}}} V_j$$
+  Once all column blocks have been processed, normalize the output accumulator by dividing each row by its final running sum:
+  $$O_i^{\text{final}} = \text{diag}(l_i^{\text{final}})^{-1} O_i$$
   In the backward pass, recompute the attention weights on-the-fly from the cached $Q, K, V$ blocks, completely eliminating the $O(S^2)$ memory footprint. Benchmark your tiled attention function against stock `attention.py` across sequence lengths $S \in \{512, 1024, 2048, 4096\}$ using `MemoryTracker` and `Timer`.
 
 ### Hardware Simulation and Memory Tracing (ScaleSim Integration)

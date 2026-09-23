@@ -259,6 +259,8 @@ On a 128 × 128 product, this loop runs at just 0.12 GFLOP/s. For a standard 102
 3. **SIMD Vectorization:** Arranges inner loops in $i, k, j$ order so that memory access along `b_row[j]` and `c_row[j]` is contiguous, allowing compiler auto-vectorization (AVX2 on x86, ARM NEON on Apple Silicon).
 4. **OpenMP Multithreading:** Distributes output tiles across CPU cores using `#pragma omp parallel for collapse(2)`.
 
+**Pedagogical Choice: Why ctypes instead of pybind11?** Modern PyTorch C++ extensions typically rely on pybind11 and `TORCH_LIBRARY` registration macros to bind native operators into Python. While pybind11 provides seamless class wrapping and exception propagation, it also conceals the actual memory boundary behind layers of C++ template metaprogramming. TinyTorch deliberately chooses Python's built-in `ctypes` foreign function interface: by extracting a raw pointer from the underlying buffer (`tensor.data.ctypes.data_as(ctypes.POINTER(ctypes.c_float))`), the developer directly confronts the C-ABI memory contract, pointer aliasing, and 64-byte cache-line alignment without any framework magic in the middle.
+
 **The Implementation:**
 
 The Python wrapper passes array pointers to the compiled C++ library:
@@ -518,7 +520,11 @@ Each project below takes a real systems bottleneck and demonstrates how you can 
 * **The Project:** Implement a custom `FlashAttentionFunction` subclassing `Function`. Tile the $Q, K, V$ matrices into blocks ($B_r \times d$ and $B_c \times d$) sized to fit entirely inside fast on-chip memory (CPU L1/L2 cache or GPU shared memory). Instead of materializing the $S \times S$ matrix, use the **online softmax** algorithm (maintaining running maximum scalars $m_i$ and running sum scalars $l_i$ per row block) to incrementally update the output accumulator $O_i$ as column blocks of $K$ and $V$ stream through:
   $$m_i^{\text{new}} = \max(m_i, \max(S_i)), \quad l_i^{\text{new}} = e^{m_i - m_i^{\text{new}}} l_i + \sum e^{S_i - m_i^{\text{new}}}$$
   $$O_i^{\text{new}} = \text{diag}(e^{m_i - m_i^{\text{new}}}) O_i + e^{S_i - m_i^{\text{new}}} V_j$$
+  Once all column blocks have been processed, normalize the output accumulator by dividing each row by its final running sum:
+  $$O_i^{\text{final}} = \text{diag}(l_i^{\text{final}})^{-1} O_i$$
   In the backward pass, recompute the attention weights on-the-fly from the cached $Q, K, V$ blocks, completely eliminating the $O(S^2)$ memory footprint. Benchmark your tiled attention function against stock `attention.py` across sequence lengths $S \in \{512, 1024, 2048, 4096\}$ using `MemoryTracker` and `Timer`.
+
+![**FlashAttention SRAM-aware tiling vs. standard attention DRAM wall**: Standard attention incurs multiple high-latency DRAM round-trips to materialize the full $S \times S$ score and weight matrices. FlashAttention partitions $Q, K, V$ into small SRAM-sized blocks ($B_r, B_c \ll S$) and employs online softmax updates directly in on-chip fast memory, completely eliminating the $O(S^2)$ DRAM memory footprint.](assets/images/diagrams/21_flashattention-sram-tiling.svg){#fig-flashattention-sram-tiling width="100%" fig-alt="Diagram contrasting standard attention DRAM memory wall with FlashAttention SRAM online softmax accumulation."}
 
 ### Hardware Simulation and Memory Tracing (ScaleSim Integration)
 
