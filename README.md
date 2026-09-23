@@ -299,6 +299,16 @@ The textbook series follows a comprehensive systems progression across four core
 
 > *Note: Volumes III and IV are in development. They change quickly as I iterate, so expect chapters to be added, reorganized, and rewritten. You are welcome to follow along as they take shape.*
 
+#### Transparency: AI Assistance and Verification Status
+
+Building an engineering curriculum of this scope in a field moving as fast as machine learning requires being explicit about how the material is developed, how AI is used, and how each volume is validated:
+
+* **Volume I (Foundations)**: **Shipped & MIT Press Release.** Fully validated through multi-semester classroom adoption at Harvard and universities worldwide, as well as extensive expert peer review. AI was used as a pedagogical sounding board for chapter sequencing, drafting computation cells, and pre-commit test automation.
+* **Volume II (Scaling)**: **Community Preview (MIT Press Track).** Extended [MLSys·im](https://mlsysbook.ai/mlsysim/) from single-node execution to fleet-scale distributed computing (3D parallelism, network topologies, collective communication). Validated through intensive one-on-one review sessions with distributed systems and ML fleet engineers—the longest and most critical part of the authoring process.
+* **Volumes III (Agentic) & IV (Physical AI)**: **In-Development Living Drafts (Uncontracted).** Written to explore and synthesize rapidly developing frontiers based on advanced literature. AI is used extensively as an interactive research partner to survey literature, explore new abstractions, and help the author learn and organize thoughts across unfamiliar domains. **These drafts have not yet been independently or humanly validated.** They are shared openly as living notebooks to solicit community feedback and domain-expert review.
+
+Across all volumes, the core engineering standard is traceability: the tool proposes, but the human ratifies.
+
 #### How the Volumes Connect
 
 Each volume in the series expands the systems boundary, answering the question that the previous level leaves open:
