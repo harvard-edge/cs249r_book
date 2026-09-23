@@ -979,14 +979,13 @@ svg_6 = """<?xml version="1.0" encoding="UTF-8"?>
 </svg>
 """
 
-# Write all SVGs
+# Write architectural SVGs (Diagrams)
 files = {
     "instruction_data_cohabitation.svg": svg_1,
     "capability_attenuation.svg": svg_2,
     "exfiltration_conjunction.svg": svg_3,
     "quarantined_reader.svg": svg_4,
     "taint_tracking_pipeline.svg": svg_5,
-    "asrr_waterfall.svg": svg_6,
 }
 
 for name, content in files.items():
@@ -994,3 +993,9 @@ for name, content in files.items():
     with open(p, "w", encoding="utf-8") as f:
         f.write(content.strip() + "\n")
     print(f"Generated {p}")
+
+# Delegate plot-based figure (asrr_waterfall.svg) to matplotlib
+import subprocess
+plot_script = Path(__file__).parent / "generate_ch09_asrr_plot.py"
+if plot_script.exists():
+    subprocess.run([sys.executable, str(plot_script)], check=True)
