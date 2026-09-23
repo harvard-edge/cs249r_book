@@ -198,5 +198,36 @@ class TestErrorMessages:
         assert len(combined_output) > 0, "No output from command without subcommand"
 
 
+class TestBenchmarkRngErrorHandling:
+    """Test lazy dependency handling in benchmark commands."""
+
+    def test_get_rng_success(self):
+        """Test _get_rng succeeds when numpy is present."""
+        from tito.commands.benchmark import _get_rng
+        np_mod, rng = _get_rng()
+        assert np_mod is not None
+        assert rng is not None
+
+    def test_get_rng_missing_numpy_raises_tinytorch_cli_error(self, monkeypatch):
+        """Test _get_rng raises TinyTorchCLIError (and not NameError) when numpy is missing."""
+        import builtins
+        from tito.commands.benchmark import _get_rng
+        from tito.core.exceptions import TinyTorchCLIError
+
+        orig_import = builtins.__import__
+
+        def failing_import(name, *args, **kwargs):
+            if name == "numpy":
+                raise ImportError("No module named 'numpy'")
+            return orig_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", failing_import)
+
+        with pytest.raises(TinyTorchCLIError) as exc_info:
+            _get_rng()
+
+        assert "NumPy is required to run benchmarks" in str(exc_info.value)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

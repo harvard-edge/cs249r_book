@@ -1110,7 +1110,7 @@ def trainer_evaluate(self, dataloader: Iterable[Tuple[Tensor, Tensor]]) -> Tuple
     >>> print(f"Eval loss: {eval_loss:.4f}, Accuracy: {accuracy:.2%}")
 
     HINTS:
-    - For multi-class: predictions = np.argmax(outputs.data, axis=1)
+    - For multi-class: predictions = np.argmax(outputs.data, axis=-1)
     - CrossEntropyLoss expects integer targets; BCE compares each binary label
     - accuracy = correct / total if total > 0 else 0.0
     """
@@ -1135,7 +1135,7 @@ def trainer_evaluate(self, dataloader: Iterable[Tuple[Tensor, Tensor]]) -> Tuple
 
         # The loss defines the task: multiple outputs can also be regression.
         if isinstance(self.loss_fn, CrossEntropyLoss):
-            predictions = np.argmax(outputs.data, axis=1)
+            predictions = np.argmax(outputs.data, axis=-1)
             correct += np.sum(predictions == targets.data)
             total += predictions.size
         elif isinstance(self.loss_fn, BinaryCrossEntropyLoss):

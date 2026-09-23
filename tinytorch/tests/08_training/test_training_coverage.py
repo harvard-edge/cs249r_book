@@ -678,6 +678,44 @@ class TestTrainerEvaluate:
         _, accuracy = trainer.evaluate(data)
         assert accuracy == 0.0, f"Wrong classifier should have accuracy=0.0, got {accuracy}"
 
+    def test_evaluate_3d_sequence_predictions(self):
+        """
+        WHAT: Trainer.evaluate computes correct accuracy for 3D sequence predictions (Batch, Seq, Vocab).
+
+        WHY: For autoregressive models (like GPT) and token classification, logits have shape
+        (Batch, Seq_Len, Vocab_Size). Argmax must reduce the last dimension (axis=-1) to find
+        the predicted class token. Using axis=1 incorrectly reduces across sequence length,
+        causing a broadcast shape mismatch error.
+        """
+        class SequenceModel:
+            training = True
+
+            def forward(self, x):
+                # x shape: (2, 3)
+                # Output logits shape: (2, 3, 4)
+                logits = np.zeros((2, 3, 4))
+                targets = np.array([[1, 2, 0], [3, 1, 2]])
+                for b in range(2):
+                    for s in range(3):
+                        logits[b, s, targets[b, s]] = 10.0
+                return Tensor(logits)
+
+            def parameters(self):
+                return []
+
+        loss_fn = CrossEntropyLoss()
+        opt = SGD([], lr=0.01)
+        trainer = Trainer(SequenceModel(), opt, loss_fn)
+
+        targets = np.array([[1, 2, 0], [3, 1, 2]])
+        inputs = np.zeros((2, 3))
+        data = [(Tensor(inputs), Tensor(targets))]
+
+        eval_loss, accuracy = trainer.evaluate(data)
+
+        assert accuracy == 1.0, f"Expected accuracy 1.0 for perfect sequence predictions, got {accuracy}"
+        assert eval_loss < 0.01, f"Expected small loss for confident predictions, got {eval_loss}"
+
 
 # ─────────────────────────────────────────────
 # Scheduler integration
