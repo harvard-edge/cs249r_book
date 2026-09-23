@@ -3,10 +3,20 @@ class TracedNode:
         self.name = name
 
     def __add__(self, other):
-        return TracedNode(f"({self.name} + {other.name})")
+        other_name = other.name if isinstance(other, TracedNode) else str(other)
+        return TracedNode(f"({self.name} + {other_name})")
+
+    def __radd__(self, other):
+        other_name = other.name if isinstance(other, TracedNode) else str(other)
+        return TracedNode(f"({other_name} + {self.name})")
 
     def __mul__(self, other):
-        return TracedNode(f"({self.name} * {other.name})")
+        other_name = other.name if isinstance(other, TracedNode) else str(other)
+        return TracedNode(f"({self.name} * {other_name})")
+
+    def __rmul__(self, other):
+        other_name = other.name if isinstance(other, TracedNode) else str(other)
+        return TracedNode(f"({other_name} * {self.name})")
 
 def compile_graph(func, *input_names):
     """

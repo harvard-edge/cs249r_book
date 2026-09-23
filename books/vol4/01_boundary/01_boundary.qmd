@@ -1206,6 +1206,214 @@ class StallCoast:
 
 Suppose the machine's chunk policy stalls for `{python} StallCoast.t_stall_str` while its memory subsystem throttles. The computation pauses, but physical momentum ensures the base keeps moving. A base that kept executing its last proposal at `{python} StallCoast.v_str` would travel blind for `{python} StallCoast.coast_str` before the next command arrived, and that displacement can consume the clearance it needs to stop if a person steps out. The machine does not allow that blind travel. A lease bounds how long the base may act on the last proposal, and when it expires the permission path brakes whether or not a new proposal has arrived, so the stopping envelope holds while the deliberative policy is unavailable. @Sec-nervous-cadences sizes that lease from the stopping budget, and @sec-enforcement-authority-refuse prices one held too long.
 
+The physical reality of this constraint is governed by the kinematic roofline: stopping envelope $d_{\text{stop}} = v \tau + \frac{v^2}{2 a_{\max}} \le R_{\text{sensor}}$ under emergency braking (@fig-01-latency-vs-velocity). Across fifty years of autonomous systems, every order-of-magnitude reduction in sense-to-act loop latency $\tau$ unlocked a corresponding expansion in safe operational speed $v$, from the stop-and-plan deliberation of Shakey ($\tau \approx 30\text{ s}, v = 0.18\text{ km/h}$) and the Stanford Cart [@moravec1988mind], through the early neural vision of ALVINN [@pomerleau1989alvinn], to modern autonomous vehicles operating at highway velocities.
+
+::: {#fig-01-latency-vs-velocity fig-env="figure" fig-pos="htb" fig-cap="**The causal boundary: sense-to-act loop latency versus safe vehicle operating speed (1970–2026)**: The kinematic roofline dictates maximum safe operational speed $v$ as a function of total round-trip control loop latency $\\tau$ and emergency deceleration ($a = 6.86\\text{ m/s}^2$, $0.7\\text{ g}$) across four sensor horizons $R$. Historical milestones from SRI Shakey (1970) and Stanford Cart [@moravec1988mind] through CMU Navlab [@pomerleau1989alvinn], the DARPA Grand Challenges, and modern autonomous fleets demonstrate how latency reductions directly expand the safe physical operating envelope." fig-alt="Kinematic roofline plot showing safe vehicle operational speed in kilometers per hour on a logarithmic scale from 0.1 to 350 km/h versus sense-to-act loop latency in milliseconds on a logarithmic scale from 10 ms to 60 seconds. Four descending curves represent sensor horizons R equals 200 meters, 100 meters, 30 meters, and 5 meters under 0.7 g emergency deceleration. Shaded background eras show Deliberative Era (1970 to 1980), Early Vision and Systolic (1985 to 1995), DARPA Grand Challenges (2004 to 2010), and High-Speed Real-Time (2020 to 2026). Historical milestones include SRI Shakey, Stanford Cart, CMU Navlab 1, Dickmanns VaMoRs, CMU Navlab 5, Stanford Stanley, CMU Boss, Waymo Driver, and PoliMOVE Indy Autonomous."}
+
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+import numpy as np
+import matplotlib as mpl
+
+mpl.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+
+fig, ax = plt.subplots(figsize=(14, 8), dpi=150, facecolor="#FFFFFF")
+ax.set_facecolor("#FFFFFF")
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5, color="#E2E8F0")
+ax.set_axisbelow(True)
+
+# 1. Background era shading
+ax.axvspan(5000, 60000, color="#F1F5F9", alpha=0.6, zorder=0)
+ax.axvspan(400, 5000, color="#EFF6FF", alpha=0.5, zorder=0)
+ax.axvspan(50, 400, color="#ECFDF5", alpha=0.4, zorder=0)
+ax.axvspan(10, 50, color="#FAF5FF", alpha=0.5, zorder=0)
+
+era_y = 450
+ax.text(25000, era_y, "Deliberative Era\n(1970–1980)", ha="center", va="center", fontsize=8.5, fontweight="bold", color="#64748B", style="italic")
+ax.text(
+    2000, era_y, "Early Vision & Systolic\n(1985–1995)", ha="center", va="center", fontsize=8.5, fontweight="bold", color="#64748B", style="italic"
+)
+ax.text(180, era_y, "DARPA Grand Challenges\n(2004–2010)", ha="center", va="center", fontsize=8.5, fontweight="bold", color="#64748B", style="italic")
+ax.text(23, era_y, "High-Speed Real-Time\n(2020–2026)", ha="center", va="center", fontsize=8.5, fontweight="bold", color="#64748B", style="italic")
+
+# 2. Kinematic Envelope Curves
+a = 6.86
+tau_ms = np.logspace(np.log10(10), np.log10(60000), 500)
+tau_s = tau_ms / 1000.0
+
+horizons = [
+    (200, "Sensor Horizon R = 200 m (Highway LiDAR/Radar)", "#A51C30", "-"),
+    (100, "R = 100 m (Suburban / Rural)", "#D97706", "--"),
+    (30, "R = 30 m (Urban Occlusion / Crosswalk)", "#008080", "-."),
+    (5, "R = 5 m (Indoor Warehouse / Hallway)", "#6B21A8", ":"),
+]
+
+for R, label, col, ls in horizons:
+    v_max_ms = np.sqrt((a * tau_s) ** 2 + 2 * a * R) - a * tau_s
+    v_max_kmh = v_max_ms * 3.6
+    ax.plot(tau_ms, v_max_kmh, linestyle=ls, color=col, linewidth=1.8, alpha=0.85, label=label, zorder=2)
+
+v_max_200 = (np.sqrt((a * tau_s) ** 2 + 2 * a * 200) - a * tau_s) * 3.6
+ax.fill_between(tau_ms, v_max_200, 520, color="#FEE2E2", alpha=0.35, zorder=1)
+ax.text(
+    12000,
+    180,
+    "PHYSICALLY UNRECOVERABLE REGIME\n(Stopping Distance > 200 m Sensor Horizon)",
+    fontsize=8.8,
+    fontweight="bold",
+    color="#A51C30",
+    alpha=0.75,
+    rotation=-14,
+    ha="center",
+)
+
+d_blind = 20
+v_blind_kmh = (d_blind / tau_s) * 3.6
+mask = (v_blind_kmh >= 0.1) & (v_blind_kmh <= 500)
+ax.plot(tau_ms[mask], v_blind_kmh[mask], color="#94A3B8", linestyle=":", linewidth=1.0, alpha=0.6, zorder=2)
+ax.text(1600, (d_blind / (1.6)) * 3.6 * 1.15, "Blind Travel d = 20m", fontsize=7.5, color="#64748B", rotation=-28, alpha=0.85)
+
+def add_badge(ax, text, xy, xytext, color="#1E293B", fontsize=8.0, arrow=True):
+    bbox = dict(boxstyle="round,pad=0.35", facecolor="#FFFFFF", edgecolor="#CBD5E1", alpha=0.95, linewidth=0.8)
+    ap = dict(arrowstyle="->", color="#94A3B8", linewidth=0.8, shrinkA=3, shrinkB=3) if arrow else None
+    ax.annotate(text, xy=xy, xytext=xytext, fontsize=fontsize, color=color, bbox=bbox, arrowprops=ap, va="center", zorder=10)
+
+milestones = [
+    {
+        "tau": 30000,
+        "v": 0.18,
+        "xytext": (14000, 0.45),
+        "text": "1970 · SRI Shakey\nτ ≈ 30 s · v = 0.18 km/h\nSTRIPS stop-and-plan",
+        "color": "#6B21A8",
+        "m": "o",
+    },
+    {
+        "tau": 15000,
+        "v": 0.10,
+        "xytext": (4500, 0.20),
+        "text": "1979 · Stanford Cart (Moravec)\nτ ≈ 15 s · v = 0.10 km/h\nStereo obstacle mapping",
+        "color": "#475569",
+        "m": "s",
+    },
+    {
+        "tau": 1500,
+        "v": 15.0,
+        "xytext": (2800, 6.5),
+        "text": "1986 · CMU Navlab 1\nτ ≈ 1.5 s · v = 15 km/h\nALVINN neural net on WARP",
+        "color": "#D97706",
+        "m": "o",
+    },
+    {
+        "tau": 40,
+        "v": 96.0,
+        "xytext": (16, 50),
+        "text": "1987 · Dickmanns VaMoRs\nτ = 40 ms (25 Hz) · v = 96 km/h\nAutobahn 4D dynamic vision",
+        "color": "#008080",
+        "m": "^",
+    },
+    {
+        "tau": 120,
+        "v": 95.0,
+        "xytext": (220, 110),
+        "text": "1995 · CMU Navlab 5\nτ ≈ 120 ms · v = 95 km/h\nNo Hands Across America",
+        "color": "#B45309",
+        "m": "s",
+    },
+    {
+        "tau": 100,
+        "v": 60.0,
+        "xytext": (35, 24),
+        "text": "2005 · Stanford Stanley\nτ ≈ 100 ms (10 Hz) · v = 60 km/h\nDARPA Grand Challenge winner",
+        "color": "#004B87",
+        "m": "D",
+    },
+    {
+        "tau": 85,
+        "v": 48.0,
+        "xytext": (160, 20),
+        "text": "2007 · CMU Boss (Urban Challenge)\nτ ≈ 85 ms · v = 48 km/h\nUrban intersection autonomy",
+        "color": "#1E793C",
+        "m": "D",
+    },
+    {
+        "tau": 80,
+        "v": 110.0,
+        "xytext": (240, 195),
+        "text": "2024 · Waymo Driver (Gen 5/6)\nτ ≈ 80 ms · v = 110 km/h (68 mph)\nCommercial highway robotaxi fleet",
+        "color": "#0284C7",
+        "m": "o",
+    },
+    {
+        "tau": 28,
+        "v": 309.0,
+        "xytext": (28, 205),
+        "text": "2024 · Indy Autonomous (PoliMOVE)\nτ ≈ 28 ms (35+ Hz) · v = 309 km/h (192 mph)\nAV-24 oval racing world record",
+        "color": "#A51C30",
+        "m": "*",
+    },
+]
+
+for pt in milestones:
+    s = 160 if pt["m"] == "*" else 80
+    ax.scatter(pt["tau"], pt["v"], color=pt["color"], marker=pt["m"], s=s, edgecolors="#FFFFFF", linewidth=1.5, zorder=5)
+    add_badge(ax, pt["text"], (pt["tau"], pt["v"]), pt["xytext"], color="#1E293B", fontsize=7.2)
+
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.set_xlim(10, 60000)
+ax.set_ylim(0.08, 520)
+
+ax.set_xticks([10, 30, 100, 300, 1000, 3000, 10000, 30000, 60000])
+ax.get_xaxis().set_major_formatter(ticker.FuncFormatter(lambda x, p: f"{int(x)} ms" if x < 1000 else f"{int(x/1000)} s"))
+ax.set_yticks([0.1, 0.5, 1, 5, 15, 50, 100, 200, 350])
+ax.get_yaxis().set_major_formatter(ticker.FuncFormatter(lambda y, p: f"{y:g} km/h"))
+
+ax.set_xlabel(r"Sense-to-Act Loop Latency $\tau_{\mathrm{delay}}$ (log scale)", fontsize=11, fontweight="bold", labelpad=8)
+ax.set_ylabel(r"Vehicle Operational Speed Envelope $v$ (km/h, log scale)", fontsize=11, fontweight="bold", labelpad=8)
+
+fig.suptitle(
+    "The Causal Boundary: Sense-to-Act Latency vs Safe Operating Speed (1970–2026)",
+    fontsize=13.5,
+    fontweight="bold",
+    color="#1E293B",
+    x=0.08,
+    y=0.96,
+    ha="left",
+)
+ax.set_title(
+    r"Physical AI kinematic roofline: stopping envelope $d_{\mathrm{stop}} = v \tau + \frac{v^2}{2a_{\max}} \leq R_{\mathrm{sensor}}$ under emergency braking ($a = 0.7\mathrm{ g}$)",
+    fontsize=8.8,
+    color="#475569",
+    loc="left",
+    pad=14,
+)
+
+legend = ax.legend(
+    loc="lower left",
+    bbox_to_anchor=(0.02, 0.02),
+    frameon=True,
+    facecolor="#FFFFFF",
+    edgecolor="#CBD5E1",
+    fontsize=8.0,
+    framealpha=0.95,
+    title=r"Kinematic Safety Ceilings ($a_{\max} = 6.86\,\mathrm{m/s}^2$)",
+)
+legend.get_title().set_fontweight("bold")
+legend.get_frame().set_linewidth(0.8)
+
+plt.tight_layout()
+plt.subplots_adjust(top=0.88, bottom=0.10, left=0.08, right=0.96)
+plt.show()
+plt.close()
+```
+:::
+
 :::
 
 ::: {.fallacy-pitfall}

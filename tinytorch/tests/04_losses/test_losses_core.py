@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyLoss
+from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyLoss, LogSoftmax, log_softmax
 
 
 class TestMSELoss:
@@ -190,3 +190,35 @@ def test_loss_means_count_every_output_and_accept_soft_binary_targets():
     assert np.isclose(MSELoss()(pred, target).data, (0.04 + 0.01 + 0.09 + 0.01) / 4)
     expected = -(np.log(0.8) + 0.5 * np.log(0.6 * 0.4) + np.log(0.7) + np.log(0.9)) / 4
     assert np.isclose(BinaryCrossEntropyLoss()(pred, target).data, expected)
+
+
+class TestLogSoftmax:
+    """Test numerically stable log-softmax computation."""
+
+    def test_log_softmax_numerical_stability_large_values(self):
+        """
+        WHAT: Verify log-softmax does not overflow with large inputs (log-sum-exp trick).
+        WHY: Exponentiating numbers > 709 overflows float64. Log-sum-exp prevents this.
+        """
+        x = Tensor([[1000.0, 1001.0, 1002.0]])
+        out = log_softmax(x, dim=-1)
+
+        assert not np.isnan(out.data).any(), "log_softmax produced NaN on large inputs"
+        assert not np.isinf(out.data).any(), "log_softmax produced Inf on large inputs"
+
+        # Exponentiating log_softmax must give a valid probability distribution summing to 1.0
+        probs = np.exp(out.data)
+        assert np.isclose(probs.sum(axis=-1)[0], 1.0, atol=1e-5)
+
+    def test_log_softmax_properties(self):
+        """Verify basic log_softmax mathematical properties across 2D batch."""
+        x = Tensor([[1.0, 2.0, 3.0], [0.1, 0.2, 0.9]])
+        out = log_softmax(x, dim=-1)
+
+        # log(P) <= 0 since P <= 1
+        assert (out.data <= 0.0).all()
+
+        # exp(log(P)) sum across classes == 1
+        probs = np.exp(out.data)
+        assert np.allclose(probs.sum(axis=-1), [1.0, 1.0], atol=1e-5)
+
