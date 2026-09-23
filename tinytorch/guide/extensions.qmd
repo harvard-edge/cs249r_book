@@ -3,6 +3,7 @@ title: "Extending TinyTorch"
 ---
 
 TinyTorch's core—its tensor striding, autograd tape, and execution engine—is intentionally kept minimal. Across Modules 01 through 20, you built a complete, self-contained deep learning framework from bare silicon concepts up to modern generative AI:
+
 - An n-dimensional array abstraction with arbitrary striding and slicing ([Module 01: Tensor](modules/01_tensor.qmd))
 - A reverse-mode automatic differentiation tape with topological backpropagation ([Module 06: Autograd](modules/06_autograd.qmd))
 - Composable parametric layers, activations, loss functions, and optimizers (Modules 02–07)
@@ -12,6 +13,7 @@ TinyTorch's core—its tensor striding, autograd tape, and execution engine—is
 Every core module operates on a shared, unified contract: a `Tensor` encapsulates contiguous memory; a `Function` records forward and backward transformations; a `Layer` manages trainable parameters; an `Optimizer` executes step updates.
 
 In modern deep learning systems, the core runtime is only the beginning. When neural networks scale to billions of parameters, or when production serving demands microsecond latencies, frameworks face an architectural dilemma:
+
 1. **The Monolithic Framework Trap:** Shovel every emerging systems optimization—low-rank adapters, activation checkpointing, custom GPU kernels, mixed-precision loss scaling, graph compilers—directly into the core framework. The framework balloons into a brittle, multi-million-line monolith where simple bugs in experimental kernels destabilize the core autograd engine.
 2. **The Extensibility Model:** Keep the engine core minimal, stable, and transparent, while exposing strict, first-class extension points. Every specialized optimization lives as an autonomous extension that plugs cleanly into the core contracts.
 
@@ -38,17 +40,20 @@ TinyTorch adopts the extensibility model. The 20 core modules constitute an immu
 
 ---
 
-## Why Not Just Use PyTorch? The xv6 Lesson
+## Why Not Just Use PyTorch? The Minix and xv6 Lesson
 
 A natural question arises: *Why should you study and build systems extensions in TinyTorch rather than jumping straight into writing custom extensions for PyTorch or JAX?*
 
-The answer lies in the classic pedagogical philosophy of MIT's operating systems curriculum (6.828 / 6.1810) and **xv6**.
+The answer lies in the classic pedagogical tradition of operating systems education: from John Lions' legendary commentary on Unix 6th Edition, to Andrew Tanenbaum's Minix, to MIT's xv6.
 
-When teaching how an operating system manages virtual memory, process scheduling, and file systems, MIT does not ask students to modify the production Linux kernel. Linux contains over 30 million lines of C, thousands of hardware drivers, lock-less read-copy-update (RCU) primitives, and deep architecture-specific macros. Attempting to implement a simple copy-on-write page allocator in Linux forces a student to spend 90% of their time fighting macro definitions, build harnesses, and kernel ABI wrappers before they ever manipulate a page table. In xv6—a complete Unix clone written in just 10,000 lines of clean ANSI C—the abstraction boundaries are razor-sharp. A student can implement copy-on-write or a priority scheduler in 40 lines of clear C and inspect every single page table manipulation directly in physical memory.
+When Linus Torvalds wanted to understand how an operating system truly manages physical hardware, he did not begin by modifying a commercial monolith. He studied Minix—a compact microkernel operating system written by Tanenbaum specifically for teaching. Minix was small enough to be held in a single person's head, yet real enough to demonstrate preemptive scheduling, memory paging, and system calls. That tactile understanding gave Linus the foundational mental model to author the initial Linux kernel.
+
+Years later, when MIT redesigned its operating systems curriculum (6.828 / 6.1810), it chose xv6—a modern reimplementation of Unix 6th Edition in 10,000 lines of clean ANSI C. When teaching virtual memory and process scheduling, MIT does not ask students to modify the production Linux kernel. Linux contains over 30 million lines of C, thousands of hardware drivers, lock-less read-copy-update (RCU) primitives, and deep architecture-specific macros. Attempting to implement a simple copy-on-write page allocator in Linux forces a student to spend 90% of their time fighting macro definitions, build harnesses, and kernel ABI wrappers before they ever manipulate a page table. In xv6, the abstraction boundaries are razor-sharp: a student can implement copy-on-write or a priority scheduler in 40 lines of clear C and inspect every page table manipulation directly in physical memory.
 
 PyTorch is the Linux kernel of deep learning. It is an industrial engineering masterpiece, but extending it requires navigating the `TORCH_LIBRARY` dispatcher macros, pybind11 ABI translation layers, internal ATen tensor representations (`c10::TensorImpl`), CUDA stream abstractions, and massive multi-repository CMake build graphs. Writing a custom C++ operator in PyTorch requires dozens of lines of framework glue code just to deliver a tensor pointer to a loop.
 
-TinyTorch is the xv6 of deep learning systems:
+TinyTorch is the Minix and xv6 of deep learning systems:
+
 - A `Tensor` is directly backed by a contiguous memory buffer.
 - A `Function` has exactly two methods: `forward` and `backward`.
 - A `Layer` has exactly two methods: `forward` and `parameters()`.
@@ -355,6 +360,7 @@ Before measuring execution time, you must guarantee numerical correctness. Never
        out_extension.data, out_reference, atol=1e-5
    )
    ```
+
 2. **Synthetic Micro-benchmarks:** Use the built-in profiling tools from `tinytorch.perf.benchmarking` (`Timer` and `MemoryTracker`) to isolate the operator across power-of-two shapes ($N \in \{128, 256, 512, 1024, 2048\}$):
    ```python
    from tinytorch.perf.benchmarking import (
@@ -413,6 +419,7 @@ To evaluate an extension on your own domain-specific problem, plug your raw data
        shuffle=True,
    )
    ```
+
 2. **Text Corpora:** Pass raw text to `Tokenizer` from `tinytorch.core.tokenization` to construct tokenized input-target sequences for autoregressive language modeling.
 3. **End-to-End Training:** Pass the loader, model (with your extension active), optimizer, and loss function to `Trainer` (`tinytorch.core.training.Trainer`). Run `trainer.fit(epochs=5)` and log training throughput and loss progression.
 
@@ -420,9 +427,18 @@ To evaluate an extension on your own domain-specific problem, plug your raw data
 
 ## Building on the Foundations: Next-Level Extensions
 
-Rather than attempting massive, disconnected projects, the most effective way to deepen your systems mastery is to build directly on the 7 canonical extensions introduced in this chapter. Each project below takes an existing extension and resolves its primary limitation:
+These are just some examples. The extensions we gave you cover a bunch of different things, and we try to cover things that you can improve on. Rather than attempting massive, disconnected projects, the most effective way to deepen your systems mastery is to build directly on the canonical extension points introduced in this chapter.
 
-### 1. Dynamic Loss Scaling (Building on Extension 3: `LossScaler`)
+If you want to extend TinyTorch, the interfaces are intentionally clean and minimalist:
+
+- To implement custom forward/backward math or recomputation patterns, subclass `Function` and implement `forward` and `backward`.
+- To inject custom parameter adaptations or layer hooks, subclass `Layer` and register parameter tensors.
+- To bypass the Python interpreter for custom hardware or low-level kernels, pass contiguous buffer pointers (`tensor.data.ctypes.data_as(...)`) across the `ctypes` foreign function interface.
+- To simulate hardware execution, trace tensor shapes and access streams into architectural modeling tools.
+
+Each project below takes a real systems bottleneck and demonstrates how you can resolve it or hook TinyTorch up to external systems tools:
+
+### Dynamic Loss Scaling
 
 * **Systems Limitation:** The stock `LossScaler` applies a fixed scale factor ($S = 65,536$). If training encounters large activations, gradient magnitudes can spike, causing multiplied values to exceed the float16 maximum ($65,504$) and overflow to `inf` or `nan`.
 * **The Project:** Implement adaptive loss scaling. After calling `loss.backward()`, scan parameter gradients for `np.isinf` or `np.isnan`. If an overflow is detected:
@@ -431,12 +447,12 @@ Rather than attempting massive, disconnected projects, the most effective way to
   3. Reset a consecutive-success step counter.
   If $M$ consecutive steps complete without any overflow (e.g., $M = 2000$), double the scale factor ($S \leftarrow 2S$) to maintain maximum numerical dynamic range. Evaluate on Milestone 4 or 5 in FP16.
 
-### 2. Register Micro-Tiling in C++ (Building on Extension 5: `simd_matmul`)
+### Register Micro-Tiling
 
 * **Systems Limitation:** Stock `simd_matmul` tiles matrices at the L1 cache level ($64 \times 64$). However, the innermost loop accumulates scalar products back into memory, keeping CPU vector execution units waiting on L1 data cache load-store latency.
 * **The Project:** Implement an $8 \times 4$ register micro-kernel in `cpp_simd_gemm.cpp`. Unroll the inner loop so that an $8 \times 4$ block of intermediate accumulation registers is kept alive in CPU vector registers (AVX2/NEON) throughout the $K$-dimension reduction, storing results back to DRAM only when the tile is complete. Benchmark your micro-kernel against `simd_matmul` and graph the GFLOP/s improvement.
 
-### 3. Model-Wide LoRA Injection Hook (Building on Extension 1: `LoRALinear`)
+### Model-Wide LoRA Injection Hook
 
 * **Systems Limitation:** Stock `LoRALinear` requires manually instantiating adapter layers by hand in your model definition. In deep models with dozens of projection matrices, manual replacement is tedious and fragile.
 * **The Project:** Author an automated helper function `inject_lora(model, target_layers, rank=8)`:
@@ -444,6 +460,23 @@ Rather than attempting massive, disconnected projects, the most effective way to
   2. For each layer matching a target name, replace the existing `Linear` layer with a corresponding `LoRALinear` instance initialized with the pre-trained weights.
   3. Set `requires_grad = False` on all non-adapter parameters.
   Test `inject_lora` on Milestone 5's GPT model to demonstrate fine-tuning a full transformer with a single function call.
+
+### FlashAttention and SRAM-Aware Tiling
+
+* **Systems Limitation:** Standard attention evaluates $O = \text{softmax}(Q K^T / \sqrt{d_k}) V$ by materializing the full intermediate $S \times S$ attention score matrix in high-bandwidth memory (DRAM). For a sequence length of $S = 4096$ with 32 heads, storing the attention score and weight matrices requires hundreds of megabytes per batch in DRAM. The operation is severely memory-bandwidth bound: the processor spends most of its execution cycles reading and writing the $S \times S$ matrix across the memory bus rather than performing floating-point math.
+* **The Project:** Implement a custom `FlashAttentionFunction` subclassing `Function`. Tile the $Q, K, V$ matrices into blocks ($B_r \times d$ and $B_c \times d$) sized to fit entirely inside fast on-chip memory (CPU L1/L2 cache or GPU shared memory). Instead of materializing the $S \times S$ matrix, use the **online softmax** algorithm (maintaining running maximum scalars $m_i$ and running sum scalars $l_i$ per row block) to incrementally update the output accumulator $O_i$ as column blocks of $K$ and $V$ stream through:
+  $$m_i^{\text{new}} = \max(m_i, \max(S_i)), \quad l_i^{\text{new}} = e^{m_i - m_i^{\text{new}}} l_i + \sum e^{S_i - m_i^{\text{new}}}$$
+  $$O_i^{\text{new}} = \text{diag}(e^{m_i - m_i^{\text{new}}}) O_i + e^{S_i - m_i^{\text{new}}} V_j$$
+  In the backward pass, recompute the attention weights on-the-fly from the cached $Q, K, V$ blocks, completely eliminating the $O(S^2)$ memory footprint. Benchmark your tiled attention function against stock `attention.py` across sequence lengths $S \in \{512, 1024, 2048, 4096\}$ using `MemoryTracker` and `Timer`.
+
+### Hardware Simulation and Memory Tracing (ScaleSim Integration)
+
+* **Systems Limitation:** Profiling on a host CPU or GPU measures total runtime, but cannot answer architectural design questions: How many multiply-accumulate (MAC) units in a 2D systolic array are actually utilized? Would doubling the on-chip SRAM buffer eliminate DRAM stall cycles? What array aspect ratio ($128 \times 128$ vs $256 \times 64$) achieves optimal utilization for a specific model?
+* **The Project:** Build an architectural memory-tracing extension that interfaces TinyTorch with **ScaleSim** (Systolic Array Memory and Cycle Simulator) or an equivalent cycle-accurate hardware simulator:
+  1. Author a tracer hook or custom `SimulatedLinear` layer that intercepts GEMM operations in TinyTorch models.
+  2. For every matrix multiplication $Y = X W$, extract the target dimensions $(M, K, N)$ and generate memory read/write address request streams for matrices $A$, $B$, and $C$.
+  3. Export a ScaleSim-compatible workload topology file listing layer dimensions and dataflows (e.g., Weight Stationary `WS`, Output Stationary `OS`, or Input Stationary `IS`).
+  4. Run the ScaleSim simulation from Python via `subprocess` to obtain cycle counts, buffer hit rates, and DRAM bandwidth requirements. Compare the simulated cycles and bandwidth stalls of `TinyGPT` projections across different array dimensions ($32 \times 32$ edge accelerator vs $128 \times 128$ datacenter systolic array).
 
 ---
 
@@ -458,4 +491,5 @@ Adding a new extension to TinyTorch is straightforward:
    ```bash
    python -m pytest tests/extensions/ -v
    ```
+
 5. **Open a Pull Request**: Share your extension with the TinyTorch community on GitHub!
