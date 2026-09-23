@@ -128,26 +128,27 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 4 | chapter | `04_context_engineering/04_context_engineering.qmd` |
 | 5 | chapter | `05_kv_cache/05_kv_cache.qmd` |
 | 6 | chapter | `06_long_term_memory/06_long_term_memory.qmd` |
-|  | part | `parts/sandboxing_principles.qmd` |
+|  | part | `parts/tool_use_principles.qmd` |
 | 7 | chapter | `07_tool_calling/07_tool_calling.qmd` |
 | 8 | chapter | `08_sandboxes/08_sandboxes.qmd` |
+| 9 | chapter | `09_security/09_security.qmd` |
 |  | part | `parts/runtime_principles.qmd` |
-| 9 | chapter | `09_agent_harness/09_agent_harness.qmd` |
-| 10 | chapter | `10_durable_execution/10_durable_execution.qmd` |
-| 11 | chapter | `11_failure_recovery/11_failure_recovery.qmd` |
-|  | part | `parts/compiler_principles.qmd` |
-| 12 | chapter | `13_trajectory_curation/13_trajectory_curation.qmd` |
-| 13 | chapter | `14_fine_tuning/14_fine_tuning.qmd` |
-| 14 | chapter | `15_rlvr/15_rlvr.qmd` |
-|  | part | `parts/fleet_principles.qmd` |
-| 15 | chapter | `16_multi_agent/16_multi_agent.qmd` |
-| 16 | chapter | `12_evaluation/12_evaluation.qmd` |
-| 17 | chapter | `17_agent_economics/17_agent_economics.qmd` |
+| 10 | chapter | `10_agent_harness/10_agent_harness.qmd` |
+| 11 | chapter | `11_durable_execution/11_durable_execution.qmd` |
+| 12 | chapter | `12_failure_recovery/12_failure_recovery.qmd` |
+| 13 | chapter | `13_evaluation/13_evaluation.qmd` |
+|  | part | `parts/learning_principles.qmd` |
+| 14 | chapter | `14_trajectory_curation/14_trajectory_curation.qmd` |
+| 15 | chapter | `15_fine_tuning/15_fine_tuning.qmd` |
+| 16 | chapter | `16_rlvr/16_rlvr.qmd` |
+|  | part | `parts/scale_principles.qmd` |
+| 17 | chapter | `17_multi_agent/17_multi_agent.qmd` |
+| 18 | chapter | `18_agent_economics/18_agent_economics.qmd` |
 |  | part | `parts/synthesis_principles.qmd` |
-| 18 | chapter | `18_conclusion/18_conclusion.qmd` |
-| 19 | chapter | `appendices/app_a_reference_architecture.qmd` |
-| 20 | chapter | `appendices/app_b_tool_design.qmd` |
-| 21 | chapter | `appendices/app_c_failure_taxonomy.qmd` |
+| 19 | chapter | `19_conclusion/19_conclusion.qmd` |
+| 20 | chapter | `appendices/app_a_reference_architecture.qmd` |
+| 21 | chapter | `appendices/app_b_tool_design.qmd` |
+| 22 | chapter | `appendices/app_c_failure_taxonomy.qmd` |
 |  | backmatter | `backmatter/appendix_math.qmd` |
 |  | backmatter | `backmatter/glossary/glossary.qmd` |
 
