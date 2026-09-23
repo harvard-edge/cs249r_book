@@ -209,12 +209,6 @@ def generate_plot():
     ax.set_xlabel("Transmission Gear Ratio $N:1$ (log scale)", fontsize=11, fontweight="bold", labelpad=8)
     ax.set_ylabel("Actuator Specific Torque Density (N·m / kg)", fontsize=11, fontweight="bold", labelpad=8)
     
-    # Title block
-    fig.suptitle("Actuator Dynamics: Torque Density vs Gear Ratio in Robotic Bodies",
-                 fontsize=14, fontweight="bold", x=0.08, y=0.98, ha="left", color=PALETTE["charcoal"])
-    ax.set_title("Mechanical transparency trade-off: stiff industrial reducers ($N^2 \\geq 2,500$) vs backdrivable Quasi-Direct Drive (QDD) actuators ($N^2 \\leq 100$)",
-                 fontsize=9.5, color="#475569", loc="left", pad=14)
-    
     # Legend custom elements
     from matplotlib.lines import Line2D
     legend_elements = [
@@ -231,12 +225,14 @@ def generate_plot():
     legend.set_zorder(15)
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.90, bottom=0.10, left=0.08, right=0.92)
+    plt.subplots_adjust(top=0.95, bottom=0.10, left=0.08, right=0.92)
     
     out_path = os.path.join(os.path.dirname(__file__), "ch02_actuator_impedance.png")
     fig.savefig(out_path, dpi=300)
+    book_path = os.path.join(os.path.dirname(__file__), "..", "books", "vol4", "02_body", "images", "png", "fig02_actuator_torque_density_vs_gear_ratio.png")
+    fig.savefig(book_path, dpi=300)
     plt.close(fig)
-    print(f"Saved: {out_path}")
+    print(f"Saved: {out_path} and {book_path}")
 
 if __name__ == "__main__":
     generate_plot()

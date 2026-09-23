@@ -11,6 +11,10 @@ from argparse import ArgumentParser, Namespace
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
+
+from .base import BaseCommand
+from ..core.exceptions import TinyTorchCLIError
+
 def _get_rng():
     """Lazily import numpy and get standard random generator."""
     try:
@@ -29,8 +33,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.prompt import Prompt, Confirm
 from rich.console import Console
 
-from .base import BaseCommand
-from ..core.exceptions import TinyTorchCLIError
 
 
 class BenchmarkCommand(BaseCommand):

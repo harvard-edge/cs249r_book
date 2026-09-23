@@ -364,30 +364,13 @@ ax.get_xaxis().set_major_formatter(ticker.FuncFormatter(lambda x, loc: f"T={int(
 ax.set_yticks(np.arange(0, 101, 10))
 ax.get_yaxis().set_major_formatter(ticker.FuncFormatter(lambda y, loc: f"{int(y)}%"))
 
-fig.suptitle(
-    "Compounding Covariate Shift: Rollout Horizon vs. Task Survival Rate",
-    fontsize=13.5,
-    fontweight="bold",
-    color="#1E293B",
-    x=0.08,
-    y=0.96,
-    ha="left",
-)
-ax.set_title(
-    "Theoretical error compounding vs. empirical survival curves across imitation learning paradigms",
-    fontsize=8.8,
-    color="#475569",
-    loc="left",
-    pad=14,
-)
-
 legend = ax.legend(
     loc="lower left", bbox_to_anchor=(0.02, 0.22), frameon=True, facecolor="#FFFFFF", edgecolor="#CBD5E1", fontsize=7.8, framealpha=0.95
 )
 legend.get_frame().set_linewidth(0.8)
 
 plt.tight_layout()
-plt.subplots_adjust(top=0.88, bottom=0.10, left=0.08, right=0.96)
+plt.subplots_adjust(top=0.95, bottom=0.10, left=0.08, right=0.96)
 plt.show()
 plt.close()
 ```
@@ -777,7 +760,22 @@ What randomization cannot reach, the permission path must bound. Every proposal 
 
 Decomposing the gap into its constitutive physical channels yields two concrete engineering artifacts, namely a supported region and an explicit residual mismatch list. The supported region is the set of conditions within which physical hardware matches simulation within validated tolerances. The residual mismatch list itemizes every unclosed difference that remains outside the training distribution. For the latch simulator, paired probes have not yet closed the strike-plate contact stiffness, which its penalty spring sets far softer than the plate, or the actuator transport lag, so both head its residual list, and the supported region excludes the contact states those two departures govern. Each entry on the residual list defines an explicit requirement for runtime monitors and safety filters, which must detect when physical execution drifts past the boundary where the simulated policy remains valid. Both artifacts pass into the policy manifest of @sec-training-policy-manifest: the residual list enters its omission log, and every state outside the supported region is entered there as an exclusion.
 
-Even under careful domain randomization and contact calibration, residual discrepancies persist in high-precision, contact-rich regimes, and the latch simulator's residual list is not yet empty. Some local mismatches are cheaper to absorb on the deployed plant than to model, at a price in wear and in lost evidence.
+### Teacher-student privileged state distillation {#sec-training-privileged-distillation}
+
+While domain randomization prepares policies for parameter variations within the simulator's modeled physics, it cannot synthesize unmodeled state feedback or bridge the sensory reality gap. Training an agile policy end-to-end directly from raw camera pixels and joint encoders using real-world reinforcement learning would subject physical actuators to millions of destructive contact cycles and thermal overloads (@sec-training-learning-by-trial).
+
+Modern agile robotics resolves this impasse through **teacher-student privileged state distillation**\index{Privileged learning!teacher-student distillation}\index{Sim-to-real transfer!privileged state distillation}\index{Teacher-student distillation!asymmetric actor-critic} [@lee2020learning; @kumar2021rma]. As illustrated in @fig-06-privileged-distillation, this architecture decouples the learning problem into two distinct computational phases:
+
+1. **Phase 1 (privileged oracle teacher)**: In simulation, a teacher policy $\pi_{\text{teacher}}(a_t \mid s_t^{\text{priv}})$ is trained via massively parallel reinforcement learning. Because it executes within the simulator, the algorithm exploits a *privileged state vector* $s_t^{\text{priv}}$ that physical sensors cannot directly measure: exact ground-truth friction coefficients $\mu$, payload mass, ground-reaction forces, motor temperatures, and dense terrain elevation heightmaps surrounding each contact point. With full state observability, the reinforcement learning optimizer avoids partial-observability credit assignment bottlenecks and converges on dynamic, robust locomotion or contact-rich manipulation within hours.
+2. **Phase 2 (sensorimotor student distillation)**: The deployed machine cannot measure $s_t^{\text{priv}}$. The teacher's competence is therefore distilled into a sensorimotor student policy $\pi_{\text{student}}(a_t \mid o_{t-H:t})$ via supervised imitation learning or DAgger [@ross2011reduction]. The student operates strictly on real-world onboard observations: joint encoders, IMU angular rates, and camera frames, aggregated across a sliding temporal history window $H$ ($o_{t-H:t} = [o_t, o_{t-1}, \dots, o_{t-H}]$).
+
+The foundational systems insight of privileged distillation is that **temporal observation history acts as an implicit state estimator**. An unmeasured physical parameter, such as ground friction $\mu$ or payload mass, manifests physically in the temporal correlation between commanded motor currents and measured joint velocity responses over preceding ticks. By training a temporal convolution or recurrent encoder over the history window $H$, the student implicitly performs real-time system identification without requiring an explicit analytical estimator. The teacher provides optimal action targets across randomized simulation parameters, forcing the student to learn an invariant representation that transfers to physical silicon without hardware damage.
+
+::: {#fig-06-privileged-distillation fig-env="figure" fig-pos="t" fig-cap="**Teacher-student privileged state distillation**: Two-phase sim-to-real transfer pipeline. (a) In simulation, an RL teacher policy is trained with privileged access to ground-truth physical parameters ($s_t^{\\text{priv}}$: friction, terrain heightmap, payload mass) that onboard sensors cannot measure, eliminating credit assignment bottlenecks. (b) The teacher is distilled via supervised imitation into a sensorimotor student policy executing on edge silicon, using a sliding temporal history window $o_{t-H:t}$ to perform implicit real-time system identification." fig-alt="Two-panel systems diagram. Left panel shows Phase 1 with a physics simulator providing privileged state s_priv (friction, contact forces, elevation, mass) to an RL teacher policy. Right panel shows Phase 2 with real onboard sensors passing proprioception and vision to a sliding temporal history buffer, which feeds a student policy running on edge silicon, with an arrow indicating supervised distillation from teacher to student."}
+![](images/svg/fig06_privileged_distillation.svg){width="100%"}
+:::
+
+Even under careful domain randomization, contact calibration, and privileged state distillation, residual discrepancies persist in high-precision, contact-rich regimes, and the latch simulator's residual list is not yet empty. Some local mismatches are cheaper to absorb on the deployed plant than to model, at a price in wear and in lost evidence.
 
 ## Fine-Tuning on the Real Machine {#sec-training-real-machine-tuning}
 

@@ -114,8 +114,6 @@ def generate_ch09_plot():
     
     ax.set_xlabel("Volumetric Memory Footprint (MB / m³ at operational resolution)", fontsize=11.5, fontweight="bold", color=PALETTE["charcoal"], labelpad=10)
     ax.set_ylabel("Spatial Point Distance / Collision Query Latency (microseconds, µs)", fontsize=11.5, fontweight="bold", color=PALETTE["charcoal"], labelpad=10)
-    ax.set_title("3D Scene Representation Frontier: Memory Density vs. Spatial Query Latency",
-                 fontsize=14.5, fontweight="bold", color=PALETTE["charcoal"], pad=24)
     
     # Badges for key trade-offs in open whitespace
     # 1. NeRF badge - top center
@@ -156,8 +154,10 @@ def generate_ch09_plot():
     plt.tight_layout()
     output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ch09_memory_3d_representation_pareto.png")
     plt.savefig(output_path, dpi=300)
+    book_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "books", "vol4", "09_memory", "images", "png", "fig09_memory_3d_representation_pareto.png")
+    plt.savefig(book_path, dpi=300)
     plt.close()
-    print(f"Generated {output_path}")
+    print(f"Generated {output_path} and {book_path}")
 
 if __name__ == "__main__":
     generate_ch09_plot()
