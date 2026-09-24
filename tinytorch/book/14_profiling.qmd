@@ -30,7 +30,7 @@ Underneath that profiling report, the systems profiler tracks the fundamental ph
 2. **Memory traffic accounting:** The engine tracks buffer allocations, peak memory residency, and memory deallocations, distinguishing persistent parameter storage from transient activation buffers.
 3. **Operational intensity and hardware bounds:** By comparing floating-point arithmetic (FLOPs) against memory moved across the bus (bytes), the profiler grounds operations in the **Roofline Model**, diagnosing whether an operator is **memory-bandwidth bound** (stalled on DRAM) or **compute-bound** (saturating ALUs).
 
-This chapter establishes TinyTorch's profiling harness, providing the analytical and empirical diagnostic foundations that guide all performance optimizations in Part III. Before building our profiling tools, we must examine why naive arithmetic counting fails to predict execution time.
+This chapter establishes TinyTorch's profiling harness, providing the analytical and empirical diagnostic foundations that guide all performance optimizations in Part III. Before constructing these profiling tools, the first step is to examine why naive arithmetic counting fails to predict execution time.
 
 ![The roofline model. Performance rises with arithmetic intensity along the bandwidth ceiling until it reaches the compute ceiling; the corner where they meet is the ridge point.](assets/images/diagrams/14_profiling-diag-1.svg){#fig-roofline-model width="100%"}
 
@@ -131,7 +131,7 @@ This explains why the generation algorithm matters. @sec-transformers's ordinary
 
 ![**Weight streaming and operational intensity across batch sizes**: At batch size $B=1$ (single-token inference), weights are streamed from DRAM over the memory bus and touched only once, resulting in low arithmetic intensity ($I \approx 0.5$ FLOPs/byte) and severe memory bandwidth starvation. At batch size $B=64$, loaded weights are reused across all 64 tokens in fast on-chip cache, boosting arithmetic intensity ($I \approx 32$ FLOPs/byte) and saturating compute execution units.](assets/images/diagrams/14_weight-streaming-reuse.svg){#fig-weight-streaming-reuse width="100%" fig-alt="Diagram contrasting memory bandwidth starvation at batch size 1 with compute-bound weight reuse at batch size 64."}
 
-::: {#nbk-profiling-tinygpt-intensity .callout-notebook title="Napkin math: TinyGPT operational intensity across prefill and decode"}
+::: {#nbk-profiling-tinygpt-intensity .callout-notebook title="Napkin Math: TinyGPT operational intensity across prefill and decode"}
 Consider the reference `TinyGPT` configuration ($d_{\text{model}}=128$, $n_{\text{layers}}=4$, context $S$, vocabulary $V=1000$). Each Transformer block contains $4 d^2$ projection parameters in attention ($W_Q, W_K, W_V, W_O$) and $8 d^2$ parameters in the two-layer MLP ($W_1, W_2$).
 
 Across $L=4$ layers, parameter weights total approximately $12 L d^2 \approx 786\text{ KB}$ in FP32 ($196,608$ floats $\times 4$ bytes), dominating activation traffic when batch size is 1:
@@ -161,7 +161,7 @@ A timer supplies elapsed time $T$, from which $F/T$ is an achieved compute rate.
 *Source Code Mapping: Module 14 extracts analytical FLOP accounting, parameter memory quantification, and roofline profiling directly from the working repository.*
 :::
 
-Begin at `Profiler.profile_forward_pass(model, input_tensor)`, the entry point that joins the counters to execution. It reads the parameter count and a per-sample FLOP estimate, probes memory using a separate dummy input, then times repeated calls on the supplied input. The returned dictionary mixes those sources, so reading it requires keeping their meanings separate. We follow each helper below, then return to the entry point to check how it combines a per-sample count with a whole-batch time.
+Begin at `Profiler.profile_forward_pass(model, input_tensor)`, the entry point that joins the counters to execution. It reads the parameter count and a per-sample FLOP estimate, probes memory using a separate dummy input, then times repeated calls on the supplied input. The returned dictionary mixes those sources, so reading it requires keeping their meanings separate. The following sections trace each helper before returning to the entry point to verify how it combines a per-sample count with a whole-batch time.
 
 ### Counting parameters and bytes
 
@@ -239,7 +239,7 @@ The classifier compares `memory_bandwidth_mbs` with `100 * gflops_per_second`. B
 
 The key join occurs at `batch_flops = flops * batch_size`. `count_flops` reports one sample, whereas `measure_latency` times the whole input tensor. Omitting the multiplier makes a larger batch appear artificially inefficient. For `Linear(3, 2)` and an input of shape `(4, 3)`, the parameter count is eight including bias, the per-sample matrix-product count is twelve, and `batch_flops` is forty-eight. A GPT sample is a whole sequence, so its sequence-length cost is already inside `flops`; only the outer batch dimension is multiplied here. The entry point also chooses five warmup calls and twenty timed calls rather than the timer's defaults.
 
-The returned fields retain those distinctions instead of collapsing them into one score. `profile_backward_pass`, despite its name, estimates backward cost from the forward report; it does not execute `backward()`. For the roofline calculation below we need explicit compute and bandwidth ceilings. The following book-only class holds those assumptions and applies the bound from The Idea.
+The returned fields retain those distinctions instead of collapsing them into one score. `profile_backward_pass`, despite its name, estimates backward cost from the forward report; it does not execute `backward()`. The roofline calculation below requires explicit compute and bandwidth ceilings. The following book-only class holds those assumptions and applies the bound from The Idea.
 
 ```python
 class Roofline:
@@ -300,7 +300,7 @@ FLOPs depend on the row count. Each block has six Linear layers whose in-times-o
 
 : FLOP counts and boundary-storage accounting for TinyGPT at two sequence lengths. The last row is a footprint ratio, not measured arithmetic intensity. {#tbl-tinygpt-intensity tbl-colwidths="[46,27,27]"}
 
-The longer input increases counted arithmetic by about 68.5 times, while this storage total increases by about 5.8 percent. The table deliberately excludes intermediate activations. Its last row checks the ratio of two known counts; it cannot place the model on a main-memory roofline. That would require a traffic estimate accounting for lookup rows, intermediate arrays, and reuse. The arithmetic in the listing below verifies the table without executing a forward pass. In line 1, dimensions `D, V, L, P = 128, 1000, 4, 256` define the TinyGPT configuration. Lines 2--6 express the analytical parameter formulas, verified by `assert params == 1_082_112` in line 7. The loop in lines 9--14 evaluates total FLOPs and storage footprint across prompt lengths $S=1$ and $S=64$, printing the ratios $0.42$ and $27.42$ matching @tbl-tinygpt-intensity.
+The longer input increases counted arithmetic by about 68.5 times, while this storage total increases by about 5.8 percent. The table deliberately excludes intermediate activations. Its last row checks the ratio of two known counts; it cannot place the model on a main-memory roofline. That would require a traffic estimate accounting for lookup rows, intermediate arrays, and reuse. The arithmetic in the listing below verifies the table without executing a forward pass. In line 1, dimensions `D, V, L, P = 128, 1000, 4, 256` define the TinyGPT configuration. Lines 2 to 6 express the analytical parameter formulas, verified by `assert params == 1_082_112` in line 7. The loop in lines 9 to 14 evaluates total FLOPs and storage footprint across prompt lengths $S=1$ and $S=64$, printing the ratios $0.42$ and $27.42$ matching @tbl-tinygpt-intensity.
 
 The same counts say when attention's quadratic term takes over. Per block, the two attention products cost $4S^2D$ FLOPs, the four projections $8SD^2$, and the MLP $16SD^2$. The products overtake the projections when $S > 2D$, the MLP when $S > 4D$, and all six Linear layers together when $S > 6D$. For TinyGPT's $D = 128$, those thresholds are 256, 512, and 768 tokens, and its 256-position table stops the model at the first one, so Linear layers dominate every configuration it can run. At $S = 64$ the attention products are under 8 percent of the block arithmetic in @tbl-tinygpt-intensity. A model with $D = 4096$ reaches the all-Linear threshold at 24,576 tokens, so whether attention dominates depends on the context the model actually runs at, not on the architecture alone.
 
@@ -443,14 +443,6 @@ Allocation tracking still does not reveal memory traffic. NVIDIA's Nsight Comput
 
 The comparison in @tbl-profiler-comparison separates the three kinds of evidence. A framework trace locates operations; an allocation report describes storage lifetime; hardware traffic metrics test transfer assumptions. These tools answer related questions, but their byte fields are not interchangeable.
 
-::: {#psp-profiling-nsight-profiler .callout-production title="Production bridge: PyTorch Profiler and NVIDIA Nsight Systems"}
-TinyTorch uses analytical FLOP accounting and Python's `time.perf_counter` to estimate compute rates and memory bottlenecks on the host CPU. In production GPU environments, profiling requires visibility into hardware execution pipelines:
-
-1. **PyTorch Profiler (`torch.profiler`)**: Records operator execution timelines, CPU-to-GPU kernel dispatch latency, memory allocation/free events (`record_shapes=True`, `profile_memory=True`), and exports execution traces viewable in Chrome (`chrome://tracing`) or Perfetto.
-2. **NVIDIA Nsight Systems (`nsys`)**: Traces system-wide execution, correlating host CPU threads, CUDA runtime calls, PCIe memory transfers, and GPU kernel execution on a unified microsecond timeline to detect CPU starvation and pipeline bubbles.
-3. **NVIDIA Nsight Compute (`ncu`)**: Profiles individual CUDA kernels at the hardware instruction level, measuring streaming multiprocessor (SM) occupancy, warp stall reasons, Tensor Core utilization, and cache hit rates against hardware roofline limits.
-:::
-
 | Quantity | TinyTorch `Profiler` | Production observation |
 | :--- | :--- | :--- |
 | FLOPs | Shape formulas plus fallback estimates | Operator formulas with documented coverage |
@@ -461,9 +453,17 @@ TinyTorch uses analytical FLOP accounting and Python's `time.perf_counter` to es
 
 : Measurement sources in the reference profiler and production tools. Storage, traffic, and time remain separate quantities. {#tbl-profiler-comparison tbl-colwidths="[16,40,44]"}
 
-The transferable habit is to make each optimization claim match its evidence. Reducing parameter bytes establishes a storage change. Reducing modeled transfers establishes a prediction under stated assumptions. A repeatable timing improvement on the same workload establishes an execution result. Subsequent chapters need all three distinctions because a numerically faithful simulation of a smaller representation can still allocate and execute in float32.
+{{< pagebreak >}}
 
----
+::: {#psp-profiling-nsight-profiler .callout-perspective title="Production Bridge: PyTorch Profiler and NVIDIA Nsight Systems"}
+TinyTorch uses analytical FLOP accounting and Python's `time.perf_counter` to estimate compute rates and memory bottlenecks on the host CPU. In production GPU environments, profiling requires visibility into hardware execution pipelines:
+
+1. **PyTorch Profiler (`torch.profiler`)**: Records operator execution timelines, kernel dispatch latency, memory allocation events, and exports execution traces viewable in Chrome (`chrome://tracing`) or Perfetto.
+2. **NVIDIA Nsight Systems (`nsys`)**: Traces system-wide execution, correlating host CPU threads, CUDA runtime calls, PCIe memory transfers, and GPU kernel execution on a unified microsecond timeline to detect CPU starvation and pipeline bubbles.
+3. **NVIDIA Nsight Compute (`ncu`)**: Profiles individual CUDA kernels at the hardware instruction level, measuring streaming multiprocessor (SM) occupancy, warp stall reasons, Tensor Core utilization, and cache hit rates against hardware roofline limits.
+:::
+
+The transferable habit is to make each optimization claim match its evidence. Reducing parameter bytes establishes a storage change. Reducing modeled transfers establishes a prediction under stated assumptions. A repeatable timing improvement on the same workload establishes an execution result. Subsequent chapters require all three distinctions because simulated low-precision arithmetic can still execute in float32.
 
 ## Summary
 
@@ -476,4 +476,4 @@ The roofline adds an explicit model of transferred bytes and machine ceilings. I
 ## Further Reading
 
 - **Williams, Waterman, and Patterson** (2009). "[Roofline: an insightful visual performance model for multicore architectures](https://doi.org/10.1145/1498765.1498785)." *CACM*. The roofline model this chapter applies.
-- **Hennessy and Patterson** (2019). *Computer Architecture: A Quantitative Approach*, 6th edition, Morgan Kaufmann. Memory hierarchies and the discipline of measuring before optimizing.
+- **Hennessy and Patterson** (2017). *Computer Architecture: A Quantitative Approach*, 6th edition, Morgan Kaufmann. Memory hierarchies and the discipline of measuring before optimizing.
