@@ -151,7 +151,6 @@ from mlsysim.physics.robotics import (
     calc_target_evidence_horizon,
     calc_latch_contact_stopping_profile,
     calc_contact_force,
-    calc_process_thermal_runaway_lease,
 )
 
 # ┌── 1. LOAD: the running machine, plus chapter-local scenario inputs ─────────
@@ -164,13 +163,7 @@ v_drift_slow = 20.0 * millimeter / second  # category: illustrative (slow-drift 
 t_intent_tail = 650.0 * millisecond  # category: illustrative (high-tail intent inference, as in the figure)
 d_target_offset = 300.0 * millimeter  # category: illustrative (scenario assumption: gripper-to-handle distance at proposal)
 
-# Class 3 contrast: a lumped heat capacity and task overshoot limit.
-c_thermal_bess = 900.0 * joule / kelvin  # category: illustrative
-p_heat_in = 3600.0 * watt  # category: illustrative
-delta_t_overshoot_max = 2.0 * kelvin  # category: illustrative (2 K rise headroom)
-delta_t_stall_bess = 10.0 * second  # category: illustrative (10 s unmitigated heating)
-
-# ┌── 2. EXECUTE: evidence horizons, mug intent lapse, latch contact, thermal ──
+# ┌── 2. EXECUTE: evidence horizons, mug intent lapse, latch contact ───────────
 # Mug on the conveyor: untracked and tracked target-evidence horizons. Both
 # horizons charge the 3 mm initial error against the 15 mm tolerance.
 grasp_error_budget = (AISLE.grasp_tolerance - AISLE.grasp_initial_error).to(millimeter)
@@ -205,12 +198,6 @@ t_arm_stop = latch_profile["t_arm_stop"]
 delta_x_unbounded = (AISLE.v_latch_approach * delta_t_stall_arm).to(millimeter)
 f_unbounded = calc_contact_force(AISLE.k_latch, delta_x_unbounded)
 
-# Class 3 contrast: lumped thermal plant.
-thermal_res = calc_process_thermal_runaway_lease(p_heat_in, c_thermal_bess, delta_t_overshoot_max)
-dt_dt_bess = thermal_res["rate_of_rise"]
-tau_thermal_overshoot = thermal_res["tau_lease"]
-delta_temp_after_stall_bess = (dt_dt_bess * delta_t_stall_bess).to(kelvin)
-
 # ┌── 3. GUARD: canon values quoted in the prose ──────────────────────────────
 check(abs(tau_ev_untracked.magnitude - 60.0) < 1e-6, "Untracked mug horizon is 60 ms")
 check(abs(tau_ev_tracked.magnitude - 219.09) < 5e-3, "Tracked mug horizon is 219 ms")
@@ -233,9 +220,6 @@ check(abs(x_remaining.magnitude - 0.1525) < 5e-5, "Latch compression left is 0.1
 check(abs(a_arm_needed.magnitude - 2.95) < 5e-3, "Arm stop premise is about 3 m/s^2 (2.95)")
 check(abs(t_arm_stop.magnitude - 10.0) < 0.5, "Arm stop takes about 10 ms")
 check(abs(f_unbounded.to(newton).magnitude - 2400.0) < 1.0, "Unbraked contact model")
-check(abs(dt_dt_bess.to(kelvin / second).magnitude - 4.0) < 0.1, "Thermal rise rate")
-check(abs(tau_thermal_overshoot.to(millisecond).magnitude - 500.0) < 0.1, "Thermal overshoot horizon")
-check(abs(delta_temp_after_stall_bess.to(kelvin).magnitude - 40.0) < 0.1, "Lumped 10 s rise")
 
 # ┌── 4. OUTPUT: rendered values ──────────────────────────────────────────────
 class IntentLeaseArchetypes:
@@ -283,14 +267,6 @@ class IntentLeaseArchetypes:
     f_unbounded_n_str = fmt_force(f_unbounded, precision=0, commas=True)
     # Permission loop
     f_permission_str = fmt_frequency(RM.permission_rate, unit=ureg.kHz, precision=0)
-    # Class 3 contrast
-    c_thermal_str = fmt_heat_capacity(c_thermal_bess, unit=joule / kelvin, precision=0)
-    p_heat_str = fmt_power(p_heat_in, unit=watt, precision=0)
-    dt_overshoot_str = fmt_temperature(delta_t_overshoot_max, unit=kelvin, precision=0)
-    t_stall_bess_str = fmt_latency(delta_t_stall_bess, unit=second, precision=0)
-    dt_dt_ks_str = fmt_temperature_rate(dt_dt_bess, unit=kelvin / second, precision=0)
-    tau_bess_ms_str = fmt_latency(tau_thermal_overshoot, unit=millisecond, precision=0)
-    delta_t_rise_k_str = fmt_temperature(delta_temp_after_stall_bess, unit=kelvin, precision=0)
 ```
 
 In physical manipulation, an isolated coordinate is incomplete. In Gibson's sense, an affordance is an action-relative relation among geometry, robot reach, and contact limits [@gibson1979ecological]. The intent proposal therefore requests a target pose in $SE(3)$, the space of three-dimensional positions and orientations, and a **task tolerance region**\index{Tolerance region!3D spatial}\index{Intent record!spatial tolerance region} within which the task counts as complete. This tolerance differs from the estimator's covariance, which describes uncertainty about the target. For the machine's mug grasp, the approved task profile allows `{python} IntentLeaseArchetypes.r_tol_str` of translational error. A controller can then terminate within that region rather than integrating forever toward an exact noisy point; it still checks that estimated target error fits inside the tolerance.
@@ -311,14 +287,13 @@ The intent lease is a different object. It bounds how long a target stays justif
 
 ::: {#nbk-intent-lease-duration-collision-exposure-tradeoff-across .callout-notebook title="Lapsed authority and physical response"}
 
-The three models below answer different questions. A stopping calculation needs the total delay to brake onset and the deceleration available from the *current* state.
+The two models below answer different questions. A stopping calculation needs the total delay to brake onset and the deceleration available from the *current* state.
 
 1. **The mug intent lapse:** The arm reaches for the red mug under an intent admitted without local tracking. At `{python} IntentLeaseArchetypes.v_conveyor_str` the conveyor consumes the `{python} IntentLeaseArchetypes.err_budget_str` between the `{python} IntentLeaseArchetypes.e0_str` initial error and the `{python} IntentLeaseArchetypes.r_tol_str` tolerance in `{python} IntentLeaseArchetypes.tau_untracked_str`, so the target's evidence expires then, as the mug-handle belief record of @sec-memory-spatial-state-schema states. Suppose the application processor stalls. A target held for `{python} IntentLeaseArchetypes.t_stall_intent_str` by the stalled proposer would sit `{python} IntentLeaseArchetypes.err_stalled_untracked_str` from the mug. The lease does not wait for the proposer. At `{python} IntentLeaseArchetypes.tau_untracked_str` the intent expires, the arm's tracking authority ends, and the arm enters a stop matched to its current state, with onset within `{python} IntentLeaseArchetypes.t_arm_onset_str` (one permission tick, one bus cycle, and the brake onset). The chunk lease of @sec-nervous-cadences is the backstop if that expiry is never observed. Under local tracking the same `{python} IntentLeaseArchetypes.t_stall_intent_str` leaves the target `{python} IntentLeaseArchetypes.err_stalled_tracked_str` off, inside the tolerance, because the tracked horizon derived in @sec-intent-goals-expire is `{python} IntentLeaseArchetypes.tau_tracked_str`; tracking is what makes the `{python} IntentLeaseArchetypes.f_intent_str` intent refresh viable.
 2. **The arm at the cage door:** At the guarded approach speed of `{python} IntentLeaseArchetypes.v_latch_str` against the `{python} IntentLeaseArchetypes.k_latch_str` strike plate of the cage door, modeled force rises at `{python} IntentLeaseArchetypes.df_dt_nms_str`. A `{python} IntentLeaseArchetypes.f_trip_str` tripwire and `{python} IntentLeaseArchetypes.t_contact_str` contact-loop response yield `{python} IntentLeaseArchetypes.f_at_brake_onset_n_str` **when the brake command begins**; force keeps rising while the arm decelerates. Staying under the `{python} IntentLeaseArchetypes.f_lim_str` latch limit leaves only `{python} IntentLeaseArchetypes.x_remaining_str` of further compression, so the arm must decelerate at about `{python} IntentLeaseArchetypes.a_arm_str` and stop within about `{python} IntentLeaseArchetypes.t_arm_stop_str`. Whether the arm can brake that hard from the approach is an open premise, which only arm stopping trials can settle. Unbraked motion for `{python} IntentLeaseArchetypes.t_stall_arm_str` advances `{python} IntentLeaseArchetypes.delta_x_unbounded_mm_str` and gives `{python} IntentLeaseArchetypes.f_unbounded_n_str` in the linear-spring model, far past the latch limit.
-3. **A process-plant contrast:** A heated process has no braking distance, but its setpoint's authority lapses the same way, spent as temperature rather than travel. For an illustrative lumped capacitance of `{python} IntentLeaseArchetypes.c_thermal_str` and uncompensated `{python} IntentLeaseArchetypes.p_heat_str` input, temperature rises at `{python} IntentLeaseArchetypes.dt_dt_ks_str`. A chosen `{python} IntentLeaseArchetypes.dt_overshoot_str` task overshoot allowance is consumed in `{python} IntentLeaseArchetypes.tau_bess_ms_str`, so a heater setpoint whose proposer stalls must lose authority well inside that interval; `{python} IntentLeaseArchetypes.t_stall_bess_str` at the same net heat input yields a `{python} IntentLeaseArchetypes.delta_t_rise_k_str` modeled rise.
 :::
 
-These three examples clarify the division of authority. High-level reasoning can propose a target, time window, and effort ceiling. The independent permission path determines which limits are admissible from measured state, configured ceilings, and a feasible fallback. Local control then tracks only an admitted proposal and withdraws authority on invalid evidence or expiry. This resembles the priority separation of the **subsumption architecture**\index{Subsumption architecture}[^fn-ai-subsumption-intent] [@brooks1986robust].
+These two examples clarify the division of authority. High-level reasoning can propose a target, time window, and effort ceiling. The independent permission path determines which limits are admissible from measured state, configured ceilings, and a feasible fallback. Local control then tracks only an admitted proposal and withdraws authority on invalid evidence or expiry. This resembles the priority separation of the **subsumption architecture**\index{Subsumption architecture}[^fn-ai-subsumption-intent] [@brooks1986robust].
 
 [^fn-ai-subsumption-intent]: **Subsumption architecture principles**\index{Architecture!subsumption}\index{Control!subsumption}: Rodney Brooks's subsumption architecture decomposed autonomous robotics into asynchronous, priority-arbitrated behavioral layers operating on sensory feedback. Here, the learned layer proposes a bounded target while an independent controller checks permission and executes a validated response on expiry.
 

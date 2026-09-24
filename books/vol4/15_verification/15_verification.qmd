@@ -99,7 +99,7 @@ A safety case does not rely on subjective assertions; every high-level claim mus
 # │      calc_voltage_droop for the rail; tank arithmetic by conservation of volume.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.core.units import ureg, L, kilogram, microsecond, millisecond, second, meter, millimeter
+from mlsysim.core.units import ureg, kilogram, microsecond, millisecond, second, meter, millimeter
 from mlsysim.physics.robotics import (
     calc_safe_stopping_distance,
     calc_max_permitted_velocity,
@@ -115,7 +115,6 @@ from mlsysim.fmt import (
     fmt_voltage,
     fmt_current,
     fmt_temperature,
-    fmt_water,
     fmt_mass,
     check,
 )
@@ -167,14 +166,6 @@ class RackEndVerification:
     )  # restricted-mode aisle speed on inspected floors, below the inspected-floor ceiling; scenario assumption; category: chosen
     late_onset = 30 * millisecond  # example late brake onset (STL margin); scenario assumption; category: illustrative
     queue_delay = 100 * millisecond  # unbudgeted ISP-to-backbone queue (fallacy); scenario assumption; category: illustrative
-    # Class 3 contrast: buffer tank behind a flow regulator (no registry entry)
-    v_weir = 95.0 * ureg.liter  # scenario assumption; category: illustrative
-    v_trip = 88.0 * ureg.liter  # scenario assumption; category: chosen
-    q_in = 1.50 * ureg.liter / second  # surge inflow; scenario assumption; category: illustrative
-    q_out = 0.10 * ureg.liter / second  # tripped-pump discharge; scenario assumption; category: illustrative
-    t_detect = 210 * millisecond  # tank detection bound; scenario assumption; category: illustrative
-    t_valve = 1.20 * second  # isolation-valve seating; scenario assumption; category: illustrative
-    delay_probe = 150 * millisecond  # bus delay applied to both plants; scenario assumption; category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     overhead = (delta_loc + delta_margin + eps_track).to(millimeter)
@@ -227,16 +218,6 @@ class RackEndVerification:
     rho_late = (budget - stop_late).to(millimeter)
     queue_extra = (v_aisle * queue_delay).to(millimeter)
     queue_breach = (queue_extra - spare).to(millimeter)
-    # Class 3 contrast
-    tank_margin = (v_weir - v_trip).to(ureg.liter)
-    q_net = (q_in - q_out).to(ureg.liter / second)
-    inflow_per_s = (q_net * (1 * second)).to(L)  # volume the net inflow adds each second
-    t_breach = (tank_margin / q_net).to(second)
-    t_protect = (t_detect + t_valve).to(second)
-    t_early = (t_breach - t_protect).to(second)
-    delay_volume = (q_net * delay_probe).to(ureg.liter)
-    delay_distance = (v_aisle * delay_probe).to(millimeter)
-    delay_vs_spare = float((delay_distance / spare).to("dimensionless").magnitude)
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(onset_bound.magnitude - 82.0) < 1e-9, "Canon: brake onset 82 ms after the last valid renewal.")
@@ -257,8 +238,6 @@ class RackEndVerification:
     check(budget_insp > d_clear, "At the aisle speed the inspected-floor budget must exceed the clear distance.")
     check(mu_insp < mu_min < mu_dry, "Dry floor supports a_brake; the inspected floor does not.")
     check(queue_extra > spare, "The unbudgeted queue must exhaust the spare.")
-    check(abs(t_breach.magnitude - 5.0) < 1e-9 and t_protect < t_breach, "Tank: 5.0 s to breach; protection first.")
-    check(delay_distance > spare, "A 150 ms delay must exceed the machine's spare.")
     check(abs(overhead.magnitude - 190.0) < 1e-6, "Canon: fixed overhead 190 mm.")
     check(rho_late.magnitude < 0, "A late onset must drive the distance margin negative.")
     check(abs(v_takeover.to(meter / second).magnitude - 1.2) < 1e-9, "Canon: in-loop takeover speed 1.2 m/s.")
@@ -338,18 +317,6 @@ class RackEndVerification:
     queue_delay_str = fmt_latency(queue_delay, unit=millisecond, precision=0)
     queue_extra_str = fmt_length(queue_extra, unit=millimeter, precision=0)
     queue_breach_str = fmt_length(queue_breach, unit=millimeter, precision=1)
-    v_weir_str = fmt_water(v_weir)
-    v_trip_str = fmt_water(v_trip)
-    tank_margin_str = fmt_water(tank_margin)
-    inflow_per_s_str = fmt_water(inflow_per_s, precision=2)
-    t_breach_str = fmt_latency(t_breach, unit=second, precision=None)
-    t_detect_str = fmt_latency(t_detect, unit=millisecond, precision=0)
-    t_valve_str = fmt_latency(t_valve, unit=second, precision=2)
-    t_early_str = fmt_latency(t_early, unit=second, precision=2)
-    delay_probe_str = fmt_latency(delay_probe, unit=millisecond, precision=0)
-    delay_volume_str = fmt_water(delay_volume, precision=2)
-    delay_distance_str = fmt_length(delay_distance, unit=millimeter, precision=0)
-    delay_vs_spare_str = fmt(delay_vs_spare, precision=1)
 ```
 
 Consider the warehouse mobile manipulator running its aisle at `{python} RackEndVerification.v_aisle_str` (chosen; see the Reader Guide) toward a rack end where a person may step out. Weeks of clean runs at that speed say little about four faults the design claims to contain: a proposer that renews its lease and then stalls (F1), an observation that reaches the permission path with a stale or corrupt capture time (F2), a burst of lost EtherCAT frames between the permission path and the drives (F3), and a sag of the `{python} RackEndVerification.rail_nominal_str` control rail when an inference burst coincides with the drive motors (F4). None of them shows in an operating log, because each leaves the machine running normally until the moment a stop is needed. The lease catches a stall, the evidence-epoch check a stale capture time, the drive's fieldbus watchdog a lost frame, and the permission path's undervoltage monitor, on its own held-up rail, a sag of the shared one. Each fault is injected at the rack end, together with the four authority faults that @sec-intervention-authority-log hands over (A1–A4), and every stopping trial is scored against the onset and distance bounds that @sec-verification-operating-envelope derives from the stopping budget.
@@ -377,8 +344,6 @@ Defining the boundary of the operating envelope requires deriving limits from fi
 Two oracle bounds follow, and every stopping trial in this chapter is scored against both. Brake onset must come no later than `{python} RackEndVerification.onset_bound_str` after the last valid renewal, the lease path of @sec-nervous-cadences: the `{python} RackEndVerification.t_lease_str` lease, one `{python} RackEndVerification.t_tick_str` tick of the permission loop, one `{python} RackEndVerification.t_bus_str` bus cycle, and `{python} RackEndVerification.t_act_str` of brake onset. The rail faults of F4 take their onset from the undervoltage flag instead. The stop, measured by instruments independent of the machine, must end within the distance allowed from the same event the fault is referenced to. For a fault that follows a target's appearance, that distance is the `{python} RackEndVerification.budget_str` the budget allows. A stalled proposer offers no target appearance, so its stop, like its onset, is measured from the last valid renewal, and the travel during the `{python} RackEndVerification.onset_bound_str` before brake onset, the resident stop, and the tracking inset give `{python} RackEndVerification.f1_aisle_stop_bound_str` at the aisle speed.
 
 Neither bound depends on the proposer. A chunk policy that stalls cannot delay brake onset, because the stop begins when the lease expires rather than when the proposer notices, so a test of F1 measures the permission path and not the policy. The budget protects a static obstacle at the clear distance, and a trial against a static target says nothing about a person still walking toward the machine, a premise the site's crossing rule carries (@sec-memory-belief-through-occlusion).
-
-A flow regulator that keeps a buffer tank below its overflow weir, the Class 3 contrast for this part, verifies a different quantity. Its oracle is volume, not distance. With the level at an `{python} RackEndVerification.v_trip_str` trip point, `{python} RackEndVerification.tank_margin_str` below a `{python} RackEndVerification.v_weir_str` weir, and a net inflow of `{python} RackEndVerification.inflow_per_s_str` each second after an upstream valve fails and a discharge pump trips, the tank overflows in `{python} RackEndVerification.t_breach_str`. A protective path that detects in `{python} RackEndVerification.t_detect_str` and seats its isolation valve in `{python} RackEndVerification.t_valve_str` finishes `{python} RackEndVerification.t_early_str` early. The same `{python} RackEndVerification.delay_probe_str` bus delay that would cost the mobile manipulator `{python} RackEndVerification.delay_distance_str`, `{python} RackEndVerification.delay_vs_spare_str` times its reserve, adds `{python} RackEndVerification.delay_volume_str` to the tank. The regulator's fault list therefore injects sustained delays and failed valves, while the machine's must resolve tens of milliseconds.
 
 On the mobile manipulator, separate minimum and maximum values for individual variables fail to capture the true operating boundary, because physical and computational dimensions are coupled. The `{python} RackEndVerification.v_aisle_str` aisle speed and an inspected floor with friction `{python} RackEndVerification.mu_insp_str` each lie inside their declared ranges, yet together they fall outside the envelope. On that floor friction, not the brake, sets the credible deceleration, which drops to `{python} RackEndVerification.a_insp_str`. The resident stop lengthens, and the budget at `{python} RackEndVerification.v_aisle_str` grows to `{python} RackEndVerification.budget_insp_str`, past the `{python} RackEndVerification.d_clear_str` clear distance; the speed boundary on that floor is `{python} RackEndVerification.ceiling_insp_str`, which is why the envelope's restricted point sits below it. Payload couples less visibly. It enters no term of the budget, but the credible deceleration was declared for the loaded machine, so a campaign run only unloaded never tests the value the budget rests on. The true operating boundary is a surface in state, parameter, and latency space, and a valid verification suite must probe that combined surface rather than isolated scalar limits.
 
@@ -560,7 +525,7 @@ Testing the two-processor implementation\index{Two-processor implementation!faul
 - **Handover Stall Injection (A3):** The testbed freezes the remote assistant's input during `PEND` and drops the acknowledgment frames at both speeds, and the start of the fallback is timed at the drive rather than in the arbiter's log.
 - **Replay and Forgery Injection (A4):** The testbed replays a captured `veto_path`, `manual_drive`, or `accept_item` packet and sends another with a corrupted authentication tag.
 
-::: {#fig-15-hardware-fault-injection fig-env="figure" fig-pos="t" fig-cap="**Multi-channel hardware fault injection and containment timing**: Multi-signal logic trace of a physical fault-injection experiment on target hardware. At $t = 20\,\text{ms}$, an ADC sensor line freezes high and the intent lease is dropped. The safety monitor asserts a non-maskable interrupt (Safety NMI) at $24\,\text{ms}$, triggering a drive state check at $26\,\text{ms}$ that confirms the safety microcontroller's independent takeover. As physical manifold pressure rises toward the critical containment limit ($16.5\,\text{bar}$), the enforcer's emergency venting/braking arrests the transient, peaking safely at $16.2\,\text{bar}$ and stabilizing at $43\,\text{ms}$, comfortably inside the $45\,\text{ms}$ physical deadline." fig-alt="Oscilloscope-style multi-signal trace showing five tracks across 50 milliseconds: ADC Sensor freezing at 20 ms, Intent Lease dropping at 20 ms, Safety NMI asserting at 24 ms, Permission/Drive switching to safe takeover at 26 ms, and Manifold Pressure peaking at 16.2 bar below the 16.5 bar red dashed limit before coming to rest at 43 ms before the 45 ms deadline."}
+::: {#fig-15-hardware-fault-injection fig-env="figure" fig-pos="t" fig-cap="**Multi-channel hardware fault injection and containment timing**: Multi-signal logic trace of a physical fault-injection experiment on target hardware. At $t = 20\,\text{ms}$, an ADC sensor line freezes high and the intent lease is dropped. The safety monitor asserts a non-maskable interrupt (Safety NMI) at $24\,\text{ms}$, triggering a drive state check at $26\,\text{ms}$ that confirms the safety microcontroller's independent takeover. As actuator joint torque rises toward the critical containment limit ($165\,\text{N}\cdot\text{m}$), the enforcer's emergency braking arrests the transient, peaking safely at $162\,\text{N}\cdot\text{m}$ and stabilizing at $43\,\text{ms}$, comfortably inside the $45\,\text{ms}$ physical deadline." fig-alt="Oscilloscope-style multi-signal trace showing five tracks across 50 milliseconds: ADC Sensor freezing at 20 ms, Intent Lease dropping at 20 ms, Safety NMI asserting at 24 ms, Permission/Drive switching to safe takeover at 26 ms, and Actuator Torque peaking at 162 N·m below the 165 N·m red dashed limit before coming to rest at 43 ms before the 45 ms deadline."}
 ![](images/svg/fig15_hardware_fault_injection.svg){width="95%"}
 :::
 
@@ -570,7 +535,7 @@ To see how target hardware enforces containment under electrical and sensory dis
 - **Track 2 (Intent Lease)**: Concurrently, the unprivileged proposal path drops its periodic keep-alive heartbeat at $t = 20\,\text{ms}$, forcing the software intent lease to transition from valid (blue) to expired (gray).
 - **Track 3 (Safety NMI)**: Four milliseconds later ($t = 24\,\text{ms}$), the discrete safety microcontroller detects the expired lease and sensor plausibility breach, asserting a hardware Non-Maskable Interrupt (NMI) line (red step) to preempt background task scheduling.
 - **Track 4 (Permission / Drive Line)**: Following the lease drop, the arbiter immediately selects the resident fallback rung (amber). At $t = 26\,\text{ms}$, the MCU performs an independent drive status check, confirming that drive inverter gates have switched exclusively to the hardware-isolated safe takeover path (green).
-- **Track 5 (Physical Plant State — Manifold Pressure)**: As the actuator continues moving under stored momentum, physical manifold pressure climbs from its nominal operating baseline toward the critical structural containment threshold ($16.5\,\text{bar}$, red dashed line). Under the active brake and relief response, the pressure trajectory peaks at $16.2\,\text{bar}$ (a safe $300\,\text{mbar}$ margin) before decaying back to rest at $t = 43\,\text{ms}$ (green dot)—arriving two full milliseconds ahead of the hard physical deadline at $t = 45\,\text{ms}$.
+- **Track 5 (Physical Plant State — Actuator Torque)**: As the actuator continues moving under stored momentum, joint torque climbs from its nominal operating baseline toward the critical structural containment threshold ($165\,\text{N}\cdot\text{m}$, red dashed line). Under the active brake response, the torque trajectory peaks at $162\,\text{N}\cdot\text{m}$ (a safe $3\,\text{N}\cdot\text{m}$ margin) before decaying back to rest at $t = 43\,\text{ms}$ (green dot)—arriving two full milliseconds ahead of the hard physical deadline at $t = 45\,\text{ms}$.
 
 Recording the state trajectory, the detector identity, the refusal timestamp, and the time to restore the bounded state requires instrumentation electrically and logically independent of the machine, such as optical shaft encoders and high-speed cameras on isolated digitizers. An onboard logging daemon is corrupted by the very failure it tries to capture, because a faulted processor or a saturated bus delays log serialization.[^fn-hw-trace-instrumentation] Independent measurement also rejects false passes, in which the machine survived for reasons absent from the safety claim. An injected lost-frame fault can trip an unmonitored thermal breaker or an auxiliary ground loop that drops power to the drives, so that the spring-applied brake stops the base inside the budget while the software enforcer has deadlocked in a priority inversion. An oracle that inspects only stopping distance scores that trial a pass. The test framework must verify that the enforcer path named in the safety claim executed the corrective action.
 
