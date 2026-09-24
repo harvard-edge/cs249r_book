@@ -101,13 +101,33 @@ To ensure that every extension functions harmoniously with the rest of the frame
 3. **Autograd Transparency:** Operations that participate in backpropagation must explicitly define their mathematical derivatives via `Function.forward` and `Function.backward`.
 4. **Graceful Fallback:** If a required compiler, runtime library, or physical GPU accelerator is unavailable, the extension must fall back cleanly to a pure-Python or NumPy reference implementation rather than crashing on import.
 
-TinyTorch provides a canonical starter template in `tinytorch/extensions/template.py` that demonstrates all four properties. When implementing a custom autograd operator, subclass `Function` and implement the forward and backward transformations:
+TinyTorch provides a canonical starter template in `tinytorch/extensions/template.py` that demonstrates all four properties across every native boundary:
+
+1. **Autograd Function Boundary:** When implementing a custom autograd operator, subclass `Function` and implement the forward and backward transformations:
 
 {{< include _listings/21_extensions/CustomScaledShift.qmd >}}
 
-When authoring a custom neural network module with learnable parameters, subclass `Layer` and register its parameter tensors:
+2. **Architectural Layer Boundary:** When authoring a custom neural network module with learnable parameters, subclass `Layer` and register its parameter tensors:
 
 {{< include _listings/21_extensions/CustomResidualBlock.qmd >}}
+
+3. **Training Dynamics Boundary:** When modifying parameter gradients prior to the optimizer step (such as threshold clipping or spectral projection), wrap parameter updates in an in-place transformation:
+
+{{< include _listings/21_extensions/CustomGradientTransform.qmd >}}
+
+4. **Silicon Kernel Boundary:** When accelerating operations via compiled C++, Triton, or GPU APIs, encapsulate native dispatch behind runtime feature detection with a transparent pure-NumPy fallback:
+
+{{< include _listings/21_extensions/custom_accelerated_op.qmd >}}
+
+#### The 5-Step Extension Recipe
+
+Adding a new capability to TinyTorch follows an explicit five-step protocol:
+
+1. **Identify the Boundary:** Map your optimization to `Function` (math/memory), `Layer` (adapters/primitives), `Optimizer` (gradients/moments), or C-ABI `ctypes` / GPU runtime (silicon).
+2. **Copy the Template:** Duplicate `tinytorch/extensions/template.py` to `tinytorch/extensions/<your_feature>.py`.
+3. **Implement the Contract:** Satisfy the Golden Invariants—handle both `Tensor` and `np.ndarray`, define backward passes for differentiable operations, and fall back to NumPy if hardware compilers or libraries are missing.
+4. **Author Unit Tests:** Duplicate `tinytorch/tests/extensions/test_template.py` to `tinytorch/tests/extensions/test_<your_feature>.py` and verify numerical parity against an unoptimized NumPy reference (`np.allclose(out, ref, atol=1e-5)`).
+5. **Register Public Symbols:** Export your classes and functional wrappers in `tinytorch/extensions/__init__.py`.
 
 ---
 

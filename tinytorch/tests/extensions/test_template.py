@@ -58,3 +58,13 @@ def test_custom_accelerated_op_fallback():
     out_np = custom_accelerated_op(x_np)
     assert isinstance(out_np, np.ndarray)
     np.testing.assert_allclose(out_np, [0.0, 0.0, 3.0])
+
+
+def test_custom_gradient_transform():
+    from tinytorch.extensions.template import CustomGradientTransform
+    transform = CustomGradientTransform(clip_value=0.5)
+    p = Tensor(np.array([1.0, 2.0], dtype=np.float32), requires_grad=True)
+    p.grad = np.array([-1.2, 0.8], dtype=np.float32)
+    transform.transform_gradients([p])
+    np.testing.assert_allclose(p.grad, [-0.5, 0.5])
+
