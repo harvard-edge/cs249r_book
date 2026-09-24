@@ -58,6 +58,8 @@ Consider one trajectory on a shared node, forty turns into a task it was expecte
 
 Each of the four events asks for something the model cannot supply. Pausing needs a place outside the model where a request to stop can land and be honored at a safe moment. Yielding to the interactive tenant needs a scheduler that can see which trajectories are waiting and which are running. Holding the table drop needs a gate between the proposal and the tool. Stopping the unproductive spend needs a meter the model can neither read nor reset. Invariant closure (principle \ref{pri-invariant-closure}) already says where such bounds belong: in the runtime, below the model, enforced whatever the model proposes. Part II applied that rule to what the next call sees, and Part III applied it to what a single action may touch (@sec-vol3-tool-calling, @sec-vol3-sandboxes). Part IV applies it to the loop itself, and the component that carries it is the harness.
 
+The agent loop is frequently misconstrued through the classical metaphor of a CPU instruction fetch-decode-execute cycle, with the foundation model cast as an arithmetic logic unit (ALU). This metaphor breaks down across every physical systems dimension. In an actual computer systems architecture, instructions are deterministic, execution units are bounded by microarchitectural hazards, and instruction retirement takes single-digit nanoseconds. An autoregressive foundation model, by contrast, is a stochastic inference engine whose execution is fundamentally partitioned into two hardware regimes: compute-bound prefill over unmatched prompt tokens, and memory-bandwidth-bound autoregressive decoding where every emitted token requires streaming tens of gigabytes of parameter weights and key-value cache lines from High-Bandwidth Memory (HBM) to on-chip SRAM. Tool execution takes place not in an execution unit, but across IPC and network RPC boundaries into isolated sandboxes that run for milliseconds to minutes. Rather than a CPU instruction loop, the agent loop is an MLSys orchestrator that cycles across a deterministic 9-state pipeline: ingestion, prefix match, prefill, decode, actuation framing, RPC dispatch, tool execution, observation streaming, and context compaction.
+
 ::: {#dfn-agent-harness .callout-definition title="Agent harness"}
 
 ***Agent harness***\index{Agent harness!definition} is the runtime component that owns the agent loop for one trajectory, assembling each model call, interpreting the reply, deciding whether and when each proposed tool call is dispatched, and keeping the record through which anything outside the loop can inspect, pause, bound, or stop the trajectory.
@@ -241,7 +243,7 @@ To support thousands of concurrent agent sessions without exhausting host resour
 $$
 M_{\text{KV}} = 2 \times H \times N_{\text{kv}} \times D \times L \times \text{sizeof(fp16)} = 2 \times 64 \times 8 \times 128 \times 32{,}768 \times 2 \approx 8.59 \text{ GB}
 $$
-The context token buffer occupies:
+Because physical HBM capacity is strictly bounded per accelerator SKU ($80\text{ GB}$ on an NVIDIA H100 SXM5 and $192\text{ GB}$ on a Blackwell B200), concurrently serving hundreds of agent trajectories will rapidly exhaust accelerator memory if dormant KV caches remain pinned.[^fn-hbm-capacity-bounds] The context token buffer occupies:
 $$
 M_{\text{tokens}} = L \times 4 \text{ bytes} = 32{,}768 \times 4 = 131{,}072 \text{ bytes} \approx 128 \text{ KB}
 $$
@@ -254,7 +256,7 @@ $$
 M_{\text{control}} = 10{,}000 \times 256 \text{ bytes} = 2.56 \times 10^6 \text{ bytes} \approx 2.44 \text{ MB}
 $$
 
-The ACB achieves this radical memory decoupling by acting as a descriptor holding indirection handles to external physical resources, as detailed in @tbl-vol3-acb-pointers.
+The ACB achieves this radical memory decoupling by acting as a descriptor holding indirection handles to external physical resources, indexing non-contiguous KV-cache pages via PagedAttention block tables.[^fn-paged-attention-overhead] When an agent enters an extended tool wait or approval escrow, retaining its $8.59\text{ GB}$ KV cache on GPU pins memory that could serve active batches; migrating these blocks over PCIe to host DRAM frees accelerator capacity, though migration is bounded by interconnect bandwidth.[^fn-kv-eviction-bandwidth] As detailed in @tbl-vol3-acb-pointers:
 
 | Pointer Reference   | Target Subsystem / Memory Tier | Physical Storage Location       | Indirection & Attenuation Invariant                                                             |
 |:--------------------|:-------------------------------|:--------------------------------|:------------------------------------------------------------------------------------------------|
@@ -265,16 +267,22 @@ The ACB achieves this radical memory decoupling by acting as a descriptor holdin
 
 : **Agent Control Block Memory Indirection Architecture**: Memory tiers, physical hardware boundaries, and supervisory isolation invariants for ACB descriptor pointer fields. {#tbl-vol3-acb-pointers}
 
-The architectural trade-offs between thread-per-agent, async coroutines, and ACB process tables are compared in @tbl-vol3-concurrency-models.
+The architectural trade-offs between thread-per-agent, async coroutines, and ACB descriptor registries are compared in @tbl-vol3-concurrency-models.
 
-| Systems Dimension             | Synchronous Thread-per-Agent                                                 | Cooperative Event-Driven Yielding                                       |
-|:------------------------------|:-----------------------------------------------------------------------------|:------------------------------------------------------------------------|
-| **Worker Concurrency**        | Bounded by OS thread limits ($10^2\text{--}10^3$ threads)                    | Bounded only by host memory descriptors ($10^4\text{--}10^5$ ACBs)      |
-| **Idle Memory Footprint**     | $2\text{--}8\text{ MiB}$ per idle trajectory (thread stack + kernel structs) | $64\text{--}128\text{ KiB}$ per idle trajectory (serialized ACB in RAM) |
-| **Signal Interception**       | Blocked in kernel syscalls; requires `EINTR` retry handling                  | Immediate; signal bits evaluated at checkpoint before thread release    |
-| **Accelerator Serving Slots** | Pinned or leaked during tool execution; poor GPU utilization                 | Released immediately; GPU resources service active decode queues        |
-| **Failure Blast Radius**      | Worker crash destroys thread stack and leaves sandbox orphaned               | ACB outlives the worker; crash recovery needs a durable log             |
+| Systems Dimension             | Synchronous Thread-per-Agent                                                | Cooperative Event-Driven Yielding                                      |
+|:------------------------------|:----------------------------------------------------------------------------|:-----------------------------------------------------------------------|
+| **Worker Concurrency**        | Bounded by OS thread limits ($10^2\text{--}10^3$ threads)                   | Bounded only by host memory descriptors ($10^4\text{--}10^5$ ACBs)     |
+| **Idle Memory Footprint**     | $2\text{--}8\text{ MB}$ per idle trajectory (thread stack + kernel structs) | $64\text{--}128\text{ KB}$ per idle trajectory (serialized ACB in RAM) |
+| **Signal Interception**       | Blocked in kernel syscalls; requires `EINTR` retry handling                 | Immediate; signal bits evaluated at checkpoint before thread release   |
+| **Accelerator Serving Slots** | Pinned or leaked during tool execution; poor GPU utilization                | Released immediately; GPU resources service active decode queues       |
+| **Failure Blast Radius**      | Worker crash destroys thread stack and leaves sandbox orphaned              | ACB outlives the worker; crash recovery needs a durable log            |
 : **Synchronous versus Cooperative Execution Architecture**: Quantitative comparison of concurrency limits, memory footprint, signal responsiveness, and fault recovery across agent execution models. {#tbl-vol3-concurrency-models}
+
+[^fn-hbm-capacity-bounds]: **High-Bandwidth Memory Capacity Boundaries**: While HBM delivers multi-terabyte-per-second memory bandwidth, physical capacity remains constrained ($80\text{ GB}$ on H100 SXM5 and $192\text{ GB}$ on B200). In multi-agent deployments serving dozens of concurrent trajectories, memory pressure forces aggressive eviction of inactive KV blocks rather than persistent GPU retention. Runtimes employ radix tree cache sharing to retain common prefix prompts in HBM while paging transient agent observation buffers to host memory.
+
+[^fn-paged-attention-overhead]: **PagedAttention Block Table Overhead**: Decoupling virtual sequence token indices from physical GPU memory requires traversing block tables mapped across high-bandwidth memory. For a 16-token block size, pointer translation adds less than 1.5 percent kernel execution overhead compared to contiguous allocations. However, severe block table fragmentation or excessive indirection across multi-turn agent trees can degrade TLB efficiency and memory burst alignment.
+
+[^fn-kv-eviction-bandwidth]: **Host Device Eviction Bandwidth**: Migrating inactive KV-cache blocks from accelerator HBM to host DRAM over a PCIe 5.0 $\times 16$ interconnect is bounded by an effective bidirectional transfer rate of approximately $63\text{ GB/s}$. Offloading an $8.59\text{ GB}$ KV cache for a 32,768-token trajectory consumes roughly $136\text{ ms}$ of interconnect time. Consequently, the harness only offloads cache blocks when the anticipated tool execution latency exceeds the round-trip direct memory access (DMA) transfer overhead.
 
 ## Trajectory States {#sec-vol3-controlplane-statemachine}
 
@@ -357,27 +365,55 @@ The guard costs a lock, a set lookup, and an append, which is negligible next to
 
 ### Formal state transition invariants
 
-Formally, the trajectory state space is defined as the finite set:
+The execution cycle of an agent loop is not an instruction fetch-decode-execute cycle of a CPU. Rather, the foundation model is an accelerator-backed stochastic inference engine operating under physical memory hierarchy constraints. Formally, the inner actuation cycle of the agent loop is defined as a 9-state MLSys state machine:
 $$
-\mathcal{S} = \{\text{INIT}, \text{RUNNABLE}, \text{RUNNING}, \text{WAIT\_IO}, \text{WAIT\_ESCROW}, \text{PREEMPTED}, \text{COMPLETED}, \text{FAILED}, \text{TERMINATED}\}
+\mathcal{S}_{\text{loop}} = \{\text{INGESTION}, \text{PREFIX\_MATCH}, \text{PREFILL}, \text{DECODE}, \text{ACTUATION\_FRAMING}, \text{RPC\_DISPATCH}, \text{TOOL\_EXEC}, \text{OBSERVATION\_INGEST}, \text{COMPACTION\_PERSIST}\}
 $$
-State transitions occur according to an explicit transition function:
+augmented by supervisory lifecycle states $\{\text{PAUSED}, \text{AWAITING\_APPROVAL}, \text{FINALIZING}, \text{COMPLETED}, \text{FAILED}, \text{CANCELED}\}$. Transitions occur according to an explicit transition function:
 $$
 s' = \delta(s, e, g) \quad \text{where} \quad g(\text{ACB}, e) = \mathbf{true}
 $$
-where $e$ is an incoming lifecycle event and $g$ is a guard predicate evaluating ACB invariants. @Lst-vol3-acb-transition implements strict guard checks preventing illegal state jumps.
+where $e$ is an incoming lifecycle event and $g$ is a guard predicate evaluating ACB invariants.
+
+The hardware regimes, execution dynamics, and physical resource boundaries across the 9-state execution loop are formalized in @tbl-vol3-mlsys-state-machine. During actuation framing, the runtime evaluates schema grammar constraints using fused logit-masking kernels in on-chip SRAM to eliminate syntactic failures prior to token emission.[^fn-kernel-fusion-masking] Similarly, upon observation ingestion, the runtime persists state deltas to write-ahead storage on local NVMe flash before releasing memory allocations.[^fn-atomic-wal-persistence]
+
+| Phase & State             | Subsystem & Physical Resource   | Bottleneck & Roofline Regime                                        | Operational Invariant & Transition Guarantee                                               |
+|:--------------------------|:--------------------------------|:--------------------------------------------------------------------|:-------------------------------------------------------------------------------------------|
+| **1. INGESTION**          | Host RAM / Staging Buffer       | Host memory bus / JSON deserialization throughput                   | Enforces immutable sequence ordering; prepares context descriptor for cache matching.      |
+| **2. PREFIX_MATCH**       | GPU HBM / Radix Tree Tables     | Block table hash traversal latency ($< 0.5\text{ ms}$)              | Maximizes KV-cache block reuse; identifies unmatched token suffix $L_{\text{unmatched}}$.  |
+| **3. PREFILL**            | GPU Tensor Cores / HBM          | Compute-bound ($O(L^2)$ attention, bounded by FLOP/s)               | High arithmetic intensity ($I \gg \beta$); establishes Time-To-First-Token (TTFT).         |
+| **4. DECODE**             | GPU HBM Read Bandwidth / SRAM   | Memory-bandwidth bound ($O(N_{\text{tok}} \cdot \Phi / \text{BW})$) | Low arithmetic intensity ($I \approx 1\text{ FLOP/byte}$); bounded by Inter-Token Latency. |
+| **5. ACTUATION_FRAMING**  | On-Chip SRAM / Tensor Cores     | Grammar DFA bitset evaluation latency ($< 30\ \mu\text{s}$)         | Fused logit masking guarantees syntactically valid JSON tool invocations.                  |
+| **6. RPC_DISPATCH**       | Host Network / UNIX Sockets     | IPC transport latency ($0.2\text{--}2.0\text{ ms}$)                 | Serializes validated payloads; attaches capability tokens and idempotency keys.            |
+| **7. TOOL_EXEC**          | Guest Container / MicroVM       | Guest CPU, RAM, and external network latency                        | Bounded by execution deadlines; executes side effects in quarantined workspace.            |
+| **8. OBSERVATION_INGEST** | Host Event Loop / Socket Stream | Non-blocking socket I/O throughput                                  | Demultiplexes chunk streams; applies terminal sanitization and payload size limits.        |
+| **9. COMPACTION_PERSIST** | Host DRAM / NVMe Flash Storage  | NVMe write bandwidth ($10\text{--}50\ \mu\text{s}$ per append)      | Flushes state delta to durable WAL; evicts or migrates inactive KV-cache blocks.           |
+
+: **The Nine-State MLSys Agent Execution Loop**: Hardware regimes, execution dynamics, and physical resource boundaries across the stochastic inference and tool actuation lifecycle. {#tbl-vol3-mlsys-state-machine}
+
+[^fn-kernel-fusion-masking]: **Fused Logit Masking Kernels**: Evaluating grammar-constrained deterministic finite automaton (DFA) transitions during autoregressive decode requires applying a binary vocabulary mask to the unnormalized logit vector before softmax. Unfused implementations incur costly round-trip device memory traffic by reading logits into global HBM, applying the mask in a separate kernel, and re-reading for sampling. Fused logit-masking kernels evaluate DFA bitsets directly within accelerator on-chip SRAM registers, reducing masking latency to under 30 microseconds per token.
+
+[^fn-atomic-wal-persistence]: **Durable State Persistence Overhead**: Persisting Agent Control Block updates and trajectory checkpoints to local NVMe storage incurs write latencies of $10\text{ to }50\text{ microseconds}$ per append-only log entry. By batching disk synchronization operations to safe turn boundaries, the harness prevents I/O write stalls from corrupting the inter-token generation budget. Uncommitted in-flight state remains isolated within host memory descriptors until validated by supervisory checksums.
+
+@Lst-vol3-acb-transition implements strict guard checks preventing illegal state jumps across the 9-state MLSys state machine.
 
 ::: {#lst-vol3-acb-transition lst-cap="**State Transition Guard Verification**: Transitioning an Agent Control Block between lifecycle states with transition validation."}
 ```python
 def transition_acb(acb: AgentControlBlock, new_state: State, event: Event) -> None:
-    """Validate and apply state transition on Agent Control Block."""
+    """Validate and apply state transition on Agent Control Block across MLSys states."""
     valid_transitions = {
-        State.INIT: {State.RUNNABLE},
-        State.RUNNABLE: {State.RUNNING},
-        State.RUNNING: {State.WAIT_IO, State.WAIT_ESCROW, State.PREEMPTED, State.COMPLETED, State.FAILED},
-        State.WAIT_IO: {State.RUNNABLE, State.FAILED, State.TERMINATED},
-        State.WAIT_ESCROW: {State.RUNNABLE, State.FAILED, State.TERMINATED},
-        State.PREEMPTED: {State.RUNNABLE, State.TERMINATED},
+        State.INGESTION: {State.PREFIX_MATCH, State.FINALIZING},
+        State.PREFIX_MATCH: {State.PREFILL, State.DECODE, State.FINALIZING},
+        State.PREFILL: {State.DECODE, State.FINALIZING},
+        State.DECODE: {State.ACTUATION_FRAMING, State.DECODE, State.FINALIZING},
+        State.ACTUATION_FRAMING: {State.RPC_DISPATCH, State.AWAITING_APPROVAL, State.FINALIZING},
+        State.AWAITING_APPROVAL: {State.RPC_DISPATCH, State.INGESTION, State.FINALIZING},
+        State.RPC_DISPATCH: {State.TOOL_EXEC, State.FINALIZING},
+        State.TOOL_EXEC: {State.OBSERVATION_INGEST, State.FINALIZING},
+        State.OBSERVATION_INGEST: {State.COMPACTION_PERSIST, State.FINALIZING},
+        State.COMPACTION_PERSIST: {State.INGESTION, State.PREFIX_MATCH, State.FINALIZING},
+        State.PAUSED: {State.INGESTION, State.FINALIZING},
+        State.FINALIZING: {State.COMPLETED, State.FAILED, State.CANCELED},
     }
     if new_state not in valid_transitions.get(acb.state, set()):
         raise InvalidStateTransitionError(f"Illegal transition from {acb.state} to {new_state} via {event}")
@@ -441,11 +477,11 @@ def evaluate_signal_checkpoint(acb: AgentControlBlock, checkpoint: Checkpoint) -
         return True
     sig = acb.pending_signals.popleft()
     if sig == Signal.SIGPAUSE:
-        acb.state = State.PREEMPTED
+        acb.state = State.PAUSED
         persist_trajectory_checkpoint(acb)
         return False
     elif sig == Signal.SIGKILL:
-        acb.state = State.TERMINATED
+        acb.state = State.FINALIZING
         release_sandbox_lease(acb.sandbox_id)
         return False
     return True
@@ -466,9 +502,30 @@ A tool wait ends when the tool answers or its deadline passes. The next kind of 
 
 ### Cooperative process yielding mechanics
 
-Model token generation operates on millisecond scales ($10 - 50\ \text{ms}$ per token), whereas external tool calls—such as compilation jobs, database queries, and web retrievals—frequently take seconds to minutes. If an agent thread synchronously blocks while awaiting external tool completion, it ties up valuable host concurrency slots and GPU worker capacity.
+Model token generation operates on millisecond scales ($10\text{--}50\text{ ms}$ per token), whereas external tool calls—such as compilation jobs, database queries, and web retrievals—frequently take seconds to minutes. If an agent thread synchronously blocks while awaiting external tool completion, it ties up valuable host concurrency slots and GPU worker capacity.
 
-Cooperative process yielding decouples execution by transitioning the trajectory to `WAIT_IO` immediately upon dispatching a tool request, freeing execution threads for other active trajectories. The execution dynamics are diagrammed in @fig-vol3-cooperative-yielding.
+To analyze the physical time distribution across a turn, the harness models the end-to-end makespan using the **End-to-End Turn Latency Waterfall**:
+$$
+T_{\text{turn}} = T_{\text{prefix\_match}} + T_{\text{prefill}}(L_{\text{unmatched}}) + \sum_{i=1}^{N_{\text{tok}}} T_{\text{decode}, i} + T_{\text{dispatch}} + T_{\text{sandbox\_exec}} + T_{\text{stream\_ingest}}
+$$
+where each term corresponds to a distinct hardware regime across the 9-state MLSys state machine:
+
+1. **Prefix Match Latency ($T_{\text{prefix\_match}}$)**: The latency to traverse PagedAttention radix trees and hash tables in accelerator memory to identify existing cached prefix blocks ($< 0.5\text{ ms}$).
+2. **Prefill Duration ($T_{\text{prefill}}$)**: The time required to compute attention across unmatched prompt tokens $L_{\text{unmatched}} = L_{\text{total}} - L_{\text{cached}}$. Because all prompt tokens are processed in parallel, arithmetic intensity is high ($I_{\text{prefill}} \approx L_{\text{unmatched}}\text{ FLOP/byte}$). For typical agent prompts ($L_{\text{unmatched}} \ge 512$), $I_{\text{prefill}}$ far exceeds the accelerator machine balance $\beta = \mathcal{P}_{\text{peak}} / \text{BW}_{\text{HBM}}$, making prefill strictly **compute-bound** ($O(L^2)$ attention, or $O(L)$ with FlashAttention):
+   $$
+   T_{\text{prefill}}(L_{\text{unmatched}}) \approx \frac{2 \Phi \cdot L_{\text{unmatched}} + \mathcal{O}(L_{\text{unmatched}})}{\mathcal{P}_{\text{peak}}}
+   $$
+   bounded by Tensor Core peak floating-point throughput $\mathcal{P}_{\text{peak}}$ rather than memory bandwidth.
+3. **Autoregressive Decode Duration ($\sum T_{\text{decode}, i}$)**: The cumulative time to emit $N_{\text{tok}}$ proposal tokens. For each emitted token, the entire model parameter weight matrix $\Phi$ and the growing KV cache must be streamed from HBM to on-chip SRAM for a batch size of unity, resulting in arithmetic intensity near unity ($I_{\text{decode}} \approx 1\text{ FLOP/byte} \ll \beta$). Consequently, autoregressive decoding is strictly **memory-bandwidth bound**:
+   $$
+   \sum_{i=1}^{N_{\text{tok}}} T_{\text{decode}, i} \approx \frac{N_{\text{tok}} \cdot 2 \Phi}{\text{BW}_{\text{HBM}}} + \sum_{i=1}^{N_{\text{tok}}} \frac{M_{\text{KV}}(L_{\text{prefix}} + i)}{\text{BW}_{\text{HBM}}}
+   $$
+   This physical ceiling dictates the Inter-Token Latency (ITL) floor across hardware SKUs.[^fn-sku-memory-bandwidth] On an NVIDIA H100 SXM5 ($3.35\text{ TB/s}$ HBM3), serving a 70B parameter model in FP16 ($140\text{ GB}$ of weights across two GPUs, $70\text{ GB}$ per GPU) requires at least $70 / 3.35 \approx 20.9\text{ ms}$ per token. On a Blackwell B200 ($8.0\text{ TB/s}$ HBM3e), this floor drops to $70 / 8.0 \approx 8.75\text{ ms}$ per token.
+4. **RPC Dispatch Latency ($T_{\text{dispatch}}$)**: Time spent verifying capability tokens, serializing JSON-RPC payloads, and crossing the host-guest socket boundary ($0.2\text{--}2.0\text{ ms}$).
+5. **Sandbox Execution Makespan ($T_{\text{sandbox\_exec}}$)**: Time spent running the side-effecting command in an isolated guest environment (ranging from milliseconds to minutes).
+6. **Observation Ingestion Latency ($T_{\text{stream\_ingest}}$)**: Time spent demultiplexing socket chunks, sanitizing terminal escape sequences, and appending observations to the trajectory record.
+
+Cooperative process yielding decouples execution by transitioning the trajectory to `WAITING_TOOL` immediately upon dispatching a tool request, freeing execution threads and GPU serving slots for other active trajectories. The execution dynamics are diagrammed in @fig-vol3-cooperative-yielding.
 
 ::: {#fig-vol3-cooperative-yielding fig-env="figure" fig-pos="htb" fig-cap="**Synchronous Blocking versus Cooperative Yielding**: Architectural comparison between synchronous thread-per-agent execution and cooperative event-driven yielding. Panel (a) illustrates the synchronous blocking model, where 2,000 POSIX threads lock over 8 GB of dormant stack memory and pin GPU batch slots while waiting on high-latency tool execution ($\tau_{\text{tool}} \gg \tau_{\text{model}}$). Panel (b) illustrates the supervisory `epoll` datapath, where a fixed pool of worker threads is immediately relinquished at checkpoint $C_{\text{tool}}$, registering non-blocking file descriptors with the kernel event multiplexer and scaling concurrency to $10^4\text{--}10^5$ trajectories with negligible memory overhead." fig-alt="Systems architecture diagram comparing synchronous thread-per-agent blocking, which locks 8 GB of stack memory for 2,000 threads, against cooperative event-driven yielding using an epoll multiplexer and a fixed pool of 8 worker threads managing compact ACB descriptors."}
 ![](images/svg/fig-vol3-cooperative-yielding.svg)
@@ -480,27 +537,66 @@ The event-driven wakeup mechanics connecting OS network polling (`epoll`) to ACB
 |:-------------------------------|:--------------------------------------|:--------------------------------------------------------------------------------------------------------------------|
 | **1. Event Notification**      | Kernel Multiplexer (`epoll`/`kqueue`) | Edge-triggered wake-up fires as sandbox process writes JSON-RPC completion to socket descriptor.                    |
 | **2. Observation Extraction**  | Supervisor Event Loop                 | Reads observation buffer $\mathbf{o}_k$, binds payload to ACB at Checkpoint $C_{\text{obs}}$, and records duration. |
-| **3. Liveness & Signal Check** | ACB Signal Validator                  | Evaluates pending signal bitmask; routes to `TERMINATING` if canceled during wait, else advances to `RUNNABLE`.     |
+| **3. Liveness & Signal Check** | ACB Signal Validator                  | Evaluates pending signal bitmask; routes to `FINALIZING` if canceled during wait, else advances to `READY`.         |
 | **4. Runqueue Re-Entry**       | Scheduler Priority Queue              | Inserts ACB descriptor into active priority queue; readies context for subsequent prefill batch.                    |
-: **Event-Driven Reactivation Pipeline**: The four-stage event-driven reactivation pipeline transitioning a trajectory from `WAITING_IO` to `RUNNABLE` without thread polling or compute starvation. {#tbl-vol3-event-wakeup-pipeline}
 
-@Lst-vol3-bounded-decode implements bounded token generation with cooperative yielding.
+: **Event-Driven Reactivation Pipeline**: The four-stage event-driven reactivation pipeline transitioning a trajectory from `WAITING_TOOL` to `READY` without thread polling or compute starvation. {#tbl-vol3-event-wakeup-pipeline}
 
-::: {#lst-vol3-bounded-decode lst-cap="**Bounded Token Generation with Cooperative Yielding**: Yielding execution to the event loop immediately upon emitting a tool call delimiter."}
+During autoregressive decode, structured tool invocations are emitted as text tokens. Because tokens stream over HTTP Server-Sent Events (SSE) or gRPC network boundaries, tool-call opening and closing delimiters (such as ````json` or `<tool_call>`) frequently get split across network chunk boundaries. A naive decoder checking only single token payloads fails to recognize split boundaries, while buffering the entire response re-introduces synchronous worker stalls and pins GPU KV-cache slots. While predictable grammar tokens can be accelerated through speculative decoding,[^fn-speculative-decode-harness] the streaming decoder must detect split delimiters across chunk boundaries on the fly without unbounded buffering.
+
+@Lst-vol3-bounded-decode implements bounded streaming decoding with cooperative yielding, maintaining a sliding window to catch split delimiters without buffering the entire completion.
+
+::: {#lst-vol3-bounded-decode lst-cap="**Bounded Token Generation with Cooperative Yielding**: Streaming delimiter detection handling partial tokens across chunk boundaries without full response buffering."}
 ```python
-async def execute_bounded_decode(acb: AgentControlBlock, client: LLMClient) -> GenerationResult:
-    """Execute token decoding bounded by cooperative step quotas."""
+async def execute_bounded_decode(
+    acb: AgentControlBlock,
+    token_stream: AsyncIterator[str],
+    delimiters: tuple[str, ...] = ("```json", "<tool_call>", '{"name":'),
+) -> GenerationResult:
+    """Stream tokens bounded by step quotas, handling split delimiters without full buffering."""
     tokens_generated = 0
-    while tokens_generated < acb.step_token_quota:
-        token = await client.decode_next_token(acb.trajectory_id)
+    sliding_window = ""
+    max_delim_len = max(len(d) for d in delimiters)
+
+    async for chunk in token_stream:
+        sliding_window += chunk
         tokens_generated += 1
         acb.tokens_total += 1
-        if token.is_tool_call_delimiter:
-            acb.state = State.WAIT_IO
-            return GenerationResult(status=Status.TOOL_PENDING, tokens=tokens_generated)
-    return GenerationResult(status=Status.QUOTA_EXHAUSTED, tokens=tokens_generated)
+
+        # Check for delimiter completion across network chunk boundaries
+        for delim in delimiters:
+            if delim in sliding_window:
+                pre_text, _, remainder = sliding_window.partition(delim)
+                acb.state = State.ACTUATION_FRAMING
+                return GenerationResult(
+                    status=Status.TOOL_PENDING,
+                    emitted_text=pre_text,
+                    matched_delimiter=delim,
+                    trailing_buffer=remainder,
+                    tokens=tokens_generated,
+                )
+
+        # Evict non-overlapping text to avoid unconstrained response buffering
+        if len(sliding_window) > max_delim_len:
+            safe_offset = len(sliding_window) - max_delim_len
+            acb.stream_buffer.append(sliding_window[:safe_offset])
+            sliding_window = sliding_window[safe_offset:]
+
+        if tokens_generated >= acb.step_token_quota:
+            acb.state = State.PAUSED
+            return GenerationResult(
+                status=Status.QUOTA_EXHAUSTED,
+                emitted_text="".join(acb.stream_buffer) + sliding_window,
+                tokens=tokens_generated,
+            )
+
+    return GenerationResult(status=Status.STREAM_CLOSED, tokens=tokens_generated)
 ```
 :::
+
+[^fn-sku-memory-bandwidth]: **Accelerator Memory Bandwidth Scaling**: Hardware accelerators exhibit marked memory bandwidth disparities that govern autoregressive decode latency. For instance, an NVIDIA H100 SXM5 delivers $3.35\text{ TB/s}$ of high-bandwidth memory (HBM3) bandwidth, whereas the Blackwell B200 scales to $8.0\text{ TB/s}$ across an 8-hi HBM3e stack. Because single-token decode generates arithmetic intensity near unity, this $2.39\times$ bandwidth scaling directly compresses the inter-token latency floor for agent execution loops.
+
+[^fn-speculative-decode-harness]: **Speculative Decoding in Tool Actuation**: Speculative decoding accelerates autoregressive generation by pairing a small draft model with a large target verifier. In agentic tool calling, predictable structural grammar tokens such as JSON syntax and schema keys achieve verification acceptance rates exceeding 90 percent. This selective predictability shifts structured token generation toward the compute-bound regime, circumventing memory bandwidth bottlenecks during actuation framing.
 
 ## Approval Gates {#sec-vol3-controlplane-hitl}
 
@@ -568,11 +664,11 @@ def verify_escrow_payload(manifest: EscrowManifest, auth_token: AuthToken) -> bo
 
 The lifecycle transitions of an escrow manifest are detailed in @tbl-vol3-escrow-transitions.
 
-| Current State    | Event / Guard Condition                                                                         | Next State       | Action / Transition Side Effect                                                                                   |
-|:-----------------|:------------------------------------------------------------------------------------------------|:-----------------|:------------------------------------------------------------------------------------------------------------------|
-| `RUNNING`        | Action proposal exceeds blast radius threshold ($\mathbf{a}_k \in \mathcal{A}_{\text{escrow}}$) | `WAITING_ESCROW` | Halt dispatch, unbind OS worker thread, checkpoint KV cache to host DRAM, persist ACB to NVMe storage.            |
-| `WAITING_ESCROW` | Wall clock $\tau_{\text{current}} > \tau_{\text{expire}}$ (Lease expiration)                    | `READY`          | Invalidate manifest $\mathcal{M}$, synthesize `REFUSED` observation $\mathbf{o}_k^{\text{synth}}$, reenqueue ACB. |
-| `WAITING_ESCROW` | Valid cryptographic signature set satisfies policy $\mathcal{P}_{\text{quorum}}$                | `READY`          | Validate digests, restore ACB from NVMe, bind OS worker thread, dispatch $\mathbf{a}_k$ to sandbox driver.        |
+| Current State       | Event / Guard Condition                                                                         | Next State          | Action / Transition Side Effect                                                                                   |
+|:--------------------|:------------------------------------------------------------------------------------------------|:--------------------|:------------------------------------------------------------------------------------------------------------------|
+| `ACTUATION_FRAMING` | Action proposal exceeds blast radius threshold ($\mathbf{a}_k \in \mathcal{A}_{\text{escrow}}$) | `AWAITING_APPROVAL` | Halt dispatch, release worker and inference batch slot, checkpoint KV cache to host DRAM, persist ACB.            |
+| `AWAITING_APPROVAL` | Wall clock $\tau_{\text{current}} > \tau_{\text{expire}}$ (Lease expiration)                    | `READY`             | Invalidate manifest $\mathcal{M}$, synthesize `REFUSED` observation $\mathbf{o}_k^{\text{synth}}$, reenqueue ACB. |
+| `AWAITING_APPROVAL` | Valid cryptographic signature set satisfies policy $\mathcal{P}_{\text{quorum}}$                | `READY`             | Validate digests, restore ACB from NVMe, stage KV cache, dispatch $\mathbf{a}_k$ to sandbox driver.               |
 : **Human Escrow State Transitions and Side Effects**: Operational state transitions, guard conditions, and resource side effects governing human approval escrows. {#tbl-vol3-escrow-transitions}
 
 For high-stakes enterprise workflows, multiple distinct approvers are required according to the quorum invariants in @tbl-vol3-quorum-checkpoint-invariants.
@@ -609,35 +705,88 @@ Concurrent agent trajectories compete across four distinct physical hardware vec
 
 ### Deficit round-robin dispatch architecture
 
-To prevent greedy trajectories with large contexts from monopolizing GPU memory bandwidth and host thread pools, the harness employs Deficit Round-Robin (DRR) scheduling. The node scheduling hierarchy is illustrated in @fig-vol3-node-scheduler.
+To prevent greedy trajectories with large contexts from monopolizing GPU memory bandwidth and host thread pools, the harness employs Deficit Round-Robin (DRR) scheduling. In continuous batching serving runtimes, the scheduler must arbitrate between two radically different workloads: latency-sensitive autoregressive decode iterations for ongoing agent turns ($N_{\text{tok}}$, memory-bandwidth bound) and compute-heavy prompt prefills for incoming turns ($L_{\text{unmatched}}$, compute-bound). If the serving engine greedily admits full prompt prefills, concurrent decode iterations suffer severe inter-token latency spikes and convoy stalls.[^fn-inter-token-jitter]
 
-::: {#fig-vol3-node-scheduler fig-env="figure" fig-pos="htb" fig-cap="**Weighted Deficit Round-Robin (WDRR) Node Scheduling Architecture**: Multi-resource arbitration pipeline multiplexing heterogeneous agent workloads across shared host resources. Active trajectories across Interactive ($w=4$), Standard ($w=2$), and Batch ($w=1$) priority queues are arbitrated by a central WDRR engine. In each round, the arbiter replenishes deficits via $D_i \leftarrow D_i + (w_i \times Q_{\text{base}})$, admits turns satisfying $D_i \ge C(\tau_{i,k})$, and decrements the counter upon dispatch while resetting empty queues ($D_i \leftarrow 0$) to prevent burst hoarding. Dispatched turns are mediated downstream through a global token rate-limiter and a warm sandbox counting semaphore ($S \le S_{\max}$) before binding to worker threads." fig-alt="Systems architecture diagram of a Weighted Deficit Round-Robin node scheduler showing priority ready queues on the left, WDRR deficit accumulator and cost evaluator in the center, and downstream token bucket and warm sandbox semaphore admission gates on the right."}
+Deficit Round-Robin balances these competing demands across priority classes by assigning each class a service weight $w_i$ and replenishing deficit credits via a base quantum $Q_{\text{base}}$ per round.[^fn-drr-quantum-selection] In each scheduling round $t$:
+
+1. **Deficit replenishment**:
+   For each queue $i \in \{\text{decode}, \text{prefill}\}$, the arbiter accumulates credit:
+   $$
+   D_i^{(t)} = D_i^{(t-1)} + w_i \cdot Q_{\text{base}}
+   $$
+2. **Chunked admission and cost evaluation**:
+   To prevent long prefill requests from starving ongoing autoregressive decodes, prefill processing is partitioned into bounded token chunks of size $C_{\text{chunk}}$:[^fn-chunked-prefill-tradeoff]
+   $$
+   c(r) = \begin{cases}
+   1 & \text{if } r \in \mathcal{Q}_{\text{decode}} \\
+   \min\left(L_{\text{unmatched}}(r), C_{\text{chunk}}\right) & \text{if } r \in \mathcal{Q}_{\text{prefill}}
+   \end{cases}
+   $$
+   A candidate request $r$ is admitted into iteration batch $\mathcal{B}^{(t)}$ if and only if:
+   $$
+   D_i^{(t)} \ge c(r) \quad \text{and} \quad \sum_{m \in \mathcal{B}^{(t)}} c(m) + c(r) \le C_{\text{batch\_limit}}
+   $$
+3. **Deficit deduction**:
+   Upon admitting candidate $r$ to the active inference batch, its allocated token quantum is deducted:
+   $$
+   D_i^{(t)} \leftarrow D_i^{(t)} - c(r)
+   $$
+4. **Anti-hoarding empty-queue reset**:
+   If a queue becomes empty, its deficit counter is immediately cleared to prevent credit hoarding:
+   $$
+   D_i^{(t)} \leftarrow 0 \quad \text{if } \mathcal{Q}_i = \emptyset
+   $$
+5. **Deterministic ITL jitter bound**:
+   By enforcing chunked prefill with chunk limit $C_{\text{chunk}}$, the worst-case latency delay (inter-token jitter) injected into active decode sessions is strictly bounded:
+   $$
+   \Delta \text{ITL}_{\max} \le \frac{2 \Phi \cdot C_{\text{chunk}}}{\mathcal{P}_{\text{peak}}}
+   $$
+
+The node scheduling hierarchy is illustrated in @fig-vol3-node-scheduler.
+
+::: {#fig-vol3-node-scheduler fig-env="figure" fig-pos="htb" fig-cap="**Weighted Deficit Round-Robin (WDRR) Node Scheduling Architecture**: Multi-resource arbitration pipeline multiplexing heterogeneous agent workloads across shared host resources. Active trajectories across Interactive ($w=4$), Standard ($w=2$), and Batch ($w=1$) priority queues are arbitrated by a central WDRR engine. In each round, the arbiter replenishes deficits via $D_i \leftarrow D_i + (w_i \times Q_{\text{base}})$, admits turns satisfying $D_i \ge C(\tau_{i,k})$, and decrements the counter upon dispatch while resetting empty queues ($D_i \leftarrow 0$) to prevent burst hoarding. Dispatched turns are mediated downstream through a global token rate-limiter and a warm sandbox counting semaphore ($S \le S_{\max}$) before entering continuous batching iteration slots." fig-alt="Systems architecture diagram of a Weighted Deficit Round-Robin node scheduler showing priority ready queues on the left, WDRR deficit accumulator and cost evaluator in the center, and downstream token bucket and warm sandbox semaphore admission gates on the right."}
 ![](images/svg/fig-vol3-node-scheduler.svg)
 :::
 
 The per-round quantum dispatch mechanics are diagrammed in @fig-vol3-scheduler-dispatch.
 
-::: {#fig-vol3-scheduler-dispatch fig-env="figure" fig-pos="htb" fig-cap="**Scheduler Run Queue and Priority Scoring Engine**: Three-level supervisory dispatch datapath arbitrating candidate Agent Control Blocks in host DRAM. Level 1 filters the active ACB array to extract runnable trajectories while bypassing blocked I/O and escrow states. Level 2 ranks runnable candidates through a multi-attribute fair-share priority scoring engine $P_i$. Level 3 evaluates hard token and step ceilings, admitting compliant tasks to inference batch slots while preemptively terminating exhausted trajectories." fig-alt="Systems datapath diagram showing an ACB runqueue array in host DRAM, filtered for RUNNABLE phase, scored by a priority engine evaluating tokens and SLO deficits, and branched into inference worker dispatch or preemptive TERMINATED rejection."}
+::: {#fig-vol3-scheduler-dispatch fig-env="figure" fig-pos="htb" fig-cap="**Scheduler Run Queue and Priority Scoring Engine**: Three-level supervisory dispatch datapath arbitrating candidate Agent Control Blocks in host DRAM. Level 1 filters the active ACB array to extract ready trajectories while bypassing waiting tool and escrow states. Level 2 ranks ready candidates through a multi-attribute fair-share priority scoring engine $P_i$. Level 3 evaluates hard token and step ceilings, admitting compliant tasks to inference batch slots while preemptively finalizing exhausted trajectories." fig-alt="Systems datapath diagram showing an ACB runqueue array in host DRAM, filtered for READY phase, scored by a priority engine evaluating tokens and SLO deficits, and branched into inference batch admission or preemptive FINALIZING rejection."}
 ![](images/svg/fig-vol3-scheduler-dispatch.svg)
 :::
 
-@Lst-vol3-drr-dispatch implements deficit round-robin dispatch across active trajectories.
+@Lst-vol3-drr-dispatch implements deficit round-robin dispatch across active trajectories into the continuous batching engine.
 
 ::: {#lst-vol3-drr-dispatch lst-cap="**Deficit Round-Robin Trajectory Dispatch**: Fair-share scheduling across active trajectories using token-bucket deficit accounting."}
 ```python
-def dispatch_round(active_acbs: list[AgentControlBlock], q_base: int, bucket: TokenBucket) -> None:
-    """Dispatch active trajectories using Deficit Round-Robin scheduling."""
+def dispatch_round(
+    active_acbs: list[AgentControlBlock],
+    q_base: int,
+    bucket: TokenBucket,
+    engine: InferenceEngine,
+    chunk_limit: int = 512,
+) -> None:
+    """Dispatch active trajectories into continuous batching using Deficit Round-Robin."""
     for acb in active_acbs:
-        if acb.state != State.RUNNABLE:
+        if acb.state != State.READY:
             continue
-        acb.deficit += q_base
-        cost = acb.estimated_step_cost
+        acb.deficit += acb.priority_weight * q_base
+        # Chunk large prefills to protect concurrent decode latency
+        unmatched = acb.unmatched_token_count
+        cost = min(unmatched, chunk_limit) if acb.is_prefill else 1
         if acb.deficit >= cost and bucket.consume(cost):
             acb.deficit -= cost
-            acb.state = State.RUNNING
-            schedule_vcpus(acb)
+            acb.state = State.CALLING_MODEL
+            engine.admit_to_batch(acb, tokens_to_process=cost)
+        elif acb.is_empty_queue:
+            acb.deficit = 0  # Anti-hoarding reset
 ```
 :::
+
+[^fn-inter-token-jitter]: **Decode Jitter and Convoy Effects**: In shared continuous batching engines, interleaving compute-heavy prefill operations with memory-bound decode iterations induces high-tail decode jitter. When an unmatched prompt of 4,096 tokens preempts an iteration, concurrent decode streams experience instantaneous latency spikes of 50 to 100 milliseconds. Implementing strict deficit round-robin admission and token chunking bounds this tail latency variance within predictable percentiles.
+
+[^fn-drr-quantum-selection]: **Base Quantum Sizing in DRR**: Sizing the Deficit Round-Robin base token quantum $Q_{\text{base}}$ requires balancing scheduling fairness against batching throughput. A small quantum minimizes queue waiting times for interactive agent sessions but fragments batch execution and degrades accelerator compute utilization. Conversely, a large quantum favors long prefill throughput at the expense of severe decode latency jitter for interactive trajectories.
+
+[^fn-chunked-prefill-tradeoff]: **Chunked Prefill Scheduling Dynamics**: Chunking long prompt inputs into discrete token slices prevents long prefill requests from starving ongoing autoregressive decode iterations. While chunking caps inter-token decode latency spikes, it introduces redundant intermediate activation storage and reduces Tensor Core compute efficiency by 8 to 14 percent compared to monolithic prefill. Serving runtimes dynamically balance chunk size against decode latency service-level objectives.
 
 ## Budgets and Ceilings {#sec-vol3-controlplane-accounting}
 
