@@ -133,7 +133,11 @@ At large scale (hundreds of billions of parameters across thousands of GPUs), gr
 
 ### The physics of data movement {#sec-communication-collective-operations-physics-data-movement}
 
-Physical constraints govern data movement before algorithms are designed. @Sec-network-fabrics-wire-link establishes the wire-level physics behind these algorithms: the speed of light sets a latency floor[^fn-speed-of-light] (roughly 5 $\mu\text{s}$ per kilometer in fiber), the bandwidth-distance product limits how far a fast link can reach before it needs optics (PAM4 signaling and copper-vs.-optics reach are developed in @sec-network-fabrics-pam4), and kernel-bypass transports such as remote direct memory access (RDMA) and GPUDirect RDMA strip the per-message software tax down to a few microseconds (@sec-network-fabrics-rdma). Collective communication adds the energy cost of moving a bit, which the algorithms must respect as firmly as latency and bandwidth.
+Physical constraints govern data movement before algorithms are designed. The speed of light sets a latency floor[^fn-speed-of-light] (roughly 5 $\mu\text{s}$ per kilometer in fiber), the bandwidth-distance product limits how far a fast link can reach before it needs optics, and kernel-bypass transports such as remote direct memory access (RDMA) and GPUDirect RDMA strip the per-message software tax down to a few microseconds. Collective communication adds the energy cost of moving a bit, which the algorithms must respect as firmly as latency and bandwidth.
+
+::: {.column-margin .margin-pointer}
+↩ Physical layer SerDes signaling, optical reach, and RDMA transports are established in @sec-network-fabrics.
+:::
 
 Moving data costs energy that scales exponentially with distance. @Fig-data-movement-hierarchy illustrates this data-movement energy hierarchy across four physical tiers: local on-chip SRAM ($\sim$0.5\,pJ/bit), on-package high-bandwidth memory (HBM)\index{HBM}\index{High-Bandwidth Memory|see{HBM}} ($\sim$20\,pJ/bit), intra-node NVLink ($\sim$100\,pJ/bit), and optical inter-node InfiniBand ($\sim$1{,}000\,pJ/bit). The figure plots higher-bound published estimates that include link-, switch-, and transceiver-side power; chapter prose elsewhere uses the lower bound of each range for back-of-the-envelope models. Both views agree on the central thermodynamic reality: crossing from on-package SRAM to a 50-meter optical data center fabric incurs a 2{,}000$\times$ energy penalty, making physical data locality the primary driver of sustainable distributed ML system design.
 
@@ -537,7 +541,11 @@ plt.close()
 
 The journey begins at the moment the backward pass completes. On a single machine, that was the end of the story: the weights were updated, and the neuron learned. At production scale, however, the gradient is born into isolation. It exists on one GPU, while the "truth" of the model is distributed across thousands. To achieve global convergence, the gradient must find its peers.
 
-The specific "travel manifest" for this journey is dictated by the parallelism strategy chosen in @sec-distributed-training-systems. The choice of how the math is split determines how the data moves. For the Lighthouse Archetypes (@sec-vol2-introduction-archetypes), these manifests differ fundamentally. For Archetype A (GPT-4/Llama-3), the gradient is part of a massive, dense tensor that must meet every other gradient in the fleet to compute a global average, so its primary vehicle is the AllReduce. For Archetype B (DLRM at Scale),[^fn-dlrm-embedding-alltoall] the gradient or activation is sparse and targeted: it does not need to meet everyone, only the specific GPU that holds its embedding shard. Mixture-of-experts (MoE) routing creates the same targeted pattern, sending each token to the GPU that hosts its assigned expert, so both rely on the AllToAll.
+The specific "travel manifest" for this journey is dictated by the chosen parallelism strategy: the choice of how the math is split determines how the data moves. For the Lighthouse Archetypes, these manifests differ fundamentally. For Archetype A (GPT-4/Llama-3), the gradient is part of a massive, dense tensor that must meet every other gradient in the fleet to compute a global average, so its primary vehicle is the AllReduce. For Archetype B (DLRM at Scale),[^fn-dlrm-embedding-alltoall] the gradient or activation is sparse and targeted: it does not need to meet everyone, only the specific GPU that holds its embedding shard. Mixture-of-experts (MoE) routing creates the same targeted pattern, sending each token to the GPU that hosts its assigned expert, so both rely on the AllToAll.
+
+::: {.column-margin .margin-pointer}
+↩ Parallelism strategies (data, tensor, pipeline, and MoE) are developed in @sec-distributed-training-systems.
+:::
 
 Understanding this mapping is essential: the what of parallelism directly determines the how of communication. At large scale, these strategies are not mutually exclusive. A single training run for a large language model typically employs 3D parallelism (combining data parallelism\index{Data Parallelism}, tensor parallelism\index{Tensor Parallelism}, and pipeline parallelism\index{Pipeline Parallelism} simultaneously), which means multiple collective primitives execute concurrently on overlapping subsets of GPUs. Tensor parallelism drives AllReduce operations within each node (over NVLink), pipeline parallelism drives point-to-point sends between pipeline stages (often between nodes), and data parallelism drives AllReduce operations across groups of nodes (over InfiniBand).
 
@@ -1007,7 +1015,11 @@ class LogPOverlap:
 
 :::
 
-The choice between models depends on the analysis context. The $\alpha$-$\beta$ model is the right tool for back-of-envelope calculations, algorithm selection (Ring vs. Tree), and blocking communication whose completion lies on the dependency path. Its strength is simplicity, since the two parameters can be estimated from latency and bandwidth measurements. Its weakness is the assumption that the processor is idle during communication, which makes it overly pessimistic when overlap is possible. The LogP model earns its extra parameters when the analysis turns to **Pipelined Execution**\index{Pipelined Execution}, compute-communication overlap, or diagnosing why a theoretically fast algorithm underperforms. Its distinction between network latency $L_{\text{lat}}$ and processor overhead $o$ determines whether a given overlap strategy can hide communication. The profiling method in @sec-performance-engineering-profiling measures those terms and attributes the residual; this chapter uses them to choose the communication schedule.
+The choice between models depends on the analysis context. The $\alpha$-$\beta$ model is the right tool for back-of-envelope calculations, algorithm selection (Ring vs. Tree), and blocking communication whose completion lies on the dependency path. Its strength is simplicity, since the two parameters can be estimated from latency and bandwidth measurements. Its weakness is the assumption that the processor is idle during communication, which makes it overly pessimistic when overlap is possible. The LogP model earns its extra parameters when the analysis turns to **Pipelined Execution**\index{Pipelined Execution}, compute-communication overlap, or diagnosing why a theoretically fast algorithm underperforms. Its distinction between network latency $L_{\text{lat}}$ and processor overhead $o$ determines whether a given overlap strategy can hide communication. The profiling method measures those terms and attributes the residual; this chapter uses them to choose the communication schedule.
+
+::: {.column-margin .margin-pointer}
+↪ Overlap profiling, communication instrumentation, and trace attribution are developed in @sec-performance-engineering-profiling.
+:::
 
 In practice, most engineering calculations start with the $\alpha$-$\beta$ model for initial sizing and algorithm selection, then refine with LogP analysis when communication-computation overlap is the target optimization. Both models share a common limitation: they assume a single flow on a single link. Real communication patterns involve multiple simultaneous flows competing for shared bandwidth, which can cause congestion that neither model captures. For congestion-sensitive workloads (particularly AllToAll for MoE), empirical benchmarking on the target cluster remains the necessary validation step.
 
@@ -3704,8 +3716,12 @@ If parallelism decides what must be communicated, collective communication measu
 
 ::: {.callout-chapter-connection title="From logic to resilience"}
 
-The fleet now has its logic (parallelism) and its traffic patterns (communication). In production, however, GPUs overheat, networks drop packets, and nodes fail mid-calculation. @Sec-fault-tolerance-reliability examines how checkpointing, recovery, and elastic training maintain a coherent computation on imperfect hardware.
+The fleet now has its logic (parallelism) and its traffic patterns (communication). In production, however, GPUs overheat, networks drop packets, and nodes fail mid-calculation. Checkpointing, recovery, and elastic training maintain a coherent computation on imperfect hardware.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Checkpointing protocols, failure recovery, and elastic training systems are examined in @sec-fault-tolerance-reliability.
 :::
 
 [^fn-allreduce-etymology-primitive]: **AllReduce**\index{AllReduce!etymology}: A compound term from MPI indicating a Reduce operation (summing data from all nodes to one) followed by a Broadcast (sending the sum to all nodes). Ring-based AllReduce implements this as a sequential ReduceScatter phase followed by an AllGather phase, each taking $N-1$ rounds for $2(N-1)$ rounds total; ranks send and receive concurrently within each round, and every GPU ends with the global sum without a centralized bottleneck.

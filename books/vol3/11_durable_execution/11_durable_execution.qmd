@@ -54,9 +54,9 @@ A long-running agent outlives the machine it starts on. Hosts crash, workers are
 *Horizon stretches state past one host's life, so this chapter makes the record durable.*
 :::
 
-A trajectory is on turn forty of a cloud migration. The harness has just sent the request that provisions a database replica, and the host loses power before the response arrives. When another host picks up the trajectory, three questions decide whether recovery helps or harms. What had the runtime proposed, authorized, and observed by turn thirty-nine? Could the provisioning request have left the machine? If it did, did it take effect? The trajectory record of @sec-vol3-controlplane-acb answers none of them, because it lived in the memory of the host that failed. Over a long horizon, the state a trajectory carries becomes a durability problem (@sec-vol3-intro-hsa), since trajectories routinely outlive the machines they start on (@sec-vol3-intro-temporal-stretching).
+A trajectory is on turn forty of a cloud migration. The harness has just sent the request that provisions a database replica, and the host loses power before the response arrives. When another host picks up the trajectory, three questions decide whether recovery helps or harms. What had the runtime proposed, authorized, and observed by turn thirty-nine? Could the provisioning request have left the machine? If it did, did it take effect? The in-memory trajectory record answers none of them, because it lived in the memory of the host that failed. Over a long horizon, the state a trajectory carries becomes a durability problem, since trajectories routinely outlive the machines they start on.
 
-The obvious recovery, feeding the original prompt back to the model, does not work. Each model call draws a sample, and even at temperature zero a serving system does not promise the same tokens twice (@sec-vol3-foundation-model-autoregressive), so a rerun may choose a different tool at turn three and a different set of files at turn four. Worse, the rerun cannot know which of the first forty turns already changed the world. A second provisioning request creates a second replica. Recovery therefore needs a record that the runtime wrote before the crash and that says, turn by turn, what happened.
+The obvious recovery, feeding the original prompt back to the model, does not work. Each model call draws a sample, and even at temperature zero a serving system does not promise the same tokens twice, so a rerun may choose a different tool at turn three and a different set of files at turn four. Worse, the rerun cannot know which of the first forty turns already changed the world. A second provisioning request creates a second replica. Recovery therefore needs a record that the runtime wrote before the crash and that says, turn by turn, what happened.
 
 ### The log as the source of truth
 
@@ -64,7 +64,7 @@ The runtime keeps that record as an append-only **trajectory log**\index{Traject
 
 $$\mathcal{E} = [e_1, e_2, \dots, e_t]$$
 
-Each event records one fact about the trajectory, such as a context being assembled, the model replying, the runtime authorizing a tool call, or a result coming back. The live trajectory record of @sec-vol3-agent-harness (status, budgets, pending approvals, the current plan) is no longer stored independently. It is a projection that the harness computes by folding the log, starting from an initial record $R_0$ and applying one deterministic update function per event:
+Each event records one fact about the trajectory, such as a context being assembled, the model replying, the runtime authorizing a tool call, or a result coming back. The live trajectory record (status, budgets, pending approvals, the current plan) is no longer stored independently. It is a projection that the harness computes by folding the log, starting from an initial record $R_0$ and applying one deterministic update function per event:
 
 $$R_t = \text{fold}(R_0, \mathcal{E}) = \text{apply}(\dots\text{apply}(\text{apply}(R_0, e_1), e_2)\dots, e_t)$$
 
@@ -74,7 +74,11 @@ $$R_t = \text{fold}(R_0, \mathcal{E}) = \text{apply}(\dots\text{apply}(\text{app
 
 @Fig-vol3-event-sourcing shows the two halves. The update function is ordinary harness code with no I/O, so folding the same log always yields the same record. Recovery after a crash reads the log and folds it again. It calls no model and no tool, because every model reply and tool result it needs is already an event (principle \ref{pri-vol3-intent-before-effect}). This design pattern, **event sourcing**\index{Event sourcing!trajectory log}, is old in data systems [@kleppmann2017designing]. It fits agents unusually well, because the one component whose output cannot be recomputed, the model, is exactly the component whose output the log keeps.
 
-The same split separates the log from the context window. The context is what the next model call reads. It is assembled from the log, and it is lossy on purpose. Compaction (@sec-vol3-context-engineering-compaction) summarizes old turns, and truncation (@sec-vol3-tool-calling-streaming) cuts long tool output. The log keeps what the context drops. Treating the context as the record of the trajectory is the most common way to lose it, because the evidence a post-mortem needs is precisely what compaction removed.
+The same split separates the log from the context window. The context is what the next model call reads. It is assembled from the log, and it is lossy on purpose. Context compaction summarizes old turns, and output truncation cuts long tool output. The log keeps what the context drops. Treating the context as the record of the trajectory is the most common way to lose it, because the evidence a post-mortem needs is precisely what compaction removed.
+
+::: {.column-margin .margin-pointer}
+↩ The in-memory Agent Control Block and trajectory state machine are developed in @sec-vol3-agent-harness.
+:::
 
 ### What the log records
 
@@ -143,11 +147,15 @@ The ordering in @eq-vol3-wal-ordering restricts the combinations of records that
 
 : **Recovery States of a Logged Action**: Write-ahead ordering guarantees that every world-changing action is found in exactly one of three states after a crash. Only the third requires active reconciliation. {#tbl-vol3-durable-recovery-states tbl-colwidths="[30,16,54]"}
 
-Write-ahead ordering cannot magically resolve the third state, the **in-doubt action**\index{In-doubt action}. What it guarantees is that the in-doubt state is explicitly visible. Settlement before retry (principle \ref{pri-vol3-exactly-once-settlement}) resolves it using the mechanisms of @sec-vol3-tool-calling-idempotency:
+Write-ahead ordering cannot magically resolve the third state, the **in-doubt action**\index{In-doubt action}. What it guarantees is that the in-doubt state is explicitly visible. Settlement before retry (principle \ref{pri-vol3-exactly-once-settlement}) resolves it using idempotency mechanisms:
 
 1. **Idempotency keys**: The recovery manager re-issues the tool request using the identical idempotency nonce stored in the `ToolIntent` event record. If the tool server processed the earlier request, it returns the cached outcome without repeating the side effect.
 2. **Reconciliation probes**: When interacting with external APIs lacking native idempotency, the recovery manager runs a side-effect read probe (e.g., querying whether the database replica exists) to determine whether the mutation occurred.
-3. **Supervisory escalation**: If the environment remains indeterminate, the supervisor halts execution and escalates to human review (@sec-vol3-controlplane-hitl) rather than gambling on a blind retry.
+3. **Supervisory escalation**: If the environment remains indeterminate, the supervisor halts execution and escalates to human review rather than gambling on a blind retry.
+
+::: {.column-margin .margin-pointer}
+↩ Idempotency keys, lease renewal, and external settlement reconciliation are established in @sec-vol3-tool-calling.
+:::
 
 ### ARIES recovery versus agent trajectory persistence
 
@@ -207,14 +215,14 @@ Before moving on, check that you can answer the following:
 
 ## Checkpoints {#sec-vol3-persistence-checkpointing}
 
-A coding agent is on turn three hundred. Its log records that at turn 212 an edit tool rewrote `parser.py` and at turn 250 a shell tool deleted a build directory. Folding the log rebuilds the trajectory record, but it does not rebuild `parser.py`. The log holds the tool calls and their results; the files those calls produced live in the sandbox workspace (@sec-vol3-sandboxes-cow), and if the host holding the workspace suffered a hardware crash, the workspace died with it. Replaying the log cannot recreate the modified files either, because replay intentionally stubs tool execution.
+A coding agent is on turn three hundred. Its log records that at turn 212 an edit tool rewrote `parser.py` and at turn 250 a shell tool deleted a build directory. Folding the log rebuilds the trajectory record, but it does not rebuild `parser.py`. The log holds the tool calls and their results; the files those calls produced live in the sandbox workspace, and if the host holding the workspace suffered a hardware crash, the workspace died with it. Replaying the log cannot recreate the modified files either, because replay intentionally stubs tool execution.
 
 ### What a checkpoint captures: Full vs. incremental delta encoding
 
 A **checkpoint**\index{Checkpoint!definition} is a durable snapshot of everything the log alone cannot rebuild cheaply, bound to the exact log position it corresponds to. It comprises three components:
 
 1. **A record snapshot**: The serialized trajectory record $R_k$ at turn $k$, so a restart need not fold the whole log from $R_0$.
-2. **A workspace snapshot**: The sandbox filesystem at turn $k$, captured via copy-on-write snapshotting (@sec-vol3-sandboxes-cow).[^fn-cow-snapshot-overhead]
+2. **A workspace snapshot**: The sandbox filesystem at turn $k$, captured via copy-on-write snapshotting.[^fn-cow-snapshot-overhead]
 3. **A `Checkpoint` event**: Appended to the log only after both snapshots are durable on non-volatile media.
 
 The architectural trade-off lies in whether the supervisor takes a *full state snapshot* or an *incremental delta snapshot*. In long-horizon tasks, the context buffer expands monotonically as code diffs and execution traces accumulate. If context reaches $128\text{ KB}$ of structured tokens and metadata, committing a full snapshot every five turns over a 500-turn trajectory forces the storage engine to write:
@@ -348,7 +356,7 @@ class CheckpointCadence:
 
 ::: {#nbk-11-checkpoint-cadence .callout-notebook title="Choosing a checkpoint cadence in turns"}
 
-**Problem**: A coding agent runs on a pool of preemptible workers whose mean time between failures is `{python} CheckpointCadence.mtbf_h_str` hours. A turn takes `{python} CheckpointCadence.turn_str` s on average, and a checkpoint (flushing the record and taking a copy-on-write workspace snapshot at a turn boundary) pauses the trajectory for `{python} CheckpointCadence.delta_str` s. At the time of a crash the context holds `{python} CheckpointCadence.ctx_str` tokens and each reply has `{python} CheckpointCadence.k_out_str` output tokens, priced as in the budget example of @sec-vol3-controlplane-accounting. The inputs are illustrative. How often should the harness checkpoint, and what does a crash cost at that cadence and at a much rarer one?
+**Problem**: A coding agent runs on a pool of preemptible workers whose mean time between failures is `{python} CheckpointCadence.mtbf_h_str` hours. A turn takes `{python} CheckpointCadence.turn_str` s on average, and a checkpoint (flushing the record and taking a copy-on-write workspace snapshot at a turn boundary) pauses the trajectory for `{python} CheckpointCadence.delta_str` s. At the time of a crash the context holds `{python} CheckpointCadence.ctx_str` tokens and each reply has `{python} CheckpointCadence.k_out_str` output tokens, priced as in the earlier harness budget example. The inputs are illustrative. How often should the harness checkpoint, and what does a crash cost at that cadence and at a much rarer one?
 
 **Cadence**: With $\delta$ = `{python} CheckpointCadence.delta_str` s and $M$ = `{python} CheckpointCadence.mtbf_total_str` s, @eq-vol3-young-formula gives $T^{\ast} = \sqrt{2\,\delta\,M}$ = `{python} CheckpointCadence.t_opt_str` s, which is `{python} CheckpointCadence.turns_opt_str` turns.
 
@@ -362,18 +370,18 @@ class CheckpointCadence:
 
 Four moments call for a checkpoint regardless of the formula, because each is a point the trajectory will want to return to or must not lose:
 
-- **Before an irreversible action**, so the work before the pivot is safe whatever happens after it (@sec-vol3-failure-recovery covers the pivot).
+- **Before an irreversible action**, so the work before the pivot is safe whatever happens after it.
 - **When the trajectory pauses for an approval**, since a wait of hours makes a failure during the wait likely.
 - **Before compaction**, so the pre-compaction context stays reachable.
-- **When the harness moves the trajectory to another worker** (@sec-vol3-persistence-migration).
+- **When the harness moves the trajectory to another worker** (detailed in the next section).
 
 ## Resuming a Trajectory {#sec-vol3-persistence-migration}
 
-The trajectory from the start of the chapter now resumes on a new worker. The previous host may have crashed, been preempted, or been drained for a deployment, or the trajectory may simply have been paused for two days waiting for a person to approve a production change (@sec-vol3-controlplane-hitl). In every case the worker that continues it starts with nothing but the log, the latest checkpoint, and the rule that it must not repeat an effect. **Resume**\index{Resume!definition} is the protocol that turns those into a running trajectory:
+The trajectory from the start of the chapter now resumes on a new worker. The previous host may have crashed, been preempted, or been drained for a deployment, or the trajectory may simply have been paused for two days waiting for a person to approve a production change. In every case the worker that continues it starts with nothing but the log, the latest checkpoint, and the rule that it must not repeat an effect. **Resume**\index{Resume!definition} is the protocol that turns those into a running trajectory:
 
 1. **Claim ownership.** Acquire the trajectory's lease with a fencing token, so that no other worker can act for it (below).
 2. **Restore.** Load the latest checkpoint's record and workspace snapshots, then fold the log suffix into the record.
-3. **Settle.** Resolve every in-doubt intent, as @sec-vol3-persistence-wal describes, before anything new is dispatched.
+3. **Settle.** Resolve every in-doubt intent, as described earlier, before anything new is dispatched.
 4. **Rebuild the context** from the log and prefill it.
 5. **Continue** the loop at the next turn boundary, in the state the record says the trajectory was in.
 
@@ -381,9 +389,13 @@ Steps 2 and 3 reuse the machinery of the previous two sections. Steps 1 and 4, a
 
 ### Rebuilding the context
 
-The model keeps nothing between calls, so the resumed worker must hand it a context. It re-derives that context from the log with the same assembly rules the trajectory was using (@sec-vol3-context-engineering-staging): the recorded messages, the recorded tool results as they were delivered, and the recorded `Compacted` summaries in place of the turns they replaced. The `ContextBuilt` hash lets the harness confirm that the re-assembled context matches the last one the model saw before the crash. A mismatch means the assembly rules or their inputs changed, which is drift (below), not recovery.
+The model keeps nothing between calls, so the resumed worker must hand it a context. It re-derives that context from the log with the same assembly rules the trajectory was using: the recorded messages, the recorded tool results as they were delivered, and the recorded `Compacted` summaries in place of the turns they replaced. The `ContextBuilt` hash lets the harness confirm that the re-assembled context matches the last one the model saw before the crash. A mismatch means the assembly rules or their inputs changed, which is drift (below), not recovery.
 
-The rebuilt context must then be prefilled again. The key-value state that the old serving session held was derived from the token prefix and did not survive (principle \ref{pri-vol3-prefix-coherence}), and the new call may land on a server whose prefix cache has never seen this trajectory (@sec-vol3-kvcache-radix-tree). Resume therefore pays one cold prefill of the full context.
+The rebuilt context must then be prefilled again. The key-value state that the old serving session held was derived from the token prefix and did not survive (principle \ref{pri-vol3-prefix-coherence}), and the new call may land on a server whose prefix cache has never seen this trajectory. Resume therefore pays one cold prefill of the full context.
+
+::: {.column-margin .margin-pointer}
+↩ Canonical prompt staging and radix-tree prefix caching are established in @sec-vol3-context-engineering and @sec-vol3-kv-cache.
+:::
 
 We formalize end-to-end crash recovery latency $T_{\text{recovery}}$ by decomposing it into its three constituent physical phases in @eq-vol3-recovery-latency-decomposition:
 
@@ -399,13 +411,13 @@ where:
 
 Comparing the physical latency scales reveals a critical architectural takeaway: $T_{\text{WAL\_read}} \ll T_{\text{prefill}}(L_{\text{recovered}})$. In classical database systems, crash recovery is bound by disk I/O throughput during page replay. In autonomous agent systems, crash recovery time is overwhelmingly dominated by the arithmetic intensity and memory bandwidth of large language model (LLM) prompt prefill on the serving cluster. Reading a 50 KB JSON WAL from NVMe flash takes microseconds, whereas prefilling a 32,000-token reconstructed prompt on an 8x H100 cluster requires hundreds of milliseconds to multiple seconds.
 
-Two operational practices keep $T_{\text{prefill}}$ small. Routing the resumed trajectory to a server that still holds its prefix turns the cold prefill into a cache hit, and re-assembling the context byte for byte as before keeps the prefix identical, so any surviving cache entry is usable. For a long context that is seconds of latency and cents of input-token cost (@sec-vol3-foundation-model-cost; @sec-vol3-appendix-inference-kv-cache), small next to redoing turns, which costs minutes of model calls and dollars and puts every in-doubt effect at risk.
+Two operational practices keep $T_{\text{prefill}}$ small. Routing the resumed trajectory to a server that still holds its prefix turns the cold prefill into a cache hit, and re-assembling the context byte for byte as before keeps the prefix identical, so any surviving cache entry is usable. For a long context that is seconds of latency and cents of input-token cost, small next to redoing turns, which costs minutes of model calls and dollars and puts every in-doubt effect at risk.
 
 ### Pauses, approvals, and late results
 
-A pause for approval is a resume that the harness planned. When a call is held (@sec-vol3-controlplane-hitl), the harness writes `ApprovalRequested`, takes a checkpoint, and releases the worker and its model-serving state entirely, because holding either for hours wastes both. When the answer arrives, the runtime writes `ApprovalResolved` and resumes the trajectory through the same five steps. The approval gate's own rules, such as expiry and re-checking the action's preconditions before dispatch, run after the resume, against the world as it is now rather than as it was when the request was made.
+A pause for approval is a resume that the harness planned. When a call is held in approval escrow, the harness writes `ApprovalRequested`, takes a checkpoint, and releases the worker and its model-serving state entirely, because holding either for hours wastes both. When the answer arrives, the runtime writes `ApprovalResolved` and resumes the trajectory through the same five steps. The approval gate's own rules, such as expiry and re-checking the action's preconditions before dispatch, run after the resume, against the world as it is now rather than as it was when the request was made.
 
-Long-running tools create the opposite case. A job started through an asynchronous tool (@sec-vol3-tool-calling-async-resumption) may finish after the worker that started it has died. Its result must therefore go to a durable inbox keyed by tool-call ID, not to the worker's memory. On resume, the harness matches each waiting result against the intents in the log and writes the matching `ToolResult`. A result whose tool-call ID has no intent in the log, or that arrives for a trajectory that has since been canceled, is rejected by the record's state guards (@sec-vol3-controlplane-statemachine) rather than delivered to the model.
+Long-running tools create the opposite case. A job started through an asynchronous tool may finish after the worker that started it has died. Its result must therefore go to a durable inbox keyed by tool-call ID, not to the worker's memory. On resume, the harness matches each waiting result against the intents in the log and writes the matching `ToolResult`. A result whose tool-call ID has no intent in the log, or that arrives for a trajectory that has since been canceled, is rejected by the record's state guards rather than delivered to the model.
 
 ### Moving a trajectory and fencing tokens
 
@@ -433,7 +445,7 @@ Between the crash and the resume, or during a long approval pause, the system ar
 - **Cross over** to the new versions at the next turn boundary, writing a drift event that records the old and new versions. Recorded turns keep their recorded outputs, the context is re-assembled under the new template, and the prefix cache misses from the first changed token onward.
 - **Refuse** and escalate, the right answer when a changed tool schema would reinterpret arguments already recorded in an in-doubt intent.
 
-A trajectory that crosses over is, from turn $k$ onward, a different system. Its behavior before and after the crossing should not be pooled when it is evaluated (@sec-vol3-evaluation), and the drift event is what lets an evaluator split it.
+A trajectory that crosses over is, from turn $k$ onward, a different system. Its behavior before and after the crossing should not be pooled when it is evaluated, and the drift event is what lets an evaluator split it.
 
 Resume uses the log to continue a trajectory. The same machinery can also rebuild a trajectory's past without continuing it, which is how engineers find out what went wrong.
 
@@ -457,7 +469,7 @@ Overnight, an agent deleted a release branch at turn 23 of a cleanup task. The n
 
 : **Replay versus Rerun**: Replay rebuilds a trajectory from its log without calling the model or the tools. A rerun from the original prompt is a new trajectory that spends tokens again and repeats effects. {#tbl-vol3-replay-comparison tbl-colwidths="[18,24,29,29]"}
 
-Replay is strict. If the harness, while replaying, tries to call the model or a tool that the log does not account for, the replay fails. An unlogged call means either that the harness code has changed since the recording or that some input reached the live trajectory without passing through the log, and both are findings. The idea comes from deterministic replay of whole machines, where reproducing an execution requires logging every nondeterministic input [@king2005debugging]. For an agent, the nondeterministic inputs are few and well defined, namely model replies, tool results, and whatever the harness itself reads from the environment (@sec-vol3-persistence-non-determinism).
+Replay is strict. If the harness, while replaying, tries to call the model or a tool that the log does not account for, the replay fails. An unlogged call means either that the harness code has changed since the recording or that some input reached the live trajectory without passing through the log, and both are findings. The idea comes from deterministic replay of whole machines, where reproducing an execution requires logging every nondeterministic input [@king2005debugging]. For an agent, the nondeterministic inputs are few and well defined, namely model replies, tool results, and whatever the harness itself reads from the environment.
 
 ### Time travel and counterfactual branches
 
@@ -473,9 +485,9 @@ Because replay can stop at any turn, the log becomes a timeline an engineer can 
 
 :::
 
-For the deleted branch, the engineer replays to turn 23 and reads the context the model received. Suppose the branch listing it had been shown was truncated before the line that marked the release branch as protected. The defect is then in observation truncation, not in the model. That kind of attribution, separating model failures from harness failures across many incidents, is the subject of @sec-vol3-evaluation-postmortems. Replay supplies its evidence.
+For the deleted branch, the engineer replays to turn 23 and reads the context the model received. Suppose the branch listing it had been shown was truncated before the line that marked the release branch as protected. The defect is then in observation truncation, not in the model. That kind of attribution, separating model failures from harness failures across many incidents, is the subject of incident post-mortem analysis. Replay supplies its evidence.
 
-A **counterfactual branch** goes one step further. The engineer forks the trajectory at turn 22, changes one thing (the truncation rule, the prompt template, the tool schema, or the model), and lets it continue live from that point. Everything before the fork is replayed, so the early turns cost nothing and stay identical. Everything after it is a new trajectory, and it must run in a sandbox with external tools stubbed or pointed at test systems, because it is live and its effects are real. Comparing one branch against one recording shows only that the fix can change the outcome. Showing that it does so reliably requires running many branches and measuring them, which @sec-vol3-evaluation takes up.
+A **counterfactual branch** goes one step further. The engineer forks the trajectory at turn 22, changes one thing (the truncation rule, the prompt template, the tool schema, or the model), and lets it continue live from that point. Everything before the fork is replayed, so the early turns cost nothing and stay identical. Everything after it is a new trajectory, and it must run in a sandbox with external tools stubbed or pointed at test systems, because it is live and its effects are real. Comparing one branch against one recording shows only that the fix can change the outcome. Showing that it does so reliably requires running many branches and measuring them, which rigorous evaluation suites take up.
 
 ### Regression tests for the harness
 
@@ -483,7 +495,11 @@ Replay also tests the harness itself. Every change to the harness, such as a str
 
 Replaying archived trajectories through the changed harness removes all three problems. The recorded model replies are fixed test inputs, so the test measures the harness and nothing else. Suppose a team tightens the parser that extracts file edits from tool calls. Replaying a few hundred production logs through the new parser finds a trajectory where, at turn 14, the old parser accepted a patch wrapped in a markdown code fence and the new one rejects it, and the replay stops at that turn with both parses in hand. The test cost harness compute only, ran in seconds, and pointed to the exact turn and payload.
 
-The scope of this test is narrow by design. It shows that the new harness handles recorded model outputs as the old one did, or where it differs. It cannot show that the new harness makes the agent more successful, because the model's future replies will respond to the new harness. That question needs fresh trajectories and the statistics of @sec-vol3-evaluation. The same logs, once verified, also become the raw material for training (@sec-vol3-trajectory-curation).
+The scope of this test is narrow by design. It shows that the new harness handles recorded model outputs as the old one did, or where it differs. It cannot show that the new harness makes the agent more successful, because the model's future replies will respond to the new harness. That question needs fresh trajectories and rigorous statistical evaluation. The same logs, once verified, also become the raw material for policy curation and training.
+
+::: {.column-margin .margin-pointer}
+↪ Deterministic evaluation suites and post-mortem attribution across recorded trajectories are developed in @sec-vol3-evaluation.
+:::
 
 Replay works because it never asks the model for anything. The moment an engineer does ask, by rerunning a prompt or continuing a counterfactual branch, the trajectory can diverge from its recording, and it is worth knowing why.
 
@@ -640,7 +656,7 @@ Production architectures resolve this tension by organizing storage into a three
 
 1. **Hot Tier (Local NVMe / Embedded RocksDB)**: Executes locally on the worker node. When the harness logs a `ToolIntent` or `ToolResult`, it appends directly to an embedded LSM-tree with `fdatasync()`. Because writes are strictly sequential and local, durable settlement completes in under $0.5\ \text{ms}$, satisfying @eq-vol3-wal-ordering without remote network hops.
 2. **Warm Tier (Clustered Relational Database / PostgreSQL)**: An asynchronous background streaming sidecar daemon tails the local RocksDB log and replicates committed event batches to a centralized relational database. This tier provides indexed multi-agent queries, administrative cancellation, and live dashboard monitoring without blocking the execution path.
-3. **Cold Tier (Columnar Object Storage / Apache Parquet)**: An offline batch pipeline consolidates completed trajectories older than 7 days into compressed Apache Parquet files on object storage (S3/GCS), partitioned by tenant, date, and model version. Analytical engines (DuckDB, Trino) and training pipelines stream these columnar chunks directly into GPU memory for policy training (@sec-vol3-trajectory-curation).
+3. **Cold Tier (Columnar Object Storage / Apache Parquet)**: An offline batch pipeline consolidates completed trajectories older than 7 days into compressed Apache Parquet files on object storage (S3/GCS), partitioned by tenant, date, and model version. Analytical engines (DuckDB, Trino) and training pipelines stream these columnar chunks directly into GPU memory for downstream policy training.
 
 | Storage Media | Storage Technology                                             | Query / Access Pattern                                            | Operational Function                                                       | Performance & Cost Envelopes                                              |
 |:--------------|:---------------------------------------------------------------|:------------------------------------------------------------------|:---------------------------------------------------------------------------|:--------------------------------------------------------------------------|
@@ -677,19 +693,19 @@ The context window is a lossy projection of the trajectory. Compaction summarize
 ::: {.fallacy-pitfall}
 **Pitfall:** *Dispatching a world-changing call before its intent is durable, to save latency.*
 
-The saving is small, since a local flush adds well under 1 percent to a turn. The cost is a phantom effect whenever the host fails in the window between dispatch and flush. The recovered harness finds no intent, concludes the call never happened, and repeats a payment, a message, or a provisioning request. Write-ahead ordering (@sec-vol3-persistence-wal) closes the window, and group commit recovers most of the latency.
+The saving is small, since a local flush adds well under 1 percent to a turn. The cost is a phantom effect whenever the host fails in the window between dispatch and flush. The recovered harness finds no intent, concludes the call never happened, and repeats a payment, a message, or a provisioning request. Write-ahead ordering closes the window, and group commit recovers most of the latency.
 :::
 
 ::: {.fallacy-pitfall}
 **Fallacy:** *Rerunning the model at temperature zero reproduces a trajectory.*
 
-Serving at temperature zero is still not bit-exact, because batch composition changes the order of floating-point sums and near-ties between tokens flip. Model versions change behind a stable name, harness inputs such as timestamps enter the context, and the environment moves. A rerun is a new trajectory. Reproduction comes from replaying recorded model replies and tool results (@sec-vol3-persistence-replay), and divergence analysis (@sec-vol3-persistence-non-determinism) explains the rest.
+Serving at temperature zero is still not bit-exact, because batch composition changes the order of floating-point sums and near-ties between tokens flip. Model versions change behind a stable name, harness inputs such as timestamps enter the context, and the environment moves. A rerun is a new trajectory. Reproduction comes from replaying recorded model replies and tool results, and divergence analysis explains the rest.
 :::
 
 ::: {.fallacy-pitfall}
 **Pitfall:** *Regenerating summaries and contexts on resume instead of re-using the recorded ones.*
 
-A resumed harness that re-summarizes old turns, or re-assembles the context under a prompt template edited since the crash, gives the model a different memory of its own past than the one it acted on. The trajectory then continues from a state that never existed, its prefix cache misses, and its later turns cannot be compared with its earlier ones. Resume uses the recorded `Compacted` events and the recorded template version, and treats any change as explicit drift (@sec-vol3-persistence-migration).
+A resumed harness that re-summarizes old turns, or re-assembles the context under a prompt template edited since the crash, gives the model a different memory of its own past than the one it acted on. The trajectory then continues from a state that never existed, its prefix cache misses, and its later turns cannot be compared with its earlier ones. Resume uses the recorded `Compacted` events and the recorded template version, and treats any change as explicit drift.
 :::
 
 ::: {.fallacy-pitfall}
@@ -701,7 +717,7 @@ A timeout says the reply did not arrive, not that the request did nothing. Re-se
 ::: {.fallacy-pitfall}
 **Pitfall:** *Keeping every byte of raw tool output in the live log forever.*
 
-Test runners and compilers can produce megabytes per turn, most of which the model never received. Keeping it all in the live log slows appends, checkpoints, and moves between workers, and inflates storage costs without improving replay. Offloading the bulk below the truncation line to content-addressed storage, while keeping the delivered content and a hash in the log (@sec-vol3-persistence-compaction), preserves everything replay and audit need.
+Test runners and compilers can produce megabytes per turn, most of which the model never received. Keeping it all in the live log slows appends, checkpoints, and moves between workers, and inflates storage costs without improving replay. Offloading the bulk below the truncation line to content-addressed storage, while keeping the delivered content and a hash in the log, preserves everything replay and audit need.
 :::
 
 ## Summary {#sec-vol3-durable-execution-summary}
@@ -719,8 +735,12 @@ The chapter asked what a runtime must record so that a trajectory can survive a 
 
 Recovery in this chapter never calls the model. The trajectory record is recomputed from the log, write-ahead ordering places every effect after its durable intent, and checkpoints bound what a restart must redo. That is intent before effect (principle \ref{pri-vol3-intent-before-effect}) with its costs attached, one durable write per world-changing call and a checkpoint cadence set by the failure rate. It also marks where the mechanical half of invariant closure (principle \ref{pri-invariant-closure}) ends for durability. The runtime can guarantee that no effect goes unrecorded and that no settled effect is repeated, but it cannot decide from the log alone whether an in-doubt effect took place, and it cannot decide whether a recorded effect was the right one.
 
+::: {.column-margin .margin-pointer}
+↪ Sagas, compensators, and semantic forward-recovery protocols are developed in @sec-vol3-failure-recovery.
+:::
+
 ::: {.callout-chapter-connection title="From a durable history to recovering from its mistakes"}
-The log says what happened. When what happened was wrong, and some of it cannot be undone, how does the trajectory recover? @Sec-vol3-failure-recovery takes up that question. It uses this chapter's log to know which effects committed, compensates the ones that can be answered by another action, repairs forward through the model where the effect can stand, stops at the one action that cannot be reversed, and detects when a trajectory has stopped making progress at all.
+The log says what happened. When what happened was wrong, and some of it cannot be undone, how does the trajectory recover? Failure recovery takes up that question. It uses this chapter's log to know which effects committed, compensates the ones that can be answered by another action, repairs forward through the model where the effect can stand, stops at the one action that cannot be reversed, and detects when a trajectory has stopped making progress at all.
 :::
 
 [^fn-aries-steal-noforce]: **ARIES Buffer Policies**: Classical ARIES operates under a steal and no-force buffer management policy where dirty uncommitted pages can be flushed to disk while committed pages need not be forced synchronously. The write-ahead logging invariant guarantees that a dirty page cannot be written to non-volatile storage before its corresponding log record is flushed ($PageLSN \le FlushedLSN$). This decoupling maximizes transaction throughput while preserving crash consistency.

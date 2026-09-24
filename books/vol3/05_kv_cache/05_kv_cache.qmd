@@ -166,7 +166,11 @@ $$B_{\max} = \left\lfloor \frac{\text{HBM}_{\text{total}} - \text{Mem}_{\text{we
 
 When agent sequences are short ($S = 8,192$), the cluster comfortably hosts $B_{\max} = \lfloor 480 / 2.5 \rfloor = 192$ concurrent trajectories. But as soon as those agents ingest complex codebases and run multi-step execution traces that drive context to $S = 131,072$, the cluster's concurrency collapses to $B_{\max} = \lfloor 480 / 40 \rfloor = 12$ active trajectories. A thirteenth concurrent request cannot be scheduled; it triggers immediate queueing or causes the serving engine to fault with an accelerator out-of-memory termination. A runtime that holds each working set near its effective size (principle \ref{pri-vol3-attention-working-set}) stays much closer to the short-context regime. The 131,072-token case is what the serving engine must survive when context management fails or is absent.
 
-Tool waits make the bottleneck worse. @Sec-vol3-intro-memory-stranding priced this pressure, the tool-wait memory tax, for one paused session on the same node. While a tool runs, the trajectory's attention state sits idle in accelerator memory, and the serving system must choose between holding tens of gigabytes that other trajectories need and moving or discarding them at the price of a reload or a full prefill when the observation returns. The model cannot make that choice. Memory is a resource bound, and the invariant closure principle (\ref{pri-invariant-closure}) places resource bounds in the runtime below the model, so the serving system owns the decision. It returns in @sec-vol3-kvcache-swapping once paging is in place.
+Tool waits make the bottleneck worse. The tool-wait memory tax prices this pressure for one paused session on the same node. While a tool runs, the trajectory's attention state sits idle in accelerator memory, and the serving system must choose between holding tens of gigabytes that other trajectories need and moving or discarding them at the price of a reload or a full prefill when the observation returns. The model cannot make that choice. Memory is a resource bound, and the invariant closure principle (\ref{pri-invariant-closure}) places resource bounds in the runtime below the model, so the serving system owns the decision. It returns in @sec-vol3-kvcache-swapping once paging is in place.
+
+::: {.column-margin .margin-pointer}
+↩ Tool-wait memory stranding and the passive boundary ceiling are established in @sec-vol3-intro.
+:::
 
 The physical scale of this dilemma is visualized in @fig-vol3-kv-cache-memory-wall. As plotted in the left panel of @fig-vol3-kv-cache-memory-wall, frontier language model context windows expanded over 4,000-fold between 2018 and 2026, growing from GPT-1's 512 tokens to Gemini 1.5 and 2.0's 2,097,152 tokens. While this expansion enables agents to ingest entire codebases and retain extensive tool interactions, it crashes directly into the physical memory ceilings of hardware accelerators shown in the right panel. At a 16-bit footprint of $320\text{ KiB}$ per token under grouped-query attention [@ainslie2023gqa], a single 70B model trajectory ($B=1$) at 128,000 tokens pins 40 GB of High-Bandwidth Memory (half an NVIDIA H100 accelerator). At 1,000,000 tokens, that single trajectory commands 320 GB of KV cache—exceeding the 80 GB capacity of an entire H100 GPU by 4.0-fold and exceeding even next-generation 192 GB B200 accelerators by 1.7-fold. When four concurrent agents run at this horizon ($B=4$), aggregate KV memory demands surge past 1.28 TB, overwhelming entire multi-GPU clusters. This **KV cache memory wall** transforms memory allocation from a background implementation detail into the primary governor of agent scalability, necessitating virtual memory abstractions, dynamic block paging [@kwon2023vllm], and hierarchical offloading.
 
@@ -928,7 +932,11 @@ Even with large batches, paged allocation restricts internal memory waste to les
 
 ### Zero-copy deliberation via copy-on-write branching
 
-In agentic architectures, execution rarely proceeds along a single linear trajectory. Deliberation buys evidence by generating alternatives (principle \ref{pri-vol3-test-time-scaling}), so tree-of-thought search, speculative candidate sampling, self-consistency evaluation, and tool-call retries all fork several branches from one shared prefix (@sec-vol3-test-time-compute). A planning agent might ingest an eight-thousand-token context containing system prompts, environment specifications, and tool documentation, and subsequently spawn four speculative child trajectories to explore distinct execution strategies.
+In agentic architectures, execution rarely proceeds along a single linear trajectory. Deliberation buys evidence by generating alternatives (principle \ref{pri-vol3-test-time-scaling}), so tree-of-thought search, speculative candidate sampling, self-consistency evaluation, and tool-call retries all fork several branches from one shared prefix. A planning agent might ingest an eight-thousand-token context containing system prompts, environment specifications, and tool documentation, and subsequently spawn four speculative child trajectories to explore distinct execution strategies.
+
+::: {.column-margin .margin-pointer}
+↩ Branching rollouts, tree-of-thought search, and speculative verification are developed in @sec-vol3-test-time-compute.
+:::
 
 Under a contiguous memory allocation model, branching is an expensive, high-latency operation. Because each child sequence must append newly generated tokens to its own contiguous memory span, the serving engine must physically duplicate the parent's entire KV cache tensor. For the 70B parameter model analyzed above, deep-copying an $8,192$-token prefix across four child branches requires physically duplicating:
 
@@ -1044,12 +1052,12 @@ Consider an autonomous coding agent operating on an 8-GPU tensor-parallel node h
 The agent's standard system instruction, formatting rules, and tool definition schema comprise an invariant prefix of $S_{\text{prefix}} = 4{,}096$ tokens.
 
 **1. Physical KV Memory Footprint:**
-Applying the physical GQA tensor footprint established in @sec-vol3-foundation-model-tokenization ($m_{\text{token}} = 320\text{ KiB/token}$):
+Applying the physical GQA tensor footprint ($m_{\text{token}} = 320\text{ KiB/token}$):
 $$M_{\text{KV}} = S_{\text{prefix}} \cdot m_{\text{token}} = 4{,}096 \times 320\text{ KiB} = 1{,}310{,}720\text{ KiB} = 1.25\text{ GiB}$$
 Distributed across the 8 GPUs via tensor parallelism, this footprint requires only $160\text{ MiB}$ of HBM per accelerator.
 
 **2. Prefill Compute Savings:**
-Applying the foundation engine Roofline model from @sec-vol3-foundation-model-cost, evaluating prompt context requires $2N$ FLOPs per token for linear projections plus the quadratic self-attention component ($4 \cdot L \cdot d_{\text{model}} \cdot S_{\text{prefix}}^2$):
+Under the foundation engine Roofline model, evaluating prompt context requires $2N$ FLOPs per token for linear projections plus the quadratic self-attention component ($4 \cdot L \cdot d_{\text{model}} \cdot S_{\text{prefix}}^2$):
 $$\text{FLOPs}_{\text{linear}} = 2 \cdot (70 \times 10^9) \cdot 4{,}096 \approx 5.734 \times 10^{14}\text{ FLOPs} = 573.4\text{ TFLOPs}$$
 $$\text{FLOPs}_{\text{attn}} = 4 \cdot 80 \cdot 8{,}192 \cdot (4{,}096)^2 \approx 4.40 \times 10^{13}\text{ FLOPs} = 44.0\text{ TFLOPs}$$
 $$\text{FLOPs}_{\text{total}} = \text{FLOPs}_{\text{linear}} + \text{FLOPs}_{\text{attn}} = 573.4 + 44.0 = 617.4\text{ TFLOPs}$$
@@ -1101,7 +1109,11 @@ This leaf-first traversal guarantees that the root and high-level branch nodes�
 
 ### What breaks the hit rate
 
-Attention state for a token depends on every token before it, so the cache can reuse state only up to the first token that differs (principle \ref{pri-vol3-prefix-coherence}). Prefix caching is all or nothing from left to right. The engine cannot enforce a cache-friendly layout; it can only reward one, and the harness controls every input that decides the outcome. @Sec-vol3-context-engineering-staging already named the changes that break the prefix: a per-call field at the head, a tool list that changes mid-trajectory, nondeterministic serialization, and every compaction. Seen from the cache, they share one signature. Each moves the first differing token toward the head of the context, and the engine prefills every block after it again. The first three are avoidable by layout. Compaction is not, which is why the harness compacts rarely and in large batches (@sec-vol3-context-engineering-compaction) and accepts one expensive turn per batch.
+Attention state for a token depends on every token before it, so the cache can reuse state only up to the first token that differs (principle \ref{pri-vol3-prefix-coherence}). Prefix caching is all or nothing from left to right. The engine cannot enforce a cache-friendly layout; it can only reward one, and the harness controls every input that decides the outcome. Logical context staging already named the changes that break the prefix: a per-call field at the head, a tool list that changes mid-trajectory, nondeterministic serialization, and every compaction. Seen from the cache, they share one signature. Each moves the first differing token toward the head of the context, and the engine prefills every block after it again. The first three are avoidable by layout. Compaction is not, which is why the harness compacts rarely and in large batches and accepts one expensive turn per batch.
+
+::: {.column-margin .margin-pointer}
+↩ Three-zone prompt layout, ascending volatility ordering, and batch compaction thresholds are developed in @sec-vol3-context-engineering.
+:::
 
 The measure of all this is the prefix hit rate, the fraction of prompt tokens served from cache rather than prefilled:
 
@@ -1113,7 +1125,7 @@ where request $i$ has prompt length $S_{\text{prompt}}^{(i)}$ and matched prefix
 
 Most agent builders call a model through a hosted API rather than running the engine, and they meet the same mechanism as a billing feature. The provider caches the KV state of a prompt prefix and bills cached input tokens at a fraction of the normal input rate. Some interfaces reuse any sufficiently long matching prefix automatically. Others ask the caller to mark cache breakpoints, the positions up to which the prefix should be stored, and may charge extra for the tokens written into the cache. Cached entries expire after an idle time-to-live, typically minutes, because the provider runs the same leaf-first eviction as the radix cache, on a shared fleet.
 
-Three harness consequences follow. The breakpoints belong at the boundaries of the stable zones in the layout of @sec-vol3-context-engineering-staging, after the tool definitions and after the long-lived history, so that each zone is cached once and reused. The time-to-live couples caching to tool waits. A tool that runs longer than the time-to-live returns to a cold cache, and the next turn pays full input price for the whole context, which is the provider-side version of the retain-or-evict decision in @sec-vol3-kvcache-swapping. Finally, the hit rate becomes directly visible in the bill, as the ratio of cached to uncached input tokens the API reports, which makes it the cheapest metric of cache health a harness can track.
+Three harness consequences follow. The breakpoints belong at the boundaries of the stable zones in the three-zone prompt layout, after the tool definitions and after the long-lived history, so that each zone is cached once and reused. The time-to-live couples caching to tool waits. A tool that runs longer than the time-to-live returns to a cold cache, and the next turn pays full input price for the whole context, which is the provider-side version of the retain-or-evict decision in @sec-vol3-kvcache-swapping. Finally, the hit rate becomes directly visible in the bill, as the ratio of cached to uncached input tokens the API reports, which makes it the cheapest metric of cache health a harness can track.
 
 Prefix caching removes the prefill of everything the trajectory has already sent. It cannot remove the prefill of what is new, and in an agent the new tokens arrive in large pieces, one tool observation at a time.
 
@@ -1125,7 +1137,7 @@ Chunked prefill resolves this physical collision by slicing monolithic prompts i
 
 ### The prefill-decode interference dilemma
 
-Prefill and decode conflict because they saturate different resources. Decode is bound by memory bandwidth (principle \ref{pri-vol3-memory-bandwidth-decoding}) while prefill is bound by compute, as @sec-vol3-foundation-model-cost derived. Under the Roofline model, the operational intensity $\mathcal{I}$ of a workload measures the ratio of floating-point operations executed to memory bytes transferred across the accelerator memory bus:
+Prefill and decode conflict because they saturate different resources. Decode is bound by memory bandwidth (principle \ref{pri-vol3-memory-bandwidth-decoding}) while prefill is bound by compute. Under the Roofline model, the operational intensity $\mathcal{I}$ of a workload measures the ratio of floating-point operations executed to memory bytes transferred across the accelerator memory bus:
 
 $$\mathcal{I} = \frac{\text{Floating Point Operations (FLOPs)}}{\text{Memory Traffic (Bytes)}}$$
 
@@ -1343,7 +1355,7 @@ When an agentic trajectory pauses for tool execution or human deliberation, the 
 
 In conversational serving, request execution is continuous: an initial prefill phase processes the prompt, followed immediately by an unbroken autoregressive decode phase that emits tokens until reaching a stop delimiter or sequence limit. Agentic workloads shatter this assumption. An agent trajectory is a punctuated sequence of short token generations separated by heavy-tailed external execution intervals. A code-editing agent may generate a fifty-token shell command in two hundred milliseconds, then idle for forty-five seconds while a build system compiles dependencies and runs unit tests. A research agent may emit a search query and pause while a browser worker downloads, parses, and scrapes several web documents.
 
-In a multi-tenant serving cluster where accelerator HBM is the gating bottleneck determining maximum concurrent batch size $B$, pinning $M_{\text{KV}}$ gigabytes of inactive attention state for an idle duration $T_{\text{wait}}$ imposes the tool-wait memory tax that @sec-vol3-intro-memory-stranding priced for one session, written here as a memory-time product:
+In a multi-tenant serving cluster where accelerator HBM is the gating bottleneck determining maximum concurrent batch size $B$, pinning $M_{\text{KV}}$ gigabytes of inactive attention state for an idle duration $T_{\text{wait}}$ imposes the tool-wait memory tax, written here as a memory-time product:
 
 $$\mathcal{C}_{\text{hold}} = M_{\text{KV}} \cdot T_{\text{wait}}$$
 
@@ -1650,7 +1662,7 @@ Provisioning high-bandwidth memory for an autonomous agent deployment based on s
 
 ### Workload dynamics: The multi-turn agent divergence {#sec-vol3-kv-workload-dynamics}
 
-The physical memory footprint of an inference engine is driven by the divergence between conversational requests and agentic execution graphs. In a standard dialog system, the distribution of sequence lengths is unimodal and tightly bounded, allowing a service operator to provision a predictable ratio of active compute batch slots to high-bandwidth memory blocks. Each request frees its blocks when it emits its end-of-sequence token, the request boundary of @sec-vol3-intro-passive-boundary-ceiling, so memory reclamation is frequent, deterministic, and tightly coupled to token emission.
+The physical memory footprint of an inference engine is driven by the divergence between conversational requests and agentic execution graphs. In a standard dialog system, the distribution of sequence lengths is unimodal and tightly bounded, allowing a service operator to provision a predictable ratio of active compute batch slots to high-bandwidth memory blocks. Each request frees its blocks when it emits its end-of-sequence token, the request boundary of passive conversational serving, so memory reclamation is frequent, deterministic, and tightly coupled to token emission.
 
 ::: {.column-margin}
 Grouped-Query Attention (GQA) reduces physical cache pressure by assigning multiple query heads to share a single key-value head pair ($H_{\text{kv}} \ll H_q$). For a model with an $8:1$ query-to-KV head ratio, the physical footprint per token shrinks by an order of magnitude, enabling proportional expansions in concurrency for identical physical HBM pools.
@@ -1868,11 +1880,11 @@ Durable semantic state belongs strictly within the host supervisor's determinist
 
 When an autonomous agent trajectory pauses its autoregressive generation to invoke an external tool, dispatch a subagent, or await human authorization, the host supervisor must decide the physical disposition of that sequence's KV cache. A pervasive pitfall in agent serving deployments is holding these physical KV blocks pinned in accelerator High-Bandwidth Memory (HBM) indefinitely, under the assumption that preserving residency avoids the latency penalty of recomputing the prompt when the external call returns.
 
-The failure mode of this policy is stranded capacity. Consider our canonical 70-billion parameter GQA foundation model ($m_{\text{token}} \approx 320\text{ KiB/token}$, as formulated in @sec-vol3-foundation-model-tokenization). An agent engaged in a complex repository refactoring trajectory with an active context length of $S = 32{,}768$ tokens immobilizes:
+The failure mode of this policy is stranded capacity. Consider our canonical 70-billion parameter GQA foundation model ($m_{\text{token}} \approx 320\text{ KiB/token}$). An agent engaged in a complex repository refactoring trajectory with an active context length of $S = 32{,}768$ tokens immobilizes:
 
 $$M_{\text{KV}} = S \cdot m_{\text{token}} = 32{,}768 \times 320\text{ KiB} = 10{,}485{,}760\text{ KiB} = 10\text{ GiB}$$
 
-If this agent dispatches an asynchronous integration test suite inside an isolated sandbox container requiring $T_{\text{wait}} = 45\text{ seconds}$ to complete, holding that allocation resident strands 10 GB of scarce accelerator capacity for three-quarters of a minute, the tool-wait memory tax of @sec-vol3-intro-memory-stranding at a smaller context. On an accelerator provisioned with 80 GB of HBM, this single dormant trajectory monopolizes 12.5 percent of total physical memory without performing a single floating-point operation.
+If this agent dispatches an asynchronous integration test suite inside an isolated sandbox container requiring $T_{\text{wait}} = 45\text{ seconds}$ to complete, holding that allocation resident strands 10 GB of scarce accelerator capacity for three-quarters of a minute, paying the tool-wait memory tax at a smaller context. On an accelerator provisioned with 80 GB of HBM, this single dormant trajectory monopolizes 12.5 percent of total physical memory without performing a single floating-point operation.
 
 Under multi-tenant workloads, this stranded capacity starves active requests of allocation blocks. The PagedAttention memory manager experiences artificial memory pressure, forcing the serving scheduler to defer incoming prefill requests, reduce active decode batch sizes, and trigger involuntary preemptive swapping of other running requests.
 
@@ -1885,6 +1897,10 @@ Offloading those blocks across a PCIe Gen5 $\times 16$ bus at an effective bandw
 $$T_{\text{reload}} = \frac{10\text{ GiB}}{50\text{ GB/s}} \approx 215\text{ ms}$$
 
 each way, so the same $53\times$ advantage over recomputation holds here as at $16\text{k}$ tokens, because the ratio does not depend on sequence length. Immobilizing 10 GB of accelerator HBM for 45 seconds to avoid a 430-millisecond round trip represents a severe misallocation of hardware resources. Systems must implement lease-based retention policies. Once the expected tool wait exceeds the break-even time $T_{\text{wait}}^*$ derived in @sec-vol3-kvcache-swapping, which approaches the round-trip transfer time under memory pressure, the runtime must unpin the blocks and migrate them to host DRAM.
+:::
+
+::: {.column-margin .margin-pointer}
+⇄ While decode is bound by memory bandwidth, prompt prefill is bound by compute; tool waits shift the bottleneck to host-device interconnects.
 :::
 
 ::: {.fallacy-pitfall}
@@ -1906,7 +1922,7 @@ The engine instantly links the physical block table of the incoming request to t
 
 This failure mode also emerges across tokenization boundaries. If prompt construction routines concatenate strings dynamically without enforcing canonical token boundary alignments, identical character strings can tokenize into divergent integer token sequences depending on trailing whitespace or punctuation. Conversely, distinct prompts can yield identical token sub-sequences that collide in naive hash tables.
 
-The defense is the invalidation of @sec-vol3-context-engineering-context-rot, applied where the staleness lives. Only the file is authoritative, and every view derived from it, the staged text and the attention state computed from that text, goes stale when the file is written (principle \ref{pri-vol3-source-authority}). The runtime tombstones or refreshes the stale observation before the next invocation. That edit changes tokens at the observation's position, so the cache still serves the stable prefix before it. Binding a workspace digest into the head of the prefix would also break the stale match, but it would place the most volatile token first, against the ascending-volatility layout of @sec-vol3-context-engineering-staging, and every file write would invalidate the whole cached branch.
+The defense is explicit runtime invalidation, applied where the staleness lives. Only the file is authoritative, and every view derived from it, the staged text and the attention state computed from that text, goes stale when the file is written (principle \ref{pri-vol3-source-authority}). The runtime tombstones or refreshes the stale observation before the next invocation. That edit changes tokens at the observation's position, so the cache still serves the stable prefix before it. Binding a workspace digest into the head of the prefix would also break the stale match, but it would place the most volatile token first, against an ascending-volatility layout, and every file write would invalidate the whole cached branch.
 :::
 
 ::: {.fallacy-pitfall}
@@ -1958,8 +1974,12 @@ Balancing these paged structures under heavy multi-tenant concurrency introduces
 
 Paging, prefix sharing, and offload all rest on one property of attention state (principle \ref{pri-vol3-prefix-coherence}). It is a function of the exact token prefix, so it can be shared only across identical prefixes and rebuilt from the tokens at any time. That property is why eviction costs recomputation and never task knowledge, and why the reload-to-recompute ratio does not depend on sequence length, which let the chapter reduce the pause decision to one break-even time. It is also why the host runtime can reason in steps, tool calls, and trajectories while the serving engine treats their attention state as bytes to page, share, or drop on cost.
 
+::: {.column-margin .margin-pointer}
+↪ Persistent vector stores, relational state indices, and external memory hierarchies are developed in @sec-vol3-long-term-memory.
+:::
+
 ::: {.callout-chapter-connection title="From serving state to durable information"}
 Physical attention state is volatile and local by definition: it is bound to the lifespan of an active inference serving request, tied to a specific GPU or TPU cluster, and destroyed whenever a process terminates or a session context is evicted. Yet real-world autonomous agents must maintain persistent identity across days, survive system crashes, coordinate state transitions across distributed subagents, and reason over multi-gigabyte codebases that far exceed the physical capacity of any accelerator memory subsystem.
 
-Resolving this tension requires decoupling transient accelerator acceleration from authoritative, long-term storage. While this chapter resolved the physical allocation and reuse of volatile KV activations inside the inference engine, @sec-vol3-long-term-memory (*Persistent Storage*) investigates the durable information tier: persistent vector stores, relational databases, inverted search indexes, and dynamic retrieval pipelines. The KV cache holds derived attention state that the engine may drop at any time. Durable storage holds the source records themselves, and its task is to record, organize, and surface them for agents across unbounded operational horizons.
+Resolving this tension requires decoupling transient accelerator acceleration from authoritative, long-term storage. While this chapter resolved the physical allocation and reuse of volatile KV activations inside the inference engine, the next chapter investigates the durable information tier: persistent vector stores, relational databases, inverted search indexes, and dynamic retrieval pipelines. The KV cache holds derived attention state that the engine may drop at any time. Durable storage holds the source records themselves, and its task is to record, organize, and surface them for agents across unbounded operational horizons.
 :::

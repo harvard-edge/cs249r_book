@@ -4160,7 +4160,7 @@ class PrecisionDividend:
 
 ### Speculative decoding as a serving policy {#sec-inference-scale-speculative-decoding-c438}
 
-Speculative decoding was established as an algorithmic optimization in @sec-performance-engineering-speculative: a small draft model proposes $K$ tokens, the target model verifies them in one parallel forward pass, and rejection sampling guarantees the emitted tokens follow the target model's distribution exactly, so the technique is lossless and bounded by the draft acceptance rate $\alpha_{\text{acc}}$. The serving question is different. Speculation becomes a resource-admission policy under service level agreement (SLA) pressure: the scheduler must decide when to enable it, how its memory cost interacts with KV-cache admission, and what it does to the SLA the endpoint is bound by.
+Speculative decoding pairs a small draft model proposing $K$ tokens with a target model verifying them in one parallel forward pass; rejection sampling guarantees the emitted tokens follow the target model's distribution exactly, so the technique is lossless and bounded by the draft acceptance rate $\alpha_{\text{acc}}$. The serving question is different. Speculation becomes a resource-admission policy under service level agreement (SLA) pressure: the scheduler must decide when to enable it, how its memory cost interacts with KV-cache admission, and what it does to the SLA the endpoint is bound by.
 
 ::: {.column-margin}
 ![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
@@ -4257,6 +4257,10 @@ The second concern is which service-level objective the endpoint is bound by. Sp
 #### Per-endpoint scheduling {#sec-inference-scale-speculative-scheduling}
 
 The third concern is that these decisions are dynamic, not static configuration. Acceptance rate drifts with the traffic mix, and the value of speculation collapses at high load: when a replica is already near its concurrency ceiling, the decode phase is closer to compute-bound and the marginal latency benefit of speculation shrinks even as its memory tax stays fixed. Production schedulers therefore treat speculation as a runtime knob gated on observed load and acceptance. They enable it for latency-sensitive endpoints during normal operation, disable it under traffic spikes to reclaim KV-cache pages for admission, and may switch draft strategies per endpoint. **Self-speculative Decoding**\index{Self-Speculative Decoding} uses early exit from the target model itself as the draft, eliminating the separate-model memory tax at the cost of lower acceptance; **Medusa**\index{Medusa} [@cai2024medusa] adds lightweight prediction heads to the target backbone; **Lookahead Decoding**\index{Lookahead Decoding} uses Jacobi iteration to avoid a draft model entirely. Each variant trades a different slice of the speculation tax against acceptance, and the scheduler chooses among them per endpoint based on which SLA binds and how much KV-cache budget remains.
+
+::: {.column-margin .margin-pointer}
+↩ Algorithmic foundations and verification mechanics of speculative decoding are introduced in @sec-performance-engineering-speculative.
+:::
 
 ### KV cache in distributed settings {#sec-inference-scale-kv-cache-distributed-settings-712e}
 
@@ -4436,13 +4440,17 @@ where $N$ is the number of devices in the sharding group, $T_{\text{comm}}(N)$ i
 
 ### Tensor parallelism {#sec-inference-scale-tensor-parallelism-b29f}
 
-Tensor parallelism [@shoeybi2019megatron] distributes individual layers across multiple devices, enabling parallel computation within each layer. The column-row partitioning scheme introduced for training in @sec-distributed-training-systems applies here: splitting the first linear layer by columns and the second by rows requires only one AllReduce per transformer block. For transformer models, the primary target is the attention mechanism and feed-forward layers, which contain the majority of computation.
+Tensor parallelism [@shoeybi2019megatron] distributes individual layers across multiple devices, enabling parallel computation within each layer. The column-row partitioning scheme introduced for training applies here: splitting the first linear layer by columns and the second by rows requires only one AllReduce per transformer block. For transformer models, the primary target is the attention mechanism and feed-forward layers, which contain the majority of computation.
+
+::: {.column-margin .margin-pointer}
+↩ Column-row tensor partitioning and distributed AllReduce collectives are analyzed in @sec-distributed-training-systems and @sec-collective-communication.
+:::
 
 The multi-head attention computation naturally partitions across attention heads. For a model with $N_{\text{heads}}$ attention heads distributed across tensor-parallel degree $t$, each device computes $N_{\text{heads}}/t$ heads:
 
 $$\text{Attention}_i = \text{softmax}\left(\frac{Q_i K_i^T}{\sqrt{d_k}}\right) V_i \text{ for heads } i \in \{1, ..., N_{\text{heads}}/t\}$$
 
-After computing local attention, an AllReduce operation (covered in @sec-collective-communication) combines results across devices, adding communication overhead proportional to the activation size divided by the interconnect bandwidth.
+After computing local attention, an AllReduce operation combines results across devices, adding communication overhead proportional to the activation size divided by the interconnect bandwidth.
 
 The feed-forward layer (typically two linear transformations with activation) partitions along the hidden dimension. For the first linear layer, columns are distributed; for the second, rows are distributed. This column-row partitioning requires only one all-reduce per feed-forward block.
 
@@ -7521,8 +7529,12 @@ Weight quantization for serving is a bottleneck-selection decision: reducing wei
 
 ::: {#psp-inference-quantization-serving-constraint .callout-perspective title="Quantization as a serving constraint"}
 
-In serving systems, quantization is not merely a model-compression technique; it changes the binding resource. Post-training quantization can shrink a deployed model without retraining, while quantization-aware training spends training effort to preserve accuracy at lower precision. The systems question is which constraint the lower-precision representation relaxes: GPU memory capacity, HBM bandwidth during decode, accelerator instruction support, or cost per served token. The precision foundations appear in @sec-performance-engineering-precision and @sec-performance-engineering-ptq-qat.
+In serving systems, quantization is not merely a model-compression technique; it changes the binding resource. Post-training quantization can shrink a deployed model without retraining, while quantization-aware training spends training effort to preserve accuracy at lower precision. The systems question is which constraint the lower-precision representation relaxes: GPU memory capacity, HBM bandwidth during decode, accelerator instruction support, or cost per served token.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↩ Hardware precision formats, PTQ, and QAT calibration foundations are covered in @sec-performance-engineering-precision and @sec-performance-engineering-ptq-qat.
 :::
 
 Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is memory-bandwidth limited rather than compute limited. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Production inference therefore needs a decision model, not a method roster. The decision model in @tbl-serving-quantization-decision-model keeps the method choice tied to the serving constraint that binds the system.
@@ -8164,11 +8176,15 @@ Continuous batching dramatically improves GPU utilization for LLM serving, but i
 
 :::
 
+::: {.column-margin .margin-pointer}
+↩ Predictive autoscaling, cold-start delays, and GPU provisioning dynamics are examined in @sec-fleet-orchestration-predictive-autoscaling.
+:::
+
 ::: {.fallacy-pitfall}
 
 **Pitfall**: *Sizing the fleet by average throughput.*
 
-Queuing theory establishes that systems provisioned for average load violate SLOs during traffic peaks. At 80 percent average utilization, a modest 25 percent traffic spike pushes utilization above 100 percent, causing unbounded queue growth. @Sec-fleet-orchestration-predictive-autoscaling details how the cold start problem exacerbates this: by the time new capacity is available, which can take multiple minutes for GPU instances, SLO violations have already occurred. Capacity planning must account for peak load plus headroom, not average load.
+Queuing theory establishes that systems provisioned for average load violate SLOs during traffic peaks. At 80 percent average utilization, a modest 25 percent traffic spike pushes utilization above 100 percent, causing unbounded queue growth. Cluster-level cold starts exacerbate this: by the time new capacity is available, which can take multiple minutes for GPU instances, SLO violations have already occurred. Capacity planning must account for peak load plus headroom, not average load.
 
 :::
 
@@ -8265,8 +8281,12 @@ Ultimately, serving efficiency is governed by the serving cost dominance law (pr
 
 ::: {.callout-chapter-connection title="From data center to edge"}
 
-The architectural foundations for inference at scale developed here—continuous batching, PagedAttention, model sharding, and queue-depth load balancing—all assume data center-grade hardware: enterprise accelerators, high-speed NVLink interconnects (@sec-collective-communication), and terabytes of HBM. Building on local runtime compilation (@sec-performance-engineering), this chapter scaled serving to data center fleets. Many applications, however, require predictions closer to the user: on smartphones, IoT devices, or local gateways where power budgets are measured in milliwatts, memory in megabytes, and connectivity is intermittent. @Sec-edge-intelligence examines how serving principles change when intelligence moves to the edge and every data center assumption is inverted.
+The architectural foundations for inference at scale developed here—continuous batching, PagedAttention, model sharding, and queue-depth load balancing—all assume data center-grade hardware: enterprise accelerators, high-speed NVLink interconnects, and terabytes of HBM. Building on local runtime compilation, this chapter scaled serving to data center fleets. Many applications, however, require predictions closer to the user: on smartphones, IoT devices, or local gateways where power budgets are measured in milliwatts, memory in megabytes, and connectivity is intermittent. Edge deployments invert each of these data-center assumptions.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Edge deployment constraints, on-device runtimes, and local inference architectures are covered in @sec-edge-intelligence.
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->

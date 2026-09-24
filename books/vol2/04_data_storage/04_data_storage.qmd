@@ -210,7 +210,11 @@ Traditional storage systems evolved to serve transactional databases, workloads 
 
 [^fn-raid-array-redundancy]: **RAID (redundant array of independent disks)**\index{RAID!ML storage}: A 1988 Berkeley taxonomy of drive-combining strategies, each trading redundancy against bandwidth [@patterson1988raid]. ML training inverts the database-era default: RAID 0 (striping, no parity) maximizes sequential read throughput at the cost of zero fault tolerance, a safe trade-off because training data is immutable and durably backed in object storage. Choosing RAID 5 or 6 instead wastes bandwidth on parity calculations that protect data already protected elsewhere.
 
-ML workloads systematically invert these assumptions. Training data access is predominantly sequential, streaming through datasets that span hundreds of terabytes. Individual accesses are large (megabytes rather than kilobytes) because models consume batches of images or text sequences. Consistency requirements are relaxed, since slightly stale features rarely affect model quality. Bandwidth demands, however, are extreme: hundreds of gigabytes per second, sustained for days or weeks. The mismatch between what storage was optimized for and what ML actually needs creates the **I/O Wall**\index{I/O Wall!definition} (principle \ref{pri-io-wall}): when storage throughput cannot deliver training data as fast as accelerators consume it, GPUs idle regardless of their computational power. A storage system that was adequate for 8 GPUs becomes the bottleneck at 64, making the *data pipeline*, not the *model*, the limiting factor. @Sec-appdx-c3-taxonomy-bottleneck-table classifies this wall as a constraint that lives at the intersection of Communication and Compute in the fleet-scale diagnostic framework, so a storage engineer can confirm that the cure is more bandwidth rather than faster accelerators.
+ML workloads systematically invert these assumptions. Training data access is predominantly sequential, streaming through datasets that span hundreds of terabytes. Individual accesses are large (megabytes rather than kilobytes) because models consume batches of images or text sequences. Consistency requirements are relaxed, since slightly stale features rarely affect model quality. Bandwidth demands, however, are extreme: hundreds of gigabytes per second, sustained for days or weeks. The mismatch between what storage was optimized for and what ML actually needs creates the **I/O Wall**\index{I/O Wall!definition} (principle \ref{pri-io-wall}): when storage throughput cannot deliver training data as fast as accelerators consume it, GPUs idle regardless of their computational power. A storage system that was adequate for 8 GPUs becomes the bottleneck at 64, making the *data pipeline*, not the *model*, the limiting factor.
+
+::: {.column-margin .margin-pointer}
+↩ The I/O wall and communication-compute bottleneck classification are mapped in @sec-appdx-c3-taxonomy-bottleneck-table.
+:::
 
 A simple shard-assignment calculation shows how this bottleneck can emerge even when aggregate storage capacity looks ample.
 
@@ -1340,7 +1344,11 @@ class HbmModelBudget:
 
 ### Tier 0: GPU HBM {#sec-storage-tier0-hbm}
 
-The most constrained resource in the entire system is also the most scarce. HBM\index{HBM!storage hierarchy} is the only storage tier where weights and activations can reside during active computation. As established in @sec-compute-hbm, HBM is a 3D-stacked memory technology that places DRAM dies vertically atop the accelerator, connected by thousands of through-silicon vias that provide aggregate bandwidth of `{python} HbmTierBandwidth.h100_bw_tb_per_s_str` on an H100. This bandwidth is roughly 17$\times$ higher than the chapter's 200 GB/s host-DRAM figure and roughly 480$\times$ higher than a single 7 GB/s NVMe drive. That bandwidth is what makes large-scale deep learning feasible: a matrix multiplication involving billions of parameters requires reading those parameters from memory every forward and backward pass.
+The most constrained resource in the entire system is also the most scarce. HBM\index{HBM!storage hierarchy} is the only storage tier where weights and activations can reside during active computation. HBM is a 3D-stacked memory technology that places DRAM dies vertically atop the accelerator, connected by thousands of through-silicon vias that provide aggregate bandwidth of `{python} HbmTierBandwidth.h100_bw_tb_per_s_str` on an H100. This bandwidth is roughly 17$\times$ higher than the chapter's 200 GB/s host-DRAM figure and roughly 480$\times$ higher than a single 7 GB/s NVMe drive. That bandwidth is what makes large-scale deep learning feasible: a matrix multiplication involving billions of parameters requires reading those parameters from memory every forward and backward pass.
+
+::: {.column-margin .margin-pointer}
+↩ High-bandwidth memory packaging and physical bandwidth limits are established in @sec-compute-hbm.
+:::
 
 The constraint at this tier is *capacity*, not *bandwidth*. An H100 provides 80 GB of HBM, enough to hold a 40-billion parameter model in FP16 (2 bytes per parameter), but nowhere near enough for the 175B parameter running example. To understand the severity of this constraint, consider the memory budget for training our 175B model. The model weights in FP16 consume `{python} HbmModelBudget.weights_fp16_gb_str`. FP16 gradients require another 350 GB. The Adam optimizer maintains two additional states (momentum and variance) in FP32, consuming `{python} HbmModelBudget.adam_eq_math`. Activations for a single batch, depending on sequence length and batch size, can consume another 100 to 400 GB. The total unpartitioned footprint therefore reaches roughly 2.20--2.50 TB, or 27.5--31.25$\times$ the capacity of a single H100's HBM. This capacity pressure is precisely why the partitioning in @tbl-hbm-memory-budget is mandatory. From the storage hierarchy perspective, HBM is the destination that every lower tier exists to serve. The data pipeline's purpose is to ensure that the 80 GB of HBM always contains the data the accelerator needs *next*, not the data it needed *a second ago*.
 
@@ -2380,7 +2388,11 @@ Without overlap, step time adds compute and I/O time. Pipelining reduces step ti
 
 :::
 
-The data stall ratio provides a diagnostic metric that storage engineers can use to identify whether a training job is compute bound or I/O bound. A stall ratio below 2 percent indicates that the storage pipeline is healthy: the accelerator spends virtually all its time computing. A stall ratio between 2 percent and 10 percent suggests that the pipeline is marginally adequate but will degrade if the training configuration changes (more GPUs, smaller batches, faster model). A stall ratio above 10 percent indicates a clear storage bottleneck that wastes significant compute budget. @Sec-appdx-c3-taxonomy-traffic-light maps these same green, yellow, and red bands onto the broader fleet diagnosis, so a storage engineer can read a high stall ratio as a red-light signal that computation is sitting idle and place storage alongside the other axes that starve an accelerator. Profiling tools like PyTorch's DataLoader profiler and NVIDIA Nsight Systems can measure data stall ratio directly by comparing the time the accelerator spends waiting for data vs. computing.
+The data stall ratio provides a diagnostic metric that storage engineers can use to identify whether a training job is compute bound or I/O bound. A stall ratio below 2 percent indicates that the storage pipeline is healthy: the accelerator spends virtually all its time computing. A stall ratio between 2 percent and 10 percent suggests that the pipeline is marginally adequate but will degrade if the training configuration changes (more GPUs, smaller batches, faster model). A stall ratio above 10 percent indicates a clear storage bottleneck that wastes significant compute budget. Profiling tools like PyTorch's DataLoader profiler and NVIDIA Nsight Systems can measure data stall ratio directly by comparing the time the accelerator spends waiting for data vs. computing.
+
+::: {.column-margin .margin-pointer}
+↩ Traffic-light threshold bands for fleet bottleneck classification are defined in @sec-appdx-c3-taxonomy-traffic-light.
+:::
 
 A storage system cannot be a "fire-and-forget" component; it requires continuous monitoring to prevent silent bottlenecks from eroding training efficiency. Key metrics to track in real time include per-tier bandwidth utilization (NVMe, network, object storage), prefetch buffer depth (how many batches are queued and ready), the data stall ratio per GPU, the parallel file system's metadata operation rate, and NVMe drive health indicators (wear level, temperature, error counts). Alert thresholds should trigger before stalls become visible in training loss curves. An undetected 5 percent increase in data stall ratio across a 1,000-GPU cluster for just one week wastes over \$16,800 in idle compute (1,000 GPUs $\times$ \$2/GPU-hour $\times$ 168 hours $\times$ 5 percent), making comprehensive storage monitoring a first-order economic concern rather than an operational nicety.
 
@@ -3296,7 +3308,11 @@ The throughput improvement from GDS is most pronounced for workloads that read m
 
 GDS has practical limitations. Not all NVMe controllers support peer-to-peer PCIe transfers. The data must be in a format that the GPU can consume directly, which means it must already be decoded or GPU-decodable (raw pixel values, token IDs, or formats handled by GPU decoders, not arbitrary compressed JPEG or gzip streams). In practice, many pipelines use a hybrid approach: CPU-side decoding for compressed formats followed by a normal pinned-memory GPU transfer, while GDS is reserved for direct reads of GPU-consumable data from supported local or remote storage.
 
-The architectural evolution from CPU-mediated copies to direct storage access reflects a broader trend of removing CPU payload copies from the critical data path wherever possible. @Sec-network-fabrics-rdma described RDMA, which allows network payloads to move without CPU copying. GDS does the same for storage payloads. Together, RDMA and GDS let data flow from remote storage, through the network fabric, and into GPU memory without a host-memory bounce copy. The CPU still submits and coordinates the operation, while more of its capacity remains available for data augmentation, pipeline orchestration, and error handling.
+The architectural evolution from CPU-mediated copies to direct storage access reflects a broader trend of removing CPU payload copies from the critical data path wherever possible. RDMA allows network payloads to move without CPU copying, while GDS provides the same bypass for storage payloads. Together, RDMA and GDS let data flow from remote storage, through the network fabric, and into GPU memory without a host-memory bounce copy. The CPU still submits and coordinates the operation, while more of its capacity remains available for data augmentation, pipeline orchestration, and error handling.
+
+::: {.column-margin .margin-pointer}
+↩ RDMA and kernel-bypass network paths are detailed in @sec-network-fabrics-rdma.
+:::
 
 ```{python}
 #| echo: false
@@ -4410,8 +4426,12 @@ Every other chapter in this book optimizes something the accelerators do. This o
 
 ::: {.callout-chapter-connection title="From storage to splitting"}
 
-Infrastructure is complete. Modern clusters combine accelerators that compute at petaFLOP/s (@sec-compute-infrastructure), fabrics that move gradients at TB/s (@sec-network-fabrics), and a storage hierarchy that feeds them data. The next challenge is not a hardware problem but an algorithmic one: partitioning a single training job across these thousands of resources. @Sec-distributed-training-systems explores the parallelism strategies (data, tensor, pipeline, and expert parallelism) that split computation across the fleet.
+Infrastructure is complete. Modern clusters combine high-throughput accelerators, high-bandwidth fabrics, and a multi-tiered storage hierarchy that feeds them data. The next challenge is not a hardware problem but an algorithmic one: partitioning a single training job across these thousands of resources.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Parallelism strategies (data, tensor, pipeline, and sequence) are developed in @sec-distributed-training-systems.
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->

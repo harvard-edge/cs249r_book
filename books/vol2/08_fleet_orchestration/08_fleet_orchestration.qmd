@@ -214,7 +214,11 @@ Consider the scheduler's decision when a node heartbeat is missed. The scheduler
 
 Each option trades off between responsiveness and correctness, and the effective choice depends on the failure mode distribution for the specific hardware in the cluster, information the scheduler must learn from historical failure data. @Sec-appdx-reliability-foundations-recovery-anatomy decomposes recovery time into its detect, reschedule, reload, and replay phases, which bound how long the scheduler can afford to wait on a missed heartbeat before committing to reallocation rather than betting on a transient self-resolution.
 
-These requirements connect the scheduler directly to the checkpoint and recovery infrastructure from @sec-fault-tolerance-reliability: scheduling decisions about spare capacity, preemption policies, and elastic training support determine how quickly the system recovers from statistically expected failures. A scheduler that reserves spare capacity or supports elastic recovery can restore throughput much faster than one that requires every failed job to wait for a full fresh allocation and reload, but the correct reserve fraction and recovery time are workload- and fleet-specific parameters rather than universal constants.
+These requirements connect the scheduler directly to checkpoint and recovery infrastructure: scheduling decisions about spare capacity, preemption policies, and elastic training support determine how quickly the system recovers from statistically expected failures. A scheduler that reserves spare capacity or supports elastic recovery can restore throughput much faster than one that requires every failed job to wait for a full fresh allocation and reload, but the correct reserve fraction and recovery time are workload- and fleet-specific parameters rather than universal constants.
+
+::: {.column-margin .margin-pointer}
+↩ Checkpoint coordination, failure detection, and recovery timelines are established in @sec-fault-tolerance-reliability.
+:::
 
 ### Scheduling objectives and their conflicts {#sec-fleet-orchestration-objectives}
 
@@ -1774,7 +1778,11 @@ The computational cost of topology-aware placement is nontrivial. Evaluating all
 
 ### Rail-optimized scheduling {#sec-fleet-orchestration-rail-optimized}
 
-Large GPU clusters increasingly use **Rail-Optimized Topologies**\index{Rail-Optimized Topology!definition} where each GPU in a node connects to a different network switch, creating parallel "rails" through the network fabric. This design, analyzed in @sec-network-fabrics-rail-optimized, provides balanced bandwidth across all GPUs by distributing traffic across independent switch hierarchies. However, it also creates a scheduling constraint: AllReduce operations are most efficient when communicating GPUs are on the same rail (connected to the same switch chain), because same-rail communication avoids cross-rail traffic that could create congestion at shared switch ports.
+Large GPU clusters increasingly use **Rail-Optimized Topologies**\index{Rail-Optimized Topology!definition} where each GPU in a node connects to a different network switch, creating parallel "rails" through the network fabric. This design provides balanced bandwidth across all GPUs by distributing traffic across independent switch hierarchies. However, it also creates a scheduling constraint: AllReduce operations are most efficient when communicating GPUs are on the same rail (connected to the same switch chain), because same-rail communication avoids cross-rail traffic that could create congestion at shared switch ports.
+
+::: {.column-margin .margin-pointer}
+↩ Rail-optimized fabric architectures and rail-to-rail traffic isolation are detailed in @sec-network-fabrics-rail-optimized.
+:::
 
 Rail-aware scheduling assigns data parallel replicas such that corresponding GPUs across nodes share the same rail. For an 8-GPU-per-node cluster with 8 rails, GPU 0 on every node connects to rail 0, GPU 1 to rail 1, and so on. The scheduler places data parallel rank $r$ on GPU $r \bmod 8$ across selected nodes, ensuring that AllReduce for each data parallel group traverses only a single rail switch hierarchy rather than crossing between rails. This alignment means that AllReduce traffic is confined to independent switch trees, eliminating contention between data parallel groups and providing each group with the full bandwidth of its dedicated rail.
 
@@ -1910,7 +1918,11 @@ The general scheduling idea is quarantine: when runtime evidence says a node, ra
 
 When cluster demand fluctuates, rigid allocation creates two categories of waste. During off-peak hours, a job running on 256 GPUs cannot absorb idle resources to speed up training. During peak demand, the same job cannot release excess resources to accommodate higher-priority work without being fully preempted. The scheduler's only options are "let it keep all its resources" or "kill it entirely," with nothing in between.
 
-Elastic scheduling eliminates this binary choice. The recovery mechanics of elastic training developed in @sec-fault-tolerance-reliability-reliability-elastic-training-4f87 show how a distributed job can adjust its worker count, recalibrate batch size and learning rate, and reconstruct its communication group after a failure. From the scheduler's perspective, the same capability solves a resource-allocation problem under fluctuating demand. A training job might start with 128 GPUs (the minimum needed for reasonable throughput), scale up to 256 when resources become available, and scale back to 192 when higher-priority work arrives, all while maintaining continuous training progress. This flexibility transforms the scheduler's action space from a binary {continue, preempt} to a continuous spectrum of resource allocation levels.
+Elastic scheduling eliminates this binary choice. The recovery mechanics of elastic training show how a distributed job can adjust its worker count, recalibrate batch size and learning rate, and reconstruct its communication group after a failure. From the scheduler's perspective, the same capability solves a resource-allocation problem under fluctuating demand. A training job might start with 128 GPUs (the minimum needed for reasonable throughput), scale up to 256 when resources become available, and scale back to 192 when higher-priority work arrives, all while maintaining continuous training progress. This flexibility transforms the scheduler's action space from a binary {continue, preempt} to a continuous spectrum of resource allocation levels.
+
+::: {.column-margin .margin-pointer}
+↩ Elastic training recovery mechanics, dynamic membership, and rendezvous protocols are analyzed in @sec-fault-tolerance-reliability-reliability-elastic-training-4f87.
+:::
 
 ### The scheduler-framework contract {#sec-fleet-orchestration-elastic-contract}
 
@@ -3214,7 +3226,11 @@ Software approaches to isolation provide more flexibility at the cost of weaker 
 
 GPU memory accounting must still prevent one model from consuming capacity reserved for another. A distinct virtual address space blocks direct addressing of another client's allocations, but it does not create a fixed memory-capacity partition. Without enforceable per-client limits, a memory leak or unexpectedly large batch can exhaust shared device memory and disrupt colocated workloads. MPS therefore fits mutually trusting workloads whose aggregate memory footprint and interference have been measured; MIG or full-device assignment fits stronger trust and predictability requirements.
 
-Furthermore, long-running serving instances suffer from dynamic memory fragmentation. The key culprit is the KV cache in transformer inference, which grows and shrinks with request sequence length. Standard allocators struggle with these highly variable lifetimes, leaving holes in GPU memory too small for new requests but collectively wasting gigabytes. Serving engines increasingly use paged memory management to allocate KV cache in noncontiguous blocks, reducing fragmentation-induced out-of-memory failures; @sec-inference-scale develops the paged-allocation mechanism in full.
+Furthermore, long-running serving instances suffer from dynamic memory fragmentation. The key culprit is the KV cache in transformer inference, which grows and shrinks with request sequence length. Standard allocators struggle with these highly variable lifetimes, leaving holes in GPU memory too small for new requests but collectively wasting gigabytes. Serving engines increasingly use paged memory management to allocate KV cache in noncontiguous blocks, reducing fragmentation-induced out-of-memory failures.
+
+::: {.column-margin .margin-pointer}
+↪ Paged attention, dynamic KV cache allocation, and memory management for serving are developed in @sec-inference-scale.
+:::
 
 [^fn-mps-gpu-sharing]: **CUDA MPS (Multi-Process Service)**\index{MPS!GPU sharing}: NVIDIA's client-server runtime multiplexes CUDA processes through shared GPU scheduling resources. Volta and newer clients receive distinct GPU virtual address spaces, while compute, cache, bandwidth, and device-memory capacity remain shared. Fatal faults are contained only to the subset of clients sharing the affected GPU through the same MPS server, so MPS is not equivalent to a hardware partition or full-device isolation [@nvidiaCudaMps].
 
@@ -4125,8 +4141,12 @@ The fleet now has compute, communication, storage, and the resilience to keep th
 
 ::: {.callout-chapter-connection title="From orchestration to optimization"}
 
-With distributed execution established in @sec-distributed-training-systems and fault-tolerant checkpointing in @sec-fault-tolerance-reliability, multi-tenant resource management completes the operational foundation of the machine learning fleet. With the orchestrator placing workloads on the right hardware tiers, the next challenge is maximizing single-node and intra-step efficiency. @Sec-performance-engineering examines operator fusion, precision engineering, graph compilation, and execution scheduling. Orchestration allocates the right resources; performance engineering extracts peak throughput from them.
+With distributed execution and fault-tolerant checkpointing established, multi-tenant resource management completes the operational foundation of the machine learning fleet. With the orchestrator placing workloads on the right hardware tiers, the next challenge is maximizing single-node and intra-step efficiency. Orchestration allocates the right resources; performance engineering extracts peak throughput from them.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Operator fusion, precision engineering, graph compilation, and kernel optimization are examined in @sec-performance-engineering.
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->

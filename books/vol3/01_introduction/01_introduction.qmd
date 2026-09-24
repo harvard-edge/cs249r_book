@@ -526,11 +526,15 @@ If the agent runtime executes this tool call synchronously:
 $$\text{Cost} = 60\text{ s} \times \$0.00667/\text{s} = \$0.400$$
 The system incurs `{python} ToolWaitTax.cost_turn_str` of direct compute expenditure per turn while performing zero floating-point operations. In an industrial pipeline executing `{python} ToolWaitTax.n_tools_pipeline_str` tool calls per resolution trajectory, tool-wait stranding burns `{python} ToolWaitTax.cost_pipeline_str` of capital entirely on idle silicon.
 
-**Systems insight**: Software 3.0 runtimes cannot treat tool invocations as standard blocking function calls. The host supervisor must decouple tool execution asynchronously: serializing token state, releasing accelerator memory allocations, recording progress in a Write-Ahead Log (@sec-vol3-durable-execution), and leveraging prefix caching (@sec-vol3-kv-cache) when the observation returns.
+**Systems insight**: Software 3.0 runtimes cannot treat tool invocations as standard blocking function calls. The host supervisor must decouple tool execution asynchronously: serializing token state, releasing accelerator memory allocations, recording progress in a write-ahead log, and leveraging prefix caching when the observation returns.
 
 :::
 
 This quantitative reality forces Software 3.0 runtimes to abandon synchronous execution models. An agent runtime cannot treat tool invocations as standard blocking function calls. Instead, the runtime architecture must decouple inference from execution across three distinct systems mechanisms. First, through *asynchronous context eviction*, when a long-running tool command is dispatched, the runtime serializes the logical token state, releases the physical memory allocated to the session's attention caches inside the inference engine, and marks the accelerator capacity as reclaimable for concurrent serving workloads. Second, through *prefix caching and re-hydration*, when the tool execution completes and returns an observation, the runtime reschedules the session, leveraging preserved prompt prefixes to reconstruct intermediate attention states without re-evaluating earlier sequence tokens from scratch. Third, through *speculative local verification*, fast, deterministic checks such as static linters and abstract syntax tree validators run directly on the host CPU runtime to intercept syntactic failures in milliseconds, avoiding the latency and memory overhead of dispatching a full containerized test execution.
+
+::: {.column-margin .margin-pointer}
+↪ KV cache eviction protocols, prefix caching, and durable write-ahead logging are developed in @sec-vol3-kv-cache and @sec-vol3-durable-execution.
+:::
 
 The fundamental contrast in execution flow between traditional inference and an autonomous agent loop is visualized in @fig-vol3-agent-execution-timeline. In traditional model serving (top bar), inference runs as an uninterrupted burst of continuous token generation where accelerator tensor cores achieve near-100 percent utilization. In contrast, an autonomous agent trajectory (bottom bar) is severely fragmented: during an 8.5-minute software engineering trajectory on SWE-bench Verified [@jimenez2024swebench], the agent spends 420 seconds (82.4 percent of makespan) blocked on non-neural host operations—container workspace setup, filesystem search via `ripgrep`, and `pytest` suite execution. In a synchronous runtime, these tool waits keep accelerator memory pinned while the server chassis idles.
 
@@ -829,7 +833,11 @@ To formalize macro-efficiency, we introduce the concept of **trajectory goodput*
 
 $$\mathcal{G} = \frac{\sum_{i \in \mathcal{T}_{\text{success}}} R_i}{\sum_{j \in \mathcal{T}_{\text{all}}} R_j}$$
 
-where $\mathcal{T}_{\text{all}}$ represents all dispatched trajectories, $\mathcal{T}_{\text{success}} \subseteq \mathcal{T}_{\text{all}}$ represents the subset whose deliverables pass all deterministic verification oracles $\mathcal{V}$, and $R_k$ measures physical resource expenditure (floating-point operations, GPU core-seconds, kilowatt-hours, or financial cost). Unverified token generation represents computational badput ($1 - \mathcal{G}$). We develop the full telemetry and evaluation mechanics of trajectory goodput in @sec-vol3-evaluation and analyze its macro-economic cost frontier in @sec-vol3-agent-economics.
+where $\mathcal{T}_{\text{all}}$ represents all dispatched trajectories, $\mathcal{T}_{\text{success}} \subseteq \mathcal{T}_{\text{all}}$ represents the subset whose deliverables pass all deterministic verification oracles $\mathcal{V}$, and $R_k$ measures physical resource expenditure (floating-point operations, GPU core-seconds, kilowatt-hours, or financial cost). Unverified token generation represents computational badput ($1 - \mathcal{G}$).
+
+::: {.column-margin .margin-pointer}
+↪ Trajectory goodput telemetry, verification oracles, and macroeconomic cost models are developed in @sec-vol3-evaluation and @sec-vol3-agent-economics.
+:::
 
 ```{python}
 #| label: lego-01-trajectory-goodput
@@ -1184,7 +1192,11 @@ The central reliability challenge of agentic machine learning systems is that ne
 
 To understand why conventional distributed fault tolerance fails in agentic systems, consider the phase-space trajectory corridors illustrated in @fig-vol3-fault-models-fail-plausible. In classical distributed systems, components operate either within a *Fail-Stop* regime—where a faulty node crashes overtly, cleanly tripping kernel watchdogs and process exit monitors—or an adversarial *Byzantine* regime—where a compromised node deviates maliciously across network protocols, requiring replicated voting quorums ($3f+1$) to mask.
 
-In contrast, the *Fail-Plausible* regime occupies a unique and hazardous phase space. The neural execution core remains strictly within the syntactic grammar envelope $\mathcal{L}(G)$ and executes commands that return status code 0, yet its operational trajectory wanders outside the semantic specification envelope $\mathcal{I}_{\text{spec}}$. Because surface-level syntax and exit codes remain pristine, conventional operating system monitors are blind to the failure. Detecting fail-plausible faults requires supervisory fencing: independent, out-of-band verification oracles that evaluate deep environmental invariants rather than trusting model self-reports or return codes. We analyze and formally define the hardware execution semantics of the fail-plausible stochastic inference engine in @sec-vol3-foundation-model.
+In contrast, the *Fail-Plausible* regime occupies a unique and hazardous phase space. The neural execution core remains strictly within the syntactic grammar envelope $\mathcal{L}(G)$ and executes commands that return status code 0, yet its operational trajectory wanders outside the semantic specification envelope $\mathcal{I}_{\text{spec}}$. Because surface-level syntax and exit codes remain pristine, conventional operating system monitors are blind to the failure. Detecting fail-plausible faults requires supervisory fencing: independent, out-of-band verification oracles that evaluate deep environmental invariants rather than trusting model self-reports or return codes.
+
+::: {.column-margin .margin-pointer}
+↪ Hardware execution semantics, token sampling distributions, and fail-plausible processor models are formalized in @sec-vol3-foundation-model.
+:::
 
 ::: {#fig-vol3-fault-models-fail-plausible fig-env="figure" fig-pos="htb" fig-cap="**Spectrum of Distributed Failure Models and Phase-Space Trajectories**: Phase-space trajectories and supervisory fencing across Fail-Stop, Byzantine, and Fail-Plausible fault regimes. In Fail-Stop (left), execution halts overtly upon fault occurrence, tripping hardware or kernel monitors. In Byzantine (center), an adversarial component exhibits arbitrary or malicious deviation, requiring replicated consensus. In Fail-Plausible (right), an ungrounded neural core remains strictly within the syntactic grammar $\mathcal{L}(G)$ and exits with status 0 while silently diverging outside the specification envelope $\mathcal{I}_{\text{spec}}$. Supervisory fencing and out-of-band verification oracles are required to detect semantic divergence that leaves return codes and syntax intact." fig-alt="Phase-space state diagram comparing Fail-Stop, Byzantine, and Fail-Plausible fault models. A 2D coordinate plane shows the syntactic grammar boundary L(G) containing the invariant specification envelope I_spec. A Fail-Stop trajectory crashes out early with non-zero exit code. A Byzantine trajectory deviates arbitrarily across communication channels. A Fail-Plausible trajectory wanders smoothly outside I_spec while remaining fully inside L(G) with exit code 0, until intercepted by external verification oracles."}
 ![](images/svg/fault_models_fail_plausible.svg)
@@ -1426,7 +1438,11 @@ Context poisoning comes from the model's own mistakes. A related fault comes fro
 
 [^fn-security-threat-surfaces]: **Security Threat Surfaces and the Confused Deputy**: Indirect prompt injection is the machine learning realization of the classical *confused deputy problem* [@hardy1988confused], wherein an unprivileged party tricks a privileged entity into misusing its authority. When an agent ingests untrusted third-party text (e.g., repository documentation, HTML web pages, issue comments), an attacker embeds adversarial directives that hijack the autoregressive generation loop. Because the neural engine cannot distinguish data from instructions, it emits privileged tool calls on behalf of the attacker, such as exfiltrating private credentials via outgoing HTTP queries or modifying local security configurations. Hardened sandboxes with strict network air-gaps and read-only bind mounts are mandatory to bound the blast radius of such attacks (@sec-vol3-sandboxes). \index{Confused deputy!agentic threat model}\index{Prompt injection!threat surface}
 
-Injection belongs in the fail-plausible model because it produces the same symptom. A proposal steered by injected text looks like any other well-formed proposal, and nothing in its syntax marks it as hostile. Two consequences follow for the rest of the book. Reading is never harmless, since an agent that can only read can still be steered by what it reads and can leak what it read through the arguments of its next tool call. No instruction to the model to ignore embedded instructions can be relied on either, for the same reason no model output can be trusted on its own. @Sec-vol3-context-engineering labels the provenance of untrusted content in the context, and @sec-vol3-sandboxes builds the containment that limits what a steered agent can do.
+Injection belongs in the fail-plausible model because it produces the same symptom. A proposal steered by injected text looks like any other well-formed proposal, and nothing in its syntax marks it as hostile. Two consequences follow for the rest of the book. Reading is never harmless, since an agent that can only read can still be steered by what it reads and can leak what it read through the arguments of its next tool call. No instruction to the model to ignore embedded instructions can be relied on either, for the same reason no model output can be trusted on its own. Provenance tracking labels untrusted content in the context, while sandbox isolation builds the containment that limits what a steered agent can do.
+
+::: {.column-margin .margin-pointer}
+↪ Context provenance tagging and sandbox containment boundaries are developed in @sec-vol3-context-engineering and @sec-vol3-sandboxes.
+:::
 
 ::: {#chk-fail-plausible .callout-checkpoint title="Recognizing plausible failure"}
 
@@ -1949,7 +1965,11 @@ The four questions choose a starting point. Once a system is running, its failur
 | **6** | More agents            | One agent's context, authority, or budget cannot hold the task                                  | Part VI                  |
 : **The Intervention Ladder**: Each rung is climbed only when a measured failure is attributed to the level below it; cheaper, reversible changes come before changes to the model's weights or to the number of agents. {#tbl-vol3-intervention-ladder}
 
-Two features of the ladder shape the rest of this book. Every rung above zero must be justified by a failure that has been measured and attributed to it, which means measurement comes before any change to the model. Nothing is trained until it can be measured, so @sec-vol3-evaluation closes Part IV before Part V begins. The ladder also puts the model's weights near the top. Changing context, tools, or runtime is fast, cheap, and reversible, while retraining is slow, expensive, and moves no exposure, since a better model still proposes and the runtime still decides.
+Two features of the ladder shape the rest of this book. Every rung above zero must be justified by a failure that has been measured and attributed to it, which means measurement comes before any change to the model. Nothing is trained until it can be measured, establishing rigorous evaluation before model post-training begins. The ladder also puts the model's weights near the top. Changing context, tools, or runtime is fast, cheap, and reversible, while retraining is slow, expensive, and moves no exposure, since a better model still proposes and the runtime still decides.
+
+::: {.column-margin .margin-pointer}
+↪ Benchmark design, harness isolation, and trajectory evaluation suites are formalized in @sec-vol3-evaluation.
+:::
 
 ::: {#chk-workflow-vs-loop .callout-checkpoint title="Workflow, loop, and the next rung"}
 
