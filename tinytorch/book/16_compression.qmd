@@ -30,7 +30,7 @@ Underneath that simple call, the systems reality of compression reveals critical
 2. **Mask indirection overhead:** Pruning frameworks maintain auxiliary binary masks alongside original weights, temporarily *increasing* memory consumption until weights are pruned permanently.
 3. **Structured vs. low-rank dimension reduction:** To achieve actual speedups without specialized sparse hardware, compression must either prune whole structured channels or factorize weight matrices via low-rank SVD ($W \approx U V$), physically reducing matrix dimensions and arithmetic counts.
 
-This chapter implements TinyTorch's compression tools (pruning, SVD factorization, and knowledge distillation) and measures what each one changes. Before building these techniques, we must inspect the systems trap of dense zeroed weights.
+This chapter implements TinyTorch's compression tools (pruning, SVD factorization, and knowledge distillation) and measures what each one changes. Before building these techniques, the first step is to inspect the systems trap of dense zeroed weights.
 
 ::: {#fig-compression-spectrum fig-env="figure" fig-pos="htb" fig-cap="**Compression representations**: Both pruning functions preserve dense array dimensions. Low-rank approximation returns three factors; a caller must retain and use them to benefit from their smaller storage." fig-alt="Three panels show scattered zero weights, zeroed output columns, and SVD factors with shapes M by r, r, and r by N."}
 ![](assets/images/diagrams/16_compression-diag-1.svg){width="100%"}
@@ -94,7 +94,7 @@ Magnitude pruning picks a threshold $\theta$ and replaces every weight with
 
 $$W_{\text{sparse}} = W \odot M, \qquad M_{i,j} = \begin{cases} 1 & |W_{i,j}| \ge \theta \\ 0 & |W_{i,j}| < \theta \end{cases}$$
 
-where $\odot$ multiplies element by element and $M$ is the binary mask. A percentile threshold can miss the intended count when magnitudes tie. The module instead ranks entries and selects the requested number, with a stable tie order. On its own it does not change the shape, so the dense allocation and arithmetic count are unchanged. We build it anyway, and the first listing in The Code says what it is good for.
+where $\odot$ multiplies element by element and $M$ is the binary mask. A percentile threshold can miss the intended count when magnitudes tie. The module instead ranks entries and selects the requested number, with a stable tie order. On its own it does not change the shape, so the dense allocation and arithmetic count are unchanged. The implementation builds it anyway, and the first listing in The Code demonstrates its utility.
 
 ### Structured pruning: delete whole neurons
 
@@ -148,7 +148,7 @@ The loss has two parts. The hard part is the ordinary cross-entropy from @sec-lo
 
 $$\mathcal{L} = \alpha \, \mathrm{KL}\!\left(p_{\text{teacher}}^{(T)} \,\|\, p_{\text{student}}^{(T)}\right) + (1 - \alpha)\, \mathrm{CE}\!\left(p_{\text{student}}, y\right)$$
 
-::: {#nbk-compression-distillation-overhead .callout-notebook title="Napkin math: memory overhead of dual-model distillation"}
+::: {#nbk-compression-distillation-overhead .callout-notebook title="Napkin Math: Memory overhead of dual-model distillation"}
 Knowledge distillation trains a compact student model, but the training run must host two networks simultaneously:
 
 - **Teacher State**: The full-scale teacher model (e.g., 12-layer GPT, 120M parameters) runs in inference mode. While gradients and optimizer moment buffers are omitted, its weights ($120\text{M} \times 4\text{ B} = 480\text{ MB}$) and forward activations must reside in memory.
@@ -237,7 +237,7 @@ def prune_neurons(first: Linear, second: Linear, keep: int):
 
 Column scores can miss redundancy between columns. The all-$4/3$ matrix introduced earlier has no zero column, yet one direction describes it exactly. The same possibility motivates examining the singular values of a larger trained projection. The reconstruction error determines which directions can be discarded, while storage arithmetic determines whether the retained factors are smaller than the original matrix.
 
-::: {#nbk-compression-svd-breakeven-rank .callout-notebook title="Napkin math: the break-even rank"}
+::: {#nbk-compression-svd-breakeven-rank .callout-notebook title="Napkin Math: The break-even rank"}
 Factorizing $W \in \mathbb{R}^{M \times N}$ into $W_A \in \mathbb{R}^{M \times r}$ and $W_B \in \mathbb{R}^{r \times N}$ saves parameters only when
 
 $$r \times (M + N) < M \times N \quad\Longleftrightarrow\quad r < \frac{MN}{M+N}.$$
@@ -298,9 +298,9 @@ The method returns a scalar `Tensor`, ready for `backward()`. Its stable `log_so
 
 ### Following one distillation update
 
-Use one input, two output classes, and explicitly chosen weights so that the trace has no random initialization hidden in it. In @lst-compression-student-update, lines 7--10 construct `teacher` and `student` linear layers with weights `[[2.0, 0.0]]` and `[[0.0, 0.0]]`. Constructing the optimizer in line 11 before the forward pass enables gradient tracking on the student's parameters. Line 12 initializes `KnowledgeDistillation(teacher, student, temperature=2.0, alpha=0.5)`. In lines 13--15, input `x` evaluates `teacher_logits` while `teacher_before` takes a reference copy.
+Use one input, two output classes, and explicitly chosen weights so that the trace has no random initialization hidden in it. In @lst-compression-student-update, lines 7 to 10 construct `teacher` and `student` linear layers with weights `[[2.0, 0.0]]` and `[[0.0, 0.0]]`. Constructing the optimizer in line 11 before the forward pass enables gradient tracking on the student's parameters. Line 12 initializes `KnowledgeDistillation(teacher, student, temperature=2.0, alpha=0.5)`. In lines 13 to 15, input `x` evaluates `teacher_logits` while `teacher_before` takes a reference copy.
 
-Lines 17--19 evaluate the combined distillation loss. In line 20, `loss.backward()` executes backpropagation. Lines 21--23 confirm that `student.weight.grad` receives the analytical gradient `[[-0.307765, 0.307765]]` while `teacher.weight.grad` remains `None` (the teacher is not trained). In line 24, `optimizer.step()` updates the student; lines 25--27 verify that student loss decreased while teacher parameters remained strictly frozen. Lines 29--31 confirm that duplicating the input maintains consistent sample-mean loss.
+Lines 17 to 19 evaluate the combined distillation loss. In line 20, `loss.backward()` executes backpropagation. Lines 21 to 23 confirm that `student.weight.grad` receives the analytical gradient `[[-0.307765, 0.307765]]` while `teacher.weight.grad` remains `None` (the teacher is not trained). In line 24, `optimizer.step()` updates the student; lines 25 to 27 verify that student loss decreased while teacher parameters remained strictly frozen. Lines 29 to 31 confirm that duplicating the input maintains consistent sample-mean loss.
 
 ::: {#lst-compression-student-update lst-pos="H" lst-cap="**A distillation update with fixed teacher state**: The assertions check the state contract described in the surrounding text."}
 ```python
@@ -400,7 +400,7 @@ $$W_1 = \sigma_1 u_1 v_1^T = \frac{4}{3}\begin{bmatrix} 1 & 1 & 1 \\ 1 & 1 & 1 \
 
 The Frobenius norm of the residual is $\sqrt{3 \cdot (2/3)^2 + 6 \cdot (1/3)^2} = \sqrt{2} \approx 1.41$, and Eckart-Young predicts $\sqrt{\sigma_2^2 + \sigma_3^2} = \sqrt{2}$. The two factors are $W_A = \sqrt{4} \, u_1 \approx [1.155, 1.155, 1.155]^T$ and $W_B = \sqrt{4} \, v_1^T$, the same three numbers as a row. An SVD routine may flip the signs of both $u_1$ and $v_1$; their outer product remains unchanged, so the test must compare the reconstructed matrix rather than assume a sign. Each of the three ranks tells a different story about storage, summarized in @tbl-svd-trace.
 
-| Rank $r$ | Stored values | Returned shapes | Frobenius error | Size vs. original |
+| Rank $r$ | Stored values | Returned shapes | Frobenius error | Relative size |
 | :--- | :---: | :--- | :---: | :---: |
 | 3 | 21 | $(3,3), (3,), (3,3)$ | $0$ | $2.33\times$ |
 | 2 | 14 | $(3,2), (2,), (2,3)$ | $1$ | $1.56\times$ |
@@ -444,18 +444,18 @@ The reference pruning functions make one in-place edit. PyTorch's pruning utilit
 
 A sparse execution path can exploit zeros without changing the logical matrix dimensions. For example, PyTorch documents [semi-structured sparse tensors](https://docs.pytorch.org/docs/stable/sparse.html#sparse-semi-structured-tensors) with a restricted pattern, a packed value representation, and metadata identifying retained positions. A 2:4 pattern retains two values in each group of four. Metadata adds storage beyond those values, and supported devices, dtypes, shapes, and operations constrain its use. The relevant comparison is therefore a specific packed representation and its supported multiplication, not a dense matrix that happens to contain zeros. Module 16 implements neither this format nor its kernel.
 
-Low-rank adaptation uses the same thin-matrix arithmetic for a different purpose. [LoRA, by Hu et al.](https://arxiv.org/abs/2106.09685), freezes pretrained weights and trains a low-rank update. In this chapter's inputs-by-outputs layout, the adapted weight is $W + AB$, with $A$ shaped $(M,r)$ and $B$ shaped $(r,N)$, apart from a scaling constant. The update adds $r(M+N)$ trainable values while retaining the $MN$ values of the base. In contrast, `factorize_linear` replaces the base matrix. A small adapter therefore does not imply a smaller base-model allocation. TinyTorch's SVD routine computes an approximation of existing weights; it does not implement LoRA training.
+Low-rank adaptation uses thin-matrix arithmetic for a different purpose. [LoRA (Hu et al., 2021)](https://arxiv.org/abs/2106.09685) freezes pretrained weights and trains a low-rank update $W + AB$, with $A \in \mathbb{R}^{M \times r}$ and $B \in \mathbb{R}^{r \times N}$. The update adds $r(M+N)$ trainable parameters alongside the base $MN$ weights. In contrast, `factorize_linear` replaces the base matrix directly; an adapter does not shrink the base allocation. TinyTorch computes an SVD approximation of existing weights rather than an adapter.
 
-The teacher-student objective transfers directly. [Hinton, Vinyals, and Dean](https://arxiv.org/abs/1503.02531) use softened teacher predictions to guide a student and compensate for the temperature dependence of soft-target gradients with a $T^2$ factor. TinyTorch deliberately leaves that multiplier out. In the local trace, increasing temperature therefore changes both the probabilities and the strength of their contribution relative to the hard labels. A production objective must specify its reductions and scaling just as explicitly; matching the name “distillation” is not enough to establish that two training runs use the same loss.
+The teacher-student objective transfers directly. [Hinton, Vinyals, and Dean (2015)](https://arxiv.org/abs/1503.02531) soften teacher predictions to guide a student, scaling gradients by $T^2$. TinyTorch intentionally omits that multiplier. In the local trace, increasing temperature changes both target entropy and relative gradient scale. A production pipeline must specify reductions and scalings explicitly; the label “distillation” alone does not guarantee matching losses.
 
-::: {#psp-compression-structured-vs-unstructured .callout-production title="Production bridge: 2:4 structured sparsity and hardware accelerators"}
-Unstructured pruning zeros arbitrary weights but produces random sparsity patterns that standard GEMM hardware cannot accelerate without expensive CSR indexing overhead. Modern production deployments navigate this through hardware-aligned sparsity:
+::: {#psp-compression-structured-vs-unstructured .callout-perspective title="Production Bridge: 2:4 Structured Sparsity and Hardware Accelerators"}
+Unstructured pruning zeroes arbitrary weights, producing irregular sparsity that standard GEMM hardware cannot accelerate without indexing overhead. Modern production runtimes resolve this through hardware-aligned sparsity:
 
-1. **NVIDIA 2:4 Structured Sparsity**: Starting with Ampere (A100) and Hopper (H100), Tensor Cores support native 2:4 structured sparsity. For every block of four consecutive values along a matrix row, exactly two must be zero. The hardware stores only the two nonzero values alongside 2-bit indices per pair, cutting memory storage in half and doubling GEMM arithmetic throughput with minimal accuracy loss.
-2. **Channel and Block Pruning**: Serving frameworks (e.g., TensorRT, ONNX Runtime) favor structured pruning, removing entire attention heads (recalling the multi-head attention partitioning in @sec-attention), MLP intermediate channels, or transformer blocks. Because shrinking channel dimensions preserves contiguous memory strides and standard BLAS kernels, structured pruning yields guaranteed wall-clock latency reductions without requiring specialized sparse execution engines.
+1. **NVIDIA 2:4 Structured Sparsity**: Starting with Ampere and Hopper, Tensor Cores support native 2:4 structured sparsity. For every four values along a row, exactly two must be zero. Accelerators store only the two nonzeros with 2-bit pair indices, cutting memory traffic in half and doubling GEMM throughput with minimal accuracy loss.
+2. **Channel and Block Pruning**: Serving frameworks (such as TensorRT and ONNX Runtime) favor structured pruning, removing entire attention heads (@sec-attention), MLP intermediate channels, or transformer blocks. Preserving contiguous memory strides and standard dense BLAS kernels guarantees wall-clock latency reductions without specialized sparse hardware.
 :::
 
-@Tbl-compression-production separates the allocation changes from the execution path they require. A proposed optimization needs both a representation that saves work or storage and a computation that consumes that representation. Prediction error and latency remain measurements on the target workload.
+@Tbl-compression-production separates allocation changes from the required execution path. A proposed optimization needs both a representation that saves work or storage and a kernel that consumes that representation.
 
 | Method | Stored state | Execution requirement |
 | :--- | :--- | :--- |
@@ -465,9 +465,9 @@ Unstructured pruning zeros arbitrary weights but produces random sparsity patter
 | Folded SVD factors | Two weights totaling $r(M+N)$ values | Two successive dense multiplications |
 | LoRA update | Base $W$ plus $r(M+N)$ update values | Base computation plus update, or a merged dense weight |
 
-: **Representation and execution**: Pruning, factorization, and adaptation change different parts of the state. Smaller stored factors do not establish a latency improvement by themselves. {#tbl-compression-production tbl-colwidths="[22,36,42]"}
+: **Representation and execution**: Pruning, factorization, and adaptation change different parts of the state. Smaller stored factors do not establish a latency improvement by themselves. {#tbl-compression-production tbl-colwidths="[24,38,38]"}
 
----
+{{< pagebreak >}}
 
 ## Summary
 
