@@ -466,6 +466,40 @@ Across a 60-layer model hosting a 128,000-token agent context, MLA shrinks aggre
 
 [^fn-deepseek-mla-decomp]: **MLA Low-Rank Compression Dynamics**: DeepSeek-V2 and V3 parameterize Multi-head Latent Attention with a latent dimension $d_c = 512$ and decoupled rotary key dimension $d_R = 64$. By decoupling rotary position embeddings from the low-rank latent representation, MLA circumvents the mathematical incompatibility between rotational position encodings and low-rank projection matrices, compressing the per-token KV cache from 4,096 elements under 16-head GQA to 576 elements per layer.
 
+### Key-value cache quantization: FP8, FP4, and INT4 representation {#sec-vol3-kvcache-quantization}
+
+While architectural innovations such as Grouped-Query Attention (GQA) and Multi-head Latent Attention (MLA) reduce the head count $H_{\text{kv}}$ and latent dimension $d_c$ in @eq-mem-token, they leave the numeric word size $b$ unchanged at standard 16-bit precision ($b = 2\text{ bytes}$, FP16 or BF16). Key-value cache quantization attacks the remaining free variable: shrinking the physical storage width of every key and value element from 16 bits down to 8 bits ($b = 1\text{ byte}$ in FP8) or 4 bits ($b = 0.5\text{ bytes}$ in INT4 or FP4).
+
+Quantizing the attention cache differs fundamentally from quantizing static model parameter weights. Model weights are stationary and can undergo extensive offline calibration or second-order error compensation (such as AWQ or GPTQ) before deployment. The key-value cache, by contrast, is dynamically generated at runtime across variable context horizons, requiring low-latency online quantization microkernels that operate without pipeline bubbles. Furthermore, key and value tensors exhibit starkly asymmetric activation distributions:
+
+1. **Key Tensor Outliers ($\mathbf{K}$):** Key activations exhibit severe *channel-wise* (dimension-wise) kurtosis. Across long sequences, specific projection dimensions consistently maintain magnitudes 10 to 50 times greater than the channel median across all token positions [@lin2023awq]. If a runtime applies uniform per-tensor or per-token scale factors to $\mathbf{K}$, these high-magnitude channel spikes dominate the dynamic range, forcing the remaining channels into underflow and destroying the inner product fidelity of the query-key dot product $\mathbf{Q} \mathbf{K}^\top$. To preserve retrieval accuracy, Key quantization mandates *per-channel* (or grouped per-head) scaling vectors:
+   $$
+   \mathbf{K}_{q} = \text{clip}\left(\left\lfloor \frac{\mathbf{K}}{\mathbf{s}_K} \right\rceil, -q_{\max}, q_{\max}\right), \quad \mathbf{s}_K \in \mathbb{R}^{1 \times d_{\text{head}}}
+   $$
+   where $\mathbf{s}_K$ scales each feature dimension independently.
+2. **Value Tensor Outliers ($\mathbf{V}$):** Value activations, conversely, exhibit *token-wise* (row-wise) outlier distributions. Specific structural tokens (such as initial delimiter tokens, system prompt boundaries, and newline tokens) accumulate large activation norms across all channels, whereas variance across feature dimensions within any single token remains smooth. Consequently, Value quantization achieves optimal fidelity using *per-token* or *per-block* scale factors:
+   $$
+   \mathbf{V}_{q} = \text{clip}\left(\left\lfloor \frac{\mathbf{V}}{\mathbf{s}_V} \right\rceil, -q_{\max}, q_{\max}\right), \quad \mathbf{s}_V \in \mathbb{R}^{S \times 1}
+   $$
+
+The primary numeric formats employed in production serving runtimes are summarized in @tbl-vol3-kv-quant-formats.
+
+| Numeric Format  | Bit Width ($b$)          | Exponent / Mantissa     | Dynamic Range ($\approx$)                | Quantization Granularity                         | Memory Savings vs. FP16   |
+|:----------------|:-------------------------|:------------------------|:-----------------------------------------|:-------------------------------------------------|:--------------------------|
+| **FP16 / BF16** | 16 bits ($2.0\text{ B}$) | 5/10 (FP16), 8/7 (BF16) | $6.5 \times 10^4$ / $3.4 \times 10^{38}$ | None (unquantized)                               | Baseline ($1.0\times$)    |
+| **FP8 (E4M3)**  | 8 bits ($1.0\text{ B}$)  | 4 bits / 3 bits         | $\pm 448$                                | Per-channel $\mathbf{K}$, per-token $\mathbf{V}$ | $2.0\times$ capacity gain |
+| **FP8 (E5M2)**  | 8 bits ($1.0\text{ B}$)  | 5 bits / 2 bits         | $\pm 5.7 \times 10^4$                    | Per-channel $\mathbf{K}$, per-token $\mathbf{V}$ | $2.0\times$ capacity gain |
+| **INT4**        | 4 bits ($0.5\text{ B}$)  | None (linear grid)      | $[-8, 7]$                                | Grouped per-channel (group size 32–128)          | $4.0\times$ capacity gain |
+| **NVFP4**       | 4 bits ($0.5\text{ B}$)  | 2 bits / 1 bit (E2M1)   | Micro-scaled grid                        | Two-level micro-block (16 elements)              | $4.0\times$ capacity gain |
+
+: **Numeric Quantization Formats for Key-Value Cache Storage**: Bit widths, numeric representation, scaling granularity, and memory compression factors across accelerator memory architectures. {#tbl-vol3-kv-quant-formats}
+
+In modern GPU serving systems (such as vLLM and TensorRT-LLM), low-precision KV cache blocks are integrated directly into the PagedAttention memory manager. For 4-bit representations (INT4 and NVFP4), individual elements are packed as two 4-bit nibbles per byte. This packing imposes an architectural invariant on the physical page allocator: the PagedAttention block size $B$ must be a multiple of the vector alignment quantum (typically 16 or 32 tokens) to guarantee that every physical page starts on a 128-bit memory boundary, enabling non-coalesced 16-byte memory loads (`LDG.E.128`) without memory interface replay penalties.
+
+During autoregressive generation, memory-bandwidth-bound decode kernels cannot afford the latency of dequantizing historical blocks in High-Bandwidth Memory before execution. Instead, runtimes deploy fused attention kernels (such as FlashInfer or CUTLASS FlashAttention extensions) that execute **on-the-fly SRAM dequantization**. The GPU streams compressed 8-bit or 4-bit vectors across the HBM bus at peak memory bandwidth, unpacking and converting elements to FP16 registers inside on-chip SRAM immediately before executing Tensor Core multiply-accumulate operations. Because the decode phase operates at an operational intensity near unity ($I_{\text{decode}} \approx 1\text{ FLOP/byte}$), the ALU instructions required for register unpacking are entirely masked behind the memory bus transfer latency.
+
+Applying FP8 quantization to the canonical 70B grouped-query model shrinks $m_{\text{token}}$ from $320\text{ KiB}$ to $160\text{ KiB}$, instantly doubling the cluster concurrency ceiling from 48 to 96 concurrent 32,768-token trajectories on an 8-GPU node. Under INT4 or NVFP4, $m_{\text{token}}$ drops to $80\text{ KiB}$, quadrupling capacity to 192 concurrent trajectories and matching the concurrency of short conversational sessions.
+
 If every agent trajectory possessed an invariant, statically predictable sequence length, sizing and partitioning this memory would reduce to a trivial static allocation problem. A runtime could partition its 480 GB of available HBM into twelve fixed 40 GB contiguous buffers, assigning one buffer to each execution slot. In production environments, however, agent trajectories are radically non-deterministic: one trajectory may succeed and terminate in 1,200 tokens, another may encounter a compiler syntax error and iterate for 45,000 tokens, and a third may spin into a recursive loop consuming the entire 131,072-token window. When an engine pre-allocates contiguous physical memory buffers based on worst-case context lengths, the overwhelming majority of allocated accelerator memory sits completely unwritten and idle, while incoming requests are rejected due to perceived capacity exhaustion. How, then, does this dynamic variation in trajectory length induce catastrophic physical memory fragmentation in contiguous allocators, and what architectural mechanisms must a serving system introduce to eliminate the resulting waste?
 
 ## Memory Fragmentation {#sec-vol3-kvcache-fragmentation}
@@ -1325,11 +1359,47 @@ Now contrast this transfer latency against the alternative: recomputing the prom
 
 $$\text{FLOPs}_{\text{recomp}} \approx 2 \cdot P \cdot S = 2 \times (70 \times 10^9) \times 32{,}768 \approx 4.588 \times 10^{15}\text{ FLOPs} = 4.588\text{ PFLOPs}$$
 
-On an 8-GPU H100 node delivering an achieved prefill throughput of $R_{\text{prefill}} = 3.56\text{ PFLOP/s}$ (at 45 percent MFU), recomputing the attention state consumes:
+On an 8-GPU H100 node delivering an achieved prefill throughput of $\mathcal{P}_{\text{achieved}} = 3.56\text{ PFLOP/s}$ (at 45 percent Model FLOPs Utilization), recomputing the attention state consumes:
 
 $$T_{\text{recompute}} \approx \frac{4.588\text{ PFLOPs}}{3.56\text{ PFLOP/s}} \approx 1{,}289\text{ ms} \approx 1.29\text{ seconds}$$
 
-Streaming the attention state over an 800 Gbps RDMA interconnect ($104.9\text{ ms}$) is $12.3\times$ faster than local recomputation ($1{,}289\text{ ms}$), and even over a 400 Gbps fabric ($209.7\text{ ms}$) it is $6.1\times$ faster. Crucially, executing prompt recomputation would freeze all concurrent decode streams on that node for $1.29\text{ seconds}$, destroying ITL guarantees. In contrast, GPUDirect RDMA transfers are orchestrated entirely by asynchronous network DMA engines. The KV state streams silently into physical HBM blocks while the decode GPUs continue executing autoregressive steps without preemption stalls.[^fn-rocev2-flow-control]
+Streaming the attention state over an 800 Gbps RDMA interconnect ($104.9\text{ ms}$) is $12.3\times$ faster than local recomputation ($1{,}289\text{ ms}$), and even over a 400 Gbps fabric ($209.7\text{ ms}$) it is $6.1\times$ faster.
+
+#### The disaggregation machine balance and transfer roofline
+
+To formalize when disaggregated network handoff strictly dominates local prompt recomputation, we equate transfer latency with recomputation makespan:
+$$
+T_{\text{transfer}} \le T_{\text{recompute}} \iff \frac{m_{\text{token}} \cdot S}{\text{BW}_{\text{net}}} \le \frac{2 \cdot P \cdot S}{\mathcal{P}_{\text{achieved}}}
+$$
+Canceling the sequence length $S$ yields the fundamental network roofline condition:
+$$
+\text{BW}_{\text{net}} \ge \beta_{\text{disagg}} = \frac{m_{\text{token}} \cdot \mathcal{P}_{\text{achieved}}}{2 P}
+$$ {#eq-disaggregation-machine-balance}
+In @eq-disaggregation-machine-balance, $\beta_{\text{disagg}}$ defines the **Disaggregation Machine Balance**—the minimum sustained interconnect bandwidth required for network KV streaming to outpace local compute re-evaluation. For the canonical 70B model ($P = 70 \times 10^9$) with FP16 KV cache ($m_{\text{token}} = 320\text{ KiB} = 327{,}680\text{ bytes}$) served on an 8-GPU node achieving $\mathcal{P}_{\text{achieved}} = 3.56\text{ PFLOP/s}$:
+$$
+\beta_{\text{disagg}} = \frac{327{,}680\text{ bytes} \times 3.56 \times 10^{15}\text{ FLOP/s}}{2 \times 70 \times 10^9\text{ FLOPs}} \approx 8.33 \times 10^9\text{ bytes/s} \approx 8.33\text{ GB/s} \quad (66.6\text{ Gbps})
+$$
+Any interconnect fabric delivering effective unidirectional bandwidth $\text{BW}_{\text{net}} > 8.33\text{ GB/s}$ delivers a net latency advantage over local recomputation.
+
+@Tbl-vol3-disagg-roofline evaluates this crossover frontier across the physical interconnect hierarchy for a 32,768-token agent trajectory.
+
+| Physical Interconnect Fabric     | Effective Bandwidth ($\text{BW}_{\text{net}}$) | Transfer Latency ($T_{\text{transfer}}$) | Speedup vs. Recompute ($1{,}289\text{ ms}$) | Operational Regime                                         |
+|:---------------------------------|:-----------------------------------------------|:-----------------------------------------|:--------------------------------------------|:-----------------------------------------------------------|
+| **NVLink 4 / NVLink 5** (Rack)   | $900\text{--}1{,}800\text{ GB/s}$              | $5.8\text{--}11.7\text{ ms}$             | $110\times\text{--}222\times$ faster        | Near-zero latency handoff                                  |
+| **800 Gbps RoCEv2 / InfiniBand** | $100\text{ GB/s}$                              | $104.9\text{ ms}$                        | $12.3\times$ faster                         | Production cluster disaggregation                          |
+| **PCIe Gen5 $\times 16$** (Host) | $64\text{ GB/s}$                               | $163.8\text{ ms}$                        | $7.9\times$ faster                          | Intra-node CPU-GPU streaming                               |
+| **400 Gbps RoCEv2 / InfiniBand** | $50\text{ GB/s}$                               | $209.7\text{ ms}$                        | $6.1\times$ faster                          | Cross-rack disaggregation                                  |
+| **100 Gbps Ethernet**            | $12.5\text{ GB/s}$                             | $838.9\text{ ms}$                        | $1.54\times$ faster                         | Borderline advantage ($\text{BW} > \beta_{\text{disagg}}$) |
+| **25 Gbps Commodity Link**       | $3.125\text{ GB/s}$                            | $3{,}355.4\text{ ms}$                    | $0.38\times$ (2.6$\times$ slower)           | **Crossover failure**: Recompute dominates                 |
+
+: **Disaggregated Key-Value Transfer Roofline across Interconnect Hierarchy**: Effective unidirectional bandwidth, transfer makespan for a 32,768-token 70B trajectory ($M_{\text{KV}} = 10.49\text{ GB}$ in FP16), and speedup relative to local compute recomputation ($1{,}289\text{ ms}$). {#tbl-vol3-disagg-roofline}
+
+Two physical dynamics further widen the advantage of disaggregation in production agent architectures:
+
+1. **Super-Linear Attention Scaling at Horizon:** While linear feedforward layers scale as $2 P S$, full multi-head attention prefill includes quadratic matrix multiplications whose operations scale as $\text{FLOPs}_{\text{attn}} = 4 \cdot L \cdot d_{\text{model}} \cdot S^2$. At $S = 131{,}072$ tokens, local recomputation expands super-linearly to over $5.8\text{ seconds}$, whereas network transfer remains strictly linear in context length ($T_{\text{transfer}} \propto S$), increasing the 800G RDMA transfer speedup from $12.3\times$ to over $14\times$.
+2. **Quantized Network Transit:** By coupling disaggregated serving with KV cache quantization (@sec-vol3-kvcache-quantization), the prefill node quantizes key and value blocks to FP8 ($b=1\text{ byte}$) or INT4 ($b=0.5\text{ bytes}$) before scheduling network DMA transfers. Quantizing to FP8 cuts the transfer payload $M_{\text{KV}}$ from $10.49\text{ GB}$ to $5.24\text{ GB}$, halving transfer latency over 800G RDMA to just $52.4\text{ ms}$ ($24.6\times$ faster than recomputation). Concurrently, the machine balance threshold drops to $\beta_{\text{disagg}} = 4.16\text{ GB/s}$ ($33.3\text{ Gbps}$), making disaggregated prefill-decode serving highly efficient even across standard 50 Gbps and 100 Gbps data center networks.
+
+Crucially, executing prompt recomputation would freeze all concurrent decode streams on that node for seconds, destroying ITL guarantees. In contrast, GPUDirect RDMA transfers are orchestrated entirely by asynchronous network DMA engines. The KV state streams silently into physical HBM blocks while the decode GPUs continue executing autoregressive steps without preemption stalls.[^fn-rocev2-flow-control]
 
 [^fn-rocev2-flow-control]: **RoCEv2 Lossless Interconnect Dynamics**: High-throughput disaggregated KV cache transfer over RDMA over Converged Ethernet (RoCEv2) relies on Priority Flow Control (PFC, IEEE 802.1Qbb) and Explicit Congestion Notification (ECN, RFC 3168) to prevent packet drops and buffer overflows. In sustained agent burst transfers, unmitigated PFC can cause head-of-line blocking and PFC deadlocks across network leaf switches, necessitating end-to-end congestion control algorithms such as DCQCN or TIMELY.
 

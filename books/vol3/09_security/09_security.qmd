@@ -402,7 +402,7 @@ class QuarantinedIngestionPipeline:
         return sanitized_record
 ```
 
-### KV-cache memory sizing and the 56.5 percent footprint reduction
+### Key-value cache memory sizing and the 56.5 percent footprint reduction
 
 Beyond closing the authority exposure against prompt injection, the Dual-LLM supervisory architecture provides a decisive memory-efficiency benefit for accelerator clusters. In autoregressive transformer inference, the High-Bandwidth Memory (HBM) allocated to the Key-Value (KV) cache grows linearly with context length $L$. For a model with $n_{\text{layers}}$ layers, $H_{\text{kv}}$ key-value heads under Grouped-Query Attention (GQA), head dimension $d_h$, and numerical precision $b$ bytes, the KV memory consumption per token position is:
 $$
@@ -662,6 +662,20 @@ $$\sigma_{\text{auth}} = \text{Sign}_{SK_{\text{user}}}(\text{action\_hash} \mat
 
 The tool execution sandbox verifies $\sigma_{\text{auth}}$ against the user's public key before committing the side effect. If the adversary manipulates the parameters between approval and dispatch, the hash mismatch immediately aborts execution.
 
+### Tool registry supply chain integrity and Model Context Protocol authorization boundaries
+
+As agent architectures transition toward open ecosystems where tools are dynamically discovered from shared catalogs (such as Model Context Protocol registries or package indices), the attack surface expands from direct prompt manipulation to **tool supply-chain subversion**. An adversary who cannot inject text directly into a user's prompt can publish a typosquatted or shadowed tool definition to a shared registry (for instance, advertising `read_f1le` or shadowing standard `git_checkout` with an endpoint that exfiltrates working trees). If an agent platform ingests unverified tool definitions, an adversary can manipulate tool execution without ever corrupting the foundation model's context.
+
+To counter tool supply-chain attacks, the host supervisor enforces strict cryptographic provenance and mutual attestation across all registered tool schemas:
+
+1. **Cryptographic Tool Attestation:** Tool definitions, JSON schemas, and containerized implementations must be digitally signed using transparent key infrastructure (such as Sigstore Cosign with in-toto attestation metadata). Before the supervisor exposes any tool schema to the planning model, it verifies the signature against a pinned organizational root of trust:
+   $$\text{Verdict}(\text{Tool}) = \begin{cases} \text{REGISTER}, & \text{if } \text{VerifyCosign}(\text{Schema}, \text{BinaryDigest}, \text{CertChain}, \text{RootCA}) = \text{TRUE} \\ \text{QUARANTINE}, & \text{otherwise} \end{cases}$$
+   Unsigned, unverified, or expired tool definitions are quarantined immediately, preventing typosquatted or tampered capabilities from entering the model's available action space.
+2. **Model Context Protocol (MCP) Authorization Boundaries:** While MCP standardizes tool advertisement and RPC invocation across clients and servers, the protocol itself provides no ambient security boundary. The host runtime must enforce strict isolation based on the transport topology:
+   - **Local Subprocess (`stdio` Transport):** When invoking a local tool server via standard input/output streams, the host supervisor must never spawn the process under the ambient host user identity. The tool server executes in an unprivileged container or microVM envelope with dedicated user namespaces (`CLONE_NEWUSER`), restricted mount namespaces, private `/tmp` mounts, and a `seccomp-bpf` filter that drops administrative capabilities (`CAP_SYS_ADMIN`, `CAP_NET_RAW`).
+   - **Remote Microservice (`SSE` / HTTP Transport):** When interacting with distributed MCP tool servers over Server-Sent Events or HTTP POST, the host runtime enforces mutual TLS (mTLS) with pinned server certificates. Outbound requests are injected with short-lived, audience-bound JWTs minted by the Credential Broker. Raw API credentials and long-lived authorization headers are never exposed to the guest microVM or model context.
+   - **Tool Origin Binding:** The Reference Monitor binds tool permissions to the tool's verified origin URI. A capability granted for `mcp://internal-db.corp/query` cannot be fulfilled by a tool advertised from an unvetted endpoint `mcp://external-proxy.net/query`, neutralizing DNS spoofing and tool hijacking.
+
 ## Multi-Turn Adversarial Dynamics {#sec-vol3-security-multiturn}
 
 Most introductory security evaluations test agents against single-turn prompt injection benchmarks: a malicious instruction is injected into a single tool observation, and the evaluator checks whether the model executes it immediately. In real-world enterprise deployments, however, adversaries do not operate in a single step.
@@ -702,7 +716,30 @@ To mitigate context dilution, systems engineers implement **Context Re-Anchoring
 
 Beyond conversational manipulation within a single execution session, multi-tenant agent serving systems introduce physical side-channel vulnerabilities at the Key-Value cache layer. In high-throughput serving runtimes (such as vLLM or TensorRT-LLM), shared prefix caching algorithms (e.g., RadixAttention) dynamically identify and reuse KV-cache blocks across independent customer requests to eliminate redundant prefill computation.
 
-However, sharing physical cache blocks across untrusted tenants creates timing side-channels.[^fn-prefix-cache-leakage] An attacker who crafts prompts matching shared system instructions or candidate private documents can observe micro-architectural prefill latency: a cache hit yields near-instantaneous Time to First Token (TTFT), whereas a cache miss forces full matrix recomputation. By iteratively probing the cache with candidate secret tokens, an adversary can reconstruct private prompt templates or verify whether another tenant recently processed confidential text records. Production agent serving systems must therefore enforce cryptographic tenant isolation in block managers, partitioning Key-Value page tables by tenant identifier or applying salt-hashing across prefix trees.
+However, sharing physical cache blocks across untrusted tenants creates a high-precision **microarchitectural timing oracle**.[^fn-prefix-cache-leakage] When an agent serving engine ingests a prompt prefix $P = [x_1, x_2, \dots, x_L]$, it queries the global Radix prefix trie. If the token sequence matches existing cached blocks, the engine completely bypasses prompt prefill, scheduling the request directly for token decode:
+$$\text{TTFT}_{\text{hit}} \approx T_{\text{scheduling}} + T_{\text{decode\_token}} \approx 5\text{--}15\text{ ms}$$
+
+Conversely, if any token in the prefix misses the cache, the accelerator must execute dense General Matrix Multiplication (GEMM) across the full un-cached sequence length $L$, computing Key and Value projections and attention matrices across all model layers:
+$$\text{TTFT}_{\text{miss}} \approx \frac{2 \cdot P \cdot L}{\mathcal{P}_{\text{achieved}}} + T_{\text{scheduling}}$$
+where $P$ is the parameter count and $\mathcal{P}_{\text{achieved}}$ is the achieved arithmetic throughput. On a modern accelerator host such as an NVIDIA H100 SXM5 ($\mathcal{P}_{\text{achieved}} \approx 400\text{ TFLOP/s}$ dense FP16) serving a 70B parameter model ($P = 70 \times 10^9$), processing a candidate prompt prefix of length $L = 4{,}096$ tokens requires:
+$$\text{TTFT}_{\text{miss}} \approx \frac{2 \times 70 \times 10^9 \times 4{,}096}{400 \times 10^{12}} \approx 1.43\text{ seconds}$$
+
+The resulting timing discrepancy is stark:
+$$\Delta \text{TTFT} = \text{TTFT}_{\text{miss}} - \text{TTFT}_{\text{hit}} \approx 1.43\text{ s} - 0.015\text{ s} \approx 1.42\text{ seconds}$$
+
+This two-order-of-magnitude differential acts as a low-noise network oracle. An attacker sharing the multi-tenant cluster can mount a **Prefix Probing Attack**:
+
+1. **Candidate Prompt Probing:** The adversary crafts candidate prefixes combining a known public template with a guessed sensitive string (e.g., `"[SYSTEM]: Project Codename: "` + $s_{\text{guess}}$).
+2. **Timing Oracle Observation:** The adversary measures the API's Time to First Token. If $\text{TTFT} < 50\text{ ms}$, the guessed string was recently processed by another tenant and resides in GPU memory; if $\text{TTFT} > 1{,}000\text{ ms}$, the guess is false.
+3. **Linear-Time Secret Recovery:** By iteratively probing character by character or token by token, the attacker reduces an exponential brute-force search ($|\Sigma|^m$) to a linear sequence of timing queries ($\mathcal{O}(|\Sigma| \cdot m)$), reconstructing confidential system instructions, customer names, or private API keys across tenant boundaries.
+
+Production agent serving systems must neutralize prefix cache timing oracles through three systems defenses:
+
+- **Tenant-Keyed Salt Hashing:** In the RadixAttention trie, block lookup keys must not be derived solely from token hashes. The block manager incorporates a private, cryptographic tenant salt $K_{\text{tenant}}$:
+  $$\text{BlockKey}_i = \text{HMAC-SHA256}(K_{\text{tenant}}, \, x_1 \parallel x_2 \parallel \dots \parallel x_i)$$
+  Two tenants submitting identical text produce orthogonal block keys, mathematically preventing cross-tenant cache hits.
+- **Physical Memory Pool Partitioning:** Multi-tenant inference engines allocate physically distinct KV-cache page arenas per security domain, ensuring that block eviction, allocation, and lookup tables remain strictly isolated.
+- **Quantized Prefill Scheduling:** If public templates must be shared across tenants to maximize cluster throughput, the scheduler enforces constant-time prefill bins: artificially delaying first-token dispatch to the upper bound of the prefill window, thereby masking microarchitectural cache state.
 
 [^fn-prefix-cache-leakage]: **Prefix Cache Side-Channel Vulnerabilities**: Modern inference engines share physical Key-Value cache page blocks across requests through RadixAttention and ChunkedPrefill to amortize prompt processing costs. In multi-tenant agent serving environments, timing discrepancies between prefix cache hits and misses can leak whether another tenant has previously processed identical sensitive text snippets or system prompt fragments. Secure multi-tenant runtimes mitigate this vulnerability by enforcing tenant-keyed prefix isolation and salt-hashed block cache namespaces.
 

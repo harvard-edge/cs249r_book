@@ -924,9 +924,25 @@ Two consequences follow from how trajectories issue calls. Calls arrive in corre
 
 ### Provider rate limits
 
-For a team that calls a hosted model, the first capacity limit it meets is usually not hardware but the provider's quota, expressed as tokens per minute and requests per minute.[^fn-token-bucket-policing] The quota caps the rate at which trajectories can run, not how many can be open. Each trajectory needs a fixed number of tokens to finish, so in steady state token demand is the trajectory rate times tokens per trajectory, whatever the trajectories' lifetimes. Suppose trajectories start at `{python} TrajectoryCapacity.lam_str` per minute, and each makes `{python} TrajectoryCapacity.calls_str` calls of `{python} TrajectoryCapacity.tok_call_str` input tokens, `{python} TrajectoryCapacity.tok_traj_str` tokens per trajectory. Against a limit of `{python} TrajectoryCapacity.tpm_limit_str` tokens per minute, demand uses `{python} TrajectoryCapacity.util_str` of the quota, and the fleet can sustain at most `{python} TrajectoryCapacity.lam_max_str` trajectories per minute. With a lifetime of `{python} TrajectoryCapacity.life_min_str` minutes, Little's law puts `{python} TrajectoryCapacity.conc_str` trajectories in flight, each issuing about `{python} TrajectoryCapacity.per_traj_rate_str` calls per minute.
+For a team that calls a hosted model, the first capacity limit it meets is usually not hardware but the provider's quota, expressed as tokens per minute (TPM) and requests per minute (RPM).[^fn-token-bucket-policing] The quota caps the rate at which trajectories can run, not how many can be open. Each trajectory needs a fixed number of tokens to finish, so in steady state token demand is the trajectory rate times tokens per trajectory, whatever the trajectories' lifetimes. Suppose trajectories start at `{python} TrajectoryCapacity.lam_str` per minute, and each makes `{python} TrajectoryCapacity.calls_str` calls of `{python} TrajectoryCapacity.tok_call_str` input tokens, `{python} TrajectoryCapacity.tok_traj_str` tokens per trajectory. Against a limit of `{python} TrajectoryCapacity.tpm_limit_str` tokens per minute, demand uses `{python} TrajectoryCapacity.util_str` of the quota, and the fleet can sustain at most `{python} TrajectoryCapacity.lam_max_str` trajectories per minute. With a lifetime of `{python} TrajectoryCapacity.life_min_str` minutes, Little's law puts `{python} TrajectoryCapacity.conc_str` trajectories in flight, each issuing about `{python} TrajectoryCapacity.per_traj_rate_str` calls per minute.
 
 [^fn-token-bucket-policing]: **Token Bucket Gateway Policing**: Provider rate limits enforce dual token-bucket constraints governing both requests per minute (RPM) and tokens per minute (TPM). Because multi-turn agent trajectories submit prompts that expand monotonically, an agent fleet can exhaust TPM quotas while consuming less than 10 percent of allocated RPM headroom. Runtimes maintain client-side token-bucket emulators to shape traffic and prevent HTTP 429 backoff storms.
+
+#### Token bucket versus leaky bucket under monotonic context expansion {.unnumbered}
+
+Managing provider rate limits for autonomous agents differs fundamentally from standard microservice API rate-limiting. In traditional web services, request payloads are statistically independent and approximately stationary ($S \approx \text{const}$). In multi-turn agent systems, however, context length expands **monotonically** with turn depth $k$:
+
+$$L_k = L_0 + \sum_{j=1}^{k-1} \left( L_{\text{out}}^{(j)} + L_{\text{obs}}^{(j)} \right)$$
+
+An agent dispatching its first turn may submit a lightweight $2{,}000$-token prompt; by turn 25, the cumulative context history—encompassing previous thoughts, tool invocations, and environmental observations—swells to $48{,}000$ or $64{,}000$ tokens. This monotonic expansion creates severe traffic-shaping dysfunctions under standard algorithms:
+
+- **Token Bucket Vulnerability:** A standard Token Bucket accumulates token credits up to burst capacity $B_{\text{burst}}$ refilled at continuous rate $r_{\text{TPM}}$. While token buckets cleanly absorb short stochastic bursts, they collapse when multiple concurrent agents simultaneously advance into deep turns. If four agents concurrently reach turn 25 (each issuing a 64k prefill request), they consume $256{,}000$ tokens in a single millisecond. The bucket is drained to zero instantaneously, causing all subsequent model calls across the entire fleet—including trivial single-token classification probes—to be dropped with HTTP 429 (Too Many Requests) errors. In response, synchronized client retries trigger destructive thundering-herd cascades.
+- **Leaky Bucket Defect:** A Leaky Bucket enforces a rigid, constant outflow rate $r_{\text{drain}}$, smoothing bursty token traffic into a continuous, uniform stream. While this strictly prevents provider 429 faults, queueing large prefill requests inside a leaky-bucket buffer introduces severe, artificial queueing delays. An agent awaiting model output experiences multi-second stalls, stranding high-bandwidth memory (HBM) on inference servers and dramatically increasing the risk of downstream tool execution timeouts.
+
+To resolve this impedance mismatch, high-throughput agent gateways implement a **Stateful Context-Aware Dual-Bucket Architecture**:
+
+1. **New Task Admission Bucket ($B_{\text{admit}}$):** Regulates the admission rate of fresh trajectories ($\lambda_{\text{new}}$). The gateway projects the lifetime token consumption of an admitted task, $\mathbb{E}[C_{\text{tokens}}] = \sum_{k=1}^{\mathbb{E}[K]} L_k$. A new task is admitted only if the projected demand fits within the uncommitted headroom of the rolling TPM quota window.
+2. **In-Flight Expansion Bucket ($B_{\text{flight}}$):** Grants strictly prioritized token allocations to active, multi-turn trajectories. Because an agent at turn 20 has already consumed substantial dollars and GPU compute, dropping its turn-21 request to accommodate a newly arriving task destroys existing investment. The gateway guarantees token quota to in-flight deep turns, throttling new task admissions during quota pressure while allowing existing trajectories to drain to verified completion.
 
 Running this close to a quota has the same consequence as running a server close to saturation. Throttled calls retry after backoff, trajectories live longer, they hold sandboxes and cache longer, and their deadlines slip. Three levers apply. Prefix caching lowers the bill, and whether it also lowers usage against the quota depends on how the provider counts cached tokens, which the capacity plan must check rather than assume. Short, reliable trajectories consume fewer tokens per accepted task, which raises the accepted-task rate under a fixed quota as directly as a higher quota would. Discounted batch endpoints, which return results within hours, suit single-call work such as offline evaluation runs, trajectory scoring, and curation, but not a multi-turn loop in which each turn must wait for the previous one.
 
@@ -1622,6 +1638,46 @@ The synthesized system achieves a **$2.71\times$ improvement in Goodput per Doll
 :::
 
 Maximizing Goodput per Dollar reveals the fundamental trade-off of serving economics: spending more money per task is economically rational if and only if the marginal expenditure yields a super-linear increase in the probability of task acceptance. Conversely, cost reduction strategies that depress task success rates—even slightly—frequently crater Goodput per Dollar because the fixed costs of tool infrastructure, prefill tokens, and verification are squandered on unrecoverable failures.
+
+### SRE error budget burn rates and trajectory goodput SLOs {#sec-vol3-synthesis-sre-error-budgets}
+
+In classical site reliability engineering (SRE) [@beyer2016sre], service level objectives (SLOs) govern isolated, stateless remote procedure calls (RPCs)—typically enforcing constraints such as $99.9\%$ availability (three nines of HTTP 200 responses) and $P_{99}$ latency under $200\ \text{ms}$. For autonomous agents, however, traditional RPC-level availability is a dangerous and deceptive metric.
+
+An agent trajectory is a sequential, multi-turn Markov chain comprising $20$ to $50$ interdependent inference passes and tool executions. If each individual turn exhibits an apparently robust $98\%$ RPC availability ($p_{\text{turn}} = 0.98$), the compound end-to-end trajectory reliability over $K = 30$ turns collapses precipitously:
+
+$$P_{\text{trajectory\_success}} \le (p_{\text{turn}})^K = (0.98)^{30} \approx 0.545 \quad (54.5\%)$$
+
+Nearly half of all initiated trajectories crash or abort mid-execution. Worse, a failure at turn 29 consumes all the tokens, container runtimes, and external API fees incurred across turns 1 through 28, delivering zero business value while burning cluster budget. In an agentic architecture, reliability cannot be measured by turn-level HTTP status codes; it must be governed by **Trajectory Goodput Service Level Objectives**.
+
+#### Trajectory goodput service level objectives {.unnumbered}
+
+An enterprise agent fleet defines its contractual reliability target through a multi-dimensional Trajectory Goodput SLO:
+
+$$\text{SLO}_{\text{goodput}} = \frac{1}{M}\sum_{i=1}^M \mathbf{1}\left( \text{Verified}(i) \land \neg\text{Defect}(i) \land C_{\text{task}}^{(i)} \le C_{\max} \land T_{\text{task}}^{(i)} \le T_{\max} \right) \ge 1 - \epsilon_{\text{budget}}$$
+
+where $M$ is the number of admitted tasks, $C_{\max}$ is the financial ceiling, $T_{\max}$ is the end-to-end wall-clock latency deadline, and $\epsilon_{\text{budget}}$ represents the maximum allowable unreliability budget over a rolling compliance window (e.g., $\epsilon_{\text{budget}} = 0.05$ for a $95\%$ Goodput SLO over a 30-day window). A task is classified as successful if and only if it satisfies all functional post-conditions, introduces no regressions, and finishes within both budget and latency bounds.
+
+#### Multi-window error budget burn rate alerting {.unnumbered}
+
+Because agent fleets process complex, non-deterministic tasks, failures do not manifest solely as binary node crashes. Instead, an outage often appears as **semantic degradation**: a subtle prompt drift, model alignment update, or tool schema deprecation that causes the agent to enter repetitive reasoning loops, misformat JSON tool calls, or fail unit tests.
+
+To detect both sudden catastrophic outages and slow systemic degradation, the platform tracks the **Error Budget Burn Rate** $B$:
+
+$$B = \frac{\text{Observed Unreliability Rate}}{\text{Target Unreliability Rate}} = \frac{1 - \text{Goodput}_{\text{observed}}}{\epsilon_{\text{budget}}}$$
+
+A burn rate of $B = 1.0$ indicates that the system is consuming its error budget at a rate that will exhaust exactly $100\%$ of the budget over the compliance window. A burn rate of $B > 1.0$ signals that the system is consuming budget faster than permitted.
+
+Production agent platforms implement multi-window, multi-burn-rate alerting [@beyer2016sre] calibrated across short and long time horizons:
+
+1. **Catastrophic Fast Burn ($B = 14.4$, 1-hour window):** Consumes $2\%$ of the 30-day error budget in a single hour. Triggered by hard infrastructure failures—such as inference cluster network partitions, container registry outages, or breaking tool API updates. The monitoring system fires immediate high-priority PagerDuty alerts and trips automated circuit breakers.
+2. **Severe Medium Burn ($B = 6.0$, 6-hour window):** Consumes $5\%$ of the 30-day error budget in six hours. Typically triggered by prompt regressions, model weight updates that alter reasoning distributions, or external database performance degradation.
+3. **Chronic Slow Burn ($B = 1.0$, 3-day window):** Consumes $10\%$ of the error budget over three days, detecting gradual operational drift, context bloat, or rising task complexity that threatens the monthly SLO.
+
+When a high burn rate is detected, the fleet supervisory orchestrator triggers automated systems countermeasures:
+
+- **Automated Workload Shedding:** The gateway throttles asynchronous background batch workloads (such as repository indexing and evaluation sweeps), reserving GPU capacity and provider token quotas exclusively for interactive user trajectories.
+- **Dynamic Routing Fallback:** The model cascade escalates tasks from cheaper small language models directly to frontier models, trading off short-term token expenditure to stem the loss of trajectory goodput.
+- **Canary Rollback:** If a burn-rate spike correlates with a recent prompt template deployment or tool definition change, the orchestrator automatically rolls back the agent harness configuration to the last known healthy checkpoint.
 
 ### The fleet economic operating envelope {#sec-vol3-synthesis-envelope}
 

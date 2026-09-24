@@ -429,13 +429,24 @@ The sequential phases of live trajectory handoff are illustrated in @fig-vol3-tr
 ![](images/svg/fig-vol3-trajectory-migration.svg)
 :::
 
-The critical failure hazard during migration is the **split-brain execution dilemma**\index{Split-brain!trajectory migration}: a worker experiencing a transient network partition or kernel freeze may not realize its lease has expired, continuing to execute steps and issue tool mutations simultaneously with the newly arrived worker. The runtime prevents this through a **monotonically increasing fencing token** $\gamma$\index{Fencing token!distributed lease}:[^fn-distributed-fencing-tokens]
+The critical distributed systems failure hazard during migration is the **split-brain execution dilemma**\index{Split-brain!trajectory migration} [@kleppmann2017designing]. In distributed execution topologies, trajectory ownership is governed by distributed leases with periodic heartbeats ($\Delta t_{\text{heartbeat}} \approx 2\ \text{s}$) and lease timeouts ($\text{TTL}_{\text{lease}} \approx 10\ \text{s}$). If active worker $A$ experiences a transient network partition, a stop-the-world garbage collection pause, or kernel CPU throttling under cgroups quota exhaustion, its heartbeat packets stall.
 
-1. When the distributed lease service grants ownership of trajectory $\tau$ to arriving worker $B$, it increments the epoch counter: $\gamma_B = \gamma_A + 1$.
-2. Every tool invocation payload dispatched by a worker must carry its assigned fencing token: $a = \langle \text{tool}, \text{args}, \gamma \rangle$.
-3. The tool execution gateway and external resource proxies enforce a monotonic gate: any dispatch arriving with $\gamma < \gamma_{\text{current}}$ is unconditionally dropped with an authorization fault.
+When the lease coordinator observes that $\text{TTL}_{\text{lease}}$ has elapsed without a renewal, it declares worker $A$ dead, revokes the lease, and re-assigns trajectory $\tau$ to arriving worker $B$. When partitioned worker $A$ eventually resumes execution, it suffers from the classic distributed systems "zombie worker" delusion: because a process cannot reliably measure the passage of physical time during a kernel freeze, worker $A$ remains completely unaware that its lease has expired and continues executing turns. Without defensive barriers, worker $A$ and worker $B$ concurrently dispatch tool actions, flush conflicting intents to the write-ahead log, and mutate external filesystems—producing catastrophic data corruption and non-deterministic split-brain behavior.
 
-If stale worker $A$ wakes up from a temporary pause and attempts to issue an external tool call, the gateway rejects it because $\gamma_A < \gamma_B$, preventing phantom mutations and double execution.
+To make split-brain mutations mathematically impossible, the runtime enforces a **tripartite fencing token architecture** using monotonically increasing 64-bit epoch numbers $\gamma$\index{Fencing token!distributed lease}:[^fn-distributed-fencing-tokens]
+
+1. **Epoch Generation at the Coordinator:** When the distributed consensus lease service (e.g., etcd, ZooKeeper, or Spanner) reallocates trajectory $\tau$ to worker $B$, it atomically increments the trajectory's epoch counter:
+   $$\gamma_B = \gamma_A + 1$$
+   Worker $B$ receives $\gamma_B$ embedded in its migration lease grant.
+2. **Tool Execution Gateway Monotonic Fence:** Every side-effecting tool invocation dispatched by an agent worker must carry its assigned fencing token in the payload envelope:
+   $$a_{\text{ext}} = \langle \tau,\, \text{tool},\, \text{args},\, \gamma \rangle$$
+   The tool execution gateway and external resource proxies track the high-water epoch $\gamma_{\text{high-water}}(\tau)$ for every active trajectory. Any dispatch arriving with $\gamma < \gamma_{\text{high-water}}(\tau)$ is immediately rejected with an unrecoverable authorization fault (`STALE_EPOCH_FENCED`), preventing stale POSIX syscalls, network calls, or cloud mutations from executing.
+3. **Write-Ahead Log Optimistic Concurrency Fence:** The durable trajectory storage engine validates $\gamma$ on every append operation. Event flushes enforce conditional write invariants:
+   $$\text{Append}(e_{\text{flush}},\, \gamma) \iff \gamma \ge \gamma_{\text{WAL}}(\tau)$$
+   When zombie worker $A$ attempts to commit an intent event with stale token $\gamma_A$, the database rejects the write with a serialization conflict, stopping phantom log corruption before it reaches disk.
+4. **Model Serving Inference Fence:** Prefix-cached sessions and KV blocks in the accelerator cluster (@sec-vol3-kv-cache) are bound to epoch $\gamma$. When worker $B$ binds to session prefix $\tau$, the serving cluster revokes worker $A$'s access token, preventing the zombie worker from consuming accelerator compute cycles.
+
+If stale worker $A$ wakes up and attempts to issue an external tool call or flush an intent record, both the tool gateway and the storage engine reject the operation because $\gamma_A < \gamma_B$. Worker $A$ receives a terminal fencing error and immediately self-terminates (`SIGTERM`), containing the blast radius before any mutation can leak.
 
 ### Resume under drift
 
@@ -582,6 +593,27 @@ To maintain a lean causal log, the runtime applies **content-addressed payload o
    where $\text{summary}$ represents the bounded head-and-tail snippet injected into the model's active context window (@sec-vol3-tool-calling-streaming).
 
 During normal recovery or replay, the harness reads the summary directly from the log without issuing network requests. When an engineer initiates forensic debugging or deep counterfactual branching, the replay engine fetches the full body from the content-addressed store using digest $h$. If multiple turns or parallel agents encounter identical compiler warnings or standard libraries, content addressing deduplicates the payload automatically.
+
+### Log-structured merge-tree compaction for long-horizon trajectories
+
+For ultra-long-horizon agents executing multi-hour or multi-day tasks—such as full-repository migrations, complex debugging across microservice architectures, or iterative optimization loops spanning $500$ to $1{,}000+$ turns—a purely linear write-ahead log introduces severe read amplification and recovery bottlenecks. Over $1{,}000$ interactive turns, an agent generates thousands of intermediate, superseded tool operations: exploratory directory listings (`ls`), exploratory pattern searches (`grep`), intermediate compilation dumps, and temporary file mutations that were subsequently overwritten or reverted.
+
+If a worker node crashes at turn 950 or migrates to a new host, replaying or rebuilding context from an uncompacted 1,000-turn WAL forces the recovery supervisor to deserialize and traverse hundreds of megabytes of obsolete JSON records before initiating the first token prefill pass.
+
+To resolve this recovery bottleneck, production agent systems borrow the **Log-Structured Merge-Tree (LSM-Tree) compaction pattern** [@oneil1996log; @kleppmann2017designing], structuring trajectory persistence into hierarchical compaction tiers:
+
+1. **Level 0 (L0 - Hot Append-Only WAL):** Raw trajectory events ($e_{\text{flush}} \prec a_{\text{ext}}$) append sequentially to local NVMe storage. L0 records maintain strict physical chronology, capturing every intermediate intent, partial tool streaming chunk, and system signal for immediate crash recovery during the active turn.
+2. **Level 1 (L1 - Minor Compaction / Turn-Window Coalescing):** Asynchronously executed every $k_{\text{minor}}$ turns (typically $k=10\text{ to }20$), minor compaction scans the active L0 segment and coalesces redundant read-only exploratory turns. Contiguous read operations—such as multiple directory searches or file inspections—are folded into an aggregated workspace perception state, caching the net filesystem view while pruning redundant intermediate prompt wrappers.
+3. **Level 2 (L2 - Major Compaction / Semantic Tombstoning & State Folding):** Triggered at major checkpoint boundaries or extended approval pauses. Major compaction applies semantic tombstone markers to prune superseded environmental modifications:
+   - *Superseded Delta Squashing:* If a source file `src/service.py` was created at turn 15, modified at turn 42, and rewritten at turn 118, intermediate diff records are squashed into the net delta relative to the repository base snapshot.
+   - *Tombstone Pruning:* If temporary scratchpads, build artifacts, or mock tests were generated and subsequently deleted during execution, tombstone markers eliminate both the generation and deletion records from the recovery path entirely.
+   - *Cryptographic Merkle Indexing:* To preserve absolute forensic auditability, major compaction does not destroy historical data. Instead, it detaches bulky, superseded raw payloads to cold object storage, replacing them in the compacted log with cryptographic Merkle DAG content hashes.
+
+This compaction hierarchy provides a formal guarantee for crash recovery and live migration:
+
+$$\text{Size}(\text{Log}_{\text{compacted}}) \approx \mathcal{O}\left(S_{\text{active\_context}} + \Delta S_{\text{net\_workspace}}\right) \ll \mathcal{O}\left(\sum_{t=1}^T |e_t|\right)$$
+
+While an uncompacted write-ahead log grows linearly with total elapsed turns ($\mathcal{O}(T)$), the compacted LSM-tree log bounds recovery storage and context parsing time to the size of the net active context and workspace diff ($\mathcal{O}(1)$ with respect to total elapsed horizon). A 1,000-turn agent trajectory resumes in milliseconds rather than stalling across multi-second sequential WAL scans.
 
 ### Telemetry spans and trace sampling dynamics
 

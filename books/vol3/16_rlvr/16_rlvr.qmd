@@ -563,7 +563,26 @@ The mask requires knowing exactly which tokens the policy sampled, which leads t
 
 ### Credit per turn
 
-GRPO gives all turns of a rollout the same advantage. For short episodes that is adequate; for thirty-turn repairs it reproduces the diagnostic suppression of @sec-vol3-rlvr-credit at the level of turns. Two refinements are practical. The runtime can compute Monte Carlo values at a few turn boundaries and assign each turn the advantage of the value change it caused, which keeps the terminal check as the source of truth. It can also add small verifiable per-turn signals, such as a tool call that parsed or a command that exited cleanly, as shaping terms. These are cheap, but each is a target the policy will learn to hit for its own sake. A policy paid for clean exit codes learns to run commands that cannot fail. Such terms stay small relative to the outcome, and the outcome alone decides whether a trajectory counts as a success.
+In standard Group Relative Policy Optimization, the entire trajectory receives a single scalar advantage $A_i$ derived from the terminal verifier outcome. For a single-turn reasoning step or a three-turn dialogue, scalar trajectory advantage is adequate. For complex multi-turn coding and systems engineering tasks spanning thirty or forty turns ($a_1, o_1, a_2, o_2, \dots, a_T, o_T$), however, uniform trajectory advantage induces severe **credit assignment distortion**.
+
+Consider a thirty-turn software repair episode. The policy executes flawless fault localization across turns 1 through 20, edits the correct source lines on turn 21, but on turn 29 introduces a minor syntax typo in a test assertion, causing the final evaluation suite to fail ($R = 0$). In a cohort where other rollouts succeed, the entire trajectory receives negative advantage ($A_i < 0$). Standard GRPO backpropagates this negative gradient across *every single turn*—penalizing the brilliant localization and refactoring performed in the early turns simply because of an unrelated late syntax error. Symmetrically, if an agent performs twenty-nine turns of incoherent exploratory flailing before stumbling upon a working patch on turn 30 ($R = 1$), uniform positive advantage reinforces the flailing and file thrashing, rewarding noise as if it were optimal strategy.
+
+To resolve this diagnostic suppression without introducing the high memory footprint of a neural critic network, multi-turn RLVR runtimes deploy three turn-level credit assignment mechanisms:
+
+1. **Snapshot-Isolated Monte Carlo Value Rollouts:**
+   At selected turn checkpoints $t \in \mathcal{K} \subset \{1, \dots, T\}$ (for example, every 5 turns or after major git mutations), the rollout orchestrator captures a copy-on-write snapshot of the sandbox environment and forks $k$ parallel continuation rollouts:
+   $$\tau_{t \to T}^{(1)}, \, \tau_{t \to T}^{(2)}, \, \dots, \, \tau_{t \to T}^{(k)} \sim \pi_{\theta_{\text{rollout}}}(\cdot \mid s_t)$$
+   The empirical state value at turn $t$ is the Monte Carlo pass rate across these forks:
+   $$V_{\text{MC}}(s_t) = \frac{1}{k} \sum_{j=1}^k R\left(\tau_{t \to T}^{(j)}\right)$$
+   The advantage allocated to turn $t$ is then the empirical value change:
+   $$\hat{A}_t = V_{\text{MC}}(s_{t+1}) - V_{\text{MC}}(s_t)$$
+   A turn that transforms an unsolved workspace ($V(s_t) = 0.1$) into a passing build ($V(s_{t+1}) = 0.9$) receives strong positive advantage, even if a subsequent turn temporarily breaks it. Because each continuation executes in a lightweight copy-on-write microVM fork (@sec-vol3-sandboxes-cow), branching adds negligible storage overhead.
+2. **Process Reward Models (PRMs) as Step-Level Critics:**
+   Rather than executing full continuation rollouts, an auxiliary step-level Process Reward Model $r_{\text{PRM}}(s_t, a_t) \in [-1, 1]$ scores intermediate transitions—verifying whether an edit successfully compiles, whether a bash command parses, or whether a reasoning block is sound. Turn advantages are computed via Generalized Advantage Estimation (GAE) across the trajectory:
+   $$\hat{A}_t^{\text{GAE}} = \sum_{l=0}^{T-t-1} (\gamma \lambda)^l \delta_{t+l}, \quad \text{where } \delta_t = r_{\text{PRM}}(s_t, a_t) + \gamma V(s_{t+1}) - V(s_t)$$
+   To prevent the policy from reward-hacking the learned PRM (Goodhart's law), runtimes gate the PRM advantage: intermediate bonuses are credited only if the terminal outcome $R_{\text{terminal}} = 1$, ensuring that soft process scores never override hard empirical verification.
+3. **Deterministic Environmental Milestones:**
+   The cleanest intermediate signals come directly from deterministic tools: whether a modified file passed linting ($\Delta_{\text{lint}} \in \{0, 1\}$), whether a unit test subset transitioned from failing to passing ($\Delta_{\text{test}} = N_{\text{pass}}(t+1) - N_{\text{pass}}(t)$), and whether commands exited with code zero. Structuring turn advantages around verifiable tool milestones accelerates exploration while preserving the invariant that the terminal verifier is the ultimate arbiter of success.
 
 ### Environment time inside the rollout
 
@@ -744,7 +763,23 @@ Early in training, a particular sequence of tokens happens to solve some tasks, 
 
 ### Runaway length
 
-The opposite pathology is more common under outcome-only rewards. Longer reasoning raises the chance of eventually producing a correct answer, a correct answer credits every token that preceded it, and the length normalization of @sec-vol3-rlvr-grpo-objective penalizes long failures least. Mean rollout length drifts toward the ceiling. Much of the added text is repetition, as in this illustrative pair of traces that reach the same verified answer:
+The opposite pathology is more common under outcome-only rewards: **reasoning bloat** (also termed length bias or verbosity bias). Under sparse binary verification ($r \in \{0, 1\}$), mean rollout length drifts inexorably toward the context window ceiling even when verification accuracy remains completely stagnant. Two distinct mathematical and algorithmic forces drive this trajectory elongation.
+
+First, under binary terminal rewards, longer reasoning traces expand the generative search space, increasing the empirical probability that an unguided policy stumbles upon the syntactic tokens that satisfy the verifier. Because outcome verification awards terminal credit $r=1$ uniformly to the entire trajectory, every preceding exploratory, redundant, or discursive token receives positive reinforcement.
+
+Second, the standard GRPO surrogate objective contains a structural defect: **token-divisor penalty dilution**. In @eq-vol3-grpo-objective, the per-rollout loss term is normalized by its own sequence length $|o_i|$:
+
+$$\mathcal{L}_i(\theta) = \frac{1}{|o_i|} \sum_{t=1}^{|o_i|} \mathcal{M}_{i,t}(\theta)$$
+
+Taking the unclipped parameter gradient with respect to policy weights $\theta$ highlights the per-token gradient update:
+
+$$\nabla_\theta \mathcal{L}_i(\theta) = \frac{A_i}{|o_i|} \sum_{t=1}^{|o_i|} \nabla_\theta \log \pi_\theta(o_{i,t} \mid q, o_{i,<t})$$
+
+When a rollout fails a task ($r_i = 0$), its group-relative advantage is strictly negative ($A_i < 0$). For a concise failing rollout of length $|o_i| = L_{\text{concise}}$ (such as $128$ tokens), the negative gradient scale applied to each token logit is proportional to $\frac{|A_i|}{L_{\text{concise}}}$. Conversely, for an unconstrained, verbose failure that rambles until the context limit $|o_i| = L_{\text{verbose}}$ (such as $4{,}096$ tokens), the per-token gradient penalty is proportional to $\frac{|A_i|}{L_{\text{verbose}}}$. The per-token penalty applied to bad reasoning steps is diluted by a factor of $\frac{L_{\text{verbose}}}{L_{\text{concise}}} = 32\times$.
+
+Although the outer summation sums over $|o_i|$ tokens, this token-divisor normalization distorts credit assignment across rollout lengths. Concise trajectories that fail due to a single syntax error or off-by-one index receive severe, concentrated negative gradients on every constituent token. In contrast, rambling trajectories that exhaust thousands of tokens in repetitive deliberation loops distribute their negative advantage across an enormous denominator, attenuating the penalty at each individual token decision. The policy optimizer rapidly discovers that generating verbose, meandering reasoning traces provides a mathematical shield against sharp negative advantage updates.
+
+Much of this added length is unproductive repetition, as shown in this illustrative pair of traces that reach the same verified answer:
 
 ```text
 # Illustrative: two traces with the same verified answer (reward 1)
@@ -759,7 +794,11 @@ Trace B (4,096 tokens):
   Result: Theta(n log n)
 ```
 
-For an agent, length has a direct cost. Each extra token adds a generation step and holds attention state for the life of the rollout, so a policy that quadruples its reasoning roughly quadruples the time each rollout occupies the inference server and cuts the number of rollouts it can hold at once. In multi-turn episodes, runaway length also shows up as extra turns: re-reading files already read, re-running commands already run, deferring the edit.
+For an autonomous agent, reasoning bloat imposes severe microarchitectural and system-level penalties:
+
+1. **High-Bandwidth Memory (HBM) Stranding:** The KV cache memory footprint scales linearly with sequence length: $M_{\text{KV}} = 2 \cdot n_{\text{layers}} \cdot d_{\text{head}} \cdot n_{\text{kv\_heads}} \cdot |o_i| \cdot b_{\text{precision}}$ (@sec-vol3-kv-cache). A 4,096-token trajectory strands $32\times$ more high-bandwidth memory than a 128-token trajectory, directly reducing the maximum concurrent rollout cohort $G$ that the training cluster can host in HBM.
+2. **Memory-Bandwidth-Bound Decode Latency:** Autoregressive token decoding operates at GEMV operational intensity ($I_{\text{decode}} \approx 1\text{ FLOP/byte}$), shuttling the full parameter set across the memory bus for each generated token (@sec-vol3-foundation-model). A policy exhibiting runaway length occupies accelerator execution slots exponentially longer, collapsing rollout generation goodput.
+3. **Multi-Turn Context Compounding:** In multi-turn agent environments, discursive reasoning tokens persist in the trajectory context history, forcing every subsequent turn to recompute and re-attend over bloated prefix tokens during prefill.
 
 ### Regularizing exploration and length
 
@@ -768,7 +807,7 @@ For an agent, length has a direct cost. Each extra token adds a generation step 
 | **Pathology**        | **Symptom in telemetry**                                    | **Cause**                                                        | **Countermeasure**                                                 |
 |:---------------------|:------------------------------------------------------------|:-----------------------------------------------------------------|:-------------------------------------------------------------------|
 | **Entropy collapse** | Falling token entropy; rising share of zero-variance groups | Repeated reinforcement of early solutions; symmetric clipping    | Adaptive entropy bonus; higher upper clip bound; reference penalty |
-| **Runaway length**   | Mean length rising while pass rate is flat                  | Terminal credit to every token; per-rollout length normalization | Length penalty above a budget; constant-denominator normalization  |
+| **Runaway length**   | Mean length rising while pass rate is flat                  | Terminal credit to every token; per-rollout length normalization | Constant-denominator normalization; piecewise length/FLOP penalty  |
 | **Repetition loops** | Rollouts ending at the token cap with repeated $n$-grams    | Repeated text makes itself more probable                         | Detect loops during generation; truncate and score as failure      |
 
 : **RLVR Training Pathologies**: Each pathology's symptom in training telemetry, its cause, and the countermeasure that addresses it. {#tbl-vol3-rlvr-pathologies}
@@ -779,11 +818,29 @@ $$\alpha_{k+1} = \operatorname{clip}\left(\alpha_k - \eta_\alpha \cdot \left(\ov
 
 When measured entropy $\overline{\mathcal{H}}_k$ falls below the band, $\alpha$ rises and pushes probability back toward alternatives; when entropy is high, $\alpha$ decays and lets the policy concentrate on verified solutions. A complementary change targets the clip itself. Raising the upper bound of the clip above the lower bound, $[1-\epsilon_{\text{low}}, 1+\epsilon_{\text{high}}]$ with $\epsilon_{\text{high}} > \epsilon_{\text{low}}$, lets rare tokens with positive advantage gain probability faster, which directly counters the asymmetry that drives collapse.
 
-For length, a linear penalty on every token discourages the long deductions that hard tasks legitimately need. A threshold penalty grants an unpenalized budget and charges only for the excess:
+To eliminate runaway length and reasoning bloat, systems employ three complementary regularization mechanisms:
 
-$$R_{\text{final}} = R_{\text{task}} - \gamma \cdot \max\left(0, \; T_{\text{tokens}} - T_{\text{budget}}\right)$$
+1. **Batch-Level Constant-Denominator Normalization:** To neutralize the token-divisor dilution that shields verbose failures, runtimes replace the trajectory-specific divisor $1/|o_i|$ with the cohort mean token length $\bar{L} = \frac{1}{G}\sum_{j=1}^G |o_j|$ or total batch token count $N_{\text{batch}} = \sum_{j=1}^G |o_j|$:
 
-with $\gamma$ set so that a rollout at the ceiling cannot net a positive reward even when its answer is correct, $\gamma \cdot (T_{\max} - T_{\text{budget}}) \ge 1$. Within the budget, length is free; beyond it, every token costs. Replacing the per-rollout $1/|o_i|$ with a constant denominator removes the structural bias toward long failures, so the penalty does not have to fight the objective.
+$$\mathcal{L}_{\text{const}}(\theta) = \frac{1}{G \cdot \bar{L}} \sum_{i=1}^G \sum_{t=1}^{|o_i|} \mathcal{M}_{i,t}(\theta)$$
+
+Under constant-denominator normalization, the gradient penalty per token is completely independent of the rollout's individual length $|o_i|$. A flawed deduction token in a 4,000-token trace receives the exact same negative gradient magnitude as one in a 100-token trace, eliminating the optimization advantage of rambling verbosity.
+
+2. **Piecewise Linear Length Penalty:** Imposing a linear penalty from token zero penalizes the legitimate chain-of-thought deduction required for intricate algorithmic tasks. A piecewise linear penalty grants an unpenalized deliberation budget $L_{\text{target}}$ and levies a progressive linear fee only on excess tokens:
+
+$$R_{\text{final}} = R_{\text{task}} - \beta_{\text{len}} \cdot \max\left(0, \; |o_i| - L_{\text{target}}\right)$$
+
+The slope $\beta_{\text{len}}$ is mathematically bounded against the maximum task reward $R_{\max}$ and the hard token ceiling $L_{\max}$:
+
+$$\beta_{\text{len}} \ge \frac{R_{\max}}{L_{\max} - L_{\text{target}}}$$
+
+This condition guarantees that a trajectory that exhausts the maximum context ceiling $L_{\max}$ cannot yield positive net reward even if verified correct by the oracle verifier ($R_{\text{final}} \le 0$), enforcing a hard mathematical boundary against context exhaustion.
+
+3. **Token-Rate FLOP Regularization (Integrated Memory-Time Tax):** Because generation latency and KV cache memory allocation compound over the duration of a rollout, runtimes can directly align policy gradients with accelerator hardware costs. The integrated memory-time occupancy of an autoregressive rollout is proportional to the square of its sequence length: $\int_0^T M_{\text{KV}}(t)\, dt \propto |o_i|^2$. A token-rate FLOP regularizer introduces a quadratic penalty:
+
+$$R_{\text{FLOP}}(o_i) = -\kappa_{\text{FLOP}} \cdot |o_i|^2$$
+
+where $\kappa_{\text{FLOP}}$ reflects the marginal operational cost of GPU occupancy. This aligns the policy gradient directly with the inference cluster's roofline envelope, encouraging the agent to discover compact, computationally efficient trajectories.
 
 Repetition loops need a runtime check rather than a reward term.[^fn-repetition-penalty-mechanics] The rollout worker tracks recent $n$-grams during generation; when one repeats more than a threshold number of times within a window, the worker stops the rollout, and the rollout scores zero. Stopping early matters more than the score, because a looping rollout otherwise occupies its slot on the inference server until the token cap.
 
