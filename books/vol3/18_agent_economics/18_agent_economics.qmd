@@ -70,16 +70,20 @@ where $C_{\text{in}, k}$ pays for the context sent on turn $k$ (system prompt, t
 
 One attempt is not one accepted task. The right panel of @fig-vol3-task-cost-treemap shows why. If each step of an eight-step task succeeds independently with probability $p$, the whole task succeeds with probability $p^8$, and every failed attempt is paid for in full before it is discarded. Trajectory goodput and the accepted task (principle \ref{pri-vol3-trajectory-goodput}) names what a fleet must therefore minimize, the effective cost per accepted task. If a fleet makes $N$ attempts and $N_{\text{acc}}$ of them are accepted,
 
-$$C_{\text{eff}} = \frac{\sum_{i=1}^N C_{\text{attempt}, i}}{N_{\text{acc}}} = C_{\text{succ}} + \frac{1 - \alpha}{\alpha} C_{\text{fail}}$$ {#eq-vol3-effective-cost}
+$$C_{\text{eff}} = \frac{\sum_{i=1}^N C_{\text{attempt}, i}}{N_{\text{acc}}} = C_{\text{succ}} + \tau_{\text{unrel}} \cdot C_{\text{fail}} = C_{\text{succ}} + \frac{1 - \alpha}{\alpha} C_{\text{fail}}$$ {#eq-vol3-effective-cost}
 
-where $\alpha = N_{\text{acc}}/N$ is the acceptance rate, $C_{\text{succ}}$ is the mean cost of an attempt that passes, and $C_{\text{fail}}$ is the mean cost of one that fails before it is abandoned. The odds ratio $(1 - \alpha)/\alpha$ counts how many failed attempts each accepted task carries. It is small near $\alpha = 1$ and grows without bound as $\alpha$ falls, which is the steep left edge of the margin figure.
+where $\alpha = N_{\text{acc}}/N$ is the task acceptance rate, $C_{\text{succ}}$ is the mean cost of an attempt that passes verification, and $C_{\text{fail}}$ is the mean cost of one that fails before it is abandoned.
+
+The dimensionless multiplier $\tau_{\text{unrel}} = \frac{1 - \alpha}{\alpha}$ is the **Tax on Unreliability**. It counts the exact number of failed trajectories that each accepted task must financially amortize. The tax exhibits severe non-linear hyper-growth as task reliability decays:
+$$\tau_{\text{unrel}}(0.90) \approx 0.11, \quad \tau_{\text{unrel}}(0.75) \approx 0.33, \quad \tau_{\text{unrel}}(0.50) = 1.00, \quad \tau_{\text{unrel}}(0.25) = 3.00, \quad \tau_{\text{unrel}}(0.10) = 9.00$$
+Near $\alpha \to 1.0$, the tax is negligible. But below the critical threshold $\alpha = 0.50$, the tax exceeds unity—meaning every successful task carries the full financial weight of more than one discarded attempt. When an engineering team replaces a frontier model ($\alpha = 0.75$) with a lightweight alternative ($\alpha = 0.25$) that offers a $5\times$ token discount, the Tax on Unreliability surges from $0.33$ to $3.00$—a nine-fold amplification in failure waste. The resulting cascade of repeated sandbox provisions, redundant tool executions, and multi-turn prefill tokens wipes out the model's nominal token savings, yielding a higher aggregate bill per finished task.
 
 ::: {#dfn-whole-trajectory-cost .callout-definition title="Whole-trajectory cost"}
 
 ***Whole-trajectory cost***\index{Whole-trajectory cost!definition}\index{Agent economics!cost per accepted task} is the total spent on model tokens, tools, sandboxes, verification, and human review across every attempt, divided by the number of attempts whose results were accepted, $C_{\text{eff}} = C_{\text{succ}} + \frac{1 - \alpha}{\alpha} C_{\text{fail}}$.
 
 1.  **Significance**: It is the quantity that model choice, caching, routing, and capacity decisions must lower, and it can rise when token prices fall.
-2.  **Distinction**: Per-token pricing bills what the model emits whether or not the task succeeds; whole-trajectory cost charges every failed attempt and every non-model term to the tasks that were accepted.
+2.  **Distinction**: Per-token pricing bills what the model emits whether or not the task succeeds; whole-trajectory cost charges every failed attempt and every non-model term to the tasks that were accepted via the Tax on Unreliability $\tau_{\text{unrel}} = \frac{1 - \alpha}{\alpha}$.
 3.  **Common pitfall**: Budgeting an agent from a provider's price sheet, which ignores both the non-model terms and the odds ratio $\frac{1 - \alpha}{\alpha}$ that multiplies failed attempts.
 
 :::
@@ -1049,7 +1053,15 @@ The cluster scheduler partitions agent inference jobs into prioritized execution
 5. **Tiered Memory Retention:** Preempted $Q_1$ tasks retain physical HBM allocations during grace interval $\tau_{\text{grace}}$; prolonged memory pressure migrates $Q_2$ blocks to host memory via PagedAttention.
 :::
 
-The second challenge involves physical memory management during preemption. When a $Q_2$ job is preempted to free tensor cores for an incoming $Q_0$ burst, evicting its accumulated 4,000-token KV cache to host CPU RAM consumes valuable interconnect bandwidth. If the preempted task is re-admitted milliseconds later, swapping those physical pages back into HBM creates severe PCIe/NVLink thrashing. The MLFQ scheduler mitigates this via *tiered eviction thresholds*: preempted $Q_1$ tasks retain their physical HBM page allocations in a suspended state for a grace period $\tau_{\text{grace}}$. Only if memory pressure persists and $Q_0$ exhausts the free HBM frame pool does the PagedAttention memory manager trigger asynchronous page migration to host DDR5 memory.[^fn-paged-attention-swapping] The comparative trade-offs among classical and adaptive queueing disciplines are evaluated in @tbl-vol3-scheduling-disciplines.
+The second challenge involves physical memory management during preemption. When a $Q_2$ job is preempted to free tensor cores for an incoming $Q_0$ burst, evicting its accumulated 4,000-token KV cache to host CPU RAM consumes valuable interconnect bandwidth. If the preempted task is re-admitted milliseconds later, swapping those physical pages back into HBM creates severe PCIe/NVLink thrashing. The MLFQ scheduler resolves this via a formal **Two-Phase Token Reservation Protocol**:
+
+1. **Phase 1: Soft Reservation & Predictive Frame Staging.**
+   When a high-priority $Q_0$ burst arrives, the scheduler determines the required prefill and decode frame allocation $\Delta M$. Rather than instantly evicting active $Q_1$ or $Q_2$ tasks, the scheduler first attempts soft reservation against uncommitted HBM blocks. If the free pool is inadequate, the scheduler selects the lowest-priority victim sequence in $Q_2$ and initiates *predictive asynchronous DMA offloading* of its oldest physical block tables to host pinned DDR5 memory over PCIe Gen5 or NVLink, while keeping the victim's active generation prefix in HBM during a grace period $\tau_{\text{grace}}$.
+
+2. **Phase 2: Hard Preemption with Re-Prefill Debt Accounting.**
+   If memory exhaustion is immediate and DMA offload bandwidth cannot clear frames before the $Q_0$ deadline, the scheduler triggers hard preemption, evicting the victim's KV blocks to host DDR5 or dropping them entirely if DDR5 bandwidth is saturated. Critically, to prevent the victim from being trapped in an eviction thrashing loop—repeatedly re-prefilling from scratch only to be immediately preempted—the scheduler assigns an explicit **Re-Prefill Debt Credit** ($C_{\text{debt}}$) to the victim's task descriptor. Upon restoration, the scheduler grants the victim an elevated dispatch priority and a guaranteed contiguous execution quantum $\Delta_{\text{protected}} \ge 2 \cdot L_{\text{preempted}}$ tokens, ensuring that the heavy computational cost of re-prefill is amortized over guaranteed productive forward passes.[^fn-paged-attention-swapping]
+
+The comparative trade-offs among classical and adaptive queueing disciplines are evaluated in @tbl-vol3-scheduling-disciplines.
 
 | Scheduling Discipline                 | Mean Wait ($W_q$) | Tail Latency ($P_{99}$)                | Starvation Risk                | Preemption Overhead                  | Memory Efficiency (KV Cache)   |
 |:--------------------------------------|:------------------|:---------------------------------------|:-------------------------------|:-------------------------------------|:-------------------------------|
