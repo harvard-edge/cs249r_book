@@ -345,6 +345,15 @@ As detailed in @fig-vol3-verifier-cascade, the harvesting pipeline structures va
 
 Raw execution traces cannot be admitted into training corpora on self-reported completion or a single evaluation pass. Candidate trajectories instead traverse an escalating cascade of independent verifiers, from microsecond syntactic validation to multi-second dynamic isolation, and each stage filters invalid proposals at minimal computational cost. The stages climb the closure evidence levels: Stages 1 and 2 are static checks, Stage 3 runs tests, and out-of-tree test mounts make those tests sealed rather than visible to the agent. Acceptance through this pipeline never establishes metaphysical correctness; it proves only that a trajectory has survived a finite sequence of rigorous empirical falsification checks.
 
+::: {.column-margin}
+**Three distinct curation dimensions**\
+To avoid architectural ambiguity, trajectory curation systems strictly separate:
+
+1. **Verifier Gates ($V_1 \dots V_5$)**: Logical rejection filters ascending in computational cost.
+2. **Physical Pipeline Nodes**: Distributed cluster hardware components (@sec-vol3-flywheel-pipeline).
+3. **Ingestion Lifecycle Phases ($\Phi_1 \dots \Phi_6$)**: Chronological data transformations (@sec-vol3-flywheel-synthesis).
+:::
+
 Following the classic formulation of Karl Popper (1959), empirical systems engineering cannot establish the absolute correctness of an unprivileged model rollout; it can only fail to falsify the candidate across a battery of critical tests. The verifier cascade operationalizes this principle by organizing tests into an ordered sequence of rejection filters. A candidate trajectory is promoted to the training corpus if and only if it survives every gate in the sequence. By ordering gates strictly by ascending computational cost per rejected proposal, the runtime shields high-fidelity, high-cost evaluation environments behind layers of inexpensive deterministic checks.
 
 ::: {.column-margin .margin-pointer}
@@ -667,6 +676,17 @@ To understand how these trajectories are differentiated in storage, consider the
   "terminal_status": "VERIFIER_FAIL_TERMINAL"
 }
 ```
+
+#### The downstream consumer contract {.unnumbered}
+
+Data curation cannot be designed in an architectural vacuum; the tripartite corpus is consumed by distinct optimization engines downstream:
+
+1. **Supervised Fine-Tuning (SFT, @sec-vol3-fine-tuning):** Consumes **exclusively** pristine demonstrations $\mathcal{T}_{\text{pristine}}$ ($70\%$) and verified recovery traces $\mathcal{T}_{\text{recover}}$ ($30\%$). Pristine traces establish minimal-turn tool grammar; recovery traces bound covariate shift ($O(\epsilon T^2) \to O(\epsilon T)$).
+2. **Preference Optimization and Contrastive Objectives (DPO and RLVR, @sec-vol3-fine-tuning-dpo and @sec-vol3-rlvr):** Consumes **paired contrastive tuples** $(\tau_{\text{win}}, \tau_{\text{lose}})$, where $\tau_{\text{win}} \in \mathcal{T}_{\text{pristine}} \cup \mathcal{T}_{\text{recover}}$ and $\tau_{\text{lose}} \in \mathcal{T}_{\text{negative}}$ branches off from the identical initial fixture $S_0$.
+
+::: {#not-14-hard-negative-hazard .callout-note title="The hard negative training hazard"}
+**Crucial Systems Invariant:** An agent harvesting pipeline must **never** include hard negative demonstrations ($\mathcal{T}_{\text{negative}}$) in the supervised fine-tuning (SFT) cross-entropy loss. Because standard imitation learning optimizes $\max_\theta \sum_t \log \pi_\theta(a_t \mid s_t)$, training on negative traces forces the model to maximize the log-likelihood of catastrophic actions—actively conditioning the agent to emit infinite loops, delete test assertions, or execute destructive shell commands. Hard negatives are valid *only* when paired against winning traces within margin-based contrastive loss objectives ($\mathcal{L}_{\text{DPO}}$) or unlikelihood penalties.
+:::
 
 ::: {.column-margin .margin-pointer}
 ↩ Tool fault injection, synthetic exceptions, and compensating saga recovery are established in @sec-vol3-failure-recovery.
@@ -1427,7 +1447,7 @@ Finally, the pipeline must enforce *Domain Isolation*. If the training corpus co
 
 Even after hierarchical partitioning isolates repository and tool families, an automated trajectory harvesting pipeline faces an internal data efficiency challenge: within a given partition, stochastic rollouts frequently rediscover identical execution trajectories with only incidental variations in whitespace, variable names, or logging timestamps. Training on near-duplicate trajectories squanders precious token budget and concentrates probability mass on over-represented paths. However, classical pretraining deduplication—which operates on lexical $n$-grams via MinHash Locality-Sensitive Hashing (LSH)—fails on agent traces. Two trajectories that execute the exact same structural refactoring or shell debugging sequence often exhibit less than 35 percent lexical token similarity due to non-deterministic process identifiers, dynamic file paths, and rambling chain-of-thought scratchpads.
 
-To capture structural operational similarity rather than superficial token overlap, the harvesting pipeline extracts Abstract Syntax Tree (AST) representations from the trajectory's tool actions and environment diffs. The AST nodes are normalized by stripping identifier names, variable bindings, and literal values, replacing them with typed grammar nodes (e.g., `FunctionDef`, `ForLoop`, `SubprocessCall`). The normalized AST is then decomposed into a multi-set of structural subtrees of depth $d=3$, yielding an AST shingle set $S(T)$ for each trajectory $T$.[^fn-ast-subtree-shingling]
+To capture structural operational similarity rather than superficial token overlap, the harvesting pipeline extracts Abstract Syntax Tree (AST) representations from the trajectory's tool actions and environment diffs. In an interleaved agent trajectory—which contains natural language thoughts, JSON parameters, and terminal logs alongside code—AST MinHash is applied specifically to the **synthesized code patch ($\Delta_{\text{fs}}$)** and the **normalized tool invocation sequence** (mapping CLI commands into an AST command grammar), while natural language reasoning tokens undergo standard $n$-gram MinHash. The AST nodes are normalized by stripping identifier names, variable bindings, and literal values, replacing them with typed grammar nodes (e.g., `FunctionDef`, `ForLoop`, `SubprocessCall`). The normalized AST is then decomposed into a multi-set of structural subtrees of depth $d=3$, yielding an AST shingle set $S(T)$ for each trajectory $T$.[^fn-ast-subtree-shingling]
 
 The structural similarity between two trajectories $T_1$ and $T_2$ is governed by the Jaccard similarity of their AST shingle sets, which can be estimated via MinHash collisions:
 

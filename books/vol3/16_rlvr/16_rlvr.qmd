@@ -563,26 +563,19 @@ The mask requires knowing exactly which tokens the policy sampled, which leads t
 
 ### Credit per turn
 
-In standard Group Relative Policy Optimization, the entire trajectory receives a single scalar advantage $A_i$ derived from the terminal verifier outcome. For a single-turn reasoning step or a three-turn dialogue, scalar trajectory advantage is adequate. For complex multi-turn coding and systems engineering tasks spanning thirty or forty turns ($a_1, o_1, a_2, o_2, \dots, a_T, o_T$), however, uniform trajectory advantage induces severe **credit assignment distortion**.
+In standard Group Relative Policy Optimization, the entire trajectory receives a single scalar advantage $A_i$ derived from the terminal verifier outcome. For a single-turn reasoning step or a three-turn dialogue, scalar trajectory advantage is adequate. For complex multi-turn coding and systems engineering tasks spanning thirty or forty turns ($a_1, o_1, a_2, o_2, \dots, a_T, o_T$), however, uniform trajectory advantage induces severe **credit assignment distortion**, as analyzed in @sec-vol3-rlvr-credit.
 
 Consider a thirty-turn software repair episode. The policy executes flawless fault localization across turns 1 through 20, edits the correct source lines on turn 21, but on turn 29 introduces a minor syntax typo in a test assertion, causing the final evaluation suite to fail ($R = 0$). In a cohort where other rollouts succeed, the entire trajectory receives negative advantage ($A_i < 0$). Standard GRPO backpropagates this negative gradient across *every single turn*—penalizing the brilliant localization and refactoring performed in the early turns simply because of an unrelated late syntax error. Symmetrically, if an agent performs twenty-nine turns of incoherent exploratory flailing before stumbling upon a working patch on turn 30 ($R = 1$), uniform positive advantage reinforces the flailing and file thrashing, rewarding noise as if it were optimal strategy.
 
-To resolve this diagnostic suppression without introducing the high memory footprint of a neural critic network, multi-turn RLVR runtimes deploy three turn-level credit assignment mechanisms:
+To resolve this diagnostic suppression without introducing the high memory footprint of a neural critic network, multi-turn RLVR runtimes integrate the intermediate estimators formalized in @sec-vol3-rlvr-credit—snapshot-isolated Monte Carlo forks ($V_{\text{MC}}$), gated Process Reward Models ($r_{\text{PRM}}$), or deterministic tool milestones ($\Delta_{\text{test}}$)—directly into the policy gradient objective. Rather than scaling all tokens by a monolithic scalar $A_i$, the **Turn-Weighted GRPO Loss** allocates turn-specific advantages $\hat{A}_{i,t}$ across the trajectory (@eq-vol3-grpo-turn-objective):
 
-1. **Snapshot-Isolated Monte Carlo Value Rollouts:**
-   At selected turn checkpoints $t \in \mathcal{K} \subset \{1, \dots, T\}$ (for example, every 5 turns or after major git mutations), the rollout orchestrator captures a copy-on-write snapshot of the sandbox environment and forks $k$ parallel continuation rollouts:
-   $$\tau_{t \to T}^{(1)}, \, \tau_{t \to T}^{(2)}, \, \dots, \, \tau_{t \to T}^{(k)} \sim \pi_{\theta_{\text{rollout}}}(\cdot \mid s_t)$$
-   The empirical state value at turn $t$ is the Monte Carlo pass rate across these forks:
-   $$V_{\text{MC}}(s_t) = \frac{1}{k} \sum_{j=1}^k R\left(\tau_{t \to T}^{(j)}\right)$$
-   The advantage allocated to turn $t$ is then the empirical value change:
-   $$\hat{A}_t = V_{\text{MC}}(s_{t+1}) - V_{\text{MC}}(s_t)$$
-   A turn that transforms an unsolved workspace ($V(s_t) = 0.1$) into a passing build ($V(s_{t+1}) = 0.9$) receives strong positive advantage, even if a subsequent turn temporarily breaks it. Because each continuation executes in a lightweight copy-on-write microVM fork (@sec-vol3-sandboxes-cow), branching adds negligible storage overhead.
-2. **Process Reward Models (PRMs) as Step-Level Critics:**
-   Rather than executing full continuation rollouts, an auxiliary step-level Process Reward Model $r_{\text{PRM}}(s_t, a_t) \in [-1, 1]$ scores intermediate transitions—verifying whether an edit successfully compiles, whether a bash command parses, or whether a reasoning block is sound. Turn advantages are computed via Generalized Advantage Estimation (GAE) across the trajectory:
-   $$\hat{A}_t^{\text{GAE}} = \sum_{l=0}^{T-t-1} (\gamma \lambda)^l \delta_{t+l}, \quad \text{where } \delta_t = r_{\text{PRM}}(s_t, a_t) + \gamma V(s_{t+1}) - V(s_t)$$
-   To prevent the policy from reward-hacking the learned PRM (Goodhart's law), runtimes gate the PRM advantage: intermediate bonuses are credited only if the terminal outcome $R_{\text{terminal}} = 1$, ensuring that soft process scores never override hard empirical verification.
-3. **Deterministic Environmental Milestones:**
-   The cleanest intermediate signals come directly from deterministic tools: whether a modified file passed linting ($\Delta_{\text{lint}} \in \{0, 1\}$), whether a unit test subset transitioned from failing to passing ($\Delta_{\text{test}} = N_{\text{pass}}(t+1) - N_{\text{pass}}(t)$), and whether commands exited with code zero. Structuring turn advantages around verifiable tool milestones accelerates exploration while preserving the invariant that the terminal verifier is the ultimate arbiter of success.
+$$\mathcal{L}_{\text{GRPO-turn}}(\theta) = \mathbb{E} \left[ \frac{1}{G} \sum_{i=1}^G \frac{1}{\sum_{t=1}^{T_i} m_{i,t}} \sum_{t=1}^{T_i} m_{i,t} \cdot \min\left( r_{i,t}(\theta) \hat{A}_{i,t}, \, \text{clip}(r_{i,t}(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_{i,t} \right) \right]$$ {#eq-vol3-grpo-turn-objective}
+
+where $m_{i,t} \in \{0, 1\}$ is the observation mask ensuring zero gradient on environment text, $r_{i,t}(\theta) = \frac{\pi_\theta(a_{i,t} \mid s_{i,t})}{\pi_{\theta_{\text{old}}}(a_{i,t} \mid s_{i,t})}$ is the token importance ratio, and $\hat{A}_{i,t}$ represents the turn-level advantage standardized across the $G$ group completions:
+
+$$\hat{A}_{i,t} = \frac{A_{i,t} - \mu_t^{(G)}}{\sigma_t^{(G)} + \epsilon_{\text{adv}}}$$
+
+By standardizing advantages turn-by-turn across cohort rollouts that branched from the identical prompt, early localization steps that consistently raise pass probabilities earn positive gradient mass, while the isolated syntax mistake on turn 29 absorbs the negative update in isolation.
 
 ### Environment time inside the rollout
 
@@ -1084,6 +1077,15 @@ The empirical latency disparity across cohort sizes is detailed in @tbl-vol3-coh
 | **Worker $\tau_4$** | 4,096 tokens     | Max depth timeout ($T_{\max}$) | Straggler worst-case ($\sim 16.8\ \text{s}$) | $0$ slots idle (Active barrier straggler)   |
 
 : **Rollout Cohort Execution Latency Disparity**: Tail latency amplification and GPU idle wait across heterogeneous trajectory lengths within a cohort ($G=4$). {#tbl-vol3-cohort-latency-disparity}
+
+#### The cohort aggregation buffer architecture {.unnumbered}
+
+To resolve the architectural tension between GRPO's group barrier requirement and asynchronous streaming throughput, industrial RLVR clusters deploy a **Cohort Aggregation Buffer (CAB)**:
+
+1. **Cohort-Tagged Dispatch:** When the task dispatcher schedules a prompt fixture $q$, it assigns a unique cryptographic $\mathtt{cohort\_id}$ and dispatches $G$ parallel worker tasks across the rollout pool.
+2. **Non-Blocking Asynchronous Streaming:** As individual rollout workers complete their trajectories (for example, Worker $\tau_1$ exiting after 48 tokens in 200 ms), they stream their token records and sandbox verification outcomes immediately to the CAB in host pinned-DRAM, rather than idling accelerator Tensor Cores. The GPU worker immediately dequeues the next available rollout task from the cluster scheduler.
+3. **Barrier Aggregation and Normalization:** The CAB tracks arrival progress for each active $\mathtt{cohort\_id}$. Once all $G$ members arrive—or when an elastic straggler timer $\Delta t_{\text{straggler}}$ expires—the CAB computes group statistics ($\mu_{\text{group}}, \sigma_{\text{group}}$), standardizes advantage vectors $A_i$, and commits the completed cohort as an atomic mini-batch to the trainer's circular replay queue over high-speed RDMA.
+4. **Straggler Bound:** If a long-tail straggler exceeds $\Delta t_{\text{straggler}}$, the CAB seals the cohort with the $G' < G$ completed rollouts (provided $G' \ge 2$), discarding the stranded worker upon eventual timeout. This guarantees that tail stragglers cannot hold cluster training throughput hostage.
 
 ### Verification throughput sizing roofline
 
