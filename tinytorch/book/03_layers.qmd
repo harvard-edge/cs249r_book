@@ -121,7 +121,15 @@ To hold the variance steady, set $D_{\text{in}} \cdot \text{Var}(w) = 1$, or $\t
 
 $$\text{Var}(w) = \frac{2}{D_{\text{in}}}, \qquad \sigma_w = \sqrt{\frac{2}{D_{\text{in}}}}.$$
 
-Here we call the multiplier on weight *variance* the **gain**, matching the first exercise; a gain on standard deviation would be its square root. The appropriate multiplier depends on the activation and its input distribution. Gain 1 preserves the linear case and is the module's default, rather than a universal prescription for tanh. Xavier Glorot's earlier rule, $\text{Var}(w) = 2 / (D_{\text{in}} + D_{\text{out}})$, splits the difference between keeping the forward signal steady (which wants $1/D_{\text{in}}$) and keeping the backward gradient steady (which wants $1/D_{\text{out}}$; @sec-autograd will introduce that backward computation). Any of these rules can be realized with a normal distribution of the right standard deviation or a uniform one on $[-a, a]$, whose variance is $a^2/3$. For a fixed ratio of input to output width, each rule in @tbl-init-schemes reduces the standard deviation as the inverse square root of width. The activation determines the appropriate constant.
+Here we call the multiplier on weight *variance* the **gain**, matching the first exercise; a gain on standard deviation would be its square root. The appropriate multiplier depends on the activation and its input distribution. Gain 1 preserves the linear case and is the module's default, rather than a universal prescription for tanh. Xavier Glorot's earlier rule, $\text{Var}(w) = 2 / (D_{\text{in}} + D_{\text{out}})$, splits the difference between keeping the forward signal steady (which wants $1/D_{\text{in}}$) and keeping the backward gradient steady (which wants $1/D_{\text{out}}$; @sec-autograd will introduce that backward computation).
+
+::: {.column-margin}
+![](assets/images/diagrams/03_layers-margin-fanin-fanout.svg){width="100%" fig-alt="Diagram contrasting forward fan-in scaling (1/Din) with backward gradient fan-out scaling (1/Dout) and Xavier's harmonic mean compromise."}
+
+*Xavier Glorot's harmonic mean balances forward signal preservation with backward gradient stability across dimension changes.*
+:::
+
+Why does the backward gradient demand $1/D_{\text{out}}$? In the forward pass, each output neuron sums over $D_{\text{in}}$ inputs ($y_i = \sum_{j=1}^{D_{\text{in}}} x_j W_{ji}$). In the backward pass, backpropagation transposes the weight matrix ($W^T$), so each input neuron accumulates gradients across all $D_{\text{out}}$ downstream outputs ($\frac{\partial L}{\partial x_j} = \sum_{i=1}^{D_{\text{out}}} \frac{\partial L}{\partial y_i} W_{ji}$). Backpropagation treats the layer's fan-out as its effective fan-in. When $D_{\text{in}} \neq D_{\text{out}}$, no single fixed variance can hold both forward activations and backward gradients constant simultaneously, which is why Glorot proposed the harmonic mean. Any of these rules can be realized with a normal distribution of the right standard deviation or a uniform one on $[-a, a]$, whose variance is $a^2/3$. For a fixed ratio of input to output width, each rule in @tbl-init-schemes reduces the standard deviation as the inverse square root of width. The activation determines the appropriate constant.
 
 | Scheme | Meant for | Weight variance | Uniform bound $a$ |
 | :--- | :--- | :---: | :---: |
@@ -198,7 +206,8 @@ The forward pass is two tensor operations, `matmul` and `+`, and that choice is 
 
 ::: {.column-margin}
 **Core Invariant: Linear Contraction**\
-$$(B, D_{\text{in}}) \times (D_{\text{in}}, D_{\text{out}}) + (D_{\text{out}},) \to (B, D_{\text{out}})$$\
+$$(B, D_{\text{in}}) \times (D_{\text{in}}, D_{\text{out}})$$
+$$+ (D_{\text{out}},) \to (B, D_{\text{out}})$$\
 *Inner dimension $D_{\text{in}}$ contracts via row-major GEMM; bias broadcasts with stride 0.*
 :::
 
@@ -238,7 +247,7 @@ print([p.shape for p in model.parameters()])
 
 Four parameter tensors came back, weight before bias within each layer and layer order within the container, and `Dropout` contributed none. In practice a `ReLU` from @sec-activations sits between the two `Linear` layers; it is left out here so the trace below stays short, and [Milestone I](milestone_01.qmd#sec-milestone-1) builds the full version.
 
-Parameter collection follows `self.layers` in that same order, but its `seen` set records `id(param)` before appending. For `shared = Linear(2, 2)` and `Sequential(shared, Sequential(shared))`, the forward pass applies `shared` twice, while `parameters()` returns only `[shared.weight, shared.bias]`. An optimizer should update those tensors once per step. Returning them twice would confuse reuse in the forward computation with ownership of two independent parameters.
+Parameter collection follows `self.layers` in that same order, but its `seen` set records `id(param)` before appending. For `shared = Linear(2, 2)` and `Sequential(shared, Sequential(shared))`, the forward pass applies `shared` twice, while `parameters()` returns only `[shared.weight, shared.bias]`. An optimizer should update those tensors once per step. Returning them twice would confuse reuse in the forward computation with ownership of two independent parameters. This deduplication is also an architectural requirement for modern language models. In Transformer architectures (as explored in @sec-transformers), **weight tying** shares the exact same weight matrix between input token embeddings and the final output vocabulary projection head. Deduplication ensures that `optimizer.step()` (@sec-optimizers) updates the shared weights exactly once per iteration, rather than erroneously applying duplicate gradient steps or corrupting optimizer momentum buffers.
 
 ---
 
@@ -344,7 +353,7 @@ PyTorch's [Dropout documentation](https://docs.pytorch.org/docs/stable/generated
 ::: {#nbk-layers-parameter-memory-budget .callout-notebook title="What one production-sized Linear layer weighs"}
 This is a storage and operation count, not a timing measurement. `Linear(4096, 4096)` stores $4096 \times 4096 \times 4 = 67{,}108{,}864$ bytes of float32 weights and $4096 \times 4 = 16{,}384$ bytes of bias. The parameter payload is about $67.1$ MB. A batch of 16 produces $16 \times 4096$ output values, or $262{,}144$ bytes. These counts exclude temporary arrays and Python objects.
 
-The matrix product contains $16 \times 4096 \times 4096 = 268{,}435{,}456$ multiply-accumulate terms. Counting one multiply and one add per term gives approximately $537$ million floating-point operations; adding the bias requires another $65{,}536$ additions. Increasing batch size increases arithmetic and output storage while leaving parameter storage unchanged. Whether the measured call is limited by computation or memory movement depends on the backend and its reuse of those weights. The storage count alone cannot decide that.
+The matrix product contains $16 \times 4096 \times 4096 = 268{,}435{,}456$ multiply-accumulate terms. Counting one multiply and one add per term gives approximately $537$ million floating-point operations; adding the bias requires another $65{,}536$ additions. Increasing batch size increases arithmetic and output storage while leaving parameter storage unchanged. Whether the measured call is limited by computation or memory movement depends on the backend and its reuse of those weights; the storage count alone cannot decide that. @sec-profiling formalizes this trade-off using the Roofline model to compute operational intensity (FLOPs per byte transferred), while @sec-acceleration demonstrates how cache loop tiling transforms memory-bandwidth-bound matrix products into compute-saturating matrix engines.
 :::
 
 ::: {#psp-kaiming-fp16-underflow .callout-perspective title="Systems Perspective: Initialization in mixed-precision FP16/BF16"}
