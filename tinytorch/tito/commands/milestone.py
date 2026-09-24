@@ -147,7 +147,7 @@ MILESTONE_SCRIPTS = {
         "id": "06",
         "name": "MLPerf Benchmarks (2018)",
         "year": 2018,
-        "title": "The Optimization Olympics",
+        "title": "MLPerf to ChatGPT Serving (The Optimization Olympics)",
         "scripts": [
             {
                 "name": "Model Compression",
@@ -164,7 +164,7 @@ MILESTONE_SCRIPTS = {
         ],
         "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19],  # Full default run: optimization + generation speedup parts
         "description": "Compress and accelerate your neural network",
-        "historical_context": "MLPerf standardized ML benchmarks",
+        "historical_context": "MLPerf standardized ML benchmarks (2018), paving the way for ChatGPT-scale production serving (2022)",
         "emoji": "🏆"
     }
 }

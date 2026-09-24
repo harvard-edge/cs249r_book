@@ -1,8 +1,8 @@
-# Milestone 06: Optimization and measurement
+# Milestone 06: MLPerf to ChatGPT Serving (Optimization and Measurement)
 
-Compare a trained model with changed versions of itself, and measure a cache
-without changing the computation. These are classroom experiments inspired by
-MLPerf's measurement discipline, not official MLPerf submissions.
+Compare a trained model with changed versions of itself, and measure cache
+acceleration without changing the mathematical output. These experiments bridge
+MLPerf's measurement discipline (2018) to modern ChatGPT-scale production serving (2022).
 
 ## Part 1: Optimization Olympics across Three Benchmark Divisions
 
