@@ -94,6 +94,13 @@ The mechanics of this coordination contract are mapped in @fig-vol3-saga-flow. I
 ![](images/svg/vol3-saga-flow.svg)
 :::
 
+::: {#psp-12-cow-vs-saga .callout-perspective title="The two spheres of rollback: Sandbox copy-on-write vs. distributed Sagas"}
+Engineers frequently confuse local filesystem rollbacks with distributed failure recovery. Production agent runtimes partition state into two distinct spheres governed by fundamentally different recovery mechanisms:
+
+1. **Local Sandbox State ($A_1$ - Ephemeral Filesystems & Workspaces):** File modifications, compiled binaries, and temporary scripts created inside local container or microVM environments (@sec-vol3-sandboxes) are governed mechanically by **Copy-on-Write (CoW)** filesystem layers (such as OverlayFS `upperdir`, ZFS clones, or Btrfs snapshots). Rollback is mechanical, atomic, and instantaneous ($< 10\text{ ms}$): the host supervisor simply unmounts and discards the writable upper layer, instantly reverting the sandbox to its base snapshot with zero side effects. No backward compensation logic or semantic unwinding is needed.
+2. **Distributed External State ($A_2$ - Sovereign Network Services):** Cloud infrastructure allocations, database rows, third-party payment transactions, and enterprise ticketing updates cannot be rolled back by discarding local disk blocks. Once emitted across the network, external systems mutate immediately and expose state globally. Rollback in this sphere requires **distributed Sagas**: the supervisor must execute explicit, forward-compensating transactions ($C_i$) in reverse order, reconciling distributed state under eventual consistency.
+:::
+
 ### Formalizing the trajectory as an open saga
 
 In classical transaction theory, Hector Garcia-Molina and Kenneth Salem (1987) defined a Saga as a long-lived transaction consisting of a sequence of relatively short sub-transactions that can be interleaved with other transactions. Applying this formalism to agentic machine learning systems, we define an agent trajectory $\mathcal{T}$ of length $n$ as an ordered sequence of discrete, forward-executing sub-transactions:
@@ -228,6 +235,19 @@ def unwind_saga(acb: AgentControlBlock) -> None:
 ```
 
 The robustness of this architecture depends on the physical handling of crashes during the compensation phase itself. If the host agent process suffers a hardware failure, power loss, or kernel panic while executing $C_{k-2}$, the runtime on reboot reads the durable Write-Ahead Log from NVMe storage, reconstructs $\mathcal{S}_{\text{comp}}$, and inspects the last uncommitted record. Because compensators are guaranteed to be idempotent via unique idempotency keys ($\kappa^c$), the recovery manager safely re-dispatches $C_{k-2}$. The compensating sequence resumes precisely where it was interrupted, guaranteeing that partial compensations do not strand system resources.
+
+### Compensator failures and the orphan quarantine protocol
+
+What happens when a compensating transaction $C_i$ itself encounters an unrecoverable failure during a reverse unwind—a condition known as **Saga Panic**? For instance, if an agent provisions a cloud virtual machine during $T_2$ but the cloud provider's API returns persistent `HTTP 500 Internal Server Error`, or if an upstream IAM permission was revoked while the task was running, the tear-down compensator $C_2$ cannot succeed automatically. Naive systems either hang in infinite retry loops, crash without recording the failure, or silently drop the error, abandoning orphaned compute instances and leaking enterprise capital.
+
+When `unwind_saga` catches an unrecoverable `FatalCompensationError`, the host supervisor transitions to `TrajectoryState.PANIC` and initiates a four-stage **Orphan Quarantine Protocol**:
+
+1. **Execution Arrest and Credential Revocation:** The supervisor strips the agent process of all active tool leases, sandbox execution tokens, and API credentials. This prevents the unprivileged model from generating further actions or attempting rogue remediation.
+2. **Durable Orphan Quarantine Ledger Commit:** The supervisor appends an immutable record to the non-volatile **Orphan Quarantine Ledger** (`/var/log/agent/orphan_quarantine.wal`). Each entry documents:
+   $$\text{OrphanEntry} = \langle \tau,\, T_i,\, C_i,\, \kappa_i^c,\, \text{ResourceURI},\, \text{ErrorTrace},\, t_{\text{panic}} \rangle$$
+   This record persists the exact resource coordinates (e.g., dangling cloud VM instance IDs, provisioned storage volumes, or unreleased database locks) along with the idempotency key $\kappa_i^c$ required for out-of-band manual cleanup.
+3. **Compensator Stack Preservation:** The supervisor freezes the remainder of the LIFO compensation stack $\mathcal{S}_{\text{comp}}$ in durable storage. Unwind of preceding steps ($C_{i-1}, \dots, C_1$) is suspended because preceding compensations may depend on the state that $C_i$ failed to release.
+4. **Out-of-Band Incident Escalation:** The quarantine event emits an asynchronous high-priority alert to the site reliability engineering (SRE) incident gateway (such as PagerDuty or Alertmanager) annotated with the cryptographic trajectory ID and orphan manifest, transitioning the trajectory to `MANUAL_ESCALATION` for human operator remediation.
 
 ::: {.column-margin .margin-pointer}
 ↩ Write-ahead logging, deterministic checkpoints, and crash-state recovery are established in @sec-vol3-durable-execution.
@@ -727,6 +747,11 @@ In classical operating systems and distributed runtimes, liveness is modeled as 
 This architectural assumption collapses for a looping model. An inference engine running a forward pass does not stall at the instruction pointer level. Each token generation step is a regular matrix-vector multiplication ($\text{GEMV}$) that streams weights from high-bandwidth memory at a steady cadence, so a looping model looks exactly as busy as a productive one. As long as the inference server (such as vLLM or SGLang) and the host agent supervisor exchange well-formed Remote Procedure Call (RPC) messages, every standard transport-layer watchdog is satisfied. This is the fail-plausible fault model seen from the supervisor, a process that is healthy by every liveness measure and wrong by every task measure.
 
 The divergence between operational health and task advancement mirrors the core insight of Martin Rinard's *Acceptability-Oriented Computing* (2003): classical software engineering presupposes that systems either execute according to an idealized, deterministic specification or crash. When real-world systems encounter unmodeled state spaces, however, treating every non-crashing execution as acceptable allows software to burn resources indefinitely in degraded, non-productive cycles. In an agentic architecture, this failure mode manifests as an epistemic gap between the agent's internal reasoning context and the external environment. Because the autoregressive context window expands with every turn, the agent's attention mechanism experiences continuous novelty: each turn appends new reasoning tokens, fresh tool execution traces, and updated error payloads. The agent possesses the local, self-reinforcing illusion of forward momentum, even as its external environment remains trapped in a closed, circular orbit.
+
+This operational divergence underscores the complementary division of responsibility between **Resource Depletion Budgets** (@sec-vol3-agent-harness) and **Semantic Progress Watchdogs**:
+
+- **Resource Depletion Budgets (The Fuel Gauge):** The supervisory harness enforces static, cumulative ceilings—such as maximum step counts ($N_{\text{max}} = 50$), token consumption limits, and financial caps ($\$5.00$ per task). Budgets prevent catastrophic runaway expenditure by halting execution when resources are exhausted, but they are completely blind to *velocity*. An agent with a 50-step budget can spend 40 consecutive turns oscillating between two identical configuration file edits before the budget cutoff halts execution, squandering $80\%$ of its allocated compute without advancing the task.
+- **Semantic Progress Watchdogs (The Velocity Sensor):** The recovery supervisor evaluates the *directional derivative* of task advancement across turns ($\Delta \mathbf{m} \not\le \mathbf{0}$). By continuously inspecting environment state hashes and verification metrics, the watchdog detects behavioral stalling and cyclical oscillations within two to three turns ($k \in [2, 3]$). This enables the supervisor to intervene immediately—injecting synthetic context steering, initiating forward self-healing, or triggering compensating unwinds—long before cumulative resource budgets are exhausted.
 
 ### Quantifiable semantic progress invariants
 
