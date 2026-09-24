@@ -88,7 +88,7 @@ $$\text{Storage} = 786{,}432 \times 4\text{ bytes} \approx 3.15\text{ MB}$$
 Each Python `float` object contains a reference count and type pointer ($24$ bytes on 64-bit CPython). The inner lists require $8$ bytes per pointer plus list container metadata ($56$ bytes). The outer list requires $1024$ pointers ($8\text{ KB}$) plus $56$ bytes:
 $$\text{List payload} \approx 786{,}432 \times (24 + 8) + 1024 \times 64 \approx 25.17\text{ MB}$$
 
-**Systems insight**: Contiguous float32 storage achieves an $8.0\times$ memory reduction over nested Python lists while eliminating $786{,}432$ pointer indirections that thrash hardware data caches during matrix operations.
+**Systems insight**: Contiguous float32 storage achieves an $8.0\times$ memory reduction over nested Python lists while eliminating $786{,}432$ pointer indirections that thrash hardware data caches during matrix operations. Later in @sec-quantization, we pack these 4-byte floats down to 1-byte INT8 integers to quadruple cache line density again.
 
 :::
 
@@ -186,7 +186,8 @@ back must broadcast against the original shape. If the reduced axis is gone, the
 broadcast has nothing to align against. `keepdims=True` retains the collapsed
 axis with length one, so $(R, C)$ reduces to $(R, 1)$ rather than $(R,)$ and the
 result still broadcasts against the input. @sec-losses relies on this when it
-subtracts a per-row maximum from a matrix of logits.
+subtracts a per-row maximum from a matrix of logits, and @sec-autograd relies on
+matching dimensions when reducing gradients across broadcast axes.
 
 The arithmetic cost is linear in the entries read, since every element is touched
 once whichever axis is named. What changes is the access pattern: collapsing the
@@ -409,7 +410,7 @@ The transposed NumPy view in the trace illustrates an alternative to TinyTorch's
 
 A copy becomes necessary when the layout a consumer requires differs from the one available. The cost is proportional to the amount of data moved, while changing a view's metadata does not copy the entries. Some numerical routines accept transposed inputs directly, so a transpose alone is not evidence that a copy is necessary. TinyTorch's `np.dot` calls already show this distinction. NumPy reads their operands through the available strides.
 
-Layout also affects access patterns. Reading adjacent values can reuse data brought into a processor's cache, a small memory near the arithmetic units. A strided walk may use less of each fetched block before moving elsewhere. That is a reason to measure the consuming operation, not a guarantee that one layout is always faster. Module 01's row-versus-column experiment measures elapsed time for a particular matrix and access pattern; it does not count cache misses or predict a universal speedup.
+Layout also affects access patterns. Reading adjacent values can reuse data brought into a processor's cache, a small memory near the arithmetic units. A strided walk may use less of each fetched block before moving elsewhere. That is a reason to measure the consuming operation, not a guarantee that one layout is always faster. Module 01's row-versus-column experiment measures elapsed time for a particular matrix and access pattern; it does not count cache misses or predict a universal speedup. We return to these physical cache-line dynamics quantitatively in Part III, measuring hardware cache misses against the Roofline model in @sec-profiling and implementing cache-tiled loops to restore sequential spatial locality in @sec-acceleration.
 
 ::: {#psp-pytorch-strides .callout-perspective title="Systems Perspective: Zero-copy views in PyTorch ATen"}
 
