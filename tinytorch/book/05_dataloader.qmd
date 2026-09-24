@@ -188,7 +188,7 @@ Two things to notice. First, `__iter__` is a generator, so the index list is reb
 
 ## A Worked Trace
 
-Ten samples with two features each, $\mathbf{x}_i = [i,\ i + 0.5]$, and labels stored sorted, five zeros followed by five ones. I chose the features so that every row announces its own index, which makes the collated batch easy to read by eye.
+Ten samples with two features each, $\mathbf{x}_i = [i,\ i + 0.5]$, and labels stored sorted, five zeros followed by five ones. The features are chosen so that every row announces its own index, making the collated batch easy to inspect visually.
 
 ```python
 import random
@@ -208,7 +208,7 @@ print(np.shares_memory(x3.data, inputs.data))                # False: the fetch 
 
 In line 10, `dataset = TensorDataset(inputs, targets)` wraps the ten generated samples. In line 11, `x3, y3 = dataset[3]` indexes the fourth row. Sample 3 is a fresh tensor of shape $(2,)$ holding row index 3 (`[3.0, 3.5]`), and its label is a scalar tensor `0.0` (printed in line 12). Crucially, line 13 shows `shares_memory` is `False`: each indexed lookup copies data out of the underlying storage to ensure memory isolation. Without shuffling, the loader reproduces the sorted-batch problem from the opening; the label rows of the three batches are `[0, 0, 0, 0]`, `[0, 1, 1, 1]`, and `[1, 1]`, and `len(loader)` is $\lceil 10/4 \rceil = 3$.
 
-With `shuffle=True` the order changes. In lines 1--2 of the second snippet, `random.seed(0)` sets the generator seed and `loader = DataLoader(dataset, batch_size=4, shuffle=True)` initializes the shuffled iterator. The loop in lines 3--5 traces two consecutive epochs:
+With `shuffle=True` the order changes. In lines 1 to 2 of the second snippet, `random.seed(0)` sets the generator seed and `loader = DataLoader(dataset, batch_size=4, shuffle=True)` initializes the shuffled iterator. The loop in lines 3 to 5 traces two consecutive epochs:
 
 ```python
 random.seed(0)
@@ -218,7 +218,7 @@ for epoch in range(2):
         print(epoch, X.shape, X.data.strides, X.data.ravel().tolist(), Y.data.tolist())
 ```
 
-With seed 0, I get $\pi_1 = [7, 8, 1, 5, 3, 4, 2, 0, 9, 6]$ in this runtime. Seeding reproduces the sequence within the same runtime; the exact shuffle sequence need not be stable across Python versions. The loader cuts it into groups of four, as @tbl-dataloader-epoch1 records.
+With seed 0, execution produces the permutation $\pi_1 = [7, 8, 1, 5, 3, 4, 2, 0, 9, 6]$ in this runtime. Seeding reproduces the sequence within the same runtime; the exact shuffle sequence need not be stable across Python versions. The loader cuts it into groups of four, as @tbl-dataloader-epoch1 records.
 
 | Batch | Slice of $\pi_1$ | Sample indices | Labels | Shape |
 | :---: | :---: | :---: | :---: | :---: |
@@ -246,7 +246,7 @@ The short batch exposes a contract that the training loop must preserve. If the 
 
 ### A transform belongs at sample lookup
 
-An image adds axes to the same contract. In a channels-last image, shape `(2, 3, 2)` means two rows, three columns, and two values per pixel. Flipping horizontally must reverse the three columns while keeping each pixel's two values together. Shape alone cannot identify the channel axis: the same tuple could describe two channels of height three and width two. The explicit `layout="HWC"` argument resolves that ambiguity.
+Up to this point, datasets have supplied flat feature vectors of shape $(D,)$ collated into $(B, D)$ batches. Perception tasks, by contrast, operate on multi-dimensional tensors like images with spatial dimensions and color channels. An image adds axes to the same contract. In a channels-last image, shape `(2, 3, 2)` means two rows, three columns, and two values per pixel. Flipping horizontally must reverse the three columns while keeping each pixel's two values together. Shape alone cannot identify the channel axis: the same tuple could describe two channels of height three and width two. The explicit `layout="HWC"` argument resolves that ambiguity.
 
 ```python
 from tinytorch.core.dataloader import RandomHorizontalFlip, RandomCrop, Compose
@@ -307,13 +307,11 @@ The copied sample isolates the stored image from transformations. `Compose` pass
 
 For datasets accessed by index, called map-style datasets in its API, PyTorch keeps indexed lookup separate from sampling and collation. Its tensor dataset indexes stored tensors directly, allowing a row view rather than TinyTorch's copied sample. Tensor fields are then stacked into batches. A configurable sampler and collation function support policies beyond the tuple-of-tensors contract used here. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html).
 
-When `__getitem__` reads and decodes a file, the synchronous design makes the model wait for that work. With no overlap, a step takes loading time plus model-compute time. A background producer can prepare the next batch while the current batch is in use; in an ideal steady state, the slower stage then determines throughput. Worker startup, uneven sample costs, and finite queues keep that ideal from being an automatic speedup.
-
-PyTorch exposes this extension through `num_workers`: zero keeps loading in the main process, while a positive value enables worker processes. `prefetch_factor` controls how many batches each worker prepares in advance. This changes scheduling and memory use while preserving the dataset and collation contracts. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html). TinyTorch leaves scheduling synchronous so one `next` request can be traced from index selection to the returned tensors.
+When `__getitem__` reads and decodes disk-backed files, synchronous execution forces the model to wait during I/O. Background worker processes decouple ingestion from compute: a background producer prepares batch $N+1$ while the accelerator executes batch $N$. PyTorch exposes this through `num_workers` and `prefetch_factor`. TinyTorch leaves execution synchronous so every `next` call traces deterministically from index selection to memory layout. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html).
 
 Worker processes also need to hand completed tensors back to the caller. **Shared memory** lets two processes access the same region of RAM; PyTorch's multiprocessing support uses this for CPU tensor storage passed through its queues. Moving storage into shared memory can itself require a copy, so sharing does not mean every part of the handoff is free. [PyTorch multiprocessing notes](https://docs.pytorch.org/docs/2.14/notes/multiprocessing.html).
 
-::: {#psp-dataloader-multiprocess-shm .callout-perspective title="Systems Perspective: POSIX shared memory and page-locked RAM"}
+::: {#psp-dataloader-multiprocess-shm .callout-perspective title="Systems Perspective: POSIX shared memory and zero-copy IPC"}
 
 **Inter-process communication (IPC)**: When `num_workers > 0`, Python's `multiprocessing` spawns worker processes. Standard Python `queue.Queue` serializes objects through Unix pipes using `pickle`, thrashing memory with redundant byte copies.
 
@@ -344,18 +342,18 @@ The comparison in @tbl-dataloader-vs-pytorch locates each extension at the bound
 
 : What the two loaders share and where they differ. The same indexed-dataset pattern supports configurable sampling and scheduling; TinyTorch keeps the request synchronous. {#tbl-dataloader-vs-pytorch tbl-colwidths="[18,36,46]"}
 
-The reference path gives us a way to diagnose a slow loader without assuming that every option helps. First measure whether time is spent retrieving samples, collating them, or transferring completed batches. More workers address retrieval; they do not remove unnecessary copies in the dataset. Discarding a short batch can give a consumer fixed shapes, but it also discards samples. Reproducibility requires controlling every random source used by both sampling and transformations. Those choices extend the contract only when the caller understands what they change.
+This architectural comparison provides a framework to diagnose data bottlenecks. First measure whether time is spent reading samples, collating them, or copying tensors. Increasing workers resolves I/O bottlenecks but cannot fix excessive buffer copies. Discarding a short batch guarantees fixed shapes, but permanently drops valid training data. Reproducibility requires controlling every random seed across indexing and transformations.
 
 ---
 
 ## Summary
 
-You built the three pieces that turn a pile of samples into a stream of batches: a `Dataset` that answers `len` and index lookups, a per-epoch permutation that fixes the visiting order, and a `DataLoader` that walks the permutation in strides of $B$ and collates each stride into a tuple of contiguous batch tensors by copying samples together. A feature vector becomes a row of a $(B, D)$ tensor; an image retains its spatial and channel axes after the new batch axis. With shuffling enabled, batches come from a permutation rather than repeated independent draws. A completed epoch visits each sample once, and collation must preserve feature-label pairing. The final batch can be smaller, so consumers must use its actual sample count when combining batch means. A transform inside sample lookup can change an image on each visit while keeping its label paired. Production loaders retain these separations and add configurable sampling, worker scheduling, and memory transfers. @sec-autograd takes for granted that each training step receives an input batch and its paired targets, and asks how the gradient of the loss with respect to every parameter is computed from them.
+You built the three foundational components of a data pipeline: a `Dataset` that exposes `__len__` and indexed sample lookups, a per-epoch permutation that randomizes visiting order without replacement, and a `DataLoader` that walks indices in strides of $B$ and collates samples into contiguous row-major batch tensors. A feature vector becomes a row of a $(B, D)$ tensor; an image preserves its spatial and channel dimensions after the leading batch axis. Shuffling guarantees uniform subset sampling across epochs while collation enforces strict feature-label alignment. When dataset length is not divisible by batch size, the final batch is shorter, requiring the training loop to scale loss contributions by actual sample count. Transforms placed at sample lookup allow dynamic data augmentation without mutating underlying storage. Production loaders preserve this modular separation while adding multi-process workers, shared memory, and asynchronous device transfers. @sec-autograd assumes this batch stream and derives parameter gradients.
 
 ---
 
 ## Further Reading
 
 - **Goyal et al.** (2017). "[Accurate, large minibatch SGD: training ImageNet in 1 hour](https://arxiv.org/abs/1706.02677)." *arXiv*. How batch size and learning rate move together, which @sec-optimizers returns to.
-- **Krizhevsky, Sutskever, and Hinton** (2012). "[ImageNet classification with deep convolutional neural networks](https://proceedings.neurips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html)." *NeurIPS*. A training pipeline in which data loading and augmentation ran alongside the model, the arrangement this chapter's separation of `Dataset` and `DataLoader` prepares for.
-- **Murray et al.** (2021). "[tf.data: A Machine Learning Data Processing Framework](https://arxiv.org/abs/2101.12127)." *VLDB*. A deeply systems-oriented look at how modern frameworks build asynchronous, pipelined data loaders to prevent GPU starvation.
+- **Krizhevsky, Sutskever, and Hinton** (2012). "[ImageNet classification with deep convolutional neural networks](https://proceedings.neurips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html)." *NeurIPS*. A training pipeline where data loading and augmentation ran concurrently with GPU compute.
+- **Murray et al.** (2021). "[tf.data: A Machine Learning Data Processing Framework](https://arxiv.org/abs/2101.12127)." *VLDB*. A systems analysis of asynchronous, pipelined data loaders that prevent GPU starvation.
