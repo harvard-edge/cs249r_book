@@ -138,11 +138,7 @@ The most pervasive vulnerability in autonomous agent architectures is the classi
 
 In an agentic architecture, naive single-model serving turns the foundation model into the ultimate confused deputy. While classical multi-user operating systems enforce access control lists (ACLs) or Role-Based Access Control (RBAC) at the kernel boundary, agent runtimes traditionally grant the model ambient authority: global API keys, database connection strings, shell execution permissions, and write access to filesystems. However, the model lacks an internal reference monitor to verify which entity authorized a specific tool call. When an agent reads an untrusted email requesting that it delete a customer's record, the model cannot distinguish whether the deletion intent originated from its authenticated human operator or from the external email text it just ingested. Because the model holds ambient authority—privileges associated with the running process rather than with the specific subtask—it executes the destructive call using its legitimate credentials.
 
-To eliminate the confused deputy at the architectural level, the serving system physically partitions the inference pipeline across hardware accelerators. @Fig-vol3-dual-llm-serving illustrates the **Dual-LLM GPU Serving Topology**. In this architecture, untrusted perceptions are routed to a physically isolated Quarantine Extractor running on an unprivileged GPU node with Zero Authority ($A=0$), while privileged planning executes on a dedicated Coordinator GPU node whose Key-Value cache is physically insulated from hostile payloads.
-
-:::: {#fig-vol3-dual-llm-serving fig-env="figure" fig-pos="htb" fig-cap="**Dual-LLM GPU Serving Topology**: Physical hardware separation of the unprivileged Quarantine Extractor and privileged Coordinator across isolated accelerator nodes. The unprivileged extractor runs on a lightweight GPU worker pool under Zero Authority ($A=0$) with constrained context, while the privileged coordinator maintains an isolated High-Bandwidth Memory (HBM) Key-Value cache containing only authenticated system directives and sanitized schemas." fig-alt="Hardware systems diagram illustrating the Dual-LLM GPU serving topology: untrusted payloads routed to an isolated unprivileged GPU node running an ephemeral reader model with bounded KV cache, while privileged planning models execute on separate GPU accelerators receiving sanitized schemas and opaque blob references via host supervisor memory escrow."}
-![](images/svg/dual_llm_gpu_serving.svg)
-::::
+To eliminate the confused deputy at the authority layer, the runtime must strip all ambient authority from the foundation model and enforce complete mediation below the model using unforgeable, cryptographically signed capability descriptors.
 
 ### Eliminating ambient credentials
 
@@ -322,6 +318,12 @@ The Quarantined-Reader architecture partitions the inference pipeline into two p
      run_shell("git apply $blob_8f9a2c")
      ```
      The host runtime expands the reference token inside the microVM sandbox immediately before execution. The Planner's neural attention weights never process the raw tokens of the patch, rendering indirect prompt injection mathematically impossible within the planning loop.
+
+At the serving infrastructure layer, this architectural separation maps directly to accelerator hardware partitioning. @Fig-vol3-dual-llm-serving illustrates the **Dual-LLM GPU Serving Topology**. Untrusted perceptions are routed to a physically isolated Quarantine Extractor running on an unprivileged GPU node with Zero Authority ($A=0$), while privileged planning executes on a dedicated Coordinator GPU node whose Key-Value cache in High-Bandwidth Memory (HBM) is physically insulated from hostile payloads.
+
+:::: {#fig-vol3-dual-llm-serving fig-env="figure" fig-pos="htb" fig-cap="**Dual-LLM GPU Serving Topology**: Physical hardware separation of the unprivileged Quarantine Extractor and privileged Coordinator across isolated accelerator nodes. The unprivileged extractor runs on a lightweight GPU worker pool under Zero Authority ($A=0$) with constrained context, while the privileged coordinator maintains an isolated High-Bandwidth Memory (HBM) Key-Value cache containing only authenticated system directives and sanitized schemas." fig-alt="Hardware systems diagram illustrating the Dual-LLM GPU serving topology: untrusted payloads routed to an isolated unprivileged GPU node running an ephemeral reader model with bounded KV cache, while privileged planning models execute on separate GPU accelerators receiving sanitized schemas and opaque blob references via host supervisor memory escrow."}
+![](images/svg/dual_llm_gpu_serving.svg)
+::::
 
 ### Grammar-constrained extraction and schema enforcement
 
@@ -521,11 +523,27 @@ $$\text{PolicyCheck}(\mathcal{T}, \text{args}) = \begin{cases}
 
 When an invocation is intercepted, the Reference Monitor halts dispatch and escalates to one of three enforcement actions:
 
+1. **Human Step-Up Approval (HITL Escrow):** The proposed invocation is frozen in an escrow manifest, and an out-of-band notification is dispatched to an authenticated operator displaying the exact tainted parameter values alongside an immutable provenance trace. Execution resumes only upon receiving a cryptographically signed approval token (@sec-vol3-controlplane-hitl).
+2. **Syntactic Sanitization and Narrow Coercion:** If the tainted argument is intended for a structured sink field, the runtime passes the string through an authoritative allowlist parser or deterministic sanitizer (such as parsing an issue identifier through an integer validator `int(match.group(1))` or verifying that a URL matches a pre-approved organizational repository). Coercing an arbitrary string into a validated primitive removes the taint bit, declassifying the parameter for dispatch.
+3. **Fail-Closed Rejection:** If the invocation violates policy and cannot be sanitized, the reference monitor cancels the dispatch, marks the target tool call as `REFUSED`, and synthesizes a structured observation back to the planning model explaining that the action was blocked due to untrusted taint propagation.
+
+### The quarantine as a taint firewall
+
+The combination of Quarantined Readers (@sec-vol3-security-quarantined-readers) and Dynamic Taint Tracking resolves the apparent paradox of taint tracking: *if soft attention is dense, why does ingesting a single untrusted document not immediately taint the entire agent context and halt execution?*
+
+The architectural answer is the **Taint Firewall Principle**:
+
+- **Semantic Declassification via Narrow Typing:** When an untrusted document (such as an external web page or issue description) is read, it is routed exclusively to the unprivileged reader model $\pi_{\text{read}}$. The reader's grammar-constrained decoder forces the output into rigid, typed fields (booleans, timestamps, status enums). Because these emitted tokens are syntactically and semantically bounded by the grammar DFA, they cannot inject control instructions. The runtime classifies these narrow extractions as clean or lightly tainted, preventing broad context poisoning.
+- **Out-of-Band Opaque Blobs:** When the agent needs to move large, unconstrained text across tools (for example, reading an untrusted git patch and passing it to a compiler), the text is never decoded into the planning model's token sequence. Instead, the supervisor stores the raw bytes in host DRAM as an opaque blob and provides the planner with an immutable reference handle (`$blob_...`). The reference handle itself carries no taint into the planner's neural attention weights. When the planner proposes calling `run_shell("git apply $blob_...")`, the reference monitor evaluates the command template and verifies that the tool operation complies with capability boundaries before expanding the blob inside the sandbox.
+
 ::: {.column-margin}
 **Dynamic Taint Analysis**
 Dynamic Taint Analysis (DTA) marks untrusted input as tainted and tracks its propagation through registers and memory. In an autonomous agent, tracking taint at the token and argument granularity prevents untrusted observations from weaponizing high-integrity mutation tools (`git_push`, `drop_database`, `http_post`).
 :::
 
+@Lst-vol3-reference-monitor implements complete mediation over parameter taint bitsets and security tiers before tool execution.
+
+::: {#lst-vol3-reference-monitor lst-cap="**Reference Monitor Tool Dispatch Interception**: Complete mediation over parameter taint bitsets and security tiers before tool execution."}
 ```python
 from enum import Flag, auto
 from typing import Any, Dict
@@ -576,6 +594,7 @@ class ReferenceMonitor:
 
         return "ALLOW"
 ```
+:::
 
 ## Delegated Identity and Credential Brokering {#sec-vol3-security-credentials}
 
