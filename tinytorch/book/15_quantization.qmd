@@ -32,7 +32,7 @@ Underneath that transformation, the runtime executes an affine mapping between c
 2. **Fourfold memory bandwidth reduction:** Packing numbers into single-byte representations reduces memory footprint by $4\times$, quadrupling cache line occupancy and slashing the memory-bus traffic diagnosed in @sec-profiling.
 3. **Integer widening in arithmetic units:** While storage uses 8-bit integers, matrix units widen intermediate products into 32-bit accumulators (INT32) to prevent numerical overflow during dot products, before rescaling back to floating point.
 
-This chapter constructs TinyTorch's quantization engine. It simulates INT8 by keeping integer codes in float32 arrays and multiplying in float32, measuring numerical fidelity and modeling the packed storage an industrial runtime uses. Before building the quantization formulas, we must inspect the memory traffic bottleneck that makes 32-bit floats so costly at inference.
+This chapter constructs TinyTorch's quantization engine. It simulates INT8 by keeping integer codes in float32 arrays and multiplying in float32, measuring numerical fidelity and modeling the packed storage an industrial runtime uses. Before constructing the quantization formulas, the first step is to examine the memory traffic bottleneck that makes 32-bit floats so costly at inference.
 
 ::: {#fig-quantization-geometry fig-env="figure" fig-pos="htb" fig-cap="**Quantization and storage**: A scale and zero point map floats to integer codes and reconstruct rounded values. Packed storage uses one byte per code; TinyTorch wraps codes in float32 arrays." fig-alt="Three boxes connect floating-point values, affine integer codes from minus 128 through 127, and reconstructed floats. Separate boxes distinguish packed storage from TinyTorch float32 execution."}
 ![](assets/images/diagrams/15_quantization-diag-1.svg){width="100%"}
@@ -48,10 +48,10 @@ This chapter constructs TinyTorch's quantization engine. It simulates INT8 by ke
 :::
 
 
-A 32-bit float costs 4 bytes. That is the whole problem, and a napkin shows how much it hurts. A single square linear layer with 4096 inputs and 4096 outputs holds $4096 \times 4096 = 16{,}777{,}216$ weights, which is 67 MB in FP32. Generating one token multiplies one activation vector by that matrix, so the processor must stream all 67 MB through memory to do $2 \times 4096 \times 4096 \approx 33.5$ million arithmetic operations. That is 0.5 operations per byte, the arithmetic intensity @sec-profiling taught us to compute, which makes weight bandwidth a plausible bottleneck when the weights must be fetched from main memory. At a hypothetical sustained memory bandwidth of 100 GB/s, those bytes alone imply a 0.67 ms lower bound per token per layer. Faster arithmetic cannot lower this traffic bound. Packing the weights addresses the byte count; batching and reuse address how often those bytes must cross memory.
+A 32-bit float costs 4 bytes. That is the whole problem, and a napkin shows how much it hurts. A single square linear layer with 4096 inputs and 4096 outputs holds $4096 \times 4096 = 16{,}777{,}216$ weights, which is 67 MB in FP32. Generating one token multiplies one activation vector by that matrix, so the processor must stream all 67 MB through memory to do $2 \times 4096 \times 4096 \approx 33.5$ million arithmetic operations. That is 0.5 operations per byte, the arithmetic intensity defined in @sec-profiling, which makes weight bandwidth a plausible bottleneck when the weights must be fetched from main memory. At a hypothetical sustained memory bandwidth of 100 GB/s, those bytes alone imply a 0.67 ms lower bound per token per layer. Faster arithmetic cannot lower this traffic bound. Packing the weights addresses the byte count; batching and reuse address how often those bytes must cross memory.
 
 
-::: {#nbk-quantization-int8-memory-compute-gains .callout-notebook title="Napkin math for a 4096 by 4096 layer"}
+::: {#nbk-quantization-int8-memory-compute-gains .callout-notebook title="Napkin Math: INT8 memory and compute gains for a 4096 by 4096 layer"}
 - Weights: $16{,}777{,}216$. FP32 storage: $67.1$ MB. INT8 storage: $16.8$ MB.
 - If a kernel reads packed codes directly, weight bytes streamed per generated token drop by $4\times$; at the assumed $100$ GB/s the corresponding lower bound drops from $671\ \mu\text{s}$ to $168\ \mu\text{s}$.
 - Arithmetic operations per token are unchanged at $33.5$ million. Counting weight bytes alone, the intensity rises from $0.5$ to $2.0$ operations per byte. Whether memory still limits execution depends on the machine and kernel.
@@ -115,7 +115,7 @@ This mapping is called **asymmetric** because the grid does not have to be cente
 
 ### A scale shared by the whole tensor
 
-A shared scale also explains how a kernel could multiply the integer codes. TinyTorch's layer first reconstructs float32 operands; the following identity will let us check that path against a separate integer calculation. Write the reconstructed activation row and weight matrix in terms of their codes, $\hat{x} = S_x (Q_x - Z_x)$ and $\hat{W} = S_W (Q_W - Z_W)$. Their product factors:
+A shared scale also explains how a kernel could multiply the integer codes. TinyTorch's layer first reconstructs float32 operands; the following identity enables checking that path against a separate integer calculation. Write the reconstructed activation row and weight matrix in terms of their codes, $\hat{x} = S_x (Q_x - Z_x)$ and $\hat{W} = S_W (Q_W - Z_W)$. Their product factors:
 
 $$\hat{y} = \hat{x} \hat{W}^{T} = (S_x S_W)\,\big((Q_x - Z_x)(Q_W - Z_W)^{T}\big)$$
 
@@ -144,7 +144,7 @@ Everything in this chapter happens after training, with no gradient in sight. It
 
 ### Quantize and dequantize
 
-Start with the weights, because they are the bytes we are trying to shrink. The 4096 by 4096 layer from The Problem holds 16.8 million floats. A packed representation needs one integer code per value and enough information to reconstruct the float grid. Everything else in the chapter sits on this pair of functions, and @sec-compression will change the number of matrix entries after this chapter changes their precision.
+The weights form the primary starting point because they represent the dominant memory footprint to compress. The 4096 by 4096 layer from The Problem holds 16.8 million floats. A packed representation needs one integer code per value and enough information to reconstruct the float grid. Everything else in the chapter sits on this pair of functions, and @sec-compression will change the number of matrix entries after this chapter changes their precision.
 
 The Problem already showed the naive version. Cast each weight to an integer and every one of them, being smaller than 1 in magnitude, becomes 0. A packed integer layer would occupy 16.8 MB for its weights and would compute nothing but its bias. The grid must distinguish these small floats despite having only 256 codes. The scale is the answer. Measure the zero-inclusive range, divide by its grid step, add the zero point, and round. The weights now spread across the whole byte, and each one comes back to within $S/2$ of where it started.
 
@@ -300,7 +300,7 @@ Subtracting the zero points gives the integer operands, $Q_x - Z_x = [159, -96]$
 
 The first output is off by $0.003$, about a third of a percent, and the trace shows where it came from. The reconstructions are $\hat{x} = [0.4988, -0.3012]$ and, for the first row of $W$, $[1.2657, -0.6373]$; using the unrounded grid values in the product gives approximately $0.8233$. Each is within its $S/2$ bound, $0.0016$ for the input and $0.0045$ for the weights, and on this row their errors pushed the same direction. A packed copy of the four weights would take 4 code bytes plus 8 metadata bytes, rather than 16 FP32 bytes. The two-element bias adds its own code bytes and metadata. For the complete tiny layer, `memory_usage()` therefore reports 24 original bytes and 22 modeled bytes, only $1.09\times$ compression. Metadata becomes relatively small for large arrays; `memory_usage` on the 4096 by 4096 layer from The Problem reports 67,125,248 bytes against 16,781,328, a ratio of 4.0.
 
-The class should first agree with the four weights traced by hand. In the listing below, line 4 defines the $2 \times 2$ weight matrix, loaded into `Linear(2, 2)` in lines 5--7 (transposed to match input-by-output storage convention). Line 9 wraps it in `layer = QuantizedLinear(linear)`. In lines 10--12, `layer.q_weight.data.T`, `layer.weight_scale`, and `layer.weight_zero_point` print the exact quantized integer codes ($[[127, -85], [14, -128]]$), scale factor ($0.008976$), and zero-point offset ($-14$) derived above.
+The class should first agree with the four weights traced by hand. In the listing below, line 4 defines the $2 \times 2$ weight matrix, loaded into `Linear(2, 2)` in lines 5 to 7 (transposed to match input-by-output storage convention). Line 9 wraps it in `layer = QuantizedLinear(linear)`. In lines 10 to 12, `layer.q_weight.data.T`, `layer.weight_scale`, and `layer.weight_zero_point` print the exact quantized integer codes ($[[127, -85], [14, -128]]$), scale factor ($0.008976$), and zero-point offset ($-14$) derived above.
 
 Line 14 supplies the two-element test vector $x = [0.5, -0.3]$. Line 15 computes the baseline FP32 reference `[[0.8264, 0.4322]]`. In line 16, `layer.forward(x)` executes the dequantize-in-float path, yielding `[[0.82404, 0.43267]]`. In line 17, `int8_forward(layer, x)` executes the pure INT8 integer accumulation path, producing `[[0.8233, 0.4336]]` matching @tbl-int8-quant-trace.
 
@@ -328,7 +328,7 @@ print(int8_forward(layer, x))       # [[0.8233 0.4336]]  integer path: both oper
 
 The module's uncalibrated `forward` (line 16) rounds only the weights, so it lands closer to the exact answer on this example than `int8_forward` (line 17), which rounds both operands. The two functions model different inference paths. After `calibrate`, the module also rounds its inputs, but onto the stored grid rather than a grid measured from each new input. Comparisons must state which of these paths they used; otherwise an apparent improvement can come from changing the experiment.
 
-We can follow the same layer through its calibration state change. The samples `[[0.4, -0.2]]` and `[[0.1, 0.5]]` have a combined range of $[-0.2, 0.5]$. `calibrate` stores $S_x = 0.7/255 \approx 0.0027451$ and $Z_x = -55$. It leaves the weight and bias codes unchanged. The later input `[[2.0, -1.5]]` is outside this recorded range in both coordinates.
+The same layer illustrates this calibration state change. The samples `[[0.4, -0.2]]` and `[[0.1, 0.5]]` have a combined range of $[-0.2, 0.5]$. `calibrate` stores $S_x = 0.7/255 \approx 0.0027451$ and $Z_x = -55$. It leaves the weight and bias codes unchanged. The later input `[[2.0, -1.5]]` is outside this recorded range in both coordinates.
 
 ::: {lst-cap="**A frozen calibration grid**: Later inputs outside the observed range saturate."}
 ```python
@@ -379,7 +379,7 @@ The first run isolates weight rounding. The second includes rounding and possibl
 
 ## From TinyTorch to Production
 
-PyTorch 2.9 provides a direct comparison through its eager-mode `torch.ao.quantization` API. The following version-specific example selects dynamic quantization for `Linear` layers. PyTorch's documentation directs new development toward torchao; the older API remains useful here because its conversion closely matches the layer replacement we just read. [PyTorch 2.9 quantization documentation](https://docs.pytorch.org/docs/2.9/quantization.html).
+PyTorch 2.9 provides a direct comparison through its eager-mode `torch.ao.quantization` API. The following version-specific example selects dynamic quantization for `Linear` layers. PyTorch's documentation directs new development toward torchao; the older API remains useful here because its conversion closely matches the layer replacement traced in this chapter. [PyTorch 2.9 quantization documentation](https://docs.pytorch.org/docs/2.9/quantization.html).
 
 ::: {lst-cap="**A versioned production comparison**: This PyTorch 2.9 call converts Linear layers."}
 ```python
@@ -399,11 +399,11 @@ An integer dot product is only one deployment design. A weight-only kernel can k
 
 A finer grouping also changes accuracy. Giving each output channel or small weight group its own scale prevents one outlier from coarsening the grid for the entire tensor,[^fn-llm-outlier-channels] at the cost of more metadata and rescaling work. With 4-bit codes there are only 16 levels, so this choice becomes more consequential. Training with rounding simulated in the forward pass is another option, called quantization-aware training.[^fn-ste-qat] These are extensions to the grid mechanism, not paths implemented by Module 15.
 
-::: {#psp-quantization-hardware-tensor-cores .callout-production title="Production bridge: INT8 / FP8 Tensor Cores and CUTLASS GEMM"}
+::: {#psp-quantization-hardware-tensor-cores .callout-perspective title="Production Bridge: INT8 / FP8 Tensor Cores and CUTLASS GEMM"}
 TinyTorch simulates affine quantization by mapping floats to integer steps and dequantizing back to float32 before matrix multiplication. In production acceleration runtimes (e.g., NVIDIA TensorRT, vLLM, and CUTLASS):
 
 1. **Native Integer Execution**: Accelerators execute integer matrix multiplications ($D = A_{\text{int8}} \times B_{\text{int8}}$) directly on hardware Tensor Cores using the `mma.sync.aligned.m16n8k32.row.col` PTX instruction. Intermediate products accumulate in 32-bit integer registers (`int32`) before a single epilogue instruction applies floating-point scale factor multiplication and bias addition.
-2. **FP8 and Microscaling**: Modern architectures (NVIDIA Hopper H100, Ada Lovelace, and Blackwell) extend sub-byte quantization to FP8 (`E4M3` for activations, `E5M2` for gradients) and block-scaled INT4/FP4 microscaling formats (e.g., MXFP4), providing 2--4$\times$ higher throughput than FP16 without requiring non-trivial zero-point tracking arithmetic.
+2. **FP8 and Microscaling**: Modern architectures (NVIDIA Hopper H100, Ada Lovelace, and Blackwell) extend sub-byte quantization to FP8 (`E4M3` for activations, `E5M2` for gradients) and block-scaled INT4/FP4 microscaling formats (e.g., MXFP4), providing 2 to 4$\times$ higher throughput than FP16 without requiring non-trivial zero-point tracking arithmetic.
 :::
 
 | | TinyTorch `QuantizedLinear` | PyTorch 2.9 dynamic Linear | Weight-only design |
@@ -415,15 +415,15 @@ TinyTorch simulates affine quantization by mapping floats to integer steps and d
 
 : Storage and execution are separate choices. {#tbl-quantization-production-comparison tbl-colwidths="[18,29,27,26]"}
 
-The comparison in @tbl-quantization-production-comparison keeps two contracts separate. The grid defines which values can be reconstructed and what rounding or saturation changes. The execution format defines which bytes are allocated and which arithmetic the kernel performs. TinyTorch gives us a readable reference for the first contract. Its modeled storage report must not substitute for a measurement of the second.
+The comparison in @tbl-quantization-production-comparison keeps two contracts separate. The grid defines which values can be reconstructed and what rounding or saturation changes. The execution format defines which bytes are allocated and which arithmetic the kernel performs. TinyTorch provides a readable reference for the first contract. Its modeled storage report must not substitute for a measurement of the second.
 
-Three things are worth looking for in your own work. When a quantized model loses accuracy, find the tensor whose largest magnitude is far from its typical magnitude, because that is where the grid is too coarse, and ask whether per-row or per-group scales fix it before reaching for training. When a quantized model is not faster, check whether the kernel actually consumes integers or dequantizes first, and whether the workload was memory-bound to begin with; smaller stored weights alone do not establish a speedup for a multiply limited by arithmetic. Check how far inference activations wander outside the calibration range before freezing that grid.
+Three diagnostic principles guide empirical quantization. When a quantized model loses accuracy, find the tensor whose largest magnitude is far from its typical magnitude, because that is where the grid is too coarse, and ask whether per-row or per-group scales fix it before reaching for training. When a quantized model is not faster, check whether the kernel actually consumes integers or dequantizes first, and whether the workload was memory-bound to begin with; smaller stored weights alone do not establish a speedup for a multiply limited by arithmetic. Check how far inference activations wander outside the calibration range before freezing that grid.
 
 [^fn-ste-qat]: **Straight-through estimator**: the rule that lets gradients flow through a rounding step during training. Rounding has zero derivative almost everywhere, so backpropagation would stop at it; the estimator pretends the derivative is one, so the optimizer can update the underlying floating-point weights despite the discrete forward operation. The backward rule is an approximation to guide training, not the derivative of rounding.
 [^fn-symmetric-hardware-reduction]: **Hardware efficiency of symmetric quantization**: In symmetric quantization, $Z = 0$, which halves the algebraic expansion of integer matrix multiplication. Expanding the general asymmetric product yields $(Q_x - Z_x)(Q_W - Z_W)^T = Q_x Q_W^T - Z_x \sum Q_W^T - Z_W \sum Q_x^T + Z_x Z_W K$. For symmetric weights ($Z_W = 0$), two terms vanish entirely: $Q_x Q_W^T - Z_x \sum Q_W^T$. Because weights are static during inference, the column reduction vector $\sum Q_W^T$ can be precomputed once at compilation time, leaving hardware tensor cores to execute a pure fused multiply-add on raw integer codes with a single runtime vector correction.
 [^fn-llm-outlier-channels]: **Outlier features in large language models**: When Transformer parameter counts scale past 6.7B, emergent outlier features appear in a small subset ($<0.1\%$) of hidden state channels, exhibiting magnitudes $20\times$ to $100\times$ larger than normal activations across all tokens (Dettmers et al., 2022, *LLM.int8()*). Per-tensor or per-token quantization causes severe perplexity degradation because scaling for the outlier compresses all other channels into zero or one bit of resolution. This behavior is strongly coupled to normalization layers (@sec-layers), where LayerNorm standardizes variance across dimensions but leaves specific feature coordinates free to concentrate scale. Production runtimes resolve this via mixed-precision decomposition: outlier coordinate channels are routed to standard FP16 GEMM, while the remaining $>99.9\%$ are safely executed on INT8 tensor cores.
 
----
+{{< pagebreak >}}
 
 ## Summary
 
