@@ -31,7 +31,7 @@ Underneath that single call, the runtime protects computation from the hazards o
 
 This chapter constructs TinyTorch's loss library, defusing the numerical traps of cross-entropy to provide stable scalar objectives that @sec-autograd and @sec-optimizers turn into parameter updates. Before building the stable implementation, we must inspect how textbook mathematical recipes immediately fail in float32.
 
-@Fig-loss-stability contrasts a direct exponential with the max-shifted path. The worked trace will follow each intermediate value through the implementation.
+@fig-loss-stability contrasts a direct exponential with the max-shifted path. The worked trace will follow each intermediate value through the implementation.
 
 ![Stable cross-entropy on large logits. For `[1000, 1002, 1001]` and target class 1, direct float32 exponentiation overflows. Subtracting the maximum gives `[-2, 0, -1]` and a finite loss of approximately 0.4076.](assets/images/diagrams/04_losses-diag-1.svg){#fig-loss-stability width="100%" fig-alt="Two paths for logits [1000, 1002, 1001] with target 1. Direct exponentiation gives infinities and NaN loss. Shifting by 1002 gives exponentials [0.1353, 1, 0.3679], sum 1.5032, and target log-probability minus 0.4076. Negation returns scalar loss 0.4076."}
 
@@ -63,7 +63,7 @@ print(e / np.sum(e))         # [nan nan nan]
 
 NumPy prints an overflow warning and carries on, and every probability comes out as `nan`. The reason is the range of a 32-bit float. The largest finite float32 is about $3.4 \times 10^{38}$, which is $e^{88.72}$, so `exp` of anything above 88.72 returns `inf`. The sigmoid in @sec-activations met the same wall and selected the branch whose exponent was nonpositive; this chapter applies the same idea to a whole row of numbers at once. Once one term is `inf`, the sum is `inf`, and `inf / inf` is not a number. The other direction fails just as quietly. Below about $-104$, `exp` returns an exact `0.0`, so logits of `[-1000, -1002, -1001]` give a sum of zero and `0 / 0`, which is also `nan`.
 
-Logits of 100 are not exotic. @sec-layers showed how fast badly scaled weights inflate activations; a few layers of that and the outputs are in the hundreds. A nonfinite loss is a reason to stop and inspect the batch before updating weights. Nonfinite intermediate values can propagate into the derivatives and weight updates introduced in @sec-autograd and @sec-optimizers. The scalar alone does not tell us which intermediate first failed, so the useful debugging boundary is the input logits and the operations that turn them into a loss.
+Logits of 100 are not exotic. Recall from @sec-activations that Softmax relies on raw elementwise exponentiation, where any input exceeding 88.72 overflows float32 dynamic range to infinity. Furthermore, @sec-layers showed how fast badly scaled weights inflate activations; a few layers of that and the outputs easily enter the hundreds. A nonfinite loss is a reason to stop and inspect the batch before updating weights. Nonfinite intermediate values can propagate into the derivatives and weight updates introduced in @sec-autograd and @sec-optimizers. The scalar alone does not tell us which intermediate first failed, so the useful debugging boundary is the input logits and the operations that turn them into a loss.
 
 So the need is concrete. We want a loss for classification that avoids preventable overflow when the input logits and their differences are representable. Stable algebra cannot recover a value that was already converted to `inf` before the loss received it.
 
@@ -109,7 +109,7 @@ The three loss functions in TinyTorch partition the core supervised learning wor
 | `BinaryCrossEntropyLoss` | Probabilities $[0, 1]$ | Probabilities in $(0, 1)$ | Epsilon clipping $[\epsilon, 1-\epsilon]$ | Binary classification |
 | `CrossEntropyLoss` | Class indices $\{0, \dots, C-1\}$ | Unbounded logits $\mathbb{R}^C$ | Max-shifted log-softmax & gather | Multi-class classification |
 
-: **Loss function taxonomy**: Architectural contracts, input domains, and numerical stabilization strategies across TinyTorch losses. {#tbl-loss-taxonomy tbl-colwidths="[22,20,22,22,14]"}
+: **Loss function taxonomy**: Architectural contracts, input domains, and numerical stabilization strategies across TinyTorch losses. {#tbl-loss-taxonomy tbl-colwidths="[33,16,17,20,14]"}
 
 ### The fix: shift before you exponentiate
 
@@ -207,7 +207,7 @@ The wrapper follows the same path as MSE: `__call__` delegates to `forward`, whi
 
 ### Checking the scalar contract
 
-Here is a short run of MSE and cross-entropy, on numbers small enough to check by hand. I keep a run like this next to every loss I write, because a loss that returns a plausible-looking wrong number is the kind of bug that trains for a week before anyone notices.
+Here is a short run of MSE and cross-entropy, on numbers small enough to check by hand. It is good practice to keep a sanity check like this next to every loss implementation, because a loss that returns a plausible-looking wrong number is the kind of bug that trains for a week before anyone notices.
 
 ```python
 import numpy as np
@@ -290,7 +290,7 @@ for base in (1e3, 1e6):
 
 In the snippet above, line 4 constructs test logits with large baseline magnitudes ($10^3$ and $10^6$), and line 5 finds the row maximum $c$. Line 6 computes the stabilized log-sum of exponents. Line 7 evaluates the naive arithmetic ordering `lse_first = (c + log_sum) - z[1]` ("big numbers first"), while line 8 computes TinyTorch's stabilized formulation `shift_first = log_sum - (z[1] - c)` ("small numbers first").
 
-As reported by line 9 in the trailing comments (lines 10--11), at logits near a thousand the error already corrupts the fifth decimal place. At logits near a million, where float32 can only represent multiples of 0.0625, the "big numbers first" form is off by 0.03---a 7 percent error in the loss---while the stabilized form remains accurate to six digits. This is why `LogSoftmax` subtracts the maximum before the log of the sum and why `CrossEntropyFunction` gathers from that array rather than computing the log-sum-exp as a separate scalar. Overflow is the loud failure; loss of precision is the quiet one, and the same subtraction order fixes both.
+As reported by line 9 in the trailing comments (lines 10 to 11), at logits near a thousand the error already corrupts the fifth decimal place. At logits near a million, where float32 can only represent multiples of 0.0625, the "big numbers first" form is off by 0.03 (a 7 percent error in the loss), while the stabilized form remains accurate to six digits. This is why `LogSoftmax` subtracts the maximum before the log of the sum and why `CrossEntropyFunction` gathers from that array rather than computing the log-sum-exp as a separate scalar. Overflow is the loud failure; loss of precision is the quiet one, and the same subtraction order fixes both.
 
 ---
 
@@ -302,21 +302,17 @@ The input distinction is easy to test before training. For logits `[10, 0]` and 
 
 The NumPy listing exposes the memory work as well as the arithmetic. It computes a row maximum, allocates shifted logits, exponentiates them, sums along the class axis, and forms the final log-probabilities with two subtractions. The elementwise results have the size of the logits; the row reductions are smaller. The implementation even evaluates `x - max_vals` again in its final expression. These allocations and repeated reads are visible costs, although source inspection alone does not establish which cost dominates elapsed time on a particular machine.
 
-A production **fused kernel** combines several array operations into one device routine. Instead of writing every intermediate array to the device's main memory and reading it back, it can retain intermediate values in smaller, faster local storage. The Triton softmax tutorial demonstrates this for rows that fit locally. It still writes the output; fusion does not mean no allocation or unlimited local capacity. @sec-acceleration will examine how to combine operations this way. [Triton fused-softmax tutorial](https://triton-lang.org/main/getting-started/tutorials/02-fused-softmax.html).
+A production **fused kernel** combines several array operations into one device routine. Instead of writing every intermediate array to main device memory (DRAM) and reading it back, it retains intermediate values in fast on-chip SRAM. The Triton softmax tutorial demonstrates this for rows that fit locally; fusion eliminates intermediate memory traffic rather than the arithmetic itself. @sec-acceleration will examine how to combine operations this way. [Triton fused-softmax tutorial](https://triton-lang.org/main/getting-started/tutorials/02-fused-softmax.html).
 
 ::: {#psp-fused-cross-entropy .callout-perspective title="Systems Perspective: Fused cross-entropy in large vocabulary models"}
 
-**The vocabulary VRAM bottleneck**: In modern LLMs (such as TinyGPT or LLaMA), vocabulary size $V$ ranges from $32{,}000$ to $128{,}000$. For batch size $B=16$ and sequence length $S=2048$, allocating an un-fused FP32 logits tensor of shape $(B, S, V)$ requires:
-
-$$16 \times 2048 \times 32{,}000 \times 4\text{ bytes} \approx 4.19\text{ GB}$$
-
-Materializing separate intermediate tensors for shifted logits, exponentials, and log-softmax can consume over $16\text{ GB}$ of VRAM just to compute the loss!
+**The vocabulary VRAM bottleneck**: In modern LLMs (such as TinyGPT or LLaMA), vocabulary size $V$ ranges from $32{,}000$ to $128{,}000$. For batch size $B=16$ and sequence length $S=2048$, allocating an un-fused FP32 logits tensor of shape $(B, S, V)$ requires $16 \times 2048 \times 32{,}000 \times 4\text{ bytes} \approx 4.19\text{ GB}$. Materializing separate intermediate tensors for shifted logits, exponentials, and log-softmax can consume over $16\text{ GB}$ of VRAM just to compute the loss!
 
 **Online LogSumExp fusion**: Production engines (such as Flash-Cross-Entropy or Triton kernels) stream through the vocabulary directly from the final linear layer projection, computing the running maximum and LogSumExp in fast GPU registers (SRAM) without ever materializing the massive $(B, S, V)$ logit tensor in DRAM.
 
 :::
 
-The reason to care about full-size intermediates becomes clear with a storage calculation. Suppose a text model scores 8,192 positions against 32,000 possible tokens, where a token is one piece of text selected from a vocabulary. One float32 logits array holds $8{,}192 \times 32{,}000 = 262{,}144{,}000$ values, or $1{,}048{,}576{,}000$ bytes, about 1.05 GB. Another intermediate of the same shape needs that much storage again. These are array sizes, not measurements of peak memory: the peak depends on which arrays coexist and how the implementation reuses storage. The earlier gather avoids a one-hot target array of this size, while normalization still processes every class score.
+The earlier sparse index gather avoids allocating an intermediate one-hot target matrix of this magnitude, while normalization still processes every class score.
 
 Precision is a separate concern. A narrow floating-point format stores fewer significant digits and may have a smaller range. The max shift protects the exponential arguments, but it cannot restore information lost before the loss receives its logits. PyTorch's CUDA autocast mode, which selects arithmetic types for eligible operations, runs eligible `softmax`, `log_softmax`, and `cross_entropy` calls in float32. That policy applies within the specified execution context; it is not a promise about every backend or explicitly typed call. TinyTorch uses float32 tensors throughout. [PyTorch autocast operation reference](https://docs.pytorch.org/docs/2.14/amp.html#cuda-ops-that-can-autocast-to-float32).
 
