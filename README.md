@@ -299,6 +299,17 @@ The textbook series follows a comprehensive systems progression across four core
 
 > *Note: Volumes III and IV are in development. They change quickly as I iterate, so expect chapters to be added, reorganized, and rewritten. You are welcome to follow along as they take shape.*
 
+#### Transparency: AI Assistance and Verification Status
+
+Building an engineering curriculum of this scope in a field moving as fast as machine learning requires being explicit about how the material is developed, how AI is used, and how each volume is validated:
+
+* **Volume I (Foundations)**: **Shipped & MIT Press Release.** Fully validated through multi-semester classroom adoption at Harvard and universities worldwide, alongside extensive peer review. AI served as a developmental editor and pedagogical sounding board for chapter sequencing, drafting computation cells, and pre-commit test automation.
+* **Volume II (Scaling)**: **Community Preview (MIT Press Track).** Scope and operational challenges sourced directly from industry practitioners at conferences and meetups. AI was used to draft initial chapter outlines, generate first-pass text, formulate cluster calculations, unearth seminal historical distributed systems literature, and produce conceptual sketches as a visual boilerplate for ongoing diagram illustration. Extended [MLSys·im](https://mlsysbook.ai/mlsysim/) to fleet scale (3D parallelism, network topologies, collective communication). Validated through intensive one-on-one review sessions with distributed systems and ML fleet engineers—the longest and most critical part of the authoring process.
+* **Volume III (Agentic Systems)**: **In-Development Living Draft (Uncontracted).** Distilling an emerging, fluid field through the conceptual lens of the Stochastic Computer. AI was used experimentally through interactive agentic authoring workflows, simulated classroom experiences with diverse student personas, and simulated expert feedback panels to stress-test pedagogical delivery and architectural boundaries. While the author synthesizes and refines these chapters through intensive writing, **this text is an active work in progress that will undergo the same rigorous one-on-one expert review and classroom adoption as earlier volumes before final publication.**
+* **Volume IV (Physical AI)**: **In-Development Living Draft (Uncontracted).** Cross-disciplinary synthesis bridging classical control theory, robotics, and scalable ML systems across the causal boundary. AI served as an interactive deep-search and synthesis tool to connect dots across disparate literatures that rarely cite each other, while human engineering judgment evaluates physical feasibility, latency budgets, and functional safety. **This text is an active work in progress that will undergo the same comprehensive expert review process before final publication.**
+
+Across all volumes, authorship is stewardship and accountability, not an ego claim over fundamental laws: the tool proposes, but the human engineer ratifies and assumes responsibility.
+
 #### How the Volumes Connect
 
 Each volume in the series expands the systems boundary, answering the question that the previous level leaves open:

@@ -54,6 +54,39 @@ TinyTorch exposes four native extension points that correspond to the four funda
 3. **The Training Dynamics Boundary (`Optimizer`):** Interfacing with `optimizer.params` enables custom gradient transformations, loss scaling for mixed-precision arithmetic, gradient clipping, and advanced update rules (such as Lion or Muon).
 4. **The Silicon Boundary (Backend FFI):** Extracting contiguous memory pointers from `Tensor.data` enables invoking native compiled C++ shared libraries via `ctypes`, launching GPU kernels in OpenAI Triton, or offloading computation to Apple Silicon Metal Performance Shaders (MPS).
 
+### Repository Architecture: Core versus Extensions
+
+To preserve stability, TinyTorch enforces a strict structural separation between the core standard library and the extensions ecosystem:
+
+```text
+tinytorch/
+├── tinytorch/
+│   ├── core/           # 20-module core engine
+│   │   ├── tensor.py   # Tensor memory & autograd
+│   │   ├── autograd.py # Topological tape
+│   │   ├── layers.py   # Linear, Sequential, etc.
+│   │   ├── losses.py   # MSE & CrossEntropy
+│   │   ├── optimizers.py
+│   │   ├── dataloader.py
+│   │   ├── attention.py
+│   │   └── transformers.py
+│   ├── perf/           # Baseline profiling
+│   │   ├── profiling.py
+│   │   └── benchmarking.py
+│   └── extensions/     # Contrib ecosystem
+│       ├── template.py # Starter template
+│       ├── lora.py     # Parameter-efficient adapters
+│       ├── checkpoint.py
+│       ├── loss_scaler.py
+│       ├── compile.py  # Kernel fusion compiler
+│       ├── simd_ops.py # Vectorized C++ kernels
+│       ├── mps_ops.py  # Apple Silicon MPS
+│       └── triton_gelu.py
+└── tests/extensions/   # Parity test suite
+```
+
+The `tinytorch/core/` and `tinytorch/perf/` directories contain the standard library built in Chapters 1 through 20. The `tinytorch/extensions/` directory is the open workshop: every optimization lives as an isolated, importable Python or C++ module that plugs into the core boundaries without modifying core source files.
+
 ### The Extension Contract and Starter Template
 
 To ensure that every extension functions harmoniously with the rest of the framework, all extensions adhere to the four-part **Extension Contract**:
@@ -63,7 +96,13 @@ To ensure that every extension functions harmoniously with the rest of the frame
 3. **Autograd Transparency:** Operations that participate in backpropagation must explicitly define their mathematical derivatives via `Function.forward` and `Function.backward`.
 4. **Graceful Fallback:** If a required compiler, runtime library, or physical GPU accelerator is unavailable, the extension must fall back cleanly to a pure-Python or NumPy reference implementation rather than crashing on import.
 
-TinyTorch provides a canonical starter template in `tinytorch/extensions/template.py` that demonstrates all four properties.
+TinyTorch provides a canonical starter template in `tinytorch/extensions/template.py` that demonstrates all four properties. When implementing a custom autograd operator, subclass `Function` and implement the forward and backward transformations:
+
+{{< include _listings/21_extensions/CustomScaledShift.qmd >}}
+
+When authoring a custom neural network module with learnable parameters, subclass `Layer` and register its parameter tensors:
+
+{{< include _listings/21_extensions/CustomResidualBlock.qmd >}}
 
 ---
 
@@ -336,19 +375,121 @@ As predicted by our napkin math ($n/6$ FLOP/byte), offloading small matrices los
 
 ---
 
-## The Contrib Model: Scaling the Curriculum via RFCs
+## Evaluating an Extension: From Micro-benchmarks to End-to-End Milestones
 
-The core spine of TinyTorch (Chapters 1 through 20) is calibrated as a complete, semester-long curriculum. If we kept adding every new architectural variation to the core, TinyTorch would succumb to the very bloat it was created to replace.
+When you author a new systems extension, how do you verify its correctness, benchmark its performance, and study its real-world impact? In production systems engineering, an optimization cannot be evaluated in a vacuum. TinyTorch provides a structured **3-Tier Evaluation Ladder** that guides you from unit verification to full end-to-end model training:
 
-Instead, TinyTorch follows the **open-source RFC (Request for Comments) contrib model**:
+```text
+[ Tier 3: Custom Ingestion ]
+  └─ Train with Trainer on custom data via DataLoader
+     ▲
+[ Tier 2: Historical Milestones ]
+  └─ Macro-benchmark on Milestone 4 (CNN) & 5 (GPT)
+     ▲
+[ Tier 1: Micro-benchmarking ]
+  └─ Unit parity (pytest) & isolated latency (Timer)
+```
 
-1. **The Core vs. The Contrib Ecosystem:** Treat the core 20 modules as an immutable, stable standard library. Treat cutting-edge optimizations as modular extensions that live in `tinytorch/extensions/`.
-2. **The Capstone Project Pipeline:** In an academic course or independent study, these ideas serve as premier capstone engineering assignments. Instructors can issue Requests for Comments (RFCs) inviting students to implement:
-   - **KV-Cache for Autoregressive Generation:** Cache projected Key and Value tensors in `tinytorch.core.attention`, reducing per-token generation complexity from $O(T^2)$ to $O(1)$ arithmetic per cached token.
-   - **FlashAttention SRAM Tiling:** Implement an SRAM-aware tiled attention kernel in C++ or Triton using the online softmax algorithm (Dao et al.), computing attention block-by-block without ever materializing the $S \times S$ DRAM attention matrix.
-   - **Modern Optimizers (Lion and Muon):** Implement the **Lion** optimizer (which tracks only momentum with a sign operation, halving state memory) and the **Muon** optimizer (matrix-orthogonal Newton-Schulz updates).
-   - **Gradient Accumulation:** Build an optimizer wrapper that accumulates gradients over $K$ forward-backward micro-batches before calling `optimizer.step()`, enabling arbitrary batch sizes on constrained hardware.
-   - **Distributed Data Parallel (DDP) Simulation:** Implement a multi-process simulation using Python `multiprocessing` that coordinates Ring-AllReduce gradient averaging across rank workers at the end of each backward pass.
+### Tier 1: Numerical Correctness and Synthetic Micro-benchmarks
+
+Before measuring execution time, you must guarantee numerical correctness. Never optimize an incorrect operator:
+
+1. **Unit Test Parity:** Write unit tests in `tests/extensions/test_<name>.py`. Compare your extension's forward outputs and backward gradients against a high-precision reference (such as float64 NumPy):
+   ```python
+   # Verify outputs agree within float32 tolerance
+   assert np.allclose(
+       out_extension.data, out_reference, atol=1e-5
+   )
+   ```
+2. **Synthetic Micro-benchmarks:** Use the built-in profiling tools from `tinytorch.perf.benchmarking` (`Timer` and `MemoryTracker`) to isolate the operator across power-of-two shapes ($N \in \{128, 256, 512, 1024, 2048\}$):
+   ```python
+   from tinytorch.perf.benchmarking import (
+       Timer,
+       MemoryTracker,
+   )
+
+   tracker = MemoryTracker()
+   with Timer() as t, tracker:
+       y = my_extension_op(x)
+
+   print(f"Latency:  {t.elapsed_ms:.2f} ms")
+   print(f"Peak RAM: {tracker.peak_mb:.2f} MB")
+   ```
+   Quantify execution speedup, memory reduction, and arithmetic intensity.
+
+### Tier 2: Macro-benchmarking on Stock Milestones
+
+Isolated micro-benchmarks do not capture end-to-end training dynamics, cache contention, or framework overhead. TinyTorch provides complete, reproducible historical milestones under `milestones/` to evaluate extensions in real network architectures:
+
+1. **Milestone 4: Convolutional Vision (TinyDigits):**
+   - *Script:* `milestones/04_1998_cnn/01_lecun_tinydigits.py`
+   - *Target Extensions:* Custom activations, loss scalers, or optimizers.
+   - *Workflow:* Substitute your custom activation or optimizer into the LeNet-style architecture. Train on the TinyDigits classification task and compare epoch training time and final validation accuracy against standard SGD/Adam.
+2. **Milestone 5: Generative Transformers (TinyShakespeare):**
+   - *Script:* `milestones/05_2017_transformer/02_vaswani_attention.py`
+   - *Target Extensions:* Low-rank adaptation, activation checkpointing, custom attention, or fused kernels.
+   - *Workflow for LoRA:* Freeze the pre-trained GPT weights and replace attention projection layers with `LoRALinear`. Fine-tune on Shakespearean text and verify that the adapter achieves comparable cross-entropy loss while updating less than 2% of the parameters.
+   - *Workflow for Activation Checkpointing:* Wrap each `TransformerBlock` in `checkpoint()`. Measure peak activation memory using `MemoryTracker` to prove you can double the batch size without triggering out-of-memory errors.
+3. **Milestone 6: Standardized MLPerf Inference:**
+   - *Module:* `tinytorch.perf.benchmarking`
+   - *Workflow:* Run `mlperf_run_standard_benchmark(model, dataloader)` to evaluate your optimized model against standardized MLPerf latency percentiles ($p_{50}, p_{90}, p_{99}$), sustained throughput, and memory consumption.
+
+### Tier 3: Custom Datasets and Pipeline Ingestion
+
+To evaluate an extension on your own domain-specific problem, plug your raw data into TinyTorch's ingestion pipeline:
+
+1. **Vision or Tabular Data:** Subclass `Dataset` from `tinytorch.core.dataloader`, implement `__len__()` and `__getitem__()`, and instantiate a `DataLoader`:
+   ```python
+   from tinytorch.core.dataloader import (
+       Dataset,
+       DataLoader,
+   )
+
+   class CustomArrayDataset(Dataset):
+       def __init__(self, features, targets):
+           self.x, self.y = features, targets
+       def __len__(self):
+           return len(self.x)
+       def __getitem__(self, idx):
+           return self.x[idx], self.y[idx]
+
+   loader = DataLoader(
+       CustomArrayDataset(x_data, y_data),
+       batch_size=32,
+       shuffle=True,
+   )
+   ```
+2. **Text Corpora:** Pass raw text to `Tokenizer` from `tinytorch.core.tokenization` to construct tokenized input-target sequences for autoregressive language modeling.
+3. **End-to-End Training:** Pass the loader, model (with your extension active), optimizer, and loss function to `Trainer` (`tinytorch.core.training.Trainer`). Run `trainer.fit(epochs=5)` and log training throughput and loss progression.
+
+---
+
+## Building on the Foundations: Next-Level Extensions
+
+Rather than attempting massive, disconnected projects, the most effective way to deepen your systems mastery is to build directly on the 7 canonical extensions introduced in this chapter. Each project below takes an existing extension and resolves its primary limitation:
+
+### 1. Dynamic Loss Scaling (Building on Extension 3: `LossScaler`)
+
+* **Systems Limitation:** The stock `LossScaler` applies a fixed scale factor ($S = 65,536$). If training encounters large activations, gradient magnitudes can spike, causing multiplied values to exceed the float16 maximum ($65,504$) and overflow to `inf` or `nan`.
+* **The Project:** Implement adaptive loss scaling. After calling `loss.backward()`, scan parameter gradients for `np.isinf` or `np.isnan`. If an overflow is detected:
+  1. Skip the `optimizer.step()` call to prevent corrupting parameter weights.
+  2. Halve the scale factor ($S \leftarrow S / 2$).
+  3. Reset a consecutive-success step counter.
+  If $M$ consecutive steps complete without any overflow (e.g., $M = 2000$), double the scale factor ($S \leftarrow 2S$) to maintain maximum numerical dynamic range. Evaluate on Milestone 4 or 5 in FP16.
+
+### 2. Register Micro-Tiling in C++ (Building on Extension 5: `simd_matmul`)
+
+* **Systems Limitation:** Stock `simd_matmul` tiles matrices at the L1 cache level ($64 \times 64$). However, the innermost loop accumulates scalar products back into memory, keeping CPU vector execution units waiting on L1 data cache load-store latency.
+* **The Project:** Implement an $8 \times 4$ register micro-kernel in `cpp_simd_gemm.cpp`. Unroll the inner loop so that an $8 \times 4$ block of intermediate accumulation registers is kept alive in CPU vector registers (AVX2/NEON) throughout the $K$-dimension reduction, storing results back to DRAM only when the tile is complete. Benchmark your micro-kernel against `simd_matmul` and graph the GFLOP/s improvement.
+
+### 3. Model-Wide LoRA Injection Hook (Building on Extension 1: `LoRALinear`)
+
+* **Systems Limitation:** Stock `LoRALinear` requires manually instantiating adapter layers by hand in your model definition. In deep models with dozens of projection matrices, manual replacement is tedious and fragile.
+* **The Project:** Author an automated helper function `inject_lora(model, target_layers, rank=8)`:
+  1. Recursively traverse the model's module hierarchy.
+  2. For each layer matching a target name, replace the existing `Linear` layer with a corresponding `LoRALinear` instance initialized with the pre-trained weights.
+  3. Set `requires_grad = False` on all non-adapter parameters.
+  Test `inject_lora` on Milestone 5's GPT model to demonstrate fine-tuning a full transformer with a single function call.
 
 ---
 

@@ -62,7 +62,7 @@ Volume III Seminal Papers Map
 │   ├── Garcia-Molina & Salem (1987) — Sagas
 │   ├── Lamport, Shostak & Pease (1982) — The Byzantine Generals Problem
 │   └── Schlichting & Schneider (1983) — Fail-Stop Distributed Systems
-├── Part V: The Policy Compiler (Chapters 12–14)
+├── Part V: Learning from Trajectories (Chapters 14–16)
 │   ├── Ouyang et al. (2022) — InstructGPT
 │   ├── Schulman, Wolski, Dhariwal, Radford & Klimov (2017) — PPO
 │   ├── Shao et al. (2024) — DeepSeekMath & Group Relative Policy Optimization (GRPO)
@@ -354,14 +354,14 @@ Volume III Seminal Papers Map
 
 ---
 
-## Part V: The Policy Compiler (Chapters 12–14)
+## Part V: Learning from Trajectories (Chapters 14–16)
 
 ### 37. Training Language Models to Follow Instructions with Human Feedback (InstructGPT)
 - **The Paper:** Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. *Training Language Models to Follow Instructions with Human Feedback*. NeurIPS 2022.
   `BibTeX: ouyang2022instructgpt`
 - **The Key Insight:** Pure unsupervised pretraining optimizes next-token probability on internet text, not human intent. Fine-tuning with Supervised Fine-Tuning (SFT) followed by Reinforcement Learning from Human Feedback (RLHF) aligns the model’s outputs with human instructions.
 - **Why It's Important:** The breakthrough behind ChatGPT; transformed LLMs from autocomplete engines into instruction-following agents.
-- **Why It Relates to This Book (Chapters 12, 13, 14):** Serves as the blueprint for compiling raw trajectory data into aligned procedural models.
+- **Why It Relates to This Book (Chapters 14, 15, 16):** Serves as the blueprint for post-training on verified trajectories.
 
 ### 38. Proximal Policy Optimization Algorithms (PPO)
 - **The Paper:** John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. *Proximal Policy Optimization Algorithms*. arXiv:1707.06347, 2017.

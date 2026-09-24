@@ -50,8 +50,17 @@ def generate_plot():
     ar_params = np.logspace(np.log10(3.5e7), np.log10(5.5e10), 100)
     ar_freq = 3.0 * (3.5e7 / ar_params)**0.15
     ax.plot(ar_params, ar_freq, color=PALETTE["crimson"], lw=2.2, ls="--", zorder=4, alpha=0.8)
-    ax.text(1.2e9, 1.8, "Autoregressive Memory Wall: $f \\propto 1 / M_{\\mathrm{weights}}$",
-            fontsize=8.5, fontweight="bold", color=PALETTE["crimson"], rotation=-6, ha="center")
+    ax.text(
+        1.2e9,
+        2.4,
+        "Autoregressive Memory Wall: $f \\propto 1 / M_{\\mathrm{weights}}$",
+        fontsize=8.5,
+        fontweight="bold",
+        color=PALETTE["crimson"],
+        rotation=-6,
+        ha="center",
+        bbox=dict(boxstyle="round,pad=0.2", facecolor="#FFFFFF", edgecolor="#FECACA", alpha=0.9),
+    )
 
     # Chunking / Flow-matching frontier line
     fx = np.array([8e7, 5e8, 2e9, 3.3e9, 5e9, 1.5e10])
