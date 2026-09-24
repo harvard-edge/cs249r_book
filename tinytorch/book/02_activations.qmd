@@ -178,7 +178,7 @@ The zero branch has a cost. If every example gives a unit a negative input, its 
 *GELU allows small negative gradients through its -0.17 dip before asymptotically saturating at zero.*
 :::
 
-A gate is a multiplier that controls how much of a value passes through. ReLU uses a hard gate, either 0 or 1. GELU, the **Gaussian error linear unit**, replaces it with a smooth multiplier. The exact definition is $x\Phi(x)$, where $\Phi(x)$ is the fraction of a standard normal bell curve lying to the left of $x$. That bell curve is centered at zero with standard deviation one; $\Phi(0)=0.5$ and $\Phi(1)\approx0.8413$. This probability interpretation defines the gate, but applying GELU does not draw a random sample.
+A gate is a multiplier that controls how much of a value passes through. ReLU uses a hard gate, either 0 or 1. GELU, the **Gaussian error linear unit**, replaces it with a smooth multiplier. The exact definition is $x\Phi(x)$, where $\Phi(x)$ is the fraction of a standard normal bell curve lying to the left of $x$. That bell curve is centered at zero with standard deviation one; $\Phi(0)=0.5$ and $\Phi(1)\approx0.8413$. In contrast to stochastic regularizers like Dropout that randomly zero activations with Bernoulli trials during training, GELU gates values deterministically by their cumulative probability: each activation is weighted by the likelihood that standard Gaussian noise falls below it ($x \cdot P(X \le x)$). This probability interpretation defines the shape of the smooth gate, but applying GELU does not draw a random sample; it is an entirely deterministic mathematical function.
 
 TinyTorch approximates the gate with the sigmoid already introduced:
 
@@ -196,7 +196,7 @@ Hidden layers need a nonlinearity. The last layer needs whatever form the loss e
 - **One yes-or-no label.** End with a sigmoid, so the output is one probability in $(0, 1)$. TinyTorch's `BinaryCrossEntropyLoss` expects exactly that, and clips it away from 0 and 1 before taking logarithms.
 - **One label among many.** Return the raw scores, the **logits**, and let the loss normalize them. TinyTorch's `CrossEntropyLoss` applies a max-shifted log-softmax internally, which stays finite where exponentiating first would overflow. Apply softmax yourself only when a caller needs probabilities, at inference time.
 
-The third rule is the one that fails quietly. A model that ends in softmax and trains with `CrossEntropyLoss` runs without an error, because the loss simply treats the probabilities as logits and normalizes them again (as detailed in @sec-losses). Every score it sees then lies between 0 and 1, so the correct class can never pull far ahead. With ten classes, the best the loss can reach is $-\ln\big(e / (e + 9)\big) \approx 1.46$, however well the model separates the classes.
+The third rule is the one that fails quietly. A model that ends in softmax and trains with `CrossEntropyLoss` runs without an error, because the loss internally applies `LogSoftmax` and treats those probabilities as raw logits (as detailed in @sec-losses). Every score it receives then lies strictly in $(0, 1)$, so the correct class can never pull far ahead in exponentiated space. With ten classes, the best loss the model can ever achieve is $-\ln\big(e / (e + 9)\big) \approx 1.46$, however well the network separates the inputs. In addition, computing Softmax twice creates redundant memory round-trips and distorts backward gradients, corrupting the learning trajectory without raising a single exception.
 
 ---
 
@@ -350,6 +350,12 @@ In @tbl-activation-numerical-trace (printed by lines 11--14), the GELU output is
 : Forward values and the intermediate gate in Module 02's sigmoid-form GELU. {#tbl-activation-numerical-trace tbl-colwidths="[15,18,15,30,22]"}
 
 The trace also distinguishes a formula from its name. Exact GELU at $-1$ is approximately $-0.1587$, while the implementation gives $-0.1542$. A regression test should compare to the sigmoid form actually chosen. A test against the exact form needs an explicit approximation tolerance.
+
+::: {.column-margin}
+![](assets/images/diagrams/02_activation-margin-vanishing-gradients.svg){width="100%" fig-alt="Plot comparing gradient decay across 10 layers for Sigmoid (0.25^10 ≈ 9.5e-7) versus ReLU (1.0^10 = 1.0)."}
+
+*Sigmoid's maximum slope ($0.25$) compounds across 10 layers to $9.5\times10^{-7}$, causing vanishing gradients. ReLU maintains unit slope ($1.0$), preserving signal flow.*
+:::
 
 There is a short preview of learning in these values. A local slope measures how much the output changes per small input change. Sigmoid's largest slope is $0.25$; ReLU's positive branch has slope 1 and its negative branch has slope zero. Ten factors of $0.25$ multiply to about $9.5\times10^{-7}$, while ten factors of 1 remain 1. This isolates the activations' contribution to shrinking a change as it travels through a computation. A complete network also contains weights. @sec-autograd introduces derivatives and tracks all those factors together, rather than treating this activation-only calculation as a prediction of a network's gradient.
 
