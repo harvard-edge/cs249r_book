@@ -73,7 +73,7 @@ Memory integrity alone cannot establish geometric validity [@durrant2006simultan
 
 A belief that must declare its own expiry has to travel with more than its value, so the first handoff question is what a consumer needs to evaluate a stored value after its sensor loses sight of the object.
 
-## What Memory Hands Over {#sec-memory-handoff}
+## The Spatial Memory Handoff and State Invariants {#sec-memory-handoff}
 
 An unannotated vector such as $[0.142, -0.051, 0.812]$ arriving over a real-time bus conveys nothing about what physical entity is being described, what physical dimension is represented, or how that quantity is scaled. A belief handed to a consumer therefore cannot be a naked array of floating-point numbers. It is a decaying interpretation of physical inputs and must carry its epoch, physical uncertainty, and reference frame to remain usable. A downstream controller receiving raw coordinates without metadata must rely on implicit conventions established at compile time. If an estimator produces positions in meters while an actuator controller expects millimeters, or if an angular rate is mistaken for an absolute orientation, the resulting command registers as a thousandfold tracking error, driving motor current to the actuator thermal limits detailed in @sec-body-thermal-duty-cycles. To prevent misinterpretation across the causal boundary established in @sec-boundary-causal-boundary, a belief record must first specify the entity identity, the physical quantity, and the measurement units. The consumer must be able to verify that the value represents the center of mass of a specific workpiece in meters, or the normal contact force on a fingertip in newtons, before routing that number into a control law.
 
@@ -103,7 +103,7 @@ When memory hands over a tuple containing value, reference frame, evidence epoch
 
 Evaluating the spatial belief record depends on calculating the elapsed time $\Delta t = t_{\text{now}} - t_0$ against physical reality. If the consumer cannot verify the exact physical instant when energy transduction occurred, the calculated error bound $E(\Delta t)$ becomes an unanchored fiction, mistaking software compute cycles for physical evidence. The estimate epoch and clock conversion named in the definition exist to protect that anchor, while provenance and lifecycle status, the record's remaining fields, are developed with the schema in @sec-memory-spatial-state-schema.
 
-## A State Has an Epoch {#sec-memory-state-epoch}
+## State Epochs and Temporal Anchoring {#sec-memory-state-epoch}
 
 A pose that leaves an object detector describes where a workpiece was when the camera exposed the frame, not where it is when the message arrives. Every state therefore refers to a specific instant, its **epoch**\index{Epoch}, and a state crossing a physical pipeline carries three of them before a controller can act. The **acquisition epoch**\index{Epoch!acquisition} ($t_0$) is the capture epoch of the observation contract (@sec-perception-observation-contract), the instant of energy transduction at the causal boundary, such as photons striking a photodiode array or a digital register latching an encoder count, and the belief record carries it as its evidence epoch.[^fn-hw-timer-capture] Memory adds the two epochs that follow it. The **estimate epoch**\index{Epoch!estimate} ($t_{\text{est}}$) marks the instant a state estimator or neural network completed its inference over those measurements and resolved them into a concrete state claim. The **publication epoch**\index{Epoch!publication} ($t_{\text{pub}}$) marks the instant the serialized message was committed to the transport bus for dispatch to downstream consumers.
 
@@ -160,7 +160,7 @@ Real physical systems never sample all relevant state variables simultaneously. 
 
 With these epochs and the clock-synchronization bound carried in the record of @sec-memory-handoff, the consumer computes the elapsed duration between the evidence epoch and the execution deadline, evaluates the worst-case expansion of the error bound, and determines whether the state remains within task tolerances. Handing over a state without its acquisition epoch leaves the consumer blind to transport delays and scheduling jitter, turning deterministic control into open-loop guesswork. Because physical geometry also changes as bodies move through space, spatial transforms between reference frames are subject to the same temporal decay, carrying their own distinct evidence epochs.
 
-## How a Transform Goes Stale {#sec-memory-reference-frames}
+## Coordinate Transform Expiry and Calibration Drift {#sec-memory-reference-frames}
 
 A frame binds a coordinate, but in a machine the frame itself moves. @Sec-perception-handoff gave every observation a named frame and related the sensor, body, odometry, and map frames through a transform tree. What the tree does not show is how a transform goes stale. Each edge of the tree in @fig-09-robot-transform-tree stores a rigid-body pose in $SE(3)$\index{Special Euclidean Group $SE(3)$}, parameterized by joint angles [@lynch2017modern; @craig2005introduction], and that pose describes the machine only at the epoch when its geometry was measured. When an onboard computer chains transforms measured at different times, through transport delay, asynchronous sampling, or dropped frames, the product is a hybrid pose the machine never occupied (@sec-appendix-control-kinematics derives the kinematic chain).
 
@@ -251,7 +251,7 @@ To trace this failure mechanism visually, examine the geometric breakdown in @fi
 
 A transform tree dates the machine's own geometry, and a stale edge misplaces the tool by the motion it missed, amplified by the lever arm. The world around the machine ages in the same way, but it has no joint encoders to report its motion, so memory must also hold the surrounding surfaces and the space between them, and it must record which of that space a sensor has actually seen.
 
-## What Scene Memory Can Certify {#sec-memory-scene-attention-buffers}
+## Certified Spatial Assertions in Scene Memory {#sec-memory-scene-attention-buffers}
 
 A robot that has swept its range sensor down an aisle holds three kinds of space afterward: space it saw occupied, space it saw empty, and space it never saw. Only the second can ever vouch that a path is clear, and only while its evidence is fresh. Scene memory must balance the physical resolution of obstacles, the memory bandwidth required to update volumetric representations at sensor framerates, and the latency of collision queries executed by high-rate safety controllers. These requirements divide spatial scene memory into three complementary architectural tiers: volumetric metric maps and distance fields, hierarchical dynamic scene graphs, and episodic interaction memory.
 
@@ -463,7 +463,7 @@ The operational power of this structure stems from bidirectional cross-layer com
 - *Upward Abstraction:* Raw sensor depth frames generating millions of mesh vertices in Layer 1 are progressively summarized into dozens of object nodes in Layer 2 and a handful of room nodes in Layer 4. This collapses memory bandwidth by three orders of magnitude, allowing an on-chassis vision-language-action model to reason over multi-room environments without overflowing its KV cache.
 - *Downward Grounding:* When a high-level mission token targets a specific semantic object (such as "latch handle in Bay 3"), the system traverses downward: Layer 5 resolves Bay 3, Layer 4 locates the target storage enclosure, Layer 3 plans a topological route through freespace spheres, Layer 2 extracts the object's 6-DoF coordinate frame, and Layer 1 evaluates real-time metric clearance against the localized triangular mesh.
 
-### Episodic memory: Tracing physical interaction history {#sec-memory-episodic}
+### Episodic memory and physical interaction history {#sec-memory-episodic}
 
 While metric voxel grids and dynamic scene graphs maintain spatial persistence—answering *where* objects and free space exist—physical AI agents require **episodic memory**\index{Episodic memory} to record causal history: answering *what happened*, *when it occurred*, and *what physical consequences resulted*. Rather than acting as a passive diagnostic flight recorder or write-only disk log, episodic memory functions as an active, queryable index structured around hybrid automaton transitions, contact events, and tool engagements across multi-minute task horizons.
 
@@ -479,7 +479,7 @@ A learned policy's context is memory of a different kind. An autoregressive poli
 
 For motion permission, then, a representation without an epoch is an unverified assertion, and an estimate whose error bound exceeds task tolerance must be excluded from motion proposals before the permission path considers actuator commands. The machine cannot halt every operation at the first missed frame, however. Extending action across brief sensing gaps requires estimators that propagate belief forward until new measurements arrive to confirm or correct the state.
 
-## Belief Through Occlusion {#sec-memory-belief-through-occlusion}
+## Forward State Propagation and Occlusion Decay {#sec-memory-belief-through-occlusion}
 
 When direct sensing fails due to occlusions, sensor blind spots, or lighting dropouts, a physical AI system cannot simply freeze its actuators. It must rely on an internal predictive transition model to propagate its spatial belief forward across the unobserved interval. A recursive Kalman filter\index{Filter!Kalman} propagates states through kinematic equations of motion and process noise covariances,[^fn-hist-bayesian-filter] while a learned generative policy predicts future states autoregressively\index{Network!autoregressive}.
 
@@ -837,7 +837,7 @@ class MachineExpiryRoots:
 
 Every root in this section trusts the growth law it was computed from. A growth law is only as good as the machine's ability to catch its failures, through a residual at reacquisition or a staged dropout test, and some errors produce no residual at all because no sensor on the machine can see them.
 
-## When the Estimator Cannot Know {#sec-memory-state-estimation-bounds}
+## Observability Ceilings and Estimation Limits {#sec-memory-state-estimation-bounds}
 
 In classical software verification, a program's internal variables can be fully inspected through debugger hooks, runtime assertions, and memory logs. In physical AI, however, the state of the physical plant can be known only through the narrow, imperfect window of physical transducers. If the physical sensor suite lacks the mathematical rank to distinguish between two distinct physical realities, no algorithm—no matter how many parameters its neural backbone possesses or how tightly its Kalman filter converges—can determine the true state of the machine.
 
@@ -906,7 +906,7 @@ When a physical state cannot be constrained by complementary sensing or active e
 
 The observability and convergence results of state estimation come from control theory, and they hold only under four explicit assumptions. First, the sensor forward model must capture all physical couplings without unmodeled algebraic dependencies. Second, physical parameters such as component stiffness and thermal coefficients must remain within pre-calibrated ranges. Third, sensor noise must remain zero-mean and uncorrelated with actuator commands. Fourth, the operating trajectory of the machine must avoid singular configurations that cause the **observability matrix**\index{Observability matrix} to lose rank, a mathematical collapse indicating that certain physical states have temporarily become invisible to the sensors. The estimator validates these assumptions during operation by cross-checking redundant measurement channels, checking environmental temperature sensors, and enforcing active re-zeroing routines before the belief's expiry. When an operating condition violates these assumptions, such as when an optical sensor becomes occluded or a kinematic configuration reaches a singular alignment, the estimator withdraws the estimate's valid status, and downstream controllers fall back to conservative velocity and torque limits. An estimator that withdraws its own claim fails in the open; the harder failures are the ones in which nothing withdraws.
 
-## How Belief Goes Wrong {#sec-memory-failure-modes}
+## Spatial Belief Failure Modes and Map Corruption {#sec-memory-failure-modes}
 
 The fundamental failure modes of spatial memory rarely announce themselves with operating system exceptions or kernel panic logs. A corrupted pointer or a segmentation fault crashes a process loudly, halting the robot before it moves. In contrast, spatial memory failures are predominantly silent and deceptive: the memory subsystem continues publishing well-formed, syntactically valid data structures at high frequency, while the geometric coordinates inside those structures have parted ways with physical reality.
 
@@ -982,7 +982,7 @@ When sensor updates drop out, an estimator relies entirely on its predictive for
 
 Frozen transforms, phantom tracks, misassigned frames, and overconfident predictors all cross the boundary between estimation and control, and the spatial belief record of @sec-memory-handoff is the structure that must catch them there, because an ad hoc dictionary of values and matrices cannot tell active evidence from cached momentum. Every element of spatial memory must therefore reside within an explicit state record that couples the numerical value to its base coordinate frame, its sensor provenance, its growth bound, and a hard invalidation deadline that forces downstream consumers to refuse the record once that deadline passes.
 
-## The Spatial State Schema {#sec-memory-spatial-state-schema}
+## The Scene Memory State Schema and Contract {#sec-memory-spatial-state-schema}
 
 The belief about the latch-slot finger in @sec-memory-belief-through-occlusion now carries everything a consumer needs to judge it, and the **Scene Memory State record** of \ref{dfn-memory-spatial-belief-contract} is the formal cyber-physical contract—the eighth in the volume's 14-record lineage—in which these quantities travel together. The Scene Memory State unifies discrete tracked entities (the spatial belief record) and continuous volumetric representations (@tbl-09-schema-volumetric-belief) under a common temporal and physical accounting framework. From the observation contracts of @sec-perception-observation-contract the record inherits each observation's capture epoch, clock identifier, and conversion bound, so the permission controller can convert the capture clock to its own monotonic clock with a bounded error before it evaluates age. Memory contributes five fields of its own: an estimate epoch that dates computation without renewing physical evidence; an uncertainty-growth bound that projects error expansion across blind intervals; a validity region that states where that bound holds; a physical invalidation deadline; and a collision query latency budget guaranteeing that reactive control loops can evaluate distance fields in under $2\ \mu\text{s}$. A record's lifecycle follows a deterministic four-state machine:
 

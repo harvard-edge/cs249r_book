@@ -52,7 +52,7 @@ Trajectory planning resolves this computational-physical mismatch by transformin
 
 :::
 
-## Continuous Trajectories {#sec-planning-continuous-trajectories}
+## Continuous Trajectory Generation {#sec-planning-continuous-trajectories}
 
 ```{python}
 #| label: calc-planning-opening-machine
@@ -129,7 +129,7 @@ Intent defines the admissible goal; planning supplies the continuous motion, tem
 
 Momentum, a long inference tail, and a seam that must stay continuous together decide what a plan has to contain. The first decision is therefore what the planner hands to the tracking controller and the permission path while the arm is still moving.
 
-## What Planning Hands Over {#sec-planning-handoff}
+## The Planning Handoff and Trajectory Contracts {#sec-planning-handoff}
 
 For a two-joint arm, one pair of joint angles $(q_1,q_2)$ is one point in **configuration space**\index{Configuration space!definition} $\mathcal{C}$. An obstacle excludes some angle pairs, leaving $\mathcal{C}_{\mathrm{free}}=\mathcal{C}\setminus\mathcal{C}_{\mathrm{obs}}$. A curve through that free set says where the arm may move, but not how quickly it may move or whether its motors can supply the required torque [@lozanoperez1983spatial]. A **trajectory**\index{Executable trajectory!definition} assigns time to the curve and exposes $\mathbf{x}(t)=[\mathbf{q}(t)^T,\dot{\mathbf{q}}(t)^T,\ddot{\mathbf{q}}(t)^T]^T$. The planner proposes that time-indexed reference, and the permission path checks it before any setpoint reaches the drive. A geometric path alone supplies neither timing nor fallback clearance.
 
@@ -238,7 +238,7 @@ After a lease lapse, the arm's stop begins one permission tick, one bus cycle, a
 
 The two consumers read different parts of the record. The tracker interpolates the admitted reference, timestamps, and feedforward terms to drive the actuators along a smooth path. The independent permission path reads the lineage, timing, dynamic assumptions, validity bounds, and stop suffix, and it monitors current limits and authority without inheriting the planner's feasibility claim as proof; a fresh obstacle, changed payload, or contact event can revoke TRACK and invoke the state-matched fallback. Because each field in the handoff corresponds to a runtime check, the Nervous System can admit fast motion without assuming that the next inference cycle will succeed. Producing such a record begins from a goal that carries no timing at all.
 
-## From Goal to Trajectory {#sec-planning-goal-to-trajectory}
+## Trajectory Synthesis from Discrete Goals {#sec-planning-goal-to-trajectory}
 
 The intent lease for the mug, which the arm takes from the conveyor for the coworker at the packing station, grants a goal region and effort ceilings (@sec-intent-lease), but no actuator can execute a region. The tracking controller needs a trajectory, which assigns state targets, feedforward terms, and timestamps across a bounded interval. If a learned policy could output valid motor currents at the `{python} PlanningOpeningMachine.f_track_str` joint loop rate, planning would not exist as an architectural stage, and the machine would operate as a high-rate feedback controller. Learned policies instead need tens or hundreds of milliseconds to compute a motion sequence, while the tracking controller and the permission path run deterministically on fixed millisecond-scale periods. Reconciling these asynchronous cognitive timescales with hard real-time execution demands structured trajectory synthesis across three distinct paradigms.
 
@@ -258,7 +258,7 @@ This receding-horizon structure mirrors classical **Model Predictive Control (MP
 
 : **Comparison of trajectory generation paradigms**: Classical control guarantees constraint satisfaction but cannot ingest high-dimensional semantic tokens; learned action chunking ingests vision but requires explicit downstream kinodynamic filtering and derivative boundary bridging. {#tbl-11-planning-paradigms tbl-colwidths="[22,23,23,14,18]"}
 
-### Sizing the action chunk horizon: Compute amortization vs. reactive lag {#sec-planning-horizon-tradeoff}
+### Action chunk horizon sizing and reactive lag trade-offs {#sec-planning-horizon-tradeoff}
 
 Before sizing the temporal prediction horizon $H$, the systems engineer must construct an end-to-end latency budget for the replacement pipeline. Trajectory replacement is not an instantaneous inference pass; it comprises a multi-stage data transport and verification sequence across the host processor and microcontroller.
 
@@ -885,7 +885,7 @@ Output chatter in learned proposals is a related failure. Stochastic sampling ca
 
 The transition seam between consecutive action chunks is where physical AI systems face their greatest operational vulnerability. If upstream neural inference encounters scheduling delays, bus stalls, or unhandled exceptions, the execution runtime must manage the seam without violating kinodynamic limits or exhausting mechanical stopping clearance.
 
-### The two-tier deadline hierarchy: Fast leases vs. commitment cutoff {#sec-planning-two-tier-deadlines}
+### The two-tier deadline hierarchy and commitment cutoffs {#sec-planning-two-tier-deadlines}
 
 Suppose the chunk policy stalls while the arm is reaching toward the mug. On this machine the shared lease ends the wait `{python} PlanningLeaseRule.t_lease_str` after the last admission, and the arm enters its state-matched fallback along the renewal-to-onset path of @sec-planning-handoff. Crucially, all deadline evaluations and timeout checks execute strictly within the **MCU monotonic hardware clock domain**, completely insulated from host operating system freezes, NTP time steps, or Linux scheduler jitter. The record's own deadlines decide how long any lease could be allowed to run, because until the stop begins the arm keeps moving, and every millisecond the MCU waits is travel its stop can no longer use. Let the lease run to its ceiling, then, so that the blend deadline $t_{\mathrm{blend}}$ passes with no replacement admitted. The four deadlines of @sec-planning-handoff, compared in the MCU monotonic clock with $t_{\mathrm{intent\_exp}}$, now decide what happens. A replacement may still be admitted until $t_{\mathrm{commit}}$, the entry of the matched stop suffix, whose duration is $T_{\mathrm{stop}}=t_{\mathrm{stop\_end}}-t_{\mathrm{commit}}$. It must pass the full admission check before that cutoff; a late host progress report has no authority.
 
@@ -1095,7 +1095,7 @@ Before committing an autonomous machine to an action chunk, verify your understa
 
 Each row of @tbl-11-seam-fallback-hierarchy presumes that its trigger reaches the MCU in time. A failure can first show itself in the candidate, at the seam, or in the world, and each reaches the MCU on a different schedule.
 
-## How Plans Go Wrong {#sec-planning-failure-modes}
+## Trajectory Planning Failure Modes and Infeasible Seams {#sec-planning-failure-modes}
 
 A plan can become infeasible by execution time. Between synthesis in the learned policy and actuation at the causal boundary (@sec-boundary-causal-boundary), the machine's state drifts, the environment shifts, or the seam between consecutive chunks violates dynamic constraints. Where a failure first becomes visible decides which subsystem holds the signal and how much time it has to detect and reject the plan.
 
