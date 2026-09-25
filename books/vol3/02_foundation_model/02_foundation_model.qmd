@@ -168,15 +168,7 @@ class CallPrice:
     cancel_s_str = fmt_int(cancel_s)
     k_full_str = fmt_int(k_full)
     k_diff_str = fmt_int(k_diff)
-    dm_full_str = fmt_int(dm_full)
-    dm_diff_str = fmt_int(dm_diff)
     deadline_str = fmt_int(deadline_s)
-    t_full_str = fmt_int(t_full)
-    t_diff_str = fmt(t_diff, precision=1)
-    speedup_str = fmt_int(speedup)
-    syntax_ok_str = fmt_percent(syntax_ok, precision=0)
-    fix_rate_str = fmt_percent(fix_rate, precision=0)
-    pass_diff_str = fmt_percent(pass_diff, precision=0)
 ```
 
 ## The Model Invocation Boundary {#sec-vol3-foundation-model-role}
@@ -478,155 +470,6 @@ Before staging candidate model outputs for environment dispatch, verify the runt
 
 When a generation boundary fault occurs, the host runtime must either invoke an explicit context compaction strategy (such as pruning older tool execution turns) or surface an unrecoverable resource exhaustion fault to the user. An unverified, partially generated token stream must never cross the isolation boundary into an active operating system environment.
 
-### Physical memory footprint of the key-value cache
-
-The discrete token representation is not merely an abstraction for the input stage; every active token consumes physical hardware memory throughout the entire duration of an agent's execution. While the input embedding gather executes once during the initial prompt processing pass, each token leaves a permanent footprint in the accelerator's High-Bandwidth Memory: the Key-Value (KV) cache.
-
-In a decoder-only transformer, generating each new token requires computing self-attention over all preceding token positions. To avoid the redundant $O(S^2)$ computational overhead of recomputing the Key ($\mathbf{K}$) and Value ($\mathbf{V}$) projection tensors for historical tokens at every autoregressive step, the inference engine stores these intermediate projection matrices in an accelerator memory buffer.
-
-The physical memory footprint of this cache is directly proportional to the number of processed tokens. Let:
-
-- $L$ be the total number of transformer layers in the model.
-- $n_{\text{kv}}$ be the number of Key-Value attention heads per layer.
-- $d_{\text{head}}$ be the dimensionality of each attention head ($d_{\text{head}} = d_{\text{model}} / n_{\text{q}}$, where $n_{\text{q}}$ is the number of Query heads).
-- $b$ be the numerical precision in bytes per element ($b=2$ for 16-bit precision FP16/BF16; $b=1$ for 8-bit FP8).
-
-Across the entire model, the physical memory consumed by the KV cache for a single token position is derived directly from its tensor dimensions:
-
-$$\text{Mem}_{\text{KV,token}} = 2 \cdot L \cdot (n_{\text{kv}} \cdot d_{\text{head}}) \cdot b \quad \left[\frac{\text{bytes}}{\text{token}}\right]$$
-
-The constituent factors reflect the physical structure of the attention architecture:
-
-1. **The Factor of 2:** The cache must store two distinct projection tensors for each token position: the attention Key vector $\mathbf{k}$ and the attention Value vector $\mathbf{v}$.
-2. **Layer Depth ($L$):** Each transformer layer computes independent attention projections; the cache must preserve state across all $L$ layers.
-3. **Head Width ($n_{\text{kv}} \cdot d_{\text{head}}$):** In early Multi-Head Attention (MHA) designs, the number of Key-Value heads equaled the number of Query heads ($n_{\text{kv}} = n_{\text{q}}$). Modern long-context architectures employ Grouped-Query Attention (GQA), where multiple Query heads share a single Key-Value head ($n_{\text{kv}} \ll n_{\text{q}}$), reducing the total cached state by an order of magnitude.[^fn-grouped-query-compression]
-4. **Storage Precision ($b$):** The word size dictates the memory traffic and footprint of each tensor element.
-
-[^fn-grouped-query-compression]: **Grouped-Query Attention Compression**: Grouped-Query Attention (GQA) [@ainslie2023gqa] groups multiple Query attention heads into shared Key-Value head partitions (e.g., $n_{\text{kv}} = 8$ for $n_{\text{q}} = 64$ in Llama-3-70B), reducing KV cache memory capacity and memory-bus read traffic by an $8\times$ factor while retaining over 99 percent of dense Multi-Head Attention (MHA) task performance. At the extreme limit, Multi-Query Attention (MQA) [@shazeer2019fast] collapses all query heads to a single shared Key-Value head pair ($n_{\text{kv}} = 1$), achieving up to $64\times$ memory reduction at the cost of modest degradation in complex multi-hop retrieval reasoning.
-
-For an active context containing $S$ tokens, the total physical memory allocated to the KV cache scales linearly:
-
-$$\text{Mem}_{\text{KV}}(S) = S \cdot \text{Mem}_{\text{KV,token}}$$
-
-This linear memory scaling creates an unforgiving systems constraint: on accelerator hardware, context length translates directly into physical capacity saturation. In real-world deployment, physical KV cache allocation is managed through virtualized memory pages using PagedAttention to prevent external fragmentation.[^fn-paged-attention-kvcache]
-
-[^fn-paged-attention-kvcache]: **PagedAttention Virtualization**: PagedAttention [@kwon2023vllm] virtualizes KV cache storage by partitioning sequences into fixed-size physical memory blocks (typically $B=16$ or $B=32$ tokens) referenced through dynamic page tables, mirroring virtual memory paging in operating systems. This completely eliminates external memory fragmentation between concurrently executing sequences, bounding internal fragmentation to the final block of each sequence with an expected memory waste of $(B-1)/2$ tokens (under 3 percent memory overhead in production serving).
-
-```{python}
-#| label: lego-kv-cache-memory-explosion
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ KV CACHE MEMORY EXPLOSION (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @nbk-02-kv-cache-memory-explosion
-# │ Goal: Quantify KV cache scaling and memory capacity saturation for long contexts.
-# │ Show: 128k context demands 41.94 GB (FP16) or 20.97 GB (FP8), exceeding 80 GB HBM.
-# │ How: 2 * layers * kv_heads * head_dim * bytes_per_elem * context_length + model_footprint.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-from mlsysim.core.units import *
-from mlsysim.fmt import check, fmt_int, fmt_memory
-from mlsysim.physics.agents import calc_kv_cache_bytes_per_token
-
-class KvCacheMemoryExplosion:
-    """Memory scaling of the autoregressive key-value cache under long contexts."""
-
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    n_layers = 80
-    n_q_heads = 64
-    n_kv_heads = 8
-    d_head = 128
-    d_model = n_q_heads * d_head
-    bytes_per_elem_fp16 = 2 * byte
-    bytes_per_elem_fp8 = 1 * byte
-    s_context = 128_000
-    weights_footprint = 70.0 * GB
-    hbm_capacity = 80.0 * GB
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    mem_kv_token_fp16 = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem_fp16)
-    mem_kv_token_fp8 = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem_fp8)
-    mem_kv_total_fp16 = s_context * mem_kv_token_fp16
-    mem_kv_total_fp8 = s_context * mem_kv_token_fp8
-    mem_total_fp16 = weights_footprint + mem_kv_total_fp16
-    mem_total_fp8 = weights_footprint + mem_kv_total_fp8
-    tp_kv_heads = n_kv_heads // 2
-    tp_mem_kv_fp8 = mem_kv_total_fp8 / 2
-    tp_weights = weights_footprint / 2
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(mem_kv_token_fp16.to(byte).magnitude == 327680.0, "Unexpected per-token FP16 bytes")
-    check(mem_kv_token_fp16.to(KiB).magnitude == 320.0, "Unexpected per-token FP16 KiB")
-    check(abs(mem_kv_total_fp16.to(GB).magnitude - 41.94) < 0.01, "Unexpected 128k FP16 KV size")
-    check(abs(mem_total_fp16.to(GB).magnitude - 111.94) < 0.01, "Unexpected total FP16 footprint")
-    check(mem_kv_token_fp8.to(byte).magnitude == 163840.0, "Unexpected per-token FP8 bytes")
-    check(abs(mem_kv_total_fp8.to(GB).magnitude - 20.97) < 0.01, "Unexpected 128k FP8 KV size")
-    check(abs(mem_total_fp8.to(GB).magnitude - 90.97) < 0.01, "Unexpected total FP8 footprint")
-    check(tp_kv_heads == 4, "Unexpected TP KV heads")
-    check(abs(tp_mem_kv_fp8.to(GB).magnitude - 10.49) < 0.01, "Unexpected TP FP8 KV size")
-    check(tp_weights.to(GB).magnitude == 35.0, "Unexpected TP weights")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    n_layers_str = fmt_int(n_layers)
-    n_q_heads_str = fmt_int(n_q_heads)
-    n_kv_heads_str = fmt_int(n_kv_heads)
-    d_head_str = fmt_int(d_head)
-    d_model_str = fmt_int(d_model)
-    s_context_str = fmt_int(s_context)
-    hbm_capacity_gb_str = fmt_memory(hbm_capacity, unit=GB, precision=0)
-    weights_footprint_gb_str = fmt_memory(weights_footprint, unit=GB, precision=0)
-    mem_total_fp16_gb_str = fmt_memory(mem_total_fp16, unit=GB, precision=2)
-    mem_kv_token_fp8_bytes_str = fmt_int(mem_kv_token_fp8.to(byte).magnitude)
-    mem_kv_total_fp8_gb_str = fmt_memory(mem_kv_total_fp8, unit=GB, precision=2)
-    mem_total_fp8_gb_str = fmt_memory(mem_total_fp8, unit=GB, precision=2)
-    tp_kv_heads_str = fmt_int(tp_kv_heads)
-    tp_mem_kv_fp8_gb_str = fmt_memory(tp_mem_kv_fp8, unit=GB, precision=2)
-    tp_weights_gb_str = fmt_memory(tp_weights, unit=GB, precision=0)
-```
-
-::: {#nbk-02-kv-cache-memory-explosion .callout-notebook title="KV cache memory explosion in a 128k long-context serving node"}
-Consider an agentic coding assistant deployed on a frontier model whose architecture matches Llama-3-70B. The network parameters are:
-
-- Layer depth: $L =$ `{python} KvCacheMemoryExplosion.n_layers_str`
-- Query heads: $n_{\text{q}} =$ `{python} KvCacheMemoryExplosion.n_q_heads_str`
-- Key-Value heads (GQA): $n_{\text{kv}} =$ `{python} KvCacheMemoryExplosion.n_kv_heads_str`
-- Head dimension: $d_{\text{head}} =$ `{python} KvCacheMemoryExplosion.d_head_str` (hidden dimension $d_{\text{model}} = 64 \times 128 =$ `{python} KvCacheMemoryExplosion.d_model_str`)
-- Default precision: FP16 ($b = 2\text{ bytes}$)
-
-First, calculate the memory required to store the KV cache projections for a single token:
-
-$$\text{Mem}_{\text{KV,token}} = 2 \cdot 80 \cdot (8 \cdot 128) \cdot 2 = 327{,}680\text{ bytes/token} = 320\text{ KiB/token}$$
-
-Now, consider an agent performing complex codebase analysis across a large repository context, staging an active context window of $S =$ `{python} KvCacheMemoryExplosion.s_context_str` tokens. The memory demanded exclusively by the KV cache is:
-
-$$\text{Mem}_{\text{KV}}(128\text{k}) = 128{,}000 \times 327{,}680\text{ bytes} = 41{,}943{,}040{,}000\text{ bytes} \approx 41.94\text{ GB}$$
-
-Suppose the serving node is provisioned with an industry-standard NVIDIA A100-SXM4-80GB or H100-SXM5-80GB accelerator containing `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str` of High-Bandwidth Memory (HBM). To run this 70B parameter model, the runtime uses 8-bit quantized weights and allocates static CUDA workspaces, communication scratchpads, and execution buffers, consuming a baseline resident footprint of `{python} KvCacheMemoryExplosion.weights_footprint_gb_str`:
-
-$$W = 70.00\text{ GB}$$
-
-When the agent attempts to ingest the 128k context, the total physical memory demanded on the accelerator silicon is:
-
-$$\text{Mem}_{\text{total, FP16}} = 70.00\text{ GB} + 41.94\text{ GB} = 111.94\text{ GB}$$
-
-Because `{python} KvCacheMemoryExplosion.mem_total_fp16_gb_str` $>$ `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str`, the allocation breaches physical capacity, crashing the serving runtime with a CUDA Out-of-Memory (OOM) fault.
-
-To mitigate this bottleneck, the systems engineer might attempt to quantize the KV cache to 8-bit precision (FP8, where $b = 1\text{ byte}$). Halving the storage precision cuts the per-token memory footprint to `{python} KvCacheMemoryExplosion.mem_kv_token_fp8_bytes_str` bytes/token, yielding:
-
-$$\text{Mem}_{\text{KV, FP8}}(128\text{k}) = 128{,}000 \times 163{,}840\text{ bytes} \approx 20.97\text{ GB}$$
-
-Re-evaluating the total accelerator memory footprint under FP8 yields:
-
-$$\text{Mem}_{\text{total, FP8}} = 70.00\text{ GB} + 20.97\text{ GB} = 90.97\text{ GB}$$
-
-Even with an 8-bit quantized KV cache, `{python} KvCacheMemoryExplosion.mem_total_fp8_gb_str` $>$ `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str`. The serving engine still crashes the `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str` device.
-
-In production environments, resolving this failure mode requires one of two structural systems interventions:
-
-1. **Tensor Parallelism ($TP \ge 2$):** The system shards the model weights and the `{python} KvCacheMemoryExplosion.n_kv_heads_str` KV heads across two or more interconnected GPUs. With $TP = 2$, each GPU holds only `{python} KvCacheMemoryExplosion.tp_kv_heads_str` KV heads (`{python} KvCacheMemoryExplosion.tp_mem_kv_fp8_gb_str` in FP8 or `{python} KvCacheMemoryExplosion.mem_kv_total_fp8_gb_str` in FP16) and half the model weights (`{python} KvCacheMemoryExplosion.tp_weights_gb_str`), bringing per-GPU memory well within the `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str` threshold.
-2. **Hardware Migration:** The system upgrades to next-generation accelerators with expanded physical HBM capacity, such as the NVIDIA H200 (141 GB HBM3e) or the NVIDIA B200 (192 GB HBM3e), which can comfortably absorb model weights and large continuous KV buffers on a single device.
-:::
-
 ### Multimodal token ingestion: Vision patch budgets
 
 Autonomous agents increasingly operate as multimodal perception systems, ingesting desktop screen captures in graphical user interface (GUI) automation, camera frames in robotics, and rendered visual documents in workflow automation. While text inputs inject tokens gradually at roughly three to four characters per token, multimodal inputs subject the accelerator to instantaneous, large-scale token injection. A single high-resolution image materializes thousands of input tokens simultaneously, consuming substantial context capacity and physical memory before a single reasoning token is decoded.
@@ -741,6 +584,152 @@ The host supervisor enforces three distinct stop conditions during boundary eval
 *   **Host Stop Delimiters:** The runtime matches emitted subword sequences against application-specified byte strings (such as `\nObservation:` or `</tool_call>`), terminating model execution immediately when the generation crosses an external architectural boundary.
 *   **Resource Ceilings ($T_{\max}$):** The loop reaches a strict maximum output token limit $T_{\max}$, preventing non-terminating loops and enforcing budget isolation.
 
+### Physical memory footprint of the key-value cache
+
+As established in @tbl-serving-state, the serving state machine commits the intermediate Key ($\mathbf{K}$) and Value ($\mathbf{V}$) projection tensors computed at each step into accelerator High-Bandwidth Memory (HBM). To avoid the redundant $O(S^2)$ computational overhead of recomputing the Key and Value projections for historical sequence positions at every autoregressive step, the inference engine stores these intermediate projection matrices in an accelerator memory buffer: the Key-Value (KV) cache.
+
+The physical memory footprint of this cache is directly proportional to the number of processed tokens. Let:
+
+- $L$ be the total number of transformer layers in the model.
+- $n_{\text{kv}}$ be the number of Key-Value attention heads per layer.
+- $d_{\text{head}}$ be the dimensionality of each attention head ($d_{\text{head}} = d_{\text{model}} / n_{\text{q}}$, where $n_{\text{q}}$ is the number of Query heads).
+- $b$ be the numerical precision in bytes per element ($b=2$ for 16-bit precision FP16/BF16; $b=1$ for 8-bit FP8).
+
+Across the entire model, the physical memory consumed by the KV cache for a single token position is derived directly from its tensor dimensions:
+
+$$\text{Mem}_{\text{KV,token}} = 2 \cdot L \cdot (n_{\text{kv}} \cdot d_{\text{head}}) \cdot b \quad \left[\frac{\text{bytes}}{\text{token}}\right]$$
+
+The constituent factors reflect the physical structure of the attention architecture:
+
+1. **The Factor of 2:** The cache must store two distinct projection tensors for each token position: the attention Key vector $\mathbf{k}$ and the attention Value vector $\mathbf{v}$.
+2. **Layer Depth ($L$):** Each transformer layer computes independent attention projections; the cache must preserve state across all $L$ layers.
+3. **Head Width ($n_{\text{kv}} \cdot d_{\text{head}}$):** In early Multi-Head Attention (MHA) designs, the number of Key-Value heads equaled the number of Query heads ($n_{\text{kv}} = n_{\text{q}}$). Modern long-context architectures employ Grouped-Query Attention (GQA), where multiple Query heads share a single Key-Value head ($n_{\text{kv}} \ll n_{\text{q}}$), reducing the total cached state by an order of magnitude.[^fn-grouped-query-compression]
+4. **Storage Precision ($b$):** The word size dictates the memory traffic and footprint of each tensor element.
+
+[^fn-grouped-query-compression]: **Grouped-Query Attention Compression**: Grouped-Query Attention (GQA) [@ainslie2023gqa] groups multiple Query attention heads into shared Key-Value head partitions (e.g., $n_{\text{kv}} = 8$ for $n_{\text{q}} = 64$ in Llama-3-70B), reducing KV cache memory capacity and memory-bus read traffic by an $8\times$ factor while retaining over 99 percent of dense Multi-Head Attention (MHA) task performance. At the extreme limit, Multi-Query Attention (MQA) [@shazeer2019fast] collapses all query heads to a single shared Key-Value head pair ($n_{\text{kv}} = 1$), achieving up to $64\times$ memory reduction at the cost of modest degradation in complex multi-hop retrieval reasoning.
+
+For an active context containing $S$ tokens, the total physical memory allocated to the KV cache scales linearly:
+
+$$\text{Mem}_{\text{KV}}(S) = S \cdot \text{Mem}_{\text{KV,token}}$$
+
+This linear memory scaling creates an unforgiving systems constraint: on accelerator hardware, context length translates directly into physical capacity saturation. In real-world deployment, physical KV cache allocation is managed through virtualized memory pages using PagedAttention to prevent external fragmentation.[^fn-paged-attention-kvcache]
+
+[^fn-paged-attention-kvcache]: **PagedAttention Virtualization**: PagedAttention [@kwon2023vllm] virtualizes KV cache storage by partitioning sequences into fixed-size physical memory blocks (typically $B=16$ or $B=32$ tokens) referenced through dynamic page tables, mirroring virtual memory paging in operating systems. This completely eliminates external memory fragmentation between concurrently executing sequences, bounding internal fragmentation to the final block of each sequence with an expected memory waste of $(B-1)/2$ tokens (under 3 percent memory overhead in production serving).
+
+```{python}
+#| label: lego-kv-cache-memory-explosion
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KV CACHE MEMORY EXPLOSION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-02-kv-cache-memory-explosion
+# │ Goal: Quantify KV cache scaling and memory capacity saturation for long contexts.
+# │ Show: 128k context demands 41.94 GB (FP16) or 20.97 GB (FP8), exceeding 80 GB HBM.
+# │ How: 2 * layers * kv_heads * head_dim * bytes_per_elem * context_length + model_footprint.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory
+from mlsysim.physics.agents import calc_kv_cache_bytes_per_token
+
+class KvCacheMemoryExplosion:
+    """Memory scaling of the autoregressive key-value cache under long contexts."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_layers = 80
+    n_q_heads = 64
+    n_kv_heads = 8
+    d_head = 128
+    d_model = n_q_heads * d_head
+    bytes_per_elem_fp16 = 2 * byte
+    bytes_per_elem_fp8 = 1 * byte
+    s_context = 128_000
+    weights_footprint = 70.0 * GB
+    hbm_capacity = 80.0 * GB
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mem_kv_token_fp16 = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem_fp16)
+    mem_kv_token_fp8 = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem_fp8)
+    mem_kv_total_fp16 = s_context * mem_kv_token_fp16
+    mem_kv_total_fp8 = s_context * mem_kv_token_fp8
+    mem_total_fp16 = weights_footprint + mem_kv_total_fp16
+    mem_total_fp8 = weights_footprint + mem_kv_total_fp8
+    tp_kv_heads = n_kv_heads // 2
+    tp_mem_kv_fp8 = mem_kv_total_fp8 / 2
+    tp_weights = weights_footprint / 2
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mem_kv_token_fp16.to(byte).magnitude == 327680.0, "Unexpected per-token FP16 bytes")
+    check(mem_kv_token_fp16.to(KiB).magnitude == 320.0, "Unexpected per-token FP16 KiB")
+    check(abs(mem_kv_total_fp16.to(GB).magnitude - 41.94) < 0.01, "Unexpected 128k FP16 KV size")
+    check(abs(mem_total_fp16.to(GB).magnitude - 111.94) < 0.01, "Unexpected total FP16 footprint")
+    check(mem_kv_token_fp8.to(byte).magnitude == 163840.0, "Unexpected per-token FP8 bytes")
+    check(abs(mem_kv_total_fp8.to(GB).magnitude - 20.97) < 0.01, "Unexpected 128k FP8 KV size")
+    check(abs(mem_total_fp8.to(GB).magnitude - 90.97) < 0.01, "Unexpected total FP8 footprint")
+    check(tp_kv_heads == 4, "Unexpected TP KV heads")
+    check(abs(tp_mem_kv_fp8.to(GB).magnitude - 10.49) < 0.01, "Unexpected TP FP8 KV size")
+    check(tp_weights.to(GB).magnitude == 35.0, "Unexpected TP weights")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_layers_str = fmt_int(n_layers)
+    n_kv_heads_str = fmt_int(n_kv_heads)
+    d_head_str = fmt_int(d_head)
+    d_model_str = fmt_int(d_model)
+    s_context_str = fmt_int(s_context)
+    hbm_capacity_gb_str = fmt_memory(hbm_capacity, unit=GB, precision=0)
+    weights_footprint_gb_str = fmt_memory(weights_footprint, unit=GB, precision=0)
+    mem_total_fp16_gb_str = fmt_memory(mem_total_fp16, unit=GB, precision=2)
+    mem_kv_token_fp8_bytes_str = fmt_int(mem_kv_token_fp8.to(byte).magnitude)
+    mem_kv_total_fp8_gb_str = fmt_memory(mem_kv_total_fp8, unit=GB, precision=2)
+    mem_total_fp8_gb_str = fmt_memory(mem_total_fp8, unit=GB, precision=2)
+    tp_kv_heads_str = fmt_int(tp_kv_heads)
+    tp_mem_kv_fp8_gb_str = fmt_memory(tp_mem_kv_fp8, unit=GB, precision=2)
+    tp_weights_gb_str = fmt_memory(tp_weights, unit=GB, precision=0)
+```
+
+::: {#nbk-02-kv-cache-memory-explosion .callout-notebook title="KV cache memory explosion in a 128k long-context serving node"}
+Consider an agentic coding assistant deployed on a frontier model whose architecture matches Llama-3-70B. The network parameters are:
+
+- Layer depth: $L =$ `{python} KvCacheMemoryExplosion.n_layers_str`
+- Query heads: $n_{\text{q}} =$ `{python} KvCacheMemoryExplosion.n_q_heads_str`
+- Key-Value heads (GQA): $n_{\text{kv}} =$ `{python} KvCacheMemoryExplosion.n_kv_heads_str`
+- Head dimension: $d_{\text{head}} =$ `{python} KvCacheMemoryExplosion.d_head_str` (hidden dimension $d_{\text{model}} = 64 \times 128 =$ `{python} KvCacheMemoryExplosion.d_model_str`)
+- Default precision: FP16 ($b = 2\text{ bytes}$)
+
+First, calculate the memory required to store the KV cache projections for a single token:
+
+$$\text{Mem}_{\text{KV,token}} = 2 \cdot 80 \cdot (8 \cdot 128) \cdot 2 = 327{,}680\text{ bytes/token} = 320\text{ KiB/token}$$
+
+Now, consider an agent performing complex codebase analysis across a large repository context, staging an active context window of $S =$ `{python} KvCacheMemoryExplosion.s_context_str` tokens. The memory demanded exclusively by the KV cache is:
+
+$$\text{Mem}_{\text{KV}}(128\text{k}) = 128{,}000 \times 327{,}680\text{ bytes} = 41{,}943{,}040{,}000\text{ bytes} \approx 41.94\text{ GB}$$
+
+Suppose the serving node is provisioned with an industry-standard NVIDIA A100-SXM4-80GB or H100-SXM5-80GB accelerator containing `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str` of High-Bandwidth Memory (HBM). To run this 70B parameter model, the runtime uses 8-bit quantized weights and allocates static CUDA workspaces, communication scratchpads, and execution buffers, consuming a baseline resident footprint of `{python} KvCacheMemoryExplosion.weights_footprint_gb_str`:
+
+$$W = 70.00\text{ GB}$$
+
+When the agent attempts to ingest the 128k context, the total physical memory demanded on the accelerator silicon is:
+
+$$\text{Mem}_{\text{total, FP16}} = 70.00\text{ GB} + 41.94\text{ GB} = 111.94\text{ GB}$$
+
+Because `{python} KvCacheMemoryExplosion.mem_total_fp16_gb_str` $>$ `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str`, the allocation breaches physical capacity, crashing the serving runtime with a CUDA Out-of-Memory (OOM) fault.
+
+To mitigate this bottleneck, the systems engineer might attempt to quantize the KV cache to 8-bit precision (FP8, where $b = 1\text{ byte}$). Halving the storage precision cuts the per-token memory footprint to `{python} KvCacheMemoryExplosion.mem_kv_token_fp8_bytes_str` bytes/token, yielding:
+
+$$\text{Mem}_{\text{KV, FP8}}(128\text{k}) = 128{,}000 \times 163{,}840\text{ bytes} \approx 20.97\text{ GB}$$
+
+Re-evaluating the total accelerator memory footprint under FP8 yields:
+
+$$\text{Mem}_{\text{total, FP8}} = 70.00\text{ GB} + 20.97\text{ GB} = 90.97\text{ GB}$$
+
+Even with an 8-bit quantized KV cache, `{python} KvCacheMemoryExplosion.mem_total_fp8_gb_str` $>$ `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str`. The serving engine still crashes the `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str` device.
+
+In production environments, resolving this failure mode requires one of two structural systems interventions:
+
+1. **Tensor Parallelism ($TP \ge 2$):** The system shards the model weights and the `{python} KvCacheMemoryExplosion.n_kv_heads_str` KV heads across two or more interconnected GPUs. With $TP = 2$, each GPU holds only `{python} KvCacheMemoryExplosion.tp_kv_heads_str` KV heads (`{python} KvCacheMemoryExplosion.tp_mem_kv_fp8_gb_str` in FP8 or `{python} KvCacheMemoryExplosion.mem_kv_total_fp8_gb_str` in FP16) and half the model weights (`{python} KvCacheMemoryExplosion.tp_weights_gb_str`), bringing per-GPU memory well within the `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str` threshold.
+2. **Hardware Migration:** The system upgrades to next-generation accelerators with expanded physical HBM capacity, such as the NVIDIA H200 (141 GB HBM3e) or the NVIDIA B200 (192 GB HBM3e), which can comfortably absorb model weights and large continuous KV buffers on a single device.
+:::
+
 ### The causal serialization barrier
 
 While prompt prefill parallelizes across all sequence positions as a compute-bound tensor contraction, autoregressive token generation encounters an absolute *causal serialization barrier*. In a multi-layer Transformer, the query vector $\mathbf{Q}_t$, key vector $\mathbf{K}_t$, and value vector $\mathbf{V}_t$ computed at layer $l$ for step $t$ depend directly on the contextual representation emitted by layer $l-1$ (@eq-attention-causal-step):
@@ -774,7 +763,7 @@ This guarantees that the combined output distribution is bit-exact identical to 
 ![](images/svg/speculative_decoding_pipeline.svg)
 :::
 
-### Sampling on the vocabulary Simplex
+### Sampling on the vocabulary simplex
 
 ::: {.column-margin}
 ![](images/svg/vol3_processor_margin_001.svg){width="100%" fig-alt="Ranked vocabulary probability distribution: the top two tokens capture 95.9% of cumulative mass under top-p nucleus truncation (p=0.90, in emerald), while rigid top-k (k=4) forces inclusion of two low-probability tail tokens (in crimson)."}
@@ -2019,18 +2008,6 @@ By reducing decode tokens by `{python} QuantitativeInterfaceEvaluation.token_red
 The empirical measurement of invocation interfaces exposes the fundamental operational boundary of the foundation model engine. A single invocation produces one unprivileged, stochastic candidate sequence. When that candidate is ambiguous, syntactically corrupted, or logically incorrect, the host system cannot escape the failure through superficial prompt adjustments or tighter grammar constraints. Interface optimization can minimize token tax and memory bandwidth saturation, but it cannot bridge the epistemic gap inherent in static autoregressive prediction.
 
 Before examining how systems scale inference-time compute across search trees, verification loops, and external environments to overcome these single-invocation boundaries, we must first confront the deep architectural misconceptions that routinely derail production deployments. The following analysis dismantles the persistent fallacies and traps that arise when software engineers mistake unprivileged statistical predictors for deterministic, privileged operating system kernels.
-
-::: {#nbk-02-quantitative-interface-evaluation-under-an .callout-notebook title="Two interfaces for one bug fix under a deadline"}
-
-**Problem**: The agent must change five lines of a 400-line file, with a `{python} CallPrice.s0_str`-token base prompt and a `{python} CallPrice.deadline_str`-second deadline per call. A whole-file rewrite in JSON adds `{python} CallPrice.dm_full_str` prompt tokens of format instructions and emits `{python} CallPrice.k_full_str` output tokens. An anchored diff adds `{python} CallPrice.dm_diff_str` prompt tokens and emits `{python} CallPrice.k_diff_str`. Take illustrative rates for the diff. Its anchors match `{python} CallPrice.syntax_ok_str` of the time, and `{python} CallPrice.fix_rate_str` of well-formed diffs pass the tests. Which interface completes more verified fixes?
-
-**Math**: Using $T_{\text{call}} \approx S\,t_{\text{prefill}} + K\,t_{\text{tok}}$ with the floors of @sec-vol3-foundation-model-cost, the rewrite takes about `{python} CallPrice.t_full_str` s and the diff about `{python} CallPrice.t_diff_str` s. Decode dominates both, and the diff is about `{python} CallPrice.speedup_str` times faster. The rewrite exceeds the deadline, so the runtime abandons it with status `TIMED_OUT` and its verified success is zero, however well it would have parsed. The diff finishes in time, and its verified success is the product of its anchor match rate and its test pass rate.
-
-**Result**: About `{python} CallPrice.pass_diff_str` of tasks verified for the diff, against none for the rewrite under this deadline.
-
-**Systems insight**: The interface with the lower parse rate completed far more verified fixes, because it cut output tokens by more than an order of magnitude and output tokens set latency. Judge interfaces by verified success at a matched budget, never by parse rate alone.
-
-:::
 
 ## Fallacies and Pitfalls {#sec-vol3-foundation-model-fallacies}
 

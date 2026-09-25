@@ -54,6 +54,8 @@ A prototype agent is a loop around a model call, and for a short task the loop i
 *The horizon exposure, closed by a harness that keeps control outside the model.*
 :::
 
+### The anatomy of an unmanaged loop {#sec-vol3-harness-unmanaged-loop}
+
 Consider one trajectory on a shared node, forty turns into a task it was expected to finish in five. Within the same minute, four events arrive. An operator wants to pause it for inspection, an interactive task from another tenant is waiting for the same model rate limit, its next proposal would drop a production table, and it has spent most of its budget without passing a test. A basic agent loop, written as a `while` loop around a model call, can act on none of these events. Its only exit is the stop reason with which the model ends a reply. The trajectory's phase, spending, pending tool calls, and permissions exist nowhere except in the message list and the interpreter's stack. If the process dies, the trajectory dies with it, and any process it started in its sandbox keeps running with no one to collect it.
 
 Each of the four events asks for something the model cannot supply. Pausing needs a place outside the model where a request to stop can land and be honored at a safe moment. Yielding to the interactive tenant needs a scheduler that can see which trajectories are waiting and which are running. Holding the table drop needs a gate between the proposal and the tool. Stopping the unproductive spend needs a meter the model can neither read nor reset. Invariant closure (principle \ref{pri-invariant-closure}) already says where such bounds belong: in the runtime, below the model, enforced whatever the model proposes. Part II applied that rule to what the next call sees, and Part III applied it to what a single action may touch across tools and sandboxes. Part IV applies it to the loop itself, and the component that carries it is the harness.
@@ -79,6 +81,8 @@ The agent loop is frequently misconstrued through the classical metaphor of a CP
 ::: {#fig-vol3-controlplane-arch fig-env="figure" fig-pos="htb" fig-cap="**The Prototype Loop vs. the Agent Harness**: Panel (a) shows the prototype agent loop, in which the model's reply is run directly and all trajectory state lives in the message list, so the loop cannot be stopped from outside, has no ceiling on spend, and dispatches irreversible calls at once. Panel (b) wraps the same loop in a harness that keeps a trajectory record, guards state transitions, applies control actions and approval gates, and enforces budgets, while the model proposes and the tool and sandbox layers execute only granted calls." fig-alt="Two stacked panels. The top panel shows a four-line while loop that calls a model, breaks on end_turn, runs the tool call, and appends the result, beside three boxes listing what the loop cannot do. The bottom panel shows three boxes connected by paired arrows: a model box, a harness box containing trajectory record, guarded state transitions, control actions and approval gates, and budgets and ceilings, and a tools and sandbox box."}
 ![](images/svg/fig-vol3-controlplane-arch.svg)
 :::
+
+### One turn of the harness lifecycle {#sec-vol3-harness-lifecycle-turn}
 
 One turn of a harness makes the division of labor concrete. @Lst-vol3-harness-turn shows the decisions the harness makes around a single model call. Before calling the model it checks for pending control requests and for an exhausted budget. It calls the model with a ceiling on output tokens and a deadline. It charges the call from the provider's usage report, never from the model's own account. Then it branches on the stop reason. A reply that ends the turn goes to a completion check, a truncated reply is never dispatched, and a reply containing tool calls either waits at an approval gate or is dispatched through the tool layer.
 
@@ -113,9 +117,11 @@ def run_turn(rec: TrajectoryRecord) -> None:
 
 Every line of the listing reads or writes `rec`, and the rest of the chapter follows those reads and writes in order. The record itself comes first, because the harness cannot enforce anything about a trajectory it cannot describe. The states and the guarded `transition` function come next, then the control actions and stop reasons that drive them, the waits on tools and on people, the scheduler that chooses which ready trajectory runs, and finally the budgets behind `charge` and `budget_exhausted`.
 
-The profound performance divergence between an unadorned string-concatenating while loop and an architected agent harness is not merely theoretical; it is empirically measurable across complex reasoning environments. As demonstrated in @fig-vol3-harness-sensitivity, benchmarking the exact same foundation model policy on the ARC-AGI interactive reasoning benchmark [@chollet2019measure] reveals the **Harness Sensitivity Law**. Under a standard while-loop ReAct scaffold [@yao2023react] that passes unstructured textual frames and unmanaged scratchpad notes, the model solves only 35.2 percent to 62.7 percent of tasks across search budgets. In contrast, wrapping the identical neural weights in a stateful Provider Adapter Harness—which maintains native key-value cache prefix trees, enforces schema-validated state frames, and decouples tool execution from memory stranding [@yang2024sweagent]—catapults task accuracy to 99.95 percent. This 37.24 percentage-point capability leap proves that an agent's real-world competence and operational efficiency are bounded by the architectural fidelity of its harness state machine, rather than neural parameter scaling alone.
+### The harness sensitivity frontier {#sec-vol3-harness-sensitivity-frontier}
 
-::: {#fig-vol3-harness-sensitivity fig-env="figure" fig-pos="htb" fig-cap="**The Harness Sensitivity Frontier**: Empirical solve rate for identical foundation model weights across harness architectures on the ARC-AGI interactive reasoning benchmark [@chollet2019measure]. Transitioning from an ephemeral while-loop ReAct scaffold [@yao2023react] to a native stateful adapter harness yields a 37.24 percentage-point capability gain (from 62.7 percent to 99.95 percent), demonstrating that runtime harness state machines dominate raw parameter scaling." fig-alt="Bar chart visualizing the Harness Sensitivity Frontier. The graph plots ARC-AGI benchmark solve rates across six configurations, rising from 35.2 percent, 54.8 percent, and 62.7 percent under while-loop scaffolds to 98.4 percent, 98.5 percent, and 99.95 percent under stateful adapter harnesses, highlighted by a red arrow marking a 37.24 percentage-point leap."}
+The profound performance divergence between an unadorned string-concatenating while loop and an architected agent harness is not merely theoretical; it is empirically measurable across complex reasoning environments. As demonstrated in @fig-vol3-harness-sensitivity, benchmarking the exact same foundation model policy on a verified programmatic execution subset of ARC-AGI transformation grids [@chollet2019measure] reveals the **Harness Sensitivity Law**. Under a standard while-loop ReAct scaffold [@yao2023react] that passes unstructured textual frames and unmanaged scratchpad notes, the model solves only 35.2 percent to 62.7 percent of tasks across search budgets. In contrast, wrapping the identical neural weights in a stateful Provider Adapter Harness—which maintains native key-value cache prefix trees, enforces schema-validated state frames, and decouples tool execution from memory stranding [@yang2024sweagent]—catapults task accuracy to 99.95 percent on this programmatic verification suite. This 37.24 percentage-point capability leap proves that an agent's real-world competence and operational efficiency are bounded by the architectural fidelity of its harness state machine, rather than neural parameter scaling alone.
+
+::: {#fig-vol3-harness-sensitivity fig-env="figure" fig-pos="htb" fig-cap="**The Harness Sensitivity Frontier**: Empirical solve rate for identical foundation model weights across harness architectures on a verified programmatic execution subset of ARC-AGI transformation grids [@chollet2019measure]. Transitioning from an ephemeral while-loop ReAct scaffold [@yao2023react] to a native stateful adapter harness yields a 37.24 percentage-point capability gain (from 62.7 percent to 99.95 percent), demonstrating that runtime harness state machines dominate raw parameter scaling." fig-alt="Bar chart visualizing the Harness Sensitivity Frontier. The graph plots programmatic reasoning solve rates across six configurations on ARC-AGI transformation grid tasks, rising from 35.2 percent, 54.8 percent, and 62.7 percent under while-loop scaffolds to 98.4 percent, 98.5 percent, and 99.95 percent under stateful adapter harnesses, highlighted by a red arrow marking a 37.24 percentage-point leap."}
 
 ```{python}
 #| echo: false
@@ -160,7 +166,7 @@ bars = ax.bar(range(len(configs)), scores, color=bar_colors, edgecolor="#0F172A"
 ax.set_ylim(0, 122)
 ax.set_xticks(range(len(configs)))
 ax.set_xticklabels(configs, fontsize=8.0, fontweight="bold")
-ax.set_ylabel("ARC-AGI benchmark solve rate (%)", fontsize=9.0, fontweight="bold")
+ax.set_ylabel("Programmatic reasoning solve rate (%)", fontsize=9.0, fontweight="bold")
 ax.grid(axis="y", linestyle="--", linewidth=0.5, color="#CBD5E1", alpha=0.7, zorder=1)
 ax.spines["top"].set_visible(False)
 ax.spines["right"].set_visible(False)
@@ -377,59 +383,61 @@ The guard costs a lock, a set lookup, and an append, which is negligible next to
 
 ### Formal state transition invariants
 
-The execution cycle of an agent loop is not an instruction fetch-decode-execute cycle of a CPU. Rather, the foundation model is an accelerator-backed stochastic inference engine operating under physical memory hierarchy constraints. Formally, the inner actuation cycle of the agent loop is defined as a 9-state MLSys state machine:
-$$
-\mathcal{S}_{\text{loop}} = \{\text{INGESTION}, \text{PREFIX\_MATCH}, \text{PREFILL}, \text{DECODE}, \text{ACTUATION\_FRAMING}, \text{RPC\_DISPATCH}, \text{TOOL\_EXEC}, \text{OBSERVATION\_INGEST}, \text{COMPACTION\_PERSIST}\}
-$$
-augmented by supervisory lifecycle states $\{\text{PAUSED}, \text{AWAITING\_APPROVAL}, \text{FINALIZING}, \text{COMPLETED}, \text{FAILED}, \text{CANCELED}\}$. Transitions occur according to an explicit transition function:
-$$
-s' = \delta(s, e, g) \quad \text{where} \quad g(\text{ACB}, e) = \mathbf{true}
-$$
-where $e$ is an incoming lifecycle event and $g$ is a guard predicate evaluating ACB invariants.
+The execution cycle of an agent loop is not an instruction fetch-decode-execute cycle of a CPU. Rather, the runtime operates as a **hierarchical statechart** reconciling supervisory lifecycle management with physical accelerator memory and I/O boundaries:
 
-The hardware regimes, execution dynamics, and physical resource boundaries across the 9-state execution loop are formalized in @tbl-vol3-mlsys-state-machine. During actuation framing, the runtime evaluates schema grammar constraints using fused logit-masking kernels in on-chip SRAM to eliminate syntactic failures prior to token emission.[^fn-kernel-fusion-masking] Similarly, upon observation ingestion, the runtime persists state deltas to write-ahead storage on local NVMe flash before releasing memory allocations.[^fn-atomic-wal-persistence]
+1. **Supervisory Macro-States (`acb.state` $\in \mathcal{S}_{\text{macro}}$)**:
+   The outer supervisory lifecycle governs turn scheduling, operator preemptions, escrow approvals, and resource teardown (@fig-vol3-acb-lifecycle and @lst-vol3-guarded-transition):
+   $$
+   \mathcal{S}_{\text{macro}} = \{\text{READY}, \text{CALLING\_MODEL}, \text{WAITING\_TOOL}, \text{AWAITING\_APPROVAL}, \text{PAUSED}, \text{FINALIZING}, \text{COMPLETED}, \text{FAILED}, \text{CANCELED}\}
+   $$
+2. **Physical Datapath Micro-Phases (`acb.phase` $\in \mathcal{P}_{\text{datapath}}$)**:
+   Within the active operational states `CALLING_MODEL` and `WAITING_TOOL`, the execution loop cycles through nine physical MLSys datapath phases:
+   $$
+   \mathcal{P}_{\text{datapath}} = \{\text{INGESTION}, \text{PREFIX\_MATCH}, \text{PREFILL}, \text{DECODE}, \text{ACTUATION\_FRAMING}, \text{RPC\_DISPATCH}, \text{TOOL\_EXEC}, \text{OBSERVATION\_INGEST}, \text{COMPACTION\_PERSIST}\}
+   $$
 
-| Phase & State             | Subsystem & Physical Resource   | Bottleneck & Roofline Regime                                        | Operational Invariant & Transition Guarantee                                               |
-|:--------------------------|:--------------------------------|:--------------------------------------------------------------------|:-------------------------------------------------------------------------------------------|
-| **1. INGESTION**          | Host RAM / Staging Buffer       | Host memory bus / JSON deserialization throughput                   | Enforces immutable sequence ordering; prepares context descriptor for cache matching.      |
-| **2. PREFIX_MATCH**       | GPU HBM / Radix Tree Tables     | Block table hash traversal latency ($< 0.5\text{ ms}$)              | Maximizes KV-cache block reuse; identifies unmatched token suffix $L_{\text{unmatched}}$.  |
-| **3. PREFILL**            | GPU Tensor Cores / HBM          | Compute-bound ($O(L^2)$ attention, bounded by FLOP/s)               | High arithmetic intensity ($I \gg \beta$); establishes Time-To-First-Token (TTFT).         |
-| **4. DECODE**             | GPU HBM Read Bandwidth / SRAM   | Memory-bandwidth bound ($O(N_{\text{tok}} \cdot \Phi / \text{BW})$) | Low arithmetic intensity ($I \approx 1\text{ FLOP/byte}$); bounded by Inter-Token Latency. |
-| **5. ACTUATION_FRAMING**  | On-Chip SRAM / Tensor Cores     | Grammar DFA bitset evaluation latency ($< 30\ \mu\text{s}$)         | Fused logit masking guarantees syntactically valid JSON tool invocations.                  |
-| **6. RPC_DISPATCH**       | Host Network / UNIX Sockets     | IPC transport latency ($0.2\text{--}2.0\text{ ms}$)                 | Serializes validated payloads; attaches capability tokens and idempotency keys.            |
-| **7. TOOL_EXEC**          | Guest Container / MicroVM       | Guest CPU, RAM, and external network latency                        | Bounded by execution deadlines; executes side effects in quarantined workspace.            |
-| **8. OBSERVATION_INGEST** | Host Event Loop / Socket Stream | Non-blocking socket I/O throughput                                  | Demultiplexes chunk streams; applies terminal sanitization and payload size limits.        |
-| **9. COMPACTION_PERSIST** | Host DRAM / NVMe Flash Storage  | NVMe write bandwidth ($10\text{--}50\ \mu\text{s}$ per append)      | Flushes state delta to durable WAL; evicts or migrates inactive KV-cache blocks.           |
+During model inference (`CALLING_MODEL`), the datapath advances from host staging (`INGESTION`) through KV-cache prefix resolution (`PREFIX_MATCH`), compute-bound prompt evaluation (`PREFILL`), and memory-bandwidth-bound autoregressive generation (`DECODE`) to tool call framing (`ACTUATION_FRAMING`). Once an action is framed, the supervisory state shifts to `WAITING_TOOL` (or diverts to `AWAITING_APPROVAL` if the proposed mutation exceeds safety blast radii). Under `WAITING_TOOL`, the datapath traverses RPC serialization (`RPC_DISPATCH`), isolated sandbox execution (`TOOL_EXEC`), stream sanitization (`OBSERVATION_INGEST`), and write-ahead log persistence with KV-cache eviction (`COMPACTION_PERSIST`), returning to `READY` for the next scheduling round.
 
-: **The Nine-State MLSys Agent Execution Loop**: Hardware regimes, execution dynamics, and physical resource boundaries across the stochastic inference and tool actuation lifecycle. {#tbl-vol3-mlsys-state-machine}
+The hardware regimes, execution dynamics, and physical resource boundaries across the nine datapath phases are formalized in @tbl-vol3-mlsys-state-machine. During actuation framing, the runtime evaluates schema grammar constraints using fused logit-masking kernels in on-chip SRAM to eliminate syntactic failures prior to token emission.[^fn-kernel-fusion-masking] Similarly, upon observation ingestion, the runtime persists state deltas to write-ahead storage on local NVMe flash before releasing memory allocations.[^fn-atomic-wal-persistence]
+
+| Datapath Phase            | Enclosing State | Subsystem & Physical Resource   | Bottleneck & Roofline Regime                                        | Operational Invariant & Transition Guarantee                                               |
+|:--------------------------|:----------------|:--------------------------------|:--------------------------------------------------------------------|:-------------------------------------------------------------------------------------------|
+| **1. INGESTION**          | `CALLING_MODEL` | Host RAM / Staging Buffer       | Host memory bus / JSON deserialization throughput                   | Enforces immutable sequence ordering; prepares context descriptor for cache matching.      |
+| **2. PREFIX_MATCH**       | `CALLING_MODEL` | GPU HBM / Radix Tree Tables     | Block table hash traversal latency ($< 0.5\text{ ms}$)              | Maximizes KV-cache block reuse; identifies unmatched token suffix $L_{\text{unmatched}}$.  |
+| **3. PREFILL**            | `CALLING_MODEL` | GPU Tensor Cores / HBM          | Compute-bound ($O(L^2)$ attention, bounded by FLOP/s)               | High arithmetic intensity ($I \gg \beta$); establishes Time-To-First-Token (TTFT).         |
+| **4. DECODE**             | `CALLING_MODEL` | GPU HBM Read Bandwidth / SRAM   | Memory-bandwidth bound ($O(N_{\text{tok}} \cdot \Phi / \text{BW})$) | Low arithmetic intensity ($I \approx 1\text{ FLOP/byte}$); bounded by Inter-Token Latency. |
+| **5. ACTUATION_FRAMING**  | `CALLING_MODEL` | On-Chip SRAM / Tensor Cores     | Grammar DFA bitset evaluation latency ($< 30\ \mu\text{s}$)         | Fused logit masking guarantees syntactically valid JSON tool invocations.                  |
+| **6. RPC_DISPATCH**       | `WAITING_TOOL`  | Host Network / UNIX Sockets     | IPC transport latency ($0.2\text{--}2.0\text{ ms}$)                 | Serializes validated payloads; attaches capability tokens and idempotency keys.            |
+| **7. TOOL_EXEC**          | `WAITING_TOOL`  | Guest Container / MicroVM       | Guest CPU, RAM, and external network latency                        | Bounded by execution deadlines; executes side effects in quarantined workspace.            |
+| **8. OBSERVATION_INGEST** | `WAITING_TOOL`  | Host Event Loop / Socket Stream | Non-blocking socket I/O throughput                                  | Demultiplexes chunk streams; applies terminal sanitization and payload size limits.        |
+| **9. COMPACTION_PERSIST** | `WAITING_TOOL`  | Host DRAM / NVMe Flash Storage  | NVMe write bandwidth ($10\text{--}50\ \mu\text{s}$ per append)      | Flushes state delta to durable WAL; evicts or migrates inactive KV-cache blocks.           |
+
+: **The Nine-Phase MLSys Datapath Lifecycle**: Hardware regimes, execution dynamics, and physical resource boundaries across the stochastic inference and tool actuation datapath nested within supervisory macro-states. {#tbl-vol3-mlsys-state-machine}
 
 [^fn-kernel-fusion-masking]: **Fused Logit Masking Kernels**: Evaluating grammar-constrained deterministic finite automaton (DFA) transitions during autoregressive decode requires applying a binary vocabulary mask to the unnormalized logit vector before softmax. Unfused implementations incur costly round-trip device memory traffic by reading logits into global HBM, applying the mask in a separate kernel, and re-reading for sampling. Fused logit-masking kernels evaluate DFA bitsets directly within accelerator on-chip SRAM registers, reducing masking latency to under 30 microseconds per token.
 
 [^fn-atomic-wal-persistence]: **Durable State Persistence Overhead**: Persisting Agent Control Block updates and trajectory checkpoints to local NVMe storage incurs write latencies of $10\text{ to }50\text{ microseconds}$ per append-only log entry. By batching disk synchronization operations to safe turn boundaries, the harness prevents I/O write stalls from corrupting the inter-token generation budget. Uncommitted in-flight state remains isolated within host memory descriptors until validated by supervisory checksums.
 
-@Lst-vol3-acb-transition implements strict guard checks preventing illegal state jumps across the 9-state MLSys state machine.
+@Lst-vol3-acb-transition implements strict guard checks preventing illegal datapath phase jumps within the execution loop.
 
-::: {#lst-vol3-acb-transition lst-cap="**State Transition Guard Verification**: Transitioning an Agent Control Block between lifecycle states with transition validation."}
+::: {#lst-vol3-acb-transition lst-cap="**Datapath Phase Transition Guard Verification**: Validating datapath phase advances within the Agent Control Block."}
 ```python
-def transition_acb(acb: AgentControlBlock, new_state: State, event: Event) -> None:
-    """Validate and apply state transition on Agent Control Block across MLSys states."""
+def transition_phase(acb: AgentControlBlock, new_phase: DatapathPhase, event: Event) -> None:
+    """Validate and apply datapath phase transitions on the Agent Control Block."""
     valid_transitions = {
-        State.INGESTION: {State.PREFIX_MATCH, State.FINALIZING},
-        State.PREFIX_MATCH: {State.PREFILL, State.DECODE, State.FINALIZING},
-        State.PREFILL: {State.DECODE, State.FINALIZING},
-        State.DECODE: {State.ACTUATION_FRAMING, State.DECODE, State.FINALIZING},
-        State.ACTUATION_FRAMING: {State.RPC_DISPATCH, State.AWAITING_APPROVAL, State.FINALIZING},
-        State.AWAITING_APPROVAL: {State.RPC_DISPATCH, State.INGESTION, State.FINALIZING},
-        State.RPC_DISPATCH: {State.TOOL_EXEC, State.FINALIZING},
-        State.TOOL_EXEC: {State.OBSERVATION_INGEST, State.FINALIZING},
-        State.OBSERVATION_INGEST: {State.COMPACTION_PERSIST, State.FINALIZING},
-        State.COMPACTION_PERSIST: {State.INGESTION, State.PREFIX_MATCH, State.FINALIZING},
-        State.PAUSED: {State.INGESTION, State.FINALIZING},
-        State.FINALIZING: {State.COMPLETED, State.FAILED, State.CANCELED},
+        DatapathPhase.INGESTION: {DatapathPhase.PREFIX_MATCH},
+        DatapathPhase.PREFIX_MATCH: {DatapathPhase.PREFILL, DatapathPhase.DECODE},
+        DatapathPhase.PREFILL: {DatapathPhase.DECODE},
+        DatapathPhase.DECODE: {DatapathPhase.ACTUATION_FRAMING, DatapathPhase.DECODE},
+        DatapathPhase.ACTUATION_FRAMING: {DatapathPhase.RPC_DISPATCH},
+        DatapathPhase.RPC_DISPATCH: {DatapathPhase.TOOL_EXEC},
+        DatapathPhase.TOOL_EXEC: {DatapathPhase.OBSERVATION_INGEST},
+        DatapathPhase.OBSERVATION_INGEST: {DatapathPhase.COMPACTION_PERSIST},
+        DatapathPhase.COMPACTION_PERSIST: {DatapathPhase.INGESTION, DatapathPhase.PREFIX_MATCH},
     }
-    if new_state not in valid_transitions.get(acb.state, set()):
-        raise InvalidStateTransitionError(f"Illegal transition from {acb.state} to {new_state} via {event}")
-    acb.state = new_state
+    if new_phase not in valid_transitions.get(acb.phase, set()):
+        raise InvalidStateTransitionError(f"Illegal phase transition from {acb.phase} to {new_phase} via {event}")
+    acb.phase = new_phase
     acb.last_event = event
     acb.transition_epoch_ms = current_epoch_ms()
 ```
@@ -516,7 +524,7 @@ While the trajectory waits, its context's cached state in the serving system is 
 
 A tool wait ends when the tool answers or its deadline passes. The next kind of wait has no such bound on the machine side, because the party the trajectory waits for is a person deciding whether an irreversible call should run at all.
 
-### Cooperative process yielding mechanics
+### End-to-end turn latency waterfall {#sec-vol3-harness-latency-waterfall}
 
 Model token generation operates on millisecond scales ($10\text{--}50\text{ ms}$ per token), whereas external tool calls—such as compilation jobs, database queries, and web retrievals—frequently take seconds to minutes. If an agent thread synchronously blocks while awaiting external tool completion, it ties up valuable host concurrency slots and GPU worker capacity.
 
@@ -541,13 +549,26 @@ where each term corresponds to a distinct hardware regime across the 9-state MLS
 5. **Sandbox Execution Makespan ($T_{\text{sandbox\_exec}}$)**: Time spent running the side-effecting command in an isolated guest environment (ranging from milliseconds to minutes).
 6. **Observation Ingestion Latency ($T_{\text{stream\_ingest}}$)**: Time spent demultiplexing socket chunks, sanitizing terminal escape sequences, and appending observations to the trajectory record.
 
+### Reactor event demultiplexing and descriptor dispatch {#sec-vol3-harness-reactor-demux}
+
 Cooperative process yielding decouples execution by transitioning the trajectory to `WAITING_TOOL` immediately upon dispatching a tool request, freeing execution threads and GPU serving slots for other active trajectories. The execution dynamics are diagrammed in @fig-vol3-cooperative-yielding.
 
 ::: {#fig-vol3-cooperative-yielding fig-env="figure" fig-pos="htb" fig-cap="**Synchronous Blocking versus Cooperative Yielding**: Architectural comparison between synchronous thread-per-agent execution and cooperative event-driven yielding. Panel (a) illustrates the synchronous blocking model, where 2,000 POSIX threads lock over 8 GB of dormant stack memory and pin GPU batch slots while waiting on high-latency tool execution ($\tau_{\text{tool}} \gg \tau_{\text{model}}$). Panel (b) illustrates the supervisory `epoll` datapath, where a fixed pool of worker threads is immediately relinquished at checkpoint $C_{\text{tool}}$, registering non-blocking file descriptors with the kernel event multiplexer and scaling concurrency to $10^4\text{--}10^5$ trajectories with negligible memory overhead." fig-alt="Systems architecture diagram comparing synchronous thread-per-agent blocking, which locks 8 GB of stack memory for 2,000 threads, against cooperative event-driven yielding using an epoll multiplexer and a fixed pool of 8 worker threads managing compact ACB descriptors."}
 ![](images/svg/fig-vol3-cooperative-yielding.svg)
 :::
 
-The event-driven wakeup mechanics connecting OS network polling (`epoll`) to ACB dispatch are summarized in @tbl-vol3-event-wakeup-pipeline.
+In a synchronous runtime architecture, dedicating a POSIX thread to each active trajectory allocates between $2\text{ MB}$ and $8\text{ MB}$ of thread stack memory per agent. Across $2{,}000$ concurrent trajectories, this pattern locks up to $16\text{ GB}$ of host memory solely in dormant call stacks, consumes kernel task-table entries, and caps concurrency at $10^2\text{--}10^3$ agents due to OS context-switching overhead and thread limits. When trajectories stall during long-running tool execution ($\tau_{\text{tool}} \gg \tau_{\text{model}}$), blocking threads leave valuable CPU and accelerator resources idle.
+
+To scale agent execution across tens of thousands of concurrent trajectories, the runtime implements the **Stochastic Computer Reactor Pattern** [@schmidt1995reactor]. Rather than binding threads to trajectories, the harness operates a fixed pool of worker threads sized strictly to available CPU cores ($N_{\text{workers}} = N_{\text{cores}}$). These workers drive a kernel event demultiplexer (`epoll` on Linux or `kqueue` on BSD/macOS) that multiplexes four distinct classes of heterogeneous descriptors:
+
+1. **Inference streaming descriptors**: Non-blocking TCP sockets carrying HTTP/2 Server-Sent Events (SSE) or bidirectional gRPC streams that deliver incremental token chunks and finish reasons from local or disaggregated model inference engines.
+2. **Sandbox guest IPC descriptors**: Non-blocking Unix Domain Sockets (UDS) and virtualized serial devices (`virtio-serial`) carrying standard output, standard error, and process exit status frames from microVMs and container sandboxes.
+3. **Monotonic deadline timers**: Kernel timer descriptors (`timerfd_create` configured with `CLOCK_MONOTONIC` on Linux, or `EVFILT_TIMER` on kqueue) that enforce per-token generation quotas, RPC timeouts, and human approval expiries without spin-waiting or background sleeper threads.
+4. **Supervisory signal and approval descriptors**: Non-blocking signal descriptors (`signalfd`), POSIX self-pipes, and message queue handles that ingest administrative operator commands (cancel, pause, kill) and asynchronous human review decisions.
+
+To prevent pathological thread thrashing, the Reactor enforces **edge-triggered non-blocking I/O** (`EPOLLET` or `EV_CLEAR` with `O_NONBLOCK`). Under high-throughput streaming workloads where inference engines emit 50 to 100 tokens per second, standard level-triggered notification (`EPOLLIN`) repeatedly awakens multiple worker threads for the same socket before data can be completely read, inducing destructive thundering-herd context switches. Under edge-triggered notification, a worker thread is signaled exactly once when new data arrives at the socket buffer. The worker then executes an unrolled user-space drain loop until the underlying `read` or `recv` syscall returns `EAGAIN` or `EWOULDBLOCK`, ensuring that event transitions fire strictly on state change boundaries.
+
+The Reactor achieves zero-copy ACB dispatch by exploiting the 64-bit user data payload in kernel event structures (`epoll_data.ptr` in Linux `struct epoll_event`, or `udata` in BSD `struct kevent`). When registering an active file descriptor, the harness populates this field directly with the raw 64-bit virtual memory address of the owning `AgentControlBlock` (ACB). When `epoll_wait` unblocks, the event loop dereferences `epoll_data.ptr` in $O(1)$ time, eliminating intermediate hash-table lookups, mutex contention, and descriptor-to-trajectory indirection on the critical path. The four-stage event-driven reactivation pipeline is detailed in @tbl-vol3-event-wakeup-pipeline.
 
 | Stage                          | Subsystem Component                   | Operational Mechanism & Transition Invariants                                                                       |
 |:-------------------------------|:--------------------------------------|:--------------------------------------------------------------------------------------------------------------------|
@@ -557,6 +578,8 @@ The event-driven wakeup mechanics connecting OS network polling (`epoll`) to ACB
 | **4. Runqueue Re-Entry**       | Scheduler Priority Queue              | Inserts ACB descriptor into active priority queue; readies context for subsequent prefill batch.                    |
 
 : **Event-Driven Reactivation Pipeline**: The four-stage event-driven reactivation pipeline transitioning a trajectory from `WAITING_TOOL` to `READY` without thread polling or compute starvation. {#tbl-vol3-event-wakeup-pipeline}
+
+### Bounded streaming decoding across network chunk boundaries {#sec-vol3-harness-streaming-decode}
 
 During autoregressive decode, structured tool invocations are emitted as text tokens. Because tokens stream over HTTP Server-Sent Events (SSE) or gRPC network boundaries, tool-call opening and closing delimiters (such as ````json` or `<tool_call>`) frequently get split across network chunk boundaries. A naive decoder checking only single token payloads fails to recognize split boundaries, while buffering the entire response re-introduces synchronous worker stalls and pins GPU KV-cache slots. While predictable grammar tokens can be accelerated through speculative decoding,[^fn-speculative-decode-harness] the streaming decoder must detect split delimiters across chunk boundaries on the fly without unbounded buffering.
 
@@ -583,7 +606,7 @@ async def execute_bounded_decode(
         for delim in delimiters:
             if delim in sliding_window:
                 pre_text, _, remainder = sliding_window.partition(delim)
-                acb.state = State.ACTUATION_FRAMING
+                acb.phase = DatapathPhase.ACTUATION_FRAMING
                 return GenerationResult(
                     status=Status.TOOL_PENDING,
                     emitted_text=pre_text,
@@ -680,11 +703,11 @@ def verify_escrow_payload(manifest: EscrowManifest, auth_token: AuthToken) -> bo
 
 The lifecycle transitions of an escrow manifest are detailed in @tbl-vol3-escrow-transitions.
 
-| Current State       | Event / Guard Condition                                                                         | Next State          | Action / Transition Side Effect                                                                                   |
-|:--------------------|:------------------------------------------------------------------------------------------------|:--------------------|:------------------------------------------------------------------------------------------------------------------|
-| `ACTUATION_FRAMING` | Action proposal exceeds blast radius threshold ($\mathbf{a}_k \in \mathcal{A}_{\text{escrow}}$) | `AWAITING_APPROVAL` | Halt dispatch, release worker and inference batch slot, checkpoint KV cache to host DRAM, persist ACB.            |
-| `AWAITING_APPROVAL` | Wall clock $\tau_{\text{current}} > \tau_{\text{expire}}$ (Lease expiration)                    | `READY`             | Invalidate manifest $\mathcal{M}$, synthesize `REFUSED` observation $\mathbf{o}_k^{\text{synth}}$, reenqueue ACB. |
-| `AWAITING_APPROVAL` | Valid cryptographic signature set satisfies policy $\mathcal{P}_{\text{quorum}}$                | `READY`             | Validate digests, restore ACB from NVMe, stage KV cache, dispatch $\mathbf{a}_k$ to sandbox driver.               |
+| Current Phase / State                 | Event / Guard Condition                                                                         | Next State          | Action / Transition Side Effect                                                                                   |
+|:--------------------------------------|:------------------------------------------------------------------------------------------------|:--------------------|:------------------------------------------------------------------------------------------------------------------|
+| `ACTUATION_FRAMING` (`CALLING_MODEL`) | Action proposal exceeds blast radius threshold ($\mathbf{a}_k \in \mathcal{A}_{\text{escrow}}$) | `AWAITING_APPROVAL` | Halt dispatch, release worker and inference batch slot, checkpoint KV cache to host DRAM, persist ACB.            |
+| `AWAITING_APPROVAL`                   | Wall clock $\tau_{\text{current}} > \tau_{\text{expire}}$ (Lease expiration)                    | `READY`             | Invalidate manifest $\mathcal{M}$, synthesize `REFUSED` observation $\mathbf{o}_k^{\text{synth}}$, reenqueue ACB. |
+| `AWAITING_APPROVAL`                   | Valid cryptographic signature set satisfies policy $\mathcal{P}_{\text{quorum}}$                | `READY`             | Validate digests, restore ACB from NVMe, stage KV cache, dispatch $\mathbf{a}_k$ to sandbox driver.               |
 : **Human Escrow State Transitions and Side Effects**: Operational state transitions, guard conditions, and resource side effects governing human approval escrows. {#tbl-vol3-escrow-transitions}
 
 For high-stakes enterprise workflows, multiple distinct approvers are required according to the quorum invariants in @tbl-vol3-quorum-checkpoint-invariants.
@@ -806,6 +829,12 @@ def dispatch_round(
 
 ## Budgets and Ceilings {#sec-vol3-controlplane-accounting}
 
+A production agent harness cannot rely on model self-restraint to govern its resource consumption. An autoregressive policy evaluated inside a prompt loop holds zero ambient awareness of physical machine time, financial token billing, or external tool expense. Without deterministic, host-enforced resource envelopes, a stochastic agent encountering ambiguous tasks or environment errors will spin indefinitely in degenerative reasoning attractors—consuming thousands of dollars in inference compute and stranding cluster capacity.
+
+Governing autonomous execution requires treating resource accounting as a first-class control plane primitive. The harness enforces non-bypassable, multi-dimensional expenditure ceilings across turns, tokens, dollars, and wall-clock duration, terminating runaway execution before financial or operational blast radiuses breach organizational limits.
+
+### Multi-dimensional budget vectors {#sec-vol3-harness-multidim-budgets}
+
 An agent asked to diagnose a failing data pipeline runs a query that times out. The model proposes that the query was malformed and tries a variant, then another, then a broader diagnostic that also fails. Each failure appends a stack trace to the context, and each new proposal is a well-formed tool call within every per-call limit. The trajectory yields at every tool call, stays within its share of the rate limit, and releases its sandbox between calls, so to the scheduler it is a model citizen. Hours and hundreds of turns later it has spent real money and changed nothing in the environment. @Fig-vol3-epistemic-attractor-cycle traces the loop and the one mechanism that ends it.
 
 ::: {#fig-vol3-epistemic-attractor-cycle fig-env="figure" fig-pos="htb" fig-cap="**A Runaway Loop and the Budget That Ends It**: A tool failure appends error observations to the context, the model rarely proposes ending the turn, and each retry is well formed and within per-call limits, so the loop continues without progress. A budget kept by the harness outside the context, checked before every model call against turns, tokens, dollars, and wall-clock time, stops the loop and finalizes the trajectory as FAILED." fig-alt="Four boxes in a cycle: model proposes an action, error observations accumulate, ending the turn becomes rare, and runaway loop, connected by arrows labeled tool fails and another retry. A green harness budget box at the bottom checks turns, tokens, dollars, and wall-clock ceilings and leads to a halt box reading FINALIZING to FAILED with BUDGET_EXCEEDED, with an arrow marked budget crossed stopping the loop."}
@@ -819,6 +848,8 @@ The harness enforces two layers of ceilings. Per-call ceilings, the maximum outp
 $$\mathbf{B} = \langle H_{\max},\ N_{\max},\ T_{\max},\ C_{\max} \rangle$$
 
 on turns, tokens, wall-clock time, and dollars. The turn cap $H_{\max}$ is the simplest and most widely used, and it counts the same turns as the trajectory horizon $H$. It is not sufficient alone. A trajectory within its turn cap can still exhaust a large dollar budget if every turn re-sends a very long context. A wall-clock ceiling alone kills slow but cheap work, such as a trajectory waiting on a long build, and a dollar ceiling alone misses a runaway on an inexpensive model that holds sandboxes for hours. Each dimension catches a failure the others miss, and a deployment may add dimensions such as sandbox-hours where they bind.
+
+### Metered accounting and prefix cache leverage {#sec-vol3-harness-metered-accounting}
 
 Spend is metered, not estimated. After every call the harness reads the usage the provider reports, split into uncached input tokens, cached input tokens, and output tokens, and updates the trajectory's cost:
 
@@ -917,6 +948,8 @@ class HarnessBudget:
 **Systems insight**: The same trajectory sits comfortably inside its budget or close to its dollar ceiling depending on whether its prefix cache hits. A change that breaks the cache, such as reordering the tool list on every turn, shows up first as a dollar ceiling approached early, which is one reason the budget meters dollars separately from tokens. Later economic analysis prices the saving itself.
 
 :::
+
+### Staged budget escalation and enforcement {#sec-vol3-harness-staged-escalation}
 
 The harness reduces the budget to one number per turn, the share of the tightest ceiling already used,
 

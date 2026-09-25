@@ -1248,6 +1248,36 @@ $$M_{\text{tree}} = M_{\text{prefix}} + \sum_{\text{leaf} \in \text{Leaves}} M_{
 
 When serving branching search trees, accelerator memory scales with the width of the active exploration frontier rather than the cumulative token length of all explored paths. Without prefix-tree sharing, search algorithms are forced to aggressively truncate context or serialize branch rollouts; with radix-tree virtual memory, runtimes maintain wide candidate frontiers in physical memory with zero redundant prefill latency.
 
+### Tree search across mutable sandbox environments {#sec-vol3-test-time-compute-mutable-sandbox-search}
+
+In classical game domains (such as Go and chess [@silver2016mastering]) or pure mathematical reasoning, state transitions during tree search are purely cognitive or analytically reversible. If an explored sequence of deduction steps proves sub-optimal, Monte Carlo Tree Search (MCTS) simply selects an alternative sibling edge at an ancestor node. Backtracking requires nothing more than resetting a search pointer or dereferencing token nodes in the prefix KV cache (@sec-vol3-test-time-compute-tree-kv-cache).
+
+For autonomous systems agents, however, this assumption collapses. Actions in software engineering, cloud orchestration, and systems administration are physical mutations executed against external operating system state. When an agent branch executes `git apply patch.diff`, compiles a C++ extension, updates configuration files in `/etc/`, drops database tables, or spawns long-lived daemon processes, it irrevocably alters the execution environment.
+
+This reality introduces the **state mutation divergence paradox**: if candidate branch $u \to v_1$ applies a flawed code patch that fails downstream unit tests, the search runtime cannot simply backtrack the conversation tokens to node $u$ while retaining the mutated filesystem. If alternative sibling branch $u \to v_2$ is evaluated against that contaminated container, its proposed patch will fail due to conflicting edits or corrupted build artifacts left behind by $v_1$—producing false rejections and non-reproducible trajectories.
+
+To make tree search well-defined across mutable tools, the search engine must maintain a strict bijection between cognitive nodes in the RadixAttention KV cache and isolated execution sandboxes:
+
+$$\mathcal{T}_{\text{node}}(u) = \left\langle \mathbf{x}_{1:t}^{(u)}, \; \text{KVRef}(u), \; \mathcal{E}(u) \right\rangle$$
+
+where $\mathbf{x}_{1:t}^{(u)}$ represents the token history, $\text{KVRef}(u)$ is the memory-managed handle to the radix prefix in accelerator HBM, and $\mathcal{E}(u)$ is an immutable snapshot handle of the underlying execution environment.
+
+Naively allocating a full-clone virtual machine or container for every branch in the search tree would trigger catastrophic storage exhaustion and unacceptable branching latency: cloning a 20 GB root filesystem requires seconds of disk I/O ($T_{\text{clone}} \ge 5\text{ s}$), completely destroying test-time search throughput. High-performance agent runtimes solve this by marrying RadixAttention with copy-on-write (CoW) virtualization across two tiers (@sec-vol3-sandboxes):
+
+1. **Layered Ephemeral OverlayFS Scratchpads:** In containerized environments, each child node $v = \text{child}(u, a)$ mounts a private, ephemeral `upperdir` scratchpad over the parent's read-only layer stack:
+   $$\text{Stack}(v) = \text{OverlayFS}\left(\text{lowerdir}=\text{Stack}(u), \; \text{upperdir}=\text{scratch}(v), \; \text{workdir}=\text{work}(v)\right)$$
+   Instantiating a child branch requires only an in-memory mount operation ($T_{\text{branch}} < 2\text{ ms}$). All filesystem mutations, build outputs, and temporary files created by action $a$ land exclusively in $\text{scratch}(v)$, leaving the parent filesystem $\text{Stack}(u)$ completely unmodified.
+2. **Copy-on-Write MicroVM Forking:** In multi-tenant environments requiring hardware virtualization for untrusted code execution, runtimes deploy microVMs such as Firecracker [@agache2020firecracker]. When node $u$ branches, the hypervisor suspends the guest and forks the guest memory address space using Kernel-based Virtual Machine (`/dev/kvm`) copy-on-write page tables and userfaultfd dirty-page tracking ($T_{\text{snapshot\_fork}} \approx 5\text{--}15\text{ ms}$).
+
+When the search algorithm backtracks or prunes an unviable subtree—whether guided by a low PRM score ($V(v) \approx 0$) or a hard assertion failure—state restoration is instantaneous:
+
+- **Neural Rollback:** The serving engine frees the leaf KV blocks in RadixAttention, decrementing the parent node's reference count ($\text{rc}(u) \leftarrow \text{rc}(u) - 1$).
+- **Environmental Rollback:** The host unmounts the child OverlayFS layer and purges $\text{scratch}(v)$ (`umount` and `rm -rf`), or terminates the forked child microVM process.
+
+The physical environment at node $u$ is restored with zero side-effect contamination, allowing sibling branch $v_2$ to execute against a pristine baseline.
+
+To prevent deep search trees ($D \ge 10, B \ge 4$) from exhausting host RAM and filesystem inodes, runtimes bound active environments to an **Active Environmental Working Set** $\mathcal{W}_{\text{env}}$. Non-frontier snapshot layers are unmounted and purged from memory under a Least Recently Used (LRU) policy. If the PUCT policy subsequently re-traverses an evicted ancestor node, its environment state is re-hydrated on demand by replaying the deterministic lineage of actions from the nearest surviving ancestor snapshot.
+
 ### The unified resource accounting model
 
 Every branch expanded, candidate generated, and assertion checked consumes physical resources. To prevent deliberation from degrading into unconstrained compute consumption, the agent runtime must maintain an explicit ledger of cumulative costs across all search phases.
