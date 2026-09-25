@@ -27,7 +27,9 @@ import torch
 
 # Create a 2D tensor and inspect its memory layout
 x = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-y = x.t()  # Transpose: rows become columns
+y = x.t()  # Transpose: rows become columns[^fn-fortran-blas-strides]
+
+[^fn-fortran-blas-strides]: Historical stride conventions originate in Fortran BLAS and LAPACK, where matrices are stored in column-major order with a leading dimension stride (`LDA`). Modern C and C++ libraries (such as NumPy and PyTorch ATen) use row-major order by default, where the rightmost coordinate varies fastest in memory. TinyTorch inherits row-major contiguous memory from NumPy ndarray buffers.
 
 print("x shape:", x.shape, "strides:", x.stride())        # (2, 3), strides: (3, 1)
 print("y shape:", y.shape, "strides:", y.stride())        # (3, 2), strides: (1, 3)
@@ -125,6 +127,12 @@ $$S_{N-1} = 1, \qquad S_k = S_{k+1} \times D_{k+1} \quad \text{for } k = N-2, \d
 
 For shape $(2, 3, 4)$ this gives $S_2 = 1$, $S_1 = 4$, and $S_0 = 12$. Advancing one matrix in the batch skips 12 elements, one row skips 4, one column skips 1.
 
+::: {.column-margin}
+![](assets/images/diagrams/01_tensor-margin-strides.svg){width="100%" fig-alt="Strided coordinate indexing card showing 2D matrix coordinate (1, 2) mapped to 1D DRAM buffer slot 5 via offset plus row times stride 0 plus col times stride 1."}
+
+*Strided Coordinate Mapping: Logical coordinate (1, 2) projects directly to 1D DRAM buffer slot 5 with zero memory allocation.*
+:::
+
 ### The coordinate mapping equation
 
 With strides in hand, locating any coordinate $(i_0, i_1, \dots, i_{N-1})$ in the buffer is one dot product:
@@ -133,26 +141,21 @@ $$\text{index} = \text{offset} + \sum_{k=0}^{N-1} i_k \times S_k$$
 
 This equation describes an array view. We first use it to explain what NumPy can do without moving values, then follow the module's wrapper to see when TinyTorch copies those values. Shape describes the logical coordinates; strides describe their physical layout. Neither alone tells us whether another object shares the storage.
 
-::: {.column-margin}
-![](assets/images/diagrams/01_tensor-margin-strides.svg){width="100%" fig-alt="Strided coordinate indexing card showing 2D matrix coordinate (1, 2) mapped to 1D DRAM buffer slot 5 via offset plus row times stride 0 plus col times stride 1."}
-
-*Strided Coordinate Mapping: Logical coordinate (1, 2) projects directly to 1D DRAM buffer slot 5 with zero memory allocation.*
-:::
-
 ![**Zero-copy slicing and stride manipulation**: Slicing advances the base memory offset pointer without allocating new memory, while strided views navigate the flat 1D byte ribbon in row-major or transposed order.](assets/images/diagrams/01_slice-offset-stride.svg){#fig-slice-offset-stride width="100%" fig-alt="Left panel shows flat 1D byte ribbon with slot offsets. Bottom panels show View A with base offset 0x00 and View B with slice offset 0x0C, demonstrating zero-copy indexing."}
 
-
-### Transposition is a swap
-
-A transpose exchanges rows and columns. In the mapping equation, that is the same as exchanging the roles of $i_0$ and $i_1$, which is the same as swapping the two shape entries and the two stride entries. The matrix with shape $(2, 3)$ and strides $(3, 1)$ becomes a view with shape $(3, 2)$ and strides $(1, 3)$ over the *same* buffer. Nothing is copied. The transposed view walks the buffer in column order because its strides tell it to.
-
-### Broadcasting is a zero stride
 
 ::: {.column-margin}
 **↪ Jump ahead:** @sec-layers
 *Broadcast strides allow parameter bias vectors to add across mini-batches without memory copies.*
 :::
 
+### Transposition is a swap
+
+A transpose exchanges rows and columns. In the mapping equation, that is the same as exchanging the roles of $i_0$ and $i_1$, which is the same as swapping the two shape entries and the two stride entries. The matrix with shape $(2, 3)$ and strides $(3, 1)$ becomes a view with shape $(3, 2)$ and strides $(1, 3)$ over the *same* buffer.[^fn-storage-impl-sharing] Nothing is copied. The transposed view walks the buffer in column order because its strides tell it to. In @sec-acceleration, we will see that while transposing by swapping strides costs zero operations, reading that transposed tensor row by row causes cache misses on non-contiguous memory, motivating cache-tiled loops that partition matrices into sub-blocks to fit within hardware caches.
+
+[^fn-storage-impl-sharing]: PyTorch tracks storage sharing through `c10::StorageImpl`, a refcounted allocation wrapped by `c10::TensorImpl` view instances. In NumPy, `x.base` similarly points to the owning array when `x` is an ephemeral view.
+
+### Broadcasting is a zero stride
 
 A bias vector `[10, 20, 30]` must supply the same values to both rows of our matrix. We can describe those reads with shape $(2, 3)$ and strides $(0, 1)$. Moving to the next row skips zero slots, so both rows read the original three values. For a vector of length $D$ used across $B$ rows, the mapping is
 
@@ -160,13 +163,15 @@ $$\text{index} = i \times 0 + j \times 1 = j$$
 
 and the row index $i$ has no effect on where we read. Every row maps onto the same $D$ values. The vector now *behaves* as a $(B, D)$ matrix at zero extra memory, and it did so through the same equation that handles every other tensor. NumPy and PyTorch call this **broadcasting**.
 
-For the forward pass, the contract is simple: compatible dimensions either agree or one of them is 1, and each output coordinate reads the corresponding value from each operand. The `Add` listing below relies on this rule when it adds one bias vector to several rows. A later consequence, developed in @sec-autograd, is that contributions from those rows must be summed when computing the bias's gradient; no backward machinery is needed to use broadcasting here.
+For the forward pass, the contract is simple: compatible dimensions either agree or one of them is 1, and each output coordinate reads the corresponding value from each operand. The `Add` listing below relies on this rule when it adds one bias vector to several rows. A later consequence, developed in @sec-autograd, is that contributions from those rows must be summed when computing the bias's gradient; no backward machinery is needed to use broadcasting here. Specifically, the multivariable chain rule mandates that any axis expanded via stride 0 in the forward pass must be summed along that same axis in the backward pass via `_reduce_broadcast_grad`.
 
 ![**Broadcasting with stride zero**: An operand vector of shape `(3,)` is broadcast across batch rows by assigning stride `0` along the row axis. The coordinate mapping equation reads the identical memory buffer `[10, 20, 30]` across multiple rows without allocating or duplicating any physical storage.](assets/images/diagrams/01_stride-zero-broadcast.svg){#fig-stride-zero-broadcast width="100%" fig-alt="Left panel shows matrix A of shape (2, 3) with strides (3, 1). Right panel shows vector B broadcast to (2, 3) with stride 0 along axis 0, sharing buffer storage without duplication."}
 
 ### Contiguity is a property you can check
 
-After a transpose or a broadcast, the buffer is unchanged but the view no longer walks it in plain row order. Our transposed matrix has shape $(3, 2)$ and strides $(1, 3)$, whereas row-major strides for that new shape would be $(2, 1)$. The broadcast view repeats locations because its row stride is zero. For arrays whose dimensions all exceed one, matching the formula for the array's own shape establishes C-contiguity. A dimension of length one is an exception because we never step along it; its stride does not affect the traversal. Empty arrays are another special case. NumPy's [array flags documentation](https://numpy.org/doc/stable/reference/generated/numpy.ndarray.flags.html) describes these cases, so `C_CONTIGUOUS` is the authoritative check. NumPy can read these layouts through their strides. Writes need more care: a broadcast view can map several coordinates to one location, and `np.broadcast_to` returns a read-only view. TinyTorch avoids sharing the returned tensor with its input by copying at construction. Its `contiguous()` method additionally requests row-major layout, which is a separate property from owning the buffer.
+After a transpose or a broadcast, the buffer is unchanged but the view no longer walks it in plain row order. Our transposed matrix has shape $(3, 2)$ and strides $(1, 3)$, whereas row-major strides for that new shape would be $(2, 1)$. The broadcast view repeats locations because its row stride is zero. For arrays whose dimensions all exceed one, matching the formula for the array's own shape establishes C-contiguity. A dimension of length one is an exception because we never step along it; its stride does not affect the traversal. Empty arrays are another special case. NumPy's [array flags documentation](https://numpy.org/doc/stable/reference/generated/numpy.ndarray.flags.html) describes these cases, so `C_CONTIGUOUS` is the authoritative check. NumPy can read these layouts through their strides. Writes need more care: a broadcast view can map several coordinates to one location,[^fn-stride0-write-hazard] and `np.broadcast_to` returns a read-only view. TinyTorch avoids sharing the returned tensor with its input by copying at construction. Its `contiguous()` method additionally requests row-major layout, which is a separate property from owning the buffer.
+
+[^fn-stride0-write-hazard]: Writing to a stride-0 array is illegal in production systems because multiple logical coordinates resolve to the identical physical address. Concurrent parallel writes cause non-deterministic race conditions; PyTorch explicitly forbids in-place writes on stride-0 views.
 
 ### Reductions remove an axis
 
@@ -192,12 +197,6 @@ different number of cache lines.
 
 ## The Code
 
-::: {.column-margin}
-![](assets/images/diagrams/01_tensor-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 01 showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Module 01 extracts Tensor, Function.apply, and strided coordinate indexing directly from the working repository.*
-:::
-
 The shape-and-stride description belongs to NumPy's `ndarray`. Module 01 adds an owned array and a common operation interface around it. We can read the constructor first to establish what a returned Tensor guarantees, then follow the calls that produce one.
 
 ### The Tensor class
@@ -216,6 +215,12 @@ One property of the constructor matters more than it looks. It always copies. Wh
 
 **Model scope**: The next listing is not in Module 01. It is the arithmetic NumPy performs inside the array that `Tensor` wraps, written out so it can be read. The worked trace checks it against NumPy's own numbers.
 
+:::
+
+::: {.column-margin}
+![](assets/images/diagrams/01_tensor-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 01 showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Module 01 extracts Tensor, Function.apply, and strided coordinate indexing directly from the working repository.*
 :::
 
 For the six-value matrix, `A[1, 2]` must find slot $1 \times 3 + 2 \times 1 = 5$, whose value is 6. A transpose must make that same value available at coordinate `(2, 1)` by swapping the shape and strides. Four functions express the calculation. `contiguous_strides` computes row-order strides; `physical_index` maps a valid coordinate to a slot; `transpose` exchanges two axes; and `broadcast_to` supplies zero strides where a dimension is repeated. This small model assumes positive dimension sizes and valid coordinates. It describes array reads, without implementing storage or mutation.
