@@ -85,17 +85,17 @@ The script reports timings for the machine running it; neither traversal has a f
 
 A cache stores recently accessed data near the processor. Main memory transfers chunks called cache lines, so adjacent floats can share one transfer. For example, a hypothetical 64-byte line holds sixteen float32 values. A row walk can use all sixteen; a column walk may use only one before moving to another line. Whether a later access reuses that line depends on the array size and cache behavior. The stride explains a possible cost; it does not measure transferred bytes.
 
-::: {.column-margin}
-![](assets/images/diagrams/17_acceleration-margin-cache-line.svg){width="100%" fig-alt="Cache line spatial locality diagram comparing 64-byte hardware transfers for row-major contiguous access versus strided column-major access."}
-
-*Cache line spatial locality: 64-byte hardware transfers load 16 float32 values. Row walks use all 16 floats per line (1 miss, 15 hits), while column walks stride across rows and use only 1 float per line (16 misses).*
-:::
-
 Now look at what a framework does when you write a GELU. @sec-activations introduced the tanh form,
 
 $$\text{GELU}(x) \approx 0.5\,x\left(1 + \tanh\!\left(\sqrt{2/\pi}\,\left(x + 0.044715\,x^3\right)\right)\right),$$
 
 and `unfused_gelu` evaluates it as eight steps: cube, scale, add, scale, tanh, add one, multiply by $x$, and halve. Each step computes a NumPy array and copies it into a `Tensor`. The seven named intermediates stay alive until return. At three inputs this is easy to inspect; at millions of inputs, retaining those full arrays becomes a substantial allocation cost.
+
+::: {.column-margin}
+![](assets/images/diagrams/17_acceleration-margin-cache-line.svg){width="100%" fig-alt="Cache line spatial locality diagram comparing 64-byte hardware transfers for row-major contiguous access versus strided column-major access."}
+
+*Cache line spatial locality: 64-byte hardware transfers load 16 float32 values. Row walks use all 16 floats per line (1 miss, 15 hits), while column walks stride across rows and use only 1 float per line (16 misses).*
+:::
 
 Matrix multiplication presents a different opportunity. Each input element contributes to several outputs. For $C=AB$, a row of $A$ is needed for every output column, and a column of $B$ for every output row. Grouping nearby output calculations can make those reuses occur close together in time. Analysis requires tracking both the accumulation into $C$ and which input blocks each step reads.
 
@@ -103,15 +103,15 @@ Matrix multiplication presents a different opportunity. Each input element contr
 
 ## The Idea
 
-::: {.column-margin}
-**↪ Jump ahead:** @sec-extensions
-*How modern compilers (C++, Triton, and PyTorch Inductor) automate tiling and fusion at hardware scale.*
-:::
-
 
 ### One boundary, counted in crossings
 
 Consider a tile product that repeatedly uses the same small blocks. Keeping those blocks in a cache can avoid fetching them from main memory for every arithmetic operation. Registers hold individual working values; caches hold recently accessed chunks; main memory holds the larger arrays. @Tbl-memory-hierarchy describes their roles without assuming a particular processor.
+
+::: {.column-margin}
+**↪ Jump ahead:** @sec-extensions
+*How modern compilers (C++, Triton, and PyTorch Inductor) automate tiling and fusion at hardware scale.*
+:::
 
 | Level | What it holds | Role in this chapter |
 | :--- | :--- | :--- |

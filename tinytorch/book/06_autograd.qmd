@@ -128,13 +128,13 @@ $$\frac{\partial L}{\partial x} = \sum_{k} \frac{\partial L}{\partial y_k} \frac
 
 where the $y_k$ are the tensors computed directly from $x$. In code the incoming contributions must be added. The implementation accumulates them in `pending` before adding the complete result into `x.grad`. The smallest example is `x + x`. The same tensor is both inputs of one addition, so its gradient is the incoming gradient twice. An engine that overwrote each pending contribution would silently report half the true value, and the mistake would not raise an error. It would just train worse. The same accumulation is what makes a layer whose input is added back to its output work, and it introduces one kind of accumulation: combining paths within a backward call. A separate choice keeps `.grad` between calls, so the training loop must clear it when starting a new gradient estimate.
 
+![**Gradient fan-in accumulation across branches**: When a tensor fan-outs during forward execution (e.g. into parallel residual branches or multi-head attention), reverse-mode autograd must accumulate incoming vector-Jacobian products (`x.grad += dL/dx`) rather than assigning them, honoring the multivariable chain rule.](assets/images/diagrams/06_gradient-fanin-accumulation.svg){#fig-gradient-fanin-accumulation width="100%" fig-alt="DAG diagram illustrating Node X receiving accumulated gradients from Op A and Op B via multivariable chain rule summation."}
+
 ::: {.column-margin}
 ![](assets/images/diagrams/06_autograd-margin-diamond.svg){width="100%" fig-alt="Diamond DAG topology showing forward split and backward gradient accumulation at leaf x."}
 
 *Diamond DAGs require gradient accumulation: $\nabla_x = \nabla_{y_1} \frac{\partial y_1}{\partial x} + \nabla_{y_2} \frac{\partial y_2}{\partial x}$.*
 :::
-
-![**Gradient fan-in accumulation across branches**: When a tensor fan-outs during forward execution (e.g. into parallel residual branches or multi-head attention), reverse-mode autograd must accumulate incoming vector-Jacobian products (`x.grad += dL/dx`) rather than assigning them, honoring the multivariable chain rule.](assets/images/diagrams/06_gradient-fanin-accumulation.svg){#fig-gradient-fanin-accumulation width="100%" fig-alt="DAG diagram illustrating Node X receiving accumulated gradients from Op A and Op B via multivariable chain rule summation."}
 
 
 ### What the design costs
@@ -163,13 +163,13 @@ $$\text{Total activation memory} \approx 12\text{ layers} \times 192\text{ MB} \
 
 ## The Code
 
+The tensor implementation in @sec-tensors left three fields on every `Tensor` with nothing to do: `requires_grad`, `grad`, and `_grad_fn`. It also routed every operation through one method, `Function.apply`, which computed a result and forgot how. This chapter is where all four earn their keep.
+
 ::: {.column-margin}
 ![](assets/images/diagrams/06_autograd-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 06 Autograd showing file path, exported package, and tested primitives."}
 
 *Source Code Mapping: Module 06 extracts automatic differentiation, the backward execution tape, and gradient accumulation directly from the working repository.*
 :::
-
-The tensor implementation in @sec-tensors left three fields on every `Tensor` with nothing to do: `requires_grad`, `grad`, and `_grad_fn`. It also routed every operation through one method, `Function.apply`, which computed a result and forgot how. This chapter is where all four earn their keep.
 
 ### An operation that remembers its inputs
 

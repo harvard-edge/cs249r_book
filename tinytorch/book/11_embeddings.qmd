@@ -51,13 +51,13 @@ Suppose we skip the table and feed the integer straight into a `Linear` layer. T
 
 The textbook fix is the one-hot vector that @sec-losses used for targets. Represent token $i$ as a vector of length $V$ with a $1$ in slot $i$ and zeros elsewhere, then multiply by a weight matrix. Every token is now equally far from every other, which is the right starting point, and a `Linear` layer can learn from it. The cost is the problem. With a vocabulary of $V = 50{,}257$ and a modest batch of 1,024 tokens, the one-hot input is $1{,}024 \times 50{,}257 \approx 51$ million floats, about 206 MB, of which exactly 1,024 are nonzero. The matrix multiply that follows, against a $50{,}257 \times 768$ weight matrix, performs about 39 billion multiplications, and only one in every 50,257 of them is by something other than zero.
 
+The second problem appears once the integers are gone. Take the two sentences *"the dog bit the man"* and *"the man bit the dog"*. Their token vectors are the same five rows in a different order. Any operation that treats its inputs as a set, such as summing them or averaging them, produces identical output for both sentences.
+
 ::: {.column-margin}
 ![](assets/images/diagrams/11_embeddings-margin-lookup.svg){width="100%" fig-alt="Comparison card contrasting naive one-hot matrix multiplication allocating 206 MB and 39 billion FLOPs against direct pointer gather copying 3.1 MB with zero arithmetic."}
 
 *Gather vs One-Hot GEMM: Pointer-indexed table gathering eliminates sparse intermediate allocations and wasted zero arithmetic.*
 :::
-
-The second problem appears once the integers are gone. Take the two sentences *"the dog bit the man"* and *"the man bit the dog"*. Their token vectors are the same five rows in a different order. Any operation that treats its inputs as a set, such as summing them or averaging them, produces identical output for both sentences.
 
 ```python
 import numpy as np
@@ -93,12 +93,12 @@ $$\mathbf{x}_i = \mathbf{e}_i W = W[i, :]$$
 
 Every term in the sum is zero except the one where the $1$ sits, so the product *is* row $i$. Nobody needs to build the one-hot vector or run the multiply. An `Embedding` layer stores $W$ and, given an ID, copies row $i$ out of it. The gather itself performs no arithmetic on the row values; it moves $D$ floats from one place to another. An indexed read of this kind, which pulls selected rows out of a larger array, is called a **gather**.
 
-The rows are ordinary parameters. They start random, and gradient descent moves them. Because the forward pass only touched the rows that were looked up, only those rows receive a gradient. If a batch contains only three occurrences of token 42, row 42 receives the sum of three gradients, one from each place it was used; the other $V - 1$ rows receive zero. With other tokens present, their rows receive their own contributions. The backward pass is the mirror of the gather, a **scatter-add**: take each output gradient and add it into the row it came from.
-
 ::: {.column-margin}
 ![](assets/images/diagrams/11_embeddings-margin-scatter.svg){width="100%" fig-alt="Scatter-add diagram illustrating how output gradients for repeated token IDs at positions 0 and 2 accumulate atomically into row 42."}
 *Scatter-add backward routing for repeated token IDs.*
 :::
+
+The rows are ordinary parameters. They start random, and gradient descent moves them. Because the forward pass only touched the rows that were looked up, only those rows receive a gradient. If a batch contains only three occurrences of token 42, row 42 receives the sum of three gradients, one from each place it was used; the other $V - 1$ rows receive zero. With other tokens present, their rows receive their own contributions. The backward pass is the mirror of the gather, a **scatter-add**: take each output gradient and add it into the row it came from.
 
 Nothing in the table says that `"dog"` and `"cat"` should be near each other. That closeness emerges from training, because the loss pushes tokens that appear in similar contexts toward rows that produce similar predictions. The table only makes closeness *possible*, by giving the model $D$ continuous numbers per token instead of one categorical label.
 

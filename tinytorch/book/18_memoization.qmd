@@ -75,14 +75,14 @@ Attention adds a second source of repeated work. The score matrix at step $t$ ha
 
 The remedy is the oldest trick in programming. If a computation is repeated with the same inputs, store the result and look it up. The name for that trick is **memoization**, and the only question is which results are safe to store.
 
----
-
-## The Idea
-
 ::: {.column-margin}
 **↪ Jump ahead:** @sec-benchmarking
 *Measuring KV cache latency and memory footprint under strict monotonic timing controls.*
 :::
+
+---
+
+## The Idea
 
 
 ### Keys and values of past tokens never change
@@ -107,18 +107,18 @@ where $\mathbf{q}_t = \mathbf{x}_t W_Q$ is the new token's query, $K_{\le t}$ an
 
 Putting the two facts together, one generation step at one attention layer does four things.
 
+::: {.column-margin}
+**Core Invariant: Cursor Write-Head Advance**\
+$$\text{cache}[:, :, \text{seq\_pos}, :] = k_{\text{new}}, \quad \text{seq\_pos} \mathrel{+}= 1$$\
+*Preallocating max capacity turns $O(S)$ dynamic memory reallocation into $O(1)$ stride indexing.*
+:::
+
 1. Project only the new token: $\mathbf{q}_t$, $\mathbf{k}_t$, $\mathbf{v}_t$, three products of a $1 \times D$ row with a $D \times d_k$ matrix.
 2. Append $\mathbf{k}_t$ and $\mathbf{v}_t$ to the cached $K_{< t}$ and $V_{< t}$ to form $K_{\le t}$ and $V_{\le t}$.
 3. Score $\mathbf{q}_t$ against all $t$ cached keys, scale by $1/\sqrt{d_k}$, and take one softmax over the resulting $t$ numbers.
 4. Mix the $t$ cached values with those weights to produce $\mathbf{o}_t$.
 
 Nothing in steps 1 through 4 touches an old key or value except to read it. The cache is append-only, and a single integer tracks the filled prefix shared by the layers. The stored key and value arrays carry the rest of its state.
-
-::: {.column-margin}
-**Core Invariant: Cursor Write-Head Advance**\
-$$\text{cache}[:, :, \text{seq\_pos}, :] = k_{\text{new}}, \quad \text{seq\_pos} \mathrel{+}= 1$$\
-*Preallocating max capacity turns $O(S)$ dynamic memory reallocation into $O(1)$ stride indexing.*
-:::
 
 ![**KV cache advancing write cursor and ring buffer**: Rather than reallocating expanding key/value tensors each generation step, a fixed buffer of shape $(B, H, S_{\max}, d_k)$ is preallocated. Each token generation step writes the newly projected key and value into the single slot indexed by `seq_pos` and advances the cursor, eliminating memory reallocation.](assets/images/diagrams/18_kv-cache-cursor.svg){#fig-kv-cache-cursor width="100%" fig-alt="Diagram of KV cache preallocated slots with valid slots 0 and 1, write head slot 2 at seq_pos=2, and reserved remaining slots."}
 
@@ -215,15 +215,15 @@ A request arrives as a prompt of $P$ tokens, and only then does the model produc
 
 The tempting way to build that is two paths, the full-sequence attention of @sec-attention for the prompt and the cached step for decode, with the keys and values handed from one to the other. Two paths means two places for the ordering bug to hide and a hand-off that has to agree about where the cursor is. The failure here is quiet. Forget to reset between requests and the new prompt's first token attends over the old prompt's keys, and no exception reports it; the model simply answers a question nobody asked.
 
-The module therefore runs both phases inside one generation scope, with one token per call, `advance` once per token, and `reset` once at the top. Attaching the cache is a loop over the blocks.
-
-{{< include _listings/18_memoization/enable_kv_cache.qmd >}}
-
 ::: {.column-margin}
 ![](assets/images/diagrams/18_memoization-margin-prefill-decode.svg){width="100%" fig-alt="Comparison card contrasting prefill phase compute-bound parallel GEMM against decode phase memory-bandwidth-bound sequential GEMV."}
 
 *Prefill vs Decode Phases: Prefill processes prompt tokens in parallel (S_q = P) saturating compute via GEMM, whereas decode generates single tokens (S_q = 1) bound by memory bandwidth.*
 :::
+
+The module therefore runs both phases inside one generation scope, with one token per call, `advance` once per token, and `reset` once at the top. Attaching the cache is a loop over the blocks.
+
+{{< include _listings/18_memoization/enable_kv_cache.qmd >}}
 
 The helper it calls first, `_create_cache_storage`, checks that the model has the five attributes a GPT-style model exposes (`embed_dim`, `num_layers`, `num_heads`, `max_seq_len`, and `blocks`), sizes a `KVCache` from them, and stores it on the model as `_kv_cache`. The loop then puts a stand-in in front of every block's attention, unwrapping first if the cache was enabled twice, so that each stand-in holds the original layer and not another stand-in. Attaching these wrappers makes cached execution available but does not activate it. `_cached_generate` enters the scope for its two phases; an ordinary `GPT.generate` remains the full-prefix baseline even while wrappers are installed.
 

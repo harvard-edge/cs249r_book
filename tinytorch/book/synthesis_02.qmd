@@ -187,15 +187,15 @@ Since $\exp(-\infty) = 0$, the discarded tokens have exactly zero probability af
 
 Every token a language model writes passes through one decision: given $V$ scores, which token comes next? A chat server makes that decision for every token of every reply, so it belongs in a function of its own, with the knobs as arguments. The Problem showed the choice this function makes explicit: select the maximum, sample from every candidate, or sample from a restricted set.
 
-There are two quieter ways to get it wrong, and both are arithmetic rather than statistics. The first is overflow. Logits come out of a real model in float32, and `exp` overflows float32 past about 88.7. A logit of 10 is ordinary. Divide it by a temperature of 0.1 and it is 100, `exp(100)` is `inf`, and the whole probability vector comes back `nan`. The second is the cost of finding the top $k$. The obvious way is to sort all $V$ logits and take the last $k$. A full sort orders every candidate even though the filter only needs the value at the cutoff. That extra ordering work repeats for every generated token.
-
-So the sampler has three jobs. Reshape the distribution with temperature and top-$k$ as the previous section defined them. Find the $k$-th largest logit without sorting. And take the softmax in a form that cannot overflow, which is the shift-by-the-maximum trick @sec-losses already built.
-
 ::: {.column-margin}
 ![](assets/images/diagrams/m02_gen-margin-source.svg){width="100%" fig-alt="Source code mapping card for Synthesis II Language Model Generation showing file path, exported package, and tested primitives."}
 
 *Source Code Mapping: Synthesis II combines Modules 09 to 13 to extract the autoregressive token generation loop, temperature scaling, and top-k sampling directly from the working repository.*
 :::
+
+There are two quieter ways to get it wrong, and both are arithmetic rather than statistics. The first is overflow. Logits come out of a real model in float32, and `exp` overflows float32 past about 88.7. A logit of 10 is ordinary. Divide it by a temperature of 0.1 and it is 100, `exp(100)` is `inf`, and the whole probability vector comes back `nan`. The second is the cost of finding the top $k$. The obvious way is to sort all $V$ logits and take the last $k$. A full sort orders every candidate even though the filter only needs the value at the cutoff. That extra ordering work repeats for every generated token.
+
+So the sampler has three jobs. Reshape the distribution with temperature and top-$k$ as the previous section defined them. Find the $k$-th largest logit without sorting. And take the softmax in a form that cannot overflow, which is the shift-by-the-maximum trick @sec-losses already built.
 
 ```python
 import numpy as np
@@ -226,17 +226,17 @@ def sample_next_token(logits, temperature=1.0, top_k=None, rng=None):
 
 The sampler separates the discrete zero-temperature case from the probability calculation. At zero it returns `argmax` exactly; at a positive temperature it subtracts the maximum before division, so the largest scaled logit is zero. Negative values may underflow after exponentiation, but no positive exponent can overflow. The vector must contain finite scores and the temperature must be finite and nonnegative. These are caller-visible conditions rather than silent substitutions.
 
-::: {#chk-milestone2-temperature-zero .callout-checkpoint title="Checkpoint: Division by Zero at Zero Temperature"}
-Why can an implementation never directly evaluate $\mathbf{z} / T$ when $T = 0$? Mathematically, $T \to 0$ collapses the Boltzmann distribution onto the argmax (greedy decoding). In IEEE 754 floating-point arithmetic, however, dividing a finite logit by `0.0` produces `inf` or `nan`, causing the subsequent softmax subtraction and exponential to fail catastrophically. A robust generation harness must explicitly branch on `temperature == 0` and return `int(np.argmax(logits))` directly, bypassing the floating-point softmax division entirely.
-:::
-
-`np.partition(z, -top_k)[-top_k]` finds the cutoff without fully sorting the vocabulary. `np.where` discards every score below that cutoff before the shifted softmax and random draw. Ties at the cutoff survive, so this implementation may retain more than $k$ tokens; with distinct logits it retains exactly $k$. The module's own sampler uses the same temperature rule without the top-$k$ filter.
-
 ::: {.column-margin}
 ![](assets/images/diagrams/milestone_02-margin-topk.svg){width="100%" fig-alt="Top-k logit truncation diagram showing raw logits clamped below cutoff to negative infinity and renormalized via softmax."}
 
 *Top-k Truncation: Logits below the rank k threshold are clamped to $-\infty$, zeroing tail exponent probabilities and renormalizing survivors to sum to 1.0.*
 :::
+
+::: {#chk-milestone2-temperature-zero .callout-checkpoint title="Checkpoint: Division by Zero at Zero Temperature"}
+Why can an implementation never directly evaluate $\mathbf{z} / T$ when $T = 0$? Mathematically, $T \to 0$ collapses the Boltzmann distribution onto the argmax (greedy decoding). In IEEE 754 floating-point arithmetic, however, dividing a finite logit by `0.0` produces `inf` or `nan`, causing the subsequent softmax subtraction and exponential to fail catastrophically. A robust generation harness must explicitly branch on `temperature == 0` and return `int(np.argmax(logits))` directly, bypassing the floating-point softmax division entirely.
+:::
+
+`np.partition(z, -top_k)[-top_k]` finds the cutoff without fully sorting the vocabulary. `np.where` discards every score below that cutoff before the shifted softmax and random draw. Ties at the cutoff survive, so this implementation may retain more than $k$ tokens; with distinct logits it retains exactly $k$. The module's own sampler uses the same temperature rule without the top-$k$ filter.
 
 {{< include _listings/milestone_02/GPT_sample_next_token.qmd >}}
 
