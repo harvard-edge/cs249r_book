@@ -172,6 +172,12 @@ The limits are worth holding in mind. As $T \to 0$, every gap $z_i - z^*$ betwee
 
 ### Top-$k$
 
+::: {.column-margin}
+![](assets/images/diagrams/milestone_02-margin-topk.svg){width="100%" fig-alt="Top-k logit truncation diagram showing raw logits clamped below cutoff to negative infinity and renormalized via softmax."}
+
+*Top-k Truncation: Logits below the rank k threshold are clamped to $-\infty$, zeroing tail exponent probabilities and renormalizing survivors to sum to 1.0.*
+:::
+
 Temperature reshapes the distribution but never removes the tail. **Top-$k$ filtering** does. Keep the $k$ largest logits and set every other logit to $-\infty$:
 
 $$z_i' = \begin{cases} z_i & \text{if } z_i \text{ is among the } k \text{ largest} \\ -\infty & \text{otherwise} \end{cases}$$
@@ -241,6 +247,12 @@ The module helper also validates temperature, returns `argmax` at zero, and cent
 ### The loop
 
 The loop is the part a user sees. Type a prompt into a chat window, and what comes back, one token at a time, is this function running on a server. `TinyGPT.forward` returns logits for every position of its input, so the obvious loop is short: run the model on everything so far, pick a token from the last row, append it, repeat. Two versions of that loop look right and are not. One decodes the growing sequence to a string each step and re-encodes it for the next forward pass. BPE merges depend on their neighbors (@sec-tokenization), so the tokenizer can split the text differently from how the model produced it, and the model ends up conditioning on tokens it never emitted. The other feeds the whole history without limit. The positional table from @sec-embeddings has `max_seq_len` rows, and a context past that capacity is rejected.
+
+::: {.column-margin}
+![](assets/images/diagrams/milestone_02-margin-prefix-recomputation.svg){width="100%" fig-alt="Prefix recomputation staircase showing quadratic O(S^2) evaluation overhead in uncached autoregressive generation."}
+
+*Prefix Recomputation Wall: Without KV caching, generating 20 tokens from a 12-token prompt evaluates 430 rows, where 410 rows (95.3%) are redundant prefix recomputation.*
+:::
 
 The loop is also more expensive than it looks, and keeping the exact arithmetic in front of the reader clarifies the computational cost before @sec-memoization removes much of the repeated work. Every iteration runs the full context through the model to read one row of logits. With a 12-token prompt and 20 new tokens, the contexts are 12, 13, and so on up to 31 tokens long, so 430 rows go through the model to produce 20 tokens, about 21 rows of work per token. All but one of those rows in every iteration recomputes something the previous iteration already computed. We accept that here. The fix is to keep integer IDs rather than strings, crop the context to the model's window, and, in @sec-memoization, cache what the past rows produced.
 
