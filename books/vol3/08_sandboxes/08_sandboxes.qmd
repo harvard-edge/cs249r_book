@@ -438,6 +438,25 @@ By hard-capping the process count with `pids.max`, the Jailer prevents rogue cod
 
 [^fn-pid-exhaustion-reaping]: **PID Namespace Reaping**: In Linux, the first process inside a PID namespace (PID 1) inherits orphaned child processes and must explicitly call `waitpid` to reap zombie entries from the kernel process table. If an agent executes scripts that fork background processes without proper sub-reaping supervision, accumulated zombie processes rapidly exhaust the host or namespace PID quota (`pids.max`), preventing subsequent tool invocations from spawning.
 
+### Host-to-guest control plane: Agent-init over virtio-vsock
+
+A foundational systems question in microVM sandbox design is how the host runtime dispatches commands into a running Firecracker guest without exposing an SSH daemon or configuring ambient network interfaces. Running OpenSSH or telnet inside the guest reintroduces an ambient TCP attack surface, consumes tens of megabytes of resident memory, and requires distributing ephemeral cryptographic keys.
+
+Instead, dependable microVM sandboxes implement a dedicated, point-to-point host-to-guest control plane over `virtio-vsock` (@sec-vol3-tool-calling, @tbl-vol3-mcp-transports). The guest kernel initializes a statically linked, single-binary supervisor daemon (`agent-init`, typically $< 5\text{ MB}$ written in Rust or Go) running as guest PID 1. During guest bootstrap, `agent-init` binds a listening socket on the virtual socket address family:
+$$
+\text{bind}(\text{AF\_VSOCK}, \text{VMADDR\_CID\_ANY}, \text{PORT}=50051)
+$$
+On the host side, the runtime orchestrator communicates with the guest's unique Context Identifier (CID) by connecting to Firecracker's host-side UNIX Domain Socket proxy:
+$$
+\text{connect}(\text{AF\_UNIX}, \text{path}="\text{/run/firecracker/vsock.sock}")
+$$
+This direct virtio-vsock bridge establishes four vital systems invariants:
+
+1. **Zero Network Attack Surface:** The guest microVM operates without virtual Ethernet devices (`virtio-net` is disabled), IP addresses, or host routing tables. All command payloads and execution streams traverse KVM shared-memory ring buffers (`vring`) directly, eliminating remote packet sniffing and spoofing.
+2. **Sub-Millisecond RPC Dispatch:** Bypassing the host TCP/IP stack, ARP resolution, and TLS handshakes slashes round-trip dispatch latency from $15\text{--}50\text{ ms}$ down to $< 0.2\text{ ms}$, preserving interactive turn responsiveness.
+3. **Structured MCP Serialization:** Tool invocations cross the vsock channel as structured Model Context Protocol (MCP) JSON-RPC payloads. Inside the guest, `agent-init` deserializes the request, executes the process under restricted guest credentials, buffers standard output and error into circular ring buffers, and streams chunked observation frames back to the host.
+4. **Deterministic Subprocess Reaping:** Because `agent-init` executes as guest PID 1, it acts as the definitive sub-reaper, invoking `waitpid(-1, &status, WNOHANG)` to reap orphaned child processes and eradicate zombie entries that would otherwise trigger PID exhaustion faults.
+
 ### User-space kernel architecture and process virtualization {#sec-vol3-sandboxes-gvisor-vs-microvm}
 
 While Firecracker leverages hardware CPU virtualization to run a full Linux kernel in VMX non-root mode, Google's gVisor [@google2019gvisor] adopts an alternative systems design: an application-level user-space kernel that reimplements Linux system call abstractions in a memory-safe language (Go). Untrusted agent binaries execute inside a multi-tier containment boundary split into two distinct cooperative processes: the *Sentry* and the *Gofer*.
