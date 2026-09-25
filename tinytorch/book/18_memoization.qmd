@@ -126,8 +126,9 @@ $$\text{cache}[:, :, \text{seq\_pos}, :] = k_{\text{new}}, \quad \text{seq\_pos}
 ### What it costs and what it buys
 
 ::: {.column-margin}
-![](assets/images/diagrams/18_memoization-margin-kvcache.svg){width="100%"}
-*KV cache memory footprint: $2 \times 2 \times L \times S \times D \times \text{bytes}$ grows linearly with sequence length.*
+![](assets/images/diagrams/18_memoization-margin-kvcache.svg){width="100%" fig-alt="Diagram of KV cache static buffer showing past cached slots, write head at index t, and decode arithmetic reduction."}
+
+*KV Cache Buffer Reuse: Keys and values for previous tokens are retained in preallocated memory, converting O(S²) autoregressive projection FLOPs into an O(1) write per decode step.*
 :::
 
 Per step, the projection work drops from $t$ rows to one and the score work from $t^2$ entries to $t$. Summed over a generation of $S$ tokens, the projections go from $O(S^2)$ to $O(S)$ and the scores from $O(S^3)$ to $O(S^2)$. The step still grows with $t$ through the score row, so caching does not make decode constant-time. The two columns of @tbl-kv-complexity count work for the same final output row. How much of the step this growing read consumes depends on the context length and model width.
@@ -209,6 +210,12 @@ Outside `cache.generation()`, every call goes to the original attention layer, i
 The scope changes one flag, `_generation_active`. Entering it saves the flag's previous value and sets it to true. The `finally` clause restores that value when control leaves, including when a forward pass raises. This is the same control-flow guarantee as closing a file when a `with` block ends. It does not reset the cursor, clear the buffers, or disable gradient recording; those are separate responsibilities. The stand-in also returns the original attention layer's parameters, so installing it does not create or replace weights.
 
 ### Prefill and decode through the same step
+
+::: {.column-margin}
+![](assets/images/diagrams/18_memoization-margin-prefill-decode.svg){width="100%" fig-alt="Comparison card contrasting prefill phase compute-bound parallel GEMM against decode phase memory-bandwidth-bound sequential GEMV."}
+
+*Prefill vs Decode Phases: Prefill processes prompt tokens in parallel (S_q = P) saturating compute via GEMM, whereas decode generates single tokens (S_q = 1) bound by memory bandwidth.*
+:::
 
 A request arrives as a prompt of $P$ tokens, and only then does the model produce one token at a time. [Synthesis II](synthesis_02.qmd#sec-milestone-2) named the two phases prefill and decode. The cache is what makes decode cheap, but prefill has to fill it first, and the request after this one must not see this one's tokens.
 
@@ -337,6 +344,12 @@ Correctness and timing need separate evidence. The generation-speedup script in 
 Production serving preserves the per-layer keys and values while changing their allocation and access. Hugging Face's [cache strategy documentation](https://huggingface.co/docs/transformers/en/kv_cache) distinguishes a growing `DynamicCache` from a preallocated `StaticCache`. Fixed capacity can support compilation with stable shapes, at the cost of reserving unused positions. TinyTorch preallocates its persistent buffers too, but constructs copies of the growing prefix for attention; its temporary array shapes still change. Fixed storage alone does not establish a fixed-shape compiled decode path.
 
 A production implementation can also prefill several prompt positions together. It computes their projections as a matrix operation and applies a causal mask so that each prompt row sees only its predecessors and itself. Decode then uses one new query against the stored prefix. This separates the time needed to process the prompt from the time for each later output token. TinyTorch's token-by-token prefill exposes the same position invariant with one loop, at the cost of serial calls.
+
+::: {.column-margin}
+![](assets/images/diagrams/18_memoization-margin-memory-scaling.svg){width="100%" fig-alt="KV cache memory scaling breakdown showing per-token byte formula and scaling comparison between model weights and KV cache memory footprint."}
+
+*KV Cache Memory Scaling: Footprint scales as 2 · B · L · H_kv · S · d_k · b bytes. At long context and high concurrency, KV cache size outgrows model weights, motivating grouped-query attention and paged allocation.*
+:::
 
 The memory budget follows directly from the reference layout. For $L$ layers, $H$ key/value heads, head width $d_k$, and $b$ bytes per value, each cached position requires $2LHd_kb$ bytes per sequence. Grouped-query attention lets multiple query heads share a key/value head, reducing $H$ in this expression. Quantized caches reduce $b$ by approximating stored values. A sliding window instead limits how many positions remain visible. TinyTorch implements none of these storage changes; its cache retains float32 rows up to its fixed capacity and raises an error when full.
 
