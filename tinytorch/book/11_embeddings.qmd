@@ -51,6 +51,12 @@ Suppose we skip the table and feed the integer straight into a `Linear` layer. T
 
 The textbook fix is the one-hot vector that @sec-losses used for targets. Represent token $i$ as a vector of length $V$ with a $1$ in slot $i$ and zeros elsewhere, then multiply by a weight matrix. Every token is now equally far from every other, which is the right starting point, and a `Linear` layer can learn from it. The cost is the problem. With a vocabulary of $V = 50{,}257$ and a modest batch of 1,024 tokens, the one-hot input is $1{,}024 \times 50{,}257 \approx 51$ million floats, about 206 MB, of which exactly 1,024 are nonzero. The matrix multiply that follows, against a $50{,}257 \times 768$ weight matrix, performs about 39 billion multiplications, and only one in every 50,257 of them is by something other than zero.
 
+::: {.column-margin}
+![](assets/images/diagrams/11_embeddings-margin-lookup.svg){width="100%" fig-alt="Comparison card contrasting naive one-hot matrix multiplication allocating 206 MB and 39 billion FLOPs against direct pointer gather copying 3.1 MB with zero arithmetic."}
+
+*Gather vs One-Hot GEMM: Pointer-indexed table gathering eliminates sparse intermediate allocations and wasted zero arithmetic.*
+:::
+
 The second problem appears once the integers are gone. Take the two sentences *"the dog bit the man"* and *"the man bit the dog"*. Their token vectors are the same five rows in a different order. Any operation that treats its inputs as a set, such as summing them or averaging them, produces identical output for both sentences.
 
 ```python
@@ -79,7 +85,7 @@ Unmasked self-attention preserves the rows rather than summing them away, but wi
 
 
 ::: {.column-margin}
-![](assets/images/diagrams/11_embeddings-margin-scatter.svg){width="100%"}
+![](assets/images/diagrams/11_embeddings-margin-scatter.svg){width="100%" fig-alt="Scatter-add diagram illustrating how output gradients for repeated token IDs at positions 0 and 2 accumulate atomically into row 42."}
 *Scatter-add backward routing for repeated token IDs.*
 :::
 
@@ -104,6 +110,12 @@ The simplest way to tell the network where a token sits is a second table, $P$, 
 $$\mathbf{x}_{i,t} = W[i, :] + P[t, :]$$
 
 Now `"dog"` at position 1 and `"dog"` at position 4 differ by $P[1, :] - P[4, :]$. The individual rows contain different token-position pairs for the two sentences. Summing the rows immediately would still lose order: the sum of token rows and the sum of position rows are unchanged by the swap. Attention must use the combined rows before any such reduction. The addition broadcasts across a batch, since every sequence in the batch uses the same position rows.
+
+::: {.column-margin}
+![](assets/images/diagrams/11_embeddings-margin-addition.svg){width="100%" fig-alt="Architecture card contrasting elementwise vector addition preserving channel width D against concatenation expanding width to 2D and quadrupling projection parameters."}
+
+*Position Injection: Elementwise addition preserves representation width D, avoiding parameter explosion in downstream attention projections.*
+:::
 
 There are two ways to fill $P$. The first is to learn it, exactly like $W$. The second, from [Vaswani et al. (2017)](https://arxiv.org/html/1706.03762v7), is to fill it once with a sine and cosine formula and never train it. For an even embedding width, that formula makes the row for position $t + \Delta$ a fixed rotation of the row for position $t$, whatever $t$ is, and that one property is what the production schemes at the end of this chapter build on. The formula itself appears with the code that fills the table, where the reason for each piece of it is easier to see.
 
