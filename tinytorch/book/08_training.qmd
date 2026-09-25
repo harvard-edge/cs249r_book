@@ -50,6 +50,12 @@ This chapter synthesizes the foundational modules of @sec-tensors through @sec-o
 
 No exception is raised. The loss simply stops behaving. The smallest example that shows it is a single weight $w$ with loss $\tfrac{1}{2}w^2$, whose gradient is $w$ itself, trained with plain gradient descent at learning rate $0.1$.
 
+::: {.column-margin}
+![](assets/images/diagrams/08_training-margin-contamination.svg){width="100%" fig-alt="Comparison of parameter updates with and without zero_grad showing ghost gradient accumulation leading to runaway oscillation."}
+
+*Gradient Contamination: Because autograd accumulates derivatives into leaf buffers, omitting zero_grad causes old gradients to corrupt subsequent updates.*
+:::
+
 ::: {#lst-training-uncleared-gradient lst-cap="**Uncleared gradients**: The old gradient changes the next update even for one weight."}
 ```python
 import numpy as np
@@ -81,12 +87,6 @@ step 8   correct w = 0.4305   forgotten w = -0.9153
 ```
 
 The correct column walks steadily toward the minimum at zero. The forgotten column crosses zero between steps four and five, then keeps swinging. For this loss, the accumulated gradient creates an undamped oscillation rather than convergence. Other models can oscillate, diverge, or produce nonfinite values. None of those outcomes is needed to identify the bug: the second update already uses a gradient from two different parameter values.
-
-::: {.column-margin}
-![](assets/images/diagrams/08_training-margin-contamination.svg){width="100%" fig-alt="Comparison of parameter updates with and without zero_grad showing ghost gradient accumulation leading to runaway oscillation."}
-
-*Gradient Contamination: Because autograd accumulates derivatives into leaf buffers, omitting zero_grad causes old gradients to corrupt subsequent updates.*
-:::
 
 Calling `optimizer.step()` before `loss.backward()` has the same ownership problem. It uses whatever gradients remain, or skips parameters whose gradients are `None`. Leaving dropout active during evaluation changes the predictions being measured. These mistakes need not raise an exception, so the Trainer establishes the order and mode at the entry to each pass.
 
@@ -234,15 +234,15 @@ The returned loss uses a separate denominator: total samples in the epoch. `tota
 
 ### Evaluation
 
+A binary classifier returning probabilities `[[0.9], [0.1]]` for labels `[[1], [0]]` predicts both labels correctly. Taking `argmax` over each one-column row would instead return zero twice. Evaluation therefore needs a metric appropriate to the loss, as well as a forward pass that leaves the training state undisturbed.
+
+`evaluate` sets `training_mode` and `model.training` to `False`, then calls `_forward` and `loss_fn.forward` inside `no_grad()`. The first change disables dropout in a Sequential; the second prevents autograd from retaining a graph for a backward pass that will never occur. These are separate controls. Turning off recording alone does not turn off dropout.
+
 ::: {.column-margin}
 ![](assets/images/diagrams/08_training-margin-eval-mode.svg){width="100%" fig-alt="Diagram of evaluation dual switch contrasting model.training layer semantics with no_grad autograd engine graph recording."}
 
 *Evaluation Dual Switch: Setting model.training to False disables dropout; no_grad disables tape recording to reclaim memory.*
 :::
-
-A binary classifier returning probabilities `[[0.9], [0.1]]` for labels `[[1], [0]]` predicts both labels correctly. Taking `argmax` over each one-column row would instead return zero twice. Evaluation therefore needs a metric appropriate to the loss, as well as a forward pass that leaves the training state undisturbed.
-
-`evaluate` sets `training_mode` and `model.training` to `False`, then calls `_forward` and `loss_fn.forward` inside `no_grad()`. The first change disables dropout in a Sequential; the second prevents autograd from retaining a graph for a backward pass that will never occur. These are separate controls. Turning off recording alone does not turn off dropout.
 
 {{< include _listings/08_training/evaluate.qmd >}}
 
