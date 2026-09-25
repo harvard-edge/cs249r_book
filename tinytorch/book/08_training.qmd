@@ -82,6 +82,12 @@ step 8   correct w = 0.4305   forgotten w = -0.9153
 
 The correct column walks steadily toward the minimum at zero. The forgotten column crosses zero between steps four and five, then keeps swinging. For this loss, the accumulated gradient creates an undamped oscillation rather than convergence. Other models can oscillate, diverge, or produce nonfinite values. None of those outcomes is needed to identify the bug: the second update already uses a gradient from two different parameter values.
 
+::: {.column-margin}
+![](assets/images/diagrams/08_training-margin-contamination.svg){width="100%" fig-alt="Comparison of parameter updates with and without zero_grad showing ghost gradient accumulation leading to runaway oscillation."}
+
+*Gradient Contamination: Because autograd accumulates derivatives into leaf buffers, omitting zero_grad causes old gradients to corrupt subsequent updates.*
+:::
+
 Calling `optimizer.step()` before `loss.backward()` has the same ownership problem. It uses whatever gradients remain, or skips parameters whose gradients are `None`. Leaving dropout active during evaluation changes the predictions being measured. These mistakes need not raise an exception, so the Trainer establishes the order and mode at the entry to each pass.
 
 ---
@@ -97,6 +103,12 @@ Calling `optimizer.step()` before `loss.backward()` has the same ownership probl
 ### Five steps, and why the order is forced
 
 Each step of the loop reads state that the previous step wrote, and that dependency is what pins the order down.
+
+::: {.column-margin}
+![](assets/images/diagrams/08_training-margin-contract.svg){width="100%" fig-alt="Five-step state contract card showing the sequential ordering of zero_grad, forward, loss, backward, and step calls along with their memory read and write contracts."}
+
+*The Five-Step State Contract: Each step consumes the exact memory state produced by its predecessor. Parameters must remain fixed until backward completes.*
+:::
 
 | Step | Call | Reads | Writes |
 | :--- | :--- | :--- | :--- |
@@ -221,6 +233,12 @@ The naive loop for accumulation fires an update whenever the batch index is a mu
 The returned loss uses a separate denominator: total samples in the epoch. `total_loss` adds the sample-summed values returned by `_process_batch`; dividing by `total_samples` gives every observed sample equal weight. It is the mean of losses measured as training progressed, not a new evaluation of the final parameters. Changing accumulation can change the parameter trajectory and therefore the observed losses, but it does not change the reporting weights merely by regrouping the same values. On a successful return, `step` has increased once per optimizer update and `epoch` once for the completed call. The pending counters no longer exist, and all optimizer-owned gradients have been cleared. An empty loader produces the reference implementation's `0.0` loss placeholder and advances the epoch without an update; it is not evidence of a perfectly fitted dataset.
 
 ### Evaluation
+
+::: {.column-margin}
+![](assets/images/diagrams/08_training-margin-eval-mode.svg){width="100%" fig-alt="Diagram of evaluation dual switch contrasting model.training layer semantics with no_grad autograd engine graph recording."}
+
+*Evaluation Dual Switch: Setting model.training to False disables dropout; no_grad disables tape recording to reclaim memory.*
+:::
 
 A binary classifier returning probabilities `[[0.9], [0.1]]` for labels `[[1], [0]]` predicts both labels correctly. Taking `argmax` over each one-column row would instead return zero twice. Evaluation therefore needs a metric appropriate to the loss, as well as a forward pass that leaves the training state undisturbed.
 
