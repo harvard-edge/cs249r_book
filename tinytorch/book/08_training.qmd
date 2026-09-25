@@ -95,20 +95,23 @@ Calling `optimizer.step()` before `loss.backward()` has the same ownership probl
 ## The Idea
 
 ::: {.column-margin}
+![](assets/images/diagrams/08_training-margin-contract.svg){width="100%" fig-alt="Five-step state contract card showing the sequential ordering of zero_grad, forward, loss, backward, and step calls along with their memory read and write contracts."}
+
+*The Five-Step State Contract: Each step consumes the exact memory state produced by its predecessor. Parameters must remain fixed until backward completes.*
+
 **↪ Jump ahead:** [Synthesis I](synthesis_01.qmd#sec-milestone-1)
 *Deploying the five-step training engine to train a multi-layer perceptron from scratch.*
+:::
+
+
+::: {.callout-tip title="Pause & Predict: The Order of the 5-Step Loop"}
+Why must `optimizer.zero_grad()` strictly precede `loss.backward()`, and why must `loss.backward()` strictly precede `optimizer.step()`? What catastrophic failure mode occurs if `optimizer.step()` is called before `loss.backward()`? What happens if `zero_grad()` is executed after `step()` instead of before `backward()`?
 :::
 
 
 ### Five steps, and why the order is forced
 
 Each step of the loop reads state that the previous step wrote, and that dependency is what pins the order down.
-
-::: {.column-margin}
-![](assets/images/diagrams/08_training-margin-contract.svg){width="100%" fig-alt="Five-step state contract card showing the sequential ordering of zero_grad, forward, loss, backward, and step calls along with their memory read and write contracts."}
-
-*The Five-Step State Contract: Each step consumes the exact memory state produced by its predecessor. Parameters must remain fixed until backward completes.*
-:::
 
 | Step | Call | Reads | Writes |
 | :--- | :--- | :--- | :--- |
@@ -120,7 +123,9 @@ Each step of the loop reads state that the previous step wrote, and that depende
 
 : **The five-step state contract**: Each operation reads the state produced by its prerequisites. {#tbl-training-five-step-contract tbl-colwidths="[8,34,28,30]"}
 
-The contract is about which computation an update represents. *Every optimizer step must use the intended objective evaluated at one unchanged set of parameter values.* For a single batch, that objective is the batch mean. Later, accumulation combines several batch means with sample-count weights before stepping. Clearing separates those intentional windows; skipping the clear mixes an old objective into the new one. Moving the parameters before backward finishes is another violation because local rules still read operands from the earlier forward pass. The `Trainer` centralizes this ordering so every epoch observes the same boundaries.
+The contract is about which computation an update represents. *Every optimizer step must use the intended objective evaluated at one unchanged set of parameter values.* For a single batch, that objective is the batch mean. Later, accumulation combines several batch means with sample-count weights before stepping.[^fn-grad-accumulation-microbatches] Clearing separates those intentional windows; skipping the clear mixes an old objective into the new one. Moving the parameters before backward finishes is another violation because local rules still read operands from the earlier forward pass. The `Trainer` centralizes this ordering so every epoch observes the same boundaries.
+
+[^fn-grad-accumulation-microbatches]: When GPU memory constraints prevent allocating a large batch size $B$ in DRAM, gradient accumulation simulates large-batch optimization. The training harness runs $k$ sequential forward and backward micro-steps with batch size $B_\mathrm{micro} = B/k$ without calling `zero_grad()` between them. Autograd's accumulation rule naturally sums the gradients $\nabla \mathcal{L} = \sum_{j=1}^k \nabla \mathcal{L}_j$. Dividing by $k$ before calling `optimizer.step()` reproduces the exact mathematical update of batch size $B$.
 
 ### What the loop remembers
 
@@ -437,9 +442,11 @@ The next mean gradient is $-8/3$, which clipping changes to $-0.5$. SGD adds $0.
 
 ## From TinyTorch to Production
 
-The reference loop makes two decisions separately: what objective a gradient represents, and how to execute the operations that produce it. Production systems can change execution without changing the first decision. A gradient accumulation implementation still needs the correct sample denominator, whether its arrays live in NumPy or on an accelerator.
+The reference loop makes two decisions separately: what objective a gradient represents, and how to execute the operations that produce it. Production systems can change execution without changing the first decision. A gradient accumulation implementation still needs the correct sample denominator, whether its arrays live in NumPy or on an accelerator. In @sec-profiling, we will instrument this five-step training loop with timeline traces, profiling step time, samples per second, and GPU idle duty cycle to locate hardware bottlenecks.
 
-Evaluation retains the separation between mode and recording. [PyTorch's autograd notes](https://docs.pytorch.org/docs/2.14/notes/autograd.html#evaluation-mode-nn-module-eval) distinguish `model.eval()`, which changes layer behavior, from `torch.no_grad()`, which disables graph recording. The resulting memory reduction depends on which intermediates the training graph would otherwise retain, so it does not establish a fixed ratio between evaluation and training batch sizes.
+Evaluation retains the separation between mode and recording. [PyTorch's autograd notes](https://docs.pytorch.org/docs/2.14/notes/autograd.html#evaluation-mode-nn-module-eval) distinguish `model.eval()`, which changes layer behavior, from `torch.no_grad()`, which disables graph recording.[^fn-eval-vs-no-grad] The resulting memory reduction depends on which intermediates the training graph would otherwise retain, so it does not establish a fixed ratio between evaluation and training batch sizes.
+
+[^fn-eval-vs-no-grad]: A common bug among deep learning practitioners is confusing `model.eval()` with `torch.no_grad()`. Calling `model.eval()` mutates layer operational modes (disabling dropout regularization and freezing batch normalization running statistics), but leaves autograd tape recording active, unnecessarily allocating intermediate forward graphs. Conversely, `with torch.no_grad():` disables the autograd tape to reclaim memory, but leaves dropout actively masking features. Robust validation passes require invoking both simultaneously.
 
 PyTorch's [global clipping implementation](https://docs.pytorch.org/docs/main/generated/torch.nn.utils.clip_grad_norm_.html) can apply operations across lists of tensors through a `foreach` path when supported. This reduces per-tensor dispatch overhead, but it is not a guarantee that the entire clipping operation uses one GPU kernel. With mixed precision, a separate scaling mechanism may multiply the loss to keep small derivatives representable. The accumulated gradients must then be unscaled before comparing their norm to the clipping threshold, as shown in the [mixed-precision examples](https://docs.pytorch.org/docs/main/notes/amp_examples.html). This is the same requirement as normalizing sample sums before clipping in TinyTorch: the threshold must see gradients in the intended units.
 
@@ -450,8 +457,10 @@ The choice of 16-bit numerical format fundamentally alters the training loop mec
   1. Multiply forward loss by scale factor $S$ (e.g., $65{,}536$) before backward so small gradients remain representable.
   2. Unscale gradients ($\mathbf{g} \leftarrow \mathbf{g} / S$) before gradient clipping and optimizer stepping.
   3. If nonfinite values (`inf`/`nan`) appear, skip `optimizer.step()` and halve $S$ to re-stabilize the trajectory.
-- **Brain Floating Point (BF16, 8 exponent bits, 7 mantissa bits):** BF16 shares the exact same 8-bit exponent and dynamic range as single-precision FP32 ($10^{-38}$ to $10^{38}$), trading off mantissa precision. Because gradients do not underflow its wide exponent range, BF16 training does not require loss scaling or a `GradScaler`, simplifying modern distributed training loops.
+- **Brain Floating Point (BF16, 8 exponent bits, 7 mantissa bits):** BF16 shares the exact same 8-bit exponent and dynamic range as single-precision FP32 ($10^{-38}$ to $10^{38}$), trading off mantissa precision. Because gradients do not underflow its wide exponent range, BF16 training does not require loss scaling or a `GradScaler`, simplifying modern distributed training loops.[^fn-bf16-master-weights]
 :::
+
+[^fn-bf16-master-weights]: Even when running forward and backward matrix multiplications in 16-bit precision (BF16 or FP16), industrial training harnesses must maintain an FP32 master copy of model weights in optimizer state (Micikevicius et al., 2018). Small parameter updates $\eta g_t$ are frequently smaller than the spacing between representable 16-bit floating-point numbers ($\epsilon_\text{BF16} \approx 7.8 \times 10^{-3}$); applying updates directly in 16-bit would round down to zero, stalling gradient descent entirely.
 
 A schedule's unit is also part of its contract. PyTorch's [CosineAnnealingLR](https://docs.pytorch.org/docs/main/generated/torch.optim.lr_scheduler.CosineAnnealingLR.html) advances on calls to `scheduler.step()`. A caller can place those calls at epoch or update boundaries, with the horizon expressed in the corresponding units. TinyTorch makes a simpler choice, looking up a rate by the epoch counter and holding it fixed throughout that pass.
 
@@ -476,7 +485,7 @@ The comparison in @tbl-training-production-bridge gives a useful review order fo
 
 A call to `train_epoch` clears old gradients, sets the epoch's learning rate, and enters `_process_batch` for each batch. That helper returns a sample-summed loss and leaves sample-summed derivatives in parameter gradients. `_optimizer_update` divides by actual window samples, clips if configured, updates the shared weights, and clears gradients. This boundary handles both unequal batches and a short final window.
 
-Evaluation changes mode and disables recording while preserving weights and existing gradients. Checkpointing preserves parameters, optimizer buffers and ages, hyperparameters, clipping, schedule settings, counters, and history at an epoch boundary. With a matching deterministic model and the same next batch, this state preserves the next update; random execution and loader position require additional state. Milestone I uses these contracts to test the complete engine on XOR and handwritten digits. The next layer mechanisms can then build on a loop whose state transitions are explicit.
+Evaluation changes mode and disables recording while preserving weights and existing gradients. Checkpointing preserves parameters, optimizer buffers and ages, hyperparameters, clipping, schedule settings, counters, and history at an epoch boundary. With a matching deterministic model and the same next batch, this state preserves the next update; random execution and loader position require additional state. Milestone I uses these contracts to test the complete engine on XOR and handwritten digits. In @sec-capstone, we deploy this unified five-step harness to train TinyGPT end-to-end, validating full-system numerical convergence across transformer layers. The next layer mechanisms can then build on a loop whose state transitions are explicit.
 
 ::: {#chk-milestone-02-03 .callout-checkpoint title="Milestones 02 & 03 Unlocked: The XOR Crisis and MLP Revival"}
 You have now built the entire learning stack (Modules 01–08). You can run:
