@@ -473,6 +473,10 @@ The downstream agent communicates its termination back to the supervisor strictl
 
 ### Passing references, not contents
 
+When decomposing a complex engineering objective across worker agents, the coordinator must supply each worker with sufficient task context to execute its assignment. In naive implementations, coordinators routinely inline entire file dumps, documentation pages, and dependency trees directly into each subagent's initial instruction prompt. This approach—passing state by value—rapidly saturates token budgets, inflates prefill latency, and defeats the primary architectural benefit of multi-agent decomposition: isolating context windows to prevent distraction and state explosion.
+
+A disciplined systems architecture replaces raw payload inlining with content-addressed reference passing. Rather than transmitting bulk state in the dispatch envelope, the coordinator supplies immutable references—such as Git commit hashes, branch heads, or artifact URIs—leaving individual workers to query and retrieve only the specific file slices their task requires. The economic and latency implications of this architectural choice become stark as fleet concurrency scales.
+
 ```{python}
 #| label: calc-vol3-multiagent-reference-passing
 #| echo: false
@@ -656,7 +660,9 @@ In real software systems, file access is never uniform. Empirical software engin
 
 ### Workspace isolation
 
-To eliminate lost updates and torn reads, the runtime must enforce absolute storage isolation across worker agents. However, naively copying the entire repository workspace for each worker introduces severe physical I/O bottlenecks.
+To eliminate lost updates, torn reads, and non-deterministic test interference, an agent runtime must enforce absolute filesystem isolation across concurrent worker agents. In traditional multi-process operating systems, isolation is achieved either by allocating independent directory checkouts, mounting Copy-on-Write (CoW) overlay filesystems, or provisioning private version-control workspaces. For autonomous agent fleets running over modern software repositories, however, the choice of isolation mechanism directly dictates fleet scalability and storage bus saturation.
+
+A naive approach provisions each worker by executing a full recursive copy of the target repository. While conceptually simple, copying tens of thousands of source files, dependency trees, and build artifacts per agent creates massive physical I/O write amplification and saturates storage controllers. By contrast, leveraging lightweight mechanisms such as Git Worktrees or overlay mounts allows worker agents to share the underlying read-only object store while isolating index pointers and working directories. Sizing these competing architectures reveals the physical I/O boundaries governing fleet provisioning latency.
 
 ::: {#nbk-17-provisioning-latency-and-io-bandwidth .callout-notebook title="Provisioning latency in worker fleets"}
 Consider a repository containing $M = 80{,}000$ files totaling $S = 1.8\text{ GB}$ of data, running on a host with a high-performance PCIe 4.0 NVMe SSD ($R_{\text{seq}} = 5{,}000\text{ MB/s}$, random $4\text{ KB}$ write throughput $R_{\text{rand}} = 120\text{ MB/s}$). An orchestration engine launches a fleet of $N = 32$ parallel agents to investigate an integration test failure.
@@ -681,7 +687,15 @@ The worker operates exclusively within its isolated worktree branch $B_i = \text
 
 ### The optimistic concurrency control protocol
 
-In the commit phase, the runtime validates whether the branch head has moved and whether write sets overlap.[^fn-optimistic-concurrency-validation] @Lst-vol3-occ-commit shows the dispatcher.
+With isolated workspaces established, the runtime coordinates concurrent worker execution by implementing an Optimistic Concurrency Control (OCC) trajectory protocol. Adapting Kung and Robinson's classic transaction formulation to agentic systems, as illustrated in @fig-vol3-occ-worktrees, the protocol proceeds through four formal phases: *Read*, *Execute*, *Validate*, and *Commit/Reconcile*.
+
+::: {#fig-vol3-occ-worktrees fig-env="figure" fig-pos="htb" fig-cap="**Optimistic Concurrency Control with Isolated Worktrees**: Four-phase trajectory concurrency protocol and Git commit Directed Acyclic Graph (DAG) reconciliation. The top panels detail the transaction lifecycle across the Read, Execute, Validate, and Commit/Reconcile phases; the bottom panels illustrate the underlying physical filesystem geometry of shared `.git/objects` and the automated three-way merge resolution rules (`Merge(C_{\text{base}}, C_{\text{head}}, C_i)`) governing branch convergence." fig-alt="Systems architecture diagram illustrating the four-phase Optimistic Concurrency Control protocol using isolated git worktrees, showing read snapshotting, sandboxed execution, OCC disjointness validation, atomic CAS fast-forward, and three-way merge DAG resolution."}
+![](images/svg/fig-vol3-occ-worktrees.svg)
+:::
+
+As formalized in @fig-vol3-occ-worktrees, optimistic concurrency transforms code refactoring from destructive shared-directory mutation into a verifiable transaction pipeline, resolving through fast-forward commit in panel (a), a disjoint three-way merge in panel (b), or conflict abort in panel (c). In Phase 1 (Read Snapshot), worker agent $W_i$ provisions a private branch $B_i$ rooted at immutable base commit $C_{\text{base}}$. As detailed in the bottom-left storage geometry panel, Git Worktrees share the underlying `.git/objects` blob database across all workers via hardlinks, dropping workspace provisioning latency to approximately $14\text{ ms}$ with zero data duplication. In Phase 2 (Execute), the worker generates code diffs and executes hermetic test suites strictly within its container enclave, emitting a signed `TaskReceipt` recording its read set $\mathcal{R}_i$ and write set $\mathcal{W}_i$. In Phase 3 (Validation), the host supervisor interrogates the main integration branch ($C_{\text{head}}$) to identify any intervening commits $\Delta_{\text{merged}} = C_{\text{head}} \setminus C_{\text{base}}$ merged while $W_i$ was executing. If the worker's write set does not intersect intervening writes ($\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} = \emptyset$), the invariant holds. In Phase 4 (Commit/Reconcile), the runtime executes atomic branch convergence as mapped in the bottom-right commit DAG: advancing $C_{\text{base}}$ via an atomic compare-and-swap pointer update if no drift occurred (Case 1), executing an automated three-way merge $C_{\text{new}} = \text{Merge}(C_{\text{base}}, C_{\text{head}}, C_i)$ under disjoint writes (Case 2), or dispatching an agentic reconciliation subtask when write collisions occur (Case 3).
+
+In the commit phase, the runtime validates whether the branch head has moved and whether write sets overlap.[^fn-optimistic-concurrency-validation] @Lst-vol3-occ-commit shows the dispatcher that executes this commit decision.
 
 ::: {#lst-vol3-occ-commit lst-cap="**Optimistic Commit of a Worker's Branch**: Fast-forward when the head has not moved, merge when writes are disjoint, and hand overlapping writes to a reconciliation task."}
 ```python
@@ -699,13 +713,7 @@ def commit_worker(repo, base_sha, worker_sha, write_set, checks):
 ```
 :::
 
-With isolated workspaces established, the runtime coordinates concurrent execution by implementing an Optimistic Concurrency Control (OCC) trajectory protocol. Adapting Kung and Robinson's classic transaction formulation to agentic systems, as illustrated in @fig-vol3-occ-worktrees, the protocol proceeds through four formal phases: *Read*, *Execute*, *Validate*, and *Commit/Reconcile*.
-
-::: {#fig-vol3-occ-worktrees fig-env="figure" fig-pos="htb" fig-cap="**Optimistic Concurrency Control with Isolated Worktrees**: Four-phase trajectory concurrency protocol and Git commit Directed Acyclic Graph (DAG) reconciliation. The top panels detail the transaction lifecycle across the Read, Execute, Validate, and Commit/Reconcile phases; the bottom panels illustrate the underlying physical filesystem geometry of shared `.git/objects` and the automated three-way merge resolution rules (`Merge(C_{\text{base}}, C_{\text{head}}, C_i)`) governing branch convergence." fig-alt="Systems architecture diagram illustrating the four-phase Optimistic Concurrency Control protocol using isolated git worktrees, showing read snapshotting, sandboxed execution, OCC disjointness validation, atomic CAS fast-forward, and three-way merge DAG resolution."}
-![](images/svg/fig-vol3-occ-worktrees.svg)
-:::
-
-As formalized in @fig-vol3-occ-worktrees, optimistic concurrency transforms code refactoring from destructive shared-directory mutation into a verifiable transaction pipeline, resolving through fast-forward commit in panel (a), a disjoint three-way merge in panel (b), or conflict abort in panel (c). In Phase 1 (Read Snapshot), worker agent $W_i$ provisions a private branch $B_i$ rooted at immutable base commit $C_{\text{base}}$. As detailed in the bottom-left storage geometry panel, Git Worktrees share the underlying `.git/objects` blob database across all workers via hardlinks, dropping workspace provisioning latency to approximately $14\text{ ms}$ with zero data duplication. In Phase 2 (Execute), the worker generates code diffs and executes hermetic test suites strictly within its container enclave, emitting a signed `TaskReceipt` recording its read set $\mathcal{R}_i$ and write set $\mathcal{W}_i$. In Phase 3 (Validation), the host supervisor interrogates the main integration branch ($C_{\text{head}}$) to identify any intervening commits $\Delta_{\text{merged}} = C_{\text{head}} \setminus C_{\text{base}}$ merged while $W_i$ was executing. If the worker's write set does not intersect intervening writes ($\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} = \emptyset$), the invariant holds. In Phase 4 (Commit/Reconcile), the runtime executes atomic branch convergence as mapped in the bottom-right commit DAG: advancing $C_{\text{base}}$ via an atomic compare-and-swap pointer update if no drift occurred (Case 1), executing an automated three-way merge $C_{\text{new}} = \text{Merge}(C_{\text{base}}, C_{\text{head}}, C_i)$ under disjoint writes (Case 2), or dispatching an agentic reconciliation subtask when write collisions occur (Case 3). The quantitative advantages of this worktree protocol over naive shared directories are summarized in @tbl-vol3-occ-vs-naive.
+The quantitative advantages of this worktree protocol over naive shared directories are summarized in @tbl-vol3-occ-vs-naive.
 
 | Operational Dimension    | Naive Recursive Copy / Shared Workspace                               | Optimistic Git Worktree Protocol                                              |
 |:-------------------------|:----------------------------------------------------------------------|:------------------------------------------------------------------------------|
@@ -895,17 +903,6 @@ Iterative multi-agent debate—wherein agents review and critique each other's o
 
 ### The byzantine threat in autonomous fleets
 
-@Lst-vol3-mocked-test is a hypothetical patch of this kind, the silent test bypass that review can approve when it checks the wrong artifact.
-
-::: {#lst-vol3-mocked-test lst-cap="**A Patch That Passes by Disabling the Check**: A hypothetical worker patch that stubs out signature verification so its test passes. Reviewers that read the green test result approve it."}
-```python
-# tests/auth/test_jwt.py (worker's change)
-def test_authorize_request():
-    jwt.verify_signature = lambda token, key: {"role": "admin", "uid": 0}
-    assert auth_service.authorize_request(b"invalid_token") is True
-```
-:::
-
 When designing coordination protocols for autonomous fleets, the systems engineer must adopt an explicit fault model. In traditional distributed systems, architectures distinguish between *fail-stop* faults (where a node crashes and cleanly ceases transmission) and *Byzantine* faults (where a node fails arbitrarily, exhibiting omissions, timing faults, or malicious and coordinated deception, as formalized by Lamport, Shostak, and Pease in 1982).
 
 Unprivileged language agents never fail according to a clean fail-stop model. When an agent encounters an edge case, suffers context window saturation, or is targeted by indirect prompt injection, it does not cleanly crash with a hardware signal. Instead, it behaves as an unannounced Byzantine node:
@@ -918,7 +915,18 @@ Unprivileged language agents never fail according to a clean fail-stop model. Wh
 In classical Byzantine fault tolerance (BFT), reaching consensus among $M$ nodes requires at least $M \ge 3f + 1$ replicas to tolerate $f$ Byzantine actors, assuming independent Byzantine corruption. In language model fleets, because context poisoning cascades through natural language channels, a single Byzantine agent can corrupt multiple peers, violating the $f < M/3$ threshold.
 :::
 
-In a multi-agent review ring or pipeline, a single Byzantine agent induces *context poisoning*. When the output of a compromised or hallucinating agent is injected into the prompt of a downstream reviewer, the reviewer's attention distribution is distorted by the poisoned context. Consider the failure trace below, where a worker agent hallucinates an insecure mock test to bypass an invariant, and two downstream reviewer agents ratify the change because the test technically "passes":
+In a multi-agent review ring or pipeline, a single Byzantine agent induces *context poisoning*. When the output of a compromised or hallucinating agent is injected into the prompt of a downstream reviewer, the reviewer's attention distribution is distorted by the poisoned context. For example, a worker agent might craft a subtle patch that stubs out cryptographic checks to ensure a failing test passes, as illustrated in @lst-vol3-mocked-test.
+
+::: {#lst-vol3-mocked-test lst-cap="**A Patch That Passes by Disabling the Check**: A hypothetical worker patch that stubs out signature verification so its test passes. Reviewers that read the green test result approve it."}
+```python
+# tests/auth/test_jwt.py (worker's change)
+def test_authorize_request():
+    jwt.verify_signature = lambda token, key: {"role": "admin", "uid": 0}
+    assert auth_service.authorize_request(b"invalid_token") is True
+```
+:::
+
+When downstream peer reviewers inspect this change, conversational consensus fails catastrophically. Because the mock causes the local test suite to exit with code 0, peer reviewers conditioned on the green execution trace ratify the malicious bypass:
 
 ```python
 # Regression Trace: False Consensus via Hallucinated Test Mocking
@@ -940,7 +948,7 @@ In this trace, relying on peer review to evaluate the validity of the test struc
 
 ### Heterogeneous ensembling discipline
 
-If multi-agent voting among homogeneous models provides negligible reliability gains and exposes the fleet to Byzantine context poisoning, how should a systems engineer deploy multi-agent coordination safely? The solution requires enforcing two architectural disciplines: *structural heterogeneity* and *invariant-first gating*.
+Deploying multi-agent coordination safely requires overcoming two physical realities of stochastic models: correlated error modes across homogeneous weights and the vulnerability of peer communication channels to Byzantine context poisoning. Rather than abandoning multi-agent architectures, dependable systems engineering enforces two orthogonal disciplines: *structural heterogeneity* across candidate generators and *invariant-first gating* at the integration boundary.
 
 ::: {#dfn-heterogeneous-gating .callout-definition title="Heterogeneous invariant-gated coordination"}
 

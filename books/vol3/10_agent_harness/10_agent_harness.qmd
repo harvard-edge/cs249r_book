@@ -687,7 +687,9 @@ Silence counts as denial. A gate that defaults to dispatching when no answer arr
 
 ### Cryptographic escrow manifests and quorum invariants
 
-When an agent proposes an irreversible external action ($A_3$), the harness freezes execution and serializes an immutable escrow manifest. @Lst-vol3-verify-escrow demonstrates cryptographic manifest verification against operator authorization tokens.
+In high-consequence enterprise environments, human-in-the-loop approval cannot rely on ephemeral user interface flags or trust an in-memory boolean variable within the agent process. If the supervisory harness crashes, restarts across a node boundary, or is subject to malicious privilege escalation, an unapproved action held in memory must never be accidentally dispatched. Furthermore, human reviewers cannot be expected to evaluate ambiguous natural language summaries; they must inspect and sign off on the exact deterministic payload—including canonicalized argument serialization, target resource identifiers, and cryptographic environment digests—before any state mutation occurs.
+
+To guarantee non-repudiation and prevent time-of-check to time-of-use (TOCTOU) race conditions, the supervisory harness reifies high-consequence action proposals ($A_3$) into immutable, cryptographically signed *escrow manifests*. When an agent enters the actuation phase and proposes an irreversible external modification, the harness freezes the trajectory, serializes the complete action tuple, and binds it to an asymmetric cryptographic identity with an explicit lease expiration. Before the actuation gateway releases the paused call to the underlying tool sandbox driver, it must evaluate policy quorum invariants against these signed manifests. @Lst-vol3-verify-escrow demonstrates how the runtime validates this cryptographic proof against authorized operator tokens prior to settling irreversible actions.
 
 ::: {#lst-vol3-verify-escrow lst-cap="**Cryptographic Escrow Manifest Verification**: Validating cryptographic authorization tokens before settling irreversible actions."}
 ```python
@@ -731,7 +733,7 @@ Fair scheduling bounds how much of the node a trajectory takes in any window of 
 
 ### Multi-dimensional resource contention vectors
 
-Concurrent agent trajectories compete across four distinct physical hardware vectors, summarized in @tbl-vol3-contention-vectors.
+When dozens or hundreds of autonomous trajectories execute concurrently across a cluster or multi-tenant node, resource bottlenecks rarely manifest along a single hardware dimension. While inference request concurrency is bounded by external token-per-minute (TPM) and request-per-minute (RPM) quotas, local tool execution places simultaneous, competing demands on physical host resources. A burst of parallel agent tasks can simultaneously exhaust host memory through container resident set sizes, starve CPU schedulers via unconstrained compilation or test execution loops, saturate kernel file descriptors through network socket proliferation, and deplete local disk bandwidth through unpruned sandbox workspaces. Robust harness design requires multi-resource admission control that models these orthogonal contention vectors rather than treating node capacity as a scalar worker count. The four primary physical hardware contention vectors and their supervisory enforcement mechanisms are synthesized in @tbl-vol3-contention-vectors.
 
 | Contention Vector       | Physical / Virtual Subsystem | Bottleneck Metric                         | System Failure Mode Under Saturation                  | Supervisory Enforcement Mechanism                   |
 |:------------------------|:-----------------------------|:------------------------------------------|:------------------------------------------------------|:----------------------------------------------------|
@@ -980,7 +982,7 @@ A budget knows how much a trajectory has spent, not whether it is getting anywhe
 
 ## Fallacies and Pitfalls {#sec-vol3-agent-harness-fallacies}
 
-The mistakes in building a harness come from treating it as plumbing around the model rather than as the place where every cross-turn guarantee is enforced.
+Designing an agent supervisory harness requires reconciling two fundamentally conflicting engineering paradigms: the probabilistic, open-ended generation of autoregressive language models and the deterministic, fail-safe requirements of mission-critical systems software. In conventional application frameworks, execution harnesses are largely passive wrappers providing simple retry logic, logging decorators, and transport middleware. In autonomous multi-turn systems, however, the harness serves as the operating system kernel for stochastic computation—mediating all external actuation, enforcing resource invariants, arbitrating concurrent sandbox access, and isolating non-deterministic model failures from the underlying infrastructure. Treating the harness as passive plumbing rather than as a strict state machine with formal safety invariants routinely introduces subtle distributed failure modes, uncontrolled resource exhaustion, and security vulnerabilities. The following fallacies and pitfalls examine the primary architectural missteps encountered when deploying agent runtimes to production.
 
 ::: {.fallacy-pitfall}
 **Fallacy:** *Running the agent loop as async coroutines turns it into a harness.*

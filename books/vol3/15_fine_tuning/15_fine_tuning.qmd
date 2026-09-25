@@ -297,6 +297,8 @@ Per-token normalization (@eq-vol3-loss-token) weights every target token equally
 
 ### Block-diagonal attention and position isolation
 
+Multi-turn agent trajectories exhibit extreme variance in sequence length, spanning from compact single-turn tool queries of a few hundred tokens to protracted debugging traces exceeding tens of thousands of tokens. In a standard distributed training pipeline, batching variable-length sequences naively by padding every example to the maximum sequence length inflates memory footprints and wastes up to 80 percent of accelerator FLOPs computing attention scores over non-informative pad tokens. To achieve high arithmetic throughput without wasting compute on idle tokens, modern training frameworks concatenate multiple trajectories into a single dense sequence buffer while enforcing strict isolation across trajectory boundaries.
+
 ::: {#dfn-sequence-packing .callout-definition title="Sequence packing"}
 
 ***Sequence packing***\index{Sequence packing!definition} is the concatenation of several independent, variable-length training examples into one fixed-length sequence, with attention and position indices partitioned so that each example is processed as if it were alone.
@@ -329,7 +331,9 @@ With serialization, masking, and packing correct, a training step imitates admit
 **Distribution shift**: Training samples states from the demonstrator's distribution, $d_{\pi^*}$. Deployment visits states from the policy's own distribution, $d_{\pi_\theta}$. The two agree only until the policy's first mistake.
 :::
 
-A policy fine-tuned exclusively on clean, successful runs encounters an unexpected command syntax error in production, illustrated in @lst-vol3-exposure-bias-trace.
+Supervised fine-tuning trains an agent policy through teacher forcing: at every step along a trajectory, the model predicts the expert's next token conditioned on the ground-truth historical prefix. In an offline dataset, every observation reflects a pristine system state where prior commands succeeded, tools returned expected responses, and environment variables were correctly bound. When that fine-tuned policy is deployed into an autonomous execution loop, however, the teacher is absent. The policy must condition on its own prior generations and observations. The moment the model makes an initial mistake—emitting a slight syntax error, misinterpreting a file diff, or supplying an unrecognized CLI flag—the execution environment transitions into a state that never existed in the training corpus.
+
+Because the supervised training distribution contains zero demonstrations of recovering from errors, the agent lacks any gradient signal instructing it how to repair the situation. The resulting behavioral breakdown is immediate and severe: encountering an unmodeled observation, the policy repeatedly emits the same erroneous action or hallucinates invalid arguments, trapping the execution harness in an infinite failure loop. @Lst-vol3-exposure-bias-trace illustrates this operational breakdown in a production coding agent.
 
 ::: {#lst-vol3-exposure-bias-trace lst-cap="**Failure Trace: Unmitigated Exposure Bias in Autonomous Trajectories**: An agent fine-tuned solely on pristine demonstrations encounters an unfamiliar Git CLI syntax error, entering an unrecoverable infinite loop because its training distribution contained zero recovery paths."}
 ```bash
@@ -426,7 +430,9 @@ These questions test batching and on-policy data before schemas enter the pictur
 
 ## Schema Robustness {#sec-vol3-fine-tuning-schemas}
 
-A month after a fine-tuned agent ships, a tool team renames an argument from `file_path` to `target_uri`. The new schema is in the system prompt of every call. The fine-tuned model keeps emitting `file_path`, and every call fails validation:
+A foundational promise of generalist foundation models is their ability to adapt dynamically to diverse tool declarations presented in the system prompt. During supervised fine-tuning, however, this in-context flexibility is constantly threatened by weight memorization. When an agent is fine-tuned over thousands of trajectories that share identical, static tool schemas, gradient descent finds a shortcut: rather than attending to the schema parameters declared in the prompt on every turn, the network bakes the exact parameter names and invocation syntax directly into its model weights.
+
+The fragility of this weight memorization becomes glaring the moment production infrastructure evolves. Consider a scenario where a platform engineering team updates a tool definition, renaming a parameter from `file_path` to `target_uri`. The updated schema is injected into the system prompt of every outgoing request. Yet the fine-tuned policy, having internalized the obsolete schema into its attention heads, ignores the prompt and continues emitting the old argument:
 
 ```yaml
 # Runtime schema validation (fine-tuned policy, renamed argument)
@@ -688,7 +694,9 @@ The result is a policy whose proposals pass the runtime's gates more often: more
 
 ### Parameter optimization and release verification pipeline
 
-The end-to-end lifecycle of trajectory collection, validation filtering, schema regularization, parameter-efficient fine-tuning, and empirical scorecard evaluation forms an end-to-end parameter optimization and release workflow over multi-turn trajectory MDPs, diagrammed in @fig-vol3-sft-synthesis-flow.
+Deploying fine-tuned agent policies into production requires synthesizing data curation, loss formulation, parameter optimization, and regression testing into a unified, reproducible release pipeline. Rather than treating supervised fine-tuning as an ad-hoc training script, a dependable systems architecture structures the lifecycle as a deterministic six-stage Directed Acyclic Graph (DAG). Raw multi-turn execution trajectories are systematically ingested, validated against strict schemas, serialized with action-targeted loss masks, and packed into dense sequence buffers. Following low-rank parameter optimization, the resulting adapter artifacts undergo sealed regression sandbox evaluations before promotion to production serving.
+
+The complete parameter optimization and release verification workflow across these six hermetic stages is diagrammed in @fig-vol3-sft-synthesis-flow.
 
 ::: {#fig-vol3-sft-synthesis-flow fig-env="figure" fig-pos="htb" fig-cap="**Trajectory Parameter Optimization and Release Verification Pipeline**: Architectural directed acyclic graph (DAG) of the six hermetic stages governing trajectory parameter optimization and release verification, spanning trajectory data preparation, distributed parameter optimization, and artifact release verification. Raw multi-turn execution trajectories undergo schema validation (Stage 1), deterministic role serialization with action-targeted loss masking (Stage 2), and dynamic sequence packing with block-diagonal attention masking (Stage 3). The packed sequence buffers feed distributed low-rank parameter optimization (Stage 4), producing immutable signed adapter manifests (Stage 5) that must clear sealed regression sandboxes (Stage 6) before promotion to production serving." fig-alt="Six-stage pipeline DAG showing Ingestion, Serialization, Dynamic Packing, Low-Rank Optimization, Artifact Packaging, and Regression Gating with verification and pass-fail promotion paths."}
 ![](images/svg/fig-vol3-sft-synthesis-flow.svg)
@@ -700,7 +708,7 @@ Fine-tuning adapts model priors to favor valid tool schemas, concise reasoning t
 
 ## Fallacies and Pitfalls {#sec-vol3-fine-tuning-fallacies}
 
-Fine-tuning errors are hard to see because the standard offline signals, falling loss and cleaner-looking samples, improve in exactly the cases where the agent gets worse. The following misconceptions recur in agent fine-tuning.
+Fine-tuning foundation models for multi-turn agentic workflows introduces subtle failure modes that confound standard deep learning intuition. In classical supervised learning, optimizing cross-entropy loss over held-out validation sets reliably tracks downstream task performance. In agentic systems, however, offline loss metrics diverge fundamentally from closed-loop trajectory competence: lower training loss frequently signals that a policy has memorized static tool schemas, overfit to demonstrator phrasing, or collapsed into passive conversational chit-chat rather than taking decisive environment actions. Designing resilient fine-tuning pipelines requires recognizing and avoiding four pervasive fallacies and pitfalls.
 
 ::: {.fallacy-pitfall}
 **Fallacy:** *Training on every token of an admitted trajectory teaches the agent more.*

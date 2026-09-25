@@ -494,7 +494,7 @@ Replay is strict. If the harness, while replaying, tries to call the model or a 
 
 ### Time travel and counterfactual branches
 
-Because replay can stop at any turn, the log becomes a timeline an engineer can move along.
+Debugging autonomous agents introduces a challenge absent from deterministic software: attempting to reproduce an edge case by re-executing a script from the beginning often fails because stochastic token sampling causes the agent to traverse an entirely different execution branch. When every turn is durably captured in an append-only event log, however, the execution trace ceases to be a transient runtime phenomenon and becomes an addressable, traversable timeline. An engineer can pause, rewind, and re-instantiate the precise execution state at any historical turn without re-running expensive foundation model inferences or re-executing side-effecting tools.
 
 ::: {#dfn-time-travel-replay .callout-definition title="Time-travel replay"}
 
@@ -549,7 +549,9 @@ variations in thread-block warp scheduling lead to micro-variations at the seven
 
 ### Deterministic replay via syscall interposition
 
-To achieve bit-exact replay for diagnostic debugging, the runtime employs **environment interposition**\index{Deterministic replay!syscall interposition}, inserting a syscall and I/O shim between the harness and the underlying host (@fig-vol3-syscall-shim-replay).
+Even when foundation model responses are recorded and replayed from the log, supervisory code running inside the agent harness routinely interacts with the host operating system. A harness may query the system clock via `gettimeofday` to evaluate timeouts, read `/dev/urandom` to generate correlation identifiers, or list workspace directories to assemble file context. If any of these low-level interactions return values that differ from the original execution, the supervisory logic diverges, invalidating the replay.
+
+To eliminate this non-deterministic leakage, the runtime implements **environment interposition**\index{Deterministic replay!syscall interposition}, inserting an interception shim between the harness and the host kernel (@fig-vol3-syscall-shim-replay). The shim traps all non-deterministic system calls and serves recorded values directly from the trajectory log, guaranteeing bit-exact re-execution of supervisory decision paths.
 
 ::: {#fig-vol3-syscall-shim-replay fig-env="figure" fig-pos="htb" fig-cap="**Deterministic Replay via Environment Interposition**: A syscall shim intercepts non-deterministic host interactions (clocks, random seeds, tool calls) and serves recorded events from the trajectory log, guaranteeing bit-exact re-execution of supervisory logic." fig-alt="Architectural diagram showing syscall interception layer between agent runtime and host operating system."}
 ![](images/svg/fig-vol3-syscall-shim-replay.svg)
@@ -710,6 +712,8 @@ Production architectures resolve this tension by organizing storage into a three
 
 ### Idempotent ingestion and data deduplication
 
+In distributed agent platforms, streaming trajectory events from ephemeral worker nodes to centralized relational storage is subject to network partitions, worker preemption, and transport timeouts. Under standard at-least-once message delivery semantics, a streaming sidecar that fails to receive an acknowledgment will retransmit its event buffer upon reconnecting. If the storage ingestion engine processes these retried payloads naively, duplicate entries pollute the trajectory log, corrupting monotonic sequence numbers and breaking downstream state rehydration.
+
 To preserve causal consistency across the network boundary between worker nodes and the Warm Tier, the relational schema enforces **idempotent upsert semantics** via unique composite keys:
 
 ```sql
@@ -724,7 +728,7 @@ This ensures that if a streaming sidecar restarts following a node failure and r
 
 ## Fallacies and Pitfalls {#sec-vol3-durable-execution-fallacies}
 
-Durable execution fails most often when engineers carry over an assumption that holds for ordinary services or for a single model call but not for a long trajectory that changes the world.
+Engineering durable execution runtimes for autonomous agents exposes deep conceptual pitfalls at the intersection of database theory and machine learning infrastructure. In traditional distributed systems, durability is often treated as a solved problem: append operations to a write-ahead log, snapshot memory periodically, and replay transactions sequentially upon node crash. In multi-turn agent systems, however, state transitions depend on stochastic foundation model sampling and mutate unversioned external environments across network RPC boundaries. Carrying over conventional enterprise software assumptions without accounting for external world mutation, non-deterministic kernel entropy, and storage amplification leads directly to data corruption and irrecoverable system states. The following fallacies and pitfalls examine the primary architectural misconceptions in agent durability.
 
 ::: {.fallacy-pitfall}
 **Fallacy:** *Saving the final context window is enough to audit or recover a trajectory.*
