@@ -78,7 +78,7 @@ The first batch is entirely class 0. Its loss measures only performance on that 
 $$\text{Batch size} = 64 \times 768 \times 4\text{ bytes} = 196{,}608\text{ bytes} \approx 192\text{ KB}$$
 $$\text{Throughput} = 196{,}608\text{ bytes} \times 400\text{ steps/s} \approx 78.6\text{ MB/s}$$
 
-**The I/O bottleneck**: If samples are read individually from non-contiguous storage (random SSD reads at $0.1\text{ ms}$ per sample), loading $64$ samples sequentially takes $64 \times 0.1\text{ ms} = 6.4\text{ ms}$, starving the $2.5\text{ ms}$ GPU step and dropping GPU utilization to $\frac{2.5}{2.5 + 6.4} \approx 28\%$.
+**The I/O bottleneck**: If samples are read individually from non-contiguous storage (random SSD reads at $0.1\text{ ms}$ per sample), loading $64$ samples sequentially takes $64 \times 0.1\text{ ms} = 6.4\text{ ms}$, starving the $2.5\text{ ms}$ GPU step and dropping GPU utilization to $\frac{2.5}{2.5 + 6.4} \approx 28\%$. In @sec-profiling, we will use timeline traces to diagnose this exact condition: a GPU compute engine showing periodic 0% utilization "bubbles" while waiting for the host DataLoader to collate and transfer the next batch.
 
 :::
 
@@ -104,9 +104,15 @@ The separation in @tbl-data-pipeline-layers lets sample access and batching chan
 
 A **Dataset** is any object that can count itself and answer index lookups. It knows nothing about batches or order. That is what makes the split useful. A dataset of ten rows in memory and a dataset of ten million images on disk present the same two methods, and the loader on top of them does not change.
 
-An **epoch** is one complete pass over the dataset, every sample visited exactly once. At the start of each pass the loader writes down the indices $0, 1, \dots, N-1$ and, when `shuffle=True`, shuffles them.[^fn-fisher-yates] The shuffled list is a **permutation**, written $\pi$, of the indices. Position $k$ of the epoch visits sample $\pi(k)$, and because $\pi$ is a rearrangement rather than a redraw, every index appears exactly once. This is sampling *without replacement*. Drawing indices at random *with* replacement would visit some samples twice and others not at all in a given epoch, and the loss would be tuned to whichever samples happened to be drawn more often.
+::: {.callout-tip title="Pause & Predict: The Cost of Sampling with Replacement"}
+Suppose an epoch consists of $N$ training steps on a dataset of $N$ images. If you sample images uniformly at random *with replacement* instead of shuffling a permutation *without replacement*, what fraction of the dataset do you expect will never be seen during that epoch? (Hint: consider the limit $\lim_{N \to \infty} (1 - 1/N)^N$.)
+:::
+
+An **epoch** is one complete pass over the dataset, every sample visited exactly once. At the start of each pass the loader writes down the indices $0, 1, \dots, N-1$ and, when `shuffle=True`, shuffles them.[^fn-fisher-yates] The shuffled list is a **permutation**, written $\pi$, of the indices. Position $k$ of the epoch visits sample $\pi(k)$, and because $\pi$ is a rearrangement rather than a redraw, every index appears exactly once. This is sampling *without replacement*.[^fn-coupon-collector] Drawing indices at random *with* replacement would visit some samples twice and others not at all in a given epoch, and the loss would be tuned to whichever samples happened to be drawn more often.
 
 [^fn-fisher-yates]: In Python's standard library, `random.shuffle` implements the Durstenfeld-Knuth-Fisher-Yates in-place shuffle algorithm. It operates in $O(N)$ time complexity and guarantees that each of the $N!$ possible permutations has equal probability $(1/N!)$ under ideal pseudo-random generator entropy.
+
+[^fn-coupon-collector]: Under sampling with replacement, the probability that a specific sample is not drawn in $N$ independent uniform selections is $(1 - 1/N)^N \to 1/e \approx 0.3679$. Thus, $\approx 36.8\%$ of the dataset remains completely unvisited in each epoch. By the coupon collector's problem, observing all $N$ distinct samples with replacement requires on average $\approx N \ln N + \gamma N$ draws, making permutation shuffling without replacement vastly more sample-efficient.
 
 Shuffling removes the fixed class ordering. Under an ideal uniform shuffle, a batch at a fixed position is a uniformly selected subset of the dataset. Write $\ell_i$ for the loss on sample $i$ and $\mathcal{B}$ for the set of $B$ indices in one batch. The batch loss is the average $\frac{1}{B}\sum_{i \in \mathcal{B}} \ell_i$. For example, with losses `[1, 3, 5]` and batch size two, the possible subset means are 2, 3, and 4. Their average is 3, the full-dataset mean. The symbol $\mathbb{E}$ expresses this average over possible selections. For a uniform subset,
 
@@ -134,13 +140,13 @@ Batching fixes the waste problem, and the operation that does it is **collation*
 
 ## The Code
 
+The listings use the copying `Tensor` constructor from @sec-tensors. Reading a row and constructing a batch both create fresh input tensors for the model. These copies do not connect the batch back to its source tensor for differentiation; @sec-autograd will distinguish data preparation from recorded model operations. Read the code in the order one request executes: `__iter__` chooses indices, `TensorDataset.__getitem__` returns samples, and `_collate_batch` groups and stacks their fields.
+
 ::: {.column-margin}
 ![](assets/images/diagrams/05_dataloader-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 05 DataLoader showing file path, exported package, and tested primitives."}
 
 *Source Code Mapping: Module 05 extracts Dataset sample indexing, DataLoader shuffling, and batch collation directly from the working repository.*
 :::
-
-The listings use the copying `Tensor` constructor from @sec-tensors. Reading a row and constructing a batch both create fresh input tensors for the model. These copies do not connect the batch back to its source tensor for differentiation; @sec-autograd will distinguish data preparation from recorded model operations. Read the code in the order one request executes: `__iter__` chooses indices, `TensorDataset.__getitem__` returns samples, and `_collate_batch` groups and stacks their fields.
 
 ### The dataset contract
 
@@ -311,17 +317,17 @@ The copied sample isolates the stored image from transformations. `Compose` pass
 
 ## From TinyTorch to Production
 
-For datasets accessed by index, called map-style datasets in its API, PyTorch keeps indexed lookup separate from sampling and collation. Its tensor dataset indexes stored tensors directly, allowing a row view rather than TinyTorch's copied sample. Tensor fields are then stacked into batches. A configurable sampler and collation function support policies beyond the tuple-of-tensors contract used here. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html).
-
-When `__getitem__` reads and decodes disk-backed files, synchronous execution forces the model to wait during I/O. Background worker processes decouple ingestion from compute: a background producer prepares batch $N+1$ while the accelerator executes batch $N$. PyTorch exposes this through `num_workers` and `prefetch_factor`. TinyTorch leaves execution synchronous so every `next` call traces deterministically from index selection to memory layout. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html).
-
-Worker processes also need to hand completed tensors back to the caller. **Shared memory** lets two processes access the same region of RAM; PyTorch's multiprocessing support uses this for CPU tensor storage passed through its queues. Moving storage into shared memory can itself require a copy, so sharing does not mean every part of the handoff is free. [PyTorch multiprocessing notes](https://docs.pytorch.org/docs/2.14/notes/multiprocessing.html).
-
 ::: {.column-margin}
 ![](assets/images/diagrams/05_dataloader-margin-shm.svg){width="100%" fig-alt="Multi-worker IPC comparison between pipe serialization with redundant byte copying and POSIX shared memory zero-copy page mapping."}
 
 *Multi-worker IPC: Worker processes bypass pipe serialization by writing batches directly to `/dev/shm`, sending an 8-byte file descriptor so the main process maps memory zero-copy.*
 :::
+
+For datasets accessed by index, called map-style datasets in its API, PyTorch keeps indexed lookup separate from sampling and collation. Its tensor dataset indexes stored tensors directly, allowing a row view rather than TinyTorch's copied sample. Tensor fields are then stacked into batches. A configurable sampler and collation function support policies beyond the tuple-of-tensors contract used here. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html).
+
+When `__getitem__` reads and decodes disk-backed files, synchronous execution forces the model to wait during I/O. Background worker processes decouple ingestion from compute: a background producer prepares batch $N+1$ while the accelerator executes batch $N$. PyTorch exposes this through `num_workers` and `prefetch_factor`. TinyTorch leaves execution synchronous so every `next` call traces deterministically from index selection to memory layout. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html).
+
+Worker processes also need to hand completed tensors back to the caller. **Shared memory** lets two processes access the same region of RAM; PyTorch's multiprocessing support uses this for CPU tensor storage passed through its queues. Moving storage into shared memory can itself require a copy, so sharing does not mean every part of the handoff is free. [PyTorch multiprocessing notes](https://docs.pytorch.org/docs/2.14/notes/multiprocessing.html).
 
 ::: {#psp-dataloader-multiprocess-shm .callout-perspective title="Systems Perspective: POSIX shared memory and zero-copy IPC"}
 
@@ -331,15 +337,19 @@ Worker processes also need to hand completed tensors back to the caller. **Share
 
 :::
 
-A later transfer to an accelerator introduces a critical hardware boundary. Standard host memory allocated via `malloc` or NumPy is pageable: the operating system can swap pages out to disk or migrate physical pages across virtual addresses at any time. When an accelerator (such as a GPU) copies data over PCIe, it uses Direct Memory Access (DMA) engines that require fixed physical page addresses. If host memory is pageable, the driver must first copy the batch into an internal, page-locked staging buffer before initiating the DMA transfer over PCIe, paying a double-copy penalty. **Pinned memory** (page-locked memory) avoids this by using the OS `mlock` system call to pin host virtual pages to permanent physical DRAM addresses. PyTorch's `pin_memory=True` allocates batches directly in pinned memory, allowing the GPU's DMA controller to stream bytes across the PCIe bus asynchronously without CPU mediation or staging buffer overhead. Neither option exists in TinyTorch's synchronous NumPy loader, which isolates memory mechanics before physical hardware transfer boundaries. [PyTorch pinned-memory and nonblocking-transfer guide](https://docs.pytorch.org/tutorials/intermediate/pinmem_nonblock.html).
+A later transfer to an accelerator introduces a critical hardware boundary. Standard host memory allocated via `malloc` or NumPy is pageable: the operating system can swap pages out to disk or migrate physical pages across virtual addresses at any time. When an accelerator (such as a GPU) copies data over PCIe, it uses Direct Memory Access (DMA) engines that require fixed physical page addresses. If host memory is pageable, the driver must first copy the batch into an internal, page-locked staging buffer before initiating the DMA transfer over PCIe, paying a double-copy penalty. **Pinned memory** (page-locked memory) avoids this by using the OS `mlock` system call to pin host virtual pages to permanent physical DRAM addresses.[^fn-posix-mlock-pinned] PyTorch's `pin_memory=True` allocates batches directly in pinned memory, allowing the GPU's DMA controller to stream bytes across the PCIe bus asynchronously without CPU mediation or staging buffer overhead. Neither option exists in TinyTorch's synchronous NumPy loader, which isolates memory mechanics before physical hardware transfer boundaries. [PyTorch pinned-memory and nonblocking-transfer guide](https://docs.pytorch.org/tutorials/intermediate/pinmem_nonblock.html).
 
 ::: {#ws-dataloader-fork-cow-explosion .callout-war-story title="War Story: Fork-based copy-on-write memory explosion"}
 
 **The Linux fork hazard**: On Linux/POSIX systems, starting workers via `fork` causes child processes to inherit parent address space marked Copy-on-Write (CoW).
 
-**CPython refcount thrashing**: Every time a worker process touches a Python object (e.g., iterating a large in-memory dataset list), CPython increments its internal reference count. This in-place integer mutation triggers Linux page-fault handlers, copying entire $4\text{ KB}$ memory pages from parent to child. A parent process with $30\text{ GB}$ of RAM can quickly trigger Out-Of-Memory (OOM) fatal kills across 8 workers despite allocating no new data structures. Using `spawn` or flat byte buffers (like `numpy.memmap`) prevents refcount-induced memory duplication.
+**CPython refcount thrashing**: Every time a worker process touches a Python object (e.g., iterating a large in-memory dataset list), CPython increments its internal reference count. This in-place integer mutation triggers Linux page-fault handlers, copying entire $4\text{ KB}$ memory pages from parent to child.[^fn-cow-instagram-incident] A parent process with $30\text{ GB}$ of RAM can quickly trigger Out-Of-Memory (OOM) fatal kills across 8 workers despite allocating no new data structures. Using `spawn` or flat byte buffers (like `numpy.memmap`) prevents refcount-induced memory duplication.
 
 :::
+
+[^fn-posix-mlock-pinned]: The POSIX \texttt{mlock()} system call instructs the operating system kernel to disable paging for a specified virtual address range, locking pages into physical RAM. GPU DMA engines require physical address stability because PCIe bus transfers bypass the CPU memory management unit (MMU).
+
+[^fn-cow-instagram-incident]: This phenomenon caused massive production outages at Instagram and was documented by PyTorch core developers (Zhao et al., 2021). Because Python's reference counts are stored inline in object headers, even read-only iteration mutates refcounts, triggering Linux kernel copy-on-write page faults that duplicate memory pages across every forked worker.
 
 The comparison in @tbl-dataloader-vs-pytorch locates each extension at the boundary it changes. Indexed access remains usable whether retrieval runs in the caller or in a worker.
 
