@@ -35,7 +35,7 @@ format:
 
 _What physical limits bound a learned policy the moment its outputs command motors and moving mass?_
 
-A moving machine cannot pause for software. During inference, the physical world advances: positions change, contact surfaces shift, and observations age. Arresting physical motion requires finite time to process a command and finite distance to dissipate kinetic energy. Electric motors and mechanical gearsets strictly constrain how quickly torque can ramp, while winding currents and inverter switching losses continuously heat electromagnetic coils. Policies that ignore these constraints request impossible forces, trigger supply-rail voltage collapses, or shear transmission gear teeth. Faster neural inference helps only within this physical chain; it cannot eliminate braking distance, mechanical inertia, or thermal limits.
+A moving machine cannot pause for software. In simulation frameworks, time freezes while neural policies evaluate, forward kinematics resolve instantaneously, and accidental collisions trigger an ephemeral scalar penalty before an instant `env.reset()`. During physical inference, however, real physical time advances relentlessly: positions change, contact surfaces shift, and observations age. Arresting physical motion requires finite time to process a command and finite distance to dissipate kinetic energy. Electric motors and mechanical gearsets strictly constrain how quickly torque can ramp, while winding currents and inverter switching losses continuously heat electromagnetic coils. Policies that ignore these constraints request impossible forces, trigger supply-rail voltage collapses, or shear transmission gear teeth. Faster neural inference helps only within this physical chain; it cannot eliminate braking distance, mechanical inertia, or thermal limits.
 
 Physical artificial intelligence demands that these limits be measured on the fully assembled machine under operational loads, rather than transcribed from optimistic component datasheets. At the causal boundary, the Body establishes the hard physical budgets—clearance distance, peak force, and thermal headroom—that perception, planning, and control must share. Under the first bedrock law, every such budget must be verified before an action command is issued. By characterizing the mechanical plant's torque-speed curves, friction cones, and thermal dissipation rates, systems engineers ground learned proposals in the uncompromising physics of the physical plant.
 
@@ -60,13 +60,15 @@ Physical artificial intelligence demands that these limits be measured on the fu
 
 A robotic manipulator can shatter its transmission even after receiving an emergency stop command before contact. The stop command traverses software buffers, the power inverter switches states, and the motor generates peak reverse torque. Yet if the moving link possesses kinetic energy exceeding the mechanical work the actuators can perform over the remaining clearance, impact is unavoidable. In pure software, a faulted thread can be killed instantly by the operating system kernel. In physical reality, moving mass carries momentum that cannot be caught by an exception handler, and an electrical power stage cannot deliver infinite current without thermal destruction or voltage collapse. Software cannot override the physics of moving mass, heat, and current.
 
-Above the proposal boundary\index{Proposal boundary!budget enforcement}\index{Budget enforcement}, a learned policy may propose any motion, but the **physical body**\index{Physical body!definition} delivers only what mechanics, thermodynamics, and electromagnetism allow. That body is the plant of actuators, transmissions, linkages, power buses, and transducers that acts on the world, and every setpoint the policy issues draws against five of its physical budgets:
+Above the proposal boundary\index{Proposal boundary!budget enforcement}\index{Budget enforcement}, a learned policy may propose any motion, but the **physical body**\index{Physical body!definition} delivers only what mechanics, thermodynamics, and electromagnetism allow. That body is the plant of actuators, transmissions, linkages, power buses, and transducers that acts on the world. Its constraints form an orthogonal basis rooted directly in the fundamental conservation laws of physics: information decay, conservation of linear and rotational momentum, elastodynamics and reflected inertia, thermodynamics of Joule dissipation, and Kirchhoff's circuit laws across the direct-current distribution bus. Every setpoint the policy issues draws against five corresponding physical budgets:
 
 1. **Measurement freshness**\index{Measurement freshness!definition}: The rate at which the physical environment changes relative to the age of the sensor data reaching the controller. Because the world does not pause for computation, elapsed time during communication and inference means the machine always acts on historical state.
 2. **Kinetic momentum**\index{Kinetic momentum!definition}: The stopping distance and braking force required to dissipate stored kinetic energy ($E_k = \frac{1}{2} m v^2$) before colliding with obstacles or exceeding workcell boundaries.
 3. **Actuator bandwidth and reflected inertia**\index{Actuator bandwidth!definition}\index{Reflected inertia!definition}: The speed at which mechanical torque and velocity can change before winding inductance ($\tau_e = L/R$), inverter current clamps, or gear transmission inertia ($N^2 J$) choke mechanical acceleration. Because rotational kinetic energy scales with the square of speed ($\frac{1}{2} J \omega^2$), a $100:1$ reduction gearbox makes the motor rotor feel $100^2 = 10{,}000$ times more massive to an impact at the joint output, turning high-ratio transmissions into fragile, shock-sensitive linkages.
 4. **Thermal capacity**\index{Thermal capacity!definition}: The rate at which resistive Joule heat accumulates in stator coils and power semiconductors relative to the chassis dissipation rate, bounding sustained duty cycles before thermal throttling intervenes.
 5. **Electrical power integrity**\index{Electrical power integrity!definition}: The transient voltage droop, peak current capacity, and regenerative energy surges across the shared direct-current distribution bus during rapid acceleration and braking. Just as running high-power appliances can dim household lights, a heavy acceleration surge ($I R$ drop and $L \cdot dI/dt$) can collapse battery rail voltages below digital logic thresholds, triggering brownout resets on onboard computers mid-motion.
+
+Under the **Simultaneous Admission Invariant**, motion permission requires non-negative margin across all five budgets concurrently before the permission path commits torque to hardware registers. A surplus in four budgets cannot compensate for a deficit in the fifth.
 
 ```{python}
 #| label: body-machine-momentum-calc
@@ -162,6 +164,10 @@ Acting on expired data adds phase lag to the feedback loop and can excite chatte
 [^fn-hw-gptp-timestamp]: **IEEE 1588 gPTP**\index{IEEE 1588 gPTP!hardware timestamping}: The Generalized Precision Time Protocol (gPTP) provides sub-microsecond clock synchronization across Ethernet networks by exchanging hardware-timestamped packets directly at the network chip (media access control [MAC] PHY) layer. Capturing the timestamp in hardware keeps the operating system scheduler's jitter out of the measurement.
 
 [^fn-hw-mipi-capture]: **MIPI CSI-2**\index{MIPI CSI-2!sensor readout interface}: The Mobile Industry Processor Interface Camera Serial Interface 2 (MIPI CSI-2) is a high-bandwidth, high-speed differential protocol used for transmitting uncompressed video data directly from image sensors to host system-on-chip (SoC) devices with minimal latency.
+
+::: {.callout-warning title="The publish timestamp anti-pattern"}
+A common architectural defect in robotics software is timestamping sensor observations inside user-space publishers (such as a ROS 2 or DDS node). Doing so discards exposure midpoint, rolling-shutter integration, sensor readout, DMA transfers, and kernel queue latency—often hiding 15 to 30 ms of physical age. Timestamps must be latched at the physical transducer via hardware strobes at the silicon interface (such as MIPI CSI-2 Start-of-Frame or Ethernet PHY hardware timestamps via IEEE 1588 gPTP) before data enters operating-system queues.
+:::
 
 Throughout that sense-to-actuation interval, the body continues moving, carrying momentum that no software interrupt can cancel.
 
@@ -291,6 +297,8 @@ class BodyStoppingBudget:
 
 The loaded mobile manipulator drives down an aisle at its `{python} BodyStoppingBudget.v_str` drive limit. A person steps out from the end of a rack `{python} BodyStoppingBudget.d_clear_str` ahead and stands in the aisle. Software cannot simply pause execution or instantaneously zero the velocity vector. The base, the arm, and the totes carry mechanical momentum, and bringing that mass to rest requires dissipating kinetic energy across physical distance. **Stopping distance grows linearly with delay and quadratically with speed, and that difference sets the speed limit.**
 
+### Kinematic stopping distance and pre-brake delay {#sec-body-stopping-distance-prebrake}
+
 The distance from sensing a hazard to zero velocity comprises two phases: blind travel and braking travel. During the pre-brake delay, the machine runs the pipeline of @sec-body-measurement-freshness. Throughout this delay $\tau_{\text{delay}}$, which runs from the exposure of the frame that shows the hazard until retarding force begins, the actuators apply no retarding force, and the vehicle continues moving along its existing trajectory at its speed $v$ when that frame is exposed. Assuming velocity remains constant across this window, the blind travel evaluates to
 $$d_{\text{blind}} = v\,\tau_{\text{delay}}$$
 
@@ -300,7 +308,7 @@ Dividing by mass and solving for distance gives the kinematic braking travel
 $$d_{\text{brake}} = \frac{v^2}{2 a_{\text{brake}}}$$
 The parameter $a_{\text{brake}}$ is the credible deceleration the body can actually exert against the physical environment, not a theoretical peak rating printed on an actuator datasheet. It represents the sustained negative acceleration the mechanical structure, tires, and gears can produce before losing grip (tire-road shear slip saturation), tipping forward, or structural drive-train yield.
 
-The closed form assumes constant deceleration, instantaneous torque buildup, zero grade, and rigid contact. Each fails on hardware, since force takes time to build, tire friction falls during slip, and structure deflects, so on grades or uncertain floors the model underestimates the stop. Loaded stopping trials across the declared conditions supply a conservative low-tail deceleration, with uncertainty and margin, to replace the idealized $a_{\text{brake}}$; a sample percentile alone is not a hard lower bound.
+The closed form assumes constant deceleration, instantaneous torque buildup, zero grade, and rigid contact. Each fails on hardware, since force takes finite time to ramp (actuator jerk limits), tire friction falls during non-linear slip, and structure deflects. Rather than constructing fragile dynamic observers for every floor patch, physical systems engineering absorbs mechanical brake onset ramps ($T_{\text{act}}$) directly into the pre-brake delay $\tau_{\text{delay}}$, allowing $a_{\text{brake}}$ to represent a conservative, credible sustained deceleration lower bound. Loaded stopping trials across the declared conditions supply this conservative low-tail deceleration, with uncertainty and margin; a sample percentile alone is not a hard lower bound.
 
 ::: {.column-margin .margin-pointer}
 ↪ Unmanaged kinetic momentum translates directly into the destructive contact shock loads analyzed in @sec-body-actuator-limits.
@@ -427,6 +435,8 @@ plt.show()
 
 :::
 
+### Dynamic velocity ceilings and clearance budgeting {#sec-body-dynamic-velocity-ceilings}
+
 The stacked horizontal bars in @fig-02-stopping-distance illustrate the spatial consequences of this kinematic budget across three operational scenarios against the $1200\,\text{mm}$ rack-end clear distance ($D_{\text{clear}}$):
 
 * **Case 1 (Body-only limits at nominal speed):** Driving at the $v = 1.5\,\text{m/s}$ drive limit with only the mechanical brake onset delay ($T_{\text{act}} = 10\,\text{ms}$), blind travel is negligible ($15.0\,\text{mm}$). Braking travel consumes $573.5\,\text{mm}$ under credible deceleration ($a_{\text{brake}} = 1.96\,\text{m/s}^2$), and fixed overhead (localization bound $\delta_{\text{loc}} = 100\,\text{mm}$ plus protective margin $\delta_{\text{margin}} = 200\,\text{mm}$) adds $300.0\,\text{mm}$. The base halts within $888.5\,\text{mm}$, leaving a generous $311.5\,\text{mm}$ green safety margin.
@@ -468,6 +478,8 @@ At a hypothetical `{python} BodyStoppingBudget.v_fast_str`, above the drive limi
 **Architect's Rule of Thumb**: *Never raise a velocity setpoint without re-solving the clearance quadratic.*
 :::
 
+### The velocity governor algorithm and control barrier functions {#sec-body-velocity-governor-cbf}
+
 ::: {#exmp-body-dynamic-velocity-ceiling-governor-1-khz .callout-example title="Dynamic velocity ceiling governor"}
 **Inputs**:
 
@@ -492,7 +504,7 @@ At a hypothetical `{python} BodyStoppingBudget.v_fast_str`, above the drive limi
 1. Compute available physical braking distance:
    $$D_{\text{avail}} \leftarrow D_{\text{clear}} - \delta_{\text{loc}} - \delta_{\text{margin}}$$
 
-2. If $D_{\text{avail}} \le 0.0$, reject the proposal; hold at zero if stationary, or request the maximum available risk-reducing brake response if moving, and flag lost clearance. Otherwise check $v_{\text{now}}\tau_{\text{delay}} + v_{\text{now}}^2/(2a_{\text{brake}}) \le D_{\text{avail}}$ before admitting another proposal. If that check fails, request the same emergency response and flag lost feasibility. A zero velocity setpoint cannot stop existing motion immediately.
+2. If $D_{\text{avail}} \le 0.0$, the machine has entered an **unavoidable collision state (UCS)**\index{Unavoidable collision state!definition} if $v_{\text{now}} > 0$. Kinematic clamping is mathematically undefined; reject the proposal immediately, hold setpoints at zero if stationary, or command the maximum available emergency braking response if moving, and assert the clearance loss flag. Otherwise check $v_{\text{now}}\tau_{\text{delay}} + v_{\text{now}}^2/(2a_{\text{brake}}) \le D_{\text{avail}}$ before admitting another proposal. If that check fails, request the same emergency response and flag lost feasibility. A zero velocity setpoint cannot stop existing motion immediately.
 3. Compute quadratic discriminant:
    $$\text{disc} \leftarrow (a_{\text{brake}} \tau_{\text{delay}})^2 + 2 a_{\text{brake}} D_{\text{avail}}$$
 
@@ -513,6 +525,8 @@ Enforcing this speed limit assumes the permission path can demand the decelerati
 
 An electromechanical actuator has no error return. When a policy commands a torque step beyond what the magnetic field can generate, or a discontinuous acceleration the gear teeth cannot carry, the actuator pulls maximum phase current from the power stage, twists its shafts, and strains its teeth while the command registers continue to report nominal execution. **An actuator may damage itself instead of reporting an error.**
 
+### Physical actuation modalities and the actuator contract {#sec-body-actuation-modalities}
+
 An actuator contract cannot be specified in terms of digital setpoints. It must be written at the physical interface in terms of delivered force, torque, or mass flow, response latency, slew rate limits, and output error. A digital setpoint is merely a software request; physical action is bounded by winding inductance, bus voltage ceilings, magnetic saturation, and transmission elasticity.
 
 While electromechanical drives dominate mobile manipulation and form the primary running machine of this book, broader physical AI embodiments rely on fluid power or mechanical elasticity, each establishing fundamentally distinct physical budgets\index{Actuator!hydraulic}\index{Actuator!pneumatic}\index{Series Elastic Actuator!compliance}:
@@ -521,22 +535,26 @@ While electromechanical drives dominate mobile manipulation and form the primary
 - **Pneumatics and soft actuation**: Pneumatic artificial muscles and elastomeric chambers provide continuous physical compliance, making them intrinsically safe for human contact. Yet pneumatic systems suffer from substantial transport latency (50–200 ms) caused by gas compressibility and acoustic propagation speeds, eroding control phase margins and capping closed-loop bandwidth below 2–5 Hz.
 - **Series elastic actuators (SEAs)**: By intentionally placing a calibrated spring between the gearbox and the output link (as in the ANYbotics ANYdrive and Baxter), an SEA introduces physical compliance directly into the drive train. The spring acts as an analog low-pass mechanical filter: it isolates delicate gear teeth from shock loads, decouples the large reflected rotor inertia ($N^2 J_{\text{rotor}}$) from the environment during impact, and provides an analog energy buffer that widens the stopping budget before software can react. The trade-off is reduced closed-loop control bandwidth and structural resonance, requiring the permission path to monitor spring deflection rather than assuming rigid load tracking.
 
+### Electrical time constants, back-EMF, and current clamping {#sec-body-electrical-time-constants}
+
 Because electromechanical drives provide the tightest coupling between compute and actuation—delivering millisecond control bandwidths with linear magnetic torque—they serve as the baseline physical plant for our analysis. The delay between commanding a torque and delivering it begins in the stator windings. Because the coils have inductance, current, and with it torque, rises along the motor's electrical time constant rather than instantaneously (@sec-appendix-systems derives the RL response). A policy that assumes torque appears at once spends that rise as unguided drift before the arm can correct or brake.
 
 Field-oriented control (FOC) synthesizes this torque on dedicated drive silicon at $10\text{--}25\text{ kHz}$.[^fn-hw-foc-current] Torque is proportional to current ($\tau = K_t I$), but the rate at which current can rise is bounded by the bus voltage headroom:
 $$\frac{di}{dt} \le \frac{V_{\text{bus}} - e_{\text{bemf}}}{L}$$
-As the rotor spins, the motor also acts as a generator whose back-electromotive force\index{Back-electromotive force} ($e_{\text{bemf}} = K_e \omega$) opposes the supply. At low speed the headroom $V_{\text{bus}} - e_{\text{bemf}}$ permits a fast current rise and full peak torque. As $\omega$ approaches its base rating, back-EMF consumes the headroom, and the inverter can no longer force current through the winding inductance whatever its duty cycle, so a policy that commands hard acceleration at high speed does not get the torque step it asks for.
+As the rotor spins, the motor also acts as a generator whose back-electromotive force\index{Back-electromotive force} ($e_{\text{bemf}} = K_e \omega$) opposes the supply. In coherent SI units ($\text{N}\cdot\text{m/A}$ and $\text{V}\cdot\text{s/rad}$), mechanical power $\tau \omega$ and back-EMF electrical power $e I$ must equate by energy conservation: $P_{\text{mech}} = \tau \omega = (K_t I) \omega = P_{\text{elec}} = e I = (K_e \omega) I$, establishing that $K_t \equiv K_e$. At low speed the headroom $V_{\text{bus}} - e_{\text{bemf}}$ permits a fast current rise and full peak torque. As $\omega$ approaches its base rating, back-EMF consumes the headroom, and the inverter can no longer force current through the winding inductance whatever its duty cycle, so a policy that commands hard acceleration at high speed does not get the torque step it asks for.
 
 [^fn-hw-foc-current]: **Field-Oriented Control (FOC) Current Loop**\index{Field-Oriented Control!current loop limits}: The current loop runs on the drive's own controller, not on the processor that runs the policy, so a torque step the policy issues reaches the winding only as the ramp that the loop and the bus headroom permit.
 
 Headroom limits how fast the current can rise; the drive electronics limit how much of it can flow at all. Power inverters enforce a maximum current ceiling $I_{\text{max}}$ to protect switching transistors from thermal destruction and to prevent ferromagnetic saturation in the stator core. When the motor drives a mechanical transmission with gear reduction ratio $N$ and transmission efficiency $\eta$, the ceiling on delivered output torque is:
 $$\tau_{\text{out, max}} = \eta N K_t I_{\text{max}}$$
 
-The clamp answers the question the stopping budget left open, whether the drives can deliver $a_{\text{brake}}$ when the permission path demands it, and it answers silently. A braking demand above $\tau_{\text{out, max}}$ is clipped at the power stage without any report to the software that issued it, so the base decelerates more gently than the stopping distance assumed and comes to rest beyond its calculated boundary. The credible deceleration therefore holds only for the drive current limits configured when it was established, and a firmware change to $I_{\max}$ withdraws it until it is measured again, a dependence that @sec-body-measuring-limits writes into the conditions of its limit record.
+The clamp answers the question the stopping budget left open, whether the drives can deliver $a_{\text{brake}}$ when the permission path demands it, and it answers silently. In fieldbus architectures like EtherCAT, target torque commands stream down to drive DSPs in cyclic Process Data Objects (PDOs). When a demanded torque exceeds the inverter current threshold or DC voltage headroom, the drive microcontroller clamps PWM duty cycles locally without asserting an interrupt or error code back across the fieldbus. Unless the host safety layer explicitly monitors the `actual_torque` feedback word against demanded setpoints, clipping remains invisible to software. A braking demand above $\tau_{\text{out, max}}$ is clipped at the power stage without any report to the software that issued it, so the base decelerates more gently than the stopping distance assumed and comes to rest beyond its calculated boundary. The credible deceleration therefore holds only for the drive current limits configured when it was established, and a firmware change to $I_{\max}$ withdraws it until it is measured again, a dependence that @sec-body-measuring-limits writes into the conditions of its limit record.
 
 Only part of that clamped current produces torque, and field-oriented control separates it by a change of coordinates. In a surface-magnet motor only stator current whose field is perpendicular to the rotor flux produces torque, so the drive reads rotor angle from an encoder and rotates the three measured phase currents into the rotor-fixed $dq$ frame, where the quadrature current $I_q$ produces torque and the direct current $I_d$, aligned with the flux, produces none. A push straight down on a bicycle pedal at the top of its stroke behaves the same way, straining the crank without turning it. The controller regulates $I_q$ to the torque command, holds $I_d$ near zero below base speed, and writes the resulting voltage into the inverter's complementary pulse-width-modulation timers.[^fn-hw-inverter-deadtime] Outside field weakening, where the drive deliberately injects negative $I_d$ to offset back-EMF above base speed, direct-axis current heats the winding without moving the joint and spends thermal margin (@sec-body-thermal-duty-cycles) for no torque.
 
 [^fn-hw-inverter-deadtime]: **Inverter Dead Time**\index{Inverter dead time!shoot-through protection}: A short hardware-inserted interval in which both switches of an inverter half-bridge are off, so that the high-side and low-side switches of one leg never conduct together and short the DC bus, a failure called shoot-through.
+
+### Reflected rotor inertia and optimal inertia matching {#sec-body-reflected-rotor-inertia}
 
 Gearing adds a mechanical asymmetry. High-reduction joints use ratios of $50{:}1$ to $160{:}1$ to get high torque from a compact motor, which scales delivered torque by $N$ but spins the rotor $N$ times faster than the joint. A load that backdrives the output must spin the rotor $N$ times faster too, and because kinetic energy scales with the square of speed ($\frac{1}{2} J \dot{\theta}^2$), the rotor's inertia $J_{\text{rotor}}$ resists joint acceleration multiplied by the **square of the gear ratio** (\ref{dfn-body-reflected-rotor-inertia}).
 
@@ -608,6 +626,8 @@ Below $N^*$, joint acceleration is torque-limited: increasing $N$ leverages moto
 
 Because the motor cannot instantly deliver the torque to spin up this amplified inertia, the transmission acts as a mechanical low-pass filter, smearing a sharp command into a delayed response whose lag erodes feedback stability and excites structural resonance. The control path therefore shapes requested motion, with quintic splines or S-curve rate limiters, to keep joint acceleration $\ddot{q}$ within the current and voltage limits of the hardware [@lynch2017modern].
 
+### Transmission compliance, contact impedance, and tooth fracture {#sec-body-transmission-compliance}
+
 Transmissions also introduce backlash and compliance that decouple motor from load. On reversal the motor shaft crosses mechanical clearance before the teeth engage the opposite flank, and torsional compliance in teeth and flexsplines (@fig-02-real-strain-wave-gear) makes the link an elastic system rather than a rigid bar [@spong1987modeling], whose flexible-joint model @sec-appendix-control-flexible-joints derives. Discontinuous torque steps excite that elasticity and can drive the transmission into limit-cycle chatter. A motor-side encoder conceals the deadband, because the motor turns smoothly while the output stays still, so the joint position $q_{\text{out}}$ departs from $q_{\text{motor}} / N$ by a load-dependent error $\delta_{\text{lost}}$. The controller sees continuous tracking while the end-effector hesitates and then takes an impulsive shock as the teeth snap closed, and repeated shocks end in fatigue fracture (@fig-02-real-broken-gear-tooth).
 
 ```{python}
@@ -677,6 +697,8 @@ The physical components of high-reduction transmissions dictate these failure mo
 :::
 
 Under unexpected impact or hard obstacle collision, this high-reduction structure becomes a point of brittle mechanical failure (@fig-02-real-broken-gear-tooth). Because reflected rotor inertia scales as $J_{\text{ref}} = N^2 J_{\text{rotor}}$ [4], an external collision cannot backdrive the high-ratio motor. Instead, the entire kinetic energy of the rapidly spinning rotor must be absorbed instantaneously by the gear teeth. While tooth flanks [①] transmit continuous drive loads, sudden impact forces concentrate severe cyclic tension at the root fillet [②]. When impact stress exceeds the tooth shear limit, micro-cracks propagate across the root, terminating in a sudden cleavage fracture [③] that shears the tooth cleanly and mechanically locks the joint.
+
+### Actuation regimes: Quasi-direct drive versus high-ratio reduction {#sec-body-actuation-regimes}
 
 The choice of transmission trades continuous torque density against backdrivability, and @tbl-02-mechanical-drives contrasts the backdrivable and high-reduction ends of that range. Cycloidal reducers, at $30:1$ to $100:1$, sit between those ends and tolerate shock better than a strain wave gear.
 
@@ -1029,6 +1051,10 @@ Operating near current and torque limits also has a thermodynamic cost. Every am
 
 Holding a load motionless at full reach places deceptive demands on an articulated arm such as the mobile manipulator's. Maintaining a static load against gravity demands continuous phase current through the stator coils, actively converting electrical energy into accumulating heat. **Heat arrives in seconds and leaves in minutes, making duty cycle a primary design variable.**
 
+### Thermal capacity and insulation breakdown thresholds {#sec-body-thermal-capacity}
+
+In classical mechanics, holding a stationary mass stationary involves zero mechanical work ($W = \int F \cdot dx = 0$). In an electromechanical robot, however, sustaining holding torque against gravity requires continuous phase current to produce magnetic Lorentz force ($\tau = K_t I$). That current continuously dissipates Joule heat ($I^2 R$) directly within the copper windings. Because heat has no fast exit, thermal accumulation limits how long an arm can maintain static poses without mechanical brakes.
+
 Momentum can be redirected and flux decays within milliseconds of opening a switch, but heat has no fast exit. Thermal capacity integrates power loss over time, and it protects two material thresholds (@fig-02-real-burnt-motor-stator). Winding insulation is rated by class under IEC 60085, Class F to a continuous hotspot of $155^\circ\text{C}$ and Class H to $180^\circ\text{C}$, and above its rating the enamel softens until adjacent turns short and destroy the phase winding. Neodymium-iron-boron ($\text{NdFeB}$) rotor magnets demagnetize irreversibly between $80^\circ\text{C}$ and $150^\circ\text{C}$ under strong stator fields.
 
 ::: {#fig-02-real-burnt-motor-stator fig-env="figure" fig-pos="t" fig-cap="**Stator winding insulation breakdown**: Cutaway view of a damaged electric motor stator showing critical thermal subsystems: (1) copper phase windings (primary $I^2 R$ heat source), (2) dielectric slot liners and Nomex insulation breakdown threshold ($155^\circ\text{C}$, Class F), (3) laminated iron stator core ($C_{\text{th}}$ and dissipation path $\theta_{JA}$), and (4) rotor bore air gap and magnet thermal limits ($80^\circ\text{C}\text{--}150^\circ\text{C}$). (Source: Industrial Electromechanical Diagnostics Archive, CC BY 4.0)." fig-alt="Annotated photograph of a damaged motor stator with callout badges highlighting copper phase windings, dielectric slot liners, laminated stator core, and rotor bore."}
@@ -1086,6 +1112,8 @@ Datasheet thermal ratings are optimistic because they are measured on an unconst
 ::: {.column-margin .margin-pointer}
 ↪ Real-time telemetry for thermal and power integrity budgets is transported by the deterministic fieldbuses analyzed in @sec-nervous-deterministic-fieldbuses.
 :::
+
+### Transient thermal bursts and periodic duty cycles {#sec-body-transient-thermal-bursts}
 
 Because thermal capacity integrates power over time, a peak torque[^fn-hw-motor-intermittent] or peak current rating is meaningless without four parameters: the initial winding temperature $T(0)$, the allowed duration $t_{\text{on}}$, the ambient $T_{\text{amb}}$, and the recovery time $t_{\text{off}}$. An actuator that can produce three times its continuous torque sustains it only while the integral of $I^2 R$ stays within the margin below the insulation limit, which from a cold winding can last tens of seconds and from a heat-soaked one a fraction of that (\ref{nbk-body-thermal-burst-limits}).
 
@@ -1220,7 +1248,11 @@ For repeated cycles of period $t_{\text{cycle}} = t_{\text{on}} + t_{\text{off}}
 $$D \le \frac{T_{\max} - T_{\text{amb}}}{P_{\text{peak}} \theta_{JA}}$$
 which here is `{python} ThermalBurst.duty_pct_str`, so a `{python} ThermalBurst.t_on_str` burst calls for a recovery of $t_{\text{off}} = t_{\text{on}}(1 - D)/D \approx$ `{python} ThermalBurst.t_off_str`. The average does not bound the hottest instant. In the fixed-resistance first-order model the periodic peak obeys
 $$T_{\text{peak}} - T_{\text{amb}} = P_{\text{peak}}\theta_{JA}\,\frac{1 - e^{-t_{\text{on}}/\tau}}{1 - e^{-t_{\text{cycle}}/\tau}}$$
-and the screened schedule reaches `{python} ThermalBurst.t_peak_str`, above the ceiling, before the rise of $R(T)$ adds more. Average-power screening is optimistic, and a burst schedule is accepted only against the transient hotspot trajectory. @Fig-02-motor-torque-speed-envelope distinguishes continuous duty $S_1$ from intermittent periodic duty $S_3$, whose peak acceleration depends on both initial temperature and cooling time.
+and the screened schedule reaches `{python} ThermalBurst.t_peak_str`, above the ceiling, before the rise of $R(T)$ adds more. Average-power screening is optimistic, and a burst schedule is accepted only against the transient hotspot trajectory.
+
+### Torque-speed operating envelopes and back-EMF roll-off {#sec-body-torque-speed-envelopes}
+
+@Fig-02-motor-torque-speed-envelope distinguishes continuous duty $S_1$ from intermittent periodic duty $S_3$, whose peak acceleration depends on both initial temperature and cooling time.
 
 ::: {#fig-02-motor-torque-speed-envelope fig-env="figure" fig-pos="t" fig-cap="**Motor torque-speed operating region**: The permanent magnet synchronous motor torque-speed plane, separating continuous duty $S_1$ at thermal equilibrium from intermittent periodic duty $S_3$ at peak acceleration, alongside the exponential thermal accumulation trajectory during peak bursts and conductive cooling during recovery. Winding thermal limits constrain sustainable duty cycle rather than peak inverter current." fig-alt="Torque-speed characteristic curve for a permanent magnet synchronous motor, contrasting the continuous thermal rating zone with the intermittent peak acceleration region, with an adjacent graph showing temperature rise during active bursts and cooling decay."}
 ![](images/svg/fig02_motor_torque_speed_envelope.svg){width="100%"}
@@ -1237,7 +1269,11 @@ The torque-speed plane in @fig-02-motor-torque-speed-envelope divides into disti
 3. **Base Speed Corner ($\omega_{\text{base}}$) and Back-EMF Roll-off:** As rotational velocity increases, back-EMF climbs linearly ($e_{\text{bemf}} = K_e \omega$). At the base speed $\omega_{\text{base}}$, back-EMF consumes nearly the entire bus voltage ($V_{\text{bus}} - e_{\text{bemf}} = R I_{\max}$). Above $\omega_{\text{base}}$, the inverter lacks sufficient voltage headroom to force full peak current through winding resistance and inductance, forcing torque to roll off toward zero.
 4. **No-Load Speed ($\omega_{\text{no-load}}$):** When rotor speed reaches $\omega_{\text{no-load}} = V_{\text{bus}} / K_e$, back-EMF matches bus voltage ($e_{\text{bemf}} \approx V_{\text{bus}}$). The net driving voltage collapses to zero, completely extinguishing stator current and motor torque.
 
-The safety microcontroller therefore runs a thermal observer that integrates measured phase current into an estimated hotspot temperature. When the estimate crosses a ceiling, the observer derates the current limits, and if the limit is breached, it vetoes the policy with a thermal shutdown before dielectric breakdown. A static hold shows why the observer must model copper's feedback (\ref{nbk-body-thermal-stall-derating}).
+### Copper resistance feedback and stall thermal runaway {#sec-body-copper-resistance-feedback}
+
+The safety microcontroller therefore runs a thermal observer that integrates measured phase current into an estimated hotspot temperature using a discrete first-order recurrence:
+$$\hat{T}_{k+1} = \hat{T}_k + \frac{\Delta t}{C_{\text{th}}} \left[ I_k^2 R(\hat{T}_k) - \frac{\hat{T}_k - T_{\text{amb}}}{\theta_{JA}} \right]$$
+where $R(\hat{T}_k) = R_0 [1 + \alpha_{\text{Cu}}(\hat{T}_k - T_0)]$. When the estimate crosses a ceiling, the observer derates the current limits, and if the limit is breached, it vetoes the policy with a thermal shutdown before dielectric breakdown. A static hold shows why the observer must model copper's feedback (\ref{nbk-body-thermal-stall-derating}).
 
 ```{python}
 #| label: body-thermal-stall-calc
@@ -1362,7 +1398,9 @@ When the mobile manipulator swerves hard to avoid a collision, every drive motor
 
 Rail sag, regenerative overvoltage, and thermal accumulation are manifestations of one bounded energy network on different time scales. Of the three, voltage moves fastest, within microseconds to milliseconds whenever current demand exceeds what the source can deliver at that instant. Compute, sensing, and motor inverters draw from a common bus, so when a policy commands coordinated accelerations across several joints, the sum of their currents changes the voltage delivered to every node on the machine.
 
-The supply cannot deliver an arbitrary current step. Every bus has a nonzero source impedance,[^fn-hw-bus-resistance] the sum of the battery's internal resistance and the resistance of harnesses, connectors, and protection switches, and bulk capacitors only buffer high-frequency transients locally. A rapid step in total current therefore sags the bus at once through the resistive drop across $R_{\text{bus}}$, the inductive kick across harness inductance $L_{\text{bus}}$, and the depletion of local capacitors (@sec-appendix-systems derives the transient droop). If the sag crosses the undervoltage lockout threshold, supervisor silicon asserts a brownout reset and drops the machine mid-motion.
+### Power distribution impedance, transient droop, and brownout resets {#sec-body-power-distribution-impedance}
+
+The supply cannot deliver an arbitrary current step. Every bus has a nonzero source impedance,[^fn-hw-bus-resistance] the sum of the battery's internal resistance and the resistance of harnesses, connectors, and protection switches, and bulk capacitors only buffer high-frequency transients locally. Adding tens of thousands of microfarads of bulk capacitance introduces heavy weight penalties and dangerous power-on inrush currents that can weld mechanical contactors and trip circuit protection. A rapid step in total current therefore sags the bus at once through the resistive drop across $R_{\text{bus}}$, the inductive kick across harness inductance $L_{\text{bus}}$, and the depletion of local capacitors (@sec-appendix-systems derives the transient droop). If the sag crosses the undervoltage lockout threshold, supervisor silicon asserts a brownout reset and drops the machine mid-motion.
 
 [^fn-hw-bus-resistance]: **Power Distribution Bus Impedance**\index{Bus impedance!power distribution}\index{Brownout reset!undervoltage}: The lumped source impedance of an embodied direct-current bus is $R_{\text{bus}} = R_{\text{cell}} + R_{\text{harness}} + R_{\text{switch}}$, the sum of battery cell, harness and connector, and protection-switch on-state resistances. A current surge $\Delta I$ drops the rail by $\Delta V = \Delta I R_{\text{bus}}$.
 
@@ -1406,9 +1444,15 @@ class SpringBrake:
     t_engage_max_str = fmt_latency(t_engage_max, unit=millisecond, precision=0)
 ```
 
+### Unpowered states and unmanaged fallback dynamics {#sec-body-unpowered-states}
+
 Power removal is an unmanaged state transition, not an automatic return to safety. Cutting power leaves an actuator in one of three unpowered states, namely free coasting, phase-short dynamic braking, or spring-engaged mechanical braking, and each enforces a distinct mechanical behavior. An electromechanical friction brake requires `{python} SpringBrake.t_engage_min_str` to `{python} SpringBrake.t_engage_max_str` for its mechanical spring to overcome magnetic coil decay and engage its friction pads, during which gravity accelerates an overhead arm downward. Phase-short dynamic braking acts like viscous fluid damping, providing resistance proportional to velocity but generating zero holding torque at zero speed. Free coasting simply allows gravity to accelerate unconstrained joints without any resistance. The trajectory a machine follows after an electrical cutoff must be measured under full mechanical payload, not deduced from circuit diagrams. The choice of which safe fallback state the machine should enter belongs to system safety architecture in @sec-enforcement, but the physical dynamics of an unpowered joint are unalterable mechanical constraints of the body.
 
-Deceleration drives the bus toward its opposite boundary, overvoltage, as kinetic energy stored in moving mass returns to it. **Braking converts mechanical energy into electrical energy that the supply network must absorb or dissipate.** If the source cannot accept reverse current, regenerative energy can charge the local DC link according to $\frac{1}{2} C_{\text{bus}} (V_{\text{final}}^2 - V_{\text{initial}}^2) = E_{\text{regen}}$ (see @sec-appendix-systems). This relation gives a capacitor-only endpoint under idealized assumptions, not a voltage waveform. Protection must divert energy before the bus exceeds inverter and converter ratings.[^fn-hw-brake-chopper]
+### Regenerative overvoltage surges and dynamic brake choppers {#sec-body-regenerative-surges}
+
+Deceleration drives the bus toward its opposite boundary, overvoltage, as kinetic energy stored in moving mass returns to it. **Braking converts mechanical energy into electrical energy that the supply network must absorb or dissipate.** A novice engineer might expect the battery to absorb this regenerated current seamlessly. However, modern Battery Management Systems (BMS) open their charge-protection FETs within microseconds when the pack is fully charged, cold, or when charging currents exceed cell safety limits. If the BMS disconnects during an emergency brake, 100 percent of the regenerated kinetic energy surges directly into the local DC link bus capacitance, skyrocketing rail voltage and causing instantaneous avalanche breakdown of inverter MOSFETs.
+
+If the source cannot accept reverse current, regenerative energy can charge the local DC link according to $\frac{1}{2} C_{\text{bus}} (V_{\text{final}}^2 - V_{\text{initial}}^2) = E_{\text{regen}}$ (see @sec-appendix-systems). This relation gives a capacitor-only endpoint under idealized assumptions, not a voltage waveform. Protection must divert energy before the bus exceeds inverter and converter ratings.[^fn-hw-brake-chopper]
 
 [^fn-hw-brake-chopper]: **Dynamic Braking Chopper Circuit**\index{Dynamic brake chopper!regenerative clamp}\index{Overvoltage protection!dynamic braking}: A power switch and a low-inductance braking resistor placed across the DC bus. When regenerated energy drives the bus above a comparator threshold, the switch conducts and the resistor dissipates the excess as heat, clamping the bus below the breakdown rating of the inverter and converter silicon.
 
@@ -1669,6 +1713,8 @@ Before measuring these limits on an assembled machine, verify your understanding
 
 Before an actuator is integrated into a chassis, it is characterized on a dynamometer stand (@fig-02-real-motor-dyno-bench). Software treats parameters as nominal constants in a configuration file, but in physical systems engineering **a measurement that cannot state its instrument, its percentile, and its sample count cannot support an argument later.**
 
+### Empirical dynamometer characterization and probe intrusion {#sec-body-dynamometer-characterization}
+
 A measurement begins from the decision it will govern in the permission path, which fixes the quantity, the observation point, the sensor bandwidth, the resolution, and the reference clock. Establishing the mobile manipulator's credible deceleration, for example, calls for the peak phase current and the deceleration trajectory from the instant of the brake command, captured by an isolated current probe sampled at $100\text{ kHz}$ and the wheel encoders on a common hardware timebase; an averaging bench meter yields no usable number. An instrument whose analog bandwidth falls below the electrical rise time attenuates the true transient peak, and margins built on it rest on a measurement artifact rather than on the machine.
 
 ::: {#fig-02-real-motor-dyno-bench fig-env="figure" fig-pos="t" fig-cap="**Electric motor dynamometer testbed**: High-bandwidth actuator characterization stand at NASA Armstrong Flight Research Center. Direct empirical measurement of peak torque saturation, electrical time constants ($\tau_e = L/R$), continuous thermal rise ($\Delta T = P_{\text{loss}} \theta_{JA}$), and regenerative power feedback requires synchronizing multi-channel load cells, optical encoders, and isolated current probes on a shared hardware timebase rather than trusting manufacturer catalog ratings. (Source: NASA, Public Domain)." fig-alt="Photograph of an instrumented electric motor mounted on an optical dynamometer test bench at NASA Armstrong Flight Research Center, showing coupled torque transducers and sensor wiring."}
@@ -1678,6 +1724,8 @@ A measurement begins from the decision it will govern in the permission path, wh
 Every probe also intrudes on the process it observes. A passive voltage probe loads high-frequency lines, a series current shunt drops the rail enough to trigger an early brownout, and a thermocouple inside a motor housing changes its heat paths. Instrument uncertainty is therefore a compound budget, not a single tolerance from a calibration sheet, combining sensor linearity, quantization, frequency-dependent phase lag, probe loading, and clock drift between acquisition channels. When an optical encoder with $0.05^\circ$ quantization is sampled at $1\text{ kHz}$ to compute joint velocity through discrete backward differences, numerical differentiation noise introduces velocity variance of several degrees per second that exists entirely in the measurement pipeline rather than in the mechanical joint.
 
 A limit means nothing without the context of its test. Every recorded limit states the payload, ambient temperature, supply voltage, enclosure state, firmware version, and concurrent computational workload of the run. A thermal time constant measured on an open bench at $20^\circ\text{C}$ can differ by an order of magnitude from the same actuator's constant in a sealed fairing in sunlight at $45^\circ\text{C}$, and a rail characterization that omits whether vision-language model inference [@brohan2023rt1; @brohan2023rt2] was running during motor stalls describes an idle board rather than the combined draw of full compute and peak torque.
+
+### Statistical zero-failure bounds and lifecycle degradation {#sec-body-statistical-bounds}
 
 ```{python}
 #| label: body-zero-failure-bound-calc
@@ -1723,6 +1771,8 @@ Every number that governs a machine is a direct measurement, a value derived fro
 The absence of a failure during testing bounds the failure rate statistically; it does not establish safety. If the mobile manipulator completes $n =$ `{python} ZeroFailureBound.n_str` loaded stops without a brownout or an overrun, the data support only a per-stop failure rate below roughly $3/n$ by the Rule of Three (@sec-verification, @eq-verification-rule-of-three), about one stop in `{python} ZeroFailureBound.one_in_str` at `{python} ZeroFailureBound.conf_pct_str` confidence, and only if the trials are independent and stationary. Windings that heat across successive trials and gears that wear make consecutive trials correlated and non-stationary, so the same stops run on a cool morning say nothing about the afternoon, when a hotter winding has higher resistance and less peak torque.
 
 Characterization is therefore a standing record, re-established as the machine ages, because physical limits drift over operational time, a process called **lifecycle degradation**\index{Lifecycle degradation!definition}. Brake pad friction glazing and tire tread wear degrade the sustainable deceleration limit $a_{\text{brake}}$; chemical aging in lithium-ion battery packs increases internal DC bus impedance $R_{\text{bus}}$, exacerbating voltage droop ($\Delta V_{\text{droop}}$) during dynamic maneuvers; and mechanical gear tooth wear widens backlash clearance $\delta_{\text{lost}}$.
+
+### The six-element limit record schema {#sec-body-limit-record-schema}
 
 ```{python}
 #| label: body-limit-records-calc
@@ -1814,6 +1864,31 @@ class LimitRecords:
 
 A limit whose violation can cause damage is kept not as a bare number but as a **limit record**\index{Limit record!definition} with six elements, which @tbl-02-limit-record defines and fills in for two limits of the mobile manipulator: the credible deceleration on which its stopping distance rests, and the dropout of the regulators on its shared control rail.
 
+A foundational distinction governs this structure: *uncertainty describes what you do not know about the measurement (observation noise, instrument tolerance, sensor bandwidth, and calibration drift); margin is the physical clearance you defend against what you do not know.*
+
+In physical systems engineering, safety-critical thresholds cannot remain scattered as raw scalar constants across software repositories. Instead, each limit is maintained as a structured schema that the safety runtime validates at boot:
+
+```yaml
+limit_record:
+  value: 2.0                    # Credible boundary or worst-case tail (m/s^2)
+  conditions:                   # Physical validity envelope
+    m_loaded_max: 368           # Maximum payload mass (kg)
+    mu_floor_min: 0.204         # Minimum floor traction coefficient
+    t_ambient_max: 40           # Maximum ambient temperature (C)
+  uncertainty:                  # Epistemic limits of the measurement apparatus
+    instrument: "Wheel encoder + 6-axis IMU"
+    bandwidth_hz: 100
+    noise_floor: 0.05
+  margin: 100                   # Defended physical buffer (mm)
+  detector:                     # Hardware monitor enforcing the envelope at runtime
+    mechanism: "Deceleration monitor comparing IMU with commanded profile"
+    action: "E-stop transition on 15% discrepancy"
+  provenance:                   # Evidence category and empirical pedigree
+    category: "illustrative"
+    sample_count: 3000
+    confidence: 0.95
+```
+
 | Element         | What the record states                                                                                                                               | Credible deceleration $a_{\text{brake}}$                                                                                                                                             | Control-rail regulator dropout                                                                                                                                                                                                                             |
 |:----------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Value**       | The value or empirical distribution, with its sample count and the tail percentiles it reports                                                       | `{python} LimitRecords.a_brake_str`, taken as the credible low tail of loaded stops; no samples yet                                                                                  | `{python} LimitRecords.v_dropout_str` at the point-of-load regulators; no samples yet                                                                                                                                                                      |
@@ -1845,6 +1920,8 @@ Measured and recorded one at a time, the five limits describe the body budget by
 
 A single command from the chunk policy to accelerate the loaded mobile manipulator spends from all five budgets at once. It rests on a camera frame that is already aging, it adds kinetic energy that the brakes must later remove, it accelerates reflected rotor inertia through the drive gearing, it deposits Joule heat in windings that shed it only over minutes, and it draws current from the rail that also feeds the application processor. @Tbl-02-cross-archetype-matrix sets the five budgets side by side, with the law that governs each, the assumption a policy trained in software makes about it, the machine class it binds first, and the design response and runtime invariant that answer it.
 
+### Archetype-dependent binding constraints {#sec-body-binding-constraints}
+
 ::: {.column-margin .margin-pointer}
 ↪ The degraded limits recorded here bound the supervisor intervention thresholds derived in @sec-intervention-authority-transitions.
 :::
@@ -1862,6 +1939,8 @@ On the same chassis, **thermal dissipation and electrical power integrity** gove
 | **5. Electrical Power Integrity**   | $\Delta V_{\text{droop}} \approx \Delta I R_{\text{bus}} + \frac{\Delta I \Delta t}{2 C_{\text{bus}}}$; $V_{\text{final}} = \sqrt{V_{\text{rail, nom}}^2 + \frac{2 E_{\text{regen}}}{C_{\text{bus}}}}$ | *Illusion:* Power rails act as infinite, ideal voltage sources. *Truth:* Bus impedance collapses rail voltage under combined compute+motor bursts; braking surges overvoltage.           | **Class 1 & 3:** Peak multi-axis acceleration trips microcontroller brownout resets; regen surges destroy inverter FETs. | Enforce coordinated compute-actuation power budgets and $dI/dt$ limits; install dynamic brake choppers; characterize unpowered fallbacks.                              |
 
 : **Cross-class physical constraint matrix**: The five budgets, the law that governs each, the assumption a software-trained policy makes about it, the class it binds first, and the runtime invariant that answers it. {#tbl-02-cross-archetype-matrix tbl-colwidths="[18,20,24,18,20]"}
+
+### Cross-budget coupling and permission rail isolation {#sec-body-permission-rail-isolation}
 
 ```{python}
 #| label: body-dvfs-throttle-calc
@@ -1916,7 +1995,16 @@ class ThrottledPerception:
 
 The table separates the budgets, but the machine does not, and the margins computed on the mobile manipulator differ in how much a single command can spend. The shared control rail has none left. From a battery depleted to `{python} DriveBusIntegrity.v_battery_low_str`, the coincident step of \ref{nbk-body-dc-bus-power-integrity} sags it to `{python} DriveBusIntegrity.v_sag_low_str`, below the `{python} DriveBusIntegrity.v_uvlo_str` dropout of its regulators, so its margin is already negative. A heat-soaked arm joint has a margin measured in time, since a sustained threefold current burst carries its winding to the insulation limit in `{python} ThermalBurst.t_hot_str`. The stopping distance at the `{python} BodyStoppingBudget.v_str` drive limit still keeps `{python} BodyStoppingBudget.remaining_str` of the clear distance, which only added delay spends, and a thermally throttled application processor would take `{python} ThrottledPerception.d_extra_str` of it.
 
-Because the rail binds first, the design answer is to take the permission path off it. The safety microcontroller, the drive logic, and the spring-brake coils run on an isolated rail that a local store holds up for a chosen `{python} LimitRecords.holdup_str`, long enough to outlast the longest stop the permission path can command (@sec-enforcement-fallback-ladder sizes that stop). Those loads draw `{python} LimitRecords.p_rail_str`, so the hold-up needs `{python} LimitRecords.e_store_str`, which a `{python} LimitRecords.c_store_str` store delivers between the battery-low point and the regulators' dropout. A brownout of the shared rail then resets the application processor, while the permission path rides through it, flags the undervoltage, and stops the machine. The complete coupling, in which the body's stopping distance sets the lease the permission path grants and that lease sets what the Brain must supply, is worked once for Part I in @sec-nervous-coupled-budget.
+This coupling reveals a critical cross-layer causal chain:
+$$\text{SoC thermal dissipation} \longrightarrow \text{DVFS clock throttling} \longrightarrow \text{vision latency stretch} \longrightarrow \text{observation age inflation} \longrightarrow \text{braking travel expansion} \longrightarrow \text{clearance margin erosion}$$
+When drive motors and heavy perception heat the shared chassis, the operating system throttles GPU and CPU clocks. The vision backbone stretches from `{python} ThrottledPerception.t_nominal_str` to `{python} ThrottledPerception.t_throttled_str`, adding `{python} ThrottledPerception.dt_str` to observation age $\tau_{\text{delay}}$. At the `{python} ThrottledPerception.v_str` drive limit, this compute lag adds `{python} ThrottledPerception.d_extra_str` of blind travel to the stopping envelope before brakes engage. A software power optimization intended to protect silicon silently erodes the machine's physical clearance margin.
+
+Because the rail binds first, the design answer is a **dual-rail architecture** that decouples the volatile compute and drive supplies from the critical permission path:
+
+1. **Shared compute and drive rail**: Feeds high-current motor inverters and the application processor. It accommodates multi-axis current steps that sag rail voltage by several volts, but its regulators are permitted to drop out during brownouts without taking the robot's physical safety guarantees down with them.
+2. **Isolated held-up permission rail**: Powers the safety microcontroller, fieldbus transceivers, and spring-brake coils through a reverse-blocking diode and an independent energy buffer. Backed by a local `{python} LimitRecords.c_store_str` supercapacitor store delivering `{python} LimitRecords.e_store_str` of usable energy between battery-low (`{python} DriveBusIntegrity.v_battery_low_str`) and regulator dropout (`{python} LimitRecords.v_dropout_str`), this rail guarantees a `{python} LimitRecords.holdup_str` hold-up under its `{python} LimitRecords.p_rail_str` load—long enough to outlast the longest commanded stop (@sec-enforcement-fallback-ladder).
+
+A brownout of the shared rail then resets the application processor, while the permission path rides through it, flags the undervoltage, and stops the machine. The complete coupling, in which the body's stopping distance sets the lease the permission path grants and that lease sets what the Brain must supply, is worked once for Part I in @sec-nervous-coupled-budget.
 
 ## Fallacies and Pitfalls {#sec-body-fallacies-pitfalls}
 
@@ -1928,6 +2016,8 @@ Physical limits interact across subsystem boundaries. A design that meets each c
 
 A team quantizes its vision backbone and reduces inference time from $30\text{ ms}$ to $10\text{ ms}$. The improvement shortens one stage, but the controller still acts on measurements that pass through exposure, readout, transfer, and operating-system queues. Commands then travel over the network fieldbus before the motor coil current rises to apply force. A $45\text{ ms}$ transport spike elsewhere in this chain can consume the clearance margin even when inference meets its benchmark. The engineering budget must measure the true "photon-to-torque" elapsed time from sensing to physical response and bound its tail, rather than declaring the loop real-time from model execution time alone.
 
+**Architect's Countermeasure**: Measure the true end-to-end photon-to-torque latency tail on synchronized hardware clocks; never certify real-time safety from neural network inference benchmarks alone.
+
 :::
 
 ::: {.fallacy-pitfall}
@@ -1935,6 +2025,8 @@ A team quantizes its vision backbone and reduces inference time from $30\text{ m
 **Fallacy**: *Software step commands deliver instantaneous physical torque.*
 
 A simulated policy issues piecewise-constant setpoints at $50\text{ Hz}$ and assumes the actuator follows each change immediately. The physical joint, however, responds through stator inductance ($L/R$) and reflected rotor inertia ($N^2 J_{\text{rotor}}$). An abrupt command can exceed the actuator bandwidth budget, saturating the inverter's current limit and violently loading the transmission before the joint achieves the requested motion. This physical lag alters the feedback behavior learned in simulation. Setpoint shaping and the actuator model must account for these physical time constants; a software update rate does not set the joint's achievable response.
+
+**Architect's Countermeasure**: Shape policy setpoints with continuous $C^2$ acceleration bounds and model stator electrical ($L/R$) and mechanical ($N^2 J_{\text{rotor}}$) time constants directly in the simulator and control pipeline.
 
 :::
 
@@ -1944,6 +2036,8 @@ A simulated policy issues piecewise-constant setpoints at $50\text{ Hz}$ and ass
 
 An engineer uses a motor's continuous torque rating to set the planner's limits. The rating carries the vendor's free-air test conditions (@sec-body-thermal-duty-cycles), not those of the sealed joint beside the compute unit, so it overstates what the installed motor can sustain. Because the planner treats that rating as its torque limit, every trajectory it later generates inherits the error, and the fault surfaces only after the enclosure has heat-soaked, far from the design decision that caused it. Planning limits must derive from measurements on the fully assembled machine under expected environmental and cooling conditions.
 
+**Architect's Countermeasure**: Calibrate actuator continuous ratings on fully assembled, enclosed hardware across the entire operational temperature envelope rather than copying open-bench catalog numbers into planner configuration files.
+
 :::
 
 ::: {.fallacy-pitfall}
@@ -1952,6 +2046,8 @@ An engineer uses a motor's continuous torque rating to set the planner's limits.
 
 The mobile manipulator's drive motors heat the shared chassis until its application processor triggers dynamic voltage and frequency scaling\index{Dynamic voltage and frequency scaling} (DVFS) to throttle clock frequencies and avoid junction overtemperature. This thermal intervention stretches the vision backbone from `{python} ThrottledPerception.t_nominal_str` to `{python} ThrottledPerception.t_throttled_str`. The extra `{python} ThrottledPerception.dt_str` enters the observation age $t_{\text{age}}$, and at the `{python} ThrottledPerception.v_str` drive limit it adds `{python} ThrottledPerception.d_extra_str` of travel to the stopping budget before any brake command can follow from what the camera saw. The power manager has protected the silicon, but it has silently changed the timing the stopping budget assumed. A previously adequate stopping margin may no longer be adequate. Thermal telemetry must therefore inform the motion budget, with travel speed reduced when processor throttling increases the time needed to perceive and respond.
 
+**Architect's Countermeasure**: Feed SoC thermal and clock-frequency telemetry directly into the motion safety monitor, dynamically derating maximum travel speed whenever compute throttling inflates perception age.
+
 :::
 
 ::: {.fallacy-pitfall}
@@ -1959,6 +2055,8 @@ The mobile manipulator's drive motors heat the shared chassis until its applicat
 **Pitfall**: *Scaling operational velocity without recalculating quadratic braking distances and thermal dissipation.*
 
 Repeated high-current braking heats the motor windings, so a stop the mobile manipulator survives once at a raised operating speed may exceed its allowable thermal duty cycle (the thermal capacity budget) when repeated through a shift, on top of the quadratic growth in braking travel that Case 3 in @fig-02-stopping-distance shows at `{python} BodyStoppingBudget.v_fast_str`. A higher operating speed requires a new stopping-distance calculation and a thermal assessment of repeated maneuvers before the planner can safely treat that speed as available.
+
+**Architect's Countermeasure**: Treat operating speed as an admission parameter that re-evaluates both quadratic stopping envelopes and multi-cycle thermal accumulation before granting velocity increases.
 
 :::
 
@@ -2019,6 +2117,8 @@ class ControlRailBrownout:
 
 On the mobile manipulator, a heavy inference burst coincides with the drive motors pushing the base over the cage-door threshold. The combined `{python} ControlRailBrownout.i_transient_str` transient across the `{python} ControlRailBrownout.r_harness_str` harness resistance of the shared `{python} ControlRailBrownout.v_nominal_str` control rail produces a `{python} ControlRailBrownout.v_drop_str` drop. With the battery already depleted to `{python} ControlRailBrownout.v_battery_low_str`, the rail sags to `{python} ControlRailBrownout.v_sag_str`, below the `{python} ControlRailBrownout.v_dropout_str` dropout threshold of the onboard point-of-load regulators, and the application processor resets. Had the safety microcontroller shared that rail, the same brownout would have reset it too while the machine carried active momentum, leaving the base and arm to the unpowered states of @sec-body-power-integrity instead of a commanded stop. Separate software budgets for compute and actuation ignore their physical reliance on a shared electrical supply. Power qualification must test coincident peak loads from a depleted battery, with the controller that stops the machine on its own held-up rail (@sec-body-archetype-matrix).
 
+**Architect's Countermeasure**: Electrically isolate safety microcontrollers and brake releases onto an independent, capacitor-held permission rail, and qualify power integrity under coincident peak motor and compute load at minimum battery state of charge.
+
 :::
 
 ::: {.fallacy-pitfall}
@@ -2026,6 +2126,8 @@ On the mobile manipulator, a heavy inference burst coincides with the drive moto
 **Fallacy**: *Passing isolated single-variable bench tests guarantees physical survival under compound operational stress.*
 
 A robot arm passes a maximum-payload trial in a $20^\circ\text{C}$ air-conditioned laboratory and an empty-gripper trial in a $45^\circ\text{C}$ thermal chamber. Neither test establishes its ability to carry that maximum payload in the hotter environment while running on a depleted battery. Under these combined conditions, the heavy physical load raises resistive winding losses, the hotter surroundings reduce the system's ability to reject that heat, and the lower supply voltage leaves less headroom above back-EMF, capping speed and current slew. Consequently, each subsystem can approach its failure limit much sooner than the separate, isolated trials suggest. Qualification must therefore exercise realistic combinations of payload, temperature, and battery condition on the assembled machine, rather than treating individual test passes as evidence about the combined conditions.
+
+**Architect's Countermeasure**: Test boundary envelopes under worst-case simultaneous physical stress—maximum payload, elevated ambient temperature, depleted battery, and high-frequency actuation—to catch multi-budget coupling failures.
 
 :::
 
