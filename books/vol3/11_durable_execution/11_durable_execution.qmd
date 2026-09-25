@@ -80,7 +80,7 @@ The same split separates the log from the context window. The context is what th
 ↩ The in-memory Agent Control Block and trajectory state machine are developed in @sec-vol3-agent-harness.
 :::
 
-### What the log records
+### Trajectory log record schema and event semantics
 
 A log is useful for recovery only if each event carries what a later reader will need. @Tbl-vol3-durable-log-schema lists the event kinds that a single-agent trajectory needs and why each exists.
 
@@ -102,7 +102,7 @@ Three design choices in the schema carry most of its value. The tool-call ID thr
 
 With the log in place, under invariant closure (principle \ref{pri-invariant-closure}) the runtime no longer relies on anything the model says about its own history. What happened is what the log says happened. That claim holds only if every event reaches durable storage before the world can act on it, and for one event kind the order in which the runtime writes and acts decides whether recovery is safe at all.
 
-## Intent Before Effect {#sec-vol3-persistence-wal}
+## The Write-Ahead Log and Intent-Before-Effect Invariant {#sec-vol3-persistence-wal}
 
 Return to the provisioning request at turn forty. The harness has authorized it and must now do two things: write a record that the request is going out, and send the request over the network. If it dispatches first and the host loses power before the record is durably flushed to non-volatile storage, the external resource is allocated in the physical cloud, but the log never mentions it. Upon rebooting or migrating, the recovered harness inspects the log, finds an authorized call with no sign of dispatch, concludes that the step never executed, and issues the provisioning request a second time.
 
@@ -177,7 +177,7 @@ These external tool mutations are **physically irrevocable**. No database before
 - **Intent barriers instead of page rollback**: Because physical undo is impossible for external mutations, the runtime prevents phantom effects by enforcing the strict write-ahead intent barrier $e_{\text{flush}} \prec a_{\text{ext}}$ before dispatch.
 - **Forward compensation instead of backward undo**: When an in-doubt action cannot be safely rolled back, the recovery engine either settles the mutation using an idempotency key, dispatches a compensatory forward action (such as deleting an orphaned cloud volume or issuing an inverse refund transaction via the Saga pattern), or suspends the trajectory for supervisory escalation.
 
-### What durability costs: Group commit amortization
+### Durability overhead and group commit amortization
 
 Enforcing a synchronous `fdatasync()` barrier on the critical path of every tool execution introduces non-volatile media latency. While a single NVMe flush takes between $80$ and $150\ \mu\text{s}$ on local flash, network-attached block volumes (such as AWS EBS or Google Persistent Disk) incur $2$ to $15\ \text{ms}$ per barrier. In multi-agent environments hosting tens or hundreds of concurrent agent trajectories on a shared node, serializing flushes causes severe queueing contention.
 
@@ -217,7 +217,7 @@ Before moving on, check that you can answer the following:
 
 A coding agent is on turn three hundred. Its log records that at turn 212 an edit tool rewrote `parser.py` and at turn 250 a shell tool deleted a build directory. Folding the log rebuilds the trajectory record, but it does not rebuild `parser.py`. The log holds the tool calls and their results; the files those calls produced live in the sandbox workspace, and if the host holding the workspace suffered a hardware crash, the workspace died with it. Replaying the log cannot recreate the modified files either, because replay intentionally stubs tool execution.
 
-### What a checkpoint captures: Full vs. incremental delta encoding
+### Checkpoint state capture through full and incremental delta encoding
 
 A **checkpoint**\index{Checkpoint!definition} is a durable snapshot of everything the log alone cannot rebuild cheaply, bound to the exact log position it corresponds to. It comprises three components:
 
@@ -257,7 +257,7 @@ The trade-off between checkpoint overhead and re-execution recovery time is show
 ![](images/svg/checkpoint-cadence.svg)
 :::
 
-### What a crash costs, and how often to checkpoint
+### Crash recovery costs and optimal checkpointing frequency
 
 With checkpoints, recovery restores the latest checkpoint and folds only the log suffix after it. Effects confined to the sandbox, such as file edits whose diffs are in the log, can be re-applied from the recorded results. Effects the log cannot reproduce force a choice: either roll back to the checkpoint and redo the local turns, or escalate.
 
@@ -470,7 +470,7 @@ A trajectory that crosses over is, from turn $k$ onward, a different system. Its
 
 Resume uses the log to continue a trajectory. The same machinery can also rebuild a trajectory's past without continuing it, which is how engineers find out what went wrong.
 
-## Replay {#sec-vol3-persistence-replay}
+## Deterministic Trajectory Replay {#sec-vol3-persistence-replay}
 
 Overnight, an agent deleted a release branch at turn 23 of a cleanup task. The next morning an engineer needs to know what the model saw when it chose that action: which listing it had been shown, what the instructions said after compaction, and whether the authorization check ran against the right policy. Rerunning the task answers none of these questions, because the rerun samples a new trajectory and, pointed at the real repository, might delete something else.
 
@@ -524,7 +524,7 @@ The scope of this test is narrow by design. It shows that the new harness handle
 
 Replay works because it never asks the model for anything. The moment an engineer does ask, by rerunning a prompt or continuing a counterfactual branch, the trajectory can diverge from its recording, and it is worth knowing why.
 
-## Why Replays Diverge {#sec-vol3-persistence-non-determinism}
+## Deterministic Replay Divergence and Non-Deterministic Entropy Sources {#sec-vol3-persistence-non-determinism}
 
 An engineer investigating an agent failure at turn 42 reruns the trajectory with the identical model at temperature zero against a copy of the repository at the same Git commit. The rerun diverges at turn 6, selects an entirely different tool call, and never reaches the failure. Nothing is broken. An autonomous agent rerun has multiple independent vectors of divergence.
 
@@ -576,7 +576,7 @@ Before moving on, check that you can answer the following:
 - [ ] **Counterfactuals**: Why must a counterfactual branch restore the workspace from a checkpoint before continuing live?
 :::
 
-## Log Retention {#sec-vol3-persistence-compaction}
+## Log Retention and State Compaction {#sec-vol3-persistence-compaction}
 
 Operating an autonomous agent fleet over long horizons exposes a severe operational dilemma: retaining every execution artifact in uncompressed form saturates storage substrates, while aggressively discarding data compromises post-incident auditability, deterministic replay, and model alignment. A single multi-turn software engineering trajectory running compilers, package managers, and automated test suites can easily generate tens of megabytes of raw terminal output per turn. Over an enterprise fleet executing 10,000 trajectories daily, logging uncompacted text into a flat write-ahead log accumulates terabytes of unstructured JSON weekly. This deluge induces high write-amplification factors ($\text{WAF}_{\text{NVMe}}$) on solid-state drives, exhausts local node capacity, and causes kernel I/O queue stalls that spike inter-turn latencies.
 

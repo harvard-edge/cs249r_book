@@ -48,7 +48,7 @@ An agent trajectory interleaves two authors. The model writes reasoning and tool
 
 :::
 
-## What Fine-Tuning Can Change {#sec-vol3-fine-tuning-scope}
+## Scope and Behavioral Boundaries of Supervised Fine-Tuning {#sec-vol3-fine-tuning-scope}
 
 ::: {.column-margin}
 ![](images/svg/hsa_locator_origin.svg){width="100%" fig-alt="H·S·A locator with no axis lit and the origin dot highlighted in purple."}
@@ -156,7 +156,7 @@ Because observations contain stochastic environment returns (ephemeral process i
 
 :::
 
-### Why observations must be masked
+### Observation loss masking and gradient isolation
 
 Observation loss masking (principle \ref{pri-vol3-action-masked-loss}) exists because an agent trajectory is not one author's text. Unmasked training asks one set of weights to learn two different things at once. One is the policy, $P(a_t \mid s_t)$, which maps what the agent has seen to what it should do next. The other is a model of the environment, $P(s_{t+1} \mid s_t, a_t)$, which predicts what a shell, a compiler, or an API will return. In model-based reinforcement learning, learning the second is the point. In an agent with real tools, it is waste. The compiler is present at every turn and returns its output exactly; the model gains nothing from predicting a temporary path, a process identifier, or the column of a syntax error.
 
@@ -263,7 +263,7 @@ These questions test the masked objective before batching complicates it.
 
 The mask is defined for one trajectory. Training runs on batches of many, and the way trajectories share a batch can undo the mask's intent, both by weighting some trajectories far more than others and by letting one trajectory read another.
 
-## Packing Without Leakage {#sec-vol3-fine-tuning-batching}
+## Sequence Packing and Cross-Trajectory Contamination Prevention {#sec-vol3-fine-tuning-batching}
 
 An agent corpus mixes a two-turn lookup of a few hundred tokens with a forty-turn debugging session near the context limit. Padding every example to the longest one wastes most of each batch on padding, so training pipelines pack several trajectories into one sequence. Packing is a standard efficiency move, and it creates two agent-specific hazards: a loss that silently favors long trajectories, and attention that crosses from one trajectory into the next.
 
@@ -347,7 +347,7 @@ A policy fine-tuned exclusively on clean, successful runs encounters an unexpect
 
 Every observation after the first line is outside anything the training corpus contained. The policy never saw conflict markers followed by a correct edit, so it tries a commit, then invents a flag, and the harness spends turns until a budget or watchdog ends the run. The problem is not one bad demonstration. Teacher forcing trains each step on the demonstrator's own prefix, so the model learns what to do in states the demonstrator visited. Once the model makes a mistake of its own, it is in a state no demonstrator visited, and nothing in training told it how to get back. The mismatch between training on reference prefixes and running on the model's own outputs is known in sequence prediction as exposure bias [@bengio2015scheduledsampling]. In text generation it causes drift in phrasing; in an agent, each wrong call changes the environment, and the next observation is further from the training distribution than the last.
 
-### How errors compound with the horizon
+### Autoregressive error compounding over extended horizons
 
 Let an agent task run for $H$ turns, the horizon of human, system, and agent interactions. Let $\pi^*$ be the demonstrator and $\pi_\theta$ the fine-tuned policy, and suppose supervised training reaches a per-step error rate $\epsilon$ on the demonstrator's states:
 
@@ -441,7 +441,7 @@ schema:
 
 The base model, which had never been trained on this tool, reads the new schema and calls it correctly. Fine-tuning made the model worse at the one thing the contract depends on. The typed action contract validates every call against the schema the runtime holds now (principle \ref{pri-vol3-strict-action-abi}), so the runtime catches each bad call, but the agent makes no progress. Flywheel split hygiene holds unseen tool families out of evaluation for exactly this reason.
 
-### Why fine-tuning memorizes schemas
+### Schema memorization and out-of-distribution syntax degradation
 
 In the training corpus, the tool schemas in the system prompt are identical across thousands of examples. When every file read in the data uses `read_file` with an argument named `path`, the call's tokens are predictable from the user's request alone. The cheapest way for the optimizer to reduce loss is to store the call's surface form in the weights, and the attention paths from the call back to the schema in the prompt weaken because they no longer help. The model has turned a contract, which belongs in context, into procedure in its weights, which @tbl-vol3-fine-tuning-scope says is the wrong home. @Fig-vol3-schema-memorization-attention illustrates the contrast in schematic attention weights.
 
@@ -499,7 +499,7 @@ In an offline preprocessing pass, a high-throughput inference engine evaluates $
 
 Caching reference model logits offline to NVMe reduces GPU HBM memory pressure by 50 percent during DPO training. Eliminating the 140 GB reference model weight footprint (or 16 GB for an 8B model) and its intermediate activation buffers frees accelerator memory to double the micro-batch size $B$ of the active policy $\pi_\theta$. Concurrently, avoiding reference forward passes eliminates 50 percent of the forward FLOPs per training iteration, directly accelerating post-training throughput on accelerator clusters.
 
-## Distillation {#sec-vol3-fine-tuning-distillation}
+## Policy Distillation for Autonomous Trajectories {#sec-vol3-fine-tuning-distillation}
 
 The sections so far assumed a corpus of admitted trajectories and asked how to train on it. Two practical questions come first. Where do good trajectories come from when production logs are too few or too weak, and how can a model stop paying, on every turn, for instructions it could have learned once? Both have the same answer, which is to let a more expensive configuration of a model generate the behavior and train a cheaper configuration to reproduce it.
 
@@ -519,7 +519,7 @@ Agent-trajectory distillation of this kind is a common way to build smaller agen
 
 Distillation inherits the teacher's ceiling. A student trained to imitate cannot exceed the behavior its teacher demonstrated, and it inherits the teacher's systematic errors wherever the verifiers fail to catch them. That ceiling motivates training with outcome verifiers. Before that, a distilled or fine-tuned policy must be deployed, and for agents the form of the deployed artifact matters as much as its accuracy.
 
-## Adapters for Agents {#sec-vol3-fine-tuning-peft}
+## Parameter-Efficient Fine-Tuning and Low-Rank Adaptation {#sec-vol3-fine-tuning-peft}
 
 A platform runs one agent that triages issues, another that edits code, and a third that writes database migrations. Each benefits from its own fine-tuning, and each must be rolled back independently when an update regresses. Full fine-tuning would produce three full copies of the model's weights, each a separate artifact to store, load, and serve. Parameter-efficient fine-tuning produces instead a small artifact per role on top of one shared base model, and that shape fits the way agent systems are operated.
 
@@ -604,7 +604,7 @@ A fine-tuning run ends with a set of trained weights and a validation loss. Neit
 ↩ Hermetic evaluation gyms, Wilson score intervals, and sequential release gates are established in @sec-vol3-evaluation.
 :::
 
-### Why validation loss misleads {#sec-vol3-fine-tuning-eval-decoupling}
+### Decoupling between validation loss and trajectory success {#sec-vol3-fine-tuning-eval-decoupling}
 
 Validation loss measures how well the model predicts demonstration tokens on the demonstrator's prefix. It averages over all target tokens, so near-certain predictions of JSON punctuation and boilerplate reasoning lower it as much as a correct file path does, though only the path decides whether the call works. It is also computed under teacher forcing on held-out demonstrations, which are mostly clean runs, so it says nothing about the off-path states of @sec-vol3-fine-tuning-exposure-bias where agents fail.
 
@@ -680,7 +680,7 @@ Benchmarking autonomous agents requires hermetic evaluation environments to prev
 
 : **Hermetic Evaluation Harness Architectural Components**: Component roles, isolation boundaries, and determinism mechanisms across benchmarking stages. {#tbl-vol3-evaluation-harness-components}
 
-## What Training Leaves to the Runtime {#sec-vol3-fine-tuning-synthesis}
+## Architectural Division Between Trained Policies and Runtime Governance {#sec-vol3-fine-tuning-synthesis}
 
 The pipeline is now complete, and each stage exists because of a specific way imitation can go wrong. Serialization writes each admitted trajectory in the template the model is served with, in causal order, with evidence preserved. The observation mask trains the model on what it writes and nothing else. Packing isolates trajectories in attention and position and weights them per example. On-policy data and fault injection extend the corpus to the states the policy actually reaches, with every new label admitted through the same cascade as the original data. Schema perturbation keeps the model reading contracts from context. Distillation supplies trajectories and removes procedure from the prompt, adapters package the result per role, and closed-loop evaluation decides whether it ships.
 

@@ -45,7 +45,7 @@ Every token an agent keeps in context leaves attention state in accelerator memo
 
 :::
 
-## From Context Tokens to KV State {#sec-vol3-kvcache-geometry}
+## Token Embedding Projections and Key-Value Tensor Geometry {#sec-vol3-kvcache-geometry}
 
 Return to the coding agent whose context layout was priced in \ref{nbk-04-quantitative-impact-of-prefix-layout}, now at its twentieth turn. Its context holds the system message and tool definitions, the task state and working files, and the latest tool results, including the stack trace the last test run produced, about thirty-two thousand tokens in all. The agent has just asked the harness to run the integration suite, which takes three-quarters of a minute. For those forty-five seconds the model emits nothing, yet the attention state computed for all thirty-two thousand tokens stays on the accelerator, waiting for the test log. @Sec-vol3-context-engineering decided which tokens this call should see. This chapter follows those tokens into the serving system, where they become the dominant consumer of accelerator memory, and asks what that state costs to keep, share, and release.
 
@@ -400,7 +400,7 @@ plt.close()
 
 The intersection of these two trends reveals why physical memory capacity has replaced arithmetic throughput as the fundamental governor of long-horizon agent systems. As demonstrated in the right panel of @fig-vol3-kv-cache-memory-wall, scaling context length to one million tokens requires 320 GB of key-value cache memory per 70B sequence—surpassing the 80 GB capacity of an NVIDIA H100 GPU by a factor of four. Even when scaling across an eight-accelerator node with a 480 GB dynamic pool, serving just two concurrent agents at this horizon ($B = 2$, 640 GB) completely exhausts cluster memory. This bottleneck has driven a two-pronged architectural response across machine learning systems engineering: runtime virtual memory paging via PagedAttention [@kwon2023vllm] to eliminate internal and external physical fragmentation, and algorithmic innovations such as Multi-head Latent Attention (MLA) [@deepseek2024v2; @deepseek2024v3] that compress key-value projections into low-rank latent vectors, reducing memory footprint by up to 5.7-fold. Without these systems abstractions, supporting production agent workflows over multi-turn context windows would remain physically and economically intractable.
 
-### Attention geometry: Multi-head, grouped-query, and multi-head latent attention {#sec-vol3-kvcache-mla}
+### Attention geometry across multi-head, grouped-query, and multi-head latent attention {#sec-vol3-kvcache-mla}
 
 The physical memory footprint of the key-value cache is dictated fundamentally by the attention geometry implemented in the transformer architecture. Across the evolution of foundation models, serving architectures have transitioned across three distinct attention regimes to mitigate cache growth:
 
@@ -472,7 +472,7 @@ The structural topology and decode mechanics of this compression pipeline are il
 
 [^fn-deepseek-mla-decomp]: **MLA Low-Rank Compression Dynamics**: DeepSeek-V2 and V3 parameterize Multi-head Latent Attention with a latent dimension $d_c = 512$ and decoupled rotary key dimension $d_R = 64$. By decoupling rotary position embeddings from the low-rank latent representation, MLA circumvents the mathematical incompatibility between rotational position encodings and low-rank projection matrices, compressing the per-token KV cache from 4,096 elements under 16-head GQA to 576 elements per layer.
 
-### Key-value cache quantization: FP8, FP4, and INT4 representation {#sec-vol3-kvcache-quantization}
+### Key-value cache quantization into reduced-precision representations {#sec-vol3-kvcache-quantization}
 
 While architectural innovations such as Grouped-Query Attention (GQA) and Multi-head Latent Attention (MLA) reduce the head count $H_{\text{kv}}$ and latent dimension $d_c$ in @eq-mem-token, they leave the numeric word size $b$ unchanged at standard 16-bit precision ($b = 2\text{ bytes}$, FP16 or BF16). Key-value cache quantization attacks the remaining free variable: shrinking the physical storage width of every key and value element from 16 bits down to 8 bits ($b = 1\text{ byte}$ in FP8) or 4 bits ($b = 0.5\text{ bytes}$ in INT4 or FP4).
 
@@ -642,7 +642,7 @@ Agent workloads inherently exhibit multimodal completion length distributions. S
 
 When short-lived trajectories and long-lived trajectories execute concurrently within the same physical memory pool, the rate of allocation churn escalates. Short-lived requests rapidly allocate and release small memory extents, perforating the memory space with localized holes. Meanwhile, long-lived, high-capacity agent requests lock large contiguous blocks for minutes at a time. The resulting memory topology represents the worst-case operating environment for a contiguous allocator: an unpredictable sequence of allocation sizes, interleaved with non-deterministic deallocation timings, occurring within an address space that permits neither physical discontiguity nor low-cost compaction.
 
-### Quantifying usable capacity: The KV allocation efficiency metric
+### Usable memory quantification and KV allocation efficiency
 
 To rigorously diagnose and compare allocator performance in serving runtimes, we must formalize the relationship between physical memory allocation and effective token capacity. Let $M_{\text{pool}}$ represent the total physical memory capacity allocated to the KV cache subsystem on an accelerator, measured in bytes. This pool is typically derived by subtracting the static model parameter weights $M_{\text{weights}}$ and the transient activation memory $M_{\text{act}}$ required for prefill matrix multiplications from the total physical device memory $M_{\text{device}}$:
 
@@ -1147,7 +1147,7 @@ def evict_radix_blocks(free_blocks: List[int], target_free: int) -> None:
 
 This leaf-first traversal guarantees that the root and high-level branch nodes—which represent the most broadly shared prefix scaffolding, such as system prompts—remain resident the longest. Dynamic leaf branches representing ephemeral, one-off conversational turns are pruned first, preserving the foundational layers of the prefix hierarchy where cache hit probability is highest.
 
-### What breaks the hit rate
+### Prefix cache hit rate degradation and eviction mechanisms
 
 Attention state for a token depends on every token before it, so the cache can reuse state only up to the first token that differs (principle \ref{pri-vol3-prefix-coherence}). Prefix caching is all or nothing from left to right. The engine cannot enforce a cache-friendly layout; it can only reward one, and the harness controls every input that decides the outcome. Logical context staging already named the changes that break the prefix: a per-call field at the head, a tool list that changes mid-trajectory, nondeterministic serialization, and every compaction. Seen from the cache, they share one signature. Each moves the first differing token toward the head of the context, and the engine prefills every block after it again. The first three are avoidable by layout. Compaction is not, which is why the harness compacts rarely and in large batches and accepts one expensive turn per batch.
 
@@ -1421,7 +1421,7 @@ Before analyzing memory offloading, retention, and swapping policies, verify you
 - [ ] **Disaggregated prefill-decode serving**: Why does streaming KV cache over an 800 Gbps RDMA interconnect beat local recomputation on decode workers?
 :::
 
-## Retain, Evict, Recompute, or Offload {#sec-vol3-kvcache-swapping}
+## Cache Eviction, Recomputation, and Tiered Offloading {#sec-vol3-kvcache-swapping}
 
 With paging in place, the pause deferred in @sec-vol3-kvcache-geometry can now be resolved. When an autoregressive decode loop emits a tool invocation token sequence—demanding a compilation run, a multi-second test suite execution inside an isolated container, or an interactive approval from a human operator—the model's forward inference stops instantaneously. While the agent waits for external execution results, the physical key-value cache blocks allocated to that trajectory remain pinned in high-bandwidth device memory (HBM). If the serving engine retains these physical blocks indefinitely across multi-second or multi-minute execution pauses, idle trajectories monopolize accelerator capacity, inducing artificial memory pressure that throttles active decodes and forces incoming requests into admission queues. Conversely, if the runtime prematurely evicts these blocks to liberate HBM, returning trajectories must undergo redundant prefill computation over tens of thousands of historical context tokens, wasting thousands of teraflops of compute and inflating the time-to-first-token upon resumption.
 
@@ -1459,7 +1459,7 @@ To navigate this constraint, the inference supervisor can deploy four distinct m
 
 [^fn-pinned-host-staging]: **Pinned Memory Staging Overheads**: Asynchronous Direct Memory Access (DMA) between accelerator HBM and host system memory requires host memory pages to be pinned (page-locked via cudaHostAlloc or mlock), preventing the operating system kernel from paging them to swap. Pinned memory pools reduce the physical RAM available to other host processes and operating system file buffers, requiring inference runtimes to manage custom fixed-size pinned arena allocators.
 
-### Analytical mechanics: The break-even decision frontier
+### Analytical mechanics of the break-even decision frontier
 
 ::: {.column-margin}
 ![](images/svg/vol3_virtual_memory_margin_004.svg){width="100%" fig-alt="Break-even curve showing PCIe host swapping beating full prompt recomputation whenever external tool execution pauses exceed 215 milliseconds."}
@@ -1683,7 +1683,7 @@ When an agent enters an interactive human-wait state, the host supervisor migrat
 
 For a $5\text{ GB}$ attention state, reading the serialized cache from an enterprise NVMe array requires approximately four hundred to seven hundred milliseconds. In the context of a human supervisor who required three minutes to read a terminal diff and approve a deployment, a five-hundred-millisecond cold-start reload is completely imperceptible. Secondary storage tiering thus achieves an order of magnitude reduction in serving costs: active trajectories occupy scarce HBM; short tool pauses reside in host DRAM; and dormant, human-gated trajectories are persisted safely to inexpensive flash media, preserving zero-loss prefix reuse without consuming cluster volatile memory.
 
-### Intra-sequence attention eviction: The agent anti-pattern {#sec-vol3-kvcache-intrasequence}
+### Intra-sequence attention eviction as an agent anti-pattern {#sec-vol3-kvcache-intrasequence}
 
 While hierarchical paging and secondary storage migration manage key-value cache allocations at the granularity of entire trajectories or multi-token page blocks, an orthogonal dimension of optimization operates *within* individual sequences: selectively dropping or compressing specific key-value token representations during ongoing generation (such as StreamingLLM, H2O, and Scissorhands).
 
@@ -1693,7 +1693,7 @@ In open-ended conversational streaming or single-turn document summarization, in
 As derived later in this section, dropping intermediate tokens shatters causal prefix integrity, induces dormant identifier amnesia (losing critical process IDs, hashes, or port numbers that remain unreferenced for dozens of turns), and corrupts rigid function-calling schemas. Systems architects must study these algorithms not as viable production deployments for autonomous agents, but to understand precisely why agent memory virtualization mandates *lossless* hierarchical page management (PagedAttention, Radix prefix sharing, and tiered swapping) rather than lossy token pruning.
 :::
 
-#### Mechanics of attention sinks and local windows: StreamingLLM
+#### Mechanics of attention sinks and local windows in StreamingLLM
 
 The naive implementation of intra-sequence cache eviction truncates sequence history using a sliding window: retaining only the most recent $W$ tokens and discarding earlier keys and values. However, as demonstrated by @xiao2024streamingllm, applying a pure sliding window to standard transformer models causes catastrophic perplexity collapse once the sequence length exceeds the window size $W$, even when subsequent generation depends exclusively on recent context.
 
@@ -1711,7 +1711,7 @@ $$\mathcal{S}_{\text{resident}}^{(t)} = \{0, 1, \dots, k_{\text{sink}}-1\} \cup 
 
 For any token position $t > k_{\text{sink}} + W$, the serving engine evicts tokens in the intermediate interval $[k_{\text{sink}}, t - W]$. Because rotary positional embeddings (RoPE) rely on absolute position indices that would become disjoint after intermediate eviction, the runtime remaps positional encodings dynamically: keys and values within the cache are assigned contiguous logical positions based on their relative distance within the retained buffer rather than their original sequence indices. Under StreamingLLM, the per-layer KV cache footprint remains strictly bounded at $2 \cdot (k_{\text{sink}} + W) \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot b_{\text{elem}}$ bytes, independent of total trajectory length.
 
-#### Dynamic score accumulation: Heavy hitter oracle (H2O) and scissorhands
+#### Dynamic score accumulation in H2O and scissorhands
 
 While StreamingLLM maintains a static geometric partition (initial sinks plus recent window), dynamic eviction algorithms adaptively identify and retain influential tokens across the entire history based on observed attention dynamics.
 
@@ -1755,7 +1755,7 @@ Provisioning high-bandwidth memory for an autonomous agent deployment based on s
 
 **Serving capacity in an agentic infrastructure cannot be dimensioned as a scalar multiple of active request concurrency; it must be engineered as a dynamic physical envelope determined by cumulative multi-turn token accumulation, prefix reuse topology, and tail-latency percentiles under high memory pressure.** When aggregate token demand across concurrent trajectories exceeds physical High-Bandwidth Memory ($C_{\text{HBM}}$), the underlying paged memory manager has no choice but to stall active decodes, migrate page blocks across the PCIe bus to host memory, or discard noncontiguous blocks entirely. The resulting latency penalty falls not on the model's average throughput, but on the tail percentiles of time-to-first-token (TTFT) and inter-token latency (ITL). Sizing an inference cluster for agentic workloads therefore requires translating the structural geometry of the neural architecture and the stochastic behavior of multi-turn trajectories into rigorous capacity boundaries.
 
-### Workload dynamics: The multi-turn agent divergence {#sec-vol3-kv-workload-dynamics}
+### Workload dynamics and multi-turn agent memory divergence {#sec-vol3-kv-workload-dynamics}
 
 The physical memory footprint of an inference engine is driven by the divergence between conversational requests and agentic execution graphs. In a standard dialog system, the distribution of sequence lengths is unimodal and tightly bounded, allowing a service operator to provision a predictable ratio of active compute batch slots to high-bandwidth memory blocks. Each request frees its blocks when it emits its end-of-sequence token, the request boundary of passive conversational serving, so memory reclamation is frequent, deterministic, and tightly coupled to token emission.
 
