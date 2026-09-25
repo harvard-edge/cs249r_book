@@ -106,9 +106,15 @@ In the opening example the direct $+x$ supplies a separate contribution, which i
 
 That question has a short answer for every operation we use. Addition passes the gradient through unchanged to both inputs, because $\partial(a + b)/\partial a = 1$. ReLU passes it through where the input was positive and blocks it where the input was not, because its derivative is $1$ for positive $z$ and $0$ for negative $z$. At zero the ordinary derivative is undefined; TinyTorch chooses zero. Summing a tensor to a scalar sends the same gradient to every element. Each rule needs only what the operation saw during the forward pass: ReLU needs the sign of its input, and matrix multiplication needs both of its inputs.
 
+::: {.callout-tip title="Pause & Predict: Vector-Jacobian Products vs Full Jacobians"}
+For a hidden linear layer with batch size $B=128$, input dimension $D_\text{in}=1024$, and output dimension $D_\text{out}=4096$, how many elements would the full Jacobian tensor $\partial \mathbf{Y} / \partial \mathbf{W}$ contain? What is its memory footprint in float32? Why does reverse-mode autodiff compute the vector-Jacobian product directly without ever constructing this tensor?
+:::
+
 Matrix multiplication is the one rule worth writing down. For $Y = AB$ with $A$ of shape $M \times K$ and $B$ of shape $K \times N$, let $G = \partial L / \partial Y$ be the incoming gradient, which has the same shape as $Y$. Then
 
-$$\frac{\partial L}{\partial A} = G B^{T}, \qquad \frac{\partial L}{\partial B} = A^{T} G.$$
+$$\frac{\partial L}{\partial A} = G B^{T}, \qquad \frac{\partial L}{\partial B} = A^{T} G.$$[^fn-matrix-vjp-jacobian]
+
+[^fn-matrix-vjp-jacobian]: When evaluating $\mathbf{Y} = \mathbf{A}\mathbf{B}$, the full Jacobian $\partial \mathbf{Y}/\partial \mathbf{B}$ is a 4D tensor of shape $(M, N, K, N)$. In industrial networks, materializing this full Jacobian would consume gigabytes of DRAM. Reverse-mode automatic differentiation never constructs the Jacobian tensor; it evaluates the vector-Jacobian product (VJP) $\mathbf{A}^T \mathbf{G}$ directly, computing the exact parameter gradient in $O(MKN)$ operations while maintaining the original matrix shape.
 
 For the chapter's concrete input $A=[1,2]$ and incoming gradient $G=[1,1]$, $A^T G$ is $[[1,1],[2,2]]$. Each weight in the first row receives the input value $1$, and each weight in the second row receives $2$, because those values multiply the weights during forward execution. A shape check confirms that the general rule returns one derivative per input element. $G$ is $M \times N$ and $B^T$ is $N \times K$, so $G B^T$ is $M \times K$, the shape of $A$. Likewise $A^T G$ is $K \times N$, the shape of $B$. When both inputs require gradients, backward performs two matrix multiplications, each with the same leading arithmetic count as the forward product. If only the weights require gradients, the rule skips the input-gradient product. This explains why backward work can be comparable to forward work without implying a fixed elapsed-time ratio for every model.
 
@@ -153,9 +159,7 @@ $$\text{Layer activations} \approx 4 \times (B \times S \times D) \times 4\text{
 **Total tape footprint**:
 $$\text{Total activation memory} \approx 12\text{ layers} \times 192\text{ MB} \approx 2.30\text{ GB}$$
 
-**Systems insight**: While model parameters for this configuration occupy only $\sim 340\text{ MB}$, forward activation memory on the autograd tape exceeds parameter memory by nearly $7\times$, making activation management the primary bottleneck during training.
-
-
+**Systems insight**: While model parameters for this configuration occupy only $\sim 340\text{ MB}$, forward activation memory on the autograd tape exceeds parameter memory by nearly $7\times$, making activation management the primary bottleneck during training. In @sec-extensions, we implement activation checkpointing to break this linear memory growth: by discarding intermediate layer activations during the forward pass and selectively recomputing them during the backward traversal, memory drops from $O(L)$ to $O(\sqrt{L})$ at the cost of one additional forward evaluation.
 
 :::
 
@@ -265,15 +269,15 @@ Step 1 is the depth-first walk. It uses an explicit stack rather than recursion 
 
 Step 2 creates `pending = {id(self): gradient}`. In the scalar trace this gives the loss an incoming value of one, expressing that changing the loss changes itself by the same amount. No other tensor has a pending contribution yet.
 
-Step 3 maintains two distinct kinds of gradient state. The local `pending` dictionary starts fresh on every backward call; a tensor's `.grad` may already contain contributions from an earlier call. The rule receives the current call's `grad` from `pending`, never the historical total in `.grad`. Replaying a retained graph therefore adds a new derivative to the leaf without sending the old derivative through the graph a second time.
-
-Step 3 is also where "used twice means add" lives. `pending` holds, for each tensor, the gradient accumulated so far from the consumers already visited. A tensor is only taken from `pending` when the walk reaches it, and by the order's guarantee every consumer has already added its share, so the addition into an existing `pending[id(parent)]` entry combines contributions before that parent is processed. Each node's `backward` returns one gradient per input, in the order the inputs were given, and the walker reduces each one to its input's shape before handing it on. Nothing in the loop knows what any operation does. It only knows the order.
-
 ::: {.column-margin}
 **Core Invariant: Fan-In Accumulation**\
 $$x.\text{grad} \mathrel{+}= \sum_k \text{vjp}_k$$\
 *Silent bug: assigning `=` instead of `+=` drops multi-branch gradients without raising an error.*
 :::
+
+Step 3 maintains two distinct kinds of gradient state. The local `pending` dictionary starts fresh on every backward call; a tensor's `.grad` may already contain contributions from an earlier call. The rule receives the current call's `grad` from `pending`, never the historical total in `.grad`. Replaying a retained graph therefore adds a new derivative to the leaf without sending the old derivative through the graph a second time.
+
+Step 3 is also where "used twice means add" lives. `pending` holds, for each tensor, the gradient accumulated so far from the consumers already visited. A tensor is only taken from `pending` when the walk reaches it, and by the order's guarantee every consumer has already added its share, so the addition into an existing `pending[id(parent)]` entry combines contributions before that parent is processed. Each node's `backward` returns one gradient per input, in the order the inputs were given, and the walker reduces each one to its input's shape before handing it on. Nothing in the loop knows what any operation does. It only knows the order.
 
 Step 4 severs the `_grad_fn` links after the walk and marks tensors that had a producing operation with `_graph_released`. The marker distinguishes a consumed intermediate from an original leaf. Both now have no `_grad_fn`, but only the leaf is a valid stopping point for a later backward pass. Step 1 checks the marker on every reachable differentiable tensor before step 3 mutates any gradient. A new loss built from an old intermediate therefore raises instead of silently stopping short of its original inputs.
 
@@ -391,7 +395,9 @@ On the first call (line 4), `h` receives three and sends six to `x`. On the seco
 
 ## From TinyTorch to Production
 
-PyTorch also records executed operations and exposes a result's producing node through `grad_fn`. Its backward engine applies local derivative rules to saved forward values. A production implementation can save only the values a rule needs; TinyTorch keeps every input and its output to make the record easy to inspect. PyTorch also checks version counters to detect changes to saved tensors. [PyTorch autograd mechanics](https://docs.pytorch.org/docs/2.14/notes/autograd.html).
+PyTorch also records executed operations and exposes a result's producing node through `grad_fn`.[^fn-cyclic-gc-hazard] Its backward engine applies local derivative rules to saved forward values. A production implementation can save only the values a rule needs; TinyTorch keeps every input and its output to make the record easy to inspect. PyTorch also checks version counters to detect changes to saved tensors. [PyTorch autograd mechanics](https://docs.pytorch.org/docs/2.14/notes/autograd.html).
+
+[^fn-cyclic-gc-hazard]: If a backward closure or tape node retains a direct Python reference to its own output tensor while that tensor retains a reference to the node via \texttt{\_grad\_fn}, a cyclic reference is formed. CPython's reference-counting memory manager cannot reclaim cyclic structures immediately upon variable scope exit, forcing the system to fall back on the periodic generational garbage collector. In industrial engines like PyTorch, these cycles are explicitly severed using C++ weak pointers (\texttt{std::weak\_ptr} or \texttt{c10::intrusive\_ptr}) to ensure deterministic memory reclamation.
 
 ::: {#psp-autograd-cpp-engine .callout-perspective title="Production Bridge: PyTorch's C++ autograd engine and version counters"}
 In PyTorch's native C++ core (`torch/csrc/autograd`), every `Tensor` maintains an internal `_version` counter incremented on every in-place mutation. When a backward rule requires saved forward activations (via `ctx.save_for_backward`), it records their version. If any saved tensor's version increments before backward executes, PyTorch immediately raises:
@@ -406,7 +412,7 @@ The public gradient-storage contract also differs. With its default arguments, P
 
 Saved activations add a memory cost whose size depends on the workload. For example, an activation array of shape `(32, 128, 512)` contains $2{,}097{,}152$ values and occupies $8{,}388{,}608$ bytes in float32, about $8.4$ MB. That is an array-size calculation, not a measured training peak. Parameters, accumulated gradients, operation records, temporary arrays, and later optimizer state also occupy memory. Keeping several such activations alive can therefore change whether a model fits, but neither activations nor parameters always dominate.
 
-Production frameworks can trade recomputation for saved-array storage. **Activation checkpointing** keeps selected intermediate values and reruns portions of forward computation when backward needs omitted values. The exact memory saving and extra work depend on which portions are checkpointed; TinyTorch does not implement this policy in Module 06. [PyTorch checkpoint documentation](https://docs.pytorch.org/docs/2.14/checkpoint.html). The transferable invariant remains the same: a rule needs the values belonging to the forward computation being differentiated, whether the implementation retained those values or reconstructed them.
+Production frameworks can trade recomputation for saved-array storage. **Activation checkpointing** keeps selected intermediate values and reruns portions of forward computation when backward needs omitted values. The exact memory saving and extra work depend on which portions are checkpointed; TinyTorch does not implement this policy in Module 06. In @sec-extensions, we build a full activation checkpointing wrapper that discards activations across transformer layers to reduce forward tape memory from $O(L)$ to $O(\sqrt{L})$. [PyTorch checkpoint documentation](https://docs.pytorch.org/docs/2.14/checkpoint.html). The transferable invariant remains the same: a rule needs the values belonging to the forward computation being differentiated, whether the implementation retained those values or reconstructed them.
 
 ---
 
