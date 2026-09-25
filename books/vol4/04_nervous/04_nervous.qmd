@@ -275,6 +275,10 @@ How long a spline's lease may run is a question about the plant, not the mailbox
 
 ### Proposal lease sizing from the stopping budget {#sec-nervous-lease-sizing}
 
+When a learned policy stream stalls—whether due to an operating system page fault, a thermal throttle event on the vision accelerator, or an uncaught exception in the perception pipeline—the physical robot does not freeze instantly in place. Because physical mass possesses momentum ($p = mv$), the actuators continue executing whatever trajectory spline was last committed to the motor drive inverters. To prevent an unrenewed proposal from driving the robot blindly into an obstacle, the deterministic nervous system enforces an explicit **proposal lease**\index{Proposal lease!definition}\index{Lease!stopping budget}. The lease represents a hard, non-negotiable physical lifespan attached to each admitted chunk: if a fresh proposal does not arrive and pass validation before the lease expires, the safety microcontroller unilaterally revokes tracking authority and transitions the machine into a controlled braking fallback.
+
+Critically, a proposal lease cannot be selected as an arbitrary software convenience (such as a generic $500\text{ ms}$ heartbeat timeout). Because software rollback is physically impossible, the lease duration must be derived directly from the physical stopping budget: the elapsed time of the lease plus the mechanical brake onset latency and the braking distance itself must strictly fit within the remaining obstacle clearance $D_{\text{clear}}$.
+
 ```{python}
 #| label: calc-nervous-machine-lease-budget
 #| echo: false
@@ -390,6 +394,8 @@ class MachineLeaseBudget:
     t_renewal_jitter_str = fmt_latency(t_renewal_jitter, unit=millisecond, precision=0)
     t_renewal_need_str = fmt_latency(t_renewal_need, unit=millisecond, precision=0)
 ```
+
+Notebook \ref{nbk-nervous-watchdog-stopping-lease} walks through the exact mathematical derivation sizing the mobile manipulator's chunk lease at its drive limit.
 
 ::: {#nbk-nervous-watchdog-stopping-lease .callout-notebook title="Lease sizing from the stopping budget"}
 **Problem**: The warehouse mobile manipulator cruises down an aisle at its `{python} MachineLeaseBudget.v_str` drive limit toward a person who has stepped out from a rack end and stopped `{python} MachineLeaseBudget.d_clear_str` ahead. Its chunk policy renews one last proposal and then stalls. How much time remains before braking must begin, and how much of it does the chunk lease spend?
@@ -938,13 +944,13 @@ A bounded path delivers each command to the drives within its cycle, but it is i
 
 ## Actuation Authority {#sec-nervous-actuation-authority}
 
-Authority on the mobile manipulator is the ability to write the drive registers that energize its base and arm windings and deliver mechanical power. In a correctly structured machine, this authority is concentrated exclusively within the deterministic real-time enforcer (@fig-04-privilege-enforcer-registers).
+Authority on the mobile manipulator is the ability to write the drive registers that energize its base and arm windings and deliver mechanical power. In an embodied AI system, the most dangerous architectural anti-pattern is allowing complex, uncertified perception and planning software to write actuator control registers directly.
+
+A learned foundation model or trajectory planner on an application processor must possess zero physical authority to write PWM timer registers, set gate-driver current references, or toggle motor bridge enable pins that govern current delivery to stator windings. Instead, high-level software generates unprivileged trajectory proposals ($p_t$). These proposals pass across an isolated memory transport interface into a deterministic safety microcontroller, which acts as the sole hardware gatekeeper. As contrasted in @fig-04-privilege-enforcer-registers, decoupling proposal generation from physical execution privilege ensures that a software crash, kernel panic, or runaway GPU kernel cannot command unverified torque to the motors.
 
 ::: {#fig-04-privilege-enforcer-registers fig-env="figure" fig-pos="t" fig-cap="**Hardware proposal boundary**: (a) Decoupled enforcer on an isolated safety microcontroller with exclusive write privilege over motor drive registers, while the host processor proposes trajectories across a shared-memory link. (b) Collapsed unsafe architecture where unverified host software writes actuator registers directly, creating a single failure domain." fig-alt="Comparison of hardware privilege architectures: (a) Decoupled real-time enforcer gating actuator registers with a separate torque-cutoff trip branch; (b) Unsafe collapsed architecture with direct unchecked writes from host to motor registers."}
 ![](images/svg/fig04_privilege_enforcer_registers.svg){width="90%"}
 :::
-
-A learned foundation model or trajectory planner on an application processor has zero physical authority to write PWM timer registers, set gate-driver current references, or toggle motor bridge enable pins that govern current delivery to stator windings. Instead, high-level software generates unprivileged trajectory proposals ($p_t$). These proposals pass across the memory transport interface into the safety microcontroller, which functions as a strict hardware gatekeeper.
 
 ::: {.column-margin .margin-pointer}
 ↪ Actuator override masking registers implement the hardware preemption tiers formulated in @sec-intervention-authority-log.
