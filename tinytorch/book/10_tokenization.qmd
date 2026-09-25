@@ -27,7 +27,7 @@ Underneath that simple call, the tokenizer executes a statistical compression al
 
 1. **Ordered merge rule traversal:** The engine breaks text into base characters, then iteratively scans and merges the most frequent adjacent pairs according to a pre-trained priority table, compressing common words into single integer IDs.
 2. **Elimination of out-of-vocabulary tokens:** By starting from 256 raw byte representations or base characters and building subwords hierarchically, the tokenizer can represent any arbitrary text without failing on novel or misspelled words.
-3. **Sequence length compression:** Subword chunking reduces sequence lengths by $3\times$ to $4\times$ compared to character-level representations, directly mitigating the quadratic $O(S^2)$ memory and compute costs of downstream attention layers.
+3. **Sequence length compression:** Subword chunking reduces sequence lengths by $3\times$ to $4\times$ compared to character-level representations, directly mitigating the quadratic $O(S^2)$ memory and compute costs of downstream attention layers (@sec-attention).
 
 This chapter constructs TinyTorch's BPE tokenization engine, establishing the text ingestion bridge that feeds the embedding tables in @sec-embeddings and powers language modeling in @sec-transformers. Before building the merge algorithm, we must inspect why naive character-level and word-level strategies fail in opposite directions.
 
@@ -43,7 +43,7 @@ This chapter constructs TinyTorch's BPE tokenization engine, establishing the te
 
 There are two obvious ways to turn text into integers, and both fail, in opposite directions.
 
-The first is to number the characters. Every observed character gets an ID, but unseen characters remain a problem. A byte tokenizer can instead reserve an ID for each of the 256 byte values and represent any UTF-8 input as bytes. The cost is length. For the text `"the cat sat"`, character tokenization needs eleven IDs, including the spaces; word tokenization needs three. A longer sequence requires more positions to process. In @sec-attention, attention will introduce a table with one entry for every pair of token positions, making sequence length especially consequential.
+The first is to number the characters. Every observed character gets an ID, but unseen characters remain a problem. A byte tokenizer can instead reserve an ID for each of the 256 byte values and represent any UTF-8 input as bytes. The cost is length. For the text `"the cat sat"`, character tokenization needs eleven IDs, including the spaces; word tokenization needs three. A longer sequence requires more positions to process. In @sec-attention, attention will introduce a table with one entry for every pair of token positions, making sequence length especially consequential; downstream in @sec-memoization, this sequence length directly dictates the memory footprint of the autoregressive key-value cache.
 
 The second is to number the words. Split on spaces, give each distinct word an ID, and a 1,000-word essay is 1,000 tokens. Now the vocabulary is the problem. The listing below builds a word vocabulary from one sentence and then encodes three others. Any word the vocabulary has not seen maps to a reserved ID, conventionally written `<unk>` for "unknown".
 
@@ -63,25 +63,31 @@ One plural and the model reads nothing where "cats" was. A capital letter and a 
 
 ::: {.column-margin}
 **↪ Jump ahead:** @sec-embeddings
-*How discrete token IDs map into continuous, high-dimensional vector representations.*
+*How discrete token IDs index into continuous, high-dimensional vector representations via row-gather operations.*
 :::
 
 The two extremes trade one cost for the other. Characters give a tiny table and long sequences; words give short sequences and an enormous, leaky table. What we want is in between. Common words should be single tokens, so sequences stay short. Rare words should split into pieces the vocabulary does know, so an unseen word can still retain its known characters. The split itself should be learned from data rather than written by hand, because no one can list the useful pieces of every language.
 
+::: {.callout-tip title="Pause & Predict: The Byte-Level Vocab Guarantee"}
+A character-level vocabulary has ~100 tokens but produces long sequences. A word-level vocabulary has >500,000 tokens but suffers from out-of-vocabulary (OOV) unknown words. How does byte-level Byte-Pair Encoding (BPE) guarantee both a compact vocabulary (~50,000 tokens) and that no input string can ever produce an out-of-vocabulary token?
+:::
+
 ---
 
 ## The Idea
-
-BPE began as a compression technique; [Sennrich, Haddow, and Birch applied it to translation](https://aclanthology.org/P16-1162/) to represent rare words through subword units. The compression origin is the right way to think about it. A compressor looks for repeated patterns and gives them short codes. BPE looks for the most repeated adjacent pair of symbols and gives it a new symbol.
 
 ::: {.column-margin}
 ![](assets/images/diagrams/10_tokenization-margin-bpe.svg){width="100%"}
 *BPE pair frequency decay across merge ranks.*
 :::
 
-Start with an alphabet. Module 10 uses the characters that occur in the training words, with a marker glued onto each word's last character so that a letter ending a word is a different symbol from the same letter inside one; GPT-2 uses the 256 possible byte values instead, and the production section says why. Write the training text as a sequence of those symbols. Then repeat one step. Count how often every adjacent pair occurs, pick the pair with the highest count, invent a new symbol for it, and replace every occurrence of the pair with that symbol. In symbols, with $\text{count}(a, b)$ the number of times symbol $a$ is immediately followed by symbol $b$ anywhere in the corpus,
+BPE began as a compression technique; [Sennrich, Haddow, and Birch applied it to translation](https://aclanthology.org/P16-1162/) to represent rare words through subword units. The compression origin is the right way to think about it. A compressor looks for repeated patterns and gives them short codes. BPE looks for the most repeated adjacent pair of symbols and gives it a new symbol.
+
+Start with an alphabet. Module 10 uses the characters that occur in the training words, with a marker glued onto each word's last character so that a letter ending a word is a different symbol from the same letter inside one; GPT-2 uses the 256 possible byte values instead, and the production section says why.[^fn-gpt2-byte-encoding] Write the training text as a sequence of those symbols. Then repeat one step. Count how often every adjacent pair occurs, pick the pair with the highest count, invent a new symbol for it, and replace every occurrence of the pair with that symbol. In symbols, with $\text{count}(a, b)$ the number of times symbol $a$ is immediately followed by symbol $b$ anywhere in the corpus,
 
 $$(a^*, b^*) = \arg\max_{(a, b)} \text{count}(a, b), \qquad \text{new symbol } c = a^* b^*.$$
+
+[^fn-gpt2-byte-encoding]: In standard UTF-8, control characters (bytes 0 to 31, 127 to 159) and whitespace cannot be rendered cleanly in regex parsers. GPT-2 solves this by building an explicit invertible bijection `bytes_to_unicode()` that maps all 256 byte values directly into printable Unicode code points (such as shifting byte 32 space to `Ġ` U+0120), ensuring that BPE can run standard Python string regexes without corrupting control characters or byte sequences.
 
 A new vocabulary entry can replace many occurrences of its pair; each nonoverlapping replacement shrinks a word by one symbol. The vocabulary ends up holding "es", "est", and so on up to whole common words, each earned by frequency, and the merges are recorded in the order they were made. That ordered list, together with the alphabet and ID mappings, specifies how text is represented. Training runs once, over a large corpus, and produces the list; each new vocabulary entry adds to the initial alphabet and reserved symbols. The requested `vocab_size` is a target for that total, not a count of merges; training may stop sooner when no pairs remain. It also retains the complete base alphabet when that alphabet alone exceeds the target. The public `vocab_size` reports the actual number of entries.
 
@@ -268,13 +274,9 @@ The training target is not the output size. With `BPETokenizer(vocab_size=2)` an
 
 The reference mechanism makes two production questions concrete. How can a tokenizer preserve text outside its training alphabet? How can it avoid scanning thousands of irrelevant rules for every word? Different tokenizers answer these questions differently, so it is useful to compare specific implementations rather than assume every deployed model uses one scheme.
 
-::: {.column-margin}
-![](assets/images/diagrams/10_token-margin-regex-split.svg){width="100%" fig-alt="Diagram illustrating regex pre-tokenization partitioning text into isolated chunks to restrict BPE merges within word and punctuation boundaries."}
+The [released GPT-2 encoder](https://github.com/openai/gpt-2/blob/master/src/encoder.py) begins with UTF-8 bytes, remapped reversibly onto printable characters for its internal string operations. Its base alphabet covers all 256 byte values. It uses a regular expression, a pattern describing groups of characters, to split text into chunks while retaining whitespace.[^fn-regex-pretokenization] Within each chunk, it selects the lowest-ranked available pair and repeats; a cache stores earlier chunk results. Its decoder reconstructs the bytes before interpreting them as UTF-8. These choices preserve the distinction between `"low  lower\n"` and `"low lower"`, which TinyTorch intentionally discards. They also explain why a single token's bytes need not form a complete Unicode character: decoding an entire sequence is different from decoding each ID separately.
 
-*Regex pre-tokenization: Isolating words, punctuation, and whitespace into separate chunks prevents merges across boundaries, preserving punctuation reuse and indentation.*
-:::
-
-The [released GPT-2 encoder](https://github.com/openai/gpt-2/blob/master/src/encoder.py) begins with UTF-8 bytes, remapped reversibly onto printable characters for its internal string operations. Its base alphabet covers all 256 byte values. It uses a regular expression, a pattern describing groups of characters, to split text into chunks while retaining whitespace. Within each chunk, it selects the lowest-ranked available pair and repeats; a cache stores earlier chunk results. Its decoder reconstructs the bytes before interpreting them as UTF-8. These choices preserve the distinction between `"low  lower\n"` and `"low lower"`, which TinyTorch intentionally discards. They also explain why a single token's bytes need not form a complete Unicode character: decoding an entire sequence is different from decoding each ID separately.
+[^fn-regex-pretokenization]: The GPT-2 regex (`'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+`) partitions text into lexical categories before BPE merges run. This boundary firewall ensures that contractions (such as `'ve`), numbers, and punctuation are never glued across words, preventing the tokenizer from polluting its merge table with combinations like `dog,` or `model?`.
 
 Hugging Face's [BPE model interface](https://huggingface.co/docs/tokenizers/api/models) exposes a vocabulary, ranked merges, and cache capacity, along with choices such as unknown-token handling and a word-ending suffix. Its [trainer](https://huggingface.co/docs/tokenizers/api/trainers) exposes the requested vocabulary size, minimum pair frequency, and initial alphabet. Those settings are part of the tokenizer's behavior, not interchangeable performance switches. A BPE model configured over observed characters does not acquire complete byte coverage merely because the library also supports byte-based preprocessing.
 
@@ -287,6 +289,12 @@ Hugging Face's [BPE model interface](https://huggingface.co/docs/tokenizers/api/
 | Model interface | IDs range from 0 to actual `vocab_size - 1` | Vocabulary and preprocessing must match the model |
 
 : Production alternatives address coverage and repeated work while retaining an explicit vocabulary and merge rules. {#tbl-bpe-production-comparison tbl-colwidths="[22,39,39]"}
+
+::: {.column-margin}
+![](assets/images/diagrams/10_token-margin-regex-split.svg){width="100%" fig-alt="Diagram illustrating regex pre-tokenization partitioning text into isolated chunks to restrict BPE merges within word and punctuation boundaries."}
+
+*Regex pre-tokenization: Isolating words, punctuation, and whitespace into separate chunks prevents merges across boundaries, preserving punctuation reuse and indentation.*
+:::
 
 The comparison suggests where to reduce repeated work. Our encoder does repeated work on repeated words; caching could remove it while leaving the IDs unchanged. A trainer can track which words contain a pair and update affected counts rather than scan every word again. Such changes need tests against the simple reference, because an altered tie-break or preprocessing rule can change the learned vocabulary even when the new loop is faster.
 
