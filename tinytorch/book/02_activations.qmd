@@ -142,7 +142,9 @@ Breaking the collapse is only the first requirement. The function also has to be
 
 The **sigmoid** maps zero to $0.5$, $-1$ to about $0.269$, and $1$ to about $0.731$. Its mathematical range is $(0, 1)$, useful when an output represents a probability. The endpoints are approached but never reached in exact arithmetic; float32 can round sufficiently extreme results to exactly 0 or 1.
 
-At the ends of the curve, large input changes produce small output changes. For example, increasing the input from 5 to 6 moves the output only from about $0.9933$ to $0.9975$. This flattening is called **saturation**. At extreme inputs, float32 evaluations of exponential functions also encounter severe hardware limits. In single-precision IEEE 754 float32, the maximum finite positive value is $(2 - 2^{-23}) \times 2^{127} \approx 3.4028235 \times 10^{38}$. Because $\ln(3.4028235 \times 10^{38}) \approx 88.72284$, any unshielded evaluation of $e^x$ for $x > 88.72$ overflows to $+\infty$. Symmetrically, for $x < -87.33$, $e^x$ underflows below the smallest positive subnormal float32 value to absolute zero ($0.0$), causing downstream unshielded logarithms to produce $-\infty$ or $\text{NaN}$. @sec-autograd explains why saturated activations can weaken the signal used to update earlier weights, a problem called vanishing gradients. Saturation is already visible in the forward values, without implementing training.
+At the ends of the curve, large input changes produce small output changes. For example, increasing the input from 5 to 6 moves the output only from about $0.9933$ to $0.9975$. This flattening is called **saturation**.[^fn-ieee754-ftz] At extreme inputs, float32 evaluations of exponential functions also encounter severe hardware limits. In single-precision IEEE 754 float32, the maximum finite positive value is $(2 - 2^{-23}) \times 2^{127} \approx 3.4028235 \times 10^{38}$. Because $\ln(3.4028235 \times 10^{38}) \approx 88.72284$, any unshielded evaluation of $e^x$ for $x > 88.72$ overflows to $+\infty$. Symmetrically, for $x < -87.33$, $e^x$ underflows below the smallest positive subnormal float32 value to absolute zero ($0.0$), causing downstream unshielded logarithms to produce $-\infty$ or $\text{NaN}$. @sec-autograd explains why saturated activations can weaken the signal used to update earlier weights, a problem called vanishing gradients. Saturation is already visible in the forward values, without implementing training.
+
+[^fn-ieee754-ftz]: In IEEE 754 single-precision float32, the subnormal minimum is $2^{-149} \approx 1.4 \times 10^{-45}$ and the normal minimum is $2^{-126} \approx 1.175 \times 10^{-38}$. Modern GPUs operate in Flush-To-Zero (FTZ) mode by default, treating subnormals as zero to avoid pipeline stalls. Consequently, $e^x$ underflows cleanly to $0.0$ for $x < -87.33$.
 
 ### Tanh
 
@@ -170,9 +172,11 @@ The zero branch has a cost. If every example gives a unit a negative input, its 
 
 **Mechanism**: If a layer's weights and bias project representations entirely into negative space across a dataset, the unit outputs $0.0$ everywhere. Because the output remains constant zero regardless of input variation, all downstream layers receive zero information from this feature, collapsing the effective representation capacity of the network. When training begins (@sec-autograd), a zero slope on the negative branch means upstream weights receive no corrective learning signals.
 
-**Invariant check**: Saturated units (in sigmoid/tanh) or dead units (in ReLU) collapse effective model capacity. Tracking the percentage of completely inactive activations across a batch provides an immediate diagnostic for representation collapse.
+**Invariant check**: Saturated units (in sigmoid/tanh) or dead units (in ReLU) collapse effective model capacity. Tracking the percentage of completely inactive activations across a batch provides an immediate diagnostic for representation collapse.[^fn-leaky-relu-elu]
 
 :::
+
+[^fn-leaky-relu-elu]: To prevent dead units, Maas et al. (2013) proposed Leaky ReLU ($\max(\alpha x, x)$ with $\alpha = 0.01$) and Clevert et al. (2015) introduced the Exponential Linear Unit (ELU), ensuring a continuous non-zero derivative across negative inputs.
 
 ### GELU
 
@@ -194,7 +198,9 @@ Hidden layers need a nonlinearity. The last layer needs whatever form the loss e
 - **One yes-or-no label.** End with a sigmoid, so the output is one probability in $(0, 1)$. TinyTorch's `BinaryCrossEntropyLoss` expects exactly that, and clips it away from 0 and 1 before taking logarithms.
 - **One label among many.** Return the raw scores, the **logits**, and let the loss normalize them. TinyTorch's `CrossEntropyLoss` applies a max-shifted log-softmax internally, which stays finite where exponentiating first would overflow. Apply softmax yourself only when a caller needs probabilities, at inference time.
 
-The third rule is the one that fails quietly. A model that ends in softmax and trains with `CrossEntropyLoss` runs without an error, because the loss internally applies `LogSoftmax` and treats those probabilities as raw logits (as detailed in @sec-losses). Every score it receives then lies strictly in $(0, 1)$, so the correct class can never pull far ahead in exponentiated space. With ten classes, the best loss the model can ever achieve is $-\ln\big(e / (e + 9)\big) \approx 1.46$, however well the network separates the inputs. In addition, computing Softmax twice creates redundant memory round-trips and distorts backward gradients, corrupting the learning trajectory without raising a single exception.
+The third rule is the one that fails quietly. A model that ends in softmax and trains with `CrossEntropyLoss` runs without an error,[^fn-double-softmax-failure] because the loss internally applies `LogSoftmax` and treats those probabilities as raw logits (as detailed in @sec-losses). Every score it receives then lies strictly in $(0, 1)$, so the correct class can never pull far ahead in exponentiated space. With ten classes, the best loss the model can ever achieve is $-\ln\big(e / (e + 9)\big) \approx 1.46$, however well the network separates the inputs. In addition, computing Softmax twice creates redundant memory round-trips and distorts backward gradients, corrupting the learning trajectory without raising a single exception.
+
+[^fn-double-softmax-failure]: This represents one of the most common silent failure modes in beginner PyTorch pipelines. Because PyTorch's `nn.CrossEntropyLoss` internally composes `LogSoftmax` and `NLLLoss`, feeding it softmax probabilities evaluates $\log(\text{softmax}(p))$, severely squashing gradients and reducing model convergence rates by over an order of magnitude.
 
 ---
 
@@ -381,7 +387,7 @@ An ideal separate ReLU pass reads one input array and writes one output array, a
 These are byte counts, not measured transfers from physical memory or a latency prediction. Caches, allocation, and the execution environment affect elapsed time. The count explains why reducing temporary arrays can matter even when the arithmetic is cheap. In-place evaluation saves an allocation but still reads and writes the values; fusion can eliminate the intermediate pass itself.
 :::
 
-For such a simple function, memory movement can dominate arithmetic. An operation is called **memory-bound** when moving its data is the limiting cost. That diagnosis requires measurement on a particular implementation and workload; it does not follow from a universal GPU timing ratio. Sigmoid and GELU make this especially worth checking in TinyTorch because their NumPy expressions create several temporary arrays, not one shared loop for the entire activation.
+For such a simple function, memory movement can dominate arithmetic. An operation is called **memory-bound** when moving its data is the limiting cost. In @sec-profiling, we will plot ReLU and Sigmoid on the Roofline model. Because an elementwise activation performs only 1 FLOP per 8 bytes of DRAM traffic (4 bytes read plus 4 bytes written), its operational intensity is $0.125$ FLOP/byte, placing it deep within the memory-bandwidth-bound region of all modern processors. That diagnosis requires measurement on a particular implementation and workload; it does not follow from a universal GPU timing ratio. Sigmoid and GELU make this especially worth checking in TinyTorch because their NumPy expressions create several temporary arrays, not one shared loop for the entire activation.
 
 ::: {#psp-fused-activation-cuda .callout-perspective title="Systems Perspective: Fused activation kernels in GPU execution"}
 
