@@ -136,12 +136,6 @@ Behind these decoding choices sits a question this book has not yet answered. `T
 *Eliminating the redundant $O(S^2)$ key-value recomputation during autoregressive generation.*
 :::
 
-
-::: {.column-margin}
-![](assets/images/diagrams/milestone_02-margin-temperature.svg){width="100%"}
-*Temperature scaling reshaping logit probabilities ($T \to 0$ vs $T > 1$).*
-:::
-
 ### The next token is the label
 
 For input IDs $[7, 3, 9, 4]$, take targets $[3, 9, 4, 12]$. At position zero, the model sees 7 and predicts 3; at position one, it sees 7 and 3 and predicts 9. The final row sees all four input tokens and predicts 12. The causal mask lets us compute these four predictions in one pass without allowing a row to read its target.
@@ -161,6 +155,11 @@ Generation reuses the same forward pass with no labels. Encode the prompt into t
 ![**Teacher forcing versus autoregressive text generation**: In training, teacher forcing presents the full sequence simultaneously, utilizing causal masking so position $t$ predicts target $t+1$ ($O(1)$ parallel passes). In autoregressive inference, generation proceeds iteratively token-by-token, taking the last logit row, sampling with temperature/top-$k$, and appending to the prompt prefix ($O(T)$ sequential passes).](assets/images/diagrams/milestone_02_teacher-forcing-grid.svg){#fig-teacher-forcing-grid width="100%" fig-alt="Matrix grid contrasting parallel teacher forcing training with autoregressive token-by-token generation."}
 
 ### Temperature
+
+::: {.column-margin}
+![](assets/images/diagrams/milestone_02-margin-temperature.svg){width="100%"}
+*Temperature scaling reshaping logit probabilities ($T \to 0$ vs $T > 1$).*
+:::
 
 The choice inside the loop controls how strongly we prefer the largest scores. Let $\mathbf{z} \in \mathbb{R}^V$ be the last row of logits and $T > 0$ a scalar called the **temperature**. Dividing the logits by $T$ before the softmax gives
 
@@ -191,12 +190,6 @@ Since $\exp(-\infty) = 0$, the discarded tokens have exactly zero probability af
 
 ## The Code
 
-::: {.column-margin}
-![](assets/images/diagrams/m02_gen-margin-source.svg){width="100%" fig-alt="Source code mapping card for Synthesis II Language Model Generation showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Synthesis II combines Modules 09 to 13 to extract the autoregressive token generation loop, temperature scaling, and top-k sampling directly from the working repository.*
-:::
-
 ### Picking one token
 
 Every token a language model writes passes through one decision: given $V$ scores, which token comes next? A chat server makes that decision for every token of every reply, so it belongs in a function of its own, with the knobs as arguments. The Problem showed the choice this function makes explicit: select the maximum, sample from every candidate, or sample from a restricted set.
@@ -204,6 +197,12 @@ Every token a language model writes passes through one decision: given $V$ score
 There are two quieter ways to get it wrong, and both are arithmetic rather than statistics. The first is overflow. Logits come out of a real model in float32, and `exp` overflows float32 past about 88.7. A logit of 10 is ordinary. Divide it by a temperature of 0.1 and it is 100, `exp(100)` is `inf`, and the whole probability vector comes back `nan`. The second is the cost of finding the top $k$. The obvious way is to sort all $V$ logits and take the last $k$. A full sort orders every candidate even though the filter only needs the value at the cutoff. That extra ordering work repeats for every generated token.
 
 So the sampler has three jobs. Reshape the distribution with temperature and top-$k$ as the previous section defined them. Find the $k$-th largest logit without sorting. And take the softmax in a form that cannot overflow, which is the shift-by-the-maximum trick @sec-losses already built.
+
+::: {.column-margin}
+![](assets/images/diagrams/m02_gen-margin-source.svg){width="100%" fig-alt="Source code mapping card for Synthesis II Language Model Generation showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Synthesis II combines Modules 09 to 13 to extract the autoregressive token generation loop, temperature scaling, and top-k sampling directly from the working repository.*
+:::
 
 ```python
 import numpy as np
