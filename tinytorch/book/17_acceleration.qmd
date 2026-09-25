@@ -85,6 +85,12 @@ The script reports timings for the machine running it; neither traversal has a f
 
 A cache stores recently accessed data near the processor. Main memory transfers chunks called cache lines, so adjacent floats can share one transfer. For example, a hypothetical 64-byte line holds sixteen float32 values. A row walk can use all sixteen; a column walk may use only one before moving to another line. Whether a later access reuses that line depends on the array size and cache behavior. The stride explains a possible cost; it does not measure transferred bytes.
 
+::: {.column-margin}
+![](assets/images/diagrams/17_acceleration-margin-cache-line.svg){width="100%" fig-alt="Cache line spatial locality diagram comparing 64-byte hardware transfers for row-major contiguous access versus strided column-major access."}
+
+*Cache line spatial locality: 64-byte hardware transfers load 16 float32 values. Row walks use all 16 floats per line (1 miss, 15 hits), while column walks stride across rows and use only 1 float per line (16 misses).*
+:::
+
 Now look at what a framework does when you write a GELU. @sec-activations introduced the tanh form,
 
 $$\text{GELU}(x) \approx 0.5\,x\left(1 + \tanh\!\left(\sqrt{2/\pi}\,\left(x + 0.044715\,x^3\right)\right)\right),$$
@@ -120,7 +126,7 @@ The analytical model counts requested data separately from measured time. A logi
 ### Intermediate arrays and their lifetime
 
 ::: {.column-margin}
-![](assets/images/diagrams/17_acceleration-margin-fusion.svg){width="100%"}
+![](assets/images/diagrams/17_acceleration-margin-fusion.svg){width="100%" fig-alt="Kernel fusion memory traffic ledger showing 8 unfused DRAM round-trips collapsing into 1 streaming fused pass."}
 *Kernel fusion memory ledger: 8 unfused DRAM round-trips ($360\text{ B}$) collapse into 1 streaming fused pass ($40\text{ B}$).*
 :::
 
@@ -143,6 +149,12 @@ The tile cannot grow without limit. Three blocks must fit in fast memory at once
 $$3\,T^2 \times 4 \text{ bytes} \le \text{cache size}.$$
 
 For a hypothetical cache budget of 32,768 bytes, the inequality gives $T \le 52$. A tile of 32 fits this three-block budget; a tile of 64 requires 49,152 bytes. The estimate excludes other live data, library workspace, and cache-line effects. Choosing a tile therefore starts with a capacity estimate and ends with measurement, rather than a promise that a particular size is fastest.[^fn-gotoblas-hierarchical-tiling]
+
+::: {.column-margin}
+![](assets/images/diagrams/17_acceleration-margin-tiling.svg){width="100%" fig-alt="2D block tiling diagram illustrating how partitioning large matrices into T by T blocks keeps three active tiles resident in L1 cache."}
+
+*2D cache block tiling: Partitioning matrix multiplication into $T \times T$ sub-blocks keeps three tiles ($A$, $B$, and $C$) in on-chip L1 cache ($3T^2 \times 4\text{ B} \le \text{cache size}$). Each float is reused $T$ times, slashing DRAM bus traffic by $T\times$.*
+:::
 
 [^fn-gotoblas-hierarchical-tiling]: **Hierarchical multi-level tiling and GotoBLAS**: High-performance implementations (such as OpenBLAS, BLIS, and NVIDIA CUTLASS) do not stop at single-level cache tiling. As established by Kazushige Goto and Robert van de Geijn (2008), GEMM is structured as a hierarchy of nested tiles matching hardware memory levels: an outer macro-kernel packs $M_c \times K_c$ panels of $A$ and $K_c \times N_c$ panels of $B$ into the L2/L3 cache, while an inner micro-kernel streams tiny $m_r \times n_r$ blocks directly into CPU SIMD or GPU register files. This eliminates cache evictions during the inner dot products and achieves over 90% of theoretical peak hardware arithmetic throughput.
 
