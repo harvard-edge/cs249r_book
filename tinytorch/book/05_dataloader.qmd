@@ -158,6 +158,12 @@ Look at what `__getitem__` costs. `tensor.data[idx]` is NumPy row indexing, whic
 
 ### Collation
 
+::: {.column-margin}
+![](assets/images/diagrams/05_dataloader-margin-collation.svg){width="100%" fig-alt="Batch collation memory layout showing four scattered sample buffers in heap memory packed into a single contiguous row-major batch array."}
+
+*Batch Collation: Shuffled sample allocations live at scattered heap addresses; `_collate_batch` allocates a single contiguous buffer with strides $(D, 1)$ to saturate SIMD vectorization and BLAS GEMM kernels.*
+:::
+
 Now the other side of the contract. `Linear.forward` from @sec-layers computes `x.matmul(W)`, and its input needs a batch dimension. Our loader produces a contiguous array, with row $i$ at positions $iD$ through $iD + D - 1$ and element strides $(D, 1)$. NumPy can multiply strided arrays too; the need here is to assemble separate sample buffers into one array. What the dataset hands us is $B$ separate small tensors, each in its own buffer. Four samples drawn as 7, 8, 1, 5 live in four unrelated allocations. No stride trick makes four buffers look like one $(4, 2)$ tensor.
 
 The naive way is to skip the batch and call `forward` four times, once per sample. That pays the per-call fixed cost from The Problem four times over and leaves us averaging four separate losses by hand, which is the $B = 1$ loop we set out to escape.
@@ -310,6 +316,12 @@ For datasets accessed by index, called map-style datasets in its API, PyTorch ke
 When `__getitem__` reads and decodes disk-backed files, synchronous execution forces the model to wait during I/O. Background worker processes decouple ingestion from compute: a background producer prepares batch $N+1$ while the accelerator executes batch $N$. PyTorch exposes this through `num_workers` and `prefetch_factor`. TinyTorch leaves execution synchronous so every `next` call traces deterministically from index selection to memory layout. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html).
 
 Worker processes also need to hand completed tensors back to the caller. **Shared memory** lets two processes access the same region of RAM; PyTorch's multiprocessing support uses this for CPU tensor storage passed through its queues. Moving storage into shared memory can itself require a copy, so sharing does not mean every part of the handoff is free. [PyTorch multiprocessing notes](https://docs.pytorch.org/docs/2.14/notes/multiprocessing.html).
+
+::: {.column-margin}
+![](assets/images/diagrams/05_dataloader-margin-shm.svg){width="100%" fig-alt="Multi-worker IPC comparison between pipe serialization with redundant byte copying and POSIX shared memory zero-copy page mapping."}
+
+*Multi-worker IPC: Worker processes bypass pipe serialization by writing batches directly to `/dev/shm`, sending an 8-byte file descriptor so the main process maps memory zero-copy.*
+:::
 
 ::: {#psp-dataloader-multiprocess-shm .callout-perspective title="Systems Perspective: POSIX shared memory and zero-copy IPC"}
 
