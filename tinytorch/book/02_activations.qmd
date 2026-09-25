@@ -45,12 +45,6 @@ This chapter builds the non-linear foundation of TinyTorch, implementing the cor
 
 With one input, consider a first layer that computes $h = 2x + 1$ and a second that computes $y = 3h - 2$. At $x = 1$, the intermediate value is $h = 3$ and the result is $y = 7$. Substitution gives $y = 6x + 1$, a single multiply-and-add with the same result. Adding the second layer changed the coefficients, but not the kind of function available.
 
-::: {.column-margin}
-![](assets/images/diagrams/02_activation-margin-linear-collapse.svg){width="100%" fig-alt="Diagram of linear collapse showing two stacked linear layers folding associatively into a single equivalent affine layer with effective weights and biases."}
-
-*Stacking linear layers yields an equivalent single linear layer ($\mathbf{W}_{\text{eff}} = \mathbf{W}_1\mathbf{W}_2$), collapsing model depth into a single flat hyperplane.*
-:::
-
 The layer traditionally called linear includes a bias, so mathematically it is an affine map, a linear map plus a constant shift. It maps an input row vector $\mathbf{x}$ to $\mathbf{x}\mathbf{W} + \mathbf{b}$, where $\mathbf{W}$ is a matrix of weights and $\mathbf{b}$ is a vector of biases. Stack two of them, feeding the output of the first into the second:
 
 $$\mathbf{h} = \mathbf{x}\mathbf{W}_1 + \mathbf{b}_1, \qquad \mathbf{y} = \mathbf{h}\mathbf{W}_2 + \mathbf{b}_2$$
@@ -58,6 +52,12 @@ $$\mathbf{h} = \mathbf{x}\mathbf{W}_1 + \mathbf{b}_1, \qquad \mathbf{y} = \mathb
 Substitute the first equation into the second and multiply out:
 
 $$\mathbf{y} = (\mathbf{x}\mathbf{W}_1 + \mathbf{b}_1)\mathbf{W}_2 + \mathbf{b}_2 = \mathbf{x}\,(\mathbf{W}_1\mathbf{W}_2) + (\mathbf{b}_1\mathbf{W}_2 + \mathbf{b}_2)$$
+
+::: {.column-margin}
+![](assets/images/diagrams/02_activation-margin-linear-collapse.svg){width="100%" fig-alt="Diagram of linear collapse showing two stacked linear layers folding associatively into a single equivalent affine layer with effective weights and biases."}
+
+*Stacking linear layers yields an equivalent single linear layer ($\mathbf{W}_{\text{eff}} = \mathbf{W}_1\mathbf{W}_2$), collapsing model depth into a single flat hyperplane.*
+:::
 
 The right-hand side has the form $\mathbf{x}\mathbf{W}_{\text{eff}} + \mathbf{b}_{\text{eff}}$ with $\mathbf{W}_{\text{eff}} = \mathbf{W}_1\mathbf{W}_2$ and $\mathbf{b}_{\text{eff}} = \mathbf{b}_1\mathbf{W}_2 + \mathbf{b}_2$. That is a single linear layer. Nothing in the argument depends on there being exactly two layers. Apply it again and a third layer folds into the same form, and so on for a hundred. Matrix multiplication is associative, so the product of any number of weight matrices is just another weight matrix.
 
@@ -176,12 +176,6 @@ The zero branch has a cost. If every example gives a unit a negative input, its 
 
 ### GELU
 
-::: {.column-margin}
-![](assets/images/diagrams/02_activation-margin-gelu.svg){width="100%" fig-alt="Plot comparing GELU curvature with ReLU, highlighting the smooth negative dip to -0.17 at x = -0.75."}
-
-*GELU allows small negative gradients through its -0.17 dip before asymptotically saturating at zero.*
-:::
-
 A gate is a multiplier that controls how much of a value passes through. ReLU uses a hard gate, either 0 or 1. GELU, the **Gaussian error linear unit**, replaces it with a smooth multiplier. The exact definition is $x\Phi(x)$, where $\Phi(x)$ is the fraction of a standard normal bell curve lying to the left of $x$. That bell curve is centered at zero with standard deviation one; $\Phi(0)=0.5$ and $\Phi(1)\approx0.8413$. In contrast to stochastic regularizers like Dropout that randomly zero activations with Bernoulli trials during training, GELU gates values deterministically by their cumulative probability: each activation is weighted by the likelihood that standard Gaussian noise falls below it ($x \cdot P(X \le x)$). This probability interpretation defines the shape of the smooth gate, but applying GELU does not draw a random sample; it is an entirely deterministic mathematical function.
 
 TinyTorch approximates the gate with the sigmoid already introduced:
@@ -279,6 +273,12 @@ The transposed call's output is the transpose of the first output, and neither a
 
 ### Softmax couples a row
 
+::: {.column-margin}
+**Core Invariant: Safe Exponentiation**\
+$$\max(z) \text{ subtraction keeps } z_i - m \le 0$$\
+*Exponentials never exceed $e^0 = 1.0$, preventing float32 overflow cliff.*
+:::
+
 For scores `[1, 2, 3]`, Softmax returns approximately `[0.0900, 0.2447, 0.6652]`. The outputs are nonnegative and sum to one, so they can represent relative probabilities among three choices. Unlike sigmoid, increasing one score changes the other outputs too because every entry shares the same denominator.
 
 `Softmax.forward(x, dim=-1)` calls `SoftmaxFunction.apply(x, dim=dim)`. The `dim` argument becomes an attribute of that operation instance; it chooses which axis to normalize. For an input with shape $(2, 3)$ and `dim=-1`, the operation handles each row independently. Its maximum and sum arrays have shape $(2, 1)$ because `keepdims=True` retains the reduced axis. NumPy can then broadcast those values across their original rows.
@@ -288,12 +288,6 @@ For scores `[1, 2, 3]`, Softmax returns approximately `[0.0900, 0.2447, 0.6652]`
 The formula exponentiates each score and divides by the row's exponential sum. To avoid asking for an enormous exponential, the code subtracts the row maximum first. For `[1, 2, 3]`, the shifted scores are `[-2, -1, 0]`, the exponentials are approximately `[0.1353, 0.3679, 1]`, and their sum is `1.5032`. Division gives the probabilities above. Subtracting a common constant $m = \max_k x_k$ does not change the normalized ratios, since its exponential factor cancels between numerator and denominator:
 
 $$\frac{e^{x_i - m}}{\sum_j e^{x_j - m}} = \frac{e^{x_i} e^{-m}}{\sum_j (e^{x_j} e^{-m})} = \frac{e^{-m} e^{x_i}}{e^{-m} \sum_j e^{x_j}} = \frac{e^{x_i}}{\sum_j e^{x_j}}.$$
-
-::: {.column-margin}
-**Core Invariant: Safe Exponentiation**\
-$$\max(z) \text{ subtraction keeps } z_i - m \le 0$$\
-*Exponentials never exceed $e^0 = 1.0$, preventing float32 overflow cliff.*
-:::
 
 ![**The Softmax numerical cliff**: Naive exponentiation of large logits triggers float32 overflow ($> 3.4 \times 10^{38}$), returning $\text{NaN}$ and collapsing training. Subtracting the running maximum shifts exponents into the non-positive domain ($\le 0$), ensuring finite, stable probability evaluation.](assets/images/diagrams/02_softmax-numerical-cliff.svg){#fig-softmax-numerical-cliff width="100%" fig-alt="Top panel displays naive softmax overflowing to +Inf and NaN. Bottom panel displays safe LogSumExp shifting by max logit to compute exact probabilities without NaN risk."}
 
@@ -319,6 +313,12 @@ assert probabilities.shape == scores.shape
 
 ## A Worked Trace
 
+::: {.column-margin}
+![](assets/images/diagrams/02_activation-margin-gelu.svg){width="100%" fig-alt="Plot comparing GELU curvature with ReLU, highlighting the smooth negative dip to -0.17 at x = -0.75."}
+
+*GELU allows small negative gradients through its -0.17 dip before asymptotically saturating at zero.*
+:::
+
 A useful trace follows the intermediate value that selects the output. Sigmoid forms a bounded exponential; GELU forms a sigmoid gate and multiplies by the original input. The following program sends six values through the array-level operations, just as `apply` does. Every array has shape `(6,)`.
 
 ```python
@@ -338,6 +338,12 @@ for i in range(len(v)):
           f" {gate[i]:10.4f} {g[i]:8.4f}")
 ```
 
+::: {.column-margin}
+![](assets/images/diagrams/02_activation-margin-vanishing-gradients.svg){width="100%" fig-alt="Plot comparing gradient decay across 10 layers for Sigmoid (0.25^10 ≈ 9.5e-7) versus ReLU (1.0^10 = 1.0)."}
+
+*Sigmoid's maximum slope ($0.25$) compounds across 10 layers to $9.5\times10^{-7}$, causing vanishing gradients. ReLU maintains unit slope ($1.0$), preserving signal flow.*
+:::
+
 In line 4, `v` defines six sample points spanning negative, zero, and positive domains. Lines 5 to 6 compute standard Sigmoid and ReLU activations via their `forward` methods. In lines 7 to 8, `gate` evaluates the sigmoid factor $\sigma(1.702x)$ and `g` computes the complete GELU activation; line 9 validates the identity $g = v \cdot \text{gate}$ with `assert_allclose`.
 
 In @tbl-activation-numerical-trace (printed by lines 11 to 14), the GELU output is the product of the first and fourth columns. At $-1$, a small positive gate ($0.1542$) lets a small negative value through ($-0.1542$); at zero, the gate is $0.5$ but the product is still zero. These are consequences of the multiplication, not special cases added to the function.
@@ -354,12 +360,6 @@ In @tbl-activation-numerical-trace (printed by lines 11 to 14), the GELU output 
 : Forward values and the intermediate gate in Module 02's sigmoid-form GELU. {#tbl-activation-numerical-trace tbl-colwidths="[15,18,15,30,22]"}
 
 The trace also distinguishes a formula from its name. Exact GELU at $-1$ is approximately $-0.1587$, while the implementation gives $-0.1542$. A regression test should compare to the sigmoid form actually chosen. A test against the exact form needs an explicit approximation tolerance.
-
-::: {.column-margin}
-![](assets/images/diagrams/02_activation-margin-vanishing-gradients.svg){width="100%" fig-alt="Plot comparing gradient decay across 10 layers for Sigmoid (0.25^10 ≈ 9.5e-7) versus ReLU (1.0^10 = 1.0)."}
-
-*Sigmoid's maximum slope ($0.25$) compounds across 10 layers to $9.5\times10^{-7}$, causing vanishing gradients. ReLU maintains unit slope ($1.0$), preserving signal flow.*
-:::
 
 There is a short preview of learning in these values. A local slope measures how much the output changes per small input change. Sigmoid's largest slope is $0.25$; ReLU's positive branch has slope 1 and its negative branch has slope zero. Ten factors of $0.25$ multiply to about $9.5\times10^{-7}$, while ten factors of 1 remain 1. This isolates the activations' contribution to shrinking a change as it travels through a computation. A complete network also contains weights. @sec-autograd introduces derivatives and tracks all those factors together, rather than treating this activation-only calculation as a prediction of a network's gradient.
 
