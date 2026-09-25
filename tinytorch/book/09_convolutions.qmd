@@ -61,6 +61,10 @@ We want a layer that spends its weights on *what* a pattern looks like, not on *
 *How hardware accelerators optimize convolution memory layouts and high-throughput GEMM tiling.*
 :::
 
+::: {.callout-tip title="Pause & Predict: Parameter Sharing vs Dense Connections"}
+A dense linear layer connecting a $224 \times 224 \times 3$ image to 64 feature maps requires over 9.6 million weights. A $3 \times 3$ convolutional layer producing the same 64 feature maps requires only 1,728 weights, regardless of image size. If both layers can perform linear operations on the pixels, what structural assumption enables the convolution to discard 99.98% of the weights? What happens when that assumption fails (for example, if image pixels are randomly scrambled)?
+:::
+
 
 ### A filter that slides
 
@@ -80,7 +84,7 @@ Each output pixel sees only a $K \times K$ neighborhood of the input, its **rece
 *Spatial Locality vs Strided DRAM: Stepping along width accesses contiguous memory, while stepping vertically jumps $W$ elements. The im2col transformation unrolls patches to restore contiguous vector loads.*
 :::
 
-Real images have several channels (red, green, blue), and a useful layer produces several output planes, called **feature maps**, one per filter. TinyTorch, like PyTorch, stores an image batch as a 4D tensor with shape $[N, C, H, W]$, meaning $N$ images, each with $C$ channels of $H \times W$ pixels. A filter then spans all input channels, so a layer with $C_{\text{in}}$ input channels and $C_{\text{out}}$ filters holds a weight tensor of shape $[C_{\text{out}}, C_{\text{in}}, K, K]$ plus one bias per filter. Output pixel $(h, c)$ of filter $o$ sums over the input channels too:
+Real images have several channels (red, green, blue), and a useful layer produces several output planes, called **feature maps**, one per filter. This non-contiguous row striding is the 2D spatial manifestation of the stride arithmetic introduced in @sec-tensors: whereas horizontal steps along width exploit consecutive 64-byte cache line loads with unit stride, vertical steps jump by entire row strides, causing cache line eviction if rows exceed L1 cache capacity. TinyTorch, like PyTorch, stores an image batch as a 4D tensor with shape $[N, C, H, W]$, meaning $N$ images, each with $C$ channels of $H \times W$ pixels. A filter then spans all input channels, so a layer with $C_{\text{in}}$ input channels and $C_{\text{out}}$ filters holds a weight tensor of shape $[C_{\text{out}}, C_{\text{in}}, K, K]$ plus one bias per filter. Output pixel $(h, c)$ of filter $o$ sums over the input channels too:
 
 $$Y[n, o, h, c] = b[o] + \sum_{\text{ch}=0}^{C_{\text{in}}-1} \sum_{i=0}^{K-1} \sum_{j=0}^{K-1} X[n, \text{ch}, h S + i,\; c S + j] \cdot W[o, \text{ch}, i, j].$$
 
@@ -123,7 +127,7 @@ Look again at the single-output formula. Each output pixel is a dot product betw
 3. compute $Y_{\text{col}} = X_{\text{col}} W_{\text{col}}$, shape $[N H_{\text{out}} W_{\text{out}},\; C_{\text{out}}]$;
 4. add the bias and reshape to $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$.
 
-The matrix multiplication performs the same dot products. The Code section counts the extra storage and separates that analytical cost from elapsed time, which depends on the workload and machine.
+The matrix multiplication performs the same dot products. In @sec-acceleration, we optimize this lowered GEMM operation using 2D cache tiling and SIMD vectorization, showing how hardware hierarchies transform memory-bound unrolled loops into peak arithmetic throughput. The Code section counts the extra storage and separates that analytical cost from elapsed time, which depends on the workload and machine.
 
 ![**Lowering 2D convolution to GEMM via im2col**: Sliding receptive field patches of shape $C_{\text{in}} \times K \times K$ are unrolled into rows of an input matrix $X_{\text{col}}$, while filters are flattened into columns of $W_{\text{col}}$. High-performance BLAS matrix multiplication computes all overlapping dot products simultaneously, which is then reshaped into the 4D output tensor.](assets/images/diagrams/09_im2col-lowering-gemm.svg){#fig-im2col-lowering-gemm width="100%" fig-alt="Diagram showing input feature patches unrolled into matrix X_col, kernel weights into W_col, their GEMM matrix product Y_col, and reshape to output tensor."}
 
@@ -209,6 +213,12 @@ The direct loops spend time on more than arithmetic. Each multiply requires Pyth
 
 Look at the direct routine again. The three innermost loops form a dot product between two lists of $C_{\text{in}} K^2$ numbers, the flattened patch under the filter and the flattened filter, and every output pixel is one of those dot products. We can move those dot products into one matrix operation, paying the Python loop overhead per copied patch instead of per multiply. Copy each patch the filter visits into the row of a matrix, flatten each filter into a column, and let one `matmul` do every dot product at once. The `matmul` operation from @sec-tensors already delegates matrix arithmetic to NumPy; the chapter model uses the same numerical primitive.
 
+::: {.column-margin}
+**Core Invariant: Spatial Unfolding**\
+$$\text{Patch } (C_{\text{in}}, K, K) \to \text{Row in } X_{\text{col}}$$\
+*Converts nested 4D spatial sliding windows into a single BLAS GEMM at the expense of $K^2$ memory expansion.*
+:::
+
 For a $32 \times 32$ color image with sixteen $3 \times 3$ filters and padding 1, both formulations perform 442,368 multiplies. The patch matrix contains 27,648 numbers, compared with 3,072 in the input: a $9\times$ memory footprint expansion because neighboring patches replicate interior pixels up to $K^2 = 9$ times. Why would silicon architectures gladly accept a nine-fold memory expansion? Because nested spatial loops access non-contiguous memory with irregular strides, causing constant cache misses and preventing instruction-level pipelining. Unrolling the patches into a contiguous 2D matrix lowers convolution into General Matrix Multiply (GEMM). Hardware accelerators (such as GPU Tensor Cores, TPU systolic arrays, and CPU AVX-512 units) execute contiguous GEMMs at thousands of times higher operational throughput than nested loops, heavily outweighing the transient memory expansion overhead.
 
 The model in @lst-conv-im2col-model walks the same output positions as the loops, but instead of multiplying it copies the patch into a row. The order inside a row (channel, then filter row, then filter column) is the order `ravel` produces and the order `reshape` gives the flattened filters, so the dot products pair the right numbers.
@@ -245,12 +255,6 @@ def conv2d_im2col(x, weight, bias, stride=1, padding=0):
 :::
 
 The multiplies all happen inside the `@`. Everything around it is copying and reshaping. `patches` holds $N H_{\text{out}} W_{\text{out}} C_{\text{in}} K^2$ numbers where the input held $N C_{\text{in}} H W$, which gives the ninefold storage expansion in the example above. The last line uses NumPy views to arrange the output axes: the product comes out with the output channel as its last axis, and a `reshape` plus a `transpose` present it as $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$ without moving a number. This helper supports square filters and scalar stride/padding. It is an array-only comparison model; the module also accepts rectangular kernels, and its tensor operations retain the gradient graph.
-
-::: {.column-margin}
-**Core Invariant: Spatial Unfolding**\
-$$\text{Patch } (C_{\text{in}}, K, K) \to \text{Row in } X_{\text{col}}$$\
-*Converts nested 4D spatial sliding windows into a single BLAS GEMM at the expense of $K^2$ memory expansion.*
-:::
 
 ![**Lowering 2D convolution to GEMM via im2col**: Spatial receptive fields across input feature maps are unfolded into contiguous rows/columns. The resulting matrix product executes with optimized level-3 BLAS libraries, trading temporary buffer replication for maximum compute density.](assets/images/diagrams/09_im2col-unfolding.svg){#fig-im2col-unfolding width="100%" fig-alt="Diagram of im2col lowering: 2D sliding receptive field unfolds into column vector, filter bank unfolds into rows, resulting in single matrix multiplication."}
 
@@ -417,9 +421,11 @@ A production implementation can preserve the window computation while changing h
 ::: {#psp-convolutions-cudnn-winograd .callout-perspective title="Production Bridge: cuDNN implicit GEMM and Winograd minimal filtering"}
 Modern deep learning hardware rarely materializes an explicit im2col matrix. NVIDIA cuDNN selects dynamically among four convolution engines based on kernel geometry and available GPU workspace:
 
-1. **Implicit GEMM**: Computes matrix addresses directly inside CUDA thread indexing formulas, achieving GEMM speed without the $9\times$ memory duplication penalty.
+1. **Implicit GEMM**: Computes matrix addresses directly inside CUDA thread indexing formulas, achieving GEMM speed without the $9\times$ memory duplication penalty.[^fn-cudnn-implicit-gemm]
 2. **Winograd $F(2 \times 2, 3 \times 3)$**: Uses polynomial residue transforms to reduce 2D multiplications from $4 \times 9 = 36$ down to $16$, yielding up to $2.25\times$ computational throughput on $3 \times 3$ filters at the expense of slight numerical precision.
 :::
+
+[^fn-cudnn-implicit-gemm]: Rather than allocating an explicit $O(K^2 \cdot H_\mathrm{out} \cdot W_\mathrm{out})$ patch matrix in global DRAM, cuDNN's implicit GEMM computes index mappings on the fly within GPU registers. Each warp calculates virtual row and column coordinates directly from thread IDs, streaming pixels directly from L2 cache into shared memory and register tiles without writing intermediate unrolled patch buffers to DRAM.
 
 The transform methods require mathematical tools beyond this implementation. Winograd changes the representation of small tiles to reduce multiplication count.[^fn-winograd-conv-algos] FFT methods transform larger arrays before multiplying.[^fn-fft-conv-algos] Neither method is implemented by Module 09; the reference loops provide values against which such alternatives can be checked.
 
