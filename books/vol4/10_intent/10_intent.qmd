@@ -43,7 +43,8 @@ Grounded intent translates abstract directives into physically admissible region
 
 ::: {.callout-learning-objectives}
 
-- Construct an intent lease from a belief record, with a goal region, error envelope, task tolerance, and effort ceilings
+- Ground natural-language directives into metric affordance frames, motion predicates, and verified geometric goal sets
+- Emit the Intent Specification contract from parent belief records with explicit error envelopes, task tolerances, and effort ceilings
 - Derive a target-evidence horizon from task tolerance and target drift, and distinguish it from the stopping deadline
 - Decide when grounding ambiguity or a wrong-object premise requires refusal rather than admission
 - Evaluate whether a proposed goal is reachable within its remaining evidence window
@@ -55,7 +56,15 @@ Grounded intent translates abstract directives into physically admissible region
 
 When the warehouse mobile manipulator is told to "pick the red mug" from the takeaway conveyor, the directive specifies an outcome but leaves path, force, and deadline unresolved. A motor inverter accepts electrical commands, not language. Vision-Language-Action (VLA) models [@brohan2023rt1; @brohan2023rt2] can propose actions or targets, but their update cadence depends on the model and hardware and may be much slower than local control. If a target moves during inference, a stale proposal can consume clearance. The system therefore needs dated geometric evidence, bounded requests, and an independent permission path that can withdraw authority while the model is silent.
 
-To an engineer trained on digital vision-language models, the directive "pick the mug" might sound like a solved classification task: an attention map highlights the mug, and a decoder outputs an action token. In embodied physics, however, grasping a mug is not a single point; it is a set of geometric **affordances**\index{Affordances!grasp envelopes}. Grasping the fragile ceramic rim with high-payload parallel grippers crushes the cup or spills hot liquid; grasping the smooth cylindrical body risks slipping if wet; grasping the handle requires a six-degree-of-freedom (6-DoF) approach vector that aligns the gripper fingers with the ear of the mug while respecting joint reachability limits. Intent grounding bridges this chasm by translating linguistic tokens into kinematically feasible 6-DoF grasp envelopes, torque limits, and collision-free approach cones.
+To an engineer trained on digital vision-language models, the directive "pick the mug" might sound like a solved classification task: an attention map highlights the mug, and a decoder outputs an action token. In embodied physics, however, grasping a mug is not a single point; it is an action-relative relation governed by geometric **affordances**\index{Affordances!grasp envelopes} [@gibson1979ecological]. Each functional feature on an object establishes an **affordance coordinate frame** $\mathcal{F}_{\text{affordance}}$ rigidly attached to the object's body frame $\mathcal{F}_{\text{obj}}$. For the red mug, the rim affordance frame $\mathcal{F}_{\text{rim}}$ requires low gripping force to avoid crushing fragile ceramic or spilling liquid; the cylindrical body frame $\mathcal{F}_{\text{body}}$ requires wide parallel finger span and high normal force to prevent slipping; the handle affordance frame $\mathcal{F}_{\text{handle}}$ requires a six-degree-of-freedom (6-DoF) approach vector that aligns the gripper fingers with the ear of the mug while respecting joint reachability limits.
+
+Intent grounding bridges this chasm by translating high-level semantic directives into continuous **motion predicates**\index{Motion predicates!definition} evaluated over these metric coordinate frames:
+
+1. *Pre-contact approach predicate:* $P_{\text{approach}}(\mathbf{x}) \iff \|\mathbf{p}_{\text{TCP}} - \mathbf{p}_{\text{pre}}\| \le r_{\text{tol}} \land \arccos(\hat{\mathbf{z}}_{\text{TCP}} \cdot \hat{\mathbf{a}}_{\text{approach}}) \le \theta_{\text{tol}}$, requiring the end effector tool center point (TCP) frame $\mathcal{F}_{\text{TCP}}$ to align with the affordance approach axis $\hat{\mathbf{a}}_{\text{approach}}$ within spatial tolerance $r_{\text{tol}}$ and angular tolerance $\theta_{\text{tol}}$.
+2. *Guarded contact predicate:* $P_{\text{contact}}(\mathbf{w}) \iff f_{\min} \le \|\mathbf{f}_{\text{contact}}\| \le f_{\max}$, ensuring that contact forces remain sufficient for friction grip while strictly bounded below structural crush limits.
+3. *Spatial clearance predicate:* $P_{\text{clear}}(\mathbf{x}, \mathcal{M}) \iff \min_{\mathbf{o} \in \mathcal{M}} \|\mathbf{x} - \mathbf{o}\| \ge d_{\text{margin}}$, verifying collision-free swept volume against the spatial memory state $\mathcal{M}$ (@sec-memory).
+
+Before any candidate affordance is packaged into an intent proposal, the system executes **affordance validation**\index{Affordances!validation}. The intent engine evaluates whether the candidate frame $\mathcal{F}_{\text{affordance}}$ is kinematically reachable within the manipulator's workspace manifold $\mathcal{W}$, whether the gripper jaw aperture clears the object width, and whether a collision-free approach cone exists. If validation fails or candidate referents remain unresolved, the system must not execute an ungrounded guess; it triggers an explicit **intent grounding refusal**\index{Intent grounding refusal!definition} (`ERR_GROUNDING_AMBIGUITY`).
 
 ::: {.column-margin .margin-pointer}
 ↩ The belief record a lease consumes (evidence epoch, initial error, growth law) is specified in @sec-memory-spatial-state-schema.
@@ -120,7 +129,7 @@ Grounding an open-ended directive therefore ends in a dated **intent proposal**,
 
 ## What Intent Hands Over {#sec-intent-handoff}
 
-When the arm reaches for the red mug, the Brain sends neither joint trajectories nor winding voltages across the proposal boundary. It sends a request for bounded authority, and the permission path must be able to check every part of it before it grants any of it. The checks are target tolerance, evidence validity, requested effort, and a feasible fallback, and each exists because a delayed proposal can fail in a different way. @Sec-intent-lease names the record that carries the request and its belief-record lineage.
+When the arm reaches for the red mug, the Brain sends neither joint trajectories nor winding voltages across the proposal boundary. It sends a request for bounded authority, and the permission path must be able to check every part of it before it grants any of it. The checks are target tolerance, evidence validity, requested effort, and a feasible fallback, and each exists because a delayed proposal can fail in a different way. In the machine stack's contract lineage, this handoff is formalized as the **Intent Specification** (Contract 9). Emitted downstream to the trajectory planner (@sec-planning) as an admitted **Intent Lease** record, it provides certified geometric goal sets, affordance frame bindings, and verified motion predicates that constrain continuous spline generation. @Sec-intent-lease details the schema and lineage of this record.
 
 ```{python}
 #| label: calc-intent-lease-duration-collision-exposure
@@ -316,13 +325,15 @@ To systematize the wide variety of modern foundation-model-driven robotics frame
 1. **Stage 1: Multimodal Perception & Visual Feature Encoding**: High-bandwidth visual streams (RGB-D frames from static cameras or eye-in-hand sensors) are ingested alongside proprioceptive joint states. A deep vision backbone (such as a Vision Transformer, CLIP, or ResNet encoder) extracts dense spatial feature pyramids and patch embeddings that encode both geometry and visual texture.
 2. **Stage 2: 2D Semantic Referent Selection & Open-Vocabulary Prompt Grounding**: Given an unconstrained natural language prompt (e.g., "pick the red ceramic mug"), cross-attention mechanisms align linguistic tokens with visual patches. Frameworks such as Grounding DINO [@liu2023grounding], OWL-ViT, or PaliGemma predict candidate 2D bounding boxes, segmentation masks, or normalized location tokens identifying candidate physical referents in image pixel space $(u, v)$.
 3. **Stage 3: Metric 3D Lifting & Workspace Unprojection**: Using calibrated camera intrinsic parameters $\mathbf{K} \in \mathbb{R}^{3\times3}$ and synchronized optical depth values $z = d(u, v)$, the selected 2D pixel coordinates are lifted into metric camera coordinates: $\mathbf{x}_{\text{cam}} = z \mathbf{K}^{-1} [u, v, 1]^\top$. Applying the rigid extrinsic transform from the camera frame to the robot base frame, $\mathbf{T}_{\text{base} \leftarrow \text{cam}} \in \mathrm{SE}(3)$, transforms the point into base-frame workspace coordinates: $\mathbf{x}_{\text{base}} = \mathbf{T}_{\text{base} \leftarrow \text{cam}} \mathbf{x}_{\text{cam}}$. Any extrinsic calibration bias or optical depth jitter propagates directly into spatial displacement at this stage.
-4. **Stage 4: Affordance Parameterization & Candidate Goal Generation**: The lifted metric geometry is converted into actionable manipulation hypotheses. Depending on the architecture, this output may take the form of 6-DoF grasp envelopes with approach cones, continuous 3D attraction/repulsion cost fields [@huang2023voxposer], parameterized motion primitives [@liang2023code], or 256-bin action token distributions [@brohan2023rt1].
+4. **Stage 4: Affordance Parameterization & Candidate Goal Generation**: The lifted metric geometry is converted into actionable manipulation hypotheses. Depending on the architecture, this output may take the form of 6-DoF grasp envelopes with approach cones, continuous 3D attraction/repulsion cost fields [@huang2023voxposer], parameterized motion primitives [@liang2023code], or 256-bin action token distributions [@brohan2023rt1]. Crucially, Stage 4 parameterizes candidate geometric goal sets $\mathcal{G}_{\text{goal}} \subset SE(3)$ around validated affordance frames $\mathcal{F}_{\text{affordance}}$ and specifies the target motion predicates ($P_{\text{approach}}, P_{\text{contact}}, P_{\text{clear}}$) required for task completion.
 
 Across the physical silicon boundary between the non-real-time Linux Application Processor (AP) and the hard real-time Safety MCU, Stage 4 serializes these hypotheses into a fixed-size, statically verified message structure:
 
 ```c
 struct IntentProposalMsg {
     uint64_t evidence_epoch_ns;         // Monotonic capture epoch of source frame
+    uint32_t affordance_frame_id;       // Target affordance coordinate frame identifier (e.g., F_handle)
+    uint32_t predicate_mask;            // Requested motion predicates (approach, contact, clearance)
     double   target_pose_se3[7];        // [x, y, z, qx, qy, qz, qw] in robot base frame
     double   pos_error_envelope_m[3];   // Bounded spatial uncertainty semi-axes (ex, ey, ez)
     double   task_tolerance_m[3];       // Allowable goal region semi-axes (rx, ry, rz)
@@ -582,6 +593,8 @@ Every row of the table therefore requires the proposal to carry its spatial boun
 
 The intent lease takes its lineage from memory. Its parent is the belief record of @sec-memory-spatial-state-schema, named by digest, and that record's evidence epoch, converted to the MCU's clock, becomes the lease's evidence time. The lease itself carries a goal region, an error envelope and task tolerance, a requested wrench, a requested terminal mode, an evidence horizon, and an expiry. It is a lease in the sense of @sec-nervous-cadences, here on a target, and the proposal that requests it travels under the proposal header with an intent payload in place of a chunk. An admitted intent grants a target and effort ceilings, never a path.
 
+In the machine stack's 14-record contract lineage, this stage emits the **Intent Specification** (Contract 9). While the uncertified Application Processor proposes an untrusted `IntentProposalMsg` across the proposal boundary (@sec-intent-four-stage-pipeline), the Safety MCU independently evaluates and latches the admitted **Intent Specification** record (realized at runtime as the active **Intent Lease**). This cyber-physical contract binds high-level semantic intent to verified geometric goal sets, affordance frame transforms, and certified motion predicates, constraining the downstream trajectory planner (@sec-planning-behavior-seam) before any motion is admitted.
+
 An intuitive way to conceptualize an intent lease is as a temporary parking permit. When high-level autonomy requests permission to reach toward an object or traverse an aisle, that authorization cannot be an open-ended blank check. While the robot moves, physical reality changes: an obstacle shifts, a human enters the corridor, or sensor confidence degrades. The intent lease grants bounded tracking authority only for a strictly limited duration. When the timer expires, the robot cannot coast on optimistic assumptions; it must either produce a renewed lease backed by fresh physical evidence or immediately transition to a pre-validated safe stop.
 
 ::: {.column-margin .margin-pointer}
@@ -625,6 +638,32 @@ The proposal's fields support layered checks, cheapest first, and one implementa
 3. **Dynamic admission:** Use current velocity, clearance, and actuator state to reject proposals that already fail a lower bound on transit time. Require that the total sensing-to-brake-onset travel plus braking distance fit inside the current clearance before granting motion. If no feasible fallback exists from this state, refuse the proposal. Refuse also when fresh evidence shows more than one candidate in the pick window, and route the item to the coworker for a manual pick. This stage admits a target and effort ceilings, never a path; admission of the whole trajectory belongs to the planner's record (@sec-planning-behavior-seam).
 4. **Authority latch:** Store only the MCU-approved target, effort ceilings, expiry no later than the evidence deadline, and selected fallback. Arm the local timer for the admitted interval. The untrusted requested expiry and terminal mode do not control the drive directly.
 5. **Runtime check:** On each configured control tick and relevant hardware fault event, compare measured state with the admitted limits. On evidence expiry, missed renewal, or an observed violation, revoke the proposal and start the previously validated response. The ensuing braking and hold have their own measured delay and physical margin.
+
+When the Safety MCU latches an admitted proposal in Stage 4, it emits the certified contract record consumed by the trajectory planner:
+
+```c
+struct IntentSpecificationRecord {
+    uint32_t magic;                     // Magic bytes 0x494E5453 ('INTS')
+    uint32_t version;                   // Schema version
+    uint64_t evidence_epoch_ns;         // Physical evidence epoch t_0 (from parent belief record)
+    uint64_t admission_epoch_ns;        // MCU monotonic timestamp at lease admission
+    uint64_t expiration_deadline_ns;    // Hard hardware deadline t_exp = min(t0+tau_ev, tissue+tau_lease, t_stop)
+    uint32_t target_frame_id;           // Target affordance frame identifier (e.g., F_handle)
+    uint32_t base_frame_id;             // Robot base coordinate frame identifier (F_base)
+    double   target_pose_se3[7];        // Admitted nominal pose [x, y, z, qx, qy, qz, qw]
+    double   goal_region_semi_axes[3];  // Verified task tolerance semi-axes (rx, ry, rz)
+    double   angular_tolerance_rad;     // Allowable approach orientation error (theta_tol)
+    double   max_linear_vel_mps;        // Admitted TCP speed ceiling (v_max)
+    double   max_linear_accel_mps2;     // Admitted TCP acceleration ceiling (a_max)
+    double   max_wrench[6];             // [Fx, Fy, Fz, Tx, Ty, Tz] admitted force/torque limits
+    uint32_t validated_predicates;      // Bitmask of certified motion predicates (reach, align, clearance)
+    uint32_t fallback_policy_id;        // Deterministic terminal fallback mode (HOLD, STOP, TORQUE_OFF)
+    uint8_t  parent_belief_digest[32];  // SHA-256 digest of input SpatialBeliefRecord (Contract 8)
+    uint8_t  intent_digest[32];         // SHA-256 self-digest passed to Trajectory Record (Contract 10)
+};
+```
+
+The `IntentSpecificationRecord` acts as the formal contract boundary between spatial memory and trajectory planning. By anchoring `parent_belief_digest` to the upstream `SpatialBeliefRecord` (Contract 8, @sec-memory-spatial-state-schema) and emitting its own `intent_digest` to the downstream `TrajectoryRecord` (Contract 10, @sec-planning-behavior-seam), it creates an unbroken, auditable custody chain from raw camera photons to motor currents. Trajectory planners cannot alter the admitted geometric goal set $\mathcal{G}_{\text{goal}} = \{\mathbf{T} \in SE(3) \mid \|\mathbf{p} - \mathbf{p}_{\text{target}}\| \le r_{\text{tol}}, \angle(\mathbf{R}, \mathbf{R}_{\text{target}}) \le \theta_{\text{tol}}\}$, nor can they extend tracking beyond `expiration_deadline_ns`.
 
 Filled in for the red mug, the lease admitted for the pick carries six entries. Its parent is the mug-handle belief record of @sec-memory-spatial-state-schema, matched by digest and evidence epoch. Its goal is the handle pose, and its error envelope is that record's `{python} IntentLeaseArchetypes.e0_str` initial error, inside a `{python} IntentLeaseArchetypes.r_tol_str` task tolerance. Its evidence horizon is the age at which the governing growth law reaches that tolerance, `{python} IntentLeaseArchetypes.tau_untracked_str` under the record's belt-drift law and `{python} IntentLeaseArchetypes.tau_tracked_str` under the residual-slip law of the qualified tracker's renewed record. Its speed ceiling is the arm's `{python} IntentLeaseArchetypes.v_tcp_str` tool-center-point speed limit, and it requests no item-specific wrench ceiling, because none is registered for the mug. The configured task and actuator ceilings still bound the wrench, and fragility is handled by the site's control of which items reach the conveyor, not by the controller. Its requested terminal mode is grasp, then hold for the handover, although the MCU still selects the fallback from its approved responses. Its expiry is the earliest of that evidence horizon, the configured lease ceiling, and the stop deadline.
 
@@ -698,6 +737,7 @@ What grounded intent adds to the law is evidence age on a moving target, and ref
 
 ::: {.callout-takeaways title="Grounded intent at the proposal boundary"}
 * **A lease grants a target, never a path:** The Brain supplies a target, evidence epoch, error envelope, task tolerances, and requested expiry, and it writes no actuator setpoints. The permission path admits a target and effort ceilings that expire at the earliest of the evidence horizon, the lease ceiling, and the stop deadline.
+* **The Intent Specification emits verified goal sets:** The 9th contract in the contract lineage binds admitted affordance frames, validated motion predicates, and geometric goal regions into an immutable record consumed by trajectory planners.
 * **Evidence expires with drift:** Target drift and task tolerance set a finite validity horizon under a declared validity region. A fresh timestamp does not make a target correct, and only fresh evidence, never a faster model, renews it.
 * **The evidence deadline is not the motion deadline:** The permission path separately budgets sensing, communication, enforcement, actuator delay, and braking distance for the current state and clearance.
 * **Geometry cannot verify meaning:** A confident grounding to the wrong object can pass every coordinate, reachability, and force check. That premise needs its own task evidence, because the permission path cannot settle it.
@@ -705,5 +745,5 @@ What grounded intent adds to the law is evidence age on a moving target, and ref
 :::
 
 ::: {.callout-chapter-connection title="From intent leases to trajectory planning"}
-The intent lease provides the formal spatial and temporal boundary conditions: the terminal $SE(3)$ goal region, task tolerances, maximum wrench ceilings, and hard expiration deadline. @Sec-planning takes these certified constraints as input to synthesize the continuous, jerk-limited polynomial splines that execute within the admitted space-time tube. When an upcoming trajectory chunk is delayed in flight, the planner relies on the lease's pre-validated terminal state to guarantee a feasible stopping trajectory from every reachable state.
+The Intent Specification (emitted at runtime as the admitted intent lease record) provides the formal spatial and temporal boundary conditions: the terminal $SE(3)$ goal set $\mathcal{G}_{\text{goal}}$, verified affordance frames, task tolerances, maximum wrench ceilings, and hard expiration deadline. @Sec-planning takes these certified constraints as input to synthesize the continuous, jerk-limited polynomial splines that execute within the admitted space-time tube. When an upcoming trajectory chunk is delayed in flight, the planner relies on the lease's pre-validated terminal state to guarantee a feasible stopping trajectory from every reachable state.
 :::
