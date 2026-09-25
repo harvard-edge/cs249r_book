@@ -102,7 +102,7 @@ An advisory model that only displays a recommendation has no direct path to a mo
 
 [^fn-math-idempotency-physical]: **Idempotency**\index{Idempotency}: Repeating an idempotent operation has the same specified result as executing it once. A motor setpoint command can have idempotent command semantics, but repeated execution may still dissipate energy. Idempotency does not imply reversibility or harmlessness.
 
-### Tensors to silicon: The electromechanical boundary {#sec-boundary-tensors-to-silicon}
+### Tensors to silicon and electromechanical transduction {#sec-boundary-tensors-to-silicon}
 
 Physical AI removes the gap between a model's output and an actuator. In a physical machine, the final instruction of a control loop does not write to a screen or populate a web response. For a machine learning systems engineer accustomed to writing `action = policy(observation)` in PyTorch, the causal boundary is where floating-point tensors meet physical silicon. The policy's output tensor, typically an action chunk predicting a sequence of upcoming waypoints (joint positions, velocities, or 6-DOF Cartesian poses),[^fn-action-chunk-repr] cannot execute directly on physical motors.
 
@@ -136,7 +136,7 @@ Because physical mass possesses inertia and computation takes finite time, laten
 ![](images/jpg/fig01_real_lidar_sensor_rack.jpg){width="85%"}
 :::
 
-### The kinematic roofline: Latency as physical clearance {#sec-boundary-kinematic-roofline}
+### Kinematic rooflines and latency-to-clearance translation {#sec-boundary-kinematic-roofline}
 
 ```{python}
 #| label: boundary-blind-travel
@@ -658,7 +658,7 @@ The key is to look past cosmetic form factors to the underlying physical conserv
 
 This book follows one machine from its first chapter to its last. The warehouse mobile manipulator is a wheeled base that carries a seven-joint arm, a navigation camera and lidar, a wrist camera, and two computers. An application processor runs its learned models, and a separate safety microcontroller decides, on a fixed short period, whether a proposed motion may reach the motors. Its chunk policy is a whole-body action-chunking model that proposes base velocity and arm joint targets together, as mobile manipulation systems of this class do [@fu2024mobile]. The base is a mass-dominated Class 1 machine that must stop before it reaches a person who steps out from the end of a rack. The arm is a contact-dominated Class 2 machine that must open a spring-latched cage door, lift an unfamiliar mug from a moving conveyor, and hand the mug to a coworker at the packing station, each without exceeding a contact force. The chapters that own a term of the machine's stopping budget add that term in turn, so the value one chapter computes is the value the next one uses. The remaining chapters treat the proposer that spends that budget and the evidence that decides how much of it the proposer may spend. Actuator thermal and electrical power delivery limits (Class 3) recur across the volume as constraints that bound sustained exertion and compute power integrity.
 
-### Class 1: Mobility systems
+### Class 1 mobility systems
 
 Class 1 machines move mass across space, bound by momentum conservation and kinetic energy dissipation (@fig-01-three-archetypes a, @fig-01-real-three-archetypes a). In autonomous transport platforms, quadruped robots navigating rugged terrain (such as Boston Dynamics' Spot), mobile manipulators, and aerial drones, the actuator bridge applies force to translate or rotate a body with mass $m$ at velocity $v$. Because kinetic energy $E_k = \frac{1}{2}m v^2$ cannot be instantaneously erased once delivered to the chassis (it must be scrubbed off through friction, aerodynamic drag, or regenerative braking), safety is primarily measured as remaining spatial clearance. The stopping distance of @tbl-01-kinematic-roofline is this class's budget, and the first boundary breached during a software stall or model misclassification is the physical distance to an external obstacle.
 
@@ -717,7 +717,7 @@ class MachineMomentum:
 
 To see how the two terms of that budget scale, return to the warehouse base cruising at its `{python} MachineMomentum.v_str` drive limit toward a rack end where a person has stepped out. Loaded with its tote rack, its mass is at most `{python} MachineMomentum.m_loaded_str`, and it carries `{python} MachineMomentum.e_kinetic_str` of kinetic energy, which braking must shed through the grip of its wheels on the floor. At a credible deceleration of `{python} MachineMomentum.a_brake_str`, braking alone takes `{python} MachineMomentum.d_brake_str` of floor. The `{python} MachineMomentum.blind_str` of blind travel over the `{python} BlindTravel.tau_delay_str` pre-brake delay comes before any of that braking and adds `{python} MachineMomentum.blind_share_str` to the braking distance. This pre-brake delay of `{python} BlindTravel.tau_delay_str` is not model forward-pass execution time alone; as @sec-perception derives term by term, it spans sensor photon integration, rolling shutter readout, SerDes serialization, PCIe/direct memory access (DMA) driver copies, neural inference, fieldbus dispatch, and the physical pressure rise time of the mechanical brakes. @Tbl-01-kinematic-roofline reaches a similar figure for the same base, `{python} KinematicRoofline.rm_share_str`, by a different measure, the travel over its `{python} KinematicRoofline.tau_vla_str` long delay class as a share of the whole stop. The two terms answer to different design choices. A larger model that lengthens the delay lengthens the blind travel in proportion, whereas doubling the cruising speed would quadruple both the energy and the braking distance.
 
-### Class 2: Manipulation systems
+### Class 2 manipulation systems
 
 Class 2 machines apply mechanical force through contact, limited by actuator torque saturation, environmental stiffness, and current loop bandwidth, meaning how quickly the motor controller senses and regulates current to control torque (@fig-01-three-archetypes b, @fig-01-real-three-archetypes b). In articulated manipulators, precision assembly fixtures, and robot learning workcells executing contact-rich insertion and grasping, the end-effector interacts directly with a rigid or compliant workpiece. Unlike a mobile platform, an arm in contact with a surface cannot resolve unexpected displacement by rolling forward. When an actuator commands position into a rigid boundary, physical displacement is blocked, and the interaction acts like a compressed spring governed by mechanical impedance. By Hooke's law, the contact force generated by a spatial penetration error $\Delta x$ against an environment of stiffness $k$ is $F = k \Delta x$.[^fn-math-contact-lcp]
 
@@ -778,7 +778,7 @@ class LatchContact:
 
 Contact stiffness can make a held motion command expensive before the high-level planner returns. Consider the arm of the same warehouse mobile manipulator driving its gripper toward the strike plate of the cage door at `{python} LatchContact.v_str`, and suppose its low-level controller keeps executing that command while the high-level process stalls for `{python} LatchContact.t_stall_str`. The plate acts as a spring of stiffness `{python} LatchContact.k_str`, the latch tolerates at most `{python} LatchContact.f_limit_str` of contact force, and the arm is assumed to have enough torque to keep moving through contact. The plate then deflects by $\Delta x = v \cdot \Delta t =$ `{python} LatchContact.dx_str`, and the spring model gives $F = k \cdot \Delta x =$ `{python} LatchContact.force_str`, `{python} LatchContact.force_ratio_str` times the limit. Motor saturation, compliance elsewhere, or a controller that stops on stale commands would change that result. The critical time before breaching the force limit is just $t_{\text{crit}} = \frac{F_{\text{limit}}}{k \cdot v} = \frac{100\,\text{N}}{400{,}000\,\text{N/m} \cdot 0.1\,\text{m/s}} = 2.5\,\text{ms}$. Against a plate this stiff, a 20 Hz (50 ms) VLA policy forward pass is twenty times too slow to prevent structural yield; only an independent 1 kHz current or impedance loop in the Nervous System can arrest torque in time, and @sec-training derives that budget for this plate.
 
-### Class 3: Thermal and energy systems
+### Class 3 thermal and energy systems
 
 ```{python}
 #| label: boundary-class3-budgets
@@ -1005,7 +1005,7 @@ The physical constraints governing these five levels explain why modern physical
 ↪ The Brain's committed trajectory is built in @sec-planning-continuous-trajectories.
 :::
 
-## When the Boundary Fails {#sec-boundary-when-fails}
+## Boundary Violation Modes and Dynamic Instability {#sec-boundary-when-fails}
 
 A physical crash can involve both an inaccurate prediction and a failure to respond when available evidence already warrants intervention. The forensic record of the 2018 Tempe autonomous vehicle collision shows how object tracking, braking policy, operator reliance, and lost redundancy interacted.
 
