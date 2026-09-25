@@ -81,7 +81,7 @@ Each of the four levers acts on one of the three quantities, and that is the who
 ### When speedups multiply, and when they do not
 
 ::: {.column-margin}
-![](assets/images/diagrams/20_capstone-margin-pareto.svg){width="100%"}
+![](assets/images/diagrams/20_capstone-margin-pareto.svg){width="100%" fig-alt="Scatter plot showing optimization Pareto frontier balancing throughput against perplexity across baseline, distilled, INT8, and fused-cached variants."}
 *Optimization Pareto frontier: balancing speedup, compression ratio, and accuracy retention.*
 :::
 
@@ -233,6 +233,12 @@ The cache branch removes a factor of $n$ from projection arithmetic and a factor
 
 ### The levers and the waterfall
 
+::: {.column-margin}
+![](assets/images/diagrams/20_capstone-margin-bottleneck.svg){width="100%" fig-alt="Stacked horizontal bar chart showing decode step time breakdown across launch overhead, memory bandwidth, and compute throughput as optimizations are applied."}
+
+*Decode Bottleneck Migration: In an unfused baseline, kernel launch overhead accounts for over 98 percent of step time. Reducing memory traffic via INT8 buys virtually nothing until kernel fusion eliminates 81 percent of dispatches.*
+:::
+
 The waterfall places solo and sequential comparisons beside each other. A solo ratio isolates a transformation against the original baseline. A marginal ratio compares with the immediately preceding configuration. Keeping both columns prevents a change in the denominator from being mistaken for a change in the transformation.
 
 Here is the version that survives. Each lever is a one-line edit to the configuration, so a stack is just the levers applied in sequence to one `Config`. INT8 sets `bytes_per_weight` to 1, which divides the weight part of $Q$ by four and leaves $F$ alone. SVD sets `mlp_rank` to $D/4$, replacing the MLP's $8D^2$ weights with $2.5D^2$. Its matrix arithmetic falls with that count, while the extra factor outputs and products add activation traffic and dispatch. Fusion flips the operation count from the left column of @tbl-capstone-op-count to the right. The KV cache flips the branch in `step_ms`. `waterfall` then prints all three views at once, each lever alone, the product of the solo numbers, and the cumulative total as the levers stack in a stated order, so that the product and the stack disagree on the same page.
@@ -344,6 +350,12 @@ Running `waterfall(Config(), Machine(), 128)` produces @tbl-capstone-waterfall. 
 Most of the initial estimate is the assumed dispatch term. Reducing weight bytes alone barely changes it.[^fn-dispatch-bottleneck-waterfall] Fusion lowers that term, which makes the remaining row-dependent work more consequential. Caching then removes repeated projections and reduces the linear activation traffic to one row, while adding context-dependent reads of stored keys and values.
 
 [^fn-dispatch-bottleneck-waterfall]: **Bottleneck migration in optimization stacks**: When an initial baseline is severely dispatch-bound ($n_{\text{ops}} \cdot c \gg \text{compute, memory}$), reducing memory traffic via INT8 quantization yields an apparent $1.00\times$ speedup. It is only after kernel fusion eliminates over 80% of dispatch overhead that memory bus bandwidth becomes the primary constraint, allowing INT8 and KV caching to unlock their full theoretical throughput gains.
+
+::: {.column-margin}
+![](assets/images/diagrams/20_capstone-margin-order.svg){width="100%" fig-alt="Diagram contrasting naive solo speedup product with forward and reverse sequential stacking orders, highlighting the 0.87x SVD dispatch penalty during single-token decode."}
+
+*Stacking Order and Dispatch Penalty: Multiplying solo speedups predicts 4.00x, while sequential stacking reaches 4.89x. In reverse order, SVD factorizing causes an active 0.87x slowdown because splitting matrices doubles launch dispatches on single tokens.*
+:::
 
 The order exposes a vital systems cost that a static parameter count would miss. Reversing `LEVERS` yields marginal factors of 1.10x for caching, 4.93x for fusion, 0.87x for factorization, and 1.03x for INT8, arriving at the identical final 30.63 milliseconds. Why does low-rank SVD factorization become an active slowdown (0.87x) at that stage? Because factorizing a weight matrix $\mathbf{W} \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$ into rank-$r$ factors $\mathbf{A} \mathbf{B}$ splits one single matrix multiplication ($\mathbf{x}\mathbf{W}$) into two sequential matrix multiplications ($(\mathbf{x}\mathbf{A})\mathbf{B}$). In autoregressive token generation where the input is a single token ($B=1, S=1$), the arithmetic work per layer is tiny. Doubling the number of operations doubles kernel dispatch overhead and allocates an intermediate rank-$r$ activation buffer in DRAM. When dispatch latency outweighs arithmetic time, replacing one larger matrix multiplication with two smaller ones degrades wall-clock latency despite reducing total theoretical FLOPs. Because the configuration edits commute, the final configuration and total agree in both orders, as summarized in the Napkin Math scorecard below. A real pair of transformations may change one another's weights or supported execution path, so this equality is a property of the model, not a general guarantee.
 
