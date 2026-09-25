@@ -83,12 +83,6 @@ Unmasked self-attention preserves the rows rather than summing them away, but wi
 *Continuous sequence representation tensors $(B, S, D)$ feed scaled dot-product attention.*
 :::
 
-
-::: {.column-margin}
-![](assets/images/diagrams/11_embeddings-margin-scatter.svg){width="100%" fig-alt="Scatter-add diagram illustrating how output gradients for repeated token IDs at positions 0 and 2 accumulate atomically into row 42."}
-*Scatter-add backward routing for repeated token IDs.*
-:::
-
 ### A table, not a multiply
 
 Take a three-row table `W = [[1, 2], [3, 4], [5, 6]]`. Token 2 selects `[5, 6]`; the sequence `[2, 0, 2]` selects `[[5, 6], [1, 2], [5, 6]]`. A one-hot row `[0, 0, 1]` multiplied by `W` produces the same `[5, 6]`, because it discards the first two rows and keeps the third. Repeating a token repeats its current vector; the lookup does not change the table.
@@ -100,6 +94,11 @@ $$\mathbf{x}_i = \mathbf{e}_i W = W[i, :]$$
 Every term in the sum is zero except the one where the $1$ sits, so the product *is* row $i$. Nobody needs to build the one-hot vector or run the multiply. An `Embedding` layer stores $W$ and, given an ID, copies row $i$ out of it. The gather itself performs no arithmetic on the row values; it moves $D$ floats from one place to another. An indexed read of this kind, which pulls selected rows out of a larger array, is called a **gather**.
 
 The rows are ordinary parameters. They start random, and gradient descent moves them. Because the forward pass only touched the rows that were looked up, only those rows receive a gradient. If a batch contains only three occurrences of token 42, row 42 receives the sum of three gradients, one from each place it was used; the other $V - 1$ rows receive zero. With other tokens present, their rows receive their own contributions. The backward pass is the mirror of the gather, a **scatter-add**: take each output gradient and add it into the row it came from.
+
+::: {.column-margin}
+![](assets/images/diagrams/11_embeddings-margin-scatter.svg){width="100%" fig-alt="Scatter-add diagram illustrating how output gradients for repeated token IDs at positions 0 and 2 accumulate atomically into row 42."}
+*Scatter-add backward routing for repeated token IDs.*
+:::
 
 Nothing in the table says that `"dog"` and `"cat"` should be near each other. That closeness emerges from training, because the loss pushes tokens that appear in similar contexts toward rows that produce similar predictions. The table only makes closeness *possible*, by giving the model $D$ continuous numbers per token instead of one categorical label.
 
