@@ -49,6 +49,10 @@ Write a three-layer network with nothing but tensors. You allocate `W1`, `b1`, `
 
 First, the numbers. The weights need starting values, and the obvious choice is standard normal noise, `randn`. The loop in @lst-layers-variance-run uses a hidden width of 1024 to make the change in activation spread visible as depth grows.
 
+::: {.callout-tip title="Pause & Predict: Unscaled Variance Across Depth"}
+Before running the code below, consider a 15-layer network where each layer has width $D = 1024$, weights are drawn from $\mathcal{N}(0, 1)$, and inputs have unit variance. What happens to the activation variance? Will it grow linearly, stay bounded, or explode?
+:::
+
 ::: {#lst-layers-variance-run lst-pos="H" lst-cap="**Unscaled initialization**: A ReLU stack exposes growth in pre-activation variance."}
 ```python
 import numpy as np
@@ -107,23 +111,27 @@ For a general width, take one output $y = \sum_{j=1}^{D_{\text{in}}} x_j w_j$, w
 
 $$\text{Var}(y) = D_{\text{in}} \cdot \text{Var}(x) \cdot \text{Var}(w).$$
 
-[^fn-fan-in-layer-width]: **Fan-in**: the number of inputs feeding one output of a layer, which for `Linear(in_features, out_features)` is `in_features`; **fan-out** is the number of outputs each input feeds. A 1024-wide layer sums 1024 products per output, and that count, not the weight values, is what decides how much the signal grows.
+This exact variance scaling principle reappears in @sec-attention when computing scaled dot-product attention: the inner product between query and key vectors of dimension $d_k$ sums $d_k$ independent products, scaling variance by $d_k$. Dividing the dot product by $\sqrt{d_k}$ scales its standard deviation back to 1.0, preventing softmax from saturating into one-hot distributions.
+
+[^fn-fan-in-layer-width]: **Fan-in** is the number of inputs feeding one output unit (`in_features` in `Linear`). **Fan-out** is the number of outputs each input feeds. Summing over fan-in inputs scales forward signal variance by $D_{\text{in}}$.
 
 With $\text{Var}(w) = 1$ and $D_{\text{in}} = 1024$, the first linear operation multiplies the input variance by 1024. For a symmetric input distribution, ReLU halves the second moment, $\mathbb{E}[x^2]$ (the average squared value), rather than exactly halving the variance: its output no longer has mean zero. With independent zero-mean weights in the next layer, that second moment determines the next pre-activation variance. This gives the approximate factor of 512 seen in the loop.
 
-To hold the variance steady, set $D_{\text{in}} \cdot \text{Var}(w) = 1$, or $\text{Var}(w) = 1 / D_{\text{in}}$. This is LeCun's rule and it is what the TinyTorch course module uses. Kaiming initialization accounts for the ReLU halving by doubling the weight variance:
+To hold the variance steady, set $D_{\text{in}} \cdot \text{Var}(w) = 1$, or $\text{Var}(w) = 1 / D_{\text{in}}$. This is LeCun's rule and it is what the TinyTorch course module uses. Kaiming initialization accounts for the ReLU halving by doubling the weight variance:[^fn-kaiming-relu-proof]
 
 $$\text{Var}(w) = \frac{2}{D_{\text{in}}}, \qquad \sigma_w = \sqrt{\frac{2}{D_{\text{in}}}}.$$
 
+[^fn-kaiming-relu-proof]: For a zero-mean symmetric input $z$, $\text{ReLU}(z) = \max(0, z)$ zeroes out the negative half-space, halving the expected second moment: $\mathbb{E}[(\text{ReLU}(z))^2] = \frac{1}{2}\mathbb{E}[z^2]$. To preserve variance through the subsequent matrix multiplication, the weight variance must double from $1/D_{\text{in}}$ to $2/D_{\text{in}}$ (He et al., 2015).
+
 Here we call the multiplier on weight *variance* the **gain**, matching the first exercise; a gain on standard deviation would be its square root. The appropriate multiplier depends on the activation and its input distribution. Gain 1 preserves the linear case and is the module's default, rather than a universal prescription for tanh. Xavier Glorot's earlier rule, $\text{Var}(w) = 2 / (D_{\text{in}} + D_{\text{out}})$, splits the difference between keeping the forward signal steady (which wants $1/D_{\text{in}}$) and keeping the backward gradient steady (which wants $1/D_{\text{out}}$; @sec-autograd will introduce that backward computation).
+
+Why does backward propagation through a layer demand $1/D_{\text{out}}$? In the forward pass, each output feature sums over $D_{\text{in}}$ incoming terms ($y_i = \sum_{j=1}^{D_{\text{in}}} x_j W_{ji}$). In the reverse direction, backward signal flow transposes the weight matrix ($W^T$), so each input coordinate accumulates incoming signals across all $D_{\text{out}}$ downstream outputs ($s_j = \sum_{i=1}^{D_{\text{out}}} s_i W_{ji}$). Reverse flow treats the layer's fan-out as its effective fan-in. When $D_{\text{in}} \neq D_{\text{out}}$, no single fixed variance can hold both forward and reverse signals constant simultaneously, which is why Glorot proposed the harmonic mean. Any of these rules can be realized with a normal distribution of the right standard deviation or a uniform one on $[-a, a]$, whose variance is $a^2/3$. For a fixed ratio of input to output width, each rule in @tbl-init-schemes reduces the standard deviation as the inverse square root of width. The activation determines the appropriate constant.
 
 ::: {.column-margin}
 ![](assets/images/diagrams/03_layers-margin-fanin-fanout.svg){width="100%" fig-alt="Diagram contrasting forward fan-in scaling (1/Din) with backward gradient fan-out scaling (1/Dout) and Xavier's harmonic mean compromise."}
 
 *Xavier Glorot's harmonic mean balances forward signal preservation with backward gradient stability across dimension changes.*
 :::
-
-Why does backward propagation through a layer demand $1/D_{\text{out}}$? In the forward pass, each output feature sums over $D_{\text{in}}$ incoming terms ($y_i = \sum_{j=1}^{D_{\text{in}}} x_j W_{ji}$). In the reverse direction, backward signal flow transposes the weight matrix ($W^T$), so each input coordinate accumulates incoming signals across all $D_{\text{out}}$ downstream outputs ($s_j = \sum_{i=1}^{D_{\text{out}}} s_i W_{ji}$). Reverse flow treats the layer's fan-out as its effective fan-in. When $D_{\text{in}} \neq D_{\text{out}}$, no single fixed variance can hold both forward and reverse signals constant simultaneously, which is why Glorot proposed the harmonic mean. Any of these rules can be realized with a normal distribution of the right standard deviation or a uniform one on $[-a, a]$, whose variance is $a^2/3$. For a fixed ratio of input to output width, each rule in @tbl-init-schemes reduces the standard deviation as the inverse square root of width. The activation determines the appropriate constant.
 
 | Scheme | Meant for | Weight variance | Uniform bound $a$ |
 | :--- | :--- | :---: | :---: |
@@ -148,9 +156,15 @@ Rerunning the loop from The Problem with the weights scaled three ways gives @tb
 
 ### Dropout, and why a layer needs a mode
 
+::: {.column-margin}
+![](assets/images/diagrams/03_layers-margin-dropout.svg){width="100%" fig-alt="Inverted dropout mechanism contrasting training phase Bernoulli mask and scaling with evaluation phase zero-overhead identity."}
+
+*Inverted Dropout: Training scales active activations by $1/(1-p)$ so that evaluation executes as a zero-overhead identity pass.*
+:::
+
 For an activation of value 3 and dropout probability $p=0.5$, half of the random outcomes discard the value and half retain it. Returning either 0 or 3 would average to 1.5. Returning either 0 or 6 instead averages to 3, matching the value passed through at evaluation. That correction is the arithmetic behind dropout, a training technique intended to reduce overfitting.[^fn-overfitting-dropout-motive] Each activation is independently dropped, so later computations cannot always rely on the same inputs being present.
 
-[^fn-overfitting-dropout-motive]: **Overfitting**: fitting training examples, including their noise, so closely that performance on new examples suffers. Dropout perturbs the activations during training; it can reduce reliance on particular combinations of features, but does not guarantee that a model will generalize.
+[^fn-overfitting-dropout-motive]: **Overfitting** occurs when a model memorizes training noise at the expense of generalization. Dropout injects stochastic perturbations to prevent co-adaptation of features.
 
 The correction can be placed on either side of training. One convention leaves surviving values unchanged during training and scales them down at evaluation. **Inverted dropout**, which TinyTorch implements, instead divides surviving training activations by the probability of keeping them, $1-p$. Evaluation can then return the original input without performing any scaling or array passes:
 
@@ -158,19 +172,15 @@ $$y_{\text{train}} = \frac{x \cdot m}{1 - p}, \quad m \in \{0, 1\} \text{ with }
 
 For $0 \leq p < 1$, the expected value of $m$ is $1 - p$, so the expected value of $y_{\text{train}}$ is exactly $x$. Training sees a noisy version of what eval sees, with the same average, and the eval path becomes an exact zero-overhead identity. The price is that `Dropout` must know which of the two it is doing, and that is the `training` argument it is called with.
 
-::: {.column-margin}
-![](assets/images/diagrams/03_layers-margin-dropout.svg){width="100%" fig-alt="Inverted dropout mechanism contrasting training phase Bernoulli mask and scaling with evaluation phase zero-overhead identity."}
-
-*Inverted Dropout: Training scales active activations by $1/(1-p)$ so that evaluation executes as a zero-overhead identity pass.*
-:::
-
 ::: {#chk-dropout-inference-mode .callout-checkpoint title="Checkpoint: The dropout evaluation trap"}
 
-**Mechanism**: Inverted dropout scales activations by $\frac{1}{1-p}$ during training. At test time, dropout must be turned off ($y_{\text{eval}} = x$) so predictions remain deterministic.
+**Mechanism**: Inverted dropout scales activations by $\frac{1}{1-p}$ during training.[^fn-dropout-inverted-origin] At test time, dropout must be turned off ($y_{\text{eval}} = x$) so predictions remain deterministic.
 
 **Failure mode**: If evaluation runs with `training=True`, inferences become stochastic and activations are scaled up by $\frac{1}{1-p}$ (e.g., $2\times$ when $p=0.5$). Conversely, if training runs with `training=False`, the regularization effect vanishes and downstream weights overfit without gradient noise.
 
 :::
+
+[^fn-dropout-inverted-origin]: In standard dropout (Srivastava et al., 2014), activations are kept unscaled during training and multiplied by $1-p$ during inference. Inverted dropout divides by $1-p$ during training instead, keeping the test-time forward pass an exact zero-overhead identity read without modifying tensor values.
 
 ---
 
@@ -352,7 +362,7 @@ PyTorch moves parameter bookkeeping into its base class. Assigning an `nn.Parame
 
 The shared interface does not imply identical weight layout or initialization. PyTorch's [Linear documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Linear.html) specifies a weight of shape `(out_features, in_features)` and the calculation $xW^T+b$.[^fn-pytorch-weight-layout] Its default uniform bound is $1/\sqrt{D_{\text{in}}}$, giving variance $1/(3D_{\text{in}})$. TinyTorch stores `(in_features, out_features)` and uses a normal draw with variance $1/D_{\text{in}}$. Transferring weights between those conventions requires a transpose, and matching dimensions alone does not establish matching initial values.
 
-[^fn-pytorch-weight-layout]: PyTorch's `nn.Linear` stores weights as `(out_features, in_features)` so that low-level BLAS and cuBLAS routines (`sgemm`) can compute matrix products directly over row-major memory buffers without requiring explicit transposition of weight matrices in GPU SRAM.
+[^fn-pytorch-weight-layout]: PyTorch's `nn.Linear` stores weights as `(out_features, in_features)` so that low-level BLAS and cuBLAS routines (such as `cublasSgemm`) can stream output rows as contiguous blocks in row-major memory buffers without requiring explicit transposition of weight matrices in GPU SRAM.
 
 PyTorch's [Dropout documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Dropout.html) specifies the same inverted scaling and evaluation identity. That mathematical contract does not depend on how a backend schedules the work. TinyTorch exposes separate NumPy steps for the random draw, comparison, scaling, and multiplication, plus Tensor allocations, materializing a full 32-bit float mask in DRAM. In contrast, production GPU runtimes like cuDNN and Triton use counter-based pseudo-random number generators (such as Philox) to generate random bits on-the-fly in processor registers. Rather than storing a 32-bit float or 8-bit boolean per activation, production backends pack dropout decisions into 1-bit boolean masks (packing 32 elements per 32-bit word) or simply recompute the mask during backward passes from the original Philox seed and offset, reducing memory bus traffic by a factor of 32. The local contract remains the one we traced: preserve the input's expected value during training and pass it through at evaluation.
 
@@ -360,6 +370,8 @@ PyTorch's [Dropout documentation](https://docs.pytorch.org/docs/stable/generated
 This is a storage and operation count, not a timing measurement. `Linear(4096, 4096)` stores $4096 \times 4096 \times 4 = 67{,}108{,}864$ bytes of float32 weights and $4096 \times 4 = 16{,}384$ bytes of bias. The parameter payload is about $67.1$ MB. A batch of 16 produces $16 \times 4096$ output values, or $262{,}144$ bytes. These counts exclude temporary arrays and Python objects.
 
 The matrix product contains $16 \times 4096 \times 4096 = 268{,}435{,}456$ multiply-accumulate terms. Counting one multiply and one add per term gives approximately $537$ million floating-point operations; adding the bias requires another $65{,}536$ additions. Increasing batch size increases arithmetic and output storage while leaving parameter storage unchanged. Whether the measured call is limited by computation or memory movement depends on the backend and its reuse of those weights; the storage count alone cannot decide that. @sec-profiling formalizes this trade-off using the Roofline model to compute operational intensity (FLOPs per byte transferred), while @sec-acceleration demonstrates how cache loop tiling transforms memory-bandwidth-bound matrix products into compute-saturating matrix engines.
+
+In @sec-compression and @sec-extensions, we address the massive memory footprint of these large linear layers. Instead of fine-tuning the full 67 MB weight matrix, Low-Rank Adaptation (LoRA) decomposes the weight update $\Delta W$ into two low-rank matrices $B \times A$ of rank $r \ll D_{\text{in}}$ (for instance, $r=8$). Initializing $A$ with variance scaled by $1/r$ and $B$ to zero guarantees that $\Delta W = 0$ at the start of training while slashing trainable parameter memory by over 99%.
 :::
 
 ::: {#psp-kaiming-fp16-underflow .callout-perspective title="Systems Perspective: Initialization in mixed-precision FP16/BF16"}
