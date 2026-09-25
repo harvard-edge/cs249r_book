@@ -109,7 +109,7 @@ The seeded experiment ends with an RMS of 83.96 for `plain`, about 76 times its 
 
 
 ::: {.column-margin}
-![](assets/images/diagrams/13_transformers-margin-pre-ln.svg){width="100%"}
+![](assets/images/diagrams/13_transformers-margin-pre-ln.svg){width="100%" fig-alt="Pre-LN block diagram showing the clean identity skip connection alongside the LayerNorm and sub-layer computation path."}
 *Pre-LN residual gradient highway ($I + J_l$).*
 :::
 
@@ -158,6 +158,12 @@ Why did the deep learning community migrate universally from original Post-LN tr
 :::
 
 ### The MLP
+
+::: {.column-margin}
+![](assets/images/diagrams/13_transformers-margin-mlp-expansion.svg){width="100%" fig-alt="Architecture card showing MLP 4x channel expansion from D to 4D with GELU activation and contraction back to D, allocating 8D squared weights."}
+
+*MLP Channel Expansion: Position-wise feedforward network widens features from D to 4D for non-linear separation before returning to stream dimension D.*
+:::
 
 The second sub-layer supplies the per-token feature transformation missing from attention alone. The **MLP** (multi-layer perceptron, the transformer literature's name for a two-layer feed-forward network) widens each token's vector from $D$ to $4D$, applies GELU from @sec-activations, and projects back to $D$:[^fn-mlp-4d-expansion]
 
@@ -361,6 +367,12 @@ Of the 2,080 parameters, 1,744 sit in the two blocks (872 each, of which 552 are
 The [released GPT-2 implementation](https://github.com/openai/gpt-2/blob/master/src/model.py) uses the same Pre-LN attention/addition and MLP/addition sequence, learned positions, and a final normalization. Its MLP uses a different GELU approximation, based on a hyperbolic tangent. More consequently, the final projection multiplies the final hidden states by the transpose of the token embedding table (defined in @sec-embeddings) instead of owning another matrix. This is **weight tying**. Input lookup and output scoring then train one shared table through two paths, so the optimizer must receive that Tensor only once.
 
 The memory consequence follows directly from the shapes. Untied, the token table and head each own $VD$ weights. Tying removes one $VD$ allocation but constrains both uses to share their learned values. For the trace model, it removes 128 parameters and changes the total from 2,080 to 1,952. At $V=50{,}257$ and $D=768$, the same change saves $38{,}597{,}376$ parameters. These are parameter counts, not measured speedups; output scoring still multiplies every final hidden row by a vocabulary-sized matrix.
+
+::: {.column-margin}
+![](assets/images/diagrams/13_transformers-margin-block-budget.svg){width="100%" fig-alt="Budget breakdown card illustrating the 12D squared parameter allocation per transformer block, with one-third allocated to multi-head attention and two-thirds allocated to the feedforward MLP."}
+
+*Block Parameter Budget: Matrix weights split 1:2 between multi-head attention (4D squared) and feedforward MLP (8D squared), totaling 12D squared scalars.*
+:::
 
 ::: {#nbk-transformers-flop-parameter-accounting .callout-notebook title="Napkin Math: Parameter accounting for a transformer block"}
 The default TinyTorch block owns $12D^2$ matrix weights, $9D$ biases, and $4D$ normalization parameters, for $12D^2+13D$ scalars. With $N$ blocks, vocabulary size $V$, and position capacity $S_{\max}$, its untied GPT owns $N(12D^2+13D)+2VD+S_{\max}D+2D$ parameters. Substituting $D=8$, $N=2$, $V=16$, and $S_{\max}=8$ gives $1{,}744+256+64+16=2{,}080$. The count depends on allocated position capacity, even when a call uses only three positions. Changing `ff_dim` or removing biases changes the formula.
