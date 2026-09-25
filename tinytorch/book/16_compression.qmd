@@ -167,12 +167,6 @@ Module 16 defaults to $T = 3$ and $\alpha = 0.7$. Both terms average over exampl
 
 ## The Code
 
-::: {.column-margin}
-![](assets/images/diagrams/16_comp-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 16 Compression showing file path, exported package, and tested primitives."}
-
-*Source Code Mapping: Module 16 extracts knowledge distillation loss, magnitude pruning, and low-rank approximation directly from the working repository.*
-:::
-
 Everything below works on @sec-layers's `Linear` and `Sequential` and @sec-autograd's `Tensor`. `Linear` keeps its weight as an `(in_features, out_features)` array and computes `x @ weight + bias`, and every shape comment follows that layout.
 
 ### Measuring and creating unstructured sparsity
@@ -182,6 +176,12 @@ Every compression claim starts with a number. A paper reports that a model is 80
 The obvious count divides zeros by all parameters, biases included. @sec-layers's `Linear` initializes its biases to zero, so on a fresh two-layer model with 64 inputs, 128 hidden units, and 10 outputs, that count reports 1.4 percent sparsity, 138 zeros out of 9,610 parameters, before anything has been pruned. That number describes all-parameter sparsity, but it does not measure the weight sparsity this chapter is trying to change. The obvious pruning pass has a subtler flaw. It thresholds each layer on its own, which forces exactly 80 percent out of every layer whether that layer's weights are uniformly tiny or uniformly large.
 
 The module counts weight matrices only and ranks their entries together, so that a layer whose weights are small gives up more of them than a layer whose weights are large.
+
+::: {.column-margin}
+![](assets/images/diagrams/16_comp-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 16 Compression showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Module 16 extracts knowledge distillation loss, magnitude pruning, and low-rank approximation directly from the working repository.*
+:::
 
 {{< include _listings/16_compression/measure_sparsity.qmd >}}
 
@@ -246,6 +246,12 @@ $$r \times (M + N) < M \times N \quad\Longleftrightarrow\quad r < \frac{MN}{M+N}
 For a square $4096 \times 4096$ layer the break-even rank is $4096^2 / 8192 = 2048$, half the full rank. At $r = 256$ the count drops from $16{,}777{,}216$ to $256 \times 8192 = 2{,}097{,}152$, an $8\times$ reduction in weight entries and matrix-multiplication arithmetic. These counts describe the two folded factors, excluding the unchanged bias and the new intermediate activation. Whether the accuracy survives depends on how fast the singular values of that particular layer decay, which is a property of the trained weights, not of the method.
 :::
 
+::: {.column-margin}
+![](assets/images/diagrams/16_compression-margin-svd-activation.svg){width="100%" fig-alt="Diagram contrasting direct GEMM with two-stage factorized GEMM, illustrating intermediate activation traffic to DRAM."}
+
+*Intermediate activation traffic: factorizing a layer saves weight parameters but writes and reloads intermediate tensor h, requiring operator fusion when batch size B is large.*
+:::
+
 The naive way to choose $r$ is trial. Pick a rank, factorize, retrain, measure, and repeat, with a training run per guess. Eckart-Young removes the guessing from the reconstruction side. One SVD returns every singular value, and the error at every $r$ reads off the tail of that list before a single factor is built. Whether the accuracy survives is still a question for fine-tuning, but you go into it knowing how much of the matrix you dropped.
 
 The module's function does the SVD and the truncation and stops there.
@@ -256,12 +262,6 @@ The function validates `rank_ratio` in $(0,1]$ and computes `max(1, int(rank_rat
 
 
 The returned arrays have shapes $(M,r)$, $(r,)$, and $(r,N)$ and own $r(M+N+1)$ values. This three-factor representation saves storage when $r < MN/(M+N+1)$. It does not modify the input matrix or any layer. The book extension below folds the singular values into two factors, reducing that count to $r(M+N)$, and places the original bias after the second multiplication. Reconstructing the full matrix first would lose the storage benefit.
-
-::: {.column-margin}
-![](assets/images/diagrams/16_compression-margin-svd-activation.svg){width="100%" fig-alt="Diagram contrasting direct GEMM with two-stage factorized GEMM, illustrating intermediate activation traffic to DRAM."}
-
-*Intermediate activation traffic: factorizing a layer saves weight parameters but writes and reloads intermediate tensor h, requiring operator fusion when batch size B is large.*
-:::
 
 ::: {#lst-compression-factor-helper lst-pos="H" lst-cap="**Building a forward path from SVD factors**: Two new linear layers consume the folded factors and preserve the output bias."}
 ```python
