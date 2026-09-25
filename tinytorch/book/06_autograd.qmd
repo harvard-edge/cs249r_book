@@ -213,6 +213,12 @@ $$\frac{\partial L}{\partial b_j} = \sum_{i=0}^{B-1} \frac{\partial L}{\partial 
 
 The mathematical summation across the batch becomes an array reduction across the leading axes. TinyTorch enforces this contract with `_reduce_broadcast_grad`, which sums out extra leading dimensions and collapses singleton axes back to the parameter's original shape.
 
+::: {.column-margin}
+![](assets/images/diagrams/06_autograd-margin-broadcast.svg){width="100%" fig-alt="Broadcast gradient reduction diagram showing forward replication of bias vector across batch dimension and backward summation reduction along axis 0."}
+
+*Broadcast gradient reduction: Replicating forward requires summing cotangents across batch axes in backward.*
+:::
+
 {{< include _listings/06_autograd/reduce_broadcast_grad.qmd >}}
 
 With this helper in place, the backward half of `Add` handles scalars, vectors, and broadcast tensors with the same local rule. The `@method_of(Add)` line above the definition is how Module 06 writes a method onto a class that Module 01 defined; it is the same as writing `backward` inside `class Add`, without editing the earlier module.
@@ -250,6 +256,12 @@ The records are in place. What is left is the call the training loop of @sec-tra
 A tempting walk combines recursion with a visited set. Start at the loss, run its rule, and immediately recurse into each unvisited input. On the straight chain in the worked trace below that gives the right answer, which is what makes it dangerous. For `x = 2`, let `h = x * 2` and `L = h * 3 + h * 4`. The two branches contribute $3$ and $4$ at `h`; its multiply must send $(3+4) \times 2 = 14$ to `x`. If a recursive walk reaches `h` through the first branch and immediately runs its rule, it sends only $3 \times 2 = 6$. When the second branch arrives, the visited set suppresses another traversal of `h`, losing the remaining $8$. Dropping the visited set while propagating the total `.grad` causes a different error: the later traversal also resends the first contribution. No error, a wrong number, and a model that trains a little worse than it should.
 
 The fix is to run no rule until every consumer of its tensor has reported. A topological order guarantees exactly that, and a depth-first walk hands us one for free. The implementation therefore does four things: sorts the graph, seeds the gradient at the loss, walks the order once, and releases the graph.
+
+::: {.column-margin}
+![](assets/images/diagrams/06_autograd-margin-topo-tape.svg){width="100%" fig-alt="Topological tape execution diagram showing reverse post-order DFS sequence where consumers h1 and h2 deposit gradients into pending buffer before parent h backward executes."}
+
+*Reverse topological sort guarantees all consumer paths contribute to pending gradients before a parent node executes.*
+:::
 
 {{< include _listings/06_autograd/Tensor_backward.qmd >}}
 
