@@ -47,8 +47,9 @@ This chapter writes a GELU expressed with fewer temporary Tensors and a tiled ma
 *Fusing elementwise GELU arithmetic into linear layer buffers eliminates intermediate DRAM traffic.*
 :::
 
+In eager execution, deep learning frameworks evaluate expressions statement by statement. When evaluating a compound expression, such as an activation function or a sequence of linear layers, the runtime allocates a fresh buffer for each intermediate result, writes it to main memory, and reads it back for the subsequent operation. For elementwise operations with low arithmetic intensity, memory bus bandwidth rather than floating-point compute capacity becomes the primary bottleneck. Moving transient values back and forth across the memory bus consumes substantial latency and energy even when the underlying mathematical operations are trivial.
 
-Data order provides a second concrete example. A two-row array `[[1, 2, 3], [4, 5, 6]]` stores its rows consecutively in ordinary C order. Walking a row visits adjacent floats; walking a column advances three floats between entries. Both traversals sum to 21. @Lst-acceleration-stride-timing enlarges this pattern so that access order can affect timing.
+Memory access patterns provide a second concrete performance bottleneck. A two-row array `[[1, 2, 3], [4, 5, 6]]` stores its rows consecutively in ordinary C order. Walking a row visits adjacent floats; walking a column advances three floats between entries. Both traversals sum to 21. @Lst-acceleration-stride-timing enlarges this pattern so that access order can affect timing.
 
 ::: {#lst-acceleration-stride-timing lst-cap="**Access-order experiment**: The same array is traversed by rows and columns."}
 ```python
@@ -98,7 +99,7 @@ Matrix multiplication presents a different opportunity. Each input element contr
 
 ::: {.column-margin}
 **↪ Jump ahead:** @sec-extensions
-*The same tiling and fusion compiled to C++ and Triton, then measured against NumPy.*
+*How modern compilers (C++, Triton, and PyTorch Inductor) automate tiling and fusion at hardware scale.*
 :::
 
 
@@ -125,7 +126,7 @@ The analytical model counts requested data separately from measured time. A logi
 
 At $x=1$, the first three GELU steps produce $1$, $0.044715$, and $1.044715$. In `unfused_gelu`, each value occupies the corresponding position in a different array. Naming `temp1`, `temp2`, and `temp3` keeps their `Tensor` objects reachable even after the next step has consumed their values. `Tensor` construction copies the incoming NumPy array, so these are separate owned buffers.
 
-The compact expression avoids retaining seven named `Tensor` copies. It still asks NumPy to compute powers, products, sums, and a hyperbolic tangent on arrays. Python evaluating one expression does not make those array operations into one loop. This distinction isolates allocation lifetime during eager execution while reserving the compiled single-pass alternative for the production bridge.
+The compact expression avoids retaining seven named `Tensor` wrapper objects, but it does not eliminate intermediate memory traffic. In Python and NumPy, writing a compound one-liner like `0.5 * x * (1.0 + np.tanh(...))` still allocates an anonymous, temporary NumPy array buffer for every binary operator and function call. Each sub-expression executes a distinct compiled C loop that reads operands from DRAM and writes intermediate arrays back to memory. In contrast, true kernel fusion (as performed by compiler runtimes like PyTorch `torch.compile` / Inductor, Triton, or XLA) inspects the computational graph and generates a single machine-code loop: each input element $x_i$ is loaded into a processor register once, evaluated through the entire mathematical chain entirely within register space, and written back to DRAM only once as the final result. This distinction isolates allocation lifetimes during eager execution while demonstrating why optimizing compilers are indispensable for memory-bound operators.
 
 ![**Memory traffic in unfused versus fused kernel execution**: In unfused execution, each elementwise operation launches a separate kernel that reads operands from DRAM and writes temporary buffers back to DRAM, saturating memory bandwidth and thrashing CPU caches. In a fused kernel, the input is loaded once into fast processor registers/L1 cache, all intermediate arithmetic evaluates in registers, and only the final result is written to memory.](assets/images/diagrams/17_kernel-fusion-traffic.svg){#fig-kernel-fusion-traffic width="100%" fig-alt="Diagram comparing DRAM round-trips for unfused multi-pass execution with single-trip register-cached fused kernel execution."}
 

@@ -1,4 +1,4 @@
-# Synthesis I: From Perceptrons to Rumelhart's MLP {#sec-milestone-1}
+# Synthesis I: From Perceptrons to Rumelhart's MLP {#sec-milestone-1 .unnumbered}
 
 ::: {.column-margin}
 ![](assets/images/diagrams/m01_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting Synthesis I MLP Synthesis as the active subsystem."}
@@ -8,13 +8,16 @@
 
 
 ### The History and the Problem
-In 1958, Frank Rosenblatt introduced the perceptron, sparking early optimism for artificial intelligence. But in 1969, Marvin Minsky and Seymour Papert published a famous mathematical proof that single-layer perceptrons could not learn the non-linear XOR (exclusive or) decision boundary. This seemingly simple limitation meant that early models could not separate points whose positive labels sat on opposite diagonals. This was highly critical because if a network couldn't solve XOR, it couldn't be trusted to model the complex, non-linear realities of the world. This realization precipitated the first "AI Winter," freezing funding and progress for years.
 
-### The Monumental Breakthrough
-What needed to get unlocked was a way to bend the representation space itself. Seventeen years later, in 1986, Rumelhart, Hinton, and Williams provided the monumental breakthrough: they demonstrated that multi-layer perceptrons (MLPs) with hidden units, trained via backpropagation, could cleanly resolve the XOR crisis.
+In 1958, Frank Rosenblatt introduced the perceptron, sparking initial optimism for trainable artificial intelligence. But in 1969, Marvin Minsky and Seymour Papert proved mathematically that single-layer perceptrons could not learn the non-linear XOR (exclusive or) decision boundary. A single linear hyperplane cannot separate points whose positive labels sit on opposite diagonals in coordinate space. Because real-world classification boundaries are fundamentally non-linear, this limitation paralyzed neural network research and precipitated the first "AI Winter," halting funding and progress for more than a decade.
+
+### The Multi-Layer Breakthrough
+
+The resolution required folding the coordinate space itself. In 1986, Rumelhart, Hinton, and Williams demonstrated that multi-layer perceptrons (MLPs) equipped with non-linear hidden units, trained through reverse-mode automatic differentiation (backpropagation), could resolve the XOR crisis. Hidden layers project inputs into transformed intermediate representations where previously inseparable patterns become linearly separable.
 
 ### What Was Solved
-By chaining affine transformations with non-linear gates and computing exact gradients backward through the entire graph, neural networks could finally learn complex, non-linear decision boundaries from scratch. Milestone I integrates Modules 01 through 08 (`tinytorch/src/01_tensor` through `tinytorch/src/08_training`) to build and train that exact multi-layer network, proving that our core engine can solve the problem that once stalled the entire field.
+
+By chaining affine projections with non-linear activations and executing exact reverse-mode gradient updates through computational graphs, neural networks acquired the capacity to learn non-linear decision boundaries autonomously. Synthesis I integrates Modules 01 through 08 (`tinytorch/core/tensor` through `tinytorch/core/training`) to construct and train that complete multi-layer network, verifying that our foundational engine resolves the historical crisis that once halted the field.
 
 In modern deep learning, creating a multi-layer perceptron to learn non-linear decision surfaces is trivial:
 
@@ -217,7 +220,7 @@ The model is seventeen numbers: a 2 by 4 weight matrix and 4 biases in the hidde
 
 ### The loop
 
-The first call inside the loop is `model(X)`, but recording has already been enabled by constructing `SGD(model.parameters(), lr=lr)`. The optimizer holds the four original parameter tensors and marks them `requires_grad=True` before the model runs. Forward, loss, backward, step, and clear then follow the cycle from @sec-training. The step that is easiest to drop is the clear. @sec-autograd's `backward()` adds into `.grad` rather than assigning to it, so if the gradients are not cleared between one backward pass and the next, the next update uses accumulated gradients from different parameter values. That changes the update direction as well as its magnitude. Nothing needs to raise an error, so comparing one controlled update is a better diagnostic than waiting for the loss to fail.
+The first call inside the loop is `model(X)`. Recording is already enabled because the `Linear` layer constructors initialize weights and biases with `requires_grad=True`. The optimizer holds references to the four parameter tensors and tracks their update buffers. Forward, loss, backward, step, and clear then follow the cycle from @sec-training. The step that is easiest to drop is the clear. @sec-autograd's `backward()` adds into `.grad` rather than assigning to it, so if the gradients are not cleared between one backward pass and the next, the next update uses accumulated gradients from different parameter values. That changes the update direction as well as its magnitude. Nothing needs to raise an error, so comparing one controlled update is a better diagnostic than waiting for the loss to fail.
 
 The training function below writes that cycle directly. It returns the model for the next experiment; the full milestone script returns a history dictionary for its display. The XOR class exposes `__call__`, which this loop uses. `Trainer._forward` instead calls a model's `forward` method, so handing this exact class to `Trainer` would require providing that method. The manual loop makes this interface boundary visible.
 
@@ -414,7 +417,14 @@ for epoch in range(500):
 
 : **The same update contract in two frameworks**: The XOR and digits experiments in TinyTorch and in PyTorch. {#tbl-milestone1-production-bridge tbl-colwidths="[18,42,40]"}
 
-The loss comparison in @tbl-milestone1-production-bridge combines the sigmoid and binary cross-entropy algebra to operate directly on unnormalized scores. TinyTorch separates sigmoid activation from probability loss, clipping values to $[10^{-7}, 1 - 10^{-7}]$ to prevent logarithmic overflow. While clipping preserves finite values, it yields zero gradients in saturated regimes. A fused formulation avoids probability saturation plateaus, providing stable non-zero derivatives across extreme score ranges as detailed in the [PyTorch loss documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.modules.loss.BCEWithLogitsLoss.html).
+The loss comparison in @tbl-milestone1-production-bridge reveals a crucial trade-off between pedagogical modularity and systems performance. To maintain clear abstraction boundaries, TinyTorch separates the `Sigmoid` activation from the `BCELoss` module. However, executing them as separate operations introduces two significant runtime vulnerabilities:
+
+1. **Numerical instability**: Evaluating $\sigma(z) = 1/(1+e^{-z})$ directly in float32 causes exponentials to saturate for large magnitudes, forcing TinyTorch to manually clip probabilities to $[10^{-7}, 1 - 10^{-7}]$ to prevent $\log(0)$ crashes. While clipping avoids `NaN`, it creates zero gradients on clipped activations, permanently stalling weight updates in saturated regimes.
+2. **Intermediate memory traffic**: Separating the operations writes an intermediate probability tensor of shape $(B, 1)$ out to main memory, only to immediately read it back across the bus into the loss kernel.
+
+Production engines resolve both issues through operator fusion: `torch.nn.BCEWithLogitsLoss` combines the sigmoid and binary cross-entropy algebra into a single numerically stable kernel:
+$$\mathcal{L} = \max(z, 0) - z \cdot y + \log(1 + e^{-|z|})$$
+This fused algebraic formulation guarantees finite values across all inputs without epsilon clipping, simplifies the analytical backward gradient to $\sigma(z) - y$, and eliminates intermediate DRAM round-trips entirely, as documented in the [PyTorch loss documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.modules.loss.BCEWithLogitsLoss.html).
 
 ::: {#psp-universal-approximation-mlp .callout-perspective title="Production Bridge: The Universal Approximation Theorem in practice"}
 Cybenko (1989) and Hornik (1991) proved that single-hidden-layer feedforward networks with non-linear activations can approximate any continuous function on compact subsets of $\mathbb{R}^n$ arbitrarily well.

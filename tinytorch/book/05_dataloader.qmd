@@ -7,7 +7,7 @@
 :::
 
 
-Training neural networks with Stochastic Gradient Descent (SGD) requires balancing gradient accuracy with computational tractability. Computing the true gradient across an entire dataset of millions of samples before every update is computationally prohibitive. Conversely, updating parameters on single samples produces high-variance, noisy gradient trajectories. Mini-batching resolves this tension: it yields stable empirical gradient estimates while random shuffling breaks autocorrelation between consecutive training steps.
+High-throughput deep learning requires feeding compute engines with dense, contiguous batches of data. Real-world datasets rarely arrive as ready-to-compute contiguous tensors in main memory: raw inputs may consist of individual sensor readings, text files, or image streams stored across disk or networked storage. Processing inputs one sample at a time fails to saturate modern vector hardware, leaving memory buses and compute units idle. Conversely, loading and materializing an entire multi-gigabyte dataset into a single monolithic tensor exhausts system DRAM. Mini-batching resolves this tension: it groups discrete samples into fixed-size contiguous tensors that saturate matrix multiplication units, while random index shuffling ensures independent sample order across training epochs.
 
 In PyTorch, data loading and batching are encapsulated in a standard iterator abstraction:
 
@@ -197,8 +197,8 @@ from tinytorch.core.tensor import Tensor
 from tinytorch.core.dataloader import TensorDataset, DataLoader
 
 N, D = 10, 2
-inputs = Tensor(np.array([[i, i + 0.5] for i in range(N)]))
-targets = Tensor(np.array([0 if i < 5 else 1 for i in range(N)]))
+inputs = Tensor(np.array([[i, i + 0.5] for i in range(N)], dtype=np.float32))
+targets = Tensor(np.array([0 if i < 5 else 1 for i in range(N)], dtype=np.float32))
 
 dataset = TensorDataset(inputs, targets)
 x3, y3 = dataset[3]
@@ -319,7 +319,7 @@ Worker processes also need to hand completed tensors back to the caller. **Share
 
 :::
 
-A later transfer to a GPU introduces another boundary. **Pinned memory** is host memory kept resident so the device can use it for direct transfers. PyTorch's `pin_memory=True` prepares batches in that memory. A nonblocking transfer can let the CPU proceed before copying finishes, but actual overlap with GPU computation needs suitable hardware and scheduling. Neither option exists in TinyTorch's NumPy loader. [PyTorch pinned-memory and nonblocking-transfer guide](https://docs.pytorch.org/tutorials/intermediate/pinmem_nonblock.html).
+A later transfer to an accelerator introduces a critical hardware boundary. Standard host memory allocated via `malloc` or NumPy is pageable: the operating system can swap pages out to disk or migrate physical pages across virtual addresses at any time. When an accelerator (such as a GPU) copies data over PCIe, it uses Direct Memory Access (DMA) engines that require fixed physical page addresses. If host memory is pageable, the driver must first copy the batch into an internal, page-locked staging buffer before initiating the DMA transfer over PCIe, paying a double-copy penalty. **Pinned memory** (page-locked memory) avoids this by using the OS `mlock` system call to pin host virtual pages to permanent physical DRAM addresses. PyTorch's `pin_memory=True` allocates batches directly in pinned memory, allowing the GPU's DMA controller to stream bytes across the PCIe bus asynchronously without CPU mediation or staging buffer overhead. Neither option exists in TinyTorch's synchronous NumPy loader, which isolates memory mechanics before physical hardware transfer boundaries. [PyTorch pinned-memory and nonblocking-transfer guide](https://docs.pytorch.org/tutorials/intermediate/pinmem_nonblock.html).
 
 ::: {#ws-dataloader-fork-cow-explosion .callout-war-story title="War Story: Fork-based copy-on-write memory explosion"}
 

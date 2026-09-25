@@ -151,7 +151,7 @@ For the weight above, an adaptive update of $0.1$ therefore gives $0.999-0.1=0.8
 
 ### What a learning rate means
 
-The two families give $\eta$ different units, which is why their customary values differ by about a factor of ten. For SGD the step is $\eta g$, so a safe rate depends on the curvature of the loss. The ravine above diverged along its steep axis for any $\eta$ above $2/100$; a loss with ten times that curvature would need a rate ten times smaller. There is no universal SGD rate, only a rate for a given loss. For Adam the normalized step $\hat m / (\sqrt{\hat v} + \epsilon)$ has magnitude close to one when a coordinate's gradients agree in sign and less when they do not, so $\eta$ approximately bounds how far any parameter moves in one step, whatever the scale of its gradient (Kingma and Ba, 2015). That is why an Adam rate carries between models more readily than an SGD rate. TinyTorch's defaults follow the usual convention, $0.01$ for SGD and $0.001$ for Adam and AdamW, and the course milestones use those values: SGD at 0.01 for the digit networks of @sec-milestone-1 and @sec-milestone-2, and Adam at 0.001 for the attention tasks.
+The two families give $\eta$ different units, which is why their customary values differ by about a factor of ten. For SGD the step is $\eta g$, so a safe rate depends on the curvature of the loss. The ravine above diverged along its steep axis for any $\eta$ above $2/100$; a loss with ten times that curvature would need a rate ten times smaller. There is no universal SGD rate, only a rate for a given loss. For Adam the normalized step $\hat m / (\sqrt{\hat v} + \epsilon)$ has magnitude close to one when a coordinate's gradients agree in sign and less when they do not, so $\eta$ approximately bounds how far any parameter moves in one step, whatever the scale of its gradient (Kingma and Ba, 2015). That is why an Adam rate carries between models more readily than an SGD rate. TinyTorch's defaults follow the usual convention, $0.01$ for SGD and $0.001$ for Adam and AdamW, and the course milestones use those values: SGD at 0.01 for the digit networks of [Synthesis I](synthesis_01.qmd#sec-milestone-1) and [Synthesis II](synthesis_02.qmd#sec-milestone-2), and Adam at 0.001 for the attention tasks.
 
 The batch size moves the rate as well. Averaging $B$ independent per-example gradients divides the variance of the estimate by $B$, so a larger batch gives a more reliable direction and can support a larger step. Goyal and colleagues (2017) turned this into a rule for SGD: when the batch grows by a factor of $k$, multiply the learning rate by $k$, and ramp the rate up over the first few epochs. With it they trained ResNet-50 on ImageNet at batches of up to 8,192 images without losing accuracy, and accuracy fell at larger batches. The rule is an empirical regularity for a family of models, not a law, and it is the reason a learning rate reported without its batch size is incomplete.
 
@@ -175,11 +175,11 @@ Because `backward()` accumulates gradients via `+=`, omitting `optimizer.zero_gr
 
 Clearing must remove the previous objective's gradient without removing the optimizer's history. The `backward()` traversal from @sec-autograd accumulates into `.grad`, so a second batch otherwise adds to the previous batch's gradient. Assigning `None` releases the parameter's reference to its gradient array instead of filling it with zeros. TinyTorch's backward traversal allocates a zero buffer when it first reaches the parameter, then adds the incoming contribution. The avoided work is the explicit clearing pass; the next backward pass still initializes storage.
 
-The constructor copies the supplied parameter list, retains the original tensors, and rejects duplicates so the same tensor cannot be updated twice in one step. It enables gradient recording on these tensors without clearing any gradients already present. `zero_grad()` clears the gradients. `step()` is left for each subclass to define.
+The constructor copies the supplied parameter list, retains the original tensors, and rejects duplicates so the same tensor cannot be updated twice in one step. It preserves existing parameter gradient state without clearing any gradients already present. `zero_grad()` clears the gradients. `step()` is left for each subclass to define.
 
 {{< include _listings/07_optimizers/Optimizer.qmd >}}
 
-Parameters must require gradients before the forward pass that will be differentiated. Constructing an optimizer enables that flag; explicitly setting `requires_grad=True` earlier works too. `Optimizer.__init__` stores references to the original parameter tensors and sets their `requires_grad` flags. `Function.apply` reads those flags while each operation executes; setting them after the loss has already been computed cannot reconstruct missing records. The optimizer does not discover parameters by traversing the graph, either. A weight omitted from `parameters()` will not be updated, even if a separate path computed its gradient. @Lst-optimizers-recording isolates the recording requirement with one weight.
+Parameters must have `requires_grad=True` before the forward pass that will be differentiated. TinyTorch layer parameters (such as `Linear.weight` and `Linear.bias`) enable this flag at construction, while arbitrary tensors default to `requires_grad=False`. The optimizer does not mutate `requires_grad`; it simply stores references to the tensors passed to it. `Function.apply` inspects `requires_grad` during the forward pass to build the autograd graph. If a tensor was evaluated with `requires_grad=False`, running `backward()` produces no gradient for it, and the optimizer step leaves its data untouched. The optimizer also does not discover parameters by traversing the computation graph: a tensor omitted from `params` will never be updated, even if autograd computed its gradient. @Lst-optimizers-recording demonstrates how `requires_grad` controls gradient generation and optimizer updates.
 
 ::: {#lst-optimizers-recording lst-pos="H" lst-cap="**Enable recording before forward**: Constructing an optimizer cannot recover an earlier unrecorded graph."}
 ```python
@@ -187,18 +187,23 @@ from tinytorch.core.tensor import Tensor
 from tinytorch.core.optimizers import SGD
 import tinytorch.core.autograd
 
-w = Tensor([1.0])
-old_loss = (w * w).sum()             # no input requests recording yet
-opt = SGD([w], lr=0.1)              # marks this same w as trainable
-old_loss.backward()
-print(w.grad)                       # None: the old forward recorded no graph
+# Case 1: Tensor without requires_grad produces no gradient
+w_frozen = Tensor([1.0], requires_grad=False)
+opt_frozen = SGD([w_frozen], lr=0.1)
+loss_frozen = (w_frozen * w_frozen).sum()
+loss_frozen.backward()
+print(w_frozen.grad)                # None: unrecorded graph
+opt_frozen.step()
+print(w_frozen.data)                # [1.]: parameter untouched
 
-opt.zero_grad()
-loss = (w * w).sum()                # recompute after enabling recording
+# Case 2: Trainable parameter records graph and receives update
+w = Tensor([1.0], requires_grad=True)
+opt = SGD([w], lr=0.1)
+loss = (w * w).sum()
 loss.backward()
 print(w.grad)                       # [2.]
 opt.step()
-print(w.data)                       # [0.8]
+print(w.data)                       # [0.8]: updated by lr * grad
 ```
 :::
 
@@ -214,7 +219,7 @@ A zero gradient and a missing gradient have different meanings. All three optimi
 
 SGD's loop adds one array to the state we already know. For a parameter tensor of shape $(2,3)$, its gradient and optional momentum buffer also have shape $(2,3)$. The scalar learning rate and momentum coefficient apply elementwise across those arrays. The list index associates each parameter with its own history.
 
-The constructor checks the learning rate, momentum coefficient, and decay coefficient before enabling gradients on the parameters. Invalid negative or nonfinite values raise an error before any parameter is changed. The buffer list starts with `None` entries; a tensor receives a velocity array only when it first has a gradient.
+The constructor checks the learning rate, momentum coefficient, and decay coefficient before initializing parameter buffers. Invalid negative or nonfinite values raise an error before any parameter is changed. The buffer list starts with `None` entries; a tensor receives a velocity array only when it first has a gradient.
 
 {{< include _listings/07_optimizers/SGD.qmd >}}
 

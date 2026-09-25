@@ -15,14 +15,16 @@ In PyTorch, a full transformer block is declared and composed in standard module
 import torch
 import torch.nn as nn
 
-# Standard Transformer Decoder Layer (Self-Attention + MLP + Pre-LN)
-layer = nn.TransformerDecoderLayer(d_model=64, nhead=4, dim_feedforward=256, batch_first=True)
+# Modern decoder-only Transformer block (Pre-LN with causal mask)
+layer = nn.TransformerEncoderLayer(
+    d_model=64, nhead=4, dim_feedforward=256, norm_first=True, batch_first=True
+)
 
 x = torch.randn(2, 8, 64)       # Batch of 2, sequence length 8, hidden dim 64
-memory = torch.randn(2, 8, 64)  # Context memory
-out = layer(x, memory)
+mask = nn.Transformer.generate_square_subsequent_mask(8)
+out = layer(x, is_causal=True, src_mask=mask)
 
-print("Decoder block output shape:", out.shape)  # (2, 8, 64)
+print("Decoder block output shape:", out.shape)  # torch.Size([2, 8, 64])
 ```
 
 Underneath that composable layer block, the runtime balances multiple structural and gradient invariants:
@@ -31,13 +33,13 @@ Underneath that composable layer block, the runtime balances multiple structural
 2. **Balanced compute and parameter allocation:** The block balances parameter capacity between token communication (multi-head attention, $4D^2$ parameters) and channel-wise feature transformation (the two-layer feed-forward MLP with a $4\times$ expansion, $8D^2$ parameters).
 3. **End-to-end logit projection:** Stacking $N$ identical blocks and projecting the final hidden states through a vocabulary linear head produces next-token logit distributions of shape $(B, S, V)$.
 
-This chapter synthesizes the components of Part II into TinyGPT, TinyTorch's flagship generative language model, setting the stage for text generation in @sec-milestone-2. Before assembling the model, we must inspect what happens when deep attention networks lack residual pathways and layer normalization.
+This chapter synthesizes the components of Part II into TinyGPT, TinyTorch's flagship generative language model, setting the stage for text generation in [Synthesis II](synthesis_02.qmd#sec-milestone-2). Before assembling the model, we must inspect what happens when deep attention networks lack residual pathways and layer normalization.
 
 ::: {#fig-transformer-arch fig-env="figure" fig-pos="htb" fig-cap="**Composing a transformer**: Each block adds two learned updates to the residual stream. The complete GPT stacks these blocks before a final normalization and a separate vocabulary projection." fig-alt="Two panels show a Pre-LN block with two bypass arrows around attention and MLP branches, and a GPT path from token and position embeddings through N blocks to logits of shape B by S by V."}
 ![](assets/images/diagrams/13_transformers-diag-1.svg){width="100%"}
 :::
 
-Module 13 names this model `GPT`, with `TinyGPT` retained as an alias. Its caller supplies token IDs of shape $(B, S)$ and receives logits of shape $(B, S, V)$, one row of next-token scores per position. The training and sampling loop in @sec-milestone-2 will use that contract.
+Module 13 names this model `GPT`, with `TinyGPT` retained as an alias. Its caller supplies token IDs of shape $(B, S)$ and receives logits of shape $(B, S, V)$, one row of next-token scores per position. The training and sampling loop in [Synthesis II](synthesis_02.qmd#sec-milestone-2) will use that contract.
 
 ---
 
@@ -101,7 +103,7 @@ The seeded experiment ends with an RMS of 83.96 for `plain`, about 76 times its 
 ## The Idea
 
 ::: {.column-margin}
-**↪ Jump ahead:** @sec-milestone-2
+**↪ Jump ahead:** [Synthesis II](synthesis_02.qmd#sec-milestone-2)
 *Autoregressive text generation and next-token probability distribution sampling with TinyGPT.*
 :::
 
@@ -400,7 +402,7 @@ Generation adds a separate cost. Module 13 appends one sampled token at a time, 
 
 A GPT forward call begins with $(B,S)$ token IDs. The embedding layer adds learned position rows, each block normalizes a branch input and adds attention and MLP updates, and the final normalization and head return $(B,S,V)$ logits. The mask prevents every block from reading future positions, while normalization and the MLP act within each position. Together those properties explain why appending a suffix preserves earlier predictions.
 
-Persistent state belongs to the parameter tensors. Forward operations create new activations and, when recording gradients, per-call operation records; they do not overwrite the caller's stream or update weights. `parameters()` exposes the complete ownership tree to the optimizer, and backward follows the recorded residual branches into that tree. @sec-milestone-2 uses these logits to construct a next-token loss and to sample from the final row. It must supply targets during training and the whole prefix during ordinary generation.
+Persistent state belongs to the parameter tensors. Forward operations create new activations and, when recording gradients, per-call operation records; they do not overwrite the caller's stream or update weights. `parameters()` exposes the complete ownership tree to the optimizer, and backward follows the recorded residual branches into that tree. [Synthesis II](synthesis_02.qmd#sec-milestone-2) uses these logits to construct a next-token loss and to sample from the final row. It must supply targets during training and the whole prefix during ordinary generation.
 
 ::: {#chk-milestone-05 .callout-checkpoint title="Milestone 05 Unlocked: The Transformer Era & TinyGPT"}
 You have now constructed the flagship generative architecture of TinyTorch: `TinyGPT` (Modules 01 to 13). You can run:
@@ -409,7 +411,7 @@ You have now constructed the flagship generative architecture of TinyTorch: `Tin
 tito milestone run 05
 ```
 
-This milestone challenges multi-head attention on sequence reasoning tasks (sequence reversal, token copy, associative recall) and trains TinyGPT to autoregressively sample coherent text from a prompt. Turn to @sec-milestone-2 (Parts 2 & 3) to walk through the complete language modeling loop and next-token generation.
+This milestone challenges multi-head attention on sequence reasoning tasks (sequence reversal, token copy, associative recall) and trains TinyGPT to autoregressively sample coherent text from a prompt. Turn to [Synthesis II](synthesis_02.qmd#sec-milestone-2) (Parts 2 & 3) to walk through the complete language modeling loop and next-token generation.
 :::
 
 ---

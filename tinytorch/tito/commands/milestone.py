@@ -43,6 +43,12 @@ MILESTONE_ALIASES = {
     "shakespeare": "05",
     "mlperf": "06",
     "olympics": "06",
+    "serving": "06",
+    "kernels": "07",
+    "triton": "07",
+    "metal": "07",
+    "extensions": "07",
+    "accelerators": "07",
 }
 
 # Milestone-to-script mapping for tito milestone run command
@@ -145,8 +151,8 @@ MILESTONE_SCRIPTS = {
     },
     "06": {
         "id": "06",
-        "name": "MLPerf Benchmarks (2018)",
-        "year": 2018,
+        "name": "Generative Serving & MLPerf (2022)",
+        "year": 2022,
         "title": "MLPerf to ChatGPT Serving (The Optimization Olympics)",
         "scripts": [
             {
@@ -163,9 +169,20 @@ MILESTONE_SCRIPTS = {
             }
         ],
         "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19],  # Full default run: optimization + generation speedup parts
-        "description": "Compress and accelerate your neural network",
+        "description": "Compress and accelerate TinyGPT across the MLPerf Pareto frontier",
         "historical_context": "MLPerf standardized ML benchmarks (2018), paving the way for ChatGPT-scale production serving (2022)",
         "emoji": "🏆"
+    },
+    "07": {
+        "id": "07",
+        "name": "Custom GPU Kernels (2024)",
+        "year": 2024,
+        "title": "Hardware Accelerators: OpenAI Triton & Apple Metal",
+        "script": "milestones/07_2024_kernels/01_custom_kernels.py",
+        "required_modules": [1, 2, 3, 14, 17, 20],
+        "description": "Cross the FFI to bare silicon with C++ SIMD, Apple Metal MPS, and Triton GPU shaders",
+        "historical_context": "Modern AI systems rely on custom GPU shaders to bypass framework overhead (2024)",
+        "emoji": "⚡"
     }
 }
 
@@ -204,6 +221,11 @@ MILESTONE_ACHIEVEMENT_HIGHLIGHTS = {
         "Every line of code: YOUR implementations",
         "Every candidate measured: YOUR quantization and compression",
         "Every gradient: YOUR autograd",
+    ],
+    "07": [
+        "Every line of code: YOUR implementations",
+        "Every SIMD operation: YOUR C++ kernel",
+        "Every GPU shader: YOUR Triton and Metal kernels",
     ],
 }
 
@@ -380,7 +402,7 @@ class MilestoneSystem:
             )
 
             # Check if milestone is unlocked (ready to run, not the same as actually
-            # run and achieved -- see is_completed below)
+            # run and achieved; see is_completed below)
             is_unlocked = milestone_id in milestone_data.get("unlocked_milestones", [])
 
             # Check if the milestone has actually been run and passed
@@ -605,7 +627,7 @@ class MilestoneCommand(BaseCommand):
         )
         run_parser.add_argument(
             'milestone_id',
-            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
+            help='Milestone ID (01-07) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt, kernels)'
         )
         run_parser.add_argument(
             '--part',
@@ -625,7 +647,7 @@ class MilestoneCommand(BaseCommand):
         )
         info_parser.add_argument(
             'milestone_id',
-            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
+            help='Milestone ID (01-07) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt, kernels)'
         )
 
         # Status subcommand
@@ -729,7 +751,7 @@ class MilestoneCommand(BaseCommand):
 
         # Show header with overall progress. Note: status['overall_progress']
         # is unlock-based (it also drives the timeline progress bar elsewhere,
-        # where that's the correct meaning), so it isn't used here -- showing
+        # where that's the correct meaning), so it isn't used here: showing
         # it next to "Milestones Achieved" would be contradictory (e.g. "0/6
         # achieved" beside "100%"). This header's percentage is achievement-
         # based instead, to actually match the achieved count shown above it.

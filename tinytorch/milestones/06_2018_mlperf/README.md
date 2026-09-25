@@ -1,4 +1,4 @@
-# Milestone 06: MLPerf to ChatGPT Serving (Optimization and Measurement)
+# Milestone 06: Generative Serving & MLPerf (2022)
 
 Compare a trained model with changed versions of itself, and measure cache
 acceleration without changing the mathematical output. These experiments bridge
@@ -8,17 +8,17 @@ MLPerf's measurement discipline (2018) to modern ChatGPT-scale production servin
 
 `01_optimization_olympics.py` evaluates three distinct architectural categories across their natural physical constraints:
 
-1. **Division 1: Edge & Embedded Inference — `DigitMLP` (Dense, Parameter-Bound)**
+1. **Division 1: Edge & Embedded Inference : `DigitMLP` (Dense, Parameter-Bound)**
    - Primary constraint: Weight storage capacity in SRAM/Flash.
    - Evaluates: FP32 Baseline, INT8 Quantization (4× smaller), 50% Magnitude Pruning.
    - Trade-off curve: Memory Footprint (KB) vs. Classification Accuracy (%).
 
-2. **Division 2: Spatial Vision & Compute — `SimpleCNN` (Spatial, Compute-Bound)**
+2. **Division 2: Spatial Vision & Compute : `SimpleCNN` (Spatial, Compute-Bound)**
    - Primary constraint: Spatial convolution loops and compute throughput.
    - Evaluates: FP32 Baseline, INT8 Quantization, 50% Magnitude Pruning.
    - Trade-off curve: Memory Footprint (KB) vs. Output Signal Fidelity (%).
 
-3. **Division 3: Generative LLM Serving — `TinyGPT` (Autoregressive, Prefix-Bound)**
+3. **Division 3: Generative LLM Serving : `TinyGPT` (Autoregressive, Prefix-Bound)**
    - Primary constraint: $O(N^2)$ prefix recomputation and DRAM weight streaming.
    - Evaluates: Full Prefix Recompute, INT8 Quantization, KV-Cache Memoization, Full Stack (Quant + Cache).
    - Trade-off curve: Replay Latency (ms) vs. Memory Footprint (KB).

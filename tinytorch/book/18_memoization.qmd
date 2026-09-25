@@ -48,7 +48,7 @@ This chapter constructs TinyTorch's KV cache, checks that cached and full-prefix
 *Causal attention score matrices and key/value projection mechanics.*
 :::
 
-@sec-milestone-2's generation loop keeps a growing list of token ids. At each step it hands the whole list to `model.forward`, reads the logits at the last position, samples one token, appends it, and goes around again. Nothing in that loop remembers the previous step. Inside every attention layer, the forward pass projects all $t$ tokens into queries, keys, and values, forms the $t \times t$ score matrix, and produces $t$ output rows, of which the loop uses exactly one.
+[Synthesis II](synthesis_02.qmd#sec-milestone-2)'s generation loop keeps a growing list of token ids. At each step it hands the whole list to `model.forward`, reads the logits at the last position, samples one token, appends it, and goes around again. Nothing in that loop remembers the previous step. Inside every attention layer, the forward pass projects all $t$ tokens into queries, keys, and values, forms the $t \times t$ score matrix, and produces $t$ output rows, of which the loop uses exactly one.
 
 Counting rows makes the waste concrete. Token $x_1$ is pushed through $W_K$ and $W_V$ at step 1, again at step 2, and again at every step after that. Across $S$ successive prefixes of lengths 1 through $S$, the number of rows projected is $1 + 2 + \dots + S = S(S+1)/2$, when $S$ would have been enough. @Lst-kv-projection-count checks the triangle by counting each prefix.
 
@@ -71,7 +71,7 @@ for S in (10, 100, 500):
 ```
 :::
 
-Attention adds a second source of repeated work. The score matrix at step $t$ has $t^2$ entries, so summed over a generation it grows as $S^3$, and the $t-1$ output rows that get discarded each step were each a full pass through the value matrix. Step 500 does roughly 500 times the projection work of step 1 and 250,000 times the score work, which is the recomputation @sec-milestone-2 counted. Every step also allocates fresh tensors one row larger than the last, so the allocator is busy exactly when the arithmetic is busiest.
+Attention adds a second source of repeated work. The score matrix at step $t$ has $t^2$ entries, so summed over a generation it grows as $S^3$, and the $t-1$ output rows that get discarded each step were each a full pass through the value matrix. Step 500 does roughly 500 times the projection work of step 1 and 250,000 times the score work, which is the recomputation [Synthesis II](synthesis_02.qmd#sec-milestone-2) counted. Every step also allocates fresh tensors one row larger than the last, so the allocator is busy exactly when the arithmetic is busiest.
 
 The remedy is the oldest trick in programming. If a computation is repeated with the same inputs, store the result and look it up. The name for that trick is **memoization**, and the only question is which results are safe to store.
 
@@ -210,7 +210,7 @@ The scope changes one flag, `_generation_active`. Entering it saves the flag's p
 
 ### Prefill and decode through the same step
 
-A request arrives as a prompt of $P$ tokens, and only then does the model produce one token at a time. @sec-milestone-2 named the two phases prefill and decode. The cache is what makes decode cheap, but prefill has to fill it first, and the request after this one must not see this one's tokens.
+A request arrives as a prompt of $P$ tokens, and only then does the model produce one token at a time. [Synthesis II](synthesis_02.qmd#sec-milestone-2) named the two phases prefill and decode. The cache is what makes decode cheap, but prefill has to fill it first, and the request after this one must not see this one's tokens.
 
 The tempting way to build that is two paths, the full-sequence attention of @sec-attention for the prompt and the cached step for decode, with the keys and values handed from one to the other. Two paths means two places for the ordering bug to hide and a hand-off that has to agree about where the cursor is. The failure here is quiet. Forget to reset between requests and the new prompt's first token attends over the old prompt's keys, and no exception reports it; the model simply answers a question nobody asked.
 
@@ -328,7 +328,7 @@ with no_grad():
 
 Zero temperature chooses the largest logit and makes the comparison independent of sampling randomness. Repeating the request checks that `reset` begins again at slot 0. The ordinary forward between requests checks a different boundary: leaving the scope restores ordinary routing without erasing the cache. In a manual replay, the caller must supply both `with cache.generation():` and `start_pos=cache.seq_pos`, then advance once after the complete model call. Resetting a cursor without entering the scope would compute each token independently and would fail the equivalence check.
 
-Correctness and timing need separate evidence. The generation-speedup script in @sec-milestone-3 replays a fixed sequence through both paths, compares the logits at every position, then measures repeated replays after warmup. Holding the token sequence fixed avoids timing two different sampled workloads. No numerical speedup follows from the three-row trace alone. Longer prefixes increase the work saved, but prefix copies, matrix multiplication overhead, and the model's remaining layers determine the elapsed-time ratio. @sec-benchmarking develops the measurement method.
+Correctness and timing need separate evidence. The generation-speedup script in [Synthesis III](synthesis_03.qmd#sec-milestone-3) replays a fixed sequence through both paths, compares the logits at every position, then measures repeated replays after warmup. Holding the token sequence fixed avoids timing two different sampled workloads. No numerical speedup follows from the three-row trace alone. Longer prefixes increase the work saved, but prefix copies, matrix multiplication overhead, and the model's remaining layers determine the elapsed-time ratio. @sec-benchmarking develops the measurement method.
 
 ---
 

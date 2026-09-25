@@ -98,7 +98,7 @@ One convolution's output pixel sees a $K \times K$ patch. Stack layers and the p
 
 $$r_\ell = r_{\ell-1} + (K_\ell - 1)\prod_{i<\ell} S_i, \qquad r_0 = 1.$$
 
-Three stacked $3 \times 3$ convolutions at stride 1 see 3, then 5, then 7 pixels. One $7 \times 7$ filter would see the same patch with $49$ weights per pair of input and output channels, where the stack uses $3 \times 9 = 27$ and applies a nonlinearity between each layer; that trade is the design argument behind the VGG family of networks. Pooling layers count as well. @sec-milestone-2's network runs a $3 \times 3$ convolution and then $2 \times 2$ pooling at stride 2, so its receptive field is 3 after the convolution and $3 + (2 - 1) \cdot 1 = 4$ after the pool. A $3 \times 3$ convolution placed after that pool would add $(3 - 1) \cdot 2 = 4$ more, reaching 8 of the image's 8 pixels.
+Three stacked $3 \times 3$ convolutions at stride 1 see 3, then 5, then 7 pixels. One $7 \times 7$ filter would see the same patch with $49$ weights per pair of input and output channels, where the stack uses $3 \times 9 = 27$ and applies a nonlinearity between each layer; that trade is the design argument behind the VGG family of networks. Pooling layers count as well. [Synthesis II](synthesis_02.qmd#sec-milestone-2)'s network runs a $3 \times 3$ convolution and then $2 \times 2$ pooling at stride 2, so its receptive field is 3 after the convolution and $3 + (2 - 1) \cdot 1 = 4$ after the pool. A $3 \times 3$ convolution placed after that pool would add $(3 - 1) \cdot 2 = 4$ more, reaching 8 of the image's 8 pixels.
 
 ![**Hierarchical receptive field expansion in stacked convolutions**: A single output neuron at Layer 3 integrates information across an effective $7 \times 7$ spatial patch of the input image through intermediate $3 \times 3$ kernel stages. Stacking three $3 \times 3$ convolutions uses only 27 parameter weights per channel pair compared to 49 for a single $7 \times 7$ filter, while introducing three non-linearities.](assets/images/diagrams/09_receptive-field-expansion.svg){#fig-receptive-field-expansion width="100%" fig-alt="Diagram showing hierarchical receptive field growth from 1x1 neuron at Layer 3 to 3x3 at Layer 2, 5x5 at Layer 1, and 7x7 at Layer 0."}
 
@@ -203,7 +203,7 @@ The direct loops spend time on more than arithmetic. Each multiply requires Pyth
 
 Look at the direct routine again. The three innermost loops form a dot product between two lists of $C_{\text{in}} K^2$ numbers, the flattened patch under the filter and the flattened filter, and every output pixel is one of those dot products. We can move those dot products into one matrix operation, paying the Python loop overhead per copied patch instead of per multiply. Copy each patch the filter visits into the row of a matrix, flatten each filter into a column, and let one `matmul` do every dot product at once. The `matmul` operation from @sec-tensors already delegates matrix arithmetic to NumPy; the chapter model uses the same numerical primitive.
 
-For a $32 \times 32$ color image with sixteen $3 \times 3$ filters and padding 1, both formulations perform 442,368 multiplies. The patch matrix contains 27,648 numbers, compared with 3,072 in the input. These are exact element counts for this shape, not memory measurements or timing results. Neighboring patches repeat input pixels, up to nine appearances per interior pixel. Moving the dot products into one matrix multiplication trades that extra copying and storage for less Python work; whether it improves elapsed time must be measured on the same input, dtype, and execution environment.
+For a $32 \times 32$ color image with sixteen $3 \times 3$ filters and padding 1, both formulations perform 442,368 multiplies. The patch matrix contains 27,648 numbers, compared with 3,072 in the input: a $9\times$ memory footprint expansion because neighboring patches replicate interior pixels up to $K^2 = 9$ times. Why would silicon architectures gladly accept a nine-fold memory expansion? Because nested spatial loops access non-contiguous memory with irregular strides, causing constant cache misses and preventing instruction-level pipelining. Unrolling the patches into a contiguous 2D matrix lowers convolution into General Matrix Multiply (GEMM). Hardware accelerators (such as GPU Tensor Cores, TPU systolic arrays, and CPU AVX-512 units) execute contiguous GEMMs at thousands of times higher operational throughput than nested loops, heavily outweighing the transient memory expansion overhead.
 
 The model in @lst-conv-im2col-model walks the same output positions as the loops, but instead of multiplying it copies the patch into a row. The order inside a row (channel, then filter row, then filter column) is the order `ravel` produces and the order `reshape` gives the flattened filters, so the dot products pair the right numbers.
 
@@ -444,7 +444,7 @@ A call to `Conv2d` validates `(N, C, H, W)`, allocates its output, visits each w
 
 Pooling preserves batch and channel axes while changing the spatial dimensions. Max pooling selects a winner per window; average pooling divides among the full kernel area, including padded positions. Batch normalization preserves shape and maintains two distinct kinds of state: learned scale and shift, and running statistics updated by training forwards. A returning reader can check the spatial chain by reproducing the worked values, then confirming that the same parameters receive gradients.
 
-The im2col model gives the same forward computation a matrix shape at the cost of an explicit patch buffer. It does not replace the module's recorded operations or establish a universal speedup. @sec-tokenization changes the input domain from image grids to text and explains how strings become the integer IDs that later tensor layers consume.
+The im2col model gives the same forward computation a matrix shape at the cost of an explicit patch buffer. It does not replace the module's recorded operations or establish a universal speedup. Convolutions exploit rigid, 2D local grid geometry through translational invariance and fixed receptive fields. But how do deep learning systems model open-ended, 1D sequential structures like human language or code, where dependencies span arbitrary distances and coordinates carry variable symbolic meaning? @sec-tokenization pivots from 2D spatial pixel arrays to 1D discrete sequential data, introducing byte-pair encoding to transform raw unicode strings into the integer token identifiers that feed modern language models.
 
 ::: {#chk-milestone-04 .callout-checkpoint title="Milestone 04 Unlocked: The 1998 CNN Revolution"}
 With `Conv2d` and `MaxPool2d` complete (Modules 01 to 09), you can run Yann LeCun's LeNet architecture on handwritten digits:
@@ -453,13 +453,13 @@ With `Conv2d` and `MaxPool2d` complete (Modules 01 to 09), you can run Yann LeCu
 tito milestone run 04
 ```
 
-This milestone tests spatial weight sharing against dense multi-layer perceptrons on TinyDigits, demonstrating why convolutional inductive biases reduce parameter counts from 2,410 down to 810. See @sec-milestone-2 (Part 1) for the complete experimental comparison.
+This milestone tests spatial weight sharing against dense multi-layer perceptrons on TinyDigits, demonstrating why convolutional inductive biases reduce parameter counts from 2,410 down to 810. See [Synthesis II](synthesis_02.qmd#sec-milestone-2) for the complete experimental comparison.
 :::
 
 ---
 
 ## Further Reading
 
-- **LeCun et al.** (1998). "[Gradient-based learning applied to document recognition](https://doi.org/10.1109/5.726791)." *Proceedings of the IEEE*. LeNet, weight sharing, and pooling, the design @sec-milestone-2 tests on TinyDigits.
+- **LeCun et al.** (1998). "[Gradient-based learning applied to document recognition](https://doi.org/10.1109/5.726791)." *Proceedings of the IEEE*. LeNet, weight sharing, and pooling, the design [Synthesis II](synthesis_02.qmd#sec-milestone-2) tests on TinyDigits.
 - **Chellapilla, Puri, and Simard** (2006). "[High performance convolutional neural networks for document processing](https://inria.hal.science/inria-00112631)." *IWFHR*. The unrolling of convolution into a matrix product that this chapter models as im2col.
 - **Simonyan and Zisserman** (2015). "[Very deep convolutional networks for large-scale image recognition](https://arxiv.org/abs/1409.1556)." *ICLR*. Stacks of small filters in place of large ones, the receptive-field trade described above.

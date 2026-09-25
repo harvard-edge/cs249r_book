@@ -89,7 +89,7 @@ Calling `optimizer.step()` before `loss.backward()` has the same ownership probl
 ## The Idea
 
 ::: {.column-margin}
-**↪ Jump ahead:** @sec-milestone-1
+**↪ Jump ahead:** [Synthesis I](synthesis_01.qmd#sec-milestone-1)
 *Deploying the five-step training engine to train a multi-layer perceptron from scratch.*
 :::
 
@@ -201,6 +201,12 @@ The class body supplies checkpoint helpers and `_forward`. The latter inspects `
 Follow the values across the two helpers. In `_process_batch`, it reads `inputs.shape[0]`, calls `_forward`, and requests the scalar batch mean from `loss_fn.forward`. Multiplying `np.ones_like(loss.data)` by `batch_size` supplies a seed with exactly the loss shape required by @sec-autograd. The method leaves sample-summed derivatives in `.grad` and returns the corresponding sample-summed loss as a Python float. It neither steps the optimizer nor clears the gradients.
 
 `_optimizer_update(sample_count)` consumes those sums. It first materializes `model.parameters()` as a list, because normalization and clipping must be able to visit the same parameters even if the model returns a generator. It divides each existing gradient by `sample_count`, computes the optional clipping norm on that mean, updates the weights, and clears the buffers. Normalizing before clipping is essential: a threshold applied to a sum would become more restrictive merely because the window contained more samples. The constructor also marks model parameters trainable, but the optimizer must still own the same parameter objects. A flag can enable recording; it cannot add a missing weight to the optimizer's list.
+
+::: {#chk-training-graph-retention-leak .callout-checkpoint title="Checkpoint: The graph-retention memory leak (loss vs float(loss.data))"}
+Notice that `_trainer_process_batch` returns `float(loss.data) * batch_size` rather than the `loss` Tensor itself. In Python and PyTorch, retaining a reference to a loss Tensor in a long-lived list (such as `losses.append(loss)` or `history.append(loss)`) preserves the root of the autograd computation graph.
+
+Because `loss._creator` references the operation that produced it, and that operation references all intermediate activation buffers saved for backward, appending the Tensor prevents the garbage collector from freeing the forward graph. Memory consumption grows linearly with every mini-batch until the process crashes with Out-Of-Memory. Always extract a raw scalar float via `float(loss.data)` (or `loss.item()` in PyTorch) before accumulating loss metrics across iterations.
+:::
 
 ### One epoch
 
@@ -419,12 +425,14 @@ Evaluation retains the separation between mode and recording. [PyTorch's autogra
 
 PyTorch's [global clipping implementation](https://docs.pytorch.org/docs/main/generated/torch.nn.utils.clip_grad_norm_.html) can apply operations across lists of tensors through a `foreach` path when supported. This reduces per-tensor dispatch overhead, but it is not a guarantee that the entire clipping operation uses one GPU kernel. With mixed precision, a separate scaling mechanism may multiply the loss to keep small derivatives representable. The accumulated gradients must then be unscaled before comparing their norm to the clipping threshold, as shown in the [mixed-precision examples](https://docs.pytorch.org/docs/main/notes/amp_examples.html). This is the same requirement as normalizing sample sums before clipping in TinyTorch: the threshold must see gradients in the intended units.
 
-::: {#psp-training-mixed-precision-scaling .callout-perspective title="Production Bridge: Loss scaling in FP16 / BF16 mixed-precision training"}
-In 16-bit floating point training (FP16), gradients smaller than $2^{-24} \approx 6 \times 10^{-8}$ underflow to zero. Production engines wrap the training loop with a dynamic loss scaler (`torch.cuda.amp.GradScaler`):
+::: {#psp-training-mixed-precision-scaling .callout-perspective title="Production Bridge: Loss scaling and numeric formats (FP16 vs BF16)"}
+The choice of 16-bit numerical format fundamentally alters the training loop mechanics:
 
-1. Multiply forward loss by scale factor $S$ (e.g., $65{,}536$) before backward so gradients stay within FP16 dynamic range.
-2. Unscale gradients ($\mathbf{g} \leftarrow \mathbf{g} / S$) before gradient clipping and optimizer stepping.
-3. If nonfinite values (`inf`/`nan`) appear, skip `optimizer.step()` and halve $S$ to re-stabilize the training trajectory.
+- **IEEE FP16 (5 exponent bits, 10 mantissa bits):** With only 5 exponent bits, FP16 has a narrow dynamic range ($6 \times 10^{-5}$ to $65{,}504$). Gradients smaller than $2^{-24} \approx 6 \times 10^{-8}$ underflow directly to zero. Production engines must wrap the training loop in a dynamic loss scaler (`torch.cuda.amp.GradScaler`):
+  1. Multiply forward loss by scale factor $S$ (e.g., $65{,}536$) before backward so small gradients remain representable.
+  2. Unscale gradients ($\mathbf{g} \leftarrow \mathbf{g} / S$) before gradient clipping and optimizer stepping.
+  3. If nonfinite values (`inf`/`nan`) appear, skip `optimizer.step()` and halve $S$ to re-stabilize the trajectory.
+- **Brain Floating Point (BF16, 8 exponent bits, 7 mantissa bits):** BF16 shares the exact same 8-bit exponent and dynamic range as single-precision FP32 ($10^{-38}$ to $10^{38}$), trading off mantissa precision. Because gradients do not underflow its wide exponent range, BF16 training does not require loss scaling or a `GradScaler`, simplifying modern distributed training loops.
 :::
 
 A schedule's unit is also part of its contract. PyTorch's [CosineAnnealingLR](https://docs.pytorch.org/docs/main/generated/torch.optim.lr_scheduler.CosineAnnealingLR.html) advances on calls to `scheduler.step()`. A caller can place those calls at epoch or update boundaries, with the horizon expressed in the corresponding units. TinyTorch makes a simpler choice, looking up a rate by the epoch counter and holding it fixed throughout that pass.
@@ -460,7 +468,7 @@ tito milestone run 02  # Recreate the 1969 XOR crisis (max 75% accuracy)
 tito milestone run 03  # Solve XOR (100%) and train TinyDigits (85%+)
 ```
 
-These milestones recreate the historical breakthrough of Rumelhart, Hinton, and Williams (1986). Turn to @sec-milestone-1 to walk through the mathematical proof and execution trace of this synthesis.
+These milestones recreate the historical breakthrough of Rumelhart, Hinton, and Williams (1986). Turn to [Synthesis I](synthesis_01.qmd#sec-milestone-1) to walk through the mathematical proof and execution trace of this synthesis.
 :::
 
 ---

@@ -1,4 +1,4 @@
-# Activation Functions: Non-Linearity and Gradients {#sec-activations}
+# Activation Functions: Non-Linearity and Numerical Stability {#sec-activations}
 
 ::: {.column-margin}
 ![](assets/images/diagrams/02_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting Module 02 Activations as the active subsystem."}
@@ -7,7 +7,7 @@
 :::
 
 
-The core premise of deep learning is the ability to learn complex, non-linear representations from data. Yet if a neural network consists solely of linear transformations, matrix multiplications and bias additions, it suffers a fatal mathematical collapse: the composition of any number of linear maps is itself just a single linear map ($\mathbf{W}_2(\mathbf{W}_1 \mathbf{x} + \mathbf{b}_1) + \mathbf{b}_2 = \mathbf{W}_{\text{eff}}\mathbf{x} + \mathbf{b}_{\text{eff}}$). Without non-linearity, a 100-layer deep network has no more expressive power than a single linear layer. To bend representation space and learn intricate decision boundaries, deep architectures require **activation functions**.
+The core premise of deep learning is the ability to learn complex, non-linear representations from data. Yet if a neural network consists solely of linear transformations, matrix multiplications and bias additions, it suffers a fatal mathematical collapse: the composition of any number of linear maps is itself just a single linear map ($(\mathbf{x}\mathbf{W}_1 + \mathbf{b}_1)\mathbf{W}_2 + \mathbf{b}_2 = \mathbf{x}\mathbf{W}_{\text{eff}} + \mathbf{b}_{\text{eff}}$, with effective weight $\mathbf{W}_{\text{eff}} = \mathbf{W}_1 \mathbf{W}_2$ and bias $\mathbf{b}_{\text{eff}} = \mathbf{b}_1 \mathbf{W}_2 + \mathbf{b}_2$). Without non-linearity, a 100-layer deep network has no more expressive power than a single linear layer. To bend representation space and learn intricate decision boundaries, deep architectures require **activation functions**.
 
 In PyTorch, applying an activation function is a concise one-liner:
 
@@ -27,7 +27,7 @@ Underneath that simple call, the runtime coordinates three distinct systems conc
 
 1. **Elementwise 1D kernel execution:** The runtime dispatches an elementwise unary kernel across the contiguous float32 buffer, reading input values and writing transformed activations into a newly allocated output tensor of identical shape and strides.
 2. **Memory-bandwidth saturation:** Because an activation performs only a few arithmetic operations per float read and written, its arithmetic intensity is low. On modern accelerators with fast FP32 units, the wall-clock execution time is dominated almost entirely by the memory bus bandwidth required to move bytes to and from DRAM.
-3. **The autograd contract and saved state:** The runtime must record the operator on the autograd tape and preserve either the forward inputs or a boolean bitmask (`x > 0` for ReLU) so that reverse-mode automatic differentiation can compute exact gradients during backpropagation.
+3. **Execution contracts and activation lifetimes:** The runtime must allocate and manage output buffers for downstream consumption, while maintaining activation records that downstream optimization and automatic differentiation engines will require during training (@sec-autograd).
 
 This chapter builds the non-linear foundation of TinyTorch, implementing the core activation zoo (ReLU, Sigmoid, Tanh, GELU, and Softmax) through `Function.apply`. Before building these operators, we must inspect the mathematical collapse that occurs when non-linearities are omitted.
 
@@ -136,9 +136,7 @@ Breaking the collapse is only the first requirement. The function also has to be
 
 The **sigmoid** maps zero to $0.5$, $-1$ to about $0.269$, and $1$ to about $0.731$. Its mathematical range is $(0, 1)$, useful when an output represents a probability. The endpoints are approached but never reached in exact arithmetic; float32 can round sufficiently extreme results to exactly 0 or 1.
 
-At the ends of the curve, large input changes produce small output changes. For example, increasing the input from 5 to 6 moves the output only from about $0.9933$ to $0.9975$. This flattening is called **saturation**. At extreme inputs, float32 evaluations of exponential functions also encounter severe hardware limits.[^fn-exp-overflow] @sec-autograd explains why saturated activations can weaken the signal used to update earlier weights, a problem called vanishing gradients. Saturation is already visible in the forward values, without implementing training.
-
-[^fn-exp-overflow]: In single-precision IEEE 754 float32, the maximum finite positive value is $(2 - 2^{-23}) \times 2^{127} \approx 3.4028235 \times 10^{38}$. Because $\ln(3.4028235 \times 10^{38}) \approx 88.72284$, any unshielded evaluation of $e^x$ for $x > 88.72$ overflows to $+\infty$, quickly poisoning downstream calculations with $\text{NaN}$ or infinity.
+At the ends of the curve, large input changes produce small output changes. For example, increasing the input from 5 to 6 moves the output only from about $0.9933$ to $0.9975$. This flattening is called **saturation**. At extreme inputs, float32 evaluations of exponential functions also encounter severe hardware limits. In single-precision IEEE 754 float32, the maximum finite positive value is $(2 - 2^{-23}) \times 2^{127} \approx 3.4028235 \times 10^{38}$. Because $\ln(3.4028235 \times 10^{38}) \approx 88.72284$, any unshielded evaluation of $e^x$ for $x > 88.72$ overflows to $+\infty$. Symmetrically, for $x < -87.33$, $e^x$ underflows below the smallest positive subnormal float32 value to absolute zero ($0.0$), causing downstream unshielded logarithms to produce $-\infty$ or $\text{NaN}$. @sec-autograd explains why saturated activations can weaken the signal used to update earlier weights, a problem called vanishing gradients. Saturation is already visible in the forward values, without implementing training.
 
 ### Tanh
 
@@ -164,9 +162,9 @@ The zero branch has a cost. If every example gives a unit a negative input, its 
 
 ::: {#chk-dying-relu-saturation .callout-checkpoint title="Checkpoint: Dying ReLU and saturation traps"}
 
-**Mechanism**: If a large gradient updates weights such that an artificial neuron outputs negative values across the entire dataset, its output remains permanently $0$. Because $\frac{\partial}{\partial x}\text{ReLU}(x) = 0$ for $x < 0$, backpropagation injects zero gradient into upstream weights, creating an unrecoverable "dead unit."
+**Mechanism**: If a layer's weights and bias project representations entirely into negative space across a dataset, the unit outputs $0.0$ everywhere. Because the output remains constant zero regardless of input variation, all downstream layers receive zero information from this feature, collapsing the effective representation capacity of the network. When training begins (@sec-autograd), a zero slope on the negative branch means upstream weights receive no corrective learning signals.
 
-**Invariant check**: Saturated units (in sigmoid/tanh) or dead units (in ReLU) collapse effective model capacity. Monitoring the percentage of inactive activations during training provides an early warning before training diverges.
+**Invariant check**: Saturated units (in sigmoid/tanh) or dead units (in ReLU) collapse effective model capacity. Tracking the percentage of completely inactive activations across a batch provides an immediate diagnostic for representation collapse.
 
 :::
 
@@ -334,9 +332,9 @@ for i in range(len(v)):
           f" {gate[i]:10.4f} {g[i]:8.4f}")
 ```
 
-In line 4, `v` defines six sample points spanning negative, zero, and positive domains. Lines 5--6 compute standard Sigmoid and ReLU activations via their `forward` methods. In lines 7--8, `gate` evaluates the sigmoid factor $\sigma(1.702x)$ and `g` computes the complete GELU activation; line 9 validates the identity $g = v \cdot \text{gate}$ with `assert_allclose`.
+In line 4, `v` defines six sample points spanning negative, zero, and positive domains. Lines 5 to 6 compute standard Sigmoid and ReLU activations via their `forward` methods. In lines 7 to 8, `gate` evaluates the sigmoid factor $\sigma(1.702x)$ and `g` computes the complete GELU activation; line 9 validates the identity $g = v \cdot \text{gate}$ with `assert_allclose`.
 
-In @tbl-activation-numerical-trace (printed by lines 11--14), the GELU output is the product of the first and fourth columns. At $-1$, a small positive gate ($0.1542$) lets a small negative value through ($-0.1542$); at zero, the gate is $0.5$ but the product is still zero. These are consequences of the multiplication, not special cases added to the function.
+In @tbl-activation-numerical-trace (printed by lines 11 to 14), the GELU output is the product of the first and fourth columns. At $-1$, a small positive gate ($0.1542$) lets a small negative value through ($-0.1542$); at zero, the gate is $0.5$ but the product is still zero. These are consequences of the multiplication, not special cases added to the function.
 
 | Input $x$ | Sigmoid | ReLU | GELU gate $\sigma(1.702x)$ | GELU output |
 | :---: | :---: | :---: | :---: | :---: |
