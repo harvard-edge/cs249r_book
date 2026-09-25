@@ -107,12 +107,6 @@ The seeded experiment ends with an RMS of 83.96 for `plain`, about 76 times its 
 *Autoregressive text generation and next-token probability distribution sampling with TinyGPT.*
 :::
 
-
-::: {.column-margin}
-![](assets/images/diagrams/13_transformers-margin-pre-ln.svg){width="100%" fig-alt="Pre-LN block diagram showing the clean identity skip connection alongside the LayerNorm and sub-layer computation path."}
-*Pre-LN residual gradient highway ($I + J_l$).*
-:::
-
 ### The residual stream
 
 A **residual connection** passes a layer's input around the layer and adds it to the layer's output:
@@ -126,6 +120,11 @@ The gradient shows why this helps with depth. Differentiating the equation gives
 $$\frac{\partial \mathcal{L}}{\partial x_l} = \frac{\partial \mathcal{L}}{\partial x_{l+1}} \left( I + \frac{\partial f_l}{\partial x_l} \right)$$
 
 where $\mathcal{L}$ is the loss and $I$ is the identity matrix. The identity term means the gradient arriving at layer $l+1$ reaches layer $l$ unchanged, with the layer's own contribution added on. Across $N$ residual sub-layers the chain rule still multiplies $N$ Jacobians, the matrices of output derivatives with respect to input features, but each has the form $I + J_l$. Expanding that product reveals a direct identity contribution as well as paths through the learned updates. This route makes gradient propagation easier; it does not guarantee that gradients cannot grow, shrink, or cancel. In code this needs nothing new. The autograd mechanism from @sec-autograd already sums the gradients of a tensor that is used on two paths, and $x_l$ is used on two paths: once into $f_l$, once straight into the addition.
+
+::: {.column-margin}
+![](assets/images/diagrams/13_transformers-margin-pre-ln.svg){width="100%" fig-alt="Pre-LN block diagram showing the clean identity skip connection alongside the LayerNorm and sub-layer computation path."}
+*Pre-LN residual gradient highway ($I + J_l$).*
+:::
 
 A useful picture is to think of the residual path as a **stream**, a $D$-dimensional scratchpad that each token carries through the whole network. Each sub-layer reads the stream, computes a delta, and writes the delta back by addition. An update can cancel an earlier value by adding its negative, so the stream is not an immutable record. The useful guarantee is structural: the old vector reaches the addition directly instead of having to pass through the learned transformation. A 12-block GPT has 24 sub-layers reading and writing the same stream.
 
@@ -159,12 +158,6 @@ Why did the deep learning community migrate universally from original Post-LN tr
 
 ### The MLP
 
-::: {.column-margin}
-![](assets/images/diagrams/13_transformers-margin-mlp-expansion.svg){width="100%" fig-alt="Architecture card showing MLP 4x channel expansion from D to 4D with GELU activation and contraction back to D, allocating 8D squared weights."}
-
-*MLP Channel Expansion: Position-wise feedforward network widens features from D to 4D for non-linear separation before returning to stream dimension D.*
-:::
-
 The second sub-layer supplies the per-token feature transformation missing from attention alone. The **MLP** (multi-layer perceptron, the transformer literature's name for a two-layer feed-forward network) widens each token's vector from $D$ to $4D$, applies GELU from @sec-activations, and projects back to $D$:[^fn-mlp-4d-expansion]
 
 [^fn-mlp-4d-expansion]: The $4\times$ hidden expansion ($d_{\text{ff}} = 4D$) originated in Vaswani et al. (2017) as an empirical heuristic balancing non-linear representation capacity against parameter budget. It allocates $2 \times D \times 4D = 8D^2$ weights to the feed-forward network, exactly double the $4D^2$ projection weights of Multi-Head Attention. Modern architectures using 3-matrix gated activations like SwiGLU (e.g. LLaMA) scale the expansion to approximately $\frac{8}{3}D$ so that $3 \times D \times \frac{8}{3}D = 8D^2$, maintaining the exact same parameter and FLOP allocation.
@@ -173,6 +166,12 @@ The second sub-layer supplies the per-token feature transformation missing from 
 $$\text{MLP}(x) = \text{GELU}(x W_1 + b_1)\, W_2 + b_2, \qquad W_1 \in \mathbb{R}^{D \times 4D},\; W_2 \in \mathbb{R}^{4D \times D}$$
 
 Here $x$ is one token's row vector, as in the attention projection $q_t = x_t W_q$. The same $W_1, W_2$ apply to every position, and no position sees any other. The division of labor inside a block is therefore clean. Attention decides which tokens' information to gather; the MLP decides what to do with what was gathered, one token at a time.
+
+::: {.column-margin}
+![](assets/images/diagrams/13_transformers-margin-mlp-expansion.svg){width="100%" fig-alt="Architecture card showing MLP 4x channel expansion from D to 4D with GELU activation and contraction back to D, allocating 8D squared weights."}
+
+*MLP Channel Expansion: Position-wise feedforward network widens features from D to 4D for non-linear separation before returning to stream dimension D.*
+:::
 
 ### Assembling the model
 
