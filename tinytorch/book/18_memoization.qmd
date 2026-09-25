@@ -211,17 +211,17 @@ The scope changes one flag, `_generation_active`. Entering it saves the flag's p
 
 ### Prefill and decode through the same step
 
-::: {.column-margin}
-![](assets/images/diagrams/18_memoization-margin-prefill-decode.svg){width="100%" fig-alt="Comparison card contrasting prefill phase compute-bound parallel GEMM against decode phase memory-bandwidth-bound sequential GEMV."}
-
-*Prefill vs Decode Phases: Prefill processes prompt tokens in parallel (S_q = P) saturating compute via GEMM, whereas decode generates single tokens (S_q = 1) bound by memory bandwidth.*
-:::
-
 A request arrives as a prompt of $P$ tokens, and only then does the model produce one token at a time. [Synthesis II](synthesis_02.qmd#sec-milestone-2) named the two phases prefill and decode. The cache is what makes decode cheap, but prefill has to fill it first, and the request after this one must not see this one's tokens.
 
 The tempting way to build that is two paths, the full-sequence attention of @sec-attention for the prompt and the cached step for decode, with the keys and values handed from one to the other. Two paths means two places for the ordering bug to hide and a hand-off that has to agree about where the cursor is. The failure here is quiet. Forget to reset between requests and the new prompt's first token attends over the old prompt's keys, and no exception reports it; the model simply answers a question nobody asked.
 
 The module therefore runs both phases inside one generation scope, with one token per call, `advance` once per token, and `reset` once at the top. Attaching the cache is a loop over the blocks.
+
+::: {.column-margin}
+![](assets/images/diagrams/18_memoization-margin-prefill-decode.svg){width="100%" fig-alt="Comparison card contrasting prefill phase compute-bound parallel GEMM against decode phase memory-bandwidth-bound sequential GEMV."}
+
+*Prefill vs Decode Phases: Prefill processes prompt tokens in parallel (S_q = P) saturating compute via GEMM, whereas decode generates single tokens (S_q = 1) bound by memory bandwidth.*
+:::
 
 {{< include _listings/18_memoization/enable_kv_cache.qmd >}}
 
@@ -341,15 +341,15 @@ Correctness and timing need separate evidence. The generation-speedup script in 
 
 ## From TinyTorch to Production
 
-Production serving preserves the per-layer keys and values while changing their allocation and access. Hugging Face's [cache strategy documentation](https://huggingface.co/docs/transformers/en/kv_cache) distinguishes a growing `DynamicCache` from a preallocated `StaticCache`. Fixed capacity can support compilation with stable shapes, at the cost of reserving unused positions. TinyTorch preallocates its persistent buffers too, but constructs copies of the growing prefix for attention; its temporary array shapes still change. Fixed storage alone does not establish a fixed-shape compiled decode path.
-
-A production implementation can also prefill several prompt positions together. It computes their projections as a matrix operation and applies a causal mask so that each prompt row sees only its predecessors and itself. Decode then uses one new query against the stored prefix. This separates the time needed to process the prompt from the time for each later output token. TinyTorch's token-by-token prefill exposes the same position invariant with one loop, at the cost of serial calls.
-
 ::: {.column-margin}
 ![](assets/images/diagrams/18_memoization-margin-memory-scaling.svg){width="100%" fig-alt="KV cache memory scaling breakdown showing per-token byte formula and scaling comparison between model weights and KV cache memory footprint."}
 
 *KV Cache Memory Scaling: Footprint scales as 2 · B · L · H_kv · S · d_k · b bytes. At long context and high concurrency, KV cache size outgrows model weights, motivating grouped-query attention and paged allocation.*
 :::
+
+Production serving preserves the per-layer keys and values while changing their allocation and access. Hugging Face's [cache strategy documentation](https://huggingface.co/docs/transformers/en/kv_cache) distinguishes a growing `DynamicCache` from a preallocated `StaticCache`. Fixed capacity can support compilation with stable shapes, at the cost of reserving unused positions. TinyTorch preallocates its persistent buffers too, but constructs copies of the growing prefix for attention; its temporary array shapes still change. Fixed storage alone does not establish a fixed-shape compiled decode path.
+
+A production implementation can also prefill several prompt positions together. It computes their projections as a matrix operation and applies a causal mask so that each prompt row sees only its predecessors and itself. Decode then uses one new query against the stored prefix. This separates the time needed to process the prompt from the time for each later output token. TinyTorch's token-by-token prefill exposes the same position invariant with one loop, at the cost of serial calls.
 
 The memory budget follows directly from the reference layout. For $L$ layers, $H$ key/value heads, head width $d_k$, and $b$ bytes per value, each cached position requires $2LHd_kb$ bytes per sequence. Grouped-query attention lets multiple query heads share a key/value head, reducing $H$ in this expression. Quantized caches reduce $b$ by approximating stored values. A sliding window instead limits how many positions remain visible. TinyTorch implements none of these storage changes; its cache retains float32 rows up to its fixed capacity and raises an error when full.
 
