@@ -83,7 +83,9 @@ A loss function compares predictions with targets and returns an error score. Th
 
 $$\mathcal{L}_{\text{MSE}} = \frac{1}{N} \sum_{i=1}^{N} (\hat{y}_i - y_i)^2$$
 
-Here $N$ is the number of predictions, $\hat{y}_i$ is the model's $i$-th prediction, and $y_i$ is the true value. Squaring makes the error positive and punishes large misses more than small ones. Dividing by $N$ keeps the units as squared error per prediction, so a larger batch does not automatically produce a larger loss. Different samples can still have different mean errors. `MSELoss` will be a few lines, although very large differences can still overflow when squared. Averaging also fixes the meaning of the returned number: duplicating a batch leaves its mean loss unchanged.
+Here $N$ is the number of predictions, $\hat{y}_i$ is the model's $i$-th prediction, and $y_i$ is the true value. Squaring makes the error positive and punishes large misses more than small ones. Dividing by $N$ keeps the units as squared error per prediction, so a larger batch does not automatically produce a larger loss. Different samples can still have different mean errors. `MSELoss` will be a few lines, although very large differences can still overflow when squared.[^fn-mse-float32-precision] Averaging also fixes the meaning of the returned number: duplicating a batch leaves its mean loss unchanged.
+
+[^fn-mse-float32-precision]: In float32 arithmetic, squaring differences between large numbers of similar magnitude (for instance, $10000.02 - 10000.00$) risks catastrophic cancellation in the 24-bit mantissa. High-precision loss kernels accumulate sums in float64 before dividing by $N$ to preserve numerical precision.
 
 ### Cross-entropy scores the probability of the right answer
 
@@ -97,9 +99,11 @@ Given the true class $t$, **cross-entropy** is the negative logarithm of the pro
 
 $$\mathcal{L}_{\text{CE}} = -\log p_t$$
 
-A few values make the shape of this function clear. If the model gives the right class probability 0.99, the loss is 0.01. At 0.5 it is 0.69. At 0.1 it is 2.30, and at 0.01 it is 4.61. The loss is near zero for a confident correct answer and grows without bound for a confident wrong one, which is exactly the pressure we want training to apply. Here and throughout the chapter, `log` means the natural logarithm, the inverse of the exponential. Statisticians call this quantity the negative log-likelihood,[^fn-nll-cross-entropy] and over a batch of $N$ examples we average it, for the same reason MSE divides by $N$.
+A few values make the shape of this function clear. If the model gives the right class probability 0.99, the loss is 0.01. At 0.5 it is 0.69. At 0.1 it is 2.30, and at 0.01 it is 4.61. The loss is near zero for a confident correct answer and grows without bound for a confident wrong one, which is exactly the pressure we want training to apply. Here and throughout the chapter, `log` means the natural logarithm, the inverse of the exponential. Statisticians call this quantity the negative log-likelihood,[^fn-nll-cross-entropy] and over a batch of $N$ examples we average it, for the same reason MSE divides by $N$.[^fn-kl-divergence-cross-entropy]
 
 [^fn-nll-cross-entropy]: **Negative log-likelihood** (NLL): the negative logarithm of the probability a model assigns to the outcome that actually occurred. For class-index targets without additional weighting or smoothing, this is the log-softmax, select, negate, and average computation implemented below.
+
+[^fn-kl-divergence-cross-entropy]: Mathematically, cross-entropy relates to Kullback-Leibler (KL) divergence by $H(p, q) = H(p) + D_{\text{KL}}(p \parallel q)$, where $p$ is the target distribution and $q$ is the model prediction. Because one-hot targets have zero entropy ($H(p) = 0$), minimizing cross-entropy directly minimizes the KL divergence between predictions and true labels.
 
 The three loss functions in TinyTorch partition the core supervised learning workloads as summarized in @tbl-loss-taxonomy.
 
@@ -110,6 +114,10 @@ The three loss functions in TinyTorch partition the core supervised learning wor
 | `CrossEntropyLoss` | Class indices $\{0, \dots, C-1\}$ | Unbounded logits $\mathbb{R}^C$ | Max-shifted log-softmax & gather | Multi-class classification |
 
 : **Loss function taxonomy**: Architectural contracts, input domains, and numerical stabilization strategies across TinyTorch losses. {#tbl-loss-taxonomy tbl-colwidths="[33,16,17,20,14]"}
+
+::: {.callout-tip title="Pause & Predict: The Silent Log-Softmax Cancellation"}
+Before deriving the max-shift stabilization, consider what happens when evaluating $\log(\text{softmax}(\mathbf{z}))$ for extreme logits $\mathbf{z} = [1000, 1002, 1001]$. If intermediate probabilities underflow to $0.0$ or overflow to `inf`, what happens when you take the logarithm? Can mathematical rearrangement compute the exact logarithm without ever materializing an intermediate exponential?
+:::
 
 ### The fix: shift before you exponentiate
 
@@ -151,15 +159,17 @@ Module 04 follows the pattern @sec-activations set. Each loss is a pair of class
 
 The loss is the boundary between scoring predictions and deciding how to improve them. This module enforces a strict architectural contract: the loss must collapse multi-dimensional predictions into a single 0-dimensional scalar `Tensor` of shape `()`.
 
+This scalar reduction is not merely a design preference; it is a foundational systems imperative for scalable automatic differentiation. If a loss function returned a vector of per-sample errors of shape $(B,)$ for a batch size $B=128$ evaluating a modest model with $P = 100 \times 10^6$ parameters, reverse-mode automatic differentiation would be forced to compute and materialize a full Jacobian matrix of partial derivatives of shape $(B, P)$. That Jacobian would require $128 \times 100{,}000{,}000 \times 4\text{ bytes} \approx 51.2\text{ GB}$ of DRAM allocations! By collapsing the objective to a single scalar through batch averaging ($\frac{1}{B}\sum_{i=1}^B \mathcal{L}_i$), reverse-mode accumulation collapses the entire backward pass to a single vector-Jacobian product, reducing the required gradient memory from $51.2\text{ GB}$ to a single parameter-sized buffer of $400\text{ MB}$.
+
+In @sec-autograd, we formalize this through the **scalar loss contract**: because the objective function $\mathcal{L}$ evaluates to a 0-D scalar, reverse accumulation seeds the backward graph traversal with the scalar identity seed $\partial \mathcal{L} / \partial \mathcal{L} = 1.0$. This allows TinyTorch to propagate gradient vectors directly backward through every layer without allocating multi-gigabyte Jacobian matrices.
+
+The cheaper thing to return would be a bare Python float, and for this chapter a float would work. It stops working in @sec-autograd, where `backward()` walks from the loss back through every operation that produced it, and a float has no place to record where it came from. So every loss returns a `Tensor` holding a single value, and `apply` guarantees it: whatever the operation's `forward` returns, even a NumPy scalar, comes back wrapped. `MSELoss` is the smallest pair that satisfies the contract.
+
 ::: {.column-margin}
 ![](assets/images/diagrams/04_losses-margin-jacobian.svg){width="100%" fig-alt="Comparison of vector loss allocating a 51.2 GB Jacobian matrix versus scalar loss using a 400 MB vector-Jacobian product buffer."}
 
 *Scalar Loss Reduction Invariant: Collapsing multi-sample predictions to a scalar prevents materializing a 51.2 GB Jacobian during reverse-mode autograd.*
 :::
-
-This scalar reduction is not merely a design preference; it is a foundational systems imperative for scalable automatic differentiation. If a loss function returned a vector of per-sample errors of shape $(B,)$ for a batch size $B=128$ evaluating a modest model with $P = 100 \times 10^6$ parameters, reverse-mode automatic differentiation would be forced to compute and materialize a full Jacobian matrix of partial derivatives of shape $(B, P)$. That Jacobian would require $128 \times 100{,}000{,}000 \times 4\text{ bytes} \approx 51.2\text{ GB}$ of DRAM allocations! By collapsing the objective to a single scalar through batch averaging ($\frac{1}{B}\sum_{i=1}^B \mathcal{L}_i$), reverse-mode accumulation collapses the entire backward pass to a single vector-Jacobian product, reducing the required gradient memory from $51.2\text{ GB}$ to a single parameter-sized buffer of $400\text{ MB}$.
-
-The cheaper thing to return would be a bare Python float, and for this chapter a float would work. It stops working in @sec-autograd, where `backward()` walks from the loss back through every operation that produced it, and a float has no place to record where it came from. So every loss returns a `Tensor` holding a single value, and `apply` guarantees it: whatever the operation's `forward` returns, even a NumPy scalar, comes back wrapped. `MSELoss` is the smallest pair that satisfies the contract.
 
 {{< include _listings/04_losses/MSEFunction.qmd >}}
 
@@ -191,7 +201,7 @@ Notice two things. The `keepdims=True` keeps the per-row maximum as a column of 
 
 Labels identify classes by index: with three classes, each target must be 0, 1, or 2. @sec-dataloader will build the loader that keeps these labels paired with the corresponding inputs. With log-probabilities in hand, the loss has to pick, for row `i`, the entry in column `target[i]`, negate it, and average over the batch.
 
-The textbook formula does not say "pick." It says $-\sum_i y_i \log p_i$, where a one-hot[^fn-one-hot-targets] target puts a 1 at the correct class and zeros elsewhere. For target class 2 among three classes, that vector is `[0, 0, 1]`. Multiplying by it retains only the third log-probability. Expanding targets into an $[N, C]$ matrix of zeros with a single 1 per row, multiplying it into the log-probabilities elementwise, and summing across columns incurs $N \times C$ multiplications to keep $N$ numbers. For vocabulary sizes in language models ($C = 32{,}000$) and batch sizes $N = 2048$, allocating an explicit one-hot matrix demands $2048 \times 32{,}000 \times 4\text{ bytes} \approx 262\text{ MB}$ of memory and executes $65.5\text{ million}$ multiplications, of which $99.997\text{ percent}$ multiply by zero. Can we select the target entries directly without allocating that matrix?
+The textbook formula does not say "pick." It says $-\sum_i y_i \log p_i$, where a one-hot[^fn-one-hot-targets] target puts a 1 at the correct class and zeros elsewhere. For target class 2 among three classes, that vector is `[0, 0, 1]`. Multiplying by it retains only the third log-probability. Expanding targets into an $[N, C]$ matrix of zeros with a single 1 per row, multiplying it into the log-probabilities elementwise, and summing across columns incurs $N \times C$ multiplications to keep $N$ numbers. For vocabulary sizes in language models ($C = 32{,}000$) and batch sizes $N = 2048$, allocating an explicit one-hot matrix demands $2048 \times 32{,}000 \times 4\text{ bytes} \approx 262\text{ MB}$ of memory and executes $65.5\text{ million}$ multiplications, of which $99.997\text{ percent}$ multiply by zero. Can we select the target entries directly without allocating that matrix?[^fn-gather-bandwidth]
 
 NumPy can. Indexing an array with two integer arrays of the same length pairs them up elementwise, so `log_probs[np.arange(N), target_idx]` pairs row `i` with column `target_idx[i]` and selects `N` entries into a new vector of shape `(N,)`. For `N=2` and targets `[0, 1]`, the pairs are `(row 0, column 0)` and `(row 1, column 1)`. Computing the log-probabilities still visits all `N*C` logits; the saving is in avoiding hundreds of megabytes of intermediate one-hot memory traffic and eliminating redundant arithmetic.
 
@@ -204,6 +214,8 @@ NumPy can. Indexing an array with two integer arrays of the same length pairs th
 Targets represent integer class IDs, but their storage is float32: `Tensor([0, 1])` contains `[0.0, 1.0]`. `targets.astype(int)` creates the integer array required by the gather. The expected shape is `(N,)`, paired with logits of shape `(N, C)`. Before conversion, the operation checks that the original labels are finite whole numbers and rejects IDs outside the class range. Nothing builds a one-hot matrix merely to multiply most of it by zero. The range check exists because NumPy treats a negative index as counting from the end, so a corrupted label of `-1` would silently select the last class instead of failing. After validation and conversion, the operation calls `LogSoftmax().forward` on the array directly. Calling the tensor wrapper here would add an unnecessary Tensor boundary inside an array computation. The selected log-probabilities form a temporary `(N,)` vector; negating its mean returns a scalar to `apply`, which wraps it for the caller. This forward method does not cache the log-probabilities or change the logits or targets. @sec-autograd will add a derivative rule that recomputes the probabilities from the saved inputs.
 
 [^fn-one-hot-targets]: **One-hot**: a vector with a 1 in the position of the correct class and 0 everywhere else, so a label of class 2 among 5 classes becomes `[0, 0, 1, 0, 0]`. For a batch of $N$ examples it takes $N \times C$ numbers to store what $N$ integers already say, which is why the code indexes with the integers instead.
+
+[^fn-gather-bandwidth]: In hardware terms, direct integer index gathering translates to indirect memory addressing (`log_probs[i * C + target[i]]`). Instead of streaming $B \times C$ floats across the memory bus to multiply by sparse zeros, the memory controller transfers only $B$ floats, slashing DRAM traffic by a factor of $C$ (over $32{,}000\times$ in large vocabulary models).
 
 ### `BinaryCrossEntropyLoss`, finite logs through clipping
 
