@@ -123,6 +123,12 @@ Notice the spatial collapse: the two off-diagonal points $(1, 0)$ and $(0, 1)$ m
 
 Breaking the collapse is only the first requirement. The function also has to be inexpensive to evaluate across a whole array and responsive enough that changing the incoming values can change the result. A nearly flat function loses that responsiveness. @sec-autograd will turn this observation into derivatives and gradients, the quantities used to decide how weights should change during training. Here the output values and the shapes of the curves are enough to compare the choices in @tbl-activation-zoo.
 
+::: {.column-margin}
+![](assets/images/diagrams/02_activation-margin-sigmoid.svg){width="100%" fig-alt="Sigmoid activation S-curve showing midpoint (0, 0.5) and saturation zones approaching 0 and 1."}
+
+*Sigmoid squashes inputs to $(0, 1)$ with maximum gradient $0.25$ at origin, saturating in extreme tails.*
+:::
+
 | Activation | Rule | Output behavior | Limitation |
 | :--- | :--- | :--- | :--- |
 | Sigmoid | $1/(1 + e^{-x})$ | Squashes toward 0 and 1 | Nearly flat in both tails |
@@ -135,12 +141,6 @@ Breaking the collapse is only the first requirement. The function also has to be
 ### Sigmoid and saturation
 
 The **sigmoid** maps zero to $0.5$, $-1$ to about $0.269$, and $1$ to about $0.731$. Its mathematical range is $(0, 1)$, useful when an output represents a probability. The endpoints are approached but never reached in exact arithmetic; float32 can round sufficiently extreme results to exactly 0 or 1.
-
-::: {.column-margin}
-![](assets/images/diagrams/02_activation-margin-sigmoid.svg){width="100%" fig-alt="Sigmoid activation S-curve showing midpoint (0, 0.5) and saturation zones approaching 0 and 1."}
-
-*Sigmoid squashes inputs to $(0, 1)$ with maximum gradient $0.25$ at origin, saturating in extreme tails.*
-:::
 
 At the ends of the curve, large input changes produce small output changes. For example, increasing the input from 5 to 6 moves the output only from about $0.9933$ to $0.9975$. This flattening is called **saturation**. At extreme inputs, float32 evaluations of exponential functions also encounter severe hardware limits. In single-precision IEEE 754 float32, the maximum finite positive value is $(2 - 2^{-23}) \times 2^{127} \approx 3.4028235 \times 10^{38}$. Because $\ln(3.4028235 \times 10^{38}) \approx 88.72284$, any unshielded evaluation of $e^x$ for $x > 88.72$ overflows to $+\infty$. Symmetrically, for $x < -87.33$, $e^x$ underflows below the smallest positive subnormal float32 value to absolute zero ($0.0$), causing downstream unshielded logarithms to produce $-\infty$ or $\text{NaN}$. @sec-autograd explains why saturated activations can weaken the signal used to update earlier weights, a problem called vanishing gradients. Saturation is already visible in the forward values, without implementing training.
 
@@ -315,12 +315,6 @@ assert probabilities.shape == scores.shape
 
 A useful trace follows the intermediate value that selects the output. Sigmoid forms a bounded exponential; GELU forms a sigmoid gate and multiplies by the original input. The following program sends six values through the array-level operations, just as `apply` does. Every array has shape `(6,)`.
 
-::: {.column-margin}
-![](assets/images/diagrams/02_activation-margin-gelu.svg){width="100%" fig-alt="Plot comparing GELU curvature with ReLU, highlighting the smooth negative dip to -0.17 at x = -0.75."}
-
-*GELU allows small negative gradients through its -0.17 dip before asymptotically saturating at zero.*
-:::
-
 ```python
 import numpy as np
 from tinytorch.core.activations import SigmoidFunction, ReLUFunction, GELUFunction
@@ -339,14 +333,20 @@ for i in range(len(v)):
 ```
 
 ::: {.column-margin}
-![](assets/images/diagrams/02_activation-margin-vanishing-gradients.svg){width="100%" fig-alt="Plot comparing gradient decay across 10 layers for Sigmoid (0.25^10 ≈ 9.5e-7) versus ReLU (1.0^10 = 1.0)."}
+![](assets/images/diagrams/02_activation-margin-gelu.svg){width="100%" fig-alt="Plot comparing GELU curvature with ReLU, highlighting the smooth negative dip to -0.17 at x = -0.75."}
 
-*Sigmoid's maximum slope ($0.25$) compounds across 10 layers to $9.5\times10^{-7}$, causing vanishing gradients. ReLU maintains unit slope ($1.0$), preserving signal flow.*
+*GELU allows small negative gradients through its -0.17 dip before asymptotically saturating at zero.*
 :::
 
 In line 4, `v` defines six sample points spanning negative, zero, and positive domains. Lines 5 to 6 compute standard Sigmoid and ReLU activations via their `forward` methods. In lines 7 to 8, `gate` evaluates the sigmoid factor $\sigma(1.702x)$ and `g` computes the complete GELU activation; line 9 validates the identity $g = v \cdot \text{gate}$ with `assert_allclose`.
 
 In @tbl-activation-numerical-trace (printed by lines 11 to 14), the GELU output is the product of the first and fourth columns. At $-1$, a small positive gate ($0.1542$) lets a small negative value through ($-0.1542$); at zero, the gate is $0.5$ but the product is still zero. These are consequences of the multiplication, not special cases added to the function.
+
+::: {.column-margin}
+![](assets/images/diagrams/02_activation-margin-vanishing-gradients.svg){width="100%" fig-alt="Plot comparing gradient decay across 10 layers for Sigmoid (0.25^10 ≈ 9.5e-7) versus ReLU (1.0^10 = 1.0)."}
+
+*Sigmoid's maximum slope ($0.25$) compounds across 10 layers to $9.5\times10^{-7}$, causing vanishing gradients. ReLU maintains unit slope ($1.0$), preserving signal flow.*
+:::
 
 | Input $x$ | Sigmoid | ReLU | GELU gate $\sigma(1.702x)$ | GELU output |
 | :---: | :---: | :---: | :---: | :---: |
