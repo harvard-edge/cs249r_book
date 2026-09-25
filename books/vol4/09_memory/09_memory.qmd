@@ -32,9 +32,10 @@ format:
 \end{marginfigure}
 :::
 
-_How fast does a spatial belief turn into dangerous fiction once a sensor leaves an object behind?_
+_How quickly does a robot's spatial memory decay into dangerous fiction once moving objects exit the field of view, and how does a machine track what it cannot see?_
 
-In end-to-end learning architectures, attention mechanisms retain latent spatial features, but physical robots must maintain explicit, metric 3D geometric state representations to guarantee collision-free navigation and manipulation when objects exit the camera's field of view. Whether using voxel grids, truncated signed distance fields (TSDF), or neural radiance representations, spatial memory decays over physical time as dynamic agents move unobserved and sensor calibration drifts. Managing spatial memory requires strict query-latency budgets, real-time spatial decay models, and fast collision checking to ensure safety filters evaluate fresh geometric invariants rather than obsolete assumptions.
+Biological organisms navigate dynamic environments effortlessly because their brains maintain persistent spatial representations of objects, surfaces, and obstacles long after direct sensory contact is lost. In contrast, standard vision policies operate almost entirely reactively, processing instantaneous frames and discarding spatial context the moment an object leaves the camera's limited field of view. When an autonomous forklift turns away from a pedestrian, or a mobile manipulator places a tool behind its mast, a memoryless policy behaves as if those physical entities have ceased to exist. Conversely, treating stale observations as permanently static causes robots to plan trajectories around phantom obstacles that have long since moved. A physical AI system requires a spatial memory architecture that bridges this gap: maintaining a persistent 3D representation of the physical world while dynamically modeling epistemic uncertainty and temporal decay. Spatial memory must distinguish between permanent architectural features that remain invariant, dynamic obstacles whose positions evolve along stochastic trajectories, and unobserved regions where uncertainty compounds with elapsed time. This chapter develops the systems architecture for embodied spatial memory, combining voxelized occupancy representations, neural radiance fields, and spatial belief state machines to provide planning algorithms with robust, uncertainty-aware representations of the unobserved world.
+
 {{< pagebreak >}}
 
 ::: {.callout-learning-objectives}
@@ -1045,24 +1046,11 @@ Frozen transforms, phantom tracks, misassigned frames, and overconfident predict
 
 ## The Scene Memory State Schema and Contract {#sec-memory-spatial-state-schema}
 
-The belief about the latch-slot finger in @sec-memory-belief-through-occlusion now carries everything a consumer needs to judge it, and the **Scene Memory State record** of \ref{dfn-memory-spatial-belief-contract} is the formal cyber-physical contract—the eighth in the volume's 14-record lineage—in which these quantities travel together. The Scene Memory State unifies discrete tracked entities (the spatial belief record) and continuous volumetric representations (@tbl-09-schema-volumetric-belief) under a common temporal and physical accounting framework. From the observation contracts of @sec-perception-observation-contract the record inherits each observation's capture epoch, clock identifier, and conversion bound, so the permission controller can convert the capture clock to its own monotonic clock with a bounded error before it evaluates age. Memory contributes five fields of its own: an estimate epoch that dates computation without renewing physical evidence; an uncertainty-growth bound that projects error expansion across blind intervals; a validity region that states where that bound holds; a physical invalidation deadline; and a collision query latency budget guaranteeing that reactive control loops can evaluate distance fields in under $2\ \mu\text{s}$. A record's lifecycle follows a deterministic four-state machine:
+The belief about the latch-slot finger in @sec-memory-belief-through-occlusion now carries everything a consumer needs to judge it, and the **Scene Memory State record** of \ref{dfn-memory-spatial-belief-contract} is the formal cyber-physical contract—the eighth in the volume's 14-record lineage—in which these quantities travel together. The Scene Memory State unifies discrete tracked entities (the spatial belief record) and continuous volumetric representations (@tbl-09-schema-volumetric-belief) under a common temporal and physical accounting framework. From the observation contracts of @sec-perception-observation-contract the record inherits each observation's capture epoch, clock identifier, and conversion bound, so the permission controller can convert the capture clock to its own monotonic clock with a bounded error before it evaluates age. Memory contributes five fields of its own: an estimate epoch that dates computation without renewing physical evidence; an uncertainty-growth bound that projects error expansion across blind intervals; a validity region that states where that bound holds; a physical invalidation deadline; and a collision query latency budget guaranteeing that reactive control loops can evaluate distance fields in under $2\ \mu\text{s}$. A record's lifecycle follows the deterministic four-state machine in @fig-09-spatial-belief-state-machine:
 
-```
-           Fresh Observation (t_0 renewed)
-     ┌───────────────────────────────────────────┐
-     │                                           │
-     ▼                                           │
-┌─────────┐   Sensor Occlusion   ┌──────────┐    │
-│  VALID  │ ───────────────────> │ DEGRADED │ ───┤
-└─────────┘  (E(Δt) ≤ E_max)     └──────────┘    │
-     │                                │          │
-     │ Observability                  │ E(Δt) >  │
-     │ Loss                           │ E_max    │
-     ▼                                ▼          │
-┌──────────────┐                 ┌─────────┐     │
-│ UNOBSERVABLE │                 │ EXPIRED │ ────┘
-└──────────────┘                 └─────────┘
-```
+::: {#fig-09-spatial-belief-state-machine fig-env="figure" fig-pos="tb" fig-cap="**Spatial belief state machine and transition invariants**: Deterministic four-state machine governing the lifecycle of a spatial belief record. Transitions from VALID to DEGRADED or EXPIRED model bounded error growth during occlusion; transitions back to VALID require fresh, innovation-gated physical sensor observations." fig-alt="Deterministic four-state machine governing the lifecycle of a spatial belief record. States include VALID, DEGRADED, EXPIRED, and UNOBSERVABLE, connected by transitions for sensor occlusion, staleness timeout, observability loss, and return transitions for fresh physical sensor observations."}
+![](images/svg/fig09_spatial_belief_state_machine.svg){width=95%}
+:::
 
 The transitions enforce strict physical invariants:
 
@@ -1142,7 +1130,7 @@ The same form carries the belief that @sec-intent builds on, the pose of the mug
 
 A consumer of either record converts the capture epoch to its own clock, adds the clock-error margin to the age, checks the lifecycle status and the validity region, and only then evaluates $E(t)$ against the proposed motion's tolerance. Passing these checks admits the belief to the **separate permission decision**; it does not actuate the robot. On expiry or unobservability, the controller rejects dependent proposals and selects a validated fallback whose braking, hold, or search behavior remains physically feasible.
 
-::: {#chk-mem-observability-state-schema .callout-checkpoint title="Belief expiry, observability, and the belief record"}
+::: {#chk-mem-observability-state-schema .callout-checkpoint title="Belief expiry and the memory record"}
 
 Before turning to the fallacies that arise when valid records are trusted too far, verify your understanding of evidence epochs, belief expiry, observability limits, and the belief record:
 

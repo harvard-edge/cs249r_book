@@ -7381,6 +7381,7 @@ class ValidateCommand:
         "callout-case-study",
         "callout-war-story",
         "callout-warning",
+        "callout-caution",
     }
     _CALLOUT_TITLE_OPTIONAL_CLASSES = {"callout-learning-objectives"}
 

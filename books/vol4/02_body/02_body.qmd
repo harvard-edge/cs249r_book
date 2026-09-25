@@ -32,9 +32,10 @@ format:
 \end{marginfigure}
 :::
 
-_What physical limits bound a learned policy the moment its outputs command actuators?_
+_Why must an AI software engineer master mechanical inertia, winding thermal limits, and voltage sag before writing a single line of motor control policy?_
 
-A moving machine cannot pause for software. In simulation frameworks, physics waits while a policy completes inference; in the physical world, conservation of momentum ($p = mv$) and finite motor torque ($|\tau| \le \tau_{\max}$) govern the plant continuously regardless of algorithmic delay. Every physical body operates under four non-negotiable physical constraints: kinematic clearance, force and torque limits, transient thermal dissipation, and electrical bus power integrity. Because software rollback cannot undo kinetic motion or dissipate accumulated thermal energy, these physical limits must be measured and recorded in an auditable limit record—the foundational contract governing all downstream planning and safety enforcement.
+In simulation, physics is a synchronous loop where execution pauses politely while a policy completes inference, actuators exert instantaneous torque, and power rails never droop. On physical hardware, the laws of thermodynamics and classical mechanics bind with absolute finality. A moving mass carries kinetic momentum that cannot be dissipated faster than friction and braking limits allow; electric motor windings accumulate Joule heat over seconds that takes minutes to dissipate through thermal interfaces; and coincident current spikes from high-torque maneuvers can collapse battery voltage below microcontroller dropout thresholds, crashing the compute stack mid-motion. Machine learning engineers who treat the physical robot as a black-box kinematic abstraction discover that their policies fail not from algorithmic flaws, but from burnt inverter MOSFETs, stripped planetary gearheads, and unmodeled actuator saturation. The body is not merely an execution target; it is a rigid system of physical budgets—stopping distance, thermal rise, electrical headroom, mechanical bandwidth, and transduction latency—that every upstream software layer must budget for and respect. Understanding these low-level physical dynamics is not an academic diversion into mechanical engineering; it is the prerequisite for designing policies that can actually survive contact with reality. This chapter derives these five inviolable physical budgets, establishes how to calibrate limit records with rigorous uncertainty bounds, and demonstrates why safety in Physical AI begins at the copper coils and structural joints of the machine.
+
 {{< pagebreak >}}
 
 ::: {.callout-learning-objectives}
@@ -61,6 +62,10 @@ Above the proposal boundary\index{Proposal boundary!budget enforcement}\index{Bu
 5. **Electrical power integrity**\index{Electrical power integrity!definition}: The transient voltage droop, peak current capacity, and regenerative energy surges across the shared direct-current distribution bus during rapid acceleration and braking. Just as running high-power appliances can dim household lights, a heavy acceleration surge ($I R$ drop and $L \cdot dI/dt$) can collapse battery rail voltages below digital logic thresholds, triggering brownout resets on onboard computers mid-motion.
 
 Under the **Simultaneous Admission Invariant**, motion permission requires non-negative margin across all five budgets concurrently before the permission path commits torque to hardware registers. A surplus in four budgets cannot compensate for a deficit in the fifth.
+
+::: {.callout-perspective title="Why AI engineers must master physical limits"}
+In conventional machine learning, students learn to optimize abstract objective functions—cross-entropy loss, expected reward, or diffusion score matching—under the comforting assumption that hardware is an infinitely compliant substrate. In embodied physical AI, that assumption is fatal. An AI engineer who does not understand winding saturation will design an aggressive tracking policy that burns out motor inverters; an engineer who ignores gear transmission inertia will train a controller that chatters uncontrollably upon physical contact; and an engineer who overlooks DC bus impedance will watch onboard neural accelerators trigger sudden brownout reboots during hard braking maneuvers. We study the physical body not to turn machine learning practitioners into mechanical draftsmen, but to formalize the unyielding physical budgets that bound what any software policy can ever safely demand.
+:::
 
 ```{python}
 #| label: body-machine-momentum-calc
@@ -111,7 +116,7 @@ Each budget becomes a limit established on the assembled machine under declared 
 Software benchmarks often report latency as the execution time of a network on an accelerator, but that compute slice is only one segment of the causal chain of @sec-boundary-causal-boundary. **A measurement decays from transduction; what matters is its age when acted upon.** That age spans the interval from the moment photons strike a photodiode or flux passes a Hall sensor to the moment motor coils generate torque that changes a link's acceleration. If a perception model computes an obstacle location in $15\text{ ms}$ but camera integration, sensor readout, transport, queue dispatch, and motor current rise time add another $45\text{ ms}$, the physical age of the measurement when the joint moves is $60\text{ ms}$. During that entire window, the physical world has continued to evolve.
 
 ::: {.column-margin .margin-pointer}
-↪ @sec-memory-belief-through-occlusion derives how long a stored belief stays valid as its measurement ages.
+↪ @Sec-memory-belief-through-occlusion derives how long a stored belief stays valid as its measurement ages.
 :::
 
 Tracking measurement age means decomposing that path into eight stages (@fig-02-latency-waterfall): exposure, timestamped at the midpoint of integration; sensor readout over an interface such as MIPI CSI-2; direct memory access (DMA) transport into host memory; kernel buffering into user-space queues; model computation; operating-system scheduling and inter-process dispatch across the processor boundary; command transmission over a fieldbus or shared-memory mailbox; and actuator response, as the drive builds flux in the stator windings. On a two-processor implementation the path runs from the image sensor through inference on the application processor, a lock-free mailbox, and a $1\text{ kHz}$ permission check on the safety microcontroller, to gate-driver switching and current rise. Every stage consumes a slice of the total time budget.
@@ -1247,7 +1252,7 @@ class ThermalBurst:
     t_peak_str = fmt_temperature(t_peak, unit=ureg.degC, precision=1)
 ```
 
-::: {#nbk-body-thermal-burst-limits .callout-notebook title="Transient thermal accumulation under cold vs. hot starts"}
+::: {#nbk-body-thermal-burst-limits .callout-notebook title="Thermal accumulation across duty cycles"}
 An arm shoulder joint has winding resistance $R =$ `{python} ThermalBurst.r_wind_str`, lumped thermal capacitance $C_{\text{th}} =$ `{python} ThermalBurst.c_th_str`, and installed thermal resistance $\theta_{JA} =$ `{python} ThermalBurst.theta_ja_str`, and it runs in an enclosed ambient $T_{\text{amb}} =$ `{python} ThermalBurst.t_amb_str` with Class F insulation rated to `{python} ThermalBurst.t_limit_str`. The thermal time constant is $\tau = \theta_{JA} C_{\text{th}} =$ `{python} ThermalBurst.tau_str`.
 
 **Problem**: How does the initial winding temperature change how long a threefold rated-current burst can last before the insulation limit?
@@ -1398,7 +1403,7 @@ class StallDerating:
     derate_pct_str = fmt_percent(derate, precision=1, style="prose")
 ```
 
-::: {#nbk-body-thermal-stall-derating .callout-notebook title="Static holding torque and thermal stall derating"}
+::: {#nbk-body-thermal-stall-derating .callout-notebook title="Static holding torque and stall derating"}
 An arm elbow holds $\tau_{\text{hold}} =$ `{python} StallDerating.tau_hold_str` at stall ($\omega = 0$) through an $N =$ `{python} StallDerating.n_gear_str`:1 cycloidal gearbox ($\eta =$ `{python} StallDerating.eta_str`). Its motor has $K_t =$ `{python} StallDerating.k_t_str`, cold resistance $R_0 =$ `{python} StallDerating.r_0_str` at $T_0 =$ `{python} StallDerating.t_0_str`, and $\theta_{JA} =$ `{python} StallDerating.theta_ja_str`, with a Class F limit of `{python} StallDerating.t_limit_str`, inside an unventilated limb at $T_{\text{amb}} =$ `{python} StallDerating.t_amb_str`.
 
 **Problem**: With copper's resistance rising with temperature, where does the stalled winding settle, and what holding torque is thermally sustainable?
@@ -1657,7 +1662,7 @@ class DriveBusIntegrity:
     p_peak_str = fmt_power(p_peak, unit=ureg.watt, precision=0)
 ```
 
-::: {#nbk-body-dc-bus-power-integrity .callout-notebook title="DC bus voltage sag and regenerative overvoltage"}
+::: {#nbk-body-dc-bus-power-integrity .callout-notebook title="DC bus voltage sag and regenerative surge"}
 The mobile manipulator's battery feeds one nominal `{python} DriveBusIntegrity.v_bus_nom_str` control rail that carries the drive inverters, the arm's joint drives, and the point-of-load regulators that supply its application processor.
 
 **Problem**: Under the coincident current step of an inference burst and the drive motors, and then a stop from the drive limit, does the rail remain within the operating limits of the regulators and the motor inverters?
@@ -1922,7 +1927,7 @@ A foundational distinction governs this structure: *uncertainty describes what y
 
 Each degradation mechanism above changes a limit's conditions, so a deployed machine re-establishes its records by periodic recalibration rather than trusting the values measured at commissioning. The saturation duration against which the Schiaparelli lander's inertial unit had been accepted was such a limit, and the lander's loss in 2016 shows what follows when a limit's conditions are exceeded in operation and nothing downstream checks the result.
 
-::: {#ws-body-2016-schiaparelli-imu-saturation .callout-war-story title="ExoMars Schiaparelli IMU saturation and altitude collapse (2016)"}
+::: {#ws-body-2016-schiaparelli-imu-saturation .callout-war-story title="ExoMars Schiaparelli IMU saturation (2016)"}
 **Context**: On October 19, 2016, the European Space Agency's ExoMars Schiaparelli lander executed its atmospheric entry and descent toward the Martian surface, relying on an onboard Guidance, Navigation, and Control (GNC) computer to fuse Inertial Measurement Unit (IMU) gyroscopes with a Doppler radar altimeter [@esa2017schiaparelli].
 
 **Mechanism**: About three minutes after atmospheric entry, the parachute inflated and set the lander oscillating. The IMU measured a pitch rate larger than expected and raised a saturation flag, which persisted longer than the 15 ms assumed when the unit was accepted. While the flag was set, the GNC software integrated the saturation threshold rate as though it were the true rate, although the lander was in reality oscillating, and its attitude estimate drifted by about $165^{\circ}$, nearly upside down. When the radar altimeter later returned valid slant ranges, the software projected them onto that attitude and computed a negative altitude. No onboard check tested that altitude for plausibility.
@@ -2168,6 +2173,8 @@ The body sets the budgets that every learned proposal spends, and none of them c
 * **A limit is a record, not a number**: A limit governs a decision only with its conditions, uncertainty, margin, detector, and evidence category, and it lapses when wear, heat, a new payload, or a new build changes those conditions.
 :::
 
-::: {.callout-chapter-connection title="From the body's limits to the Brain's proposals"}
+Physical body constraints are not accidental engineering friction to be abstracted away by software; they are the governing boundary conditions that define whether an embodied AI system can operate safely in the real world. Every ambitious neural policy—whether proposing agile bimanual manipulation or high-speed mobile navigation—ultimately draws against an unyielding physical budget of clearance, torque, thermal rise, and electrical energy. If an AI engineer treats actuators as ideal force generators and batteries as infinite energy pools, the resulting control policies will inevitably burn motor coils, trigger bus brownouts, or collide with obstacles during emergency stops. Systems engineering begins by measuring these physical boundaries, attaching rigorous uncertainty intervals to every limit record, and ensuring that software leases never exceed the machine's true deceleration and thermal dissipation capacity. By formalizing the body as a set of five explicit, measurable budgets, the engineer creates the foundational ground truth upon which all higher-level cognitive planning and real-time safety enforcement depend.
+
+::: {.callout-chapter-connection title="From body limits to brain proposals"}
 The **limit records** ($L$) established in this chapter define the unyielding physical plant boundaries: how old an observation may be before it expires, how far the loaded base travels before stopping, and how much torque, winding heat, and rail current a physical maneuver may spend. These limits provide the grounding foundation for the entire physical AI contract lineage. In @sec-brain, the learned models of the Brain consume $L$ to generate bounded **proposal records** ($P$)—specifying trajectory chunks, prediction horizons, and execution cadences that respect the body's mechanical and thermal envelopes. In @sec-nervous, the deterministic permission path of the Nervous System consumes both $L$ and $P$ to grant execution **leases**, enforcing physical safety at the causal boundary.
 :::
