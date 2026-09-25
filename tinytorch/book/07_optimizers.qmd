@@ -92,13 +92,19 @@ where $\eta$ is the **learning rate**, the fraction of the gradient applied per 
 
 Suppose two successive gradients are both $2$, the learning rate is $0.1$, and the retained fraction of the previous update is $0.9$. Starting with velocity zero, the first velocity is $2$ and the second is $0.9\times2+2=3.8$. The weight moves by $0.2$, then $0.38$. If the second gradient were $-2$, the second velocity would instead be $-0.2$, giving a much smaller reversal. **Momentum** implements this memory with a velocity $v$:
 
-$$v \leftarrow \beta\, v + g, \qquad \theta \leftarrow \theta - \eta\, v.$$
+$$v \leftarrow \beta\, v + g, \qquad \theta \leftarrow \theta - \eta\, v.$$[^fn-nesterov-momentum]
+
+[^fn-nesterov-momentum]: Classical momentum (Polyak, 1964) computes velocity updates using the gradient at the current position $g_t = \nabla \mathcal{L}(\theta_t)$. In contrast, Nesterov accelerated gradient evaluates the gradient at an anticipated look-ahead position $g_t = \nabla \mathcal{L}(\theta_t + \beta v_t)$. This look-ahead acts as an anticipatory predictive brake, damping oscillation when approaching high-curvature ravine walls.
 
 The coefficient $\beta$, usually $0.9$, is the fraction of the previous velocity that survives into the next step. Unrolling the recurrence shows what $v$ holds after $t$ steps:
 
 $$v_t = g_t + \beta\, g_{t-1} + \beta^2 g_{t-2} + \cdots$$
 
 For a constant gradient $g$, the terms reinforce and $v$ approaches $g/(1-\beta)$, ten times $g$ at $\beta=0.9$. For an alternating gradient of fixed magnitude, they partly cancel and the velocity's eventual magnitude is $|g|/(1+\beta)$. Those two idealized sequences explain how momentum can reinforce a consistent direction and soften reversals. In a real optimization run the gradient changes with the weights, so the factors are not universal speedups or guarantees against oscillation.
+
+::: {.callout-tip title="Pause & Predict: The Hidden Memory Cost of AdamW"}
+If a transformer model contains 1 billion parameters stored in float32 (4 GB of DRAM), how much memory is required strictly for optimizer state during AdamW training? (Hint: compute first and second moment buffers.) What fraction of the total parameter plus optimizer memory does the optimizer consume?
+:::
 
 ### Adam: a step size for every parameter
 
@@ -140,7 +146,9 @@ so a weight stays large only if the gradient keeps pushing it there. The coeffic
 
 Under Adam they are not the same. Adding $\lambda\theta$ to the gradient changes both running averages, then the result passes through the adaptive division. The amount of shrinkage can no longer be read as $\eta\lambda\theta$ independently of gradient history. AdamW keeps the L2 term out of $m$ and $v$ and applies the shrink to the old weight before subtracting the adaptive update:
 
-$$\theta \leftarrow (1 - \eta\lambda)\, \theta - \eta\, \frac{\hat{m}}{\sqrt{\hat{v}} + \epsilon}.$$
+$$\theta \leftarrow (1 - \eta\lambda)\, \theta - \eta\, \frac{\hat{m}}{\sqrt{\hat{v}} + \epsilon}.$$[^fn-decoupled-weight-decay]
+
+[^fn-decoupled-weight-decay]: In standard Adam with L2 regularization, the weight penalty $\lambda \theta$ is added directly to $g_t$, entering the second moment accumulator $v_t$. Coordinates with large gradients receive suppressed decay, while coordinates with infrequent or small gradients receive excessively strong decay. Loshchilov & Hutter (2017) demonstrated that decoupling weight decay from the gradient moments restores the true intended geometric regularization $\theta \leftarrow (1 - \eta \lambda) \theta$, which dramatically improves generalization in deep transformer models.
 
 For the weight above, an adaptive update of $0.1$ therefore gives $0.999-0.1=0.899$. Reversing the operations would give $(1-0.1)\times0.999=0.8991$, a different algorithm. The update paths in @fig-optimizers-landscape make the placement of decay explicit.
 
@@ -173,7 +181,9 @@ An optimizer separates the update rule from the loop that obtains gradients. The
 Because `backward()` accumulates gradients via `+=`, omitting `optimizer.zero_grad()` before backward causes gradients to sum continuously across consecutive mini-batches. Step 1 computes $\nabla L_1$; step 2 updates with $\nabla L_1 + \nabla L_2$; step $k$ updates with $\sum_{i=1}^k \nabla L_i$. The model diverges exponentially without raising any runtime errors.
 :::
 
-Clearing must remove the previous objective's gradient without removing the optimizer's history. The `backward()` traversal from @sec-autograd accumulates into `.grad`, so a second batch otherwise adds to the previous batch's gradient. Assigning `None` releases the parameter's reference to its gradient array instead of filling it with zeros. TinyTorch's backward traversal allocates a zero buffer when it first reaches the parameter, then adds the incoming contribution. The avoided work is the explicit clearing pass; the next backward pass still initializes storage.
+Clearing must remove the previous objective's gradient without removing the optimizer's history. The `backward()` traversal from @sec-autograd accumulates into `.grad`, so a second batch otherwise adds to the previous batch's gradient. Assigning `None` releases the parameter's reference to its gradient array instead of filling it with zeros.[^fn-zero-grad-set-to-none] TinyTorch's backward traversal allocates a zero buffer when it first reaches the parameter, then adds the incoming contribution. The avoided work is the explicit clearing pass; the next backward pass still initializes storage.
+
+[^fn-zero-grad-set-to-none]: In PyTorch, calling \texttt{zero\_grad} with \texttt{set\_to\_none=True} frees gradient memory buffers rather than filling them with zeros. This eliminates memory bandwidth overhead by skipping zero-fill memory writes; subsequent backward operations allocate and write gradients without reading previous zeros across the memory bus.
 
 The constructor copies the supplied parameter list, retains the original tensors, and rejects duplicates so the same tensor cannot be updated twice in one step. It preserves existing parameter gradient state without clearing any gradients already present. `zero_grad()` clears the gradients. `step()` is left for each subclass to define.
 
@@ -343,7 +353,7 @@ $$\begin{aligned}
 **Total model footprint**:
 $$\text{Memory} = 7 \times 10^9 \times 16\text{ bytes} = 112\text{ GB}$$
 
-**Systems insight**: Weights and gradients require $28\text{ GB} + 28\text{ GB} = 56\text{ GB}$, but AdamW's momentum buffers double that requirement to $112\text{ GB}$. A single 80 GB NVIDIA A100 cannot even hold the static training state of a 7B model without optimizer offloading or ZeRO state sharding.
+**Systems insight**: Weights and gradients require $28\text{ GB} + 28\text{ GB} = 56\text{ GB}$, but AdamW's momentum buffers double that requirement to $112\text{ GB}$. A single 80 GB NVIDIA A100 cannot even hold the static training state of a 7B model without optimizer offloading or ZeRO state sharding. In @sec-quantization, we explore 8-bit quantized optimizers (Dettmers et al., 2022), which compress these moment states from 8 bytes down to 2 bytes per parameter using block-wise non-linear quantization. In @sec-extensions, we implement parameter-efficient fine-tuning via LoRA, which freezes the original weight matrices and trains low-rank adapter matrices, eliminating AdamW state for over 98% of the model parameters.
 
 :::
 
