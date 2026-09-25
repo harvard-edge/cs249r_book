@@ -68,7 +68,8 @@ The operation we need has three properties. The mixing weights must be computed 
 ## The Idea
 
 ::: {.column-margin}
-![](assets/images/diagrams/12_attention-margin-mask.svg){width="100%"}
+![](assets/images/diagrams/12_attention-margin-mask.svg){width="100%" fig-alt="Four by four causal attention mask matrix showing lower-triangular allowed entries with value 0 and upper-triangular masked entries with value negative infinity."}
+
 *Causal attention mask setting future tokens to $-\infty$.*
 :::
 
@@ -89,6 +90,12 @@ $$\text{Attention}(Q, K, V) = \text{softmax}\!\left( \frac{Q K^T}{\sqrt{d_k}} + 
 where $V$ is the $S \times d_v$ matrix of values and $M$ is a mathematical mask of zeros and negative infinities, and the division by $\sqrt{d_k}$ is the scaling that gives the mechanism its name. Every quantity here is a matrix of shape $S \times S$ or $S \times d$, and every operation is a matrix multiply, an elementwise scale, an elementwise add, or a row-wise softmax. That is why attention runs in parallel across all tokens where earlier sequence models had to walk the sequence one step at a time. The three weight matrices are what make it learnable; the network is free to decide what each token should ask and advertise.
 
 ### Why divide by $\sqrt{d_k}$
+
+::: {.column-margin}
+![](assets/images/diagrams/12_attention-margin-variance.svg){width="100%" fig-alt="Variance scaling margin card contrasting unscaled score variance of d_k causing softmax gradient saturation against scaled score variance of 1.0 preserving active gradients."}
+
+*Variance scaling preserves unit variance for any head width, preventing softmax logits from saturating into near-zero gradients.*
+:::
 
 Suppose the entries of $q$ and $k$ are independent with mean zero and variance one. Their dot product is a sum of $d_k$ products, each with mean zero and variance one, so by the same variance argument @sec-layers made for a layer's fan-in, the sum has variance $d_k$ and standard deviation $\sqrt{d_k}$. The spread of the scores grows with the width of the head, and a softmax fed scores spread too far apart collapses toward a nearly one-hot vector with very small derivatives. Dividing every score by $\sqrt{d_k}$ divides the variance by $d_k$ and restores unit variance whatever the head width. The numbers for what goes wrong without it are beside the line of code that does the division.
 
@@ -200,9 +207,9 @@ The projections run once at full width. `_split_heads` reshapes `(B, S, D)` to `
 After attention, `_merge_heads` reverses the axis swap and combines the head and feature axes. The output projection then mixes information across heads and returns `(B, S, D)`. Split and merge preserve the association between a token and its features, but each `reshape` and `transpose` returns a tensor with its own storage in TinyTorch. Forward creates these temporary activations without changing the input or the four projection layers.
 
 ::: {.column-margin}
-**Core Invariant: Head Split Origami**\
-$$(B, S, D) \xrightarrow{\text{reshape}} (B, S, H, d_k) \xrightarrow{\text{transpose}(1, 2)} (B, H, S, d_k)$$\
-*Placing head dimension before sequence turns multi-head attention into a single batched 2D GEMM.*
+![](assets/images/diagrams/12_attention-margin-origami.svg){width="100%" fig-alt="Head split coordinate origami margin card illustrating tensor reshape from (B, S, D) to (B, S, H, d_k), axis transposition to (B, H, S, d_k) for batched 2D GEMM, and head merging back to (B, S, D)."}
+
+*Coordinate origami swaps head and sequence dimensions to place independent 2D matrix planes into the batch grid for hardware GEMM execution.*
 :::
 
 ![**Multi-head coordinate origami**: Slicing the full hidden embedding $(B, S, D)$ into $(B, H, S, d_k)$ via reshape and transposition isolates head subspaces into independent 2D planes, enabling hardware parallel matrix multiplication across all heads in a single batch call.](assets/images/diagrams/12_head-split-origami.svg){#fig-head-split-origami width="100%" fig-alt="Diagram of coordinate origami: (B, Seq, D_model) reshapes and transposes to Head 0 and Head 1 subspaces, enabling batched Q @ K.T matrix multiplication."}
