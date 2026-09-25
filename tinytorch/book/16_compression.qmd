@@ -138,7 +138,8 @@ where $\|\cdot\|_F$ is the Frobenius norm.[^fn-frobenius-svd-error] You can read
 ### Distillation: teaching the small model from the large one
 
 ::: {.column-margin}
-![](assets/images/diagrams/16_compression-margin-temperature.svg){width="100%"}
+![](assets/images/diagrams/16_compression-margin-temperature.svg){width="100%" fig-alt="Bar charts contrasting sharp prediction probabilities at temperature T=1 with softened dark knowledge distributions across non-target classes at T=4."}
+
 *Soft target entropy: higher temperature $T=4$ uncovers dark knowledge in non-target class distributions.*
 :::
 
@@ -255,6 +256,12 @@ The function validates `rank_ratio` in $(0,1]$ and computes `max(1, int(rank_rat
 
 
 The returned arrays have shapes $(M,r)$, $(r,)$, and $(r,N)$ and own $r(M+N+1)$ values. This three-factor representation saves storage when $r < MN/(M+N+1)$. It does not modify the input matrix or any layer. The book extension below folds the singular values into two factors, reducing that count to $r(M+N)$, and places the original bias after the second multiplication. Reconstructing the full matrix first would lose the storage benefit.
+
+::: {.column-margin}
+![](assets/images/diagrams/16_compression-margin-svd-activation.svg){width="100%" fig-alt="Diagram contrasting direct GEMM with two-stage factorized GEMM, illustrating intermediate activation traffic to DRAM."}
+
+*Intermediate activation traffic: factorizing a layer saves weight parameters but writes and reloads intermediate tensor h, requiring operator fusion when batch size B is large.*
+:::
 
 ::: {#lst-compression-factor-helper lst-pos="H" lst-cap="**Building a forward path from SVD factors**: Two new linear layers consume the folded factors and preserve the output bias."}
 ```python
@@ -447,6 +454,12 @@ A sparse execution path can exploit zeros without changing the logical matrix di
 Low-rank adaptation uses thin-matrix arithmetic for a different purpose. [LoRA (Hu et al., 2021)](https://arxiv.org/abs/2106.09685) freezes pretrained weights and trains a low-rank update $W + AB$, with $A \in \mathbb{R}^{M \times r}$ and $B \in \mathbb{R}^{r \times N}$. The update adds $r(M+N)$ trainable parameters alongside the base $MN$ weights. In contrast, `factorize_linear` replaces the base matrix directly; an adapter does not shrink the base allocation. TinyTorch computes an SVD approximation of existing weights rather than an adapter.
 
 The teacher-student objective transfers directly. [Hinton, Vinyals, and Dean (2015)](https://arxiv.org/abs/1503.02531) soften teacher predictions to guide a student, scaling gradients by $T^2$. TinyTorch intentionally omits that multiplier. In the local trace, increasing temperature changes both target entropy and relative gradient scale. A production pipeline must specify reductions and scalings explicitly; the label “distillation” alone does not guarantee matching losses.
+
+::: {.column-margin}
+![](assets/images/diagrams/16_compression-margin-sparsity-24.svg){width="100%" fig-alt="Card illustrating NVIDIA 2:4 structured sparsity where a four-float row block compresses into two stored values and two-bit index metadata to double Tensor Core throughput."}
+
+*2:4 structured sparsity: storing two non-zero weights per four-element block with two-bit indices achieves 2.0x math throughput on Tensor Cores.*
+:::
 
 ::: {#psp-compression-structured-vs-unstructured .callout-perspective title="Production Bridge: 2:4 Structured Sparsity and Hardware Accelerators"}
 Unstructured pruning zeroes arbitrary weights, producing irregular sparsity that standard GEMM hardware cannot accelerate without indexing overhead. Modern production runtimes resolve this through hardware-aligned sparsity:
