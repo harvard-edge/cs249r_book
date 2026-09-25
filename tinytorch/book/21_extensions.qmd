@@ -146,6 +146,12 @@ Each extension establishes:
 
 ### Extension 1: Parameter-Efficient Fine-Tuning (LoRA)
 
+::: {.column-margin}
+![](assets/images/diagrams/21_extensions-margin-lora.svg){width="100%" fig-alt="LoRA low-rank adapter decomposition diagram contrasting frozen base weight W0 with trainable factor matrices A and B, showing over 98 percent Adam optimizer memory reduction."}
+
+*LoRA Rank Decomposition: The pre-trained base weight $W_0$ is frozen ($requires\_grad=False$), eliminating optimizer momentum and variance states. Training is restricted to low-rank matrices $A$ and $B$, slashing Adam memory overhead by over 98 percent.*
+:::
+
 **The Systems Bottleneck:** Fine-tuning large language models by updating all parameters encounters a severe memory wall. Modern adaptive optimizers such as Adam maintain two 32-bit floating-point state tensors per parameter: the first moment vector $m_t$ (momentum) and the second raw moment vector $v_t$ (variance). Each parameter requires 8 bytes of optimizer state, plus 4 bytes for the stored gradient, plus 4 bytes for the weight itself, totaling 16 bytes per parameter. For a 7-billion parameter model, storing Adam optimizer states alone consumes $7 \times 10^9 \times 8 = 56\text{ GB}$ of memory, far exceeding consumer GPU memory before a single activation is allocated.
 
 **Architectural Strategy:** Low-Rank Adaptation (LoRA) freezes the pre-trained weight matrix $W_0 \in \mathbb{R}^{d \times k}$ by setting `requires_grad=False`. It decomposes the weight update $\Delta W$ into the product of two small, low-rank matrices $A \in \mathbb{R}^{d \times r}$ and $B \in \mathbb{R}^{r \times k}$, where the rank $r \ll \min(d, k)$:
@@ -171,6 +177,12 @@ Because $W_0$ is frozen, the autograd engine allocates gradients and Adam optimi
 ---
 
 ### Extension 2: Activation Checkpointing
+
+::: {.column-margin}
+![](assets/images/diagrams/21_extensions-margin-checkpoint.svg){width="100%" fig-alt="Activation checkpointing diagram contrasting standard O(L) forward activation retention with checkpointed O(sqrt(L)) boundary storage and backward recomputation."}
+
+*Activation Checkpointing: Standard autograd holds all $L$ layer activations in memory. Checkpointing stores only boundary tensors ($O(\sqrt{L})$), recomputing intermediate activations during backpropagation to reduce peak memory by up to 80 percent at a 33 percent compute overhead.*
+:::
 
 **The Systems Bottleneck:** In deep networks, the autograd tape saves intermediate tensor activations produced by every forward layer to evaluate gradient chain rules during backpropagation. For an $L$-layer transformer with sequence length $T$ and hidden dimension $D$, activation memory scales linearly with depth: $O(L \cdot T \cdot D)$. On long sequences or deep architectures, activation memory quickly dwarfs parameter storage and causes out-of-memory (OOM) crashes during training.
 
@@ -547,6 +559,12 @@ Each project below addresses a real systems bottleneck and demonstrates how to r
 ![**FlashAttention SRAM-aware tiling vs. standard attention DRAM wall**: Standard attention incurs multiple high-latency DRAM round-trips to materialize the full $S \times S$ score and weight matrices. FlashAttention partitions $Q, K, V$ into small SRAM-sized blocks ($B_r, B_c \ll S$) and employs online softmax updates directly in on-chip fast memory, completely eliminating the $O(S^2)$ DRAM memory footprint.](assets/images/diagrams/21_flashattention-sram-tiling.svg){#fig-flashattention-sram-tiling width="100%" fig-alt="Diagram contrasting standard attention DRAM memory wall with FlashAttention SRAM online softmax accumulation."}
 
 ### Hardware Simulation and Memory Tracing (ScaleSim Integration)
+
+::: {.column-margin}
+![](assets/images/diagrams/21_extensions-margin-systolic.svg){width="100%" fig-alt="Two-dimensional systolic array grid illustrating diagonal wavefront dataflow and rhythmic lock-step execution across processing elements."}
+
+*2D Systolic Wavefront: Processing elements stream activation and weight operands in rhythmic lock-step, achieving peak compute density with $2N - 1$ cycle latency.*
+:::
 
 * **Systems Limitation:** Profiling on a host CPU or GPU measures total runtime, but cannot answer architectural design questions: How many multiply-accumulate (MAC) units in a 2D systolic array are actually utilized? Would doubling the on-chip SRAM buffer eliminate DRAM stall cycles? What array aspect ratio ($128 \times 128$ vs $256 \times 64$) achieves optimal utilization for a specific model?
 * **The Project:** Build an architectural memory-tracing extension that interfaces TinyTorch with **ScaleSim** (Systolic Array Memory and Cycle Simulator) or an equivalent cycle-accurate hardware simulator:
