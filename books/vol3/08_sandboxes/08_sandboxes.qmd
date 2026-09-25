@@ -58,7 +58,7 @@ A coding agent is asked to fix a failing test in a service repository. On turn s
 
 The model reads its system prompt, its tool schemas, and the README it fetched a moment earlier as one sequence of tokens, and nothing in that sequence marks which tokens may issue commands. This is indirect prompt injection [@greshake2023not]. Provenance tags and quarantine framing tell the model which text is untrusted and lower the probability that it follows a planted instruction, but they cannot make following one impossible. Benchmark suites that plant instructions inside tool outputs [@zhan2024injecagent; @debenedetti2024agentdojo] accordingly report attack success as a rate, and they find that rate above zero for the models and prompt-level defenses they evaluate. The same proposal can also arrive with no attacker at all. A sampled `rm -rf` aimed one directory too high, or a migration run against the wrong database, is an unsafe proposal the model produced under entirely benign conditions [@amodei2016concrete]. In both cases the tool authorization grant did its job. It decided that this session may call `run_shell`, and it could not see what the command inside the call would reach once it ran. That reach is what this chapter bounds.
 
-Three conditions made the README attack work. The agent could reach private data (the credentials file), it read untrusted content that could steer its proposals (the README), and it had a channel for sending data out (an unrestricted network route). Remove any one and the attack has nowhere to go. An agent that holds no secrets has nothing to leak, an agent that reads no untrusted text receives no planted instructions, and an agent with no outbound channel cannot deliver what it read. A useful coding agent must read the internet and must touch real repositories, so the runtime rarely removes a condition outright. It shrinks each one instead, and the chapter follows that plan. Capabilities and credential brokering (@sec-vol3-sandboxes-least-privilege) keep private data out of the sandbox. The isolation envelope (@sec-vol3-sandboxes-microvms) and the workspace inside it (@sec-vol3-sandboxes-cow) bound what code can touch. Egress control (@sec-vol3-sandboxes-network) narrows the network channel, and taint tracking (@sec-vol3-sandboxes-taint) keeps untrusted text from choosing where data goes through the tools that remain. Pools and their reset contract (@sec-vol3-sandboxes-pooling) make all of this cheap enough that no one is tempted to switch it off.
+Three conditions made the README attack work. The agent could reach private data (the credentials file), it read untrusted content that could steer its proposals (the README), and it had a channel for sending data out (an unrestricted network route). Remove any one and the attack has nowhere to go. An agent that holds no secrets has nothing to leak, an agent that reads no untrusted text receives no planted instructions, and an agent with no outbound channel cannot deliver what it read. A useful coding agent must read the internet and must touch real repositories, so the runtime rarely removes a condition outright. It shrinks each one instead, and the chapter follows that plan. Capabilities and credential brokering (@sec-vol3-sandboxes-least-privilege) keep private data out of the sandbox. The isolation envelope (@sec-vol3-sandboxes-microvms) and the workspace inside it (@sec-vol3-sandboxes-cow) bound what code can touch. Egress control (@sec-vol3-sandboxes-network) narrows the network channel, while pools and their reset contract (@sec-vol3-sandboxes-pooling) make all of this cheap enough that no one is tempted to switch it off. Tracking untrusted data through downstream tool calls and quarantined models is then taken up in @sec-vol3-security-quarantined-readers and @sec-vol3-security-taint-tracking.
 
 ### The instruction-data cohabitation dilemma {#sec-vol3-sandboxes-cohabitation}
 
@@ -241,24 +241,29 @@ $$\text{Process } (\text{euid}=1000) \xrightarrow{\texttt{open(\"/etc/shadow\")}
 In an unmediated agentic runtime, however, the supervisor becomes a confused deputy:
 $$\text{Untrusted Injected Context} \xrightarrow{\text{\"Read API Key\"}} [\text{Supervisor } (\text{euid}=1000)] \xrightarrow{\texttt{open(\"~/.aws/credentials\")}} \textbf{ALLOWED}$$
 
-### Formal capability verification and monotonic attenuation
+### Cryptographic capability tokens and chained caveat attenuation
 
-An explicit capability token $C$ is formally defined as a 4-tuple:
-$$
-C = (R, O, P, E)
-$$
-where $R$ is the canonical resource identifier (such as a normalized filesystem path or network URI), $O$ is the set of authorized operations (e.g., $\{\text{READ}, \text{WRITE}\}$), $P$ represents structural parameter constraints (such as maximum file size or byte offset bounds), and $E$ is the epoch timestamp after which the capability expires.
+A capability is not merely an ephemeral in-memory struct; in a distributed or multi-tenant agent platform, it is an unforgeable cryptographic bearer token. Classical access control lists require the kernel or supervisor to maintain global state and resolve identity at every boundary. By contrast, cryptographic capabilities—instantiated via chained caveat tokens such as Macaroons [@birgisson2014macaroons]—allow unprivileged subagents and worker processes to attenuate authority offline without coordinating with a centralized authorization server.
 
-When an agent proposes an action $P$, the supervisory boundary evaluates the request against active capabilities:
-$$
-\text{Verdict}(P, C, t) = \begin{cases} \text{APPROVE} & \text{if } \text{VerifySig}(C) \land P.\text{op} \in C.O \land P.\text{res} \in C.R \land t < C.E \\ \text{DENY} & \text{otherwise} \end{cases}
-$$
+A root capability token $C_0$ is minted by the runtime supervisor using a private root secret key $k_0$:
+$$C_0 = \big(\text{id}, \text{location}, R_0, O_0, \sigma_0\big)$$
+where $\text{id}$ is a unique 64-bit trajectory identifier, $\text{location}$ identifies the target sandbox boundary, $R_0$ is the initial rights set, $O_0$ is the object namespace, and $\sigma_0$ is a cryptographic message authentication code:
+$$\sigma_0 = \text{HMAC-SHA256}\big(k_0, \, \text{id} \parallel \text{location} \parallel R_0 \parallel O_0\big)$$
 
-Furthermore, when an agent delegates tasks to sub-agents, authority must attenuate monotonically:
-$$
-C_{\text{child}} \sqsubseteq C_{\text{parent}} \iff C_{\text{child}}.O \subseteq C_{\text{parent}}.O \land C_{\text{child}}.R \subseteq C_{\text{parent}}.R \land C_{\text{child}}.E \le C_{\text{parent}}.E
-$$
-A child context can never acquire rights exceeding those held by its creator. Any attempt to escalate privileges triggers an immediate supervisory fault, preventing unprivileged guest code from overriding sandbox boundaries established via capability mechanisms or kernel security modules.[^fn-landlock-lsm-isolation]
+Authority is subsequently narrowed by appending contextual *caveats* $c_1, c_2, \dots, c_m$. Each caveat $c_i$ specifies an additional predicate that monotonically restricts the token's validity, such as constraining target filesystem paths ($c_1 = \text{"path} \sqsubseteq \text{/workspace/repo/src"}$), restricting authorized operations ($c_2 = \text{"rights} \subseteq \{\text{read}\}$"), enforcing step or turn limits ($c_3 = \text{"turn} \le 15"$), or moving forward the expiration timestamp ($c_4 = \text{"exp} \le T_0 + 120\text{ s}"$).
+
+To attenuate a token from state $i-1$ to state $i$, the delegator appends caveat $c_i$ and computes the updated signature chain:
+$$\sigma_i = \text{HMAC-SHA256}(\sigma_{i-1}, \, c_i)$$
+
+This cryptographic formulation guarantees the **Monotonic Attenuation Invariant**:
+$$C_{\text{child}} \sqsubseteq C_{\text{parent}} \iff C_{\text{child}}.R \subseteq C_{\text{parent}}.R \land C_{\text{child}}.O \subseteq C_{\text{parent}}.O \land (C_{\text{child}}.P \implies C_{\text{parent}}.P) \land C_{\text{child}}.E \le C_{\text{parent}}.E$$
+
+Because cryptographic hash functions are one-way and collision-resistant, a holder of attenuated token $C_m = (\text{id}, [c_1, \dots, c_m], \sigma_m)$ cannot strip or weaken caveat $c_m$ to recover $\sigma_{m-1}$ without knowing the intermediate HMAC key $\sigma_{m-1}$. Privilege escalation is therefore impossible by construction: a compromised tool or prompt-injected guest payload cannot expand its ambient authority or strip restrictions placed by earlier turns.
+
+When the sandbox reference monitor receives an action proposal $a = (\text{op}, \text{target}, \text{args})$ alongside capability token $C$, it evaluates verification against root key $k_0$:
+$$\text{Verdict}(a, C, t) = \begin{cases} \text{APPROVE} & \text{if } \text{VerifyHMACChain}(k_0, C) \land \forall c_i \in C.\text{caveats}: \text{Satisfied}(c_i, a, t) \\ \text{REJECT} & \text{otherwise} \end{cases}$$
+
+At the Linux kernel boundary, the agent supervisor enforces these attenuated capabilities by configuring in-kernel security modules prior to executing untrusted code, such as dropping privileges with Landlock LSM via `landlock_create_ruleset` or attaching `seccomp-bpf` system call filters.[^fn-landlock-lsm-isolation] Any attempt by guest code to violate the capability boundary triggers an immediate supervisory trap.
 
 ```bash
 # Attempted privilege escalation trapped at the supervisory boundary
@@ -267,15 +272,15 @@ A child context can never acquire rights exceeding those held by its creator. An
 [2026-09-19T10:14:22.402Z] INFO  supervisor: Revoking execution token; terminating sandbox instance
 ```
 
-[^fn-landlock-lsm-isolation]: **Landlock LSM Isolation**: Landlock is a Linux Security Module (LSM) that allows unprivileged processes to enforce their own access control policies without requiring root privileges or external supervisor daemons. By constructing rulesets over file system hierarchies and network ports via the `landlock_create_ruleset` system call, an agent process can irreversibly drop its own ambient authority prior to executing untrusted code.
+[^fn-landlock-lsm-isolation]: **Landlock LSM Isolation**: Landlock is a Linux Security Module (LSM) that allows unprivileged processes to enforce their own access control policies without requiring root privileges or external supervisor daemons. By constructing rulesets over filesystem hierarchies and network ports via the `landlock_create_ruleset` system call, an agent process can irreversibly drop its own ambient authority prior to executing untrusted code.
 
-### Attenuation within a trajectory
+### Attenuation across trajectory phases and delegation trees
 
-A coding trajectory does not need the same authority from its first turn to its last. It explores the repository and reads documentation, edits files in its workspace, runs the tests, and finally proposes a change. Each phase needs less than the union of all four. The runtime therefore narrows the capability at each phase boundary and widens it only through a new grant from outside the trajectory, such as an approval. The rule is monotonic attenuation. A derived capability $C_j$ is valid only if some held capability $C_i$ covers it:
+A coding trajectory does not need the same authority from its first turn to its last. It explores the repository and reads documentation, edits files in its workspace, runs the tests, and finally proposes a change. Each phase needs less than the union of all four. The runtime therefore narrows the capability at each phase boundary and widens it only through a new grant from outside the trajectory, such as a human approval gate. Monotonic attenuation ensures that a derived capability $C_j$ is valid only if the predecessor capability $C_i$ strictly covers it:
 
 $$C_j \sqsubseteq C_i \iff (R_j \subseteq R_i) \land (O_j \subseteq O_i) \land (P_j \implies P_i) \land (E_j \le E_i)$$
 
-The rights and objects can only shrink, the predicate can only add constraints, and the expiry can only move earlier. Consider a trajectory that holds read and write access to its repository for five minutes:
+The rights and objects can only shrink, the predicate can only add constraints, and the expiry can only move earlier. Consider a trajectory that initially holds read and write access to its repository for five minutes:
 
 $$\begin{aligned}
 C_{\text{edit}} &= \big(R=\{\text{read}, \text{write}\},\ O=\text{"/workspace/repo"},\ E=T_0 + 300\text{ s}\big) \\
@@ -283,7 +288,7 @@ C_{\text{test}} &= \big(R=\{\text{read}, \text{execute}\},\ O=\text{"/workspace/
 C_{\text{scan}} &= \big(R=\{\text{read}\},\ O=\text{"/workspace/repo/src"},\ E=T_0 + 120\text{ s}\big) && [\text{valid: } C_{\text{scan}} \sqsubseteq C_{\text{edit}}]
 \end{aligned}$$
 
-The second line is rejected even though it looks narrower, because it asks for a right the parent never held. A runtime that wants the test phase must include execute in the grant it issues at the start and then drop write when testing begins. Dropping write during tests matters for evaluation as well as safety. It keeps the trajectory from editing the tests it is being judged by, one of the conditions for sealed-test evaluation evidence. The same relation governs authority passed between agents, as the subagent tree on the right of @fig-vol3-capability-attenuation shows, and multi-agent coordination develops that case.
+The second line is rejected even though its duration is shorter, because it asks for an execution right the parent never held. A runtime that intends to support a test phase must include execute in the root grant it issues at the start, and then irreversibly drop write authority when testing begins. Dropping write privilege during test execution is an essential systems invariant for evaluation integrity: it physically prevents the agent from modifying test fixtures, linters, or grading scripts to fabricate false positive pass results, fulfilling the requirements for sealed evaluation (@sec-vol3-evaluation). The same relation governs authority passed across multi-agent delegation trees, as illustrated on the right of @fig-vol3-capability-attenuation.
 
 ::: {#chk-08-confused-deputy-defense .callout-checkpoint title="Ambient authority and capabilities"}
 Before moving on to secrets and credentials, verify that you can answer the following:
@@ -371,7 +376,7 @@ where:
 2. **Filter Latency ($T_{\text{filter}}$):** The computational cost of inspecting system call identity and arguments. For in-kernel `seccomp-bpf`, the host kernel executes an in-kernel classic BPF (cBPF) bytecode filter or JIT-compiled extended Berkeley Packet Filter (eBPF) program against the system call arguments, completing allowlist evaluations in $\approx 20\text{--}80\text{ ns}$.[^fn-seccomp-bpf-overhead] In contrast, a user-space kernel such as gVisor Sentry decodes CPU register contents in Go, resolves pathnames across its internal virtual file system (VFS), and evaluates virtual POSIX state machines, consuming $\approx 1.0\text{--}2.5\text{ }\mu\text{s}$ per call.
 3. **Context Switch Latency ($T_{\text{context\_switch}}$):** The scheduling and memory hierarchy disruption incurred when passing control across process boundaries. For native Linux and `seccomp-bpf`, $T_{\text{context\_switch}} = 0$ because security checks execute synchronously on the current thread's kernel stack without thread rescheduling. For `ptrace`-based interception, each system call forces two full context switches between the sandboxed application thread and the supervisory tracer process (one at system call entry to inspect arguments, and a second at system call exit to inspect return values). These switches incur $\approx 1.5\text{--}4.0\text{ }\mu\text{s}$ of scheduler latency, evicting L1 instruction and data cache lines and polluting the branch target buffer. For KVM-based VMMs, a vCPU thread yielding to host user space (`ioctl(KVM_RUN)` exiting to the VMM event loop) requires $\approx 0.8\text{--}1.8\text{ }\mu\text{s}$.
 
-The fundamental architectural advantage of hardware microVMs like Firecracker is that they decouple internal guest system calls from host hypervisor traps. When an agent script executes `getpid()`, `clock_gettime()`, or allocates memory via `mmap()`, the system call executes entirely inside the guest kernel in VMX non-root mode ($T_{\text{trap}} \approx 60\text{ ns}$, $T_{\text{context\_switch}} = 0$). Only I/O operations directed to VirtIO devices trigger a hardware `VM-Exit` to the host monitor. User-space kernels, by contrast, must intercept and emulate 100 percent of all system calls, imposing user-space scheduling and trapping taxes on every single operation, as benchmarked in @tbl-vol3-syscall-overhead-breakdown.
+The fundamental architectural advantage of hardware microVMs like Firecracker is that they decouple internal guest system calls from host hypervisor traps. When an agent script executes `getpid()`, `clock_gettime()`, or allocates memory via `mmap()`, the system call executes entirely inside the guest kernel in VMX non-root mode ($T_{\text{trap}} \approx 60\text{ ns}$, $T_{\text{context\_switch}} = 0$). Only I/O operations directed to VirtIO devices trigger a hardware `VM-Exit` to the host monitor. User-space kernels, by contrast, must intercept and emulate 100 percent of all system calls, imposing user-space scheduling and trapping taxes on every single operation. Meanwhile, WebAssembly Software Fault Isolation (Wasm SFI) bypasses operating system kernel traps entirely for pure in-memory execution, evaluating linear memory bounds within single nanoseconds, as benchmarked across all four isolation envelopes in @tbl-vol3-syscall-overhead-breakdown.
 
 | Isolation Primitive                   | Transition Mechanism              | $T_{\text{trap}}$ | $T_{\text{filter}}$ | $T_{\text{context\_switch}}$ | Total $T_{\text{syscall}}$  | Relative Slowdown |
 |:--------------------------------------|:----------------------------------|:------------------|:--------------------|:-----------------------------|:----------------------------|:------------------|
@@ -381,6 +386,8 @@ The fundamental architectural advantage of hardware microVMs like Firecracker is
 | **User-Space Kernel (gVisor KVM)**    | KVM stub + Sentry Go VFS          | $380\text{ ns}$   | $1{,}100\text{ ns}$ | $950\text{ ns}$              | $\approx 2{,}430\text{ ns}$ | $40.5\times$      |
 | **MicroVM (Firecracker Guest Call)**  | In-guest `syscall` (VMX non-root) | $60\text{ ns}$    | $0\text{ ns}$       | $0\text{ ns}$                | $\approx 60\text{ ns}$      | $1.0\times$       |
 | **MicroVM (Firecracker VirtIO-MMIO)** | Hardware `VM-Exit` to host VMM    | $480\text{ ns}$   | $150\text{ ns}$     | $1{,}100\text{ ns}$          | $\approx 1{,}730\text{ ns}$ | $28.8\times$      |
+| **Bytecode Sandbox (Wasm SFI Call)**  | Function call + bounds check      | $0\text{ ns}$     | $5\text{ ns}$       | $0\text{ ns}$                | $\approx 5\text{ ns}$       | $0.08\times$      |
+| **Bytecode Sandbox (WASI Host Call)** | Direct C-ABI host callgate trap   | $15\text{ ns}$    | $20\text{ ns}$      | $0\text{ ns}$                | $\approx 35\text{ ns}$      | $0.58\times$      |
 
 : **System Call Interception Overhead Breakdown**: Microbenchmarked latency decomposition across execution boundary transitions, security filter inspection, and process context switches. {#tbl-vol3-syscall-overhead-breakdown}
 
@@ -812,23 +819,7 @@ To neutralize DNS exfiltration, the sandbox must prohibit arbitrary outbound UDP
 2. **Split-Horizon Query Dropping**: Drops all queries for non-whitelisted apex domains before packet transmission.
 3. **Query Length and Entropy Caps**: Traps and alerts on queries exceeding 64 characters or exhibiting high Shannon entropy characteristic of encoded data.
 
-## Tracking Untrusted Data {#sec-vol3-sandboxes-taint}
-
-A support agent reads a customer's inbox and can send replies, read access plus an $A_2$ tool. One incoming message ends with a request to forward the most recent invoice to an outside auditing address. Every mechanism so far approves the resulting call. `send_email` was granted, the mail API is on the egress allowlist, the proxy holds the mail credential, and the envelope never saw the invoice leave, because the invoice left as a tool argument. The exfiltration channel is the tool itself.
-
-Dataflow tracking, also called taint tracking, closes this gap by following where values come from rather than where packets go. The idea comes from information flow control in operating systems and languages [@myers1997complete; @krohn2007information]. The runtime attaches a label to every value that records its origin, using the provenance tags attached to every observation, and a value derived from a labeled value inherits the label. The policy is enforced at the tool boundary. A value carrying an untrusted label may not flow into an argument that directs an effect across the trust boundary, such as a recipient address, a URL, a destination host, or a shell command, unless a human approval gate clears it.
-
-::: {.column-margin .margin-pointer}
-↩ Observation provenance tags, untrusted data quarantine, and delimiter framing are developed in @sec-vol3-context-engineering.
-:::
-
-The model defeats this tracking if it is applied naively. Every token the model emits depends on its entire context, so once untrusted text enters the context the only sound label for the next proposal is untrusted. After the first fetched web page, every argument of every later call carries the taint, and a policy that demands approval for tainted arguments demands approval for everything.
-
-The quarantined-reader pattern restores precision by keeping untrusted text away from the model that chooses actions. A planner model sees only the user's request and trusted context, and it emits a plan in which untrusted content appears only as opaque references such as `$message_body` or `$invoice_date`. A separate reader model, holding no tools, processes the untrusted content and returns values bound to those references, ideally as narrow structured types (a boolean, an enumeration, a date) enforced by grammar-constrained decoding. The runtime executes the plan, substitutes the reader's values into tool arguments, and applies the taint policy argument by argument, because each substituted value now carries its own label. An instruction planted in the email can change what the reader extracts. It cannot change the plan, and the policy decides whether a tainted value may land in a recipient field.
-
-The pattern has real costs. The planner cannot branch on content it never sees, so the plan must be expressible before the untrusted text is read. Each step needs two model calls. The reader can still be steered to return a wrong value within its type, which is why a tainted recipient still goes to approval rather than straight to dispatch. What the pattern changes is where enforcement happens. Instead of trusting the model to ignore planted instructions, which only lowers their success rate, the runtime checks an explicit dataflow before dispatch, as the invariant closure principle (\ref{pri-invariant-closure}) requires. Using taint to quarantine the effects of a failure after the fact is a recovery technique taken up under sagas and failure recovery.
-
-Every mechanism in this chapter is paid for before the first turn. An envelope must boot, an overlay must mount, a network namespace and proxy route must be wired, and credentials must be minted. Unless those costs are hidden, they tempt operators to skip the boundary.
+Every physical isolation mechanism examined so far is paid for before the first turn. An envelope must boot (@sec-vol3-sandboxes-microvms), an overlay must mount (@sec-vol3-sandboxes-cow), a network namespace and proxy route must be wired, and credentials must be minted (@sec-vol3-sandboxes-least-privilege). Unless those startup costs are hidden, they tempt operators to skip the boundary. Tracking untrusted data through tool arguments and quarantined models—preventing the tools themselves from becoming covert exfiltration conduits—operates above the operating system sandbox layer and is developed systematically in @sec-vol3-security (specifically @sec-vol3-security-quarantined-readers and @sec-vol3-security-taint-tracking). []{#sec-vol3-sandboxes-taint}
 
 ## Sandbox Pools and Reset {#sec-vol3-sandboxes-pooling}
 

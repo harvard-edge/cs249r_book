@@ -70,16 +70,20 @@ where $C_{\text{in}, k}$ pays for the context sent on turn $k$ (system prompt, t
 
 One attempt is not one accepted task. The right panel of @fig-vol3-task-cost-treemap shows why. If each step of an eight-step task succeeds independently with probability $p$, the whole task succeeds with probability $p^8$, and every failed attempt is paid for in full before it is discarded. Trajectory goodput and the accepted task (principle \ref{pri-vol3-trajectory-goodput}) names what a fleet must therefore minimize, the effective cost per accepted task. If a fleet makes $N$ attempts and $N_{\text{acc}}$ of them are accepted,
 
-$$C_{\text{eff}} = \frac{\sum_{i=1}^N C_{\text{attempt}, i}}{N_{\text{acc}}} = C_{\text{succ}} + \frac{1 - \alpha}{\alpha} C_{\text{fail}}$$ {#eq-vol3-effective-cost}
+$$C_{\text{eff}} = \frac{\sum_{i=1}^N C_{\text{attempt}, i}}{N_{\text{acc}}} = C_{\text{succ}} + \tau_{\text{unrel}} \cdot C_{\text{fail}} = C_{\text{succ}} + \frac{1 - \alpha}{\alpha} C_{\text{fail}}$$ {#eq-vol3-effective-cost}
 
-where $\alpha = N_{\text{acc}}/N$ is the acceptance rate, $C_{\text{succ}}$ is the mean cost of an attempt that passes, and $C_{\text{fail}}$ is the mean cost of one that fails before it is abandoned. The odds ratio $(1 - \alpha)/\alpha$ counts how many failed attempts each accepted task carries. It is small near $\alpha = 1$ and grows without bound as $\alpha$ falls, which is the steep left edge of the margin figure.
+where $\alpha = N_{\text{acc}}/N$ is the task acceptance rate, $C_{\text{succ}}$ is the mean cost of an attempt that passes verification, and $C_{\text{fail}}$ is the mean cost of one that fails before it is abandoned.
+
+The dimensionless multiplier $\tau_{\text{unrel}} = \frac{1 - \alpha}{\alpha}$ is the **Tax on Unreliability**. It counts the exact number of failed trajectories that each accepted task must financially amortize. The tax exhibits severe non-linear hyper-growth as task reliability decays:
+$$\tau_{\text{unrel}}(0.90) \approx 0.11, \quad \tau_{\text{unrel}}(0.75) \approx 0.33, \quad \tau_{\text{unrel}}(0.50) = 1.00, \quad \tau_{\text{unrel}}(0.25) = 3.00, \quad \tau_{\text{unrel}}(0.10) = 9.00$$
+Near $\alpha \to 1.0$, the tax is negligible. But below the critical threshold $\alpha = 0.50$, the tax exceeds unity—meaning every successful task carries the full financial weight of more than one discarded attempt. When an engineering team replaces a frontier model ($\alpha = 0.75$) with a lightweight alternative ($\alpha = 0.25$) that offers a $5\times$ token discount, the Tax on Unreliability surges from $0.33$ to $3.00$—a nine-fold amplification in failure waste. The resulting cascade of repeated sandbox provisions, redundant tool executions, and multi-turn prefill tokens wipes out the model's nominal token savings, yielding a higher aggregate bill per finished task.
 
 ::: {#dfn-whole-trajectory-cost .callout-definition title="Whole-trajectory cost"}
 
 ***Whole-trajectory cost***\index{Whole-trajectory cost!definition}\index{Agent economics!cost per accepted task} is the total spent on model tokens, tools, sandboxes, verification, and human review across every attempt, divided by the number of attempts whose results were accepted, $C_{\text{eff}} = C_{\text{succ}} + \frac{1 - \alpha}{\alpha} C_{\text{fail}}$.
 
 1.  **Significance**: It is the quantity that model choice, caching, routing, and capacity decisions must lower, and it can rise when token prices fall.
-2.  **Distinction**: Per-token pricing bills what the model emits whether or not the task succeeds; whole-trajectory cost charges every failed attempt and every non-model term to the tasks that were accepted.
+2.  **Distinction**: Per-token pricing bills what the model emits whether or not the task succeeds; whole-trajectory cost charges every failed attempt and every non-model term to the tasks that were accepted via the Tax on Unreliability $\tau_{\text{unrel}} = \frac{1 - \alpha}{\alpha}$.
 3.  **Common pitfall**: Budgeting an agent from a provider's price sheet, which ignores both the non-model terms and the odds ratio $\frac{1 - \alpha}{\alpha}$ that multiplies failed attempts.
 
 :::
@@ -924,9 +928,25 @@ Two consequences follow from how trajectories issue calls. Calls arrive in corre
 
 ### Provider rate limits
 
-For a team that calls a hosted model, the first capacity limit it meets is usually not hardware but the provider's quota, expressed as tokens per minute and requests per minute.[^fn-token-bucket-policing] The quota caps the rate at which trajectories can run, not how many can be open. Each trajectory needs a fixed number of tokens to finish, so in steady state token demand is the trajectory rate times tokens per trajectory, whatever the trajectories' lifetimes. Suppose trajectories start at `{python} TrajectoryCapacity.lam_str` per minute, and each makes `{python} TrajectoryCapacity.calls_str` calls of `{python} TrajectoryCapacity.tok_call_str` input tokens, `{python} TrajectoryCapacity.tok_traj_str` tokens per trajectory. Against a limit of `{python} TrajectoryCapacity.tpm_limit_str` tokens per minute, demand uses `{python} TrajectoryCapacity.util_str` of the quota, and the fleet can sustain at most `{python} TrajectoryCapacity.lam_max_str` trajectories per minute. With a lifetime of `{python} TrajectoryCapacity.life_min_str` minutes, Little's law puts `{python} TrajectoryCapacity.conc_str` trajectories in flight, each issuing about `{python} TrajectoryCapacity.per_traj_rate_str` calls per minute.
+For a team that calls a hosted model, the first capacity limit it meets is usually not hardware but the provider's quota, expressed as tokens per minute (TPM) and requests per minute (RPM).[^fn-token-bucket-policing] The quota caps the rate at which trajectories can run, not how many can be open. Each trajectory needs a fixed number of tokens to finish, so in steady state token demand is the trajectory rate times tokens per trajectory, whatever the trajectories' lifetimes. Suppose trajectories start at `{python} TrajectoryCapacity.lam_str` per minute, and each makes `{python} TrajectoryCapacity.calls_str` calls of `{python} TrajectoryCapacity.tok_call_str` input tokens, `{python} TrajectoryCapacity.tok_traj_str` tokens per trajectory. Against a limit of `{python} TrajectoryCapacity.tpm_limit_str` tokens per minute, demand uses `{python} TrajectoryCapacity.util_str` of the quota, and the fleet can sustain at most `{python} TrajectoryCapacity.lam_max_str` trajectories per minute. With a lifetime of `{python} TrajectoryCapacity.life_min_str` minutes, Little's law puts `{python} TrajectoryCapacity.conc_str` trajectories in flight, each issuing about `{python} TrajectoryCapacity.per_traj_rate_str` calls per minute.
 
 [^fn-token-bucket-policing]: **Token Bucket Gateway Policing**: Provider rate limits enforce dual token-bucket constraints governing both requests per minute (RPM) and tokens per minute (TPM). Because multi-turn agent trajectories submit prompts that expand monotonically, an agent fleet can exhaust TPM quotas while consuming less than 10 percent of allocated RPM headroom. Runtimes maintain client-side token-bucket emulators to shape traffic and prevent HTTP 429 backoff storms.
+
+#### Token bucket versus leaky bucket under monotonic context expansion {.unnumbered}
+
+Managing provider rate limits for autonomous agents differs fundamentally from standard microservice API rate-limiting. In traditional web services, request payloads are statistically independent and approximately stationary ($S \approx \text{const}$). In multi-turn agent systems, however, context length expands **monotonically** with turn depth $k$:
+
+$$L_k = L_0 + \sum_{j=1}^{k-1} \left( L_{\text{out}}^{(j)} + L_{\text{obs}}^{(j)} \right)$$
+
+An agent dispatching its first turn may submit a lightweight $2{,}000$-token prompt; by turn 25, the cumulative context history—encompassing previous thoughts, tool invocations, and environmental observations—swells to $48{,}000$ or $64{,}000$ tokens. This monotonic expansion creates severe traffic-shaping dysfunctions under standard algorithms:
+
+- **Token Bucket Vulnerability:** A standard Token Bucket accumulates token credits up to burst capacity $B_{\text{burst}}$ refilled at continuous rate $r_{\text{TPM}}$. While token buckets cleanly absorb short stochastic bursts, they collapse when multiple concurrent agents simultaneously advance into deep turns. If four agents concurrently reach turn 25 (each issuing a 64k prefill request), they consume $256{,}000$ tokens in a single millisecond. The bucket is drained to zero instantaneously, causing all subsequent model calls across the entire fleet—including trivial single-token classification probes—to be dropped with HTTP 429 (Too Many Requests) errors. In response, synchronized client retries trigger destructive thundering-herd cascades.
+- **Leaky Bucket Defect:** A Leaky Bucket enforces a rigid, constant outflow rate $r_{\text{drain}}$, smoothing bursty token traffic into a continuous, uniform stream. While this strictly prevents provider 429 faults, queueing large prefill requests inside a leaky-bucket buffer introduces severe, artificial queueing delays. An agent awaiting model output experiences multi-second stalls, stranding high-bandwidth memory (HBM) on inference servers and dramatically increasing the risk of downstream tool execution timeouts.
+
+To resolve this impedance mismatch, high-throughput agent gateways implement a **Stateful Context-Aware Dual-Bucket Architecture**:
+
+1. **New Task Admission Bucket ($B_{\text{admit}}$):** Regulates the admission rate of fresh trajectories ($\lambda_{\text{new}}$). The gateway projects the lifetime token consumption of an admitted task, $\mathbb{E}[C_{\text{tokens}}] = \sum_{k=1}^{\mathbb{E}[K]} L_k$. A new task is admitted only if the projected demand fits within the uncommitted headroom of the rolling TPM quota window.
+2. **In-Flight Expansion Bucket ($B_{\text{flight}}$):** Grants strictly prioritized token allocations to active, multi-turn trajectories. Because an agent at turn 20 has already consumed substantial dollars and GPU compute, dropping its turn-21 request to accommodate a newly arriving task destroys existing investment. The gateway guarantees token quota to in-flight deep turns, throttling new task admissions during quota pressure while allowing existing trajectories to drain to verified completion.
 
 Running this close to a quota has the same consequence as running a server close to saturation. Throttled calls retry after backoff, trajectories live longer, they hold sandboxes and cache longer, and their deadlines slip. Three levers apply. Prefix caching lowers the bill, and whether it also lowers usage against the quota depends on how the provider counts cached tokens, which the capacity plan must check rather than assume. Short, reliable trajectories consume fewer tokens per accepted task, which raises the accepted-task rate under a fixed quota as directly as a higher quota would. Discounted batch endpoints, which return results within hours, suit single-call work such as offline evaluation runs, trajectory scoring, and curation, but not a multi-turn loop in which each turn must wait for the previous one.
 
@@ -1033,7 +1053,15 @@ The cluster scheduler partitions agent inference jobs into prioritized execution
 5. **Tiered Memory Retention:** Preempted $Q_1$ tasks retain physical HBM allocations during grace interval $\tau_{\text{grace}}$; prolonged memory pressure migrates $Q_2$ blocks to host memory via PagedAttention.
 :::
 
-The second challenge involves physical memory management during preemption. When a $Q_2$ job is preempted to free tensor cores for an incoming $Q_0$ burst, evicting its accumulated 4,000-token KV cache to host CPU RAM consumes valuable interconnect bandwidth. If the preempted task is re-admitted milliseconds later, swapping those physical pages back into HBM creates severe PCIe/NVLink thrashing. The MLFQ scheduler mitigates this via *tiered eviction thresholds*: preempted $Q_1$ tasks retain their physical HBM page allocations in a suspended state for a grace period $\tau_{\text{grace}}$. Only if memory pressure persists and $Q_0$ exhausts the free HBM frame pool does the PagedAttention memory manager trigger asynchronous page migration to host DDR5 memory.[^fn-paged-attention-swapping] The comparative trade-offs among classical and adaptive queueing disciplines are evaluated in @tbl-vol3-scheduling-disciplines.
+The second challenge involves physical memory management during preemption. When a $Q_2$ job is preempted to free tensor cores for an incoming $Q_0$ burst, evicting its accumulated 4,000-token KV cache to host CPU RAM consumes valuable interconnect bandwidth. If the preempted task is re-admitted milliseconds later, swapping those physical pages back into HBM creates severe PCIe/NVLink thrashing. The MLFQ scheduler resolves this via a formal **Two-Phase Token Reservation Protocol**:
+
+1. **Phase 1: Soft Reservation & Predictive Frame Staging.**
+   When a high-priority $Q_0$ burst arrives, the scheduler determines the required prefill and decode frame allocation $\Delta M$. Rather than instantly evicting active $Q_1$ or $Q_2$ tasks, the scheduler first attempts soft reservation against uncommitted HBM blocks. If the free pool is inadequate, the scheduler selects the lowest-priority victim sequence in $Q_2$ and initiates *predictive asynchronous DMA offloading* of its oldest physical block tables to host pinned DDR5 memory over PCIe Gen5 or NVLink, while keeping the victim's active generation prefix in HBM during a grace period $\tau_{\text{grace}}$.
+
+2. **Phase 2: Hard Preemption with Re-Prefill Debt Accounting.**
+   If memory exhaustion is immediate and DMA offload bandwidth cannot clear frames before the $Q_0$ deadline, the scheduler triggers hard preemption, evicting the victim's KV blocks to host DDR5 or dropping them entirely if DDR5 bandwidth is saturated. Critically, to prevent the victim from being trapped in an eviction thrashing loop—repeatedly re-prefilling from scratch only to be immediately preempted—the scheduler assigns an explicit **Re-Prefill Debt Credit** ($C_{\text{debt}}$) to the victim's task descriptor. Upon restoration, the scheduler grants the victim an elevated dispatch priority and a guaranteed contiguous execution quantum $\Delta_{\text{protected}} \ge 2 \cdot L_{\text{preempted}}$ tokens, ensuring that the heavy computational cost of re-prefill is amortized over guaranteed productive forward passes.[^fn-paged-attention-swapping]
+
+The comparative trade-offs among classical and adaptive queueing disciplines are evaluated in @tbl-vol3-scheduling-disciplines.
 
 | Scheduling Discipline                 | Mean Wait ($W_q$) | Tail Latency ($P_{99}$)                | Starvation Risk                | Preemption Overhead                  | Memory Efficiency (KV Cache)   |
 |:--------------------------------------|:------------------|:---------------------------------------|:-------------------------------|:-------------------------------------|:-------------------------------|
@@ -1622,6 +1650,46 @@ The synthesized system achieves a **$2.71\times$ improvement in Goodput per Doll
 :::
 
 Maximizing Goodput per Dollar reveals the fundamental trade-off of serving economics: spending more money per task is economically rational if and only if the marginal expenditure yields a super-linear increase in the probability of task acceptance. Conversely, cost reduction strategies that depress task success rates—even slightly—frequently crater Goodput per Dollar because the fixed costs of tool infrastructure, prefill tokens, and verification are squandered on unrecoverable failures.
+
+### SRE error budget burn rates and trajectory goodput SLOs {#sec-vol3-synthesis-sre-error-budgets}
+
+In classical site reliability engineering (SRE) [@beyer2016sre], service level objectives (SLOs) govern isolated, stateless remote procedure calls (RPCs)—typically enforcing constraints such as $99.9\%$ availability (three nines of HTTP 200 responses) and $P_{99}$ latency under $200\ \text{ms}$. For autonomous agents, however, traditional RPC-level availability is a dangerous and deceptive metric.
+
+An agent trajectory is a sequential, multi-turn Markov chain comprising $20$ to $50$ interdependent inference passes and tool executions. If each individual turn exhibits an apparently robust $98\%$ RPC availability ($p_{\text{turn}} = 0.98$), the compound end-to-end trajectory reliability over $K = 30$ turns collapses precipitously:
+
+$$P_{\text{trajectory\_success}} \le (p_{\text{turn}})^K = (0.98)^{30} \approx 0.545 \quad (54.5\%)$$
+
+Nearly half of all initiated trajectories crash or abort mid-execution. Worse, a failure at turn 29 consumes all the tokens, container runtimes, and external API fees incurred across turns 1 through 28, delivering zero business value while burning cluster budget. In an agentic architecture, reliability cannot be measured by turn-level HTTP status codes; it must be governed by **Trajectory Goodput Service Level Objectives**.
+
+#### Trajectory goodput service level objectives {.unnumbered}
+
+An enterprise agent fleet defines its contractual reliability target through a multi-dimensional Trajectory Goodput SLO:
+
+$$\text{SLO}_{\text{goodput}} = \frac{1}{M}\sum_{i=1}^M \mathbf{1}\left( \text{Verified}(i) \land \neg\text{Defect}(i) \land C_{\text{task}}^{(i)} \le C_{\max} \land T_{\text{task}}^{(i)} \le T_{\max} \right) \ge 1 - \epsilon_{\text{budget}}$$
+
+where $M$ is the number of admitted tasks, $C_{\max}$ is the financial ceiling, $T_{\max}$ is the end-to-end wall-clock latency deadline, and $\epsilon_{\text{budget}}$ represents the maximum allowable unreliability budget over a rolling compliance window (e.g., $\epsilon_{\text{budget}} = 0.05$ for a $95\%$ Goodput SLO over a 30-day window). A task is classified as successful if and only if it satisfies all functional post-conditions, introduces no regressions, and finishes within both budget and latency bounds.
+
+#### Multi-window error budget burn rate alerting {.unnumbered}
+
+Because agent fleets process complex, non-deterministic tasks, failures do not manifest solely as binary node crashes. Instead, an outage often appears as **semantic degradation**: a subtle prompt drift, model alignment update, or tool schema deprecation that causes the agent to enter repetitive reasoning loops, misformat JSON tool calls, or fail unit tests.
+
+To detect both sudden catastrophic outages and slow systemic degradation, the platform tracks the **Error Budget Burn Rate** $B$:
+
+$$B = \frac{\text{Observed Unreliability Rate}}{\text{Target Unreliability Rate}} = \frac{1 - \text{Goodput}_{\text{observed}}}{\epsilon_{\text{budget}}}$$
+
+A burn rate of $B = 1.0$ indicates that the system is consuming its error budget at a rate that will exhaust exactly $100\%$ of the budget over the compliance window. A burn rate of $B > 1.0$ signals that the system is consuming budget faster than permitted.
+
+Production agent platforms implement multi-window, multi-burn-rate alerting [@beyer2016sre] calibrated across short and long time horizons:
+
+1. **Catastrophic Fast Burn ($B = 14.4$, 1-hour window):** Consumes $2\%$ of the 30-day error budget in a single hour. Triggered by hard infrastructure failures—such as inference cluster network partitions, container registry outages, or breaking tool API updates. The monitoring system fires immediate high-priority PagerDuty alerts and trips automated circuit breakers.
+2. **Severe Medium Burn ($B = 6.0$, 6-hour window):** Consumes $5\%$ of the 30-day error budget in six hours. Typically triggered by prompt regressions, model weight updates that alter reasoning distributions, or external database performance degradation.
+3. **Chronic Slow Burn ($B = 1.0$, 3-day window):** Consumes $10\%$ of the error budget over three days, detecting gradual operational drift, context bloat, or rising task complexity that threatens the monthly SLO.
+
+When a high burn rate is detected, the fleet supervisory orchestrator triggers automated systems countermeasures:
+
+- **Automated Workload Shedding:** The gateway throttles asynchronous background batch workloads (such as repository indexing and evaluation sweeps), reserving GPU capacity and provider token quotas exclusively for interactive user trajectories.
+- **Dynamic Routing Fallback:** The model cascade escalates tasks from cheaper small language models directly to frontier models, trading off short-term token expenditure to stem the loss of trajectory goodput.
+- **Canary Rollback:** If a burn-rate spike correlates with a recent prompt template deployment or tool definition change, the orchestrator automatically rolls back the agent harness configuration to the last known healthy checkpoint.
 
 ### The fleet economic operating envelope {#sec-vol3-synthesis-envelope}
 

@@ -206,7 +206,28 @@ $$N_{\text{active}} = 1{,}400 + 960 = 2{,}360, \qquad \frac{2{,}360}{16{,}384} \
 
 ### Reasoning as target or context
 
-The mask is settled for prompts, observations, and calls. Reasoning is a design choice. Training on reasoning ($m_t = 1$ on $\mathcal{T}_{\text{rationale}}$) teaches the model how the demonstrator decomposed the problem, which helps on long tasks where the plan matters. It also teaches the demonstrator's verbosity, and every extra reasoning token is an output token, the expensive kind, paid on every turn at serving time. Training on actions only keeps demonstrated reasoning as context and puts the whole gradient on call accuracy. It suits a small, fast policy that must emit correct calls cheaply, and it leaves the policy weaker at deliberating its way out of unfamiliar failures. The choice follows the deployment, as the principle states. Reasoning is trained when the deployed policy must reason and kept as context when it need not.
+While the masking policy for prompts, observations, and tool calls is mechanically dictated by the causality of the execution environment, the treatment of chain-of-thought reasoning tokens ($\mathcal{T}_{\text{rationale}}$) introduces a fundamental systems dilemma. In language models, reasoning tokens precede tool invocations to enable scratchpad deliberation. During fine-tuning, the data loader must decide whether to set $m_t = 1$ (computing cross-entropy loss over reasoning tokens) or $m_t = 0$ (masking reasoning tokens out of the loss while retaining them in the attention prefix).
+
+Rather than treating this as an arbitrary preference, production agent runtimes evaluate this trade-off using a structured three-way systems decision matrix (@tbl-vol3-reasoning-mask-regimes):
+
+1. **Full Deliberation Cloning ($m_{\text{reason}} = 1$):**
+   The training loss supervises both the rationale tokens and the action tokens.
+   - *Advantage:* Teaches the policy complex multi-step planning, domain-specific problem decomposition, and self-correction patterns exhibited by expert demonstrators.
+   - *Systems Penalty:* Output token inflation. Because the model learns to imitate the demonstrator's verbosity, it emits hundreds of deliberation tokens on every turn. In an autoregressive decode regime, every emitted token requires shuttling weights across accelerator memory buses ($I_{\text{decode}} \approx 1\text{ FLOP/byte}$), multiplying serving latency and inference costs by $3\times\text{ to }5\times$. Furthermore, the policy risks *sycophantic deliberation*—emitting ritualistic reasoning boilerplate ("Let me carefully examine the codebase...") that correlates with teacher formatting but provides zero causal diagnostic value.
+2. **Action-Only Distillation ($m_{\text{reason}} = 0$):**
+   Demonstrated reasoning tokens are retained in the context window to provide causal prefix conditioning, but their cross-entropy loss is zeroed out ($m_t = 0$ for all $t \in \mathcal{T}_{\text{rationale}}$). Only the action tokens (the JSON tool call and arguments) receive gradient updates.
+   - *Advantage:* Forces the neural policy to internalize procedural heuristics directly into its weights. At inference time, the model skips verbal deliberation and emits compact, high-velocity tool calls directly, minimizing Time-to-First-Token ($t_{\text{TTFT}}$) and eliminating decoding overhead.
+   - *Systems Penalty:* Degrades operational accuracy on long-horizon, ambiguous engineering tasks that genuinely require explicit search, hypothesis branching, and multi-file tracking.
+3. **Selective Diagnostic Masking:**
+   The training pipeline partitions reasoning tokens based on verification feedback. Exploratory dead-ends and superficial narration are masked out ($m_t = 0$), whereas verified diagnostic reflections—such as stack trace interpretations and hypothesis pivots preceding successful recovery mutations—are supervised ($m_t = 1$). This delivers optimal token efficiency while preserving self-healing capabilities.
+
+| Regimes                      | Mask Setting                                 | Serving Token Tax      | Planning Capability | Primary Systems Failure Risk                       |
+|:-----------------------------|:---------------------------------------------|:-----------------------|:--------------------|:---------------------------------------------------|
+| **Full Deliberation**        | $m_{\text{reason}} = 1$                      | High ($3\times$)       | High                | Sycophantic verbosity, decode bandwidth saturation |
+| **Action-Only Distillation** | $m_{\text{reason}} = 0$                      | Minimal ($1\times$)    | Low to Moderate     | Heuristic brittleness on multi-hop tasks           |
+| **Selective Diagnostic**     | $m_{\text{reason}} \in \{0, 1\}$ conditional | Moderate ($1.5\times$) | High                | Annotation complexity; requires verified traces    |
+
+: **Reasoning Token Masking Regimes**: Trade-offs across loss masking strategies for chain-of-thought tokens. {#tbl-vol3-reasoning-mask-regimes}
 
 ### The end-of-turn token and truncated turns
 
@@ -245,6 +266,14 @@ The mask is defined for one trajectory. Training runs on batches of many, and th
 ## Packing Without Leakage {#sec-vol3-fine-tuning-batching}
 
 An agent corpus mixes a two-turn lookup of a few hundred tokens with a forty-turn debugging session near the context limit. Padding every example to the longest one wastes most of each batch on padding, so training pipelines pack several trajectories into one sequence. Packing is a standard efficiency move, and it creates two agent-specific hazards: a loss that silently favors long trajectories, and attention that crosses from one trajectory into the next.
+
+::: {#psp-15-padding-bubble-roofline .callout-perspective title="The padding bubble roofline: Why agent trajectories break naive batching"}
+In traditional natural language processing, text documents follow a relatively unimodal length distribution, allowing sequence bucketing to achieve $80\%\text{--}90\%$ batch occupancy. In autonomous agent engineering workloads, trajectory lengths follow an extreme Pareto distribution: from a 256-token file search to a 32,768-token multi-file debugging session.
+
+If a training batch of $B=8$ sequences is padded naively to the batch maximum $L_{\max} = 32{,}768$, the total allocated tensor elements is $B \times L_{\max} = 262{,}144$ tokens. If the average trajectory length in the batch is $\bar{L} = 3{,}800$ tokens, the active tokens represent only:
+$$\eta_{\text{occupancy}} = \frac{8 \times 3{,}800}{262{,}144} \approx 11.6\%$$
+Over **$88\%$ of accelerator FLOPs and high-bandwidth memory capacity are squandered processing pad tokens** that contribute zero gradient. Packing multiple trajectories up to a fixed buffer length $L_{\text{pack}}$ with FlashAttention varlen kernels collapses this bubble to zero, delivering an empirical $7.8\times$ throughput speedup on an 8-GPU H100 node while eliminating VRAM fragmentation.
+:::
 
 ### Loss normalization across variable-length trajectories
 
@@ -452,6 +481,13 @@ In multi-turn trajectory MDPs, preference optimization operates over complete ex
 $$\mathcal{L}_{\text{DPO}}(\theta; \pi_{\text{ref}}) = -\mathbb{E}_{(\tau_w, \tau_l) \sim \mathcal{D}} \left[ \log \sigma \left( \beta \sum_{t=1}^{|\tau_w|} \log \frac{\pi_\theta(a_t^w \mid s_t^w)}{\pi_{\text{ref}}(a_t^w \mid s_t^w)} - \beta \sum_{t=1}^{|\tau_l|} \log \frac{\pi_\theta(a_t^l \mid s_t^l)}{\pi_{\text{ref}}(a_t^l \mid s_t^l)} \right) \right]$$ {#eq-vol3-dpo-trajectory}
 
 where $\beta$ is a temperature hyperparameter controlling the strength of the implicit KL-divergence constraint relative to $\pi_{\text{ref}}$, and $\sigma(z) = (1 + e^{-z})^{-1}$ denotes the sigmoid function. In @eq-vol3-dpo-trajectory, token log-probabilities are accumulated strictly across active action and reasoning tokens ($m_t = 1$). Crucially, environment observations carry $m_t = 0$ and are omitted from the log-likelihood summations, preventing non-deterministic environment outputs from introducing spurious variance into the preference gradient. When $\pi_\theta$ increases the cumulative log-likelihood ratio margin of $\tau_w$ over $\tau_l$, the objective value approaches zero.
+
+::: {#psp-15-offline-dpo-vs-online-rlvr .callout-perspective title="The offline-online divide: Static DPO vs. dynamic RLVR"}
+Engineers designing post-training pipelines must decide when to stop optimizing offline preference pairs and when to transition to online reinforcement learning (@sec-vol3-rlvr). The two paradigms occupy opposite sides of an infrastructure and algorithmic trade-off:
+
+1. **Offline Trajectory DPO (Post-Processing Static Curated Datasets):** Operates entirely offline on pre-collected pairs $(\tau_w, \tau_l)$ harvested by the curation pipeline (@sec-vol3-trajectory-curation). It requires zero live sandbox infrastructure during training, eliminates rollout generation latency, and, via offline reference logit caching, reduces training GPU HBM footprint by $50\%$. However, its mathematical effectiveness is bounded by **off-policy distribution shift**: as $\pi_\theta$ updates, its state-action distribution drifts away from the static dataset, eventually saturating policy performance without discovering novel solution paths.
+2. **Online RLVR (Dynamic Exploration in Live Execution Gyms):** Explores on-policy within isolated, hermetic microVM sandboxes (@sec-vol3-sandboxes). It generates rollouts dynamically, evaluates outcomes against programmatic ground-truth verifiers in real time, and uses group-relative policy gradients (GRPO) to push agents beyond the ceiling of static human or teacher demonstrations.
+:::
 
 ### Offline reference logit caching and memory reduction
 
