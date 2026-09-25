@@ -78,11 +78,6 @@ The integers $-128$ through $127$ are perfectly good for counting, but the weigh
 
 ### One scale and one zero point
 
-::: {.column-margin}
-![](assets/images/diagrams/15_quantization-margin-grid.svg){width="100%"}
-*Affine INT8 quantization: continuous FP32 values project onto 256 discrete bins with scale $S$ and zero-point $Z$.*
-:::
-
 Consider `[0.0, 0.5, 1.0]`. Its endpoints are one unit apart. Dividing that interval into 255 steps gives a step width of $1/255$. Code $-128$ represents zero, code $127$ represents one, and the midpoint rounds to code $0$, which reconstructs as $128/255 \approx 0.50196$. The middle value changes slightly; it no longer disappears. The step width and the code assigned to zero are the two numbers needed to repeat this mapping for another tensor.
 
 Take a tensor whose values lie between $x_{\min}$ and $x_{\max}$. Stretch that interval so that it includes $0.0$ (if the values are all positive, as the output of a ReLU is, the interval grows down to zero), and then spread it evenly over the 256 codes a signed byte can hold. The width of one step is the **scale**:
@@ -92,6 +87,11 @@ $$S = \frac{x_{\max} - x_{\min}}{255}$$
 Divide every value by $S$ and the tensor spans 255 steps. Shifting it so that $x_{\min}$ lands on $-128$ takes one integer offset, the **zero point** $Z$, which is the code that represents $0.0$:
 
 $$Z = \text{round}\!\left(-128 - \frac{x_{\min}}{S}\right), \qquad q = \text{clamp}\!\left(\text{round}\!\left(\frac{x}{S} + Z\right),\; -128,\; 127\right)$$
+
+::: {.column-margin}
+![](assets/images/diagrams/15_quantization-margin-grid.svg){width="100%"}
+*Affine INT8 quantization: continuous FP32 values project onto 256 discrete bins with scale $S$ and zero-point $Z$.*
+:::
 
 Here $x$ is the original float and $q$ is its 8-bit code. Rounding the zero point can put an endpoint code just outside the byte, so the clamp is necessary even for the observed range. A grid chosen from different data may require much larger clipping. Stretching the interval to include zero keeps $Z$ inside the byte, but it can enlarge the step substantially for a narrow interval far from zero. The reconstruction bound must use that enlarged interval. To get a float back, undo the shift and the division:
 
@@ -336,6 +336,12 @@ The module's uncalibrated `forward` (line 16) rounds only the weights, so it lan
 
 The same layer illustrates this calibration state change. The samples `[[0.4, -0.2]]` and `[[0.1, 0.5]]` have a combined range of $[-0.2, 0.5]$. `calibrate` stores $S_x = 0.7/255 \approx 0.0027451$ and $Z_x = -55$. It leaves the weight and bias codes unchanged. The later input `[[2.0, -1.5]]` is outside this recorded range in both coordinates.
 
+::: {.column-margin}
+![](assets/images/diagrams/15_quant-margin-clipping.svg){width="100%" fig-alt="Diagram showing quantization error regimes, contrasting bounded in-range rounding noise with unbounded out-of-range saturation clipping error."}
+
+*Quantization error decomposition: In-range discretization error is strictly bounded by half a grid step ($S/2$), whereas out-of-range values saturate at boundary codes, producing severe clipping distortion.*
+:::
+
 ::: {lst-cap="**A frozen calibration grid**: Later inputs outside the observed range saturate."}
 ```python
 layer.calibrate([Tensor([[0.4, -0.2]]), Tensor([[0.1, 0.5]])])
@@ -349,12 +355,6 @@ print(dequantize_int8(Tensor(codes), scale, zero).data)
 print(layer.forward(x_drift).data)   # [[0.76006 0.33064]]
 print(x_drift.data @ W.T)           # [[3.497   2.0345]]
 ```
-:::
-
-::: {.column-margin}
-![](assets/images/diagrams/15_quant-margin-clipping.svg){width="100%" fig-alt="Diagram showing quantization error regimes, contrasting bounded in-range rounding noise with unbounded out-of-range saturation clipping error."}
-
-*Quantization error decomposition: In-range discretization error is strictly bounded by half a grid step ($S/2$), whereas out-of-range values saturate at boundary codes, producing severe clipping distortion.*
 :::
 
 The large discrepancy occurs before matrix multiplication. Clamping makes `2.0` behave like approximately `0.49961` and `-1.5` like `-0.20039`. The half-step bound for values inside the calibration interval cannot protect these out-of-range inputs. `forward` keeps the same scale afterward; it does not widen the range in response to this call. Calling `calibrate` again would replace the grid, while constructing a fresh wrapper would restore the uncalibrated path.
