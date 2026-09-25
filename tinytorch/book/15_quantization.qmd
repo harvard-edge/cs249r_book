@@ -249,6 +249,12 @@ def int8_forward(layer: QuantizedLinear, x: Tensor) -> np.ndarray:
 ```
 :::
 
+::: {.column-margin}
+![](assets/images/diagrams/15_quant-margin-accumulator.svg){width="100%" fig-alt="Diagram showing integer matrix multiplication datapath where 8-bit operands widen to 16-bit intermediate products, accumulate in 32-bit registers to prevent overflow, and rescale to float32."}
+
+*Integer MAC datapath: 8-bit operand products require a 32-bit integer accumulator (INT32) to prevent numerical overflow across reduction dimension K, followed by a single floating-point rescale epilogue.*
+:::
+
 One detail matters for the accumulator. After the zero points are subtracted each operand spans up to 255, so one product can reach $255 \times 255 = 65{,}025$, and a dot product over $K$ inputs sums $K$ of them. A 32-bit accumulator holds up to $2{,}147{,}483{,}647$, enough for $K$ up to about $33{,}000$ inputs at the worst case; a 16-bit accumulator cannot hold even one worst-case product. This book function uses 32-bit accumulation, as does the integer-kernel design it models. NumPy's `int32` does it here, and the trace checks that the sums stay far from the edge. This function is an arithmetic demonstration, not a packed or optimized kernel: its NumPy operands are int32 arrays, and it allocates them on every call.
 
 ### Quantizing a whole model
@@ -343,6 +349,12 @@ print(dequantize_int8(Tensor(codes), scale, zero).data)
 print(layer.forward(x_drift).data)   # [[0.76006 0.33064]]
 print(x_drift.data @ W.T)           # [[3.497   2.0345]]
 ```
+:::
+
+::: {.column-margin}
+![](assets/images/diagrams/15_quant-margin-clipping.svg){width="100%" fig-alt="Diagram showing quantization error regimes, contrasting bounded in-range rounding noise with unbounded out-of-range saturation clipping error."}
+
+*Quantization error decomposition: In-range discretization error is strictly bounded by half a grid step ($S/2$), whereas out-of-range values saturate at boundary codes, producing severe clipping distortion.*
 :::
 
 The large discrepancy occurs before matrix multiplication. Clamping makes `2.0` behave like approximately `0.49961` and `-1.5` like `-0.20039`. The half-step bound for values inside the calibration interval cannot protect these out-of-range inputs. `forward` keeps the same scale afterward; it does not widen the range in response to this call. Calling `calibrate` again would replace the grid, while constructing a fresh wrapper would restore the uncalibrated path.
