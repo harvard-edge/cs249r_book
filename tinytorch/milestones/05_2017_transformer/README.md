@@ -20,6 +20,9 @@ Train **TinyGPT** from scratch on Shakespeare. Brings together your tokenization
 **Part 2 (`02_vaswani_attention.py` - Attention Proof):**
 Prove your attention mechanism on three synthetic sequence challenges (reversal, copying, prefix-controlled mixed tasks) without external data dependencies.
 
+**Part 3 (`03_tinygpt_code_completion.py` - Code Completion):**
+Train **TinyGPT** on Python code using the TinyPy dataset to complete functions, preserve indentation, and generate syntactically valid code.
+
 ## Required Modules
 
 **Run after Module 13** (Complete transformer stack)
@@ -67,6 +70,12 @@ tito milestone run tinygpt
 tito milestone run 05 --part 2
 ```
 
+**Run Part 3 (Python Code Completion):**
+
+```bash
+tito milestone run 05 --part 3
+```
+
 **Or run directly:**
 
 ```bash
@@ -75,6 +84,55 @@ python3 milestones/05_2017_transformer/01_tinygpt_shakespeare.py --quick
 
 # Part 2: Sequence tasks
 python3 milestones/05_2017_transformer/02_vaswani_attention.py
+
+# Part 3: Code completion (from repository root)
+python3 milestones/05_2017_transformer/03_tinygpt_code_completion.py --quick
+
+# Or from within milestones/05_2017_transformer/
+python3 03_tinygpt_code_completion.py --quick
+```
+
+## Part 3: Code Completion with TinyPy (`03_tinygpt_code_completion.py`)
+
+### Why Code Completion is the Natural Evolution from Shakespeare
+
+Training an autoregressive model on natural prose like Shakespeare demonstrates statistical language structure: meter, vocabulary, and dialogue cadence. However, natural language is forgiving. A typo, an extra space, or an unexpected comma rarely prevents comprehension.
+
+Code completion represents the natural evolution in sequence modeling for three foundational reasons:
+
+1. **Rigid Syntactic Constraints:**
+   Programming languages possess strict context-free grammars. Every opening parenthesis, bracket, and quotation mark must balance. In Python, indentation defines block scoping, and keywords such as `def`, `class`, `return`, and `if` demand exact downstream syntax. If an attention head fails to track an open delimiter, the generated code fails to parse.
+
+2. **Long-Range Semantic Dependencies:**
+   In code, tokens defined dozens or hundreds of positions earlier, such as function parameters or imported module identifiers, must be referenced with exact character fidelity later in the sequence. Causal self-attention provides the direct constant-distance path needed to bind variable names across statements without the gradient attenuation of recurrent networks.
+
+3. **Bridging to Modern Developer Assistants:**
+   The exact architecture trained here reflects the foundation of modern coding assistants, such as OpenAI Codex and GitHub Copilot. Autoregressive transformers trained with next-token cross-entropy loss generalize naturally from human conversational prose to algorithmic source code.
+
+### Commands to Run
+
+**Quick verification run (recommended for fast turnaround):**
+
+```bash
+python3 03_tinygpt_code_completion.py --quick
+```
+
+Or from the TinyTorch repository root:
+
+```bash
+python3 milestones/05_2017_transformer/03_tinygpt_code_completion.py --quick
+```
+
+**Run via TITO CLI:**
+
+```bash
+tito milestone run 05 --part 3
+```
+
+**Full training run:**
+
+```bash
+python3 03_tinygpt_code_completion.py --epochs 10
 ```
 
 ## Expected Results
@@ -83,6 +141,7 @@ python3 milestones/05_2017_transformer/02_vaswani_attention.py
 |------|--------|------|------------------|
 | 1 (Default) | `01_tinygpt_shakespeare.py` | Shakespeare Next-Token Prediction | Loss drops from ~3.0 to < 1.0 (PPL < 3.0); generates coherent verse |
 | 2 (Optional) | `02_vaswani_attention.py` | Synthetic Reversal / Copy / Mixed | High accuracy (>95% reversal, >95% copy, >90% mixed) |
+| 3 (Code) | `03_tinygpt_code_completion.py` | Python Code Completion | Loss drops steadily; generates valid syntax and completes functions |
 
 ## Achievement Unlocked
 
@@ -91,6 +150,7 @@ After completing this milestone, you'll understand:
 - Why teacher forcing trains all sequence positions in parallel
 - How temperature and top-k sampling turn raw logits into generative prose
 - Why autoregressive decode creates the prefix recomputation bottleneck that Part III will optimize
+- How autoregressive transformers generalize from literary prose to formal code completion
 
 **You've validated the architecture powering modern AI!**
 

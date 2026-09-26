@@ -41,6 +41,8 @@ MILESTONE_ALIASES = {
     "tinygpt": "05",
     "gpt": "05",
     "shakespeare": "05",
+    "code": "05",
+    "tinypy": "05",
     "mlperf": "06",
     "olympics": "06",
     "serving": "06",
@@ -142,10 +144,16 @@ MILESTONE_SCRIPTS = {
                 "script": "milestones/05_2017_transformer/02_vaswani_attention.py",
                 "description": "Prove attention mechanism on sequence reversal and copying",
                 "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13]
+            },
+            {
+                "name": "Code Completion",
+                "script": "milestones/05_2017_transformer/03_tinygpt_code_completion.py",
+                "description": "Train TinyGPT on Python code to complete functions and syntax",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
             }
         ],
         "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13],  # TinyGPT training requirements
-        "description": "Train TinyGPT from scratch on Shakespeare and generate text",
+        "description": "Train TinyGPT from scratch on Shakespeare and Python code",
         "historical_context": "Vaswani et al. (2017) and the Generative LLM revolution (2020–2022) proved transformers and emergent autoregressive scaling",
         "emoji": "🤖"
     },

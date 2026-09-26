@@ -7,8 +7,9 @@ This directory contains datasets for TinyTorch milestone examples.
 ```
 datasets/
 ├── tinydigits/         ← 8×8 handwritten digits (ships with repo, ~310KB)
-├── tinytalks/          ← conversational Q&A text for transformers (~40KB)
+├── tinypy/             ← curated, verified Python code for code completion (~67KB)
 ├── tinyshakespeare/    ← bundled sample of Shakespeare plays (~21KB)
+├── tinytalks/          ← conversational Q&A text for transformers (~40KB)
 └── README.md           ← This file
 ```
 
@@ -20,6 +21,13 @@ datasets/
 - **Format:** 8×8 grayscale images, pickled
 - **Size:** ~310 KB
 - **Purpose:** Fast iteration on real image classification
+
+### TinyPy
+- **Used by:** Code completion and generative modeling (e.g. Milestone 05 and modern generative AI tasks)
+- **Contents:** 102 curated Python snippets (148 functions/methods, 12 classes across 4 domains)
+- **Format:** Clean, 100% AST-valid Python source code with full type annotations and docstrings
+- **Size:** ~67 KB
+- **Purpose:** Fast, offline code completion, syntax learning, and next-token prediction
 
 ### TinyTalks
 - **Used by:** Transformer / language teaching (e.g. Milestone 05 materials and extensions)
@@ -71,7 +79,7 @@ The milestones automatically download larger datasets when needed:
 
 ## Total Repository Size
 
-- **Shipped data:** ~350 KB (TinyDigits + TinyTalks combined)
+- **Shipped data:** ~440 KB (TinyDigits, TinyPy, TinyTalks, TinyShakespeare combined)
 - **USB-friendly:** Entire repo fits on any device
 - **Offline-capable:** Core milestones work without internet
 - **Git-friendly:** No large binary files in version control

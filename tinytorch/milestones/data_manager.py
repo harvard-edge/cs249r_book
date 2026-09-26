@@ -11,6 +11,8 @@ Supported Datasets:
 - CIFAR-10: Natural images (32x32 RGB)
 - XOR: Synthetic non-linear problem
 - Perceptron: Synthetic linearly separable data
+- TinyShakespeare: Shakespeare plays and sonnets (1.1MB)
+- TinyPy: Curated Python functions and algorithms for code completion
 """
 
 import os
@@ -50,6 +52,13 @@ DATASET_INFO = {
         'extracted_size_mb': 1.1,
         'description': '1.1MB of William Shakespeare plays and sonnets',
         'url': 'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt'
+    },
+    'tinypy': {
+        'name': 'TinyPy',
+        'download_size_mb': 0.1,
+        'extracted_size_mb': 0.1,
+        'description': 'Curated Python functions and algorithms for code completion',
+        'url': 'https://raw.githubusercontent.com/harvard-edge/tinytorch/main/datasets/tinypy/tinypy_sample.txt'
     }
 }
 
@@ -295,6 +304,51 @@ class DatasetManager:
         with open(data_file, 'r', encoding='utf-8') as f:
             return f.read()
 
+    def get_tinypy(self, sample_only=False):
+        """Download and prepare TinyPy dataset for code completion milestone.
+
+        Args:
+            sample_only: If True, return the offline bundled sample (no download).
+
+        Returns:
+            str: The raw text content of Python code.
+        """
+        sample_path = Path(__file__).resolve().parent.parent / "datasets" / "tinypy" / "tinypy_sample.txt"
+        if not sample_path.exists():
+            sample_path = Path(__file__).parent / "05_2017_transformer" / "data" / "tinypy_sample.txt"
+        if not sample_path.exists():
+            sample_path = Path(__file__).parent / "05_2017_transformer" / "tinypy_sample.txt"
+
+        if sample_only and sample_path.exists():
+            with open(sample_path, 'r', encoding='utf-8') as f:
+                return f.read()
+
+        tinypy_dir = self.data_dir / "tinypy"
+        tinypy_dir.mkdir(exist_ok=True)
+        data_file = tinypy_dir / "tinypy_sample.txt"
+
+        if sample_only and data_file.exists():
+            with open(data_file, 'r', encoding='utf-8') as f:
+                return f.read()
+
+        if not data_file.exists():
+            if sample_path.exists():
+                with open(sample_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+
+            if not self.confirm_download('tinypy'):
+                if sample_path.exists():
+                    print("⚠️ Falling back to bundled offline TinyPy sample.")
+                    with open(sample_path, 'r', encoding='utf-8') as f:
+                        return f.read()
+                raise RuntimeError("TinyPy download canceled and no offline sample found")
+
+            url = DATASET_INFO['tinypy']['url']
+            self.download_with_progress(url, data_file)
+
+        with open(data_file, 'r', encoding='utf-8') as f:
+            return f.read()
+
     def get_xor_data(self, num_samples=1000):
         """Generate XOR problem data for non-linear milestone."""
         print("🧮 Generating XOR problem data...")
@@ -378,6 +432,20 @@ def main():
         print(f"   Shape: train_X={train_X.shape}, test_X={test_X.shape}")
     except Exception as e:
         print(f"   CIFAR-10 download failed: {e}")
+
+    print("\n5. Testing TinyShakespeare Sample:")
+    try:
+        shake_sample = manager.get_tinyshakespeare(sample_only=True)
+        print(f"   Loaded: {len(shake_sample)} characters")
+    except Exception as e:
+        print(f"   TinyShakespeare sample failed: {e}")
+
+    print("\n6. Testing TinyPy Sample:")
+    try:
+        py_sample = manager.get_tinypy(sample_only=True)
+        print(f"   Loaded: {len(py_sample)} characters of Python code")
+    except Exception as e:
+        print(f"   TinyPy sample failed: {e}")
 
     print("\n✅ Dataset Manager test complete!")
 
