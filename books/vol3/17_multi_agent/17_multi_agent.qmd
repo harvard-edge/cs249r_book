@@ -165,7 +165,17 @@ In the *Sequential Linear Pipeline* topology (Panel B), execution is structured 
 
 In the *Shared Blackboard and Actor* models (Panel C), centralized coordinators are eliminated in favor of decoupled asynchronous storage. In the Actor model, autonomous agents maintain private local state, communicating exclusively through asynchronous typed message mailboxes. In the Blackboard architecture, concurrent workers read from and write to a globally visible, append-only artifact repository or tuple space. For $N$ workers claiming subtasks and posting candidate artifacts, the operation complexity per round scales linearly:
 $$M_{\text{blackboard}} = \mathcal{O}(N)$$
-Worker contexts remain decoupled, keeping individual token ingress small ($B_i \approx L$). However, communication complexity is traded for *shared state contention*. Because agents execute concurrently without a central arbiter, two workers may simultaneously claim the same subtask or attempt conflicting mutations on overlapping files. In the absence of synchronized physical clocks, establishing causal event ordering across asynchronous agent messages requires implementing Lamport logical timestamps or vector clocks (Leslie Lamport, 1978) within the runtime message broker.[^fn-vector-clock-causality] Under power-law file access distributions, contention on hotspot files scales as $\sigma(N - 1)$, triggering optimistic concurrency aborts and retry storms. The properties and trade-offs across these four topologies are compared in @tbl-vol3-topologies-comparison.
+Worker contexts remain decoupled, keeping individual token ingress small ($B_i \approx L$). However, communication complexity is traded for *shared state contention*. Because agents execute concurrently without a central arbiter, two workers may simultaneously claim the same subtask or attempt conflicting mutations on overlapping files. In the absence of synchronized physical clocks, establishing causal event ordering across asynchronous agent messages requires implementing Lamport logical timestamps or vector clocks (Leslie Lamport, 1978) within the runtime message broker.[^fn-vector-clock-causality] Under power-law file access distributions, contention on hotspot files scales as $\sigma(N - 1)$, triggering optimistic concurrency aborts and retry storms.
+
+Beyond message routing complexity, multi-agent fleet scalability is tightly coupled to the physical memory architecture of the underlying foundation model serving cluster. While modern serving engines exploit **prefix caching (RadixAttention)** to share immutable system prompts, tool schemas, and repository base indexes across all $N$ workers at zero additional GPU HBM cost, the true physical bottleneck in parallel agent fleets is **KV-cache memory exhaustion during divergent autoregressive decode**.
+
+As $N$ parallel workers explore divergent reasoning trajectories, execute tools, and inspect candidate diffs, their generative outputs diverge completely. Each worker must allocate private, unshareable physical KV pages in accelerator HBM:
+
+$$M_{\text{KV\_worker}} = 2 \times n_{\text{layers}} \times d_{\text{head}} \times n_{\text{heads\_kv}} \times S_{\text{decode}} \times b_{\text{precision}} \text{ bytes}.$$ {#eq-vol3-multiagent-kv-cache-alloc}
+
+For an $N$-worker fleet running a 70B parameter model with Grouped-Query Attention (GQA, $n_{\text{layers}} = 80, d_{\text{head}} = 128, n_{\text{heads\_kv}} = 8$, FP8 precision $b_{\text{precision}} = 1\text{ byte}$), each worker generating $S_{\text{decode}} = 8{,}192$ tokens consumes $1.34\text{ GB}$ of dedicated KV cache. For a fleet of $N = 32$ workers, divergent decode demands over $43\text{ GB}$ of unshareable HBM—more than half the usable capacity of an 80 GB NVIDIA H100 GPU after loading base weights.
+
+When aggregate KV demand exceeds physical HBM capacity, serving engines are forced to swap KV blocks to host DRAM over PCIe Gen5 ($64\text{ GB/s}$) or preempt workers entirely by evicting pages. Furthermore, continuous batching schedulers must interleave the bursty prefill GEMM operations of arriving tool outputs with the memory-bandwidth-bound decode GEMVs of running workers. This induces **Time-to-First-Token (TTFT) latency spikes and decode bubbles** that ripple across the task dependency DAG, turning tail-latency stragglers into critical-path bottlenecks. The properties and trade-offs across these four topologies are compared in @tbl-vol3-topologies-comparison.
 
 | Coordination Topology              | Round Message Complexity                             | Fleet Token Ingress Bandwidth                                       | Critical-Path Latency                                                   | Primary Scalability Bottleneck                                  | Optimal Workload Profile                                                          |
 |:-----------------------------------|:-----------------------------------------------------|:--------------------------------------------------------------------|:------------------------------------------------------------------------|:----------------------------------------------------------------|:----------------------------------------------------------------------------------|
@@ -731,37 +741,72 @@ During the **Validation Phase**, the runtime evaluates whether the integration b
 
 $$\Delta_{\text{merged}} = C_{\text{head}} \setminus C_{\text{base}}$$
 
-If $\Delta_{\text{merged}} = \emptyset$, no intervening commits occurred; validation succeeds unconditionally. If $\Delta_{\text{merged}} \neq \emptyset$, the runtime inspects the write sets of all intervening commits. The validation condition requires that the worker's write set does not overlap with any concurrent mutations committed since its base snapshot:
+During the **Validation Phase**, the runtime evaluates whether the integration branch head $C_{\text{head}}$ has advanced beyond $C_{\text{base}}$ during the worker's execution window:
 
-$$\mathcal{W}_i \cap \left( \bigcup_{C_k \in \Delta_{\text{merged}}} \mathcal{W}_k \right) = \emptyset$$
+$$\Delta_{\text{merged}} = C_{\text{head}} \setminus C_{\text{base}}$$
 
-During the **Commit / Reconciliation Phase**, the runtime merges the validated work according to one of three structural outcomes:
+In production software repositories, evaluating validation solely at coarse file-level granularity ($\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} = \emptyset$) triggers catastrophic false aborts: multiple parallel agents concurrently adding independent endpoints to `routes.py` or distinct database columns to `models.py` are rejected even though their edits are completely orthogonal. To balance concurrency throughput against semantic safety, the runtime implements a **Three-Tier OCC Validation Hierarchy**:
+
+1. **Tier 1: Path-Level Disjointness (Fast Check):** If file write sets are strictly disjoint ($\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} = \emptyset$), validation succeeds immediately without parsing file contents.
+2. **Tier 2: AST Symbol and Hunk Disjointness (Syntactic Merge):** If write sets overlap, the runtime parses the common ancestor ($C_{\text{base}}$), current integration head ($C_{\text{head}}$), and worker branch ($C_i$) into Abstract Syntax Trees using language-specific parsers (such as tree-sitter). The validator verifies that:
+   - Modifications reside in disjoint AST nodes (such as separate class definitions, independent function signatures, or non-overlapping line hunks).
+   - Neither commit modifies symbols (types, functions, variables) upon which the other depends, verified via symbol reference graph reachability.
+   If AST diffs are orthogonal, the runtime synthesizes an automated clean three-way AST merge.
+3. **Tier 3: Hermetic Regression Gating (Semantic Validation):** If Tier 1 or Tier 2 produces a merged tree $C_{\text{candidate}}$, the runtime builds and executes the sealed integration test suite inside a transient, hermetic microVM sandbox. If regression assertions pass, the commit is certified.
+
+During the **Commit / Reconciliation Phase**, the runtime merges validated work through one of four operational paths:
 
 1. *Fast-Forward Commit:* When $C_{\text{head}} == C_{\text{base}}$, the runtime advances the integration branch pointer directly to $C_i$ using an atomic compare-and-swap pointer update (`git update-ref`).
-2. *Disjoint Three-Way Merge:* When $C_{\text{head}} \neq C_{\text{base}}$ but write sets are provably disjoint, the runtime executes an automated three-way merge:
+2. *Disjoint Three-Way Merge:* When $C_{\text{head}} \neq C_{\text{base}}$ but write sets satisfy Tier 1 or Tier 2 disjointness, the runtime merges branches cleanly:
    $$C_{\text{new}} = \text{Merge}(C_{\text{base}}, C_{\text{head}}, C_i)$$
-   Because the modifications touch non-overlapping files or orthogonal AST blocks, the merge succeeds cleanly without semantic conflict. The runtime invokes the sealed regression test suite; upon verification, $C_{\text{head}} \leftarrow C_{\text{new}}$.
+   Upon passing Tier 3 regression certification, $C_{\text{head}} \leftarrow C_{\text{new}}$.
+3. *Agentic Reconciliation Subtask:* When AST nodes overlap or syntactic conflicts emerge, standard diff engines emit conflict markers. Rather than discarding hundreds of thousands of generated tokens, the runtime provisions an ephemeral reconciliation worker prompted strictly to resolve the syntactic collision against the three-way context.
+4. *Commit Livelock Governance (Randomized Exponential Backoff):* A critical failure mode in multi-agent OCC is **reconciliation livelock** (commit starvation). Because an agentic reconciliation worker requires 30 to 60 seconds of LLM decode latency to analyze conflicts and re-run tests, another fast worker may commit to $C_{\text{head}}$ in the interim. When the reconciler finishes, its base snapshot is stale again, forcing another reconciliation round and trapping the fleet in an infinite retry storm.
 
-3. *Conflicting Merge and Syntactic Reconciliation:* When $\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} \neq \emptyset$, standard diff engines emit conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). Rather than aborting the transaction and discarding hundreds of thousands of generated tokens, the runtime invokes an *Agentic Reconciliation Subtask*.
+To prevent commit starvation, the runtime implements randomized truncated exponential backoff coupled with a FIFO commit ticket queue:
 
+$$T_{\text{backoff}} = \min\left( T_{\max}, \; T_{\text{base}} \cdot 2^{\text{attempt}} + \text{Uniform}(0, \delta) \right)$$ {#eq-vol3-occ-backoff}
+
+When an agent enters reconciliation, it acquires a bounded commit ticket. Sibling workers attempting to commit overlapping file paths are temporarily paused at the validation barrier until the ticket holder settles or times out ($\tau_{\text{reconcile}} \le 90\text{ s}$), mathematically guaranteeing forward progress across the cluster. @Lst-vol3-occ-commit-tiered illustrates this tiered dispatcher.
+
+::: {#lst-vol3-occ-commit-tiered lst-cap="**Three-Tier OCC Dispatcher with AST Verification and Livelock Governance**: Validates write sets via file paths, AST disjointness, and hermetic regression suites, enforcing commit ticket backoff to prevent livelock."}
 ```python
-# OCC Validation and Atomic Fast-Forward / Reconciliation Dispatcher
-def commit_agent_transaction(repo, base_sha, branch_sha, write_set):
-    current_head = repo.rev_parse("HEAD")
-    if current_head == base_sha:
-        repo.update_ref("refs/heads/main", branch_sha, old_val=base_sha)
-        return {"status": "COMMITTED_FAST_FORWARD", "sha": branch_sha}
+def commit_agent_transaction(repo, base_sha, branch_sha, write_set, max_retries=3):
+    for attempt in range(max_retries):
+        current_head = repo.rev_parse("HEAD")
+        if current_head == base_sha:
+            repo.update_ref("refs/heads/main", branch_sha, old_val=base_sha)
+            return {"status": "COMMITTED_FAST_FORWARD", "sha": branch_sha}
 
-    intervening_writes = repo.get_modified_files(base_sha, current_head)
-    if write_set.isdisjoint(intervening_writes):
-        merged_sha = repo.merge_trees(base_sha, current_head, branch_sha)
-        repo.update_ref("refs/heads/main", merged_sha, old_val=current_head)
-        return {"status": "COMMITTED_MERGE", "sha": merged_sha}
+        intervening_writes = repo.get_modified_files(base_sha, current_head)
 
-    return dispatch_reconciliation_agent(base_sha, current_head, branch_sha)
+        # Tier 1: Path-level disjointness fast check
+        if write_set.isdisjoint(intervening_writes):
+            merged_sha = repo.merge_trees(base_sha, current_head, branch_sha)
+            if repo.run_hermetic_tests(merged_sha) == "PASS":
+                repo.update_ref("refs/heads/main", merged_sha, old_val=current_head)
+                return {"status": "COMMITTED_MERGE", "sha": merged_sha}
+
+        # Tier 2: AST symbol and hunk disjointness check
+        if repo.verify_ast_disjointness(base_sha, current_head, branch_sha):
+            merged_sha = repo.synthesize_ast_merge(base_sha, current_head, branch_sha)
+            if repo.run_hermetic_tests(merged_sha) == "PASS":
+                repo.update_ref("refs/heads/main", merged_sha, old_val=current_head)
+                return {"status": "COMMITTED_AST_MERGE", "sha": merged_sha}
+
+        # Tier 3: Acquire commit ticket & dispatch reconciliation agent
+        with repo.acquire_commit_ticket(timeout_s=90) as ticket:
+            res = dispatch_reconciliation_agent(base_sha, current_head, branch_sha)
+            if res["status"] == "SUCCESS" and repo.run_hermetic_tests(res["sha"]) == "PASS":
+                repo.update_ref("refs/heads/main", res["sha"], old_val=current_head)
+                return {"status": "COMMITTED_RECONCILED", "sha": res["sha"]}
+
+        # Exponential backoff jitter to prevent live-lock storms
+        time.sleep(min(60.0, 2.0 * (2 ** attempt) + random.uniform(0.5, 2.0)))
+
+    return {"status": "TRANSACTION_ABORTED", "reason": "MAX_RETRIES_EXCEEDED"}
 ```
-
-When an agentic reconciliation subtask is triggered, the runtime provisions an ephemeral reconciliation worker whose prompt is constrained strictly to conflict resolution. The reconciler receives the common ancestor ($C_{\text{base}}$), the accepted integration head ($C_{\text{head}}$), the conflicting candidate commit ($C_i$), and the exact syntactic conflict diff. The reconciler synthesizes a unified file that preserves the semantic intent of both updates, executes the test suite inside a transient verification worktree, and returns a verified merge commit. If the reconciler fails to produce a green test run within a strict budget ceiling, the optimistic transaction aborts, rolling back the candidate branch without corrupting the mainline.
+:::
 
 ### Distributed lease management
 
@@ -1416,16 +1461,26 @@ $$\text{Speedup}(N) = \frac{1}{(1 - f) + \frac{f}{N} + h(N)}$$ {#eq-vol3-multiag
 
 To model the precise physical behavior of multi-agent concurrency, systems engineers apply Neil J. Gunther's Universal Scalability Law (USL, 2007). In an agent runtime, relative system capacity $C(N)$ accounts for both serial resource contention and pairwise coherence penalties:[^fn-universal-scalability-lineage]
 $$C(N) = \frac{N}{1 + \sigma (N - 1) + \kappa N(N - 1)}$$ {#eq-vol3-gunther-usl}
-The parameter $\sigma \ge 0$ is the *contention coefficient*, representing time spent queuing for serialized resources, such as the supervisor's input context processing queue, host CPU compile locks, or shared repository branch locks. The parameter $\kappa \ge 0$ is the *coherency coefficient*, representing the pairwise communication delay required to reconcile conflicting mutations, synchronize state across worker scratchpads, or achieve consensus among ensemble members. In an agent architecture, $\kappa$ is physically grounded as the **Token Crosstalk Tax**: to maintain a coherent shared worldview, each agent must ingest, re-read, and attend over the intermediate logs, state diffs, and proposed patches emitted by its $N - 1$ peers. Because attention prefill scales quadratically or linearly across all peer turns, pairwise context synchronization demands $\mathcal{O}(\kappa N^2)$ token re-prefills across the cluster. When $\kappa N(N - 1)$ dominates, peer agents spend more accelerator compute reading each other's conversational context and resolving AST merge conflicts than executing productive code mutations. Both formulations in @eq-vol3-multiagent-speedup and @eq-vol3-gunther-usl capture how coordination friction degrades ideal concurrency.
+
+The relationship between Gunther's USL and Amdahl's Law is exact: when communication and coherence delays are zero ($\kappa = 0$), @eq-vol3-gunther-usl simplifies algebraically to:
+$$C(N) = \frac{N}{1 + \sigma (N - 1)} = \frac{1}{\sigma + \frac{1 - \sigma}{N}} \equiv \frac{1}{(1 - f) + \frac{f}{N}}.$$
+
+Amdahl's Law is therefore the zero-coherence special case of the Universal Scalability Law, identifying the contention parameter $\sigma$ as the serialized execution fraction: $\sigma \equiv 1 - f$ and $1 - \sigma \equiv f$. In distributed multi-agent systems, the contention parameter $\sigma \ge 0$ decomposes into static and dynamic components:
+$$\sigma = (1 - f) + \sigma_{\text{queue}},$$ {#eq-vol3-usl-contention-decomp}
+where $(1 - f)$ represents the static critical-path serialization dictated by the task dependency DAG (such as initial root planning, task decomposition, and final regression certification), while $\sigma_{\text{queue}}$ captures dynamic queueing delays for serialized runtime resources (such as supervisor input context processing queues, host CPU compile locks, or shared repository branch locks).
+
+The parameter $\kappa \ge 0$ is the *coherency coefficient*, representing the pairwise communication delay required to reconcile conflicting mutations, synchronize state across worker scratchpads, or achieve consensus among ensemble members. In an agent architecture, $\kappa$ is physically grounded as the **Token Crosstalk Tax**: to maintain a coherent shared worldview, each agent must ingest, re-read, and attend over the intermediate logs, state diffs, and proposed patches emitted by its $N - 1$ peers. Because attention prefill scales quadratically or linearly across all peer turns, pairwise context synchronization demands $\mathcal{O}(\kappa N^2)$ token re-prefills across the cluster. When $\kappa N(N - 1)$ dominates, peer agents spend more accelerator compute reading each other's conversational context and resolving AST merge conflicts than executing productive code mutations. Both formulations in @eq-vol3-multiagent-speedup and @eq-vol3-gunther-usl capture how coordination friction degrades ideal concurrency.
 
 When pairwise coherency delays exist ($\kappa > 0$), the speedup curve does not merely plateau—it *retrogrades*. As $N$ increases beyond a critical threshold, the $\kappa N(N - 1)$ quadratic term outgrows parallel compute gains. Adding more agents causes the system to run slower than a single agent. The optimal worker count $N^*$ that maximizes capacity is derived by finding the stationary point $\frac{dC}{dN} = 0$:
-$$N^* = \sqrt{\frac{1 - \sigma}{\kappa}}$$
+$$N^* = \sqrt{\frac{1 - \sigma}{\kappa}}$$ {#eq-vol3-usl-n-star}
 Retrograde collapse into sub-unitary scaling ($C(N) < 1.0\times$) occurs whenever concurrency exceeds $(N^*)^2 = \frac{1 - \sigma}{\kappa}$. For tasks where merge contention or coherence overhead is exceptionally high, the optimal worker count collapses to $N^* = 1$: the workload should not be delegated at all.
 
 ::: {#nbk-17-quantitative-evaluation-of-a-parallel .callout-notebook title="Evaluation of a parallel refactoring fleet"}
-A platform team designs an agentic refactoring pipeline to modernize legacy code across a microservice repository. Profiling an optimized single-agent baseline reveals an average task execution time $T_1 = 600\text{ s}$ (10 minutes) and a total token consumption of 120,000 tokens (100,000 input tokens, 20,000 output tokens). Analysis of the execution trace indicates that initial dependency analysis and the final integration test suite require 180 seconds of strictly serial execution ($1 - f = 0.30$, meaning $f = 0.70$).
+A platform team designs an agentic refactoring pipeline to modernize legacy code across a microservice repository. Profiling an optimized single-agent baseline reveals an average task execution time $T_1 = 600\text{ s}$ (10 minutes) and a total token consumption of 120,000 tokens (100,000 input tokens, 20,000 output tokens).
 
-The team deploys a supervisor-worker topology with $N = 4$ worker agents operating on isolated git worktrees. Systems telemetry measures a contention parameter $\sigma = 0.05$ (supervisor dispatch latency and lock contention) and a coherency parameter $\kappa = 0.03$ (AST merge conflicts and three-way reconciliation delays).
+Analysis of the execution trace indicates that initial root dependency analysis and final regression verification require an algorithmic serial fraction of $(1 - f) = 0.02$ (12 seconds of strictly serial execution, meaning $f = 0.98$). Supervisor dispatch queueing and git worktree serialization introduce dynamic contention $\sigma_{\text{queue}} = 0.03$, resulting in an aggregate contention parameter $\sigma = (1 - f) + \sigma_{\text{queue}} = 0.05$. Telemetry measures a pairwise coherency parameter $\kappa = 0.03$ (AST merge conflicts, context re-reading delays, and three-way reconciliation overhead).
+
+The team deploys a supervisor-worker topology with $N = 4$ worker agents operating on isolated git worktrees.
 
 **1. Calculate Achievable Speedup and Makespan:**
 Using Gunther's Universal Scalability Law (@eq-vol3-gunther-usl):
@@ -1446,6 +1501,8 @@ At integer concurrency $N = 6$, capacity peaks at $C(6) = \frac{6}{1 + 0.05(5) +
 Retrograde collapse into sub-unitary speedup ($C(N) < 1.0\times$) occurs when concurrency exceeds $(N^*)^2 = 31.67$. For $N = 32$ workers:
 $$C(32) = \frac{32}{1 + 0.05(31) + 0.03(32)(31)} = \frac{32}{1 + 1.55 + 29.76} = \frac{32}{32.31} \approx 0.99\times$$
 The makespan balloons to $T_{32} = \frac{600\text{ s}}{0.99} \approx 606\text{ s}$, executing slower than the single agent!
+
+*Structural Serialization Bound:* If the workload instead exhibited substantial structural serialization, say $(1 - f) = 0.30$ (180 seconds out of 600s), the structural serial bound alone would force $\sigma \ge 0.30$. Under that regime, the maximum theoretical speedup would be capped by Amdahl's limit at $\frac{1}{0.30} = 3.33\times$, and optimal concurrency would contract to $N^* \le \sqrt{\frac{0.70}{0.03}} \approx 4.83$ workers, demonstrating that high algorithmic serialization dramatically shrinks the concurrency window before coherency penalties destroy throughput.
 :::
 
 To verify whether a proposed delegation topology improves system efficiency prior to deployment, systems engineers can evaluate Gunther's speedup equation directly against profiling traces:

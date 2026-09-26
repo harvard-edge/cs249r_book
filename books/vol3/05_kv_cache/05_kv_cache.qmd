@@ -1149,6 +1149,32 @@ def evict_radix_blocks(free_blocks: List[int], target_free: int) -> None:
 
 This leaf-first traversal guarantees that the root and high-level branch nodes—which represent the most broadly shared prefix scaffolding, such as system prompts—remain resident the longest. Dynamic leaf branches representing ephemeral, one-off conversational turns are pruned first, preserving the foundational layers of the prefix hierarchy where cache hit probability is highest.
 
+#### Cost-aware prefix eviction and multi-tenant thrashing {.unnumbered}
+
+In classical single-turn conversational serving, temporal Least Recently Used (LRU) eviction provides a reasonable heuristic for future access probability. In multi-tenant agent serving, however, flat temporal LRU triggers catastrophic **cache pollution and thrashing caused by speculative agent branching**.
+
+When an autonomous agent executes deliberative test-time search (such as Best-of-$N$ sampling or Monte Carlo Tree Search, @sec-vol3-test-time-compute), it generates a rapid burst of transient leaf branches. Once scored and pruned by verifiers, these dead-end branches transition into dormant leaves ($\text{ref\_count} = 0$) with fresh timestamps. Under flat temporal LRU, this flood of freshly generated speculative leaves will evict older dormant prefixes—such as an 8,192-token system instruction, a 32,768-token repository map, or tool API schemas shared across dozens of independent agent instances.
+
+This eviction pattern squanders immense computational investment. In physical hardware, the cost to recreate a prefix is governed by its recomputation FLOPs:
+
+- Recomputing a 32,768-token repository map on an 8-GPU 70B cluster requires $4.588\text{ PFLOPs}$ ($1{,}289\text{ ms}$ of compute, @sec-vol3-kvcache-chunked-prefill).
+- Recomputing a 256-token ephemeral tool observation requires only $0.035\text{ PFLOPs}$ ($10\text{ ms}$).
+
+Flat LRU treats both nodes identically based purely on the timestamp of their last access. Evicting the repository map to retain a dead-end speculative leaf squanders over $130\times$ more accelerator compute upon subsequent reuse.
+
+To guarantee multi-tenant fairness and maximize cluster-wide FLOP efficiency, production radix managers replace pure temporal LRU with **Compute-Weighted Cost-Aware Eviction**. For each dormant candidate leaf node $u$ in the Radix tree, the eviction priority score $\mathcal{P}(u)$ balances recomputation FLOPs, cumulative historical hit frequency, memory footprint, and recency:
+
+$$\mathcal{P}(u) = \frac{\text{FLOPs}_{\text{recomp}}(u) \cdot \left(1 + \alpha \cdot H_{\text{hits}}(u)\right)}{M_{\text{blocks}}(u)} \cdot \exp\left(-\frac{\Delta t_u}{\tau_{\text{decay}}}\right)$$ {#eq-cost-aware-radix-priority}
+
+where:
+
+1. $\text{FLOPs}_{\text{recomp}}(u) = 2 \cdot P \cdot S_u$ represents the floating-point operations saved by retaining prefix $u$ of length $S_u$ on a model with $P$ parameters.
+2. $H_{\text{hits}}(u)$ is the lifetime cache hit count of node $u$, weighted by tunable scaling factor $\alpha$.
+3. $M_{\text{blocks}}(u)$ is the physical HBM footprint in PagedAttention blocks, penalizing wide memory allocations.
+4. $\Delta t_u = t_{\text{current}} - t_{\text{last\_access}}$ is the elapsed idle duration, attenuated by exponential half-life $\tau_{\text{decay}}$.
+
+When memory utilization crosses low-watermark $\tau_{\text{low}}$, the allocator pops the candidate leaf with the *lowest* priority score $\arg\min_{u \in \text{Leaves}} \mathcal{P}(u)$. Transient speculative leaves (possessing zero historical hits and modest recompute costs) are evicted within milliseconds, while high-value foundational prefixes remain shielded against churn, maximizing effective token reuse across multi-tenant workloads.
+
 ### Prefix cache hit rate degradation and eviction mechanisms
 
 Attention state for a token depends on every token before it, so the cache can reuse state only up to the first token that differs (principle \ref{pri-vol3-prefix-coherence}). Prefix caching is all or nothing from left to right. The engine cannot enforce a cache-friendly layout; it can only reward one, and the harness controls every input that decides the outcome. Logical context staging already named the changes that break the prefix: a per-call field at the head, a tool list that changes mid-trajectory, nondeterministic serialization, and every compaction. Seen from the cache, they share one signature. Each moves the first differing token toward the head of the context, and the engine prefills every block after it again. The first three are avoidable by layout. Compaction is not, which is why the harness compacts rarely and in large batches and accepts one expensive turn per batch.
@@ -1409,6 +1435,35 @@ Two physical dynamics further widen the advantage of disaggregation in productio
 
 Crucially, executing prompt recomputation would freeze all concurrent decode streams on that node for seconds, destroying ITL guarantees. In contrast, GPUDirect RDMA transfers are orchestrated entirely by asynchronous network DMA engines. The KV state streams silently into physical HBM blocks while the decode GPUs continue executing autoregressive steps without preemption stalls.[^fn-rocev2-flow-control]
 
+#### Disaggregated KV layout transposition and remote block table synthesis {.unnumbered}
+
+While the transfer roofline in @eq-disaggregation-machine-balance models network bandwidth as a scalar throughput pipeline, practical disaggregated architectures encounter a fundamental systems challenge: **tensor parallelism topology asymmetry**.
+
+Prefill nodes and decode nodes operate under contradictory hardware efficiency regimes:
+
+1. *Prefill Topology:* Ingesting prompts containing tens of thousands of tokens ($S \ge 32\text{k}$) requires massive dense GEMMs. To maximize Tensor Core arithmetic intensity and distribute large weight matrices, prefill workers operate at high tensor parallelism (typically $TP_P = 8$ across an NVLink domain).
+2. *Decode Topology:* Autoregressive generation emits exactly one token per sequence per step ($S_{\text{decode}} = 1$), running memory-bandwidth-bound GEMVs. At a batch size of one or small batches, running $TP=8$ incurs severe pipeline bubble overhead: each transformer layer requires two `All-Reduce` collective operations across the NVLink interconnect (160 All-Reduces per step, as derived in @sec-vol3-foundation-model-cost), where communication latency ($T_{\text{comm}} \approx 1\text{--}2\text{ }\mu\text{s}$ per All-Reduce) dominates small-matrix computation. Decode nodes therefore operate at minimal tensor parallelism ($TP_D = 1$ or $TP_D = 2$).
+
+This parallelism asymmetry creates the **cross-parallelism KV layout transposition dilemma**. Consider our canonical 70B model with Grouped-Query Attention ($L = 80$, $n_{\text{kv}} = 8$ KV heads, $d_{\text{head}} = 128$):
+
+- On the prefill cluster ($TP_P = 8$), the 8 KV heads are sharded evenly across all 8 GPUs: each prefill GPU holds exactly $8/8 = 1$ KV head slice per layer.
+- On the decode node ($TP_D = 1$), the single target GPU must receive and assemble all 8 KV heads into its unified PagedAttention memory pool.
+
+If handled naively via the host CPU, each prefill GPU would copy its head slice to host DRAM, the CPU would stitch the 8 slices into a contiguous multi-head layout, and copy the unified tensor to the decode GPU. This triple-copy pipeline would saturate PCIe buses and completely negate the speedup of network disaggregation.
+
+Production disaggregated serving systems (such as Splitwise [@patel2024] and Mooncake [@qin2024mooncake]) eliminate host CPU serialization through **all-to-all scatter-gather GPUDirect RDMA over InfiniBand/RoCEv2**.[^fn-rdma-direct-zerocopy] The source prefill GPUs issue asynchronous RDMA Write operations directly from their local HBM across the network fabric. Each prefill GPU $k \in \{0, \dots, TP_P - 1\}$ writes its single KV head slice directly into the destination GPU's memory at a head-interleaved byte offset:
+
+$$\text{DstOffset}(l, h_k, p) = \text{BaseAddr}(p) + \left( l \cdot n_{\text{kv}} + h_k \right) \cdot B \cdot d_{\text{head}} \cdot b_{\text{bytes}}$$ {#eq-disagg-scatter-gather}
+
+where $l$ is layer index, $h_k$ is the global KV head index assigned to prefill GPU $k$, $p$ is the physical destination block index, $B$ is the PagedAttention block size, and $b_{\text{bytes}}$ is the numeric word width. The network interface card (NIC) DMA engine performs the scatter-gather reassembly directly into device memory without host intervention.
+
+To coordinate this transfer, the serving architecture enforces a **Remote Block Table Synthesis Protocol**:
+
+1. *Allocation Ahead of Transfer:* Before the network transfer begins, the decode engine's memory coordinator pre-allocates $N_{\text{blocks}} = \lceil S / B \rceil$ physical page frames in its local HBM pool.
+2. *Descriptor Exchange:* The coordinator packages the allocated physical base addresses into a Remote Transfer Descriptor and transmits it over a low-latency sideband control-plane channel (e.g., gRPC or UCX) to the prefill orchestrator.
+3. *Direct Memory Placement:* The prefill GPUs use these remote physical addresses as the target scatter list for their RDMA Write operations.
+4. *Zero-Copy Ingestion:* Once the RDMA completion queue entry (CQE) signals transfer completion, the decode node instantly binds the pre-allocated block table into its local PagedAttention scheduler, transitioning the request into the active decode queue with zero memory copies.
+
 [^fn-rocev2-flow-control]: **RoCEv2 Lossless Interconnect Dynamics**: High-throughput disaggregated KV cache transfer over RDMA over Converged Ethernet (RoCEv2) relies on Priority Flow Control (PFC, IEEE 802.1Qbb) and explicit congestion notification (ECN, RFC 3168) to prevent packet drops and buffer overflows. In sustained agent burst transfers, unmitigated PFC can cause head-of-line blocking and PFC deadlocks across network leaf switches, necessitating end-to-end congestion control algorithms such as DCQCN or TIMELY.
 
 [^fn-rdma-direct-zerocopy]: **GPUDirect RDMA Zero-Copy Pipeline**: GPUDirect RDMA enables third-party PCIe network interface cards (NICs) to access accelerator High-Bandwidth Memory directly via PCIe peer-to-peer (P2P) transactions. By bypassing host CPU memory bounce buffers, GPUDirect RDMA eliminates intermediate memcpy operations and cache pollution, cutting KV cache transfer latency across disaggregated serving nodes by more than half.
@@ -1653,6 +1708,26 @@ def swap_out_trajectory(seq_id: int, block_table: BlockTable,
                  gpu_alloc.free_blocks(gpu_frames))
     )
 ```
+
+#### Pinned host arena allocation and kernel lock serialization {.unnumbered}
+
+Asynchronous DMA transfers between accelerator HBM and host DRAM over PCIe Gen5 require host physical pages to be *pinned* (page-locked via POSIX `mlock` or CUDA `cudaHostAlloc`). Pinned pages are guaranteed never to be paged out to secondary swap storage or relocated by the operating system virtual memory subsystem, enabling the GPU's PCIe DMA engines to read and write physical host DRAM addresses directly without CPU intervention.
+
+However, dynamically allocating pinned host memory during runtime serving introduces a severe operating system scalability hazard: **kernel lock contention on `mmap_lock`**.
+
+In Linux, calling `cudaHostAlloc` or `cudaFreeHost` invokes kernel memory management syscalls (`mmap`, `mprotect`, and `pin_user_pages()`). These primitives must acquire the process's virtual memory descriptor lock (`mm->mmap_lock`, historically known as `mmap_sem`) in exclusive write mode. In a high-throughput multi-tenant server hosting dozens of concurrent agent workers:
+
+1. Every tool-wait transition that invokes dynamic `cudaHostAlloc` acquires `mmap_lock` for writing, invalidating the kernel's virtual memory area (VMA) tree.
+2. Concurrent CPU worker threads attempting to handle minor page faults, expand thread stacks, or manage CUDA context mappings are blocked behind the write lock.
+3. This kernel serialization produces massive tail latency spikes—frequently causing $150\text{--}300\text{ ms}$ of unprompted control-plane jitter across all active inference streams on the host node, degrading inter-token latency and triggering watchdog alarms.
+
+High-performance agent runtimes eliminate this kernel serialization by implementing a **Static Slab-Allocated Host Arena (`HostBlockArena`)**:
+
+1. *Daemon-Time Reservation:* At serving daemon startup, before accepting inference traffic, the runtime pre-allocates a large, contiguous host DRAM pool (such as $256\text{--}512\text{ GB}$) and locks all pages into physical memory via a single batch call to `cudaHostAlloc(..., cudaHostAllocMapped)`.
+2. *Uniform Block Slicing:* The host arena is partitioned into fixed-size physical frames matching the exact byte footprint of accelerator PagedAttention blocks ($M_{\text{frame}} = B \cdot m_{\text{token/block}}$).
+3. *User-Space Lock-Free Lists:* Free frames are indexed in user space via lock-free atomic queues or bitmasks. Allocating or releasing a host frame during a tool swap requires only an atomic bit operation ($O(1)$) in user space.
+
+By migrating blocks into a static, pre-pinned host arena, the serving engine eliminates all runtime `mmap()` syscalls and driver memory allocations during tool-wait transitions, reducing host-side swap overhead to pure PCIe DMA execution with zero kernel lock contention.
 
 The primary engineering challenge on the return path is hiding reload latency. If the engine waits until the tool returns its final payload before issuing the swap-in request, the model experiences a pipeline bubble equal to $M_{\text{KV}} / B_{\text{pcie}}$. Modern agent runtimes employ two systems techniques to eliminate this stall:
 

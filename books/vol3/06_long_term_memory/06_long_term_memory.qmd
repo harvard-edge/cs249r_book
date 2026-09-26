@@ -1130,6 +1130,21 @@ where $M_{\text{source}}$ is the raw text size and $\beta$ is the index expansio
 
 This storage amplification is easily absorbed by modern persistent NVMe drives. The real bottleneck is the *ingestion time-barrier*: if re-indexing a modified file requires dozens of seconds, the agent cannot quickly inspect the structural effects of its own code edits.
 
+#### Lazy relational edge pruning and invalidation DAG propagation {.unnumbered}
+
+Graph-structured retrieval systems deployed in active agent editing environments encounter severe maintenance economics challenges during iterative refactoring.
+
+When an agent modifies or deletes a function, class, or module, eagerly updating all incoming and outgoing relational edges (`CALLS`, `INHERITS`, `READS`) across the Code Property Graph requires recursive traversals across persistent storage, inducing massive write amplification. Furthermore, in hierarchical GraphRAG architectures (this section), mutating an entity within a leaf community $C_1$ technically invalidates both the modular summary $S_{C_1}$ and the root summary $S_{\text{root}}$. Re-running Leiden clustering and re-invoking large language model summarization passes on every interactive turn costs thousands of inference tokens and dozens of seconds of latency, destroying maintenance economics.
+
+High-performance agent runtimes resolve these bottlenecks through two complementary systems mechanisms:
+
+1. **Lazy Relational Edge Pruning:** Rather than eagerly modifying disk-backed adjacency lists when a code entity is deleted or rewritten, the storage engine registers the modified entity's symbol ID in an in-memory vertex tombstone bitset ($\text{Tombstone}_V$). During graph traversal—such as Personalized PageRank (PPR) or seeded neighborhood expansion—the transition probability kernel dynamically masks edges directed toward tombstoned vertices:
+   $$P_{uv}^{\text{active}} = \begin{cases} P_{uv} & \text{if } \text{Tombstone}_V[v] = 0 \\ 0 & \text{if } \text{Tombstone}_V[v] = 1 \end{cases}$$ {#eq-lazy-edge-pruning}
+   This neutralizes dead or superseded relational paths in $O(1)$ time with zero disk pointer rewrites. Physical edge list consolidation is deferred to background garbage collection passes.
+2. **Hierarchical Invalidation DAG Propagation:** Communities in hierarchical GraphRAG form a directed acyclic dependency graph from leaf files up to root-level synthesis documents. When an entity in community $C_1$ mutates, the runtime marks $C_1$ and its ancestor communities as `DIRTY` in the Invalidation DAG. During active agent reasoning turns, queries referencing $C_1$ do not wait for an LLM re-summarization pass. Instead, the runtime stages a hybrid context consisting of the cached base summary $S_{C_1}^{\text{cached}}$ paired with an incremental syntactic delta frame $\Delta C_1^{\text{Tree-sitter}}$ emitted in $\sim 2\text{ ms}$ by Tree-sitter:
+   $$\text{StagedContext}(C_1) = \left\langle S_{C_1}^{\text{cached}}, \; \Delta C_1^{\text{Tree-sitter}} \right\rangle$$ {#eq-graphrag-invalidation-dag}
+   Expensive hierarchical LLM re-clustering and macroscopic re-summarization are deferred to asynchronous, offline consolidation windows (@sec-vol3-memory-consolidation), bounding GraphRAG maintenance token spend by over 95 percent during interactive workflows.
+
 ::: {#chk-06-hybrid-retrieval .callout-checkpoint title="Evaluating hybrid and multi-hop retrieval"}
 Before examining persistent storage invalidation protocols, verify your understanding of hybrid index topologies:
 
@@ -1479,6 +1494,44 @@ To reclaim memory and repair graph topology without interrupting agent execution
 $$\rho_{\text{dead}} = \frac{|V_{\text{tombstone}}|}{|V_{\text{total}}|}$$
 
 When $\rho_{\text{dead}}$ exceeds a predefined threshold $\theta_{\text{compact}}$ (typically $0.15 \le \theta_{\text{compact}} \le 0.20$), a background thread clones the active graph segment, purges all chunks where $e_{\text{death}} \le e_{\text{current}}$, re-links the HNSW entry points, and atomically swaps the compacted index pointer.
+
+#### Causal read-your-writes fencing over distributed change data capture {.unnumbered}
+
+In distributed or multi-worker agent deployments (such as a multi-agent system where Worker 1 executes code modifications while Worker 2 or an auxiliary search agent queries an index replica), invalidation cannot rely on a single process-local hash table.
+
+Authoritative storage mutations committed by worker nodes are recorded into a distributed Write-Ahead Log (WAL) and streamed to derivative search replicas via asynchronous Change Data Capture (CDC, @sec-vol3-persistence-wal). However, network propagation and consumer processing introduce an unavoidable **CDC replication lag** ($\tau_{\text{lag}} \approx 10\text{--}250\text{ ms}$). If a sub-agent on Worker 2 issues a vector or lexical query before the CDC stream applies the latest tombstone batch, the replica returns pre-mutation code chunks, re-triggering the Self-Contradiction Trap despite the primary transaction having committed.
+
+To guarantee sequential consistency across distributed agent nodes, the runtime implements the **Causal Read Fence Protocol**. The host supervisor augments the episodic query tuple (@sec-vol3-persistent-query-tuple) with a minimum Log Sequence Number (LSN) dependency token:
+
+$$\mathcal{Q} = \left\langle \mathbf{q}, \; \mathcal{S}_{\text{scope}}, \; \dots, \; \text{LSN}_{\min} \right\rangle$$ {#eq-causal-read-fence-tuple}
+
+where $\text{LSN}_{\min}$ represents the monotonic commit sequence number returned by the agent's most recent authoritative filesystem or state mutation.
+
+When a derivative index replica receives query $\mathcal{Q}$, its query engine executes a four-phase barrier evaluation:
+
+1. **Watermark Comparison:** The replica inspects its local consumer progress watermark $\text{LSN}_{\text{replica}}$, which records the highest WAL entry successfully ingested and applied to its local tombstone registry.
+2. **Fast Path ($\text{LSN}_{\text{replica}} \ge \text{LSN}_{\min}$):** The local index is guaranteed to contain all preceding mutations. Query execution proceeds immediately with zero synchronization latency.
+3. **Bounded Barrier Wait ($\text{LSN}_{\text{replica}} < \text{LSN}_{\min}$):** The query thread suspends on a condition variable awaiting the arrival of lagging CDC log frames. To protect interactive latency budgets, the wait is bounded by a hard barrier timeout ($T_{\text{fence}} \le 15\text{ ms}$).
+4. **Authoritative Storage Fallback:** If $T_{\text{fence}}$ expires before the replica catches up (due to network congestion, garbage collection pauses, or consumer backpressure), the query engine aborts the asynchronous replica read. It falls back to authoritative primary storage, executing a targeted lexical scan (e.g., direct `git grep` or ripgrep over working tree files) filtered through an in-memory dirty-delta mask constructed from unapplied WAL frames.
+
+The Causal Read Fence guarantees strict *read-your-writes* consistency across the distributed agent topology without exposing the execution harness to unbounded replica stalls.
+
+#### Epoch-based read-copy-update for concurrent vector graph mutations {.unnumbered}
+
+Integrating real-time invalidation with continuous vector indexing introduces two concurrency hazards on multi-core host processors:
+
+1. **The Write-Tombstone Race:** Writing modified bytes to storage (`write()` followed by `fsync()`) and inserting the document ID into the in-memory tombstone table (`Tombstone[D_j] \leftarrow \tau_{\text{mod}}`) are distinct operations. If a concurrent reader thread executes a search between the filesystem commit and the tombstone insertion, it retrieves an obsolete vector chunk whose on-disk verification hash immediately mismatches the newly committed file, triggering false-positive integrity alarms.
+2. **HNSW Link Mutation Race:** As background workers embed new document chunks, they must insert new vertices into the multi-layer HNSW graph and rewire bidirectional adjacency lists ($M=32$ neighbor pointers per node). If a query thread traverses these adjacency lists while pointers are being overwritten, it encounters torn 64-bit memory addresses or broken proximity paths, causing segmentation faults or silent recall collapse.
+
+Production agent storage engines eliminate these race conditions using **Atomic Sequencing and Epoch-Based Read-Copy-Update (RCU)**:
+
+- **Pre-Commit Tombstone Registration:** To prevent the write-tombstone race, the storage engine enforces a strict sequencing invariant: the pending tombstone entry is registered in an atomic pre-commit state *before* the filesystem `fsync()` completes. Any query executing during the disk flush observes the document as tombstoned, forcing a wait or fallback rather than serving stale data.
+- **Lock-Free Epoch Traversal:** Reader threads query the HNSW graph lock-free without acquiring read-write mutexes, avoiding cache-line bouncing on shared CPU memory channels. A reader thread registers its active status by incrementing an atomic epoch counter $E_{\text{reader}}$.
+- **Copy-on-Write Neighbor Publishing:** When a background worker re-links the neighbors of node $u$, it does not mutate $u$'s adjacency array in place. Instead, it allocates a private copy-on-write buffer $L_{\text{new}}$, populates the updated neighbor pointers, and swaps the pointer atomically using memory release semantics:
+  $$\text{atomic\_store\_explicit}(\&u\text{->neighbors}, \; L_{\text{new}}, \; \text{memory\_order\_release})$$
+- **Deferred Epoch Reclamation:** The superseded neighbor buffer $L_{\text{old}}$ is placed onto an epoch retirement queue. Memory is freed only after all reader threads registered in epochs $E \le E_{\text{retire}}$ have completed their traversals.
+
+Epoch RCU guarantees that vector similarity lookups remain wait-free and nanosecond-fast, while background reconciliation safely mutates graph topologies and tombstone sets without locking active inference workers.
 
 Index invalidation closes one storage property mechanically, since the retrieval engine never serves a superseded chunk. Under the invariant closure principle (\ref{pri-invariant-closure}) it cannot certify the task, whose evidence still comes from the end-to-end boundary [@saltzer1984endtoend], where checks confirm that the agent's changes satisfy the environment's own invariants. What the storage layer owes that boundary is an honest record of the source. Whenever the agent mutates a file, the runtime captures an authoritative content hash and file modification timestamp directly from the OS kernel before executing any subsequent retrieval or deliberation step. Durable memory must remain subservient to the physical state of the machine.
 

@@ -102,6 +102,19 @@ Rather than relying on the foundation model to recognize and resist this instruc
 5. **Ephemeral Copy-on-Write Overlay Discard (Part III & IV):** Any local filesystem modifications, script injections, or environment variable tamperings executed within the sandbox touch only an ephemeral Copy-on-Write upperdir (@sec-vol3-sandboxes). Upon task abort or step boundary, the host runtime discards the overlay in milliseconds, guaranteeing that host state and base disk images remain immutable.
 6. **Sealed Verification Oracle (Part IV & VII):** Finally, if a compromised agent emits a deceptive candidate deliverable claiming that the incident is resolved, the report is treated as untrusted text. The host-level verification oracle evaluates out-of-band state assertions from outside the guest VM (@sec-vol3-evaluation). Because database SLA metrics and table integrity checks fail, the oracle returns exit code 1, the trajectory is aborted, and the malicious trace is isolated in the Durable Orphan Quarantine ledger (@sec-vol3-failure-recovery).
 
+::: {#lst-vol3-adversarial-telemetry lst-cap="**SRE Telemetry Trace: Defense-in-Depth Under Attack**: Monospace audit event log capturing the deterministic interception and containment of an indirect prompt injection across all six runtime barriers."}
+```text
+2026-09-26T04:12:08.102Z [INGEST:TAINT]      Span [142, 198] marked UNTRUSTED (src: db://pg_stat_activity#L42, sha: a8f9c2)
+2026-09-26T04:12:08.114Z [CONTEXT:DELIM]     Enclosed untrusted span in <untrusted_observation id="obs_42">; escaped markers
+2026-09-26T04:12:09.451Z [DECODE:GPU_PDA]    Token 'curl' rejected (logit -> -inf); DFA grammar clamped to JSON schema
+2026-09-26T04:12:10.024Z [ESCROW:MACAROON]   Action 'db_drop_table' REJECTED: lease macaroon allows SELECT on replicas only
+2026-09-26T04:12:10.038Z [SANDBOX:SECCOMP]   Syscall connect(AF_INET, 198.51.100.1:53) -> EPERM (bpf_deny_egress in tap0)
+2026-09-26T04:12:10.052Z [STORAGE:OVERLAY]   Task aborted; ephemeral upperdir 'snap_984' unmounted and purged in 4.2ms
+2026-09-26T04:12:10.065Z [VERIFIER:ORACLE]   Assertion 'p99_query_latency <= 50ms' FAILED (actual: 1420ms); exit code 1
+2026-09-26T04:12:10.071Z [HARNESS:CIRCUIT]   Circuit breaker TRIP: trajectory aborted -> routed to DurableOrphanQuarantine
+```
+:::
+
 Both the nominal incident remediation and the adversarial defense walkthrough illustrate that agency is an architectural property of runtime boundaries, not the neural model. @Tbl-vol3-capstone-owners condenses these transitions into formal subsystem owners and audit records.
 
 | **Transition**                   | **Owner**                                        | **Record it leaves**                                    |
@@ -560,6 +573,29 @@ While @tbl-vol3-seams captures the principal cross-subsystem failure modes, rigo
 | **6. Coordination & Fleet Economics (Part VI)** | Optimistic Concurrency Control (OCC) over isolated Git worktrees; MLFQ scheduling with two-phase KV cache reservation          | Monotonic delegation (privilege and budget attenuation down delegation trees); Tax on Unreliability bounds cascades   | Three-way diff validation gates abort conflicting commits; MLFQ preemption preserves hot KV caches via DMA    |
 
 : **The Stochastic Computer master seam invariant matrix**: Architectural contracts, boundary invariants, and failure interception guarantees across all six core layers. {#tbl-vol3-master-seam-invariants tbl-colwidths="[20,28,26,26]"}
+
+To convert these tabular invariants into mathematically verifiable systems specifications, the Stochastic Computer formalizes the master seams as state-transition contracts expressed via Hoare logic ($\langle P \rangle \, \mathbf{Operation} \, \langle Q \rangle$):
+
+1. **Harness $\to$ Sandbox Barrier (Execution Containment):**
+   $$\langle \mathcal{J}_t \in \text{WAL}_{\text{synced}} \land \text{cap}(a_t) \sqsubseteq \rho_{\text{task}} \rangle \; \mathbf{Dispatch}(a_t) \; \langle \text{exec}(a_t) \subseteq \text{MicroVM}_{\text{CoW}} \land \Delta S_{\text{host}} = \emptyset \rangle$$ {#eq-vol3-hoare-sandbox}
+   *Precondition:* Proposed action $a_t$ is durably flushed to the Write-Ahead Log on non-volatile media, and its requested privilege is a monotonic attenuation of the active task capability lease ($\text{cap}(a_t) \sqsubseteq \rho_{\text{task}}$).
+   *Postcondition:* Tool execution is strictly confined to an ephemeral Copy-on-Write guest microVM, guaranteeing that host operating system state undergoes zero mutation ($\Delta S_{\text{host}} = \emptyset$).
+2. **Sandbox $\to$ Context / Memory Boundary (State Normalization):**
+   $$\langle \text{mutated}(\text{path}) \rangle \; \mathbf{Normalize}(o_{t+1}) \; \langle \mathcal{P}(o_{t+1}).\tau_{\text{trust}} = \text{TAINTED} \land \text{RadixEvict}(\mathcal{H}_{\text{prefix}}) \rangle$$ {#eq-vol3-hoare-memory}
+   *Precondition:* A sandbox operation mutates a filesystem path or receives data over an external network socket.
+   *Postcondition:* The returned observation $o_{t+1}$ is assigned an explicit taint descriptor in the provenance ledger $\mathcal{P}$, and stale derived KV prefix pages are evicted from the serving engine's Radix tree.
+3. **Harness $\to$ Verifier Seam (Unilateral Certification):**
+   $$\langle \tau \in \text{Completed} \rangle \; \mathbf{Verify}(\tau) \; \langle \bigwedge_{j=1}^M v_j(\text{Env}) = 1 \land \text{SelfReport}(\text{model}) = \bot \rangle$$ {#eq-vol3-hoare-verifier}
+   *Precondition:* The trajectory finishes execution and emits a candidate completion claim.
+   *Postcondition:* Completion is certified if and only if all $M$ external, deterministic verification predicates evaluate to true on the environment ($v_j(\text{Env}) = 1$), while any subjective completion self-reports from the model are treated as completely uninformative ($\bot$).
+4. **Coordination $\to$ Mainline Seam (Branch Convergence):**
+   $$\langle C_i \in \text{Worktree} \land \text{Tests}(C_i) = \text{PASS} \rangle \; \mathbf{Commit} \; \langle (\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} = \emptyset \lor \text{AST\_Disjoint}(C_i, C_{\text{head}})) \land C_{\text{head}} \leftarrow C_{\text{new}} \rangle$$ {#eq-vol3-hoare-commit}
+   *Precondition:* Candidate commit $C_i$ was developed in an isolated worktree and passed local hermetic verification.
+   *Postcondition:* Mainline advances if and only if the worker's write set is disjoint from intervening merges at path or AST level.
+5. **Fleet $\to$ Model Engine Seam (Prefix Cache Isolation & Allocation):**
+   $$\langle x_t \in \mathcal{T}_{\text{prompt}} \rangle \; \mathbf{Prefill} \; \langle \text{pos}[t] = t - c_k \land \text{RadixLookup}(\text{Prefix}) \to \text{HBM}_{\text{hit}} \rangle$$ {#eq-vol3-hoare-prefill}
+   *Precondition:* Prompt tokens $x_t$ arrive for batch prefill.
+   *Postcondition:* Rotary position embeddings are partitioned at trajectory boundaries ($t - c_k$), and static shared prefixes are bound to deduplicated physical KV blocks in accelerator HBM without cross-sequence leakage.
 
 ### Provenance tracking {#sec-vol3-memory-provenance-grounding}
 
@@ -1301,6 +1337,15 @@ To achieve structural containment, the agent runtime applies the principle of ep
 Furthermore, state modifications spanning multiple microservices cannot be executed as blind open-loop operations. The runtime enforces the Saga pattern: every forward mutating action $a_t$ registered in the Write-Ahead Log must be paired with an executable compensating transaction $a_t^{-1}$. If an operational invariant trips during step $t+k$, the supervisor halts execution, suppresses further model decoding, and traverses the log backwards, executing compensations to unwind the environment to a known-consistent baseline state $s_0$.
 
 Finally, the architecture establishes formal *operational escalation paths*. When a candidate action's estimated uncertainty exceeds a safety boundary, or when a tool invocation involves an irreversible physical effect (such as deleting durable backups or dispatching public communications), the supervisor must not guess. Instead, the runtime suspends the execution thread, writes its entire deliberative context and state snapshot to durable storage, and elevates the action to an asynchronous Human-in-the-Loop (HITL) approval queue. The human operator is presented with the explicit claim, the model's causal justification, and the exact deterministic diff proposed. Only upon cryptographic confirmation by an authorized human principal does the supervisor release the action from escrow and commit the state transition.
+
+### Closed-loop feedback stability invariant {#sec-vol3-feedback-stability}
+
+When verified trajectories from live production are fed back into offline curation, Supervised Fine-Tuning (SFT), and Reinforcement Learning with Verifiable Rewards (RLVR), the runtime transitions from an open-loop executor into a dynamical feedback system. Without rigorous feedback dampening, this self-improvement loop suffers from catastrophic distribution collapse:
+
+1. **Verifier Separation Principle:** A policy optimized against a static reward verifier eventually games its heuristic loopholes (Goodhart's Law). To ensure dynamical stability, the verification suite must be strictly partitioned into training and evaluation sets:
+   $$\mathcal{V}_{\text{train}} \subset \mathcal{V}_{\text{eval}}, \qquad \mathcal{V}_{\text{holdout}} = \mathcal{V}_{\text{eval}} \setminus \mathcal{V}_{\text{train}} \neq \emptyset.$$ {#eq-vol3-verifier-separation}
+   Candidate model checkpoints are promoted to production canary rings only if they achieve non-inferiority on the adversarial holdout verifiers $\mathcal{V}_{\text{holdout}}$, preventing reward hacking from corrupting model weights.
+2. **Prefix Stability Guarantee:** Fine-tuning across iterations shifts token generation priors and prompt structures. To prevent continuous fine-tuning from fragmenting accelerator memory, trajectory compilation enforces canonical prefix layout invariants: system prompt schemas, static tool declarations, and context anchors must remain byte-identical across model checkpoints, guaranteeing that upgraded models retain $>90\%$ prefix cache hit rates on serving clusters.
 
 As we reflect on the capabilities of the agentic system, what timeless software engineering principles govern what AI can and cannot solve? The architecture of safety cases, mechanical verifiers, and sandboxed runtimes underscores a profound reality: automating the generation of code and actions does not eliminate the intellectual burden of software engineering. To understand the fundamental limits of agentic delegation, we must return to Frederick Brooks’ classic distinction between accidental and essential complexity.
 

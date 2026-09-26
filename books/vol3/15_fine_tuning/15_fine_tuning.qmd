@@ -206,28 +206,37 @@ $$N_{\text{active}} = 1{,}400 + 960 = 2{,}360, \qquad \frac{2{,}360}{16{,}384} \
 
 ### Reasoning as target or context
 
-While the masking policy for prompts, observations, and tool calls is mechanically dictated by the causality of the execution environment, the treatment of chain-of-thought reasoning tokens ($\mathcal{T}_{\text{rationale}}$) introduces a fundamental systems dilemma. In language models, reasoning tokens precede tool invocations to enable scratchpad deliberation. During fine-tuning, the data loader must decide whether to set $m_t = 1$ (computing cross-entropy loss over reasoning tokens) or $m_t = 0$ (masking reasoning tokens out of the loss while retaining them in the attention prefix).
+While the masking policy for prompts, observations, and tool calls is mechanically dictated by the causality of the execution environment, the treatment of chain-of-thought reasoning tokens ($\mathcal{T}_{\text{rationale}}$) introduces a fundamental systems dilemma. In language models, reasoning tokens precede tool invocations to enable scratchpad deliberation. During fine-tuning, the data loader must decide whether to set $m_t = 1$ (computing cross-entropy loss over reasoning tokens), set $m_t = 0$ (masking reasoning tokens out of the loss while retaining them in the attention prefix), or excise reasoning tokens from the sequence entirely.
 
-Rather than treating this as an arbitrary preference, production agent runtimes evaluate this trade-off using a structured three-way systems decision matrix (@tbl-vol3-reasoning-mask-regimes):
+A common implementation trap in agent training is the **action-only conditioning distribution shift**. Suppose a data loader retains demonstrated reasoning tokens $r_{1:M}$ in the context window to provide causal prefix conditioning, but zeroes out their cross-entropy loss ($m_t = 0$ for all $t \in \mathcal{T}_{\text{rationale}}$), training only on action tokens $a_{1:K}$:
 
-1. **Full Deliberation Cloning ($m_{\text{reason}} = 1$):**
-   The training loss supervises both the rationale tokens and the action tokens.
-   - *Advantage:* Teaches the policy complex multi-step planning, domain-specific problem decomposition, and self-correction patterns exhibited by expert demonstrators.
-   - *Systems Penalty:* Output token inflation. Because the model learns to imitate the demonstrator's verbosity, it emits hundreds of deliberation tokens on every turn. In an autoregressive decode regime, every emitted token requires shuttling weights across accelerator memory buses ($I_{\text{decode}} \approx 1\text{ FLOP/byte}$), multiplying serving latency and inference costs by $3\times\text{ to }5\times$. Furthermore, the policy risks *sycophantic deliberation*—emitting ritualistic reasoning boilerplate ("Let me carefully examine the codebase...") that correlates with teacher formatting but provides zero causal diagnostic value.
-2. **Action-Only Distillation ($m_{\text{reason}} = 0$):**
-   Demonstrated reasoning tokens are retained in the context window to provide causal prefix conditioning, but their cross-entropy loss is zeroed out ($m_t = 0$ for all $t \in \mathcal{T}_{\text{rationale}}$). Only the action tokens (the JSON tool call and arguments) receive gradient updates.
-   - *Advantage:* Forces the neural policy to internalize procedural heuristics directly into its weights. At inference time, the model skips verbal deliberation and emits compact, high-velocity tool calls directly, minimizing Time-to-First-Token ($t_{\text{TTFT}}$) and eliminating decoding overhead.
-   - *Systems Penalty:* Degrades operational accuracy on long-horizon, ambiguous engineering tasks that genuinely require explicit search, hypothesis branching, and multi-file tracking.
-3. **Selective Diagnostic Masking:**
-   The training pipeline partitions reasoning tokens based on verification feedback. Exploratory dead-ends and superficial narration are masked out ($m_t = 0$), whereas verified diagnostic reflections—such as stack trace interpretations and hypothesis pivots preceding successful recovery mutations—are supervised ($m_t = 1$). This delivers optimal token efficiency while preserving self-healing capabilities.
+$$\mathcal{L}_{\text{action}}(\theta) = -\sum_{j=1}^K \log P_\theta(a_j \mid x_{\text{prompt}}, r_{1:M}, a_{<j}).$$
 
-| Regimes                      | Mask Setting                                 | Serving Token Tax      | Planning Capability | Primary Systems Failure Risk                       |
-|:-----------------------------|:---------------------------------------------|:-----------------------|:--------------------|:---------------------------------------------------|
-| **Full Deliberation**        | $m_{\text{reason}} = 1$                      | High ($3\times$)       | High                | Sycophantic verbosity, decode bandwidth saturation |
-| **Action-Only Distillation** | $m_{\text{reason}} = 0$                      | Minimal ($1\times$)    | Low to Moderate     | Heuristic brittleness on multi-hop tasks           |
-| **Selective Diagnostic**     | $m_{\text{reason}} \in \{0, 1\}$ conditional | Moderate ($1.5\times$) | High                | Annotation complexity; requires verified traces    |
+Under teacher forcing, the attention layers learn to attend to representations of $r_{1:M}$ to predict action tokens $a_j$. If the deployed agent is expected to skip verbal deliberation at inference time and emit actions immediately given only $x_{\text{prompt}}$, $r_{1:M}$ is completely absent from the KV cache. Evaluating $P_\theta(a \mid x_{\text{prompt}})$ subjects the neural policy to severe covariate shift: conditioned on missing prompt representations, the model either hallucinates uncalibrated deliberation or fails to generate valid tool syntax.
 
-: **Reasoning Token Masking Regimes**: Trade-offs across loss masking strategies for chain-of-thought tokens. {#tbl-vol3-reasoning-mask-regimes}
+To train an agent that emits actions directly without runtime deliberation, reasoning tokens must be **excised from the training sequence entirely** (true context distillation), forcing parameter weights to absorb the underlying heuristics. Retaining $r_{1:M}$ with $m_t = 0$ is valid *only* when an upstream planner, supervisory model, or latent reasoning phase generates $r_{1:M}$ at serving time.
+
+To navigate this trade-off, production agent training pipelines evaluate four quantitative systems criteria:
+
+1. **Decode Memory-Bandwidth Roofline:**
+   Autoregressive decoding is strictly memory-bandwidth bound ($I_{\text{decode}} \approx 1\text{ FLOP/byte}$). In an $N$-turn agent, serving latency added by verbal reasoning tokens is governed by the weight shuttle across accelerator memory buses:
+   $$\Delta t_{\text{decode}} = N_{\text{turns}} \times \bar{L}_{\text{reason}} \times \frac{2\Phi}{\beta_{\text{HBM}}}.$$
+   For a 70B parameter model ($\Phi = 70 \times 10^9$) served in FP8 across an 8-GPU H100 node ($\beta_{\text{HBM}} \approx 26.8\text{ TB/s}$ aggregate), generating 500 reasoning tokens per turn over a 20-turn trajectory requires 10,000 autoregressive weight sweeps, adding over $50\text{ seconds}$ of pure decode latency. If task service-level agreements (SLAs) require sub-second turn latency, unmasked deliberation ($m_{\text{reason}} = 1$) violates hardware throughput constraints, requiring reasoning excision.
+2. **Model Parameter Scale & Representational Capacity:**
+   Small edge policies ($<14\text{B}$ parameters) lack the parameter depth to compress multi-hop dependency graphs, AST diffs, and backtracking heuristics into static feedforward weights. Excising reasoning causes severe task failure on complex benchmarks; small models require $m_{\text{reason}} = 1$. Conversely, frontier-scale models ($\ge 70\text{B}$) possess sufficient capacity to internalize operational procedures without explicit scratchpads.
+3. **Task Search Entropy & Branching Factor:**
+   Low-entropy tasks with deterministic input-action mappings (such as schema transformation or structured triage) gain negligible benefit from scratchpads; reasoning is excised. High-entropy, open-ended tasks (such as distributed debugging or multi-file codebase refactoring) require dynamic working memory in the KV cache, mandating reasoning generation.
+4. **Selective Diagnostic Masking Criteria:**
+   Rather than binary inclusion, advanced loaders apply counterfactual verification: reasoning tokens are supervised ($m_{\text{reason}} = 1$) *only* on transitions where diagnostic reflection immediately preceded a recovery mutation (a transition from a failing test suite to a passing test suite). Exploratory dead-ends and conversational boilerplate are masked ($m=0$).
+
+| Regimes                              | Sequence Representation | Mask Setting                | Serving Latency Tax              | Planning Capacity | Primary Systems Failure Risk                        |
+|:-------------------------------------|:------------------------|:----------------------------|:---------------------------------|:------------------|:----------------------------------------------------|
+| **Full Deliberation Cloning**        | $[x, r, a]$             | $m_r = 1, m_a = 1$          | High ($3\times\text{--}5\times$) | High              | Decode bandwidth saturation, sycophancy             |
+| **Prefix-Conditioned Execution**     | $[x, r, a]$             | $m_r = 0, m_a = 1$          | High ($3\times\text{--}5\times$) | High              | Training-serving mismatch if $r$ missing at runtime |
+| **Direct Action Distillation**       | $[x, a]$ (excised)      | $m_a = 1$                   | Minimal ($1\times$)              | Low to Moderate   | Heuristic brittleness on multi-hop tasks            |
+| **Selective Diagnostic Supervision** | $[x, r, a]$             | $m_r \in \{0, 1\}, m_a = 1$ | Moderate ($1.5\times$)           | High              | Annotation complexity; requires verified traces     |
+
+: **Reasoning Token Masking and Distillation Regimes**: Trade-offs across sequence representations and loss masking strategies for chain-of-thought tokens. {#tbl-vol3-reasoning-mask-regimes}
 
 ### The end-of-turn token and truncated turns
 
@@ -317,11 +326,26 @@ $$A_{i,j} = \begin{cases} \frac{Q_i K_j^T}{\sqrt{d}} & \text{if } \text{traj}(i)
 ![](images/svg/ch13-block-diagonal-mask.svg)
 :::
 
-Position indices need the same partition. If positions run continuously through the packed sequence, the first system token of $\tau^{(2)}$ sits at a position of several thousand, where the served model never sees a system prompt begin. Resetting positions at each boundary,
+Position indices require equivalent hardware partitioning. Rotary Position Embeddings (RoPE) rotate query and key projections in complex 2D planes via rotation matrix $R_{\Theta, t}^d$. If token positions run continuously through a packed sequence buffer, tokens in trajectory $\tau^{(k)}$ are rotated by cumulative batch offsets $\sum_{i=1}^{k-1} T_i$. This artificial phase shift perturbs frequency modulation and degrades long-context attention. Resetting position IDs at each trajectory boundary:
 
-$$\text{pos}[t] = t - c_k \quad \text{for } t \in [c_k, c_{k+1}),$$
+$$\text{pos}[t] = t - c_k \quad \text{for } t \in [c_k, c_{k+1}),$$ {#eq-vol3-rope-reset}
 
-makes every packed trajectory look positionally identical to the same trajectory served alone. Efficient attention implementations take the boundary offsets directly and skip the masked blocks rather than materializing the full mask in @eq-vol3-block-diagonal-attention, so isolation costs almost nothing. The mechanics of those kernels belong to training-systems texts such as *Machine Learning Systems at Scale*; what matters here is the contract, that each packed trajectory must be indistinguishable from the same trajectory served alone.
+guarantees exact mathematical equivalence with single-sequence serving:
+
+$$q_i^T k_j = \left( R_{\Theta, i-c_k}^d W_q x_i \right)^T \left( R_{\Theta, j-c_k}^d W_k x_j \right).$$
+
+Rather than materializing the dense $O(L_{\text{pack}}^2)$ mask matrix of @eq-vol3-block-diagonal-attention in accelerator memory, modern kernels (such as FlashAttention `varlen`) implement block-diagonal attention directly at the physical hardware layer:
+
+1. **Activation Memory Allocation (Physical HBM Footprint):**
+   Naive padded batching allocates contiguous 3D HBM tensors of shape $[B, L_{\max}, D]$. For an agent batch with $B=8$, $L_{\max}=32\text{k}$, and $\bar{L}=3.8\text{k}$, over $88\%$ of allocated HBM stores non-informative padding tokens. Because backward pass activation tensors must be retained in device memory to evaluate parameter gradients, padded batches waste tens of gigabytes of VRAM, triggering Out-Of-Memory (OOM) faults or forcing micro-batch size $B=1$.
+   In contrast, sequence packing concatenates trajectories into a flattened 1D jagged buffer $[N_{\text{total}}, D]$, where $N_{\text{total}} = \sum_{k=1}^K T_k$. Physical activation memory scales strictly as $O(N_{\text{total}} \cdot D)$, shrinking dynamic HBM consumption by $\frac{B \cdot L_{\max}}{N_{\text{total}}} \approx 8.6\times$ and allowing larger effective packed buffer lengths ($L_{\text{pack}}$) that keep GPU streaming multiprocessors (SMs) fully saturated.
+2. **Kernel Tile Scheduling & SM Warp Divergence:**
+   In padded causal attention, standard GPU kernels launch thread blocks across the uniform $L_{\max} \times L_{\max}$ tile grid. Thread blocks assigned to padded regions either perform dummy GEMM operations or branch off early, causing severe **SM warp divergence** and stranding Tensor Cores.
+   FlashAttention `varlen` accepts the cumulative sequence length vector $\mathtt{cu\_seqlens} = [c_0, c_1, \dots, c_K]$. The CUDA grid scheduler maps thread blocks exclusively to the lower-triangular diagonal blocks of each trajectory $\tau_k \in [c_k, c_{k+1})$.
+3. **Physical FLOP Elimination:**
+   The theoretical floating-point operations evaluated by standard padded attention versus block-diagonal packed attention scale as:
+   $$\text{FLOPs}_{\text{padded}} = 4 B L_{\max}^2 d, \qquad \text{FLOPs}_{\text{varlen}} = 4 \sum_{k=1}^K T_k^2 d.$$ {#eq-vol3-attention-flops}
+   Because $\left(\sum_{k=1}^K T_k\right)^2 = \sum_{k=1}^K T_k^2 + 2\sum_{i<j} T_i T_j$, block-diagonal execution physically skips $4 d \sum_{i<j} T_i T_j$ off-diagonal cross-trajectory interactions, executing zero arithmetic instructions on unneeded blocks without ever allocating or materializing an attention mask in SRAM or HBM.
 
 With serialization, masking, and packing correct, a training step imitates admitted trajectories faithfully. Faithful imitation still has a structural limit, which appears as soon as the trained model runs on its own.
 
@@ -489,6 +513,26 @@ In multi-turn trajectory MDPs, preference optimization operates over complete ex
 $$\mathcal{L}_{\text{DPO}}(\theta; \pi_{\text{ref}}) = -\mathbb{E}_{(\tau_w, \tau_l) \sim \mathcal{D}} \left[ \log \sigma \left( \beta \sum_{t=1}^{|\tau_w|} \log \frac{\pi_\theta(a_t^w \mid s_t^w)}{\pi_{\text{ref}}(a_t^w \mid s_t^w)} - \beta \sum_{t=1}^{|\tau_l|} \log \frac{\pi_\theta(a_t^l \mid s_t^l)}{\pi_{\text{ref}}(a_t^l \mid s_t^l)} \right) \right]$$ {#eq-vol3-dpo-trajectory}
 
 where $\beta$ is a temperature hyperparameter controlling the strength of the implicit KL-divergence constraint relative to $\pi_{\text{ref}}$, and $\sigma(z) = (1 + e^{-z})^{-1}$ denotes the sigmoid function. In @eq-vol3-dpo-trajectory, token log-probabilities are accumulated strictly across active action and reasoning tokens ($m_t = 1$). Crucially, environment observations carry $m_t = 0$ and are omitted from the log-likelihood summations, preventing non-deterministic environment outputs from introducing spurious variance into the preference gradient. When $\pi_\theta$ increases the cumulative log-likelihood ratio margin of $\tau_w$ over $\tau_l$, the objective value approaches zero.
+
+To understand how trajectory preference optimization updates policy representations, examine the analytical gradient of @eq-vol3-dpo-trajectory with respect to parameters $\theta$:
+
+$$\nabla_\theta \mathcal{L}_{\text{DPO}} = -\beta \, \sigma\left(\hat{r}_\theta(\tau_l) - \hat{r}_\theta(\tau_w)\right) \left[ \nabla_\theta \sum_{t=1}^{|\tau_w|} \log \pi_\theta(a_t^w \mid s_t^w) - \nabla_\theta \sum_{t=1}^{|\tau_l|} \log \pi_\theta(a_t^l \mid s_t^l) \right],$$ {#eq-vol3-dpo-gradient}
+
+where $\hat{r}_\theta(\tau) = \beta \sum_{t=1}^{|\tau|} \log \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\text{ref}}(a_t \mid s_t)}$ denotes the scalar implicit trajectory reward. The gradient decomposes into a scalar weighting factor $\sigma\left(\hat{r}_\theta(\tau_l) - \hat{r}_\theta(\tau_w)\right)$ multiplied by a contrastive vector: a positive supervised update on winning actions $a_t^w$ and a negative supervised update on losing actions $a_t^l$.
+
+This analytical decomposition reveals two critical failure modes unique to multi-turn agent systems:
+
+1. **Negative Gradient Destruction and Tool Syntax Degeneration:**
+   The unconstrained negative gradient term $-\nabla_\theta \sum_t \log \pi_\theta(a_t^l \mid s_t^l)$ pushes down the probability of *every* active token generated in the losing trajectory. However, losing agent trajectories are not composed entirely of flawed actions; they frequently contain syntactically valid JSON delimiters (`{`, `"name":`, `}`), standard CLI utilities (`grep`, `find`, `cat`), and valid English reasoning. When negative gradients depress these foundational structural tokens across multiple training iterations, the policy suffers from **tool syntax degeneration**: emitting malformed JSON brackets, truncating argument closures, or hallucinating invalid CLI subcommands.
+   To prevent syntax collapse, production trajectory fine-tuning pipelines combine the preference loss with an auxiliary supervised fine-tuning (SFT) objective on winning trajectories:
+   $$\mathcal{L}_{\text{TDPO}}(\theta; \pi_{\text{ref}}) = \mathcal{L}_{\text{DPO}}(\theta; \pi_{\text{ref}}) + \gamma \mathcal{L}_{\text{SFT}}(\tau_w),$$ {#eq-vol3-dpo-joint-sft}
+   where $\gamma \in [0.1, 0.5]$ anchors the policy's language modeling representations and preserves strict tool calling syntax while optimizing preference margins.
+2. **Trajectory Length Asymmetry and Length Bias:**
+   In agent workflows, paired rollouts often exhibit severe length discrepancies. In an infinite-loop failure mode, a losing trajectory may wander aimlessly until hitting the 30-turn harness ceiling ($|\tau_l| \approx 25{,}000$ tokens), while the winning trajectory completes the repair concisely in two turns ($|\tau_w| \approx 1{,}500$ tokens). Because @eq-vol3-dpo-trajectory uses unnormalized sums, $\tau_l$ contributes nearly twenty times more terms to the loss, allowing minor fluctuations in losing token probabilities to overwhelm the gradient update.
+   Conversely, when a losing trajectory crashes immediately on turn 1 ($|\tau_l| \approx 100$ tokens) while the winning trajectory undertakes complex multi-step debugging ($|\tau_w| \approx 10{,}000$ tokens), the fact that per-token log-probabilities are negative ($\log \pi \le 0$) causes the cumulative sum to penalize the winning trajectory, inducing **length collapse** (where the policy learns to emit early termination tokens to minimize cumulative negative log-likelihood). To eliminate length distortion, loaders apply length-normalized implicit rewards:
+   $$\hat{r}_{\text{norm}}(\tau) = \frac{\beta}{|\tau|} \sum_{t=1}^{|\tau|} \log \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\text{ref}}(a_t \mid s_t)}.$$ {#eq-vol3-dpo-length-norm}
+3. **Multi-Turn Step-Level Credit Assignment:**
+   When $\tau_w$ and $\tau_l$ share an identical prefix up to turn $k$—diverging only when $\tau_l$ selects a catastrophic action while $\tau_w$ selects a correct recovery—full-trajectory DPO naively applies negative gradients to the valid actions taken during turns $1 \dots k-1$. Aligning preference pairs at the branching decision pivot $(a_k^w, a_k^l \mid s_k)$ focuses the gradient update precisely on the divergent decision boundary, eliminating credit assignment noise across shared historical prefixes.
 
 ::: {#psp-15-offline-dpo-vs-online-rlvr .callout-perspective title="The offline-online divide: Static DPO vs. dynamic RLVR"}
 Engineers designing post-training pipelines must decide when to stop optimizing offline preference pairs and when to transition to online reinforcement learning (@sec-vol3-rlvr). The two paradigms occupy opposite sides of an infrastructure and algorithmic trade-off:

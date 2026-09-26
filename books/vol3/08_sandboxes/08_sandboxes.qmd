@@ -64,21 +64,7 @@ Three conditions made the README attack work. The agent could reach private data
 
 When an operating system kernel dispatches instructions to a classical processor, it relies on a foundational architectural invariant: the physical hardware enforces a rigid, hardware-mediated separation between executable instructions and untrusted application data. The processor's Memory Management Unit (MMU) checks page-table protection bits on every memory cycle, enforcing Write XOR Execute ($W \oplus X$) permissions that prevent writable data buffers from executing as machine code, while hardware privilege rings cleanly isolate the supervisor kernel (Ring 0 on x86-64, Exception Level 1 on ARM64) from unprivileged user-space processes (Ring 3 or Exception Level 0). If an unprivileged application attempts to execute a privileged instruction, dereference an unmapped address, or overwrite kernel memory, the hardware synchronously raises an architectural exception. Execution traps immediately to a registered kernel vector, halting the offending thread in a deterministic, inspectable state.
 
-An agent runtime has no such hardware bit to check. The model reads system directives, tool schemas, and untrusted observations retrieved from external sources as a single, contiguous sequence of tokens. The multi-head attention mechanism applies identical Key and Value projection matrices across the entire sequence, computing dot-product similarities across all token pairs without architectural distinction between trusted instructions and adversarial data payloads.
-
-For a context window of length $L = 32{,}768$ tokens containing an untrusted external retrieval payload of $N_{\text{data}} = 4{,}096$ tokens, the pairwise attention computation expands across all token interactions:
-$$
-\text{Total Attention Pairs} = L^2 = (32{,}768)^2 = 1{,}073{,}741{,}824\text{ pairs}
-$$
-The cross-attention interactions between untrusted external data tokens and internal instruction tokens account for:
-$$
-\text{Untrusted Cross-Pairs} = N_{\text{data}} \times L = 4{,}096 \times 32{,}768 = 134{,}217{,}728\text{ pairs}
-$$
-which constitutes:
-$$
-\frac{134{,}217{,}728}{1{,}073{,}741{,}824} = 12.5\%\text{ of total prefill attention compute}
-$$
-Within this unified dense matrix, an adversarial injection can steer the next-token distribution toward generating well-formed, schema-valid tool invocations that execute with the ambient privileges of the runtime supervisor. The threat vectors separating classical OS processes from autonomous agent execution planes are summarized in @tbl-vol3-threat-domains.
+An agent runtime has no such hardware bit to check. Because foundation models ingest system prompts, tool schemas, and untrusted observations within a single, undifferentiated context stream, attention layers compute token interactions without architectural distinction between privileged instructions and untrusted data payloads (the detailed cognitive mechanics and attention dynamics of instruction-data cohabitation are formalized in @sec-vol3-security-threat-model). At the operating system boundary, this creates a foundational systems premise: **an unprivileged model cannot be trusted to self-police its execution proposals**. Any shell command, binary execution, or filesystem modification emitted by the model must be treated by the host supervisor as untrusted user-space code requiring strict physical containment. The threat vectors separating classical OS processes from autonomous agent execution planes are summarized in @tbl-vol3-threat-domains.
 
 | Protection Dimension             | Classical Operating System (Saltzer & Schroeder 1975)                                                                        | Autonomous Agentic Runtime                                                                      |
 |:---------------------------------|:-----------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------|
@@ -348,7 +334,25 @@ Memory virtualization under hardware-assisted virtualization is governed by two-
 
 $$\text{Guest Virtual Address (GVA)} \xrightarrow{\text{Guest Page Table}} \text{Guest Physical Address (GPA)} \xrightarrow{\text{Extended Page Table (EPT)}} \text{Host Physical Address (HPA)}$$
 
-The guest kernel possesses full administrative control over its internal page tables, allowing it to allocate virtual memory to its sub-processes without host intervention. However, the guest cannot modify the EPT root pointer (`EPTP`), which is configured and write-protected by the hypervisor in VMX root mode. Even if an adversarial agent payload executes an exploit that achieves complete root control over the guest Linux kernel, it remains physically trapped within its assigned GPA space. The guest kernel cannot address, inspect, or corrupt any host physical memory frame ($HPA$) outside the explicit ranges mapped by the host's EPT structures, establishing the boundary transitions compared in @tbl-vol3-isolation-transitions.
+The guest kernel possesses full administrative control over its internal page tables, allowing it to allocate virtual memory to its sub-processes without host intervention. However, the guest cannot modify the EPT root pointer (`EPTP`), which is configured and write-protected by the hypervisor in VMX root mode. Even if an adversarial agent payload executes an exploit that achieves complete root control over the guest Linux kernel, it remains physically trapped within its assigned GPA space. The guest kernel cannot address, inspect, or corrupt any host physical memory frame ($HPA$) outside the explicit ranges mapped by the host's EPT structures.
+
+#### Two-dimensional page table walks and transparent huge pages {.unnumbered}
+
+The security guarantee of EPT introduces a non-trivial translation tax on memory-intensive agent workloads. In native execution, an x86-64 four-level page table walk (PML4 $\to$ PDPT $\to$ PD $\to$ PT) requires at most 4 memory references on a Translation Lookaside Buffer (TLB) miss. Under hardware virtualization, however, every pointer dereference within the guest page table is itself a Guest Physical Address that must be translated through the host's four-level EPT structure.
+
+The worst-case memory reference count for an un-cached two-dimensional walk is governed by:
+
+$$N_{\text{refs}} = (N_{\text{guest}} + 1) \times (N_{\text{host}} + 1) - 1 = (4 + 1) \times (4 + 1) - 1 = 24\text{ memory references}$$ {#eq-vol3-ept-walk-refs}
+
+If these references miss CPU cache hierarchies, resolving a single guest TLB miss can stall the vCPU pipeline for up to 24 DRAM access cycles ($> 1\text{ }\mu\text{s}$), degrading the throughput of compiler passes, linkers, and language runtimes.
+
+To mitigate this penalty, hypervisors back guest memory regions with **Transparent Huge Pages (THP, $2\text{ MiB}$)**. Backing the microVM address space with $2\text{ MiB}$ frames eliminates the bottom page-table level (collapsing $N_{\text{host}}$ from 4 to 3). This reduces the memory walk to:
+
+$$N_{\text{refs, THP}} = (4 + 1) \times (3 + 1) - 1 = 19\text{ memory references}$$
+
+When the guest operating system kernel also employs $2\text{ MiB}$ pages internally, the entire two-dimensional walk collapses to $(3 + 1) \times (3 + 1) - 1 = 9$ memory references—a $62.5\%$ reduction in memory translation latency.
+
+However, this translation speedup imposes a critical architectural trade-off on copy-on-write snapshotting: coarsening page granularity from $4\text{ KiB}$ to $2\text{ MiB}$ increases CoW allocation granularity by a factor of 512. Modifying a single 8-byte counter inside guest memory forces the host kernel to allocate and duplicate an entire $2\text{ MiB}$ physical frame, multiplying memory dirtiness ($M_{\text{dirty}}$) and inflating burst rehydration traffic across the memory bus, as established in @tbl-vol3-isolation-transitions.
 
 ::: {.column-margin}
 ![](images/svg/vol3_virtualization_margin_001.svg){width="100%" fig-alt="Horizontal bar ladder showing host system calls exposed to untrusted code: Container at 450, gVisor at 50, Firecracker at 35, and WebAssembly at 0."}
@@ -437,6 +441,25 @@ To neutralize this escalation vector, Firecracker enforces a defense-in-depth ar
 By hard-capping the process count with `pids.max`, the Jailer prevents rogue code from exhausting host thread structures via unconstrained fork bombs, while host-level sub-reapers ensure clean process teardown.[^fn-pid-exhaustion-reaping]
 
 [^fn-pid-exhaustion-reaping]: **PID Namespace Reaping**: In Linux, the first process inside a PID namespace (PID 1) inherits orphaned child processes and must explicitly call `waitpid` to reap zombie entries from the kernel process table. If an agent executes scripts that fork background processes without proper sub-reaping supervision, accumulated zombie processes rapidly exhaust the host or namespace PID quota (`pids.max`), preventing subsequent tool invocations from spawning.
+
+#### Kernel resource accounting: Cgroups v2, PSI, and OOM semantics {.unnumbered}
+
+Resource containment in multi-tenant sandbox hosting requires fine-grained kernel accounting that avoids the structural pitfalls of legacy cgroups v1. In cgroups v1, controllers were organized into independent, orthogonal directory hierarchies (`/sys/fs/cgroup/memory`, `/sys/fs/cgroup/cpu`, `/sys/fs/cgroup/blkio`). This separation frequently caused synchronization deadlocks and inverted accounting: for example, background page-cache writeback could not be correctly attributed to the blkio controller of the process that dirtied the pages.
+
+Modern sandbox runtimes enforce **cgroups v2**, which mandates a single, unified process tree (`/sys/fs/cgroup`). Every sandbox envelope occupies an isolated slice of the hierarchy, where all active resource controllers operate over an identical process membership:
+
+1. **CFS Bandwidth Control (`cpu.max`):** Host CPU consumption is bounded using Completely Fair Scheduler (CFS) bandwidth quotas configured via:
+   $$\text{cpu.max} = \text{\texttt{\$QUOTA\ \ \$PERIOD}}$$
+   For instance, setting `cpu.max = 200000 100000` grants the sandbox $200{,}000\text{ }\mu\text{s}$ of CPU execution time per $100{,}000\text{ }\mu\text{s}$ wall-clock window, enforcing a rigid ceiling of 2.0 vCPUs. If an agent initiates an unconstrained compile loop or infinite recursion that consumes this quota, the host kernel throttles the vCPU threads for the remainder of the period. This introduces scheduling latency jitter into tool execution that can trigger false-positive harness timeouts unless monitored by the host orchestrator.
+2. **Four-Tier Memory Management:** Rather than relying on a brittle, single-value memory ceiling, cgroups v2 provides four progressive memory control thresholds:
+   - `memory.min` (*Hard Protection*): A strictly protected floor. The kernel's page reclamation scanner will never reclaim memory from a cgroup whose usage is below `memory.min`, shielding essential host daemons from noisy-neighbor pressure.
+   - `memory.low` (*Soft Protection*): Best-effort retention. Memory below `memory.low` is reclaimed only if all unprotected, unassigned memory across the host has been completely exhausted.
+   - `memory.high` (*Proportional Throttling*): The primary operational safety valve. When guest allocation exceeds `memory.high`, the kernel does not kill the instance. Instead, it forces allocating threads into synchronous page-cache reclamation loops and injects artificial kernel sleep delays. This applies progressive backpressure, dramatically slowing down rogue scripts while giving the host supervisor time to inspect or pause the execution.
+   - `memory.max` (*Hard OOM Ceiling*): The absolute allocation limit. If memory usage reaches `memory.max` and immediate synchronous page reclamation fails, the kernel synchronously invokes the in-cgroup Out-Of-Memory (OOM) killer, delivering a fatal `SIGKILL` (exit code 137) to the Firecracker VMM thread.
+3. **Pressure Stall Information (PSI):** Waiting for `memory.max` to trigger an OOM kill is an operational failure: a hard `SIGKILL` instantly destroys volatile scratchpad state and terminates the trajectory unrecoverably. Production supervisors instead poll kernel Pressure Stall Information via `/proc/pressure/memory`:
+   $$\text{\texttt{some avg10=24.50 avg60=8.10 avg300=2.30 total=412000}}$$
+   $$\text{\texttt{full avg10=12.20 avg60=3.40 avg300=0.80 total=189000}}$$
+   The `some` metric measures the percentage of wall-clock time that at least one thread in the cgroup was stalled waiting for memory resources (such as page-cache refaults or direct reclaim). The `full` metric records complete execution starvation where *all* threads in the cgroup were simultaneously blocked. By registering an `epoll` notification trigger on `/proc/pressure/memory` (e.g., waking the supervisor when `some avg10 > 20%`), the agent harness detects memory thrashing proactively, allowing it to signal context compaction or checkpointing before an irrecoverable kernel SIGKILL occurs.
 
 ### Host-to-guest control plane: Agent-init over virtio-vsock
 
@@ -740,14 +763,38 @@ Subsequent path lookups encountering the `0/0` character device mask the lower f
 *Modifying a single byte triggers full-file copy-up, turning sub-millisecond writes into multi-second NVMe stalls for gigabyte assets.*
 :::
 
-The copy-up mechanism introduces a subtle but severe performance pitfall: write amplification on large fixtures. If a coding agent appends a single byte to a 5 GB SQLite database, machine learning model weight file, or binary test fixture residing in `lowerdir`, OverlayFS must copy all 5 GB to `upperdir` before executing the 1-byte append:
+The copy-up mechanism introduces a subtle but severe performance pitfall: catastrophic write amplification on large repository assets. Because OverlayFS operates at the VFS inode and dentry granularity, opening an existing lower-layer file with write intent (`O_WRONLY` or `O_RDWR`) forces the kernel to copy the entire file from `lowerdir` into `upperdir` via `ovl_copy_up_one()`, even if the agent modifies only a single byte.
+
+We formalize the Write Amplification Factor ($\text{WAF}$) of workspace copy-up as:
+
+$$\text{WAF} = \frac{\text{Bytes written to physical storage}}{\text{Bytes modified by tool}} = \frac{S_{\text{file}}}{\Delta B_{\text{write}}}$$ {#eq-vol3-waf-cliff}
+
+Consider an autonomous software engineering agent running a test suite that appends a timestamp to a 1.2 GB SQLite database fixture, a machine learning model checkpoint, or a monolithic Git packfile (`.git/objects/pack/*.pack`):
 
 ```bash
-# Triggering a 5 GB copy-up by appending a timestamp to a test fixture
-echo "TEST_EPOCH=1719200000" >> tests/fixtures/test_suite.bin
+# Triggering a 1.2 GB copy-up by appending a timestamp to a test fixture
+echo "TEST_EPOCH=1719200000" >> tests/fixtures/large_database.sqlite
 ```
 
-This copy-up locks the file's dentry, exhausts storage bandwidth, and can stall agent execution for tens of seconds. Systems designers mitigate this by decomposing large fixtures into chunked assets or mounting large read-only fixtures on dedicated read-only loopback devices bypassing the overlay.
+Because $\Delta B_{\text{write}} = 22\text{ bytes}$ and $S_{\text{file}} = 1.2 \times 10^9\text{ bytes}$, the write amplification explodes to:
+
+$$\text{WAF} = \frac{1.2 \times 10^9}{22} \approx 5.45 \times 10^7$$
+
+In parallel evaluation environments running $N = 32$ concurrent agent trajectories on a single host, thirty-two concurrent 1-byte mutations force $38.4\text{ GB}$ of synchronous disk writes. This instantly saturates host NVMe write queues, triggers kernel dentry lock contention across VFS inodes, and turns a sub-millisecond tool execution into a 10-to-30-second blocking freeze.
+
+#### Extent-level copy-on-write (`FICLONE`) and block-level thin provisioning {.unnumbered}
+
+To eliminate this write amplification cliff, modern sandbox orchestrators replace or augment inode-level union filesystems with block-level and extent-level copy-on-write primitives:
+
+1. **Linux `ioctl(FICLONE)` (Reflink Sharing):** On filesystems supporting extent-level sharing (such as XFS and Btrfs), the host supervisor duplicates the repository workspace using extent reflinks:
+   ```c
+   // Block-level extent sharing between golden template and agent scratchpad
+   ioctl(dest_fd, FICLONE, src_fd);
+   ```
+   Reflink creation is an $O(1)$ metadata operation taking microseconds, regardless of file size. When the agent appends 22 bytes to the 1.2 GB database, the filesystem duplicates only the single $4\text{ KiB}$ leaf extent containing the target offset:
+   $$\text{WAF}_{\text{reflink}} = \frac{4096\text{ bytes}}{22\text{ bytes}} \approx 186.2$$
+   Reflink reduces physical write amplification by a factor of nearly $300{,}000\times$, completely eliminating host I/O stalls without requiring complex application-level chunking.
+2. **Device-Mapper Thin Provisioning (`dm-thin`):** In microVM architectures (such as Firecracker or Cloud-Hypervisor), backing `virtio-block` devices with `dm-thin` snapshot pools maps virtual disk allocations at fixed block chunk sizes (typically $64\text{ KiB}$). Mutations inside the guest allocate only modified physical chunks on host NVMe, completely bypassing host-side VFS inode copy-up locks and isolating storage traffic to true dirty sectors.
 
 #### Scratchpad storage quota enforcement
 
@@ -1008,7 +1055,19 @@ With snapshot restore and on-demand `userfaultfd` demand paging, read-only memor
 
 $$B_{\text{snapshot}} = \frac{100 \times 30\text{ MB}}{1.0\text{ s}} = 3.0\text{ GB/s}$$
 
-This represents a 74-fold reduction in host memory traffic, easily fitting within commodity DRAM channels and enabling immediate burst rehydration, as compared in @tbl-vol3-provisioning-roofline.
+This represents a 74-fold reduction in host memory traffic, easily fitting within commodity DRAM channels and enabling immediate burst rehydration.
+
+#### The userfaultfd page-fault storm and burst pre-faulting {.unnumbered}
+
+While on-demand paging slashes total memory bandwidth by $74\times$, naive `userfaultfd` architectures exhibit a severe operational failure mode under high-concurrency evaluation workloads: the **page-fault storm**. When an evaluation fleet launches $N = 100\text{--}500$ sandboxes simultaneously to evaluate a batch of SWE-bench candidate patches, hundreds of vCPU threads begin executing unmapped guest physical pages at the exact same instant.
+
+Each missing page triggers an EPT violation, trapping vCPU execution and enqueuing a page-fault descriptor over the host `userfaultfd` handle. If the supervisor resolves these faults via a single-threaded user-space event loop issuing individual `ioctl(uffd, UFFDIO_COPY)` calls for each $4\text{ KiB}$ frame, the event loop saturates completely. Thousands of in-flight page requests pile up in kernel queues, leaving vCPUs stalled in uninterruptible sleep and inflating sandbox acquisition latency from $< 2\text{ ms}$ to over $300\text{ ms}$.
+
+High-throughput sandbox runtimes resolve this bottleneck through three kernel-level techniques:
+
+1. **Kernel-Assisted Eager Pre-faulting:** Instead of waiting for on-demand traps, the supervisor issues `madvise(addr, len, MADV_WILLNEED)` over the read-only golden text segments (kernel text, glibc, and Python interpreter bytecode) during instance initialization. This pre-populates host page table entries ahead of guest instruction dispatch, converting over $90\%$ of potential UFFD traps into immediate DRAM hits.
+2. **Batched Zero-Copy Resolution (`UFFDIO_CONTINUE`):** Rather than copying $4\text{ KiB}$ buffers across user-space memory on every fault, modern Linux kernels support `UFFDIO_CONTINUE`. When the guest physical RAM is backed by a shared `tmpfs` or `shmem` file descriptor, the page provider prepares the backing page in shared memory and invokes `ioctl(uffd, UFFDIO_CONTINUE)`, resolving the fault and binding the host PTE without data copying.
+3. **The THP vs. Fault Granularity Trade-off:** As derived in @sec-vol3-sandboxes-microvms, backing memory with $2\text{ MiB}$ Transparent Huge Pages reduces EPT walk depth, but forces `userfaultfd` to fault and allocate in $2\text{ MiB}$ chunks rather than $4\text{ KiB}$. Under concurrent bursts, faulting $2\text{ MiB}$ per missing symbol saturates memory bus channels, reintroducing the bandwidth bottlenecks of cold boots. High-performance fleets therefore pin golden templates to $4\text{ KiB}$ base pages for on-demand rehydration, transitioning to $2\text{ MiB}$ THP only for long-lived, compute-bound execution workloads.
 
 | Provisioning Mechanism         | Execution Primitive                              | Initialization Latency ($T_{\text{init}}$) | Per-Instance Host RAM                        | Host Memory Traffic ($N = 100$)            | Isolation Perimeter           |
 |:-------------------------------|:-------------------------------------------------|:-------------------------------------------|:---------------------------------------------|:-------------------------------------------|:------------------------------|

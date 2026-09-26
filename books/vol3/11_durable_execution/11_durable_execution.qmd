@@ -177,6 +177,25 @@ These external tool mutations are **physically irrevocable**. No database before
 - **Intent barriers instead of page rollback**: Because physical undo is impossible for external mutations, the runtime prevents phantom effects by enforcing the strict write-ahead intent barrier $e_{\text{flush}} \prec a_{\text{ext}}$ before dispatch.
 - **Forward compensation instead of backward undo**: When an in-doubt action cannot be safely rolled back, the recovery engine either settles the mutation using an idempotency key, dispatches a compensatory forward action (such as deleting an orphaned cloud volume or issuing an inverse refund transaction via the Saga pattern), or suspends the trajectory for supervisory escalation.
 
+### Asymmetric distributed commit: Why sovereign APIs break two-phase commit
+
+The physical irrevocability of external actions is not merely an engineering inconvenience; it is a fundamental distributed systems dilemma. In classical distributed database systems, multi-node transactional consistency is achieved through the Two-Phase Commit (2PC) protocol [@gray1978]. Under 2PC, a centralized coordinator orchestrates state changes across participating resource managers:
+
+1. **Prepare Phase:** The coordinator sends a `PREPARE` request to all participants. Each participant checks constraints, acquires local row or page locks, writes a `PREPARED` record to its local write-ahead log, and returns a `VOTE_COMMIT` or `VOTE_ABORT` promise.
+2. **Commit Phase:** Only after receiving unanimous affirmative votes does the coordinator write a `COMMIT` record to its log and broadcast `GLOBAL_COMMIT`. If any participant votes negative or fails to respond before a timeout, the coordinator broadcasts `GLOBAL_ABORT`, and all participants mechanically unwind their prepared changes using local undo logs.
+
+In agentic systems, this symmetry is broken. An autonomous agent interacts with external sovereign APIs—third-party payment gateways, source control hosts, cloud control planes, messaging brokers, or physical actuators. These external endpoints are independent sovereign domains:
+
+- **No Prepare Phase:** Sovereign APIs expose no `PREPARE` endpoint. They offer no mechanism for an external caller to tentatively reserve state, verify constraints, and hold distributed locks pending a second-phase confirmation.
+- **No Participant Rollback:** A POST request to provision a compute instance or charge a credit card commits immediately within the external system's internal transaction boundary.
+- **Unilateral Coordinator Commit:** Because the external participant cannot enter a prepared state, the agent runtime must act as the coordinator of a **degenerate, unilateral Two-Phase Commit**. The coordinator's local write-ahead log flush is the sole commit decision:
+$$e_{\text{flush}} \equiv \text{Commit}_{\text{coord}}$$
+The subsequent network dispatch $a_{\text{ext}}$ is not a proposal or a vote; it is an asynchronous physical actuation.
+
+This structural asymmetry defines the **2PC Uncertainty Window** ($W_{\text{doubt}}$):
+$$W_{\text{doubt}} = \left[ t(e_{\text{flush}}),\, t(e_{\text{obs}}) \right]$$
+During this window, the coordinator has committed locally ($e_{\text{flush}}$), but network latency, packet loss, or host crashes can sever communication before the observation ($e_{\text{obs}}$) is received and persisted. If the agent host crashes during $W_{\text{doubt}}$, recovery discovers an **in-doubt action** (@tbl-vol3-durable-recovery-states). Because the external action cannot be aborted via 2PC rollback, recovery cannot simply re-dispatch the action (which risks catastrophic duplicate execution) nor assume failure (which risks abandoning unmanaged external resources). Instead, the uncertainty window must be reconciled through deterministic idempotency keys or out-of-band inquiry probes before execution can advance.
+
 ### Durability overhead and group commit amortization
 
 Enforcing a synchronous `fdatasync()` barrier on the critical path of every tool execution introduces non-volatile media latency. While a single NVMe flush takes between $80$ and $150\ \mu\text{s}$ on local flash, network-attached block volumes (such as AWS EBS or Google Persistent Disk) incur $2$ to $15\ \text{ms}$ per barrier. In multi-agent environments hosting tens or hundreds of concurrent agent trajectories on a shared node, serializing flushes causes severe queueing contention.
@@ -211,6 +230,7 @@ Before moving on, check that you can answer the following:
 - [ ] **Settlement**: What does recovery do with an in-doubt call whose tool accepts no idempotency key?
 - [ ] **Cost**: Why does group commit preserve each trajectory's causal ordering while reducing the frequency of storage barriers?
 - [ ] **ARIES vs. agent recovery**: Why can classical databases roll back uncommitted pages with before-images, while agent systems must enforce pre-mutation barriers and forward compensating actions?
+- [ ] **Asymmetric 2PC**: Why does the agent WAL act as the unilateral coordinator commit log ($e_{\text{flush}} \equiv \text{Commit}_{\text{coord}}$) for external sovereign APIs, and what defines the 2PC uncertainty window?
 :::
 
 ## Checkpoints {#sec-vol3-persistence-checkpointing}
@@ -458,6 +478,33 @@ To make split-brain mutations mathematically impossible, the runtime enforces a 
 
 If stale worker $A$ wakes up and attempts to issue an external tool call or flush an intent record, both the tool gateway and the storage engine reject the operation because $\gamma_A < \gamma_B$. Worker $A$ receives a terminal fencing error and immediately self-terminates (`SIGTERM`), containing the blast radius before any mutation can leak.
 
+### The fencing token fallacy and deterministic idempotency key synthesis
+
+While monotonic epoch fencing successfully rejects late-arriving requests from partitioned workers ($\gamma < \gamma_{\text{high-water}}$), relying on epoch numbers alone introduces a subtle and dangerous failure mode: the **Fencing Token Fallacy**.
+
+Consider a partitioned worker $A$ operating under epoch $\gamma_A$. Worker $A$ initiates an external tool call at turn $t$ to a sovereign cloud provisioning or payment API. The Tool Gateway Proxy validates that $\gamma_A \ge \gamma_{\text{high-water}}$ and dispatches the HTTP request across the physical network. Immediately following socket dispatch, worker $A$ suffers a stop-the-world kernel freeze or network partition. Its lease expires before it can receive the server's acknowledgment or append the `ToolResult` event to the write-ahead log.
+
+The distributed lease coordinator detects the heartbeat timeout, revokes worker $A$'s lease, and promotes arriving worker $B$ with incremented epoch:
+$$\gamma_B = \gamma_A + 1$$
+Worker $B$ restores the latest checkpoint, replays the log suffix, and discovers an in-doubt `ToolIntent` at turn $t$ lacking a corresponding `ToolResult`. Following standard crash recovery discipline, worker $B$ re-dispatches the action, presenting its valid, higher epoch token $\gamma_B$.
+
+Because $\gamma_B > \gamma_A$, the Tool Gateway Proxy's epoch check passes unconditionally:
+$$\gamma_B \ge \gamma_{\text{high-water}}(\tau)$$
+If the gateway simply forwards the request to the external API, the sovereign endpoint—which possesses zero visibility into internal agent lease epochs—executes the mutation a **second time**. The fencing token successfully prevented the zombie worker from issuing subsequent requests, but it completely failed to prevent duplicate execution across epoch transitions.
+
+To dismantle the Fencing Token Fallacy, the Tool Gateway Proxy must function not merely as a passive epoch filter, but as an **active bidirectional idempotency bridge**:
+
+1. **Deterministic Cryptographic Key Derivation:** The proxy synthesizes a collision-resistant idempotency key directly from immutable trajectory coordinates:
+   $$K_{\text{idemp}} = \text{HMAC-SHA256}\left(K_{\text{secret}},\, \tau \mathbin{\Vert} t \mathbin{\Vert} \text{tool\_call\_id}\right)$$ {#eq-vol3-idempotency-key}
+   Because $\tau$, turn index $t$, and `tool_call_id` are anchored in the immutable write-ahead log, worker $A$ and worker $B$ compute bit-exact identical idempotency keys for turn $t$ regardless of their differing epoch tokens $\gamma_A$ and $\gamma_B$. The gateway injects $K_{\text{idemp}}$ into standardized external transport headers (such as `Idempotency-Key` for HTTP REST APIs, `ClientToken` for AWS SDKs, or database transaction tags).
+2. **Authoritative In-Flight Reservation Table:** The Tool Gateway Proxy maintains a persistent, distributed reservation ledger tracking the lifecycle of every active idempotency key across three explicit states:
+   $$\mathcal{T}_{\text{gateway}}[K_{\text{idemp}}] \in \left\{ \text{PENDING}(\gamma_A, t_{\text{dispatch}}),\, \text{COMMITTED}(\text{cached\_response}),\, \text{FAILED}(\text{error\_payload}) \right\}$$
+   When worker $B$ presents turn $t$ with epoch $\gamma_B$, the gateway checks $\mathcal{T}_{\text{gateway}}[K_{\text{idemp}}]$ before touching the external network:
+
+   - **Case 1 (`PENDING`):** Worker $A$'s prior network call is currently in flight. Rather than issuing a concurrent duplicate request, the gateway parks worker $B$'s dispatch on an in-flight promise. If the pending call completes successfully, the gateway transitions the entry to `COMMITTED`, caches the response, and fulfills worker $B$'s promise with the cached payload.
+   - **Case 2 (`COMMITTED`):** Worker $A$'s call completed, but worker $A$ crashed before writing `ToolResult`. The gateway immediately returns `cached_response` to worker $B$ without dispatching any network packets.
+   - **Case 3 (`ABANDONED` / Timeout):** If the in-flight lease expires without response, the gateway issues a single-flight reconciliation probe or dispatches with the identical $K_{\text{idemp}}$, guaranteeing that the external sovereign endpoint deduplicates the call at its own database boundary.
+
 ### Resume under drift
 
 Between the crash and the resume, or during a long approval pause, the system around the trajectory may change. The served model may have a new version behind the same name, the prompt template may have been edited, and a tool's schema may have gained or renamed a field. Because `TaskStarted` and each `ModelReplied` record the versions in use, the harness can detect drift instead of discovering it through odd behavior, and it has three choices:
@@ -606,26 +653,37 @@ To maintain a lean causal log, the runtime applies **content-addressed payload o
 
 During normal recovery or replay, the harness reads the summary directly from the log without issuing network requests. When an engineer initiates forensic debugging or deep counterfactual branching, the replay engine fetches the full body from the content-addressed store using digest $h$. If multiple turns or parallel agents encounter identical compiler warnings or standard libraries, content addressing deduplicates the payload automatically.
 
-### Log-structured merge-tree compaction for long-horizon trajectories
+### The causal spine invariant: Trajectory compaction versus database key-value overwrites
 
-For ultra-long-horizon agents executing multi-hour or multi-day tasks—such as full-repository migrations, complex debugging across microservice architectures, or iterative optimization loops spanning $500$ to $1{,}000+$ turns—a purely linear write-ahead log introduces severe read amplification and recovery bottlenecks. Over $1{,}000$ interactive turns, an agent generates thousands of intermediate, superseded tool operations: exploratory directory listings (`ls`), exploratory pattern searches (`grep`), intermediate compilation dumps, and temporary file mutations that were subsequently overwritten or reverted.
+For ultra-long-horizon agents executing multi-hour or multi-day tasks—such as full-repository migrations, complex debugging across microservice architectures, or iterative optimization loops spanning $500$ to $1{,}000+$ turns—a purely linear write-ahead log introduces severe storage and recovery bottlenecks. Over $1{,}000$ interactive turns, an agent generates thousands of intermediate, superseded tool operations: exploratory directory listings (`ls`), pattern searches (`grep`), intermediate compilation dumps, and temporary file mutations that were subsequently overwritten or reverted.
 
 If a worker node crashes at turn 950 or migrates to a new host, replaying or rebuilding context from an uncompacted 1,000-turn WAL forces the recovery supervisor to deserialize and traverse hundreds of megabytes of obsolete JSON records before initiating the first token prefill pass.
 
-To resolve this recovery bottleneck, production agent systems borrow the **Log-Structured Merge-Tree (LSM-Tree) compaction pattern** [@oneil1996log; @kleppmann2017designing], structuring trajectory persistence into hierarchical compaction tiers. It is crucial to distinguish this agent-level pattern from traditional database block defragmentation: where storage engines like RocksDB merge sorted byte arrays (SSTables) across disk blocks to bound key-lookup read amplification, agent trajectory compaction operates strictly at the **semantic and observational layer**—squashing superseded file edits, pruning dead-end exploratory scans, and detaching bulky observation payloads to preserve an authoritative, minimal working context:
+To resolve this bottleneck, it is tempting to naively borrow the **Log-Structured Merge-Tree (LSM-Tree) compaction pattern** [@oneil1996log; @kleppmann2017designing], merging sorted runs and discarding superseded records. In storage engines like LevelDB or RocksDB, data manipulation operations exhibit commutative key-value overwrite semantics: a write record $\langle k, v_2 \rangle$ committed at timestamp $t_2$ completely supersedes and invalidates an earlier record $\langle k, v_1 \rangle$ committed at $t_1$. Compaction merges Sorted String Tables (SSTables) and mechanically discards obsolete values and tombstoned keys to bound read amplification.
 
-1. **Level 0 (L0 - Hot Append-Only WAL):** Raw trajectory events ($e_{\text{flush}} \prec a_{\text{ext}}$) append sequentially to local NVMe storage. L0 records maintain strict physical chronology, capturing every intermediate intent, partial tool streaming chunk, and system signal for immediate crash recovery during the active turn.
-2. **Level 1 (L1 - Minor Compaction / Turn-Window Coalescing):** Asynchronously executed every $k_{\text{minor}}$ turns (typically $k=10\text{ to }20$), minor compaction scans the active L0 segment and coalesces redundant read-only exploratory turns. Contiguous read operations—such as multiple directory searches or file inspections—are folded into an aggregated workspace perception state, caching the net filesystem view while pruning redundant intermediate prompt wrappers.
-3. **Level 2 (L2 - Major Compaction / Semantic Tombstoning & State Folding):** Triggered at major checkpoint boundaries or extended approval pauses. Major compaction applies semantic tombstone markers to prune superseded environmental modifications:
-   - *Superseded Delta Squashing:* If a source file `src/service.py` was created at turn 15, modified at turn 42, and rewritten at turn 118, intermediate diff records are squashed into the net delta relative to the repository base snapshot.
-   - *Tombstone Pruning:* If temporary scratchpads, build artifacts, or mock tests were generated and subsequently deleted during execution, tombstone markers eliminate both the generation and deletion records from the recovery path entirely.
-   - *Cryptographic Merkle Indexing:* To preserve absolute forensic auditability, major compaction does not destroy historical data. Instead, it detaches bulky, superseded raw payloads to cold object storage, replacing them in the compacted log with cryptographic Merkle DAG content hashes.
+**The Autoregressive Causal Contradiction:** An agent trajectory is **not** a key-value store; it is an **autoregressive causal chain**. Every token generated by the foundation model at turn $t$ is strictly conditioned on the complete sequence of preceding prompts, actions, and observations:
 
-This compaction hierarchy provides a formal guarantee for crash recovery and live migration:
+$$y_t \sim P_{\theta}\left(y_t \mid x,\, a_1,\, o_1,\, \dots,\, a_{t-1},\, o_{t-1}\right)$$ {#eq-vol3-causal-spine-autoregressive}
 
-$$\text{Size}(\text{Log}_{\text{compacted}}) \approx \mathcal{O}\left(S_{\text{active\_context}} + \Delta S_{\text{net\_workspace}}\right) \ll \mathcal{O}\left(\sum_{t=1}^T |e_t|\right)$$
+If a compaction routine naively prunes exploratory read-only turns (such as empty `grep` or `ls` queries) or squashes intermediate file edits from the write-ahead log, it triggers two fatal systems violations:
 
-While an uncompacted write-ahead log grows linearly with total elapsed turns ($\mathcal{O}(T)$), the compacted LSM-tree log bounds recovery storage and context parsing time to the size of the net active context and workspace diff ($\mathcal{O}(1)$ with respect to total elapsed horizon). A 1,000-turn agent trajectory resumes in milliseconds rather than stalling across multi-second sequential WAL scans.
+1. *Violation of the Deterministic Replay Invariant (@sec-vol3-persistence-replay):* Replaying the agent harness against the log will fail because the replaying supervisory logic expects historical events that no longer exist in the pruned log.
+2. *Violation of the Context Hash Invariant (@sec-vol3-persistence-wal):* During resume, the harness verifies context integrity by computing the SHA-256 hash of the assembled prompt and comparing it against the recorded `ContextBuilt` hash. Pruning turns from the log alters the re-assembled prompt bytes, producing a hash mismatch that the supervisor must treat as fatal unrecoverable drift.
+
+To bound recovery latency on ultra-long-horizon tasks ($1{,}000+$ turns) without violating autoregressive causality, production runtimes implement a three-tier separation of concerns governed by the **Causal Spine Invariant**:
+
+1. **Tier 1: The Immutable Causal Spine ($\mathcal{S}_{\text{causal}}$):** The sequential event backbone—comprising monotonic $LSN$, turn index $t$, event type, tool-call ID, payload content hash $h$, and context hash—is **strictly immutable, append-only, and never pruned**:
+   $$\mathcal{S}_{\text{causal}} = \left\langle \left( \text{LSN}_i,\, t_i,\, \text{type}_i,\, \text{id}_i,\, h_i,\, \text{hash}_{\text{ctx}} \right) \right\rangle_{i=1}^N$$
+   Even if an exploratory scan returned zero results, its event envelope remains in the spine to preserve bit-exact deterministic replay and cryptographic context verification.
+2. **Tier 2: Content-Addressed Payload Offloading (CAS):** Bulky observation payloads ($B_{\text{tool}} > \theta_{\text{bulk}}$) are stripped from the inline log and offloaded to content-addressed object storage, retaining only the cryptographic digest $h = \text{SHA-256}(B_{\text{tool}})$ and a bounded summary in the spine. During routine crash recovery, the harness folds the lightweight spine without fetching offloaded bodies; full payloads are retrieved lazily only during forensic debugging or counterfactual branching.
+3. **Tier 3: Sandbox Workspace CoW Layer Squashing:** File modifications, scratchpad directories, and compiler caches are compacted at the **operating system filesystem layer**, completely decoupled from the trajectory log. The supervisor merges intermediate Copy-on-Write overlay layers (e.g., consolidating OverlayFS `upperdir` diffs or extent reflink pointers via `ioctl(FICLONE)`) into a consolidated base snapshot.
+4. **Explicit Application-Level Compaction:** When context window limits are reached, the agent harness emits an explicit `Compacted` event into the causal spine. Historical turns remain recorded in the spine, while the newly compacted summary forms the prompt prefix for subsequent autoregressive turns.
+
+This architecture bounds crash recovery latency to the size of the net active context and workspace diff:
+
+$$\text{Size}(\text{Spine}_{\text{active}}) \approx \mathcal{O}\left(S_{\text{active\_context}} + \Delta S_{\text{net\_workspace}}\right) \ll \mathcal{O}\left(\sum_{t=1}^T |B_{\text{payload}}(t)|\right)$$
+
+While the raw un-offloaded data volume grows linearly with elapsed turns ($\mathcal{O}(T)$), the causal spine allows a 1,000-turn agent trajectory to resume in milliseconds without discarding a single causal token.
 
 ### Telemetry spans and trace sampling dynamics
 
@@ -676,6 +734,7 @@ Before moving on, check that you can answer the following:
 - [ ] **Parquet compaction**: How does Parquet columnar compression reduce storage volume for token logit distributions and trace spans?
 - [ ] **Telemetry sampling**: Why does uniform head-based sampling fail to capture rare operational anomalies, and how does tail-based stratified sampling resolve it?
 - [ ] **Bulky outputs**: Why should tool outputs above $\theta_{\text{bulk}}$ be offloaded to content-addressed storage rather than stored directly in the WAL?
+- [ ] **Causal spine**: Why does applying LSM-tree key-value overwrite compaction to trajectory logs break deterministic replay and context hash verification, and how does the three-tier causal spine architecture resolve this?
 :::
 
 ## Trajectory Storage Engines {#sec-vol3-persistence-engine-design}
@@ -746,6 +805,12 @@ The saving is small, since a local flush adds well under 1 percent to a turn. Th
 **Fallacy:** *Rerunning the model at temperature zero reproduces a trajectory.*
 
 Serving at temperature zero is still not bit-exact, because batch composition changes the order of floating-point sums and near-ties between tokens flip. Model versions change behind a stable name, harness inputs such as timestamps enter the context, and the environment moves. A rerun is a new trajectory. Reproduction comes from replaying recorded model replies and tool results, and divergence analysis explains the rest.
+:::
+
+::: {.fallacy-pitfall}
+**Fallacy:** *Monotonic fencing tokens alone prevent duplicate external mutations by zombie workers.*
+
+Fencing tokens prevent a partitioned worker from committing stale updates to internal stores that validate $\gamma \ge \gamma_{\text{high-water}}$. However, external sovereign APIs (such as payment gateways or cloud control planes) have independent authorization realms and do not check internal agent epoch numbers. If worker $A$ dispatches an external tool call and partitions before logging the result, an arriving worker $B$ in epoch $\gamma_B > \gamma_A$ will pass the gateway's epoch check and re-dispatch the in-doubt call, producing a duplicate external mutation. Closing the split-brain hazard requires the Tool Gateway Proxy to translate internal trajectory coordinates into deterministic cryptographic idempotency keys ($K_{\text{idemp}}$) and track in-flight reservations across epoch boundaries.
 :::
 
 ::: {.fallacy-pitfall}
