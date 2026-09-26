@@ -43,6 +43,9 @@ This chapter combines Part III's measurements and models into one checkable repo
 ## The Problem
 
 ::: {.column-margin}
+**↩ Jump back:** @sec-training
+*Model evaluation, validation loss floors, and test accuracy metrics.*
+
 **↩ Jump back:** @sec-quantization
 *Synthesizing INT8 quantization, distillation, and KV caching into a coherent serving pipeline.*
 :::
@@ -272,7 +275,9 @@ def waterfall(cfg, m, n_tokens, order=LEVERS):
 ```
 :::
 
-Two properties make the comparison reproducible. `replace` returns a new configuration and leaves the old one alone, so a lever is a pure function and a stack is function composition; nothing about applying INT8 depends on whether fusion came first, except the number that comes out. `order` is an argument rather than a constant so that the trace can run the same four levers forward and reversed, and show the cumulative total agreeing while every marginal factor moves. The table records a cumulative comparison: each row retains the preceding changes and adds one more. Stating the order makes each marginal ratio interpretable.
+Two properties make the comparison reproducible. `replace` returns a new configuration and leaves the old one alone, so a lever is a pure function and a stack is function composition; nothing about applying INT8 depends on whether fusion came first, except the number that comes out. `order` is an argument rather than a constant so that the trace can run the same four levers forward and reversed, and show the cumulative total agreeing while every marginal factor moves. The table records a cumulative comparison: each row retains the preceding changes and adds one more. Stating the order makes each marginal ratio interpretable.[^fn-optimization-stacking-order]
+
+[^fn-optimization-stacking-order]: **Non-commutative optimization stacking order**: In real production compilers (such as TensorRT and PyTorch Inductor), optimization passes are non-commutative: the sequence in which optimizations are applied alters both numerical accuracy and execution speed. Quantizing weights to INT8 prior to structured pruning restricts magnitude scoring resolution to 256 discrete bins, increasing channel ranking error. Conversely, performing SVD low-rank factorization prior to quantization introduces intermediate activations that may require distinct calibration dynamic ranges. The canonical lowering pipeline applies algebraic fusion and pruning first, followed by quantization calibration, and locks memory buffers via CUDA Graphs last.
 
 
 ---
@@ -332,6 +337,10 @@ The final two assertions in lines 30 and 31 answer different questions. In line 
 Take $D = 128$, $L = 4$, and $V = 1000$. The subtotal contains 914,432 matrix weights and 128,000 token-embedding entries. Those are stored counts. At the first step, `rows = 1`, so the transfer ledger charges $914{,}432 \times 4 = 3{,}657{,}728$ matrix bytes, 512 selected embedding bytes, and 41,376 linear input/output bytes. Its total is 3,699,616 bytes, or 0.0185 milliseconds at the assumed 200 GB/s. Matrix and attention arithmetic contribute 1,830,912 operations, or 0.00183 milliseconds at the assumed 1000 GFLOP/s. The maximum is the byte term. The $4 \times 49 + 12 = 208$ assumed operation groups add 1.040 milliseconds of dispatch, giving `step_ms(Config(), Machine(), 0) = 1.0585` milliseconds.
 
 At the final step, the uncached prefix has 128 rows. The same matrices serve those rows, but selected embeddings contribute 65,536 bytes and linear inputs/outputs contribute 5,296,128 bytes. The total transfer ledger is 9,019,392 bytes, or 0.0451 milliseconds. Arithmetic grows to 267,649,024 operations, or 0.2676 milliseconds, and becomes the larger term. The step estimate is 1.3076 milliseconds. Summing the 128 different steps gives 149.76 milliseconds. The changing row count is why multiplying the first step by 128 would miss part of the cost.
+
+::: {.callout-tip title="Pause & Predict: Amdahl's Law and the Diminishing Returns of Stacking"}
+Suppose in a baseline generative decode step taking 10.0 ms, attention projections consume 6.0 ms (60% of total latency) and MLP layers consume 4.0 ms (40%). If an optimal KV cache speeds up attention projections by $10\times$ (slashing attention latency to 0.6 ms), what is the new total step latency? What is the overall model speedup? Why did a $10\times$ component speedup produce only a $2.17\times$ end-to-end speedup?
+:::
 
 ### The waterfall
 
