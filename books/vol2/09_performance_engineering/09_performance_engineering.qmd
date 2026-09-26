@@ -774,150 +774,226 @@ $$ {#eq-ridge-point}
 Workloads with $I < I_{\text{ridge}}$ are memory-bound\index{Memory-Bound}: their performance is limited by how fast data can be loaded, not how fast it can be processed. Workloads with $I > I_{\text{ridge}}$ are compute-bound: the arithmetic units are the bottleneck. @Fig-roofline-model illustrates this relationship graphically.
 
 ::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The roofline model**: Achievable performance (y-axis) as a function of arithmetic intensity (x-axis) on a log-log plot. The sloped line represents the memory bandwidth ceiling; the flat line represents the compute ceiling at the labeled precision (FP8 tensor-core throughput on H100, approximately `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str`); their intersection is the ridge point at roughly `{python} MemoryWallScenario.h100_ridge_fp8_str` for FP8. Most transformer inference operations fall in the memory-bound region (left of the ridge point), while large batched GEMMs fall in the compute-bound region (right). The corresponding FP16 ridge point is roughly `{python} WideningGap.h100_ridge_str` FLOP/byte (`{python} WideningGap.h100_peak_flops_str` divided by `{python} WideningGap.h100_bw_str`)." fig-alt="Log-log roofline plot with diagonal memory-bandwidth ceiling and horizontal compute ceiling labeled at FP8 throughput around 2,000 TFLOP/s. Ridge point around 600 FLOP/byte. Workload markers: LLM decode and element-wise ops on the left (memory-bound), large GEMM on the right (compute-bound)."}
-```{.tikz}
-\scalebox{0.91}{
-\begin{tikzpicture}[
-    >=Stealth,
-    font=\small\sffamily
+```{python}
+#| echo: false
+#| warning: false
+import matplotlib.pyplot as plt
+import numpy as np
+
+plt.style.use('seaborn-v0_8-whitegrid')
+fig, ax = plt.subplots(figsize=(9.2, 5.2))
+
+c_dark = '#0F172A'
+c_blue = '#1E3A8A'
+c_red = '#DC2626'
+c_gray = '#64748B'
+c_border = '#CBD5E1'
+
+bw = 3.35
+peak_flops = 2000.0
+ridge_x = peak_flops / bw
+
+x_mem = np.logspace(np.log10(0.08), np.log10(ridge_x), 100)
+y_mem = bw * x_mem
+
+x_comp = np.logspace(np.log10(ridge_x), np.log10(2500), 50)
+y_comp = np.full_like(x_comp, peak_flops)
+
+# Background shading
+ax.axvspan(0.08, ridge_x, color='#FEF2F2', alpha=0.65, zorder=1)
+ax.axvspan(ridge_x, 2500, color='#EFF6FF', alpha=0.65, zorder=1)
+
+# Region pills
+ax.text(
+    2.5,
+    3600,
+    'MEMORY-BOUND REGION',
+    color='#991B1B',
+    fontsize=8.5,
+    fontweight='bold',
+    ha='center',
+    va='center',
+    bbox=dict(
+        boxstyle='round,pad=0.35',
+        facecolor='#FEE2E2',
+        edgecolor='#FCA5A5',
+        lw=1.0,
+    ),
+)
+ax.text(
+    1400,
+    3600,
+    'COMPUTE-BOUND',
+    color='#1E40AF',
+    fontsize=8.5,
+    fontweight='bold',
+    ha='center',
+    va='center',
+    bbox=dict(
+        boxstyle='round,pad=0.35',
+        facecolor='#DBEAFE',
+        edgecolor='#93C5FD',
+        lw=1.0,
+    ),
+)
+
+# Ridge line
+ax.axvline(ridge_x, color='#94A3B8', linestyle='--', linewidth=1.2, zorder=2)
+
+# Rooflines
+ax.plot(x_mem, y_mem, color=c_red, linewidth=2.4, zorder=3)
+ax.plot(x_comp, y_comp, color=c_blue, linewidth=2.4, zorder=3)
+ax.plot(
+    [ridge_x],
+    [peak_flops],
+    'o',
+    color=c_blue,
+    markersize=7.5,
+    markeredgecolor='#FFFFFF',
+    markeredgewidth=1.3,
+    zorder=6,
+)
+
+# Sloped label along memory roofline
+ax.text(
+    1.2,
+    9.0,
+    'slope = 3.35 TB/s\n(HBM3 BW ceiling)',
+    color='#B91C1C',
+    fontsize=8.2,
+    fontweight='bold',
+    rotation=32,
+    ha='center',
+    va='center',
+)
+
+# Compute ceiling label
+ax.text(
+    180,
+    2250,
+    '2,000 TFLOP/s FP8 Tensor Core ceiling',
+    color=c_blue,
+    fontsize=8.2,
+    fontweight='bold',
+    ha='right',
+    va='bottom',
+)
+
+# Ridge callout placed in compute-bound area
+ax.annotate(
+    r'Ridge Point $\approx$ 597 FLOP/byte',
+    xy=(ridge_x, peak_flops),
+    xytext=(1200, 700),
+    fontsize=8.0,
+    fontweight='bold',
+    color=c_dark,
+    ha='center',
+    bbox=dict(
+        boxstyle='round,pad=0.3',
+        facecolor='#FFFFFF',
+        edgecolor='#94A3B8',
+        lw=1.0,
+    ),
+    arrowprops=dict(arrowstyle='->', color='#64748B', lw=1.2),
+)
+
+# Workload points
+workloads = [
+    (0.65, 0.45, 'Decode', '(batch=1)', 'right', (-12, 10)),
+    (5.5, 18.0, 'Prefill', '(long prompt)', 'center', (0, 18)),
+    (28.0, 95.0, 'Transformer', 'train (B=512)', 'left', (12, -8)),
+    (150.0, 500.0, 'Conv training', '(ResNet)', 'left', (12, -8)),
 ]
 
-    % Provide colors if not defined
-    \providecolor{ForestGreen}{RGB}{34,139,34}
-    \providecolor{NavyBlue}{RGB}{20,45,110}
-    \providecolor{Amber}{RGB}{217,119,6}
-    \providecolor{BurntOrange}{RGB}{210,105,30}
-    \providecolor{BrickRed}{RGB}{180,30,30}
-    \providecolor{Crimson}{RGB}{180,30,30}
-    \providecolor{SlateGrey}{RGB}{112,128,144}
-    \providecolor{LightGrey}{RGB}{245,247,250}
-    \providecolor{BorderGrey}{RGB}{203,213,225}
+decode_actual = (0.65, 0.45)
+decode_peak = (0.65, bw * 0.65)
+ax.plot(
+    [decode_actual[0], decode_peak[0]],
+    [decode_actual[1], decode_peak[1]],
+    color='#94A3B8',
+    linestyle=':',
+    linewidth=1.2,
+    zorder=4,
+)
+ax.plot(
+    decode_peak[0],
+    decode_peak[1],
+    'o',
+    color='#CBD5E1',
+    markersize=5.0,
+    zorder=4,
+)
+ax.text(
+    decode_actual[0],
+    0.28,
+    r'peak $\gg$ actual',
+    color='#64748B',
+    fontsize=7.2,
+    fontstyle='italic',
+    ha='center',
+    va='top',
+)
 
-    % =========================================================================
-    % COORDINATE MAPPING
-    % x_canvas = 2.6 * (log10(x) + 0.903)
-    % y_canvas = 1.35 * (log10(y) + 1.0)
-    % Ridge: x = 600 -> x_c = 9.57; y = 2000 -> y_c = 5.81
-    % =========================================================================
+for pt in workloads:
+    col = c_red if pt[0] == 0.65 else c_blue
+    ax.plot(
+        pt[0],
+        pt[1],
+        'o',
+        color=col,
+        markersize=6.5,
+        markeredgecolor='#FFFFFF',
+        markeredgewidth=1.0,
+        zorder=5,
+    )
+    ax.annotate(
+        f'{pt[2]}\n{pt[3]}',
+        (pt[0], pt[1]),
+        xytext=pt[5],
+        textcoords='offset points',
+        fontsize=7.8,
+        fontweight='bold',
+        color=col,
+        ha=pt[4],
+        bbox=dict(
+            boxstyle='round,pad=0.25',
+            facecolor='#FFFFFF',
+            edgecolor=c_border,
+            lw=0.7,
+            alpha=0.95,
+        ),
+    )
 
-    % Background shading
-    % Memory-bound region (left of ridge at x = 9.57)
-    \fill[Crimson!4!white] (0, 0) rectangle (9.57, 6.2);
+# Axes scales and ticks
+ax.set_xscale('log')
+ax.set_yscale('log')
+ax.set_xlim(0.08, 2500)
+ax.set_ylim(0.15, 5200)
 
-    % Compute-bound region (right of ridge)
-    \fill[NavyBlue!4!white] (9.57, 0) rectangle (11.5, 6.2);
+xticks = [0.125, 1, 8, 64, 597]
+xticklabels = ['1/8', '1', '8', '64', r'$\approx$600']
+ax.set_xticks(xticks)
+ax.set_xticklabels(xticklabels, fontsize=8.5, color=c_dark)
 
-    % Grid lines (subtle)
-    \foreach \x in {2.35, 4.70, 7.05, 9.40} {
-        \draw[BorderGrey!40, line width=0.5pt] (\x, 0) -- (\x, 6.2);
-    }
-    \foreach \y in {1.35, 2.70, 4.05, 5.40, 5.81} {
-        \draw[BorderGrey!40, line width=0.5pt] (0, \y) -- (11.5, \y);
-    }
+yticks = [0.2, 1, 10, 100, 1000, 2000]
+yticklabels = ['0.2', '1', '10', '100', '1,000', '2,000']
+ax.set_yticks(yticks)
+ax.set_yticklabels(yticklabels, fontsize=8.5, color=c_dark)
 
-    % Region Labels (Pills at top)
-    \node[draw=Crimson!60, fill=Crimson!8!white, line width=0.8pt,
-          inner sep=4pt, font=\scriptsize\bfseries\color{Crimson}]
-        at (2.5, 6.6) {MEMORY-BOUND};
+ax.set_xlabel(
+    'Arithmetic Intensity (FLOP/byte) — log scale',
+    fontsize=9.5,
+    fontweight='bold',
+    color=c_dark,
+)
+ax.set_ylabel(
+    'Attainable Throughput (TFLOP/s) — log scale',
+    fontsize=9.5,
+    fontweight='bold',
+    color=c_dark,
+)
 
-    \node[draw=NavyBlue!60, fill=NavyBlue!8!white, line width=0.8pt,
-          inner sep=4pt, font=\scriptsize\bfseries\color{NavyBlue!90!black}]
-        at (10.4, 6.6) {COMPUTE-BOUND};
-
-    % Ridge vertical dashed line
-    \draw[dashed, SlateGrey!80, line width=0.9pt, dash pattern=on 4pt off 3pt]
-        (9.57, 0) -- (9.57, 5.81);
-
-    % Sloped roofline (Memory BW ceiling)
-    \draw[Crimson, line width=1.8pt] (0, 0.84) -- (9.57, 5.81);
-
-    % Horizontal roofline (Compute ceiling)
-    \draw[NavyBlue!90!black, line width=1.8pt] (9.57, 5.81) -- (11.2, 5.81);
-
-    % Ridge point circle
-    \fill[NavyBlue!90!black] (9.57, 5.81) circle (2.8pt);
-
-    % Ridge callout box (to the right, below ceiling)
-    \node[draw=SlateGrey!70, fill=white, line width=0.8pt,
-          inner sep=3.5pt, font=\scriptsize\bfseries\color{black!80}, anchor=west]
-        at (9.75, 5.35) {Ridge $\approx$ 600 FLOP/B};
-
-    % Sloped text: slope = 3.35 TB/s (HBM3 BW ceiling) - compact stacked
-    \node[font=\scriptsize\bfseries\color{Crimson}, rotate=27.4, align=center, anchor=south]
-        at (2.9, 2.65) {slope = 3.35 TB/s\\[1.5pt]{\tiny\color{Crimson!90!black}(HBM3 BW ceiling)}};
-
-    % Compute ceiling text
-    \node[font=\scriptsize\bfseries\color{NavyBlue!90!black}, anchor=south east]
-        at (9.45, 6.0) {2,000 TFLOP/s FP8 Tensor Core ceiling};
-
-    % =========================================================================
-    % WORKLOAD POINTS
-    % =========================================================================
-
-    % 1. Decode (batch=1)
-    \draw[dashed, SlateGrey!70, line width=0.8pt] (1.95, 1.85) -- (1.95, 1.05);
-    \fill[Crimson] (1.95, 1.05) circle (3pt);
-    \node[font=\tiny\itshape\color{black!60}, anchor=north] at (1.95, 0.95) {peak $\gg$ actual};
-    \node[draw=Crimson!60, fill=white, line width=0.8pt,
-          inner sep=3.5pt, align=center, anchor=south east] at (2.1, 1.4) {
-        {\scriptsize\bfseries\color{Crimson} Decode}\\[1pt]
-        {\tiny\color{black!70}(batch=1)}
-    };
-
-    % 2. Prefill (long prompt)
-    \fill[NavyBlue!90!black] (4.62, 3.25) circle (3pt);
-    \draw[dashed, SlateGrey!60, line width=0.7pt] (4.62, 3.25) -- (4.62, 2.5);
-    \node[draw=SlateGrey!60, fill=white, line width=0.8pt,
-          inner sep=3.5pt, align=center, anchor=south] at (4.62, 3.55) {
-        {\scriptsize\bfseries\color{black!85} Prefill}\\[1pt]
-        {\tiny\color{black!70}(long prompt)}
-    };
-
-    % 3. Transformer train (B=512)
-    \fill[NavyBlue!90!black] (6.26, 4.09) circle (3pt);
-    \node[draw=SlateGrey!60, fill=white, line width=0.8pt,
-          inner sep=3.5pt, align=center, anchor=north west] at (6.4, 3.5) {
-        {\scriptsize\bfseries\color{black!85} Transformer}\\[1pt]
-        {\tiny\color{black!70}train (B=512)}
-    };
-
-    % 4. Conv training (ResNet)
-    \fill[NavyBlue!90!black] (8.21, 5.10) circle (3pt);
-    \node[draw=NavyBlue!60, fill=white, line width=0.8pt,
-          inner sep=3.5pt, align=center, anchor=north west] at (8.3, 4.6) {
-        {\scriptsize\bfseries\color{NavyBlue!90!black} Conv training}\\[1pt]
-        {\tiny\color{black!70}(ResNet)}
-    };
-
-    % =========================================================================
-    % AXES
-    % =========================================================================
-    \draw[->, SlateGrey!90!black, line width=1.0pt] (0, 0) -- (11.8, 0);
-    \draw[->, SlateGrey!90!black, line width=1.0pt] (0, 0) -- (0, 6.6);
-
-    % Y-axis ticks and labels
-    \foreach \y/\val in {0/0.1, 1.35/1, 2.70/10, 4.05/100, 5.40/1{,}000, 5.81/2{,}000} {
-        \draw[SlateGrey!90!black, line width=0.8pt] (0, \y) -- (-0.12, \y);
-        \node[font=\scriptsize\color{black!85}, anchor=east] at (-0.16, \y) {\val};
-    }
-
-    % X-axis ticks and labels
-    \foreach \x/\val in {0/{1/8}, 2.35/1, 4.70/8, 7.05/64} {
-        \draw[SlateGrey!90!black, line width=0.8pt] (\x, 0) -- (\x, -0.12);
-        \node[font=\scriptsize\color{black!85}, anchor=north] at (\x, -0.16) {\val};
-    }
-
-    % Highlighted Ridge tick (~600)
-    \draw[SlateGrey!90!black, line width=1.0pt] (9.57, 0) -- (9.57, -0.12);
-    \node[draw=SlateGrey!60, fill=white, line width=0.6pt,
-          font=\tiny\bfseries\color{black!80}, inner sep=2.5pt, anchor=north]
-        at (9.57, -0.18) {$\sim$600};
-
-    % Axis Titles
-    \node[font=\small\bfseries\color{black!90}, rotate=90] at (-1.3, 3.3) {Attainable Throughput (TFLOP/s) --- log scale};
-    \node[font=\small\bfseries\color{black!90}] at (5.6, -0.85) {Arithmetic Intensity (FLOP/byte) $\rightarrow$ log scale};
-
-\end{tikzpicture}
-}
+plt.tight_layout()
 ```
 :::
 
