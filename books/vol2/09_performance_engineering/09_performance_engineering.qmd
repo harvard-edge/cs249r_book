@@ -1303,154 +1303,160 @@ The **decode phase**\index{Decode Phase} generates output tokens one at a time, 
 The prefill-decode decomposition has direct implications for system design, as visualized on the hardware roofline in @fig-performance-engineering-prefill-decode-roofline. A system optimized for prefill (maximizing FLOP/s utilization) operates at high arithmetic intensity in the compute-bound regime. Conversely, a system running decode (maximizing bandwidth utilization) operates far below the ridge point in the memory-bound regime. A real serving system must handle both phases, often simultaneously across different active requests.
 
 ::: {#fig-performance-engineering-prefill-decode-roofline fig-env="figure" fig-pos="htb" fig-cap="**Prefill versus decode roofline comparison**: Operational regimes of LLM prompt evaluation (prefill) versus autoregressive token generation (decode) plotted on the hardware roofline model. Prefill operates in the compute-bound regime at high arithmetic intensity ($I \gg I_{\text{ridge}}$), whereas decode is bound by HBM memory bandwidth ($I \ll I_{\text{ridge}}$)." fig-alt="Roofline comparison showing the compute-bound prefill phase near the Tensor Core ceiling and the memory-bound decode phase along the memory bandwidth slope."}
-```{.tikz}
-\scalebox{0.84}{
-\begin{tikzpicture}[
-    >=Stealth,
-    font=\small\sffamily,
-    card/.style={
-        rectangle,
-        align=center, inner sep=4pt,
-        line width=0.85pt
-    }
-]
+```{python}
+#| echo: false
+import matplotlib.pyplot as plt
 
-    % Provide colors if not defined
-    \providecolor{ForestGreen}{RGB}{34,139,34}
-    \providecolor{NavyBlue}{RGB}{20,45,110}
-    \providecolor{Amber}{RGB}{217,119,6}
-    \providecolor{BurntOrange}{RGB}{210,105,30}
-    \providecolor{BrickRed}{RGB}{180,30,30}
-    \providecolor{Crimson}{RGB}{180,30,30}
-    \providecolor{SlateGrey}{RGB}{112,128,144}
-    \providecolor{LightGrey}{RGB}{245,247,250}
-    \providecolor{BorderGrey}{RGB}{203,213,225}
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Helvetica']
+plt.rcParams['axes.edgecolor'] = '#CBD5E1'
+plt.rcParams['axes.linewidth'] = 0.8
 
-    % =========================================================================
-    % PANEL DIVIDER
-    % =========================================================================
-    \draw[dashed, SlateGrey!50, line width=0.9pt] (7.4, -0.7) -- (7.4, 6.3);
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9.6, 4.8), dpi=200)
 
-    % =========================================================================
-    % LEFT PANEL: Prefill Phase
-    % =========================================================================
-    \node[font=\large\bfseries\color{black!90}] at (3.8, 5.8) {Prefill Phase};
-    \node[draw=NavyBlue!60, fill=NavyBlue!8!white, line width=0.8pt,
-          inner sep=3.5pt, font=\scriptsize\bfseries\color{NavyBlue!90!black}]
-        at (3.8, 5.15) {Compute-Bound};
+ridge_x = 5.0
+ridge_y = 6.0
+x_min, x_max = 0.5, 9.5
 
-    % Left axis title
-    \node[font=\scriptsize\bfseries\color{black!85}, rotate=90, anchor=south] at (-0.2, 2.2) {Achievable Throughput (TFLOP/s)};
+# =========================================================================
+# LEFT PANEL: Prefill Phase (Compute-Bound)
+# =========================================================================
+ax1.plot([x_min, ridge_x], [0.5, ridge_y], color='#DC2626', linewidth=2.6, zorder=3)
+ax1.plot([ridge_x, x_max], [ridge_y, ridge_y], color='#1E40AF', linewidth=2.6, zorder=3)
 
-    % Axes (Left)
-    \draw[->, SlateGrey!90!black, line width=1.0pt] (0.8, 0) -- (6.9, 0);
-    \draw[->, SlateGrey!90!black, line width=1.0pt] (0.8, 0) -- (0.8, 4.7);
+# Ridge marker
+ax1.scatter([ridge_x], [ridge_y], color='#1E293B', s=45, zorder=5)
+ax1.text(ridge_x - 0.25, ridge_y + 0.35, r'Ridge $\sim 300$', ha='right', va='bottom', fontsize=7.2, fontweight='bold', color='#1E293B')
 
-    % Y-axis labels
-    \node[font=\tiny\color{black!80}, anchor=east] at (0.68, 0) {0};
-    \node[font=\tiny\color{black!80}, anchor=east] at (0.68, 0.6) {low};
-    \node[font=\tiny\color{black!80}, anchor=east] at (0.68, 3.4) {peak};
+# Slopes labels
+ax1.text(2.6, 4.0, 'HBM BW ceiling', rotation=42, ha='center', va='center', fontsize=7.2, fontweight='bold', color='#DC2626')
+ax1.text(7.2, ridge_y + 0.35, 'Compute ceiling', ha='center', va='bottom', fontsize=7.2, fontweight='bold', color='#1E40AF')
 
-    % X-axis labels
-    \node[font=\tiny\color{black!80}, anchor=north] at (0.8, -0.1) {0};
-    \node[font=\scriptsize\bfseries\color{black!85}] at (3.85, -0.45) {Arithmetic Intensity (FLOP/byte) $\rightarrow$};
+# Prefill point (high AI)
+prefill_x = 8.4
+ax1.plot([prefill_x, prefill_x], [0.5, ridge_y], color='#1E40AF', linestyle='--', linewidth=1.1, alpha=0.7)
+ax1.scatter([prefill_x], [ridge_y], color='#1E40AF', edgecolor='white', linewidth=1.5, s=80, zorder=6)
 
-    % Roofline (Left): Ridge at (3.8, 3.4)
-    \draw[Crimson, line width=1.6pt] (0.8, 0) -- (3.8, 3.4);
-    \draw[NavyBlue!90!black, line width=1.6pt] (3.8, 3.4) -- (6.7, 3.4);
+ax1.annotate(
+    'Prefill Point\n' + r'AI $\approx$ 1,024 FLOP/B',
+    xy=(prefill_x, ridge_y),
+    xytext=(prefill_x, 7.8),
+    ha='center',
+    va='center',
+    fontsize=7.2,
+    fontweight='bold',
+    color='#1E40AF',
+    bbox=dict(boxstyle='round,pad=0.3', fc='#EFF6FF', ec='#3B82F6', lw=0.9),
+    arrowprops=dict(arrowstyle="->", color='#1E40AF', lw=1.0),
+)
 
-    % Ridge point
-    \fill[black!85] (3.8, 3.4) circle (2.2pt);
-    \node[font=\tiny\bfseries\color{black!80}, anchor=south east] at (3.75, 3.55) {Ridge $\sim$300};
+# Compute-Limited card
+card_text1 = (
+    r"$\mathbf{Compute-Limited}$" + "\n" r"Tensor Cores saturated." + "\n\n" r"• Benefit: FP8 Tensor Cores" + "\n" r"• FlashAttention-2 tiling"
+)
+ax1.text(
+    5.5,
+    2.2,
+    card_text1,
+    ha='center',
+    va='center',
+    fontsize=7.4,
+    linespacing=1.35,
+    color='#1E3A8A',
+    bbox=dict(boxstyle='round,pad=0.6', fc='#F8FAFC', ec='#94A3B8', lw=0.9),
+)
 
-    % Roofline labels
-    \node[font=\tiny\bfseries\color{Crimson}, rotate=48, anchor=south] at (2.2, 1.8) {HBM BW ceiling};
-    \node[font=\tiny\bfseries\color{NavyBlue!90!black}, anchor=south west] at (3.9, 3.55) {Compute ceiling};
+ax1.set_xlim(0, 10.2)
+ax1.set_ylim(0, 9.4)
+ax1.set_xticks([0.5, ridge_x, prefill_x])
+ax1.set_xticklabels(['0', r'Ridge', r'1,024'], fontsize=7.5)
+ax1.set_yticks([0.5, 1.8, ridge_y])
+ax1.set_yticklabels(['0', 'low', 'peak'], fontsize=7.5)
+ax1.set_title('Prefill Phase\nCompute-Bound', fontsize=8.5, fontweight='bold', color='#1E40AF', pad=8)
+ax1.set_xlabel(r'Arithmetic Intensity (FLOP/byte) $\rightarrow$', fontsize=8.0, fontweight='bold', color='#1E293B')
+ax1.set_ylabel('Achievable Throughput (TFLOP/s)', fontsize=8.0, fontweight='bold', color='#1E293B')
+ax1.grid(True, linestyle='--', linewidth=0.5, alpha=0.5)
 
-    % Prefill Point (at x = 6.1, y = 3.4)
-    \draw[dashed, NavyBlue!80!black, line width=0.8pt] (6.1, 0) -- (6.1, 3.4);
-    \fill[NavyBlue!90!black] (6.1, 3.4) circle (3.2pt);
-    \draw[NavyBlue!90!black, line width=1.0pt] (6.1, 3.4) circle (5.0pt);
+# =========================================================================
+# RIGHT PANEL: Decode Phase (Memory-Bound)
+# =========================================================================
+ax2.plot([x_min, ridge_x], [0.5, ridge_y], color='#DC2626', linewidth=2.6, zorder=3)
+ax2.plot([ridge_x, x_max], [ridge_y, ridge_y], color='#1E40AF', linewidth=2.6, zorder=3)
 
-    % Prefill Callout badge
-    \node[draw=NavyBlue!60, fill=white, line width=0.8pt,
-          inner sep=3.5pt, align=center, anchor=south] at (6.1, 3.9) {
-        {\scriptsize\bfseries\color{NavyBlue!90!black} Prefill Point}\\[1pt]
-        {\tiny\color{black!70}AI $\approx$ 1{,}024 FLOP/B}
-    };
+# Ridge marker
+ax2.scatter([ridge_x], [ridge_y], color='#1E293B', s=45, zorder=5)
+ax2.text(ridge_x - 0.25, ridge_y + 0.35, r'Ridge $\sim 300$', ha='right', va='bottom', fontsize=7.2, fontweight='bold', color='#1E293B')
 
-    % Compute-Limited Card (placed under roofline, perfectly centered)
-    \node[card, draw=NavyBlue!70, fill=white, anchor=center]
-        at (4.4, 1.4) {
-        {\scriptsize\bfseries\color{NavyBlue!90!black} Compute-Limited}\\[2pt]
-        {\tiny\color{NavyBlue!80!black} Tensor Cores saturated.}\\[1pt]
-        {\tiny\color{black!70} Benefit: FP8 Tensor Cores,}\\[1pt]
-        {\tiny\color{black!70} FlashAttention-2 tiling.}
-    };
+# Slopes labels
+ax2.text(2.6, 4.0, 'HBM BW ceiling', rotation=42, ha='center', va='center', fontsize=7.2, fontweight='bold', color='#DC2626')
+ax2.text(7.2, ridge_y + 0.35, 'Compute ceiling', ha='center', va='bottom', fontsize=7.2, fontweight='bold', color='#1E40AF')
 
-    % =========================================================================
-    % RIGHT PANEL: Decode Phase
-    % =========================================================================
-    \node[font=\large\bfseries\color{black!90}] at (11.1, 5.8) {Decode Phase};
-    \node[draw=Crimson!60, fill=Crimson!8!white, line width=0.8pt,
-          inner sep=3.5pt, font=\scriptsize\bfseries\color{Crimson}]
-        at (11.1, 5.15) {Memory-Bound};
+# Decode point (low AI)
+decode_x = 1.6
+decode_y = 0.5 + (decode_x - x_min) * (ridge_y - 0.5) / (ridge_x - x_min)
 
-    % Axes (Right)
-    \draw[->, SlateGrey!90!black, line width=1.0pt] (8.1, 0) -- (14.2, 0);
-    \draw[->, SlateGrey!90!black, line width=1.0pt] (8.1, 0) -- (8.1, 4.7);
+ax2.plot([decode_x, decode_x], [0.5, ridge_y], color='#DC2626', linestyle='--', linewidth=1.1, alpha=0.8)
+ax2.scatter([decode_x], [decode_y], color='#DC2626', edgecolor='white', linewidth=1.5, s=80, zorder=6)
 
-    % Y-axis labels
-    \node[font=\tiny\color{black!80}, anchor=east] at (7.98, 0) {0};
-    \node[font=\tiny\color{black!80}, anchor=east] at (7.98, 0.6) {low};
-    \node[font=\tiny\color{black!80}, anchor=east] at (7.98, 3.4) {peak};
+# Compute Idle at top of dashed line
+ax2.annotate(
+    'Compute Idle\nHBM-starved',
+    xy=(decode_x, ridge_y),
+    xytext=(decode_x, 7.8),
+    ha='center',
+    va='center',
+    fontsize=7.2,
+    fontweight='bold',
+    color='#B91C1C',
+    bbox=dict(boxstyle='round,pad=0.3', fc='#FEF2F2', ec='#EF4444', lw=0.9),
+    arrowprops=dict(arrowstyle="->", color='#DC2626', lw=1.0),
+)
 
-    % X-axis labels
-    \node[font=\tiny\color{black!80}, anchor=north] at (8.1, -0.1) {0};
-    \node[font=\scriptsize\bfseries\color{black!85}] at (11.1, -0.45) {Arithmetic Intensity (FLOP/byte) $\rightarrow$};
+# Decode point badge
+ax2.annotate(
+    'Decode Point\n' + r'AI $\approx$ 1 FLOP/B',
+    xy=(decode_x, decode_y),
+    xytext=(3.4, 0.95),
+    ha='center',
+    va='center',
+    fontsize=7.2,
+    fontweight='bold',
+    color='#B91C1C',
+    bbox=dict(boxstyle='round,pad=0.3', fc='#FEF2F2', ec='#EF4444', lw=0.9),
+    arrowprops=dict(arrowstyle="->", color='#DC2626', lw=1.0),
+)
 
-    % Roofline (Right): Ridge at (11.1, 3.4)
-    \draw[Crimson, line width=1.6pt] (8.1, 0) -- (11.1, 3.4);
-    \draw[NavyBlue!90!black, line width=1.6pt] (11.1, 3.4) -- (14.0, 3.4);
+# Memory-BW Limited card
+card_text2 = (
+    r"$\mathbf{Memory-BW\ Limited}$" + "\n" r"Weights streamed per token." + "\n\n" r"• Benefit: INT4 weights" + "\n" r"• INT8 KV cache, spec dec."
+)
+ax2.text(
+    7.4,
+    2.2,
+    card_text2,
+    ha='center',
+    va='center',
+    fontsize=7.4,
+    linespacing=1.35,
+    color='#991B1B',
+    bbox=dict(boxstyle='round,pad=0.6', fc='#F8FAFC', ec='#94A3B8', lw=0.9),
+)
 
-    % Ridge point
-    \fill[black!85] (11.1, 3.4) circle (2.2pt);
-    \node[font=\tiny\bfseries\color{black!80}, anchor=south east] at (11.0, 3.55) {Ridge $\sim$300};
+ax2.set_xlim(0, 10.2)
+ax2.set_ylim(0, 9.4)
+ax2.set_xticks([0.5, decode_x, ridge_x])
+ax2.set_xticklabels(['0', r'1', r'Ridge'], fontsize=7.5)
+ax2.set_yticks([0.5, 1.8, ridge_y])
+ax2.set_yticklabels(['0', 'low', 'peak'], fontsize=7.5)
+ax2.set_title('Decode Phase\nMemory-Bound', fontsize=8.5, fontweight='bold', color='#DC2626', pad=8)
+ax2.set_xlabel(r'Arithmetic Intensity (FLOP/byte) $\rightarrow$', fontsize=8.0, fontweight='bold', color='#1E293B')
+ax2.set_ylabel('Achievable Throughput (TFLOP/s)', fontsize=8.0, fontweight='bold', color='#1E293B')
+ax2.grid(True, linestyle='--', linewidth=0.5, alpha=0.5)
 
-    % Roofline labels
-    \node[font=\tiny\bfseries\color{Crimson}, rotate=48, anchor=south] at (9.6, 1.8) {HBM BW ceiling};
-    \node[font=\tiny\bfseries\color{NavyBlue!90!black}, anchor=south west] at (11.2, 3.55) {Compute ceiling};
-
-    % Decode Point (at x = 8.65, y = 0.62)
-    \coordinate (dec_pt) at (8.65, 0.62);
-    \draw[dashed, Crimson, line width=0.9pt] (dec_pt |- 8.1, 0) -- (dec_pt) -- (8.65, 3.9);
-    \fill[Crimson] (dec_pt) circle (3.2pt);
-
-    % Compute Idle Callout (at top of dashed line, y = 3.9, perfectly symmetric with left panel)
-    \node[draw=Crimson!70, fill=white, line width=0.8pt,
-          inner sep=3.5pt, align=center, anchor=south] at (8.65, 3.9) {
-        {\scriptsize\bfseries\color{Crimson} Compute Idle}\\[1pt]
-        {\tiny\color{black!70}HBM-starved}
-    };
-
-    % Decode Point Callout (right of dot)
-    \node[draw=Crimson!70, fill=white, line width=0.8pt,
-          inner sep=3.5pt, align=center, anchor=west] at (8.9, 0.62) {
-        {\scriptsize\bfseries\color{Crimson} Decode Point}\\[1pt]
-        {\tiny\color{black!70}AI $\approx$ 1 FLOP/B}
-    };
-
-    % Memory-BW Limited Card
-    \node[card, draw=Crimson!70, fill=white, anchor=south west]
-        at (11.2, 1.1) {
-        {\scriptsize\bfseries\color{Crimson} Memory-BW Limited}\\[2pt]
-        {\tiny\color{Crimson!90!black} Weights streamed per token.}\\[1pt]
-        {\tiny\color{black!70} Benefit: INT4 weights,}\\[1pt]
-        {\tiny\color{black!70} INT8 KV cache, spec dec.}
-    };
-
-\end{tikzpicture}
-}
+plt.tight_layout()
+fig.subplots_adjust(wspace=0.25)
+plt.show()
 ```
 :::
 
