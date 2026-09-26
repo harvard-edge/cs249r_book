@@ -27,7 +27,7 @@ print("Attention output shape:", out.shape)  # (1, 4, 8, 16)
 
 Underneath that compact functional call, the runtime coordinates multiple linear algebra stages:
 
-1. **The quadratic all-to-all similarity matrix ($Q K^T$):** The engine multiplies query and key projections across all heads simultaneously, materializing an $(S \times S)$ score matrix per head. This creates the characteristic $O(S^2)$ quadratic memory and compute footprint that defines transformer scaling.
+1. **The quadratic all-to-all similarity matrix ($Q K^T$):** The engine multiplies query and key projections across all heads simultaneously, materializing an $(S \times S)$ score matrix per head. This creates the characteristic $O(S^2)$ quadratic memory and compute footprint that defines transformer scaling (@sec-profiling).
 2. **Variance scaling ($1/\sqrt{d_k}$):** As the head dimension $d_k$ grows, dot products scale proportionally in variance. Scaling by $1/\sqrt{d_k}$ keeps logits in a moderate range, preventing Softmax from saturating into near-zero gradients.
 3. **Causal autoregressive masking:** In generative decoders, future tokens must remain invisible. The runtime injects an upper-triangular mask of $-\infty$ prior to Softmax, forcing future attention probabilities to exactly zero without branching logic.
 
@@ -63,15 +63,13 @@ The operation we need has three properties. The mixing weights must be computed 
 *Evaluating attention across expanding prefixes incurs $O(S^2)$ recomputation; the KV cache eliminates it.*
 :::
 
+::: {.callout-tip title="Pause & Predict: The Attention Variance Explosion"}
+Let query vector $q \in \mathbb{R}^{d_k}$ and key vector $k \in \mathbb{R}^{d_k}$ have elements drawn independently from zero-mean, unit-variance distributions. What is the expected mean and variance of their dot product $q \cdot k = \sum_{i=1}^{d_k} q_i k_i$? If $d_k = 128$, what happens to the softmax probabilities if we omit the $1/\sqrt{d_k}$ scaling factor?
+:::
+
 ---
 
 ## The Idea
-
-::: {.column-margin}
-![](assets/images/diagrams/12_attention-margin-mask.svg){width="100%" fig-alt="Four by four causal attention mask matrix showing lower-triangular allowed entries with value 0 and upper-triangular masked entries with value negative infinity."}
-
-*Causal attention mask setting future tokens to $-\infty$.*
-:::
 
 ### Queries, keys, and values
 
@@ -87,7 +85,9 @@ The score between query $i$ and key $j$ is their dot product $q_i \cdot k_j$, wh
 
 $$\text{Attention}(Q, K, V) = \text{softmax}\!\left( \frac{Q K^T}{\sqrt{d_k}} + M \right) V$$
 
-where $V$ is the $S \times d_v$ matrix of values and $M$ is a mathematical mask of zeros and negative infinities, and the division by $\sqrt{d_k}$ is the scaling that gives the mechanism its name. Every quantity here is a matrix of shape $S \times S$ or $S \times d$, and every operation is a matrix multiply, an elementwise scale, an elementwise add, or a row-wise softmax. That is why attention runs in parallel across all tokens where earlier sequence models had to walk the sequence one step at a time. The three weight matrices are what make it learnable; the network is free to decide what each token should ask and advertise.
+where $V$ is the $S \times d_v$ matrix of values and $M$ is a mathematical mask of zeros and negative infinities, and the division by $\sqrt{d_k}$ is the scaling that gives the mechanism its name.[^fn-attn-variance-derivation] Every quantity here is a matrix of shape $S \times S$ or $S \times d$, and every operation is a matrix multiply, an elementwise scale, an elementwise add, or a row-wise softmax. That is why attention runs in parallel across all tokens where earlier sequence models had to walk the sequence one step at a time. The three weight matrices are what make it learnable; the network is free to decide what each token should ask and advertise.
+
+[^fn-attn-variance-derivation]: For independent zero-mean unit-variance components $q_i, k_i \sim \mathcal{N}(0, 1)$, $\text{Var}(q \cdot k) = \sum_{i=1}^{d_k} \text{Var}(q_i k_i) = d_k$. Dividing by $\sqrt{d_k}$ scales variance by $1/d_k$, restoring unit variance for arbitrary head width.
 
 ### Why divide by $\sqrt{d_k}$
 
@@ -97,7 +97,7 @@ where $V$ is the $S \times d_v$ matrix of values and $M$ is a mathematical mask 
 *Variance scaling preserves unit variance for any head width, preventing softmax logits from saturating into near-zero gradients.*
 :::
 
-Suppose the entries of $q$ and $k$ are independent with mean zero and variance one. Their dot product is a sum of $d_k$ products, each with mean zero and variance one, so by the same variance argument @sec-layers made for a layer's fan-in, the sum has variance $d_k$ and standard deviation $\sqrt{d_k}$. The spread of the scores grows with the width of the head, and a softmax fed scores spread too far apart collapses toward a nearly one-hot vector with very small derivatives. Dividing every score by $\sqrt{d_k}$ divides the variance by $d_k$ and restores unit variance whatever the head width. The numbers for what goes wrong without it are beside the line of code that does the division.
+Suppose the entries of $q$ and $k$ are independent with mean zero and variance one. Their dot product is a sum of $d_k$ products, each with mean zero and variance one, so by the same variance argument @sec-layers made for a layer's fan-in ($1/\sqrt{D_{\text{in}}}$), the sum has variance $d_k$ and standard deviation $\sqrt{d_k}$. The spread of the scores grows with the width of the head, and a softmax fed scores spread too far apart collapses toward a nearly one-hot vector with very small derivatives. Dividing every score by $\sqrt{d_k}$ divides the variance by $d_k$ and restores unit variance whatever the head width. The numbers for what goes wrong without it are beside the line of code that does the division.
 
 ### Causal masking
 
@@ -148,11 +148,17 @@ The helper contains two operations from @sec-tensors. `transpose(-2, -1)` swaps 
 
 ### Softmax by rows
 
-Each row of the score matrix belongs to one query, so each row needs its own softmax over keys. Direct exponentiation can overflow for large scores. Module 12 reuses `Softmax()(scores, dim=-1)`, which subtracts the maximum of each row before exponentiating. For a row containing an allowed finite score, the largest shifted entry is zero, its exponential is one, and the denominator is positive. Forbidden entries remain negative infinity and contribute zero. The mask validation is what rules out the undefined all-negative-infinity case.
+Each row of the score matrix belongs to one query, so each row needs its own softmax over keys. Direct exponentiation can overflow for large scores. Module 12 reuses `Softmax()(scores, dim=-1)`, which subtracts the maximum of each row before exponentiating (@sec-activations). For a row containing an allowed finite score, the largest shifted entry is zero, its exponential is one, and the denominator is positive. Forbidden entries remain negative infinity and contribute zero. The mask validation is what rules out the undefined all-negative-infinity case.
 
 The implementation makes separate NumPy passes to find the maximum, shift the scores, exponentiate, sum, and divide. These passes operate on a fully materialized score tensor. The production bridge will return to the memory cost of keeping and revisiting that tensor.
 
 ### The causal mask
+
+::: {.column-margin}
+![](assets/images/diagrams/12_attention-margin-mask.svg){width="100%" fig-alt="Four by four causal attention mask matrix showing lower-triangular allowed entries with value 0 and upper-triangular masked entries with value negative infinity."}
+
+*Causal attention mask setting future tokens to $-\infty$.*
+:::
 
 [Synthesis II](synthesis_02.qmd#sec-milestone-2) trains a next-token predictor, and the loss at position $t$ scores a prediction of token $t+1$. That only works if position $t$'s output was computed without reading token $t+1$. @sec-memoization leans on the same guarantee from the other side. It generates one token at a time and reuses the keys and values of earlier positions, which is valid only because an earlier position's output never depended on anything after it. The naive way to keep the future out is to run the model once per prefix, $S$ forward passes for a sequence of $S$ tokens, a thousand passes for 1,024 tokens to get what one masked pass gives.
 
@@ -160,7 +166,9 @@ Setting a forbidden score to zero does not exclude it. Softmax over `[0.7071, 0.
 
 {{< include _listings/12_attention/apply_mask.qmd >}}
 
-The mask arrives as ones and zeros, with the same convention as `np.tril(np.ones((S, S)))`. `_apply_mask` first rejects nonbinary entries, broadcasts the mask to the score shape, and checks that each query has an allowed key. `scores.masked_fill(allowed == 0, MASK_VALUE)` then returns a new tensor with blocked scores replaced by `float("-inf")`. It preserves the input scores and records the operation for backward. The rule from @sec-autograd passes gradients at allowed positions and zeros them at forbidden positions. The mask itself is a fixed choice of connectivity, not a trainable parameter.
+The mask arrives as ones and zeros, with the same convention as `np.tril(np.ones((S, S)))`. `_apply_mask` first rejects nonbinary entries, broadcasts the mask to the score shape, and checks that each query has an allowed key. `scores.masked_fill(allowed == 0, MASK_VALUE)` then returns a new tensor with blocked scores replaced by `float("-inf")`.[^fn-fp16-masking] It preserves the input scores and records the operation for backward. The rule from @sec-autograd passes gradients at allowed positions and zeros them at forbidden positions. The mask itself is a fixed choice of connectivity, not a trainable parameter.
+
+[^fn-fp16-masking]: In 32-bit floating point, \texttt{-inf} evaluates reliably. In half-precision formats like FP16, \texttt{-inf} can produce \texttt{NaN} values during exponent subtraction if all row entries are masked. Production engines frequently substitute large finite negatives such as \texttt{-1e4} or \texttt{-1e9} to avoid precision overflow.
 
 ![**The causal attention engine**: Queries and keys interact via scaled dot products $QK^T / \sqrt{d_k}$ to form an $S \times S$ score matrix. An upper-triangular mask sets future positions to $-\infty$ so row-wise softmax normalizes attention weights exclusively over past and present tokens ($j \le i$), strictly preserving autoregressive causality during value mixing.](assets/images/diagrams/12_causal-attention-engine.svg){#fig-causal-attention-engine width="100%" fig-alt="Causal attention engine diagram showing multi-head projection split, score matrix computation, upper-triangular -inf masking, softmax normalization, and value matrix mixture."}
 
