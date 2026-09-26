@@ -46,6 +46,9 @@ This chapter builds TinyTorch's benchmarking suite, establishing the rigorous em
 ## The Problem
 
 ::: {.column-margin}
+**↩ Jump back:** @sec-training
+*Training loop timing: early epoch steps include allocator initialization and worker process startup.*
+
 **↩ Jump back:** @sec-memoization
 *Benchmarking cached versus uncached autoregressive generation under strict warmup controls.*
 :::
@@ -81,6 +84,11 @@ The first call requests 40 ms of setup sleep plus 5 ms of steady work, totaling 
 
 The second flaw is that one measurement is one sample. Even after warmup, the same forward pass does not take the same time twice. The operating system schedules other work, the caches hold different contents, the clock frequency drifts. In any 100 consecutive calls after the first, the toy requests 5 ms of sleep on 96 calls and 15 ms on four calls; observed durations also include scheduling delays. A single timing that happens to catch a stall reports a model three times slower than it is; a single timing that misses every stall reports a model that never stalls.
 
+::: {.column-margin}
+**↪ Jump ahead:** @sec-capstone
+*The multi-axis scorecard: evaluating accuracy retention, compression ratio, and runtime speedup.*
+:::
+
 The third flaw appears once measurements are repeated and averaged. A simple calculation makes this concrete. If 99 requests take 5.0 ms and one stalls for 500 ms, the mean is 9.95 ms, a number no single request ever experienced. The mean is pulled up by the single outlier and reveals neither what a typical request costs nor how severe the worst stalls are. Latency is not symmetric noise around a center; it has a floor and a long right tail, and the arithmetic mean hides both.
 
 The timer here surrounds completed NumPy work on the CPU. A device that accepts work into a queue needs a different timing boundary: the host call may finish before the computation does. The production bridge returns to that distinction after the reference loop is clear.
@@ -89,17 +97,15 @@ The timer here surrounds completed NumPy work on the CPU. A device that accepts 
 
 ## The Idea
 
-::: {.column-margin}
-**↪ Jump ahead:** @sec-capstone
-*The multi-axis scorecard: evaluating accuracy retention, compression ratio, and runtime speedup.*
-:::
-
-
 Treating a latency measurement as a sample from a probability distribution requires designing the benchmark so that the sampled distribution matches the operational target. That single reframing produces every rule in the chapter.
 
 ### Warmup
 
-For a sustained inference comparison, the distribution of interest is steady state, the cost once the model is loaded and running. An application concerned with startup must measure cold latency separately. Cold runs come from a different distribution, one that includes setup, and mixing the two corrupts every summary statistic. The fix is to run the model several times and discard those initial timings, so that the retained list is drawn purely from the steady-state distribution.
+For a sustained inference comparison, the distribution of interest is steady state, the cost once the model is loaded and running. An application concerned with startup must measure cold latency separately. Cold runs come from a different distribution, one that includes setup, and mixing the two corrupts every summary statistic. The fix is to run the model several times and discard those initial timings, so that the retained list is drawn purely from the steady-state distribution.[^fn-dvfs-thermal-soaking]
+
+[^fn-dvfs-thermal-soaking]: **DVFS and thermal settling**: Modern processors utilize Dynamic Voltage and Frequency Scaling (DVFS) to balance power and thermals. Under standard operating system balanced governors, processors boot from low idle frequencies (such as 800 MHz) and take tens of milliseconds to ramp to peak turbo clocks. Conversely, sustained execution heats the die and triggers thermal throttling that lowers clocks by 15% to 30%. Rigorous systems benchmarks lock hardware governors to performance mode and run continuous thermal-soak iterations prior to recording measurements.
+
+\newpage
 
 ### Repetition and the shape of the distribution
 
@@ -134,8 +140,10 @@ A run exceeds the true 99th percentile with probability $p = 0.01$. The chance t
 
 $$1 - 0.99^N \ge 0.95 \quad\Longrightarrow\quad N \ge \frac{\ln 0.05}{\ln 0.99} \approx \frac{-2.996}{-0.01005} \approx 298.07.$$
 
-Round up to **299 runs** to meet the inequality. This calculation concerns observing at least one tail event, assuming independent samples. It does not establish a precise percentile estimate: one event gives little evidence about the tail's shape. `MLPerf.run_standard_benchmark` defaults to 100 runs, while `Benchmark` defaults to 10 measured runs. Both are classroom starting points; repeat the experiment and collect more samples before interpreting its $P_{99}$ as a service guarantee.
+Round up to **299 runs** to meet the inequality. This calculation concerns observing at least one tail event, assuming independent samples. It does not establish a precise percentile estimate: one event gives little evidence about the tail's shape. `MLPerf.run_standard_benchmark` defaults to 100 runs, while `Benchmark` defaults to 10 measured runs. Both are classroom starting points; repeat the experiment and collect more samples before interpreting its $P_{99}$ as a service guarantee.[^fn-gc-benchmarking-tail]
 :::
+
+[^fn-gc-benchmarking-tail]: **Python garbage collection pauses and allocator churn**: Python's automatic garbage collector tracks cyclic object references. When generational garbage collection triggers during an untimed iteration, it pauses execution to traverse heap object references, introducing multi-millisecond tail latency spikes. High-precision benchmarking harnesses explicitly invoke `gc.collect()` before timing and call `gc.disable()` during active timing loops, re-enabling collection only between iterations to prevent allocator maintenance from contaminating $P_{95}$ and $P_{99}$ latency metrics.
 
 ### Throughput
 
@@ -150,6 +158,12 @@ The formula is a special case of **Little's law**, which relates three averages 
 ### Fairness
 
 One more rule follows from the same model. A comparison is fair only when both sides are measured under the same conditions, which means the same input, the same machine, the same warmup and run counts, and the same statistic on each side. Comparing a median against a mean, or a warm run against a cold one, yields a ratio that reflects the measurement flaw rather than true model performance.
+
+::: {.callout-tip title="Pause & Predict: The Mean vs Median Latency Trap"}
+Suppose you record 20 benchmark runs of a model forward pass. Exactly 19 iterations finish in 1.0 ms each, but iteration 14 experiences an operating system context switch and takes 21.0 ms. What is the mean latency across the 20 runs? What is the median ($P_{50}$)? If a client requires an SLA of $P_{99} \le 5.0\text{ ms}$, does this service pass or fail?
+:::
+
+\newpage
 
 ---
 
@@ -378,7 +392,7 @@ This checks scoring and orchestration on a known rule, not keyword-spotting qual
 
 ## From TinyTorch to Production
 
-A CUDA operation can return control to the CPU while its work is still queued on the GPU. To time completed computation with a CPU clock, synchronize before the start reading and after the model call, before the end reading. Alternatively, record CUDA events[^fn-cuda-event-gpu-timer] around the device work and wait for completion before reading elapsed time, as highlighted in the Checkpoint below. These are different timing boundaries from TinyTorch's completed CPU forwards. PyTorch's [CUDA semantics documentation](https://docs.pytorch.org/docs/stable/notes/cuda.html#asynchronous-execution) explains this distinction; its [benchmark timer](https://docs.pytorch.org/docs/stable/benchmark_utils.html) supplies warmups, replication, and accelerator synchronization.
+A CUDA operation can return control to the CPU while its work is still queued on the GPU. To time completed computation with a CPU clock, synchronize before the start reading and after the model call, before the end reading. Alternatively, record CUDA events[^fn-cuda-event-gpu-timer] around the device work and wait for completion before reading elapsed time, as highlighted in the Checkpoint below. These are different timing boundaries from TinyTorch's completed CPU forwards. PyTorch's [CUDA semantics documentation](https://docs.pytorch.org/docs/stable/notes/cuda.html#asynchronous-execution) explains this distinction; its [benchmark timer](https://docs.pytorch.org/docs/stable/benchmark_utils.html) supplies warmups, replication, and accelerator synchronization.[^fn-cuda-graphs-kernel-launch]
 
 ::: {#chk-benchmarking-cuda-synchronize .callout-checkpoint title="Checkpoint: Asynchronous CUDA Execution Timing Pitfall"}
 A common benchmarking trap occurs when measuring accelerator code using standard CPU timers:
@@ -408,6 +422,7 @@ Alternatively, record timestamps on device streams using `torch.cuda.Event` with
 
 [^fn-cuda-event-gpu-timer]: **CUDA event**: a marker recorded in a GPU stream, the ordered queue of device work. With timing enabled, two completed events provide elapsed time between their positions in that stream. Work from other streams or gaps between submitted operations can still affect the interval.
 [^fn-cuda-event-overhead-vs-sync]: **CUDA events versus host synchronization**: Calling `torch.cuda.synchronize()` on the CPU blocks the host thread until the GPU has completely drained all submitted command queues. While necessary before reading CPU clocks, doing so inside a per-layer loop artificially flushes the GPU hardware execution pipeline, preventing the overlap of kernel launches and memory transfers. Using `torch.cuda.Event` with `enable_timing=True` records GPU clock cycle timestamps asynchronously within the stream without halting execution; host synchronization is deferred until after the entire benchmark window concludes.
+[^fn-cuda-graphs-kernel-launch]: **CUDA Graphs and kernel launch overhead**: Even when GPU execution is asynchronous, the CPU overhead of launching individual CUDA kernels (typically 5 to 10 microseconds per kernel dispatch) can dominate execution time for small models or shallow layers. CUDA Graphs capture an entire sequence of kernel launches and memory dependencies into an execution graph. Subsequent benchmark iterations replay the pre-instantiated graph with a single CPU launch call, eliminating host driver overhead and isolating pure silicon execution latency.
 
 A more complete experiment also varies and records its conditions. Repeating the same setup at different times can reveal interference that one long run hides. Interleaving baseline and candidate measurements can reduce the effect of a slow change in machine load. Neither a warmup nor a fixed random seed guarantees a stable machine, as detailed in the Systems Perspective below, so preserve the raw observations and report the comparison procedure.
 
