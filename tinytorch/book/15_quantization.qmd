@@ -66,7 +66,13 @@ print([int(w) for w in weights])   # every weight becomes 0
 
 The integers $-128$ through $127$ are perfectly good for counting, but the weights do not live on that grid. Quantization is the trick of moving them onto it.
 
+::: {.callout-tip title="Pause & Predict: Dynamic Range vs Quantization Resolution"}
+Suppose an activation vector has $99.9\%$ of its values clustered tightly in $[-2.0, 2.0]$, but a single activation outlier spikes at $x = 127.0$. If we apply asymmetric INT8 quantization across $[-2.0, 127.0]$ ($255$ discrete bins), what is the resulting step scale $S$? What happens to the resolution of the non-outlier features? How does this explain why naive INT8 quantization degrades large language models?
+:::
+
 ---
+
+\newpage
 
 ## The Idea
 
@@ -119,7 +125,7 @@ A shared scale also explains how a kernel could multiply the integer codes. Tiny
 
 $$\hat{y} = \hat{x} \hat{W}^{T} = (S_x S_W)\,\big((Q_x - Z_x)(Q_W - Z_W)^{T}\big)$$
 
-For this equation, the weight matrix has one output per row; the source Linear stores its transpose with shape `[in_features, out_features]`. Everything inside the last parentheses is integer arithmetic: subtract each zero point from its codes, which is still an integer, then take the dot products. The two scales are ordinary floats, and their product can rescale each accumulated output once. A single scale per tensor makes this factorization possible. The stored codes fit in a byte, but subtracting zero points and summing products require wider integers. The book-only integer function below will make those intermediate types explicit.
+For this equation, the weight matrix has one output per row; the source Linear stores its transpose with shape `[in_features, out_features]`. Everything inside the last parentheses is integer arithmetic: subtract each zero point from its codes, which is still an integer, then take the dot products. The two scales are ordinary floats, and their product can rescale each accumulated output once. A single scale per tensor makes this factorization possible. The stored codes fit in a byte, but subtracting zero points and summing products require wider integers. The book-only integer function below will make those intermediate types explicit. Quantizing weights to INT8 cuts transferred bytes $Q$ by $4\times$. On the memory-bound slope of the Roofline model (@sec-profiling), this $4\times$ reduction in $Q$ lifts achieved throughput by up to $4\times$ without altering the arithmetic operations $F$. In @sec-acceleration, dedicated vector hardware (such as AVX-512 VNNI and GPU Tensor Cores) executes this integer dot product with $4\times$ the arithmetic density of FP32.
 
 ::: {.column-margin}
 **Core Invariant: Symmetric Zero-Point Cancellation**\
@@ -415,7 +421,7 @@ A finer grouping also changes accuracy. Giving each output channel or small weig
 TinyTorch simulates affine quantization by mapping floats to integer steps and dequantizing back to float32 before matrix multiplication. In production acceleration runtimes (e.g., NVIDIA TensorRT, vLLM, and CUTLASS):
 
 1. **Native Integer Execution**: Accelerators execute integer matrix multiplications ($D = A_{\text{int8}} \times B_{\text{int8}}$) directly on hardware Tensor Cores using the `mma.sync.aligned.m16n8k32.row.col` PTX instruction. Intermediate products accumulate in 32-bit integer registers (`int32`) before a single epilogue instruction applies floating-point scale factor multiplication and bias addition.
-2. **FP8 and Microscaling**: Modern architectures (NVIDIA Hopper H100, Ada Lovelace, and Blackwell) extend sub-byte quantization to FP8 (`E4M3` for activations, `E5M2` for gradients) and block-scaled INT4/FP4 microscaling formats (e.g., MXFP4), providing 2 to 4$\times$ higher throughput than FP16 without requiring non-trivial zero-point tracking arithmetic.
+2. **FP8 and Microscaling**: Modern architectures (NVIDIA Hopper H100, Ada Lovelace, and Blackwell) extend sub-byte quantization to FP8: `E4M3` (1 sign bit, 4 exponent bits, 3 mantissa bits) provides higher precision ($[-448, 448]$) for forward-pass GEMM activations and weights, while `E5M2` (1 sign bit, 5 exponent bits, 2 mantissa bits) matches FP16's wide dynamic range ($[-57344, 57344]$) to prevent underflow during backward-pass gradient accumulation. Microscaling formats (e.g., MXFP4) provide up to $4\times$ higher throughput than FP16 without requiring complex zero-point tracking.
 :::
 
 | | TinyTorch `QuantizedLinear` | PyTorch 2.9 dynamic Linear | Weight-only design |
