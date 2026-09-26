@@ -126,6 +126,10 @@ Sampling from the full softmax distribution creates a different trade-off. Suppo
 
 Behind these decoding choices sits a question this book has not yet answered. `TinyGPT` outputs a row of $V$ logits at every position. A classifier in [Synthesis I](synthesis_01.qmd#sec-milestone-1) had one label per image. What is the label for position 7 of a sentence?
 
+::: {.callout-tip title="Pause & Predict: The Sampling Temperature Continuum"}
+Let a model's raw logits over three candidate tokens be $z = [4.0, 2.0, 1.0]$. What are the normalized softmax probabilities when temperature $T = 1.0$? What happens to the distribution in the limit as $T \to 0^+$? And as $T \to \infty$? Why does zero temperature yield purely deterministic generation while infinite temperature ignores model knowledge entirely?
+:::
+
 ---
 
 ## The Idea
@@ -147,7 +151,7 @@ Here $x_t$ is the token at position $t$ and $P(x_t \mid x_1, \dots, x_{t-1})$ is
 
 ### The generation loop
 
-Generation reuses the same forward pass with no labels. Encode the prompt into token IDs. Run the model. Take the last row of logits, the prediction for the token after the prompt. Choose a token from it. Append that token to the sequence and run the model again on the longer sequence. The loop below stops after a fixed number of tokens. Stopping on an end-of-sequence token would require reserving and training such a token, then testing for its ID in the loop; this small corpus does neither. That is the whole model of generation; what it costs per iteration is a question for the code.
+Generation reuses the same forward pass with no labels. Encode the prompt into token IDs. Run the model. Take the last row of logits, the prediction for the token after the prompt. Choose a token from it. Append that token to the sequence and run the model again on the longer sequence. The loop below stops after a fixed number of tokens. Stopping on an end-of-sequence token would require reserving and training such a token, then testing for its ID in the loop; this small corpus does neither. That is the whole model of generation; what it costs per iteration is a question for the code. Notice that at step $t$, this naive loop recomputes self-attention over all preceding $t-1$ tokens even though their keys and values never change. In @sec-memoization, we will eliminate this $O(S^2)$ prefix recomputation wall by caching previously materialized key and value tensors in DRAM, reducing step-by-step token generation to an efficient $O(1)$ memory-bandwidth bound operation.
 
 ![The positive-temperature generation loop. Each pass recomputes the retained token prefix, then samples from its last logit row and appends the selected ID.](assets/images/diagrams/milestone_02-diag-1.svg){#fig-milestone2-loop width="100%"}
 
@@ -180,6 +184,8 @@ Since $\exp(-\infty) = 0$, the discarded tokens have exactly zero probability af
 
 
 ---
+
+\newpage
 
 ## The Code
 
@@ -249,7 +255,7 @@ The loop is the part a user sees. Type a prompt into a chat window, and what com
 ::: {.column-margin}
 ![](assets/images/diagrams/milestone_02-margin-prefix-recomputation.svg){width="100%" fig-alt="Prefix recomputation staircase showing quadratic O(S^2) evaluation overhead in uncached autoregressive generation."}
 
-*Prefix Recomputation Wall: Without KV caching, generating 20 tokens from a 12-token prompt evaluates 430 rows, where 410 rows (95.3%) are redundant prefix recomputation.*
+*Prefix Recomputation Wall: Without KV caching, generating 20 tokens evaluates 430 rows, where 95.3% is redundant prefix recomputation.*
 :::
 
 The loop is also more expensive than it looks, and keeping the exact arithmetic in front of the reader clarifies the computational cost before @sec-memoization removes much of the repeated work. Every iteration runs the full context through the model to read one row of logits. With a 12-token prompt and 20 new tokens, the contexts are 12, 13, and so on up to 31 tokens long, so 430 rows go through the model to produce 20 tokens, about 21 rows of work per token. All but one of those rows in every iteration recomputes something the previous iteration already computed. We accept that here. The fix is to keep integer IDs rather than strings, crop the context to the model's window, and, in @sec-memoization, cache what the past rows produced.
