@@ -76,7 +76,13 @@ This experiment deliberately has no expected pair of timings. The second call do
 
 A nearly flat pair would be evidence against predicting time from FLOPs alone. One possible explanation is that fetching the weights costs more than the arithmetic, allowing additional rows to reuse data already fetched. Another is a change in the library's execution path. The timer alone does not distinguish them. Counting both operations and bytes gives a model against which to test those explanations.
 
+::: {.callout-tip title="Pause & Predict: Arithmetic Intensity & The Memory Wall"}
+Suppose an accelerator has a peak compute throughput of $P_{\text{peak}} = 100\text{ TFLOP/s}$ and a memory bandwidth of $B_{\text{peak}} = 1{,}000\text{ GB/s}$. What is the hardware ridge point $I_{\text{ridge}}$? If an autoregressive token decode step has an arithmetic intensity of $I = 0.5\text{ FLOP/B}$, what is the maximum achievable compute throughput? What percentage of the processor's peak compute capacity sits idle waiting for memory transfers?
+:::
+
 ---
+
+\newpage
 
 ## The Idea
 
@@ -117,7 +123,9 @@ $$I_{\text{ridge}} = \frac{P_{\text{peak}}}{B_{\text{peak}}}$$
 
 Left of the ridge, the model's lower ceiling comes from memory bandwidth; this is its **memory-bound** region. Reducing transferred bytes or increasing available bandwidth raises that ceiling. Right of the ridge, peak arithmetic throughput supplies the lower ceiling; this is its **compute-bound** region. Fewer FLOPs or faster arithmetic can then reduce the time bound. Real operations can run below both ceilings because of costs such as Python calls, allocation, or incomplete use of the processor.
 
-The illustrative machine in @fig-roofline-model has a peak of 1,000 GFLOP/s and bandwidth of 200 GB/s. Here a GFLOP is a billion floating-point operations, and a GB is a billion bytes. Its ridge is $1000 / 200 = 5$ FLOPs per byte. An operation at 2 FLOPs per byte has a ceiling of $2 \times 200 = 400$ GFLOP/s. These are chosen numbers that make the relationship visible, not specifications for the reader's computer.
+The illustrative machine in @fig-roofline-model has a peak of 1,000 GFLOP/s and bandwidth of 200 GB/s. Here a GFLOP is a billion floating-point operations, and a GB is a billion bytes. Its ridge is $1000 / 200 = 5$ FLOPs per byte. An operation at 2 FLOPs per byte has a ceiling of $2 \times 200 = 400$ GFLOP/s. These are chosen numbers that make the relationship visible, not specifications for the reader's computer.[^fn-hardware-ridge-points]
+
+[^fn-hardware-ridge-points]: Real hardware accelerators exhibit dramatically different ridge points: an Apple M3 Max has $I_{\text{ridge}} \approx 3.75\text{ FLOP/B}$ ($1.5\text{ TFLOP/s} / 400\text{ GB/s}$), an Intel Xeon 8480+ has $I_{\text{ridge}} \approx 25\text{ FLOP/B}$ ($7.6\text{ TFLOP/s} / 307\text{ GB/s}$), and an NVIDIA H100 SXM5 GPU has $I_{\text{ridge}} \approx 295\text{ FLOP/B}$ ($989\text{ TFLOP/s FP16} / 3{,}350\text{ GB/s HBM3}$). Higher ridge points demand higher batch sizes to escape the memory-bound regime.
 
 ### Why a Linear layer's intensity grows with its row count
 
@@ -125,7 +133,7 @@ Apply the definition to the layer that dominates every model in this book. A Lin
 
 $$I \;\approx\; \frac{2Rnm}{4nm} \;=\; \frac{R}{2}$$
 
-Under this traffic model, a Linear layer's intensity is roughly half its row count. The approximation assumes float32 weights, one transfer of each weight, and small input and output arrays relative to the weight matrix. One row gives about 0.5 FLOPs per byte; sixty-four rows give about 32. Rows can come from several examples in a batch or several positions in a sequence.
+Under this traffic model, a Linear layer's intensity is roughly half its row count. The approximation assumes float32 weights, one transfer of each weight, and small input and output arrays relative to the weight matrix. One row gives about 0.5 FLOPs per byte; sixty-four rows give about 32. Rows can come from several examples in a batch or several positions in a sequence. As established in @sec-tensors, memory layout and contiguous strides govern transfer efficiency. At $I \approx 0.5\text{ FLOP/B}$, the memory bus is completely saturated. In @sec-acceleration, kernel fusion will eliminate intermediate DRAM roundtrips to lift memory-bound operators toward the compute ceiling, while @sec-memoization will decouple decode latency from sequence length.
 
 This explains why the generation algorithm matters. @sec-transformers's ordinary `GPT.generate` recomputes the supplied prefix, so a prefix of length $S$ sends $S$ rows through each projection. Processing only the newest position requires the cache introduced in @sec-memoization, and even then attention must read earlier keys and values. An `S = 1` forward pass here is a one-token input, not a cached decoding step with a long history.
 
@@ -352,7 +360,15 @@ print(profiler.count_flops(model, (1, 1)), profiler.count_flops(model, (1, 64)))
 
 The counters return the same three numbers as the hand calculation. The input term is four bytes per token because the reference `Tensor` stores float32 arrays, including token IDs. GPT returns `(B, S, V)` logits, so a 64-token input produces $64 \times 1000 \times 4 = 256{,}000$ output bytes. The memory probe counts those actual boundary arrays; its peak can be larger because it also traces intermediate allocations.
 
+\newpage
+
 ### Comparing a measured sweep with a model
+
+::: {.column-margin}
+![](assets/images/diagrams/14_profiling-margin-linear-intensity.svg){width="100%" fig-alt="Margin card illustrating why Linear arithmetic intensity scales as R over 2 and transitions from memory-bound to compute-bound at the ridge point."}
+
+*Linear Intensity Scaling: For small row counts, weight bytes dominate activation traffic, yielding arithmetic intensity of approximately R/2. Execution stays flat on the memory bus until crossing the ridge into compute saturation.*
+:::
 
 The second half returns to the $4096 \times 4096$ weight matrix from The Problem. Its float32 storage is 67,108,864 bytes. For the traffic model, assume the multiplication reads each weight and input once and writes each output once. This gives $Q = 4(N^2 + 2RN)$ for a square weight of width $N$ and $R$ rows. The assumption describes an ideal transfer count at a chosen memory boundary; it does not count NumPy's internal traffic.
 
@@ -382,12 +398,6 @@ for rows in (1, 2, 8, 16, 64, 256, 1024):
 ```
 
 A flat region in measured time suggests that additional arithmetic is reusing a cost already paid. A region where FLOP/s levels off suggests a limit on arithmetic throughput. These patterns guide investigation, but neither establishes the machine's peak by itself. Cache reuse, changes in the library routine, and other processes can change the curve. Record the matrix size, dtype, library configuration, and timing protocol with any result intended for comparison.
-
-::: {.column-margin}
-![](assets/images/diagrams/14_profiling-margin-linear-intensity.svg){width="100%" fig-alt="Margin card illustrating why Linear arithmetic intensity scales as R over 2 and transitions from memory-bound to compute-bound at the ridge point."}
-
-*Linear Intensity Scaling: For small row counts, weight bytes dominate activation traffic, yielding arithmetic intensity of approximately R/2. Execution stays flat on the memory bus until crossing the ridge into compute saturation.*
-:::
 
 For a calculation independent of a particular machine, use the illustrative ceilings from @fig-roofline-model: 1,000 GFLOP/s and 200 GB/s. The resulting ridge is 5 FLOPs per byte. @Tbl-roofline-sweep shows the two time terms and their maximum; every entry is calculated, not measured.
 
@@ -447,7 +457,9 @@ The assertions pin down what can be predicted from shapes and the report's own c
 
 ## From TinyTorch to Production
 
-TinyTorch exposes the accounting in ordinary Python. Production profiling adds finer observation points so that a slow forward pass can be traced to particular operations. PyTorch's `torch.profiler` can record CPU and accelerator activities, input shapes, and tensor allocation information. Its optional FLOP estimate uses formulas for selected operations, including matrix multiplication and two-dimensional convolution; even a production report requires checking which operations it counts. These capabilities are described in the [PyTorch profiler documentation](https://docs.pytorch.org/docs/stable/profiler.html).
+TinyTorch exposes the accounting in ordinary Python. Production profiling adds finer observation points so that a slow forward pass can be traced to particular operations. PyTorch's `torch.profiler` can record CPU and accelerator activities, input shapes, and tensor allocation information.[^fn-triton-operator-lowering] Its optional FLOP estimate uses formulas for selected operations, including matrix multiplication and two-dimensional convolution; even a production report requires checking which operations it counts. These capabilities are described in the [PyTorch profiler documentation](https://docs.pytorch.org/docs/stable/profiler.html).
+
+[^fn-triton-operator-lowering]: In modern PyTorch 2.x, the profiler often reveals that memory-bound pointwise and reduction operators dominate runtime. PyTorch Inductor addresses this by delegating operator fusion directly to OpenAI Triton, compiling fused GPU kernels that keep intermediate tensors in on-chip SRAM instead of issuing repeated DRAM roundtrips.
 
 Timing requires another distinction on a GPU. The CPU can queue an operation and return before the GPU finishes it. Timing only that call measures submission, not completion. An accurate device measurement uses timing events on the GPU or waits for queued work to finish before reading the host clock. PyTorch documents both methods in its [CUDA timing guidance](https://docs.pytorch.org/docs/stable/notes/cuda.html#asynchronous-execution). TinyTorch's NumPy timer measures the synchronous CPU forward call used in this module.
 
