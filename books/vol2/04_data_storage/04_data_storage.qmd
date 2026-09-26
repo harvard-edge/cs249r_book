@@ -478,210 +478,114 @@ Understanding which storage tier can keep accelerators fed is essential to syste
 
 ::: {#fig-access-patterns-vol2 fig-env="figure" fig-pos="htb" fig-cap="**The storage bottleneck zone**: Required I/O throughput for full GPU utilization rises with model size from 100 million to 175 billion parameters. The red curve shows storage demand; horizontal dashed lines mark common storage-tier ceilings (NVMe at 7 GB/s, object storage at 50 GB/s, and Lustre at 100 GB/s). Between the compute-bound and storage-bottleneck regions lies the transition where storage, not compute, limits training throughput." fig-alt="Log-scale line chart: Model Size 100M to 175B parameters on the x-axis, Data Throughput (GB/s) on the y-axis. Red curve shows required I/O rising to about 500 GB/s at 175B. Dashed lines mark NVMe (7), Object (50), and Lustre (100 GB/s) ceilings."}
 
-```{.tikz}
-\scalebox{0.92}{%
-\begin{tikzpicture}[
-  font=\sffamily,
-  >=Stealth
-]
+```{python}
+#| echo: false
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.interpolate import PchipInterpolator
 
-  % Book color palette
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Helvetica']
+plt.rcParams['axes.edgecolor'] = '#CBD5E1'
+plt.rcParams['axes.linewidth'] = 0.8
 
-  % =============================================================
-  % 0. COORDINATES & SCALES
-  % =============================================================
-  \def\xleft{-4.8}
-  \def\xright{4.8}
-  \def\hplot{6.0}
+fig, (ax, ax_card) = plt.subplots(2, 1, figsize=(7.6, 5.2), dpi=200, gridspec_kw={'height_ratios': [4.0, 1.1]})
 
-  % X-positions of 5 model sizes
-  \def\xmone{-3.8} % 100M
-  \def\xmtwo{-1.9} % 1B
-  \def\xmthr{0.0}  % 10B
-  \def\xmfou{1.9}  % 70B
-  \def\xmfiv{3.8}  % 175B
+# Model sizes in parameters
+model_sizes = [1e8, 1e9, 1e10, 7e10, 1.75e11]
+model_labels = ['100M', '1B', '10B', '70B', '175B']
+io_demand = [10, 25, 60, 150, 500]
 
-  % Curve Y-coordinates:
-  \def\yone{0.40} % 100M -> 10 GB/s
-  \def\ytwo{1.00} % 1B   -> 25 GB/s
-  \def\ythr{2.20} % 10B  -> 60 GB/s
-  \def\yfou{3.60} % 70B  -> 150 GB/s
-  \def\yfiv{5.00} % 175B -> 500 GB/s
+# Smooth monotonic spline through actual points in log-log space
+log_x = np.log10(model_sizes)
+log_y = np.log10(io_demand)
+interp = PchipInterpolator(log_x, log_y)
 
-  % =============================================================
-  % 1. SHADED REGIONS (Compute-bound vs Storage-bottleneck)
-  % =============================================================
-  % Green Shaded Zone: between Lustre ceiling (y = 3.0) and curve up to intersection
-  \fill[GreenFill!60]
-    (\xmone, 3.0) -- (1.10, 3.0) --
-    (\xmthr, \ythr) -- (\xmtwo, \ytwo) -- (\xmone, \yone) -- cycle;
+x_smooth = np.logspace(np.log10(model_sizes[0]), np.log10(model_sizes[-1]), 300)
+y_smooth = 10 ** interp(np.log10(x_smooth))
 
-  % Red Shaded Zone: above Lustre ceiling (y = 3.0) and under curve from intersection to 175B
-  \fill[RedFill!70]
-    (1.10, 3.0) -- (\xmfou, \yfou) -- (\xmfiv, \yfiv) -- (\xmfiv, 3.0) -- cycle;
+# Storage tier ceilings
+ax.axhline(7, color='#EA580C', linestyle='--', linewidth=1.4, alpha=0.9, label='NVMe SSD (7 GB/s)')
+ax.axhline(50, color='#16A34A', linestyle='--', linewidth=1.4, alpha=0.9, label='Object Store (50 GB/s)')
+ax.axhline(100, color='#2563EB', linestyle='--', linewidth=1.4, alpha=0.9, label='Lustre PFS (100 GB/s)')
 
-  % =============================================================
-  % 2. GRID LINES & Y-AXIS TICKS
-  % =============================================================
-  \foreach \y/\lbl in {
-    1.0/25,
-    2.0/50,
-    3.0/100,
-    4.0/200,
-    5.0/500,
-    6.0/1000
-  } {
-    \draw[SlateLine!20, line width=0.5pt] (\xleft, \y) -- (\xright, \y);
-    \node[anchor=east, font=\scriptsize, text=TextMuted] at (\xleft - 0.15, \y) {\lbl};
-  }
-  \node[anchor=east, font=\scriptsize, text=TextMuted] at (\xleft - 0.15, 0) {0};
+# Fill zones
+# Compute-bound zone: between Lustre ceiling and curve where curve < 100
+ax.fill_between(x_smooth, y_smooth, 100, where=(y_smooth <= 100), color='#DCFCE7', alpha=0.55, label='_nolegend_')
+# Storage bottleneck zone: between Lustre ceiling and curve where curve > 100
+ax.fill_between(x_smooth, 100, y_smooth, where=(y_smooth >= 100), color='#FEE2E2', alpha=0.6, label='_nolegend_')
 
-  % Axes
-  \draw[->, line width=1.1pt, SlateLine] (\xleft, 0) -- (\xleft, \hplot + 0.45);
-  \draw[line width=1.1pt, SlateLine] (\xleft, 0) -- (\xright, 0);
+# Required I/O curve
+ax.plot(x_smooth, y_smooth, color='#DC2626', linewidth=2.5, zorder=5, label='Required I/O for Full GPU Utilization')
+ax.scatter(model_sizes, io_demand, color='#DC2626', edgecolor='white', linewidth=1.5, s=50, zorder=6)
 
-  % Y-Axis Title
-  \node[
-    rotate=90,
-    anchor=south,
-    font=\scriptsize\bfseries,
-    text=TextDark
-  ] at (\xleft - 0.75, \hplot / 2) {Data Throughput ($\text{GB/s}$)};
+ax.set_xscale('log')
+ax.set_yscale('log')
+ax.set_xlim(8e7, 2.2e11)
+ax.set_ylim(4, 800)
 
-  % =============================================================
-  % 3. HORIZONTAL STORAGE TIER CEILINGS (Dashed lines + Right badges)
-  % =============================================================
-  % NVMe (7 GB/s -> y = 0.28 cm)
-  \draw[dashed, line width=1.2pt, OrangeLine] (\xleft, 0.28) -- (\xright, 0.28);
-  \node[anchor=west, align=left] at (\xright + 0.15, 0.28) {
-    \textbf{\scriptsize\textcolor{OrangeLine!90!black}{NVMe SSD}}\\[1pt]
-    \tiny\textcolor{TextMuted}{($7\text{ GB/s}$)}
-  };
+ax.set_xticks(model_sizes)
+ax.set_xticklabels(model_labels, fontsize=8.5, fontweight='bold', color='#1E293B')
+ax.set_xlabel('Model Size (parameters)', fontsize=8.5, fontweight='bold', color='#1E293B')
 
-  % Object Store (50 GB/s -> y = 2.0 cm)
-  \draw[dashed, line width=1.2pt, DarkGreen] (\xleft, 2.0) -- (\xright, 2.0);
-  \node[anchor=west, align=left] at (\xright + 0.15, 2.0) {
-    \textbf{\scriptsize\textcolor{DarkGreen}{Object Store}}\\[1pt]
-    \tiny\textcolor{TextMuted}{($50\text{ GB/s}$)}
-  };
+ax.set_yticks([7, 25, 50, 100, 200, 500])
+ax.get_yaxis().set_major_formatter(plt.ScalarFormatter())
+ax.set_ylabel('Data Throughput (GB/s)', fontsize=8.5, fontweight='bold', color='#1E293B')
 
-  % Lustre PFS (100 GB/s -> y = 3.0 cm)
-  \draw[dashed, line width=1.2pt, SteelBlue] (\xleft, 3.0) -- (\xright, 3.0);
-  \node[anchor=west, align=left] at (\xright + 0.15, 3.0) {
-    \textbf{\scriptsize\textcolor{NavyBlue}{Lustre PFS}}\\[1pt]
-    \tiny\textcolor{TextMuted}{($100\text{ GB/s}$)}
-  };
+# Zone callout text badges positioned with ample breathing room
+ax.text(
+    4.5e8,
+    70,
+    'Compute-Bound Zone\nStorage bandwidth exceeds appetite',
+    ha='center',
+    va='center',
+    fontsize=7.5,
+    fontweight='bold',
+    color='#166534',
+    bbox=dict(boxstyle='round,pad=0.25', fc='white', ec='#16A34A', lw=0.8, alpha=0.95),
+)
 
-  % =============================================================
-  % 4. X-AXIS TICKS & MODEL SIZE LABELS
-  % =============================================================
-  \foreach \x/\lbl in {
-    \xmone/100M,
-    \xmtwo/1B,
-    \xmthr/10B,
-    \xmfou/70B,
-    \xmfiv/175B
-  } {
-    \draw[line width=0.8pt, SlateLine] (\x, 0) -- (\x, -0.12);
-    \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (\x, -0.18) {\lbl};
-  }
+ax.text(
+    3.5e10,
+    360,
+    'Storage Bottleneck Zone\nI/O starving GPU pipelines',
+    ha='center',
+    va='center',
+    fontsize=7.5,
+    fontweight='bold',
+    color='#991B1B',
+    bbox=dict(boxstyle='round,pad=0.35', fc='white', ec='#DC2626', lw=0.8, alpha=0.95),
+)
 
-  % X-Axis Title
-  \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (0, -0.7)
-    {Model Size (parameters)};
+# Legend
+ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor='#CBD5E1', fontsize=7.5)
+ax.grid(True, which='major', linestyle='--', linewidth=0.6, alpha=0.7)
+ax.grid(True, which='minor', linestyle=':', linewidth=0.4, alpha=0.3)
 
-  % =============================================================
-  % 5. REQUIRED I/O DEMAND CURVE (Smooth Red Curve + Points)
-  % =============================================================
-  \draw[line width=2.0pt, DarkRed, line join=round]
-    (\xmone, \yone) -- (\xmtwo, \ytwo) -- (\xmthr, \ythr) -- (\xmfou, \yfou) -- (\xmfiv, \yfiv);
+# Card subplot
+ax_card.axis('off')
+card_text = (
+    'Storage Throughput Scaling & Bottleneck Dynamics\n'
+    '• Nonlinear I/O Demand: As model capacity scales from 100M to 175B parameters, sustaining full GPU compute requires a 50× surge in throughput (10 → 500 GB/s).\n'
+    '• The Lustre Crossover: Beyond ~30B parameters, required feeding bandwidth outstrips standard parallel filesystems (100 GB/s), creating severe data stalls.\n'
+    '• Architectural Mitigation: Overcoming the storage wall demands hierarchical prefetching, GPUDirect Storage (GDS) zero-copy DMA, and sharded dataset caching.'
+)
+ax_card.text(
+    0.5,
+    0.45,
+    card_text,
+    ha='center',
+    va='center',
+    fontsize=7.0,
+    color='#1E293B',
+    linespacing=1.35,
+    bbox=dict(boxstyle='round,pad=0.55', fc='#F8FAFC', ec='#94A3B8', lw=0.9),
+)
 
-  % Data points
-  \foreach \x/\y in {
-    \xmone/\yone,
-    \xmtwo/\ytwo,
-    \xmthr/\ythr,
-    \xmfou/\yfou,
-    \xmfiv/\yfiv
-  } {
-    \fill[DarkRed] (\x, \y) circle (3.2pt);
-    \fill[white] (\x, \y) circle (1.2pt);
-  }
-
-  % Label at top of curve
-  \node[anchor=south east, align=right] at (\xmfiv - 0.1, \yfiv + 0.15) {
-    \textbf{\scriptsize\textcolor{DarkRed}{Required I/O for}}\\[1pt]
-    \textbf{\scriptsize\textcolor{DarkRed}{Full GPU Utilization}}
-  };
-
-  % =============================================================
-  % 6. ANNOTATION CALLOUT BOXES (Non-colliding positions)
-  % =============================================================
-  % Compute Bound Box (neatly placed inside green zone below 50 GB/s)
-  \node[
-    rectangle,
-        draw=DarkGreen,
-    fill=white,
-    line width=0.8pt,
-    inner xsep=6pt,
-    inner ysep=3.5pt,
-    align=center
-  ] at (-2.4, 1.45) {
-    \textbf{\scriptsize\textcolor{DarkGreen}{Compute-Bound Zone}}\\[1.5pt]
-    \tiny\textcolor{DarkGreen!80!black}{Storage bandwidth exceeds accelerator appetite}
-  };
-
-  % Storage Bottleneck Zone Box (neatly placed inside red zone above the curve)
-  \node[
-    rectangle,
-        draw=DarkRed,
-    fill=white,
-    line width=0.8pt,
-    inner xsep=6pt,
-    inner ysep=3.5pt,
-    align=center
-  ] at (0.95, 4.65) {
-    \textbf{\scriptsize\textcolor{DarkRed}{Storage Bottleneck Zone}}\\[1.5pt]
-    \tiny\textcolor{DarkRed!80!black}{I/O starving GPU compute pipelines}
-  };
-
-  % =============================================================
-  % 7. BOTTOM SUMMARY CARD
-  % =============================================================
-  \def\ycard{-1.3}
-  \node[
-    rectangle,
-        draw=CardBorder,
-    fill=white,
-    line width=0.8pt,
-    minimum width=13.6cm,
-    minimum height=2.45cm,
-    anchor=north
-  ] (card) at (0, \ycard) {};
-
-  % Header bar
-  \path[fill=SlateFill]
-    ($(card.north west)$) rectangle ($(card.north east) + (0, -0.42)$);
-  \path[fill=SlateFill]
-    ($(card.north west) + (0, -0.28)$) rectangle ($(card.north east) + (0, -0.42)$);
-  \draw[CardBorder, line width=0.7pt]
-    ($(card.north west) + (0, -0.42)$) -- ($(card.north east) + (0, -0.42)$);
-
-  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at ($(card.north) + (0, -0.21)$)
-    {Storage Throughput Scaling \& Bottleneck Dynamics};
-
-  % Card Body Rows
-  \node[anchor=north west, inner sep=0pt] at ($(card.north west) + (0.35, -0.56)$) {
-    \begin{minipage}{12.9cm}
-      \fontsize{6.8pt}{9.2pt}\selectfont
-      $\bullet$ \textbf{Nonlinear I/O Demand:}\quad As model capacity scales from 100M to 175B parameters, sustaining full GPU compute requires a $50\times$ surge in throughput ($10 \to 500\text{ GB/s}$).\\[2pt]
-      $\bullet$ \textbf{The Lustre Crossover:}\quad Beyond $\sim 30\text{B}$ parameters, required feeding bandwidth outstrips standard parallel filesystems ($100\text{ GB/s}$), creating severe data stalls.\\[2pt]
-      $\bullet$ \textbf{Architectural Mitigation:}\quad Overcoming the storage wall demands hierarchical prefetching, GPUDirect Storage (GDS) zero-copy DMA, and sharded dataset caching.
-    \end{minipage}
-  };
-
-\end{tikzpicture}%
-}
+plt.subplots_adjust(hspace=0.32)
+plt.show()
+plt.close()
 ```
 
 :::
