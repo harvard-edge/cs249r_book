@@ -1193,8 +1193,12 @@ class LayoutCommand:
         back by ``_measure_table_pdf``) and its source location, followed by the original table and
         caption Markdown. Overwrites ``qmd_path``.
         """
-        theme = (self.config_manager.book_dir / "tex" / f"theme-colors-{volume}.tex").resolve()
-        header = (self.config_manager.book_dir / "tex" / "header-includes.tex").resolve()
+        theme = (self.config_manager.book_dir / volume / "tex" / "theme-colors.tex").resolve()
+        if not theme.exists():
+            theme = (self.config_manager.book_dir / "tex" / f"theme-colors-{volume}.tex").resolve()
+        header = (self.config_manager.book_dir / "shared" / "tex" / "header-includes.tex").resolve()
+        if not header.exists():
+            header = (self.config_manager.book_dir / "tex" / "header-includes.tex").resolve()
         bib = (
             self.config_manager.book_dir
             / "references.bib"
