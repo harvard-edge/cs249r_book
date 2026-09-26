@@ -159,9 +159,20 @@ For autoregressive generation, calculate the KV cache memory footprint across co
   $$2 \times 32 \times 1024 \times 2\text{ B} = 131{,}072\text{ bytes per token} = 128\text{ KB/token}.$$
   For $S = 8{,}192$ context length: $8{,}192 \times 128\text{ KB} = 1.05\text{ GB}$ per sequence.
   Serving a batch of 64 concurrent requests requires $64 \times 1.05\text{ GB} = 67.2\text{ GB}$ dedicated exclusively to the KV cache, far exceeding the model weights ($16\text{ GB}$).
+
+- **Decode Generation Latency Equation**:
+  Because single-token generation is memory-bandwidth bound (@sec-profiling), per-token decode latency is governed by memory streaming:
+  $$\text{Latency per token} \approx \frac{\text{Model Weight Bytes} + \text{Active KV Cache Bytes}}{\text{Memory Bus Bandwidth}}.$$
+  On an accelerator with $1{,}000\text{ GB/s}$ memory bandwidth running LLaMA-3-8B ($16\text{ GB}$ weights) with a $4\text{ GB}$ active batch KV cache, each token requires transferring $20\text{ GB}$ of data, yielding a physical decode speed limit of $20\text{ ms/token}$ ($50\text{ tokens/s}$).
+:::
+
+::: {.callout-tip title="Pause & Predict: KV Cache Memory Exhaustion"}
+Suppose an inference server has $16\text{ GB}$ of free GPU VRAM available for KV cache allocations. It serves a model with $L = 32$ layers, $H_{kv} = 32$ key/value heads, head dimension $d_k = 128$, and 16-bit precision ($b = 2$ bytes). How many total tokens can fit across all concurrent KV caches before the server runs out of memory (OOM)? If each user request has an average context length of $S = 4{,}096$ tokens, how many concurrent users can the server support simultaneously?
 :::
 
 ---
+
+\newpage
 
 ## The Code
 
@@ -305,6 +316,12 @@ print(full.data[0, -1])            # [1.5035 1.5035]: same as the cached step
 
 The history row counts are the cache's visible prefix. At step 3, `seq_pos=2` and `get` returns shape `(1, 1, 2, 2)`; concatenating the current key produces `(1, 1, 3, 2)`. The query has shape `(1, 1, 1, 2)`, so its score row has shape `(1, 1, 1, 3)`. After `advance`, the cursor is 3 and all three stored rows become history. Comparing every row provides the definitive correctness invariant. Feed all three tokens at once to the full layer with the causal mask, and the final row of its $3 \times 2$ output is the same $[1.5035, 1.5035]$; every row of it, in fact, matches the corresponding cached step. The cached path and the full-sequence path compute the same function; if they ever disagree on the last row, the implementation must be checked for stale slots, a missed `advance`, incorrect positions, or a duplicated current row.
 
+::: {.column-margin}
+![](assets/images/diagrams/18_memoization-margin-memory-scaling.svg){width="100%" fig-alt="KV cache memory scaling breakdown showing per-token byte formula and scaling comparison between model weights and KV cache memory footprint."}
+
+*KV Cache Memory Scaling: Footprint scales as 2 · B · L · H_kv · S · d_k · b bytes. At long context and high concurrency, KV cache size outgrows model weights, motivating grouped-query attention and paged allocation.*
+:::
+
 The wrapper lifetime can also be checked at model level. With prompt `[3, 7]` and two requested output tokens, prefill writes slots 0 and 1. Its last logits predict the first output token. Processing that token writes slot 2 and predicts the second, which is returned without another forward. The cursor is therefore 3 when the scope exits. The next ordinary forward must behave independently of those three cached positions, which @lst-kv-request-lifetime checks.
 
 ::: {#lst-kv-request-lifetime lst-pos="H" lst-cap="**Request lifetime**: Repeated generation resets state while ordinary forwards remain independent."}
@@ -341,17 +358,11 @@ Correctness and timing need separate evidence. The generation-speedup script in 
 
 ## From TinyTorch to Production
 
-::: {.column-margin}
-![](assets/images/diagrams/18_memoization-margin-memory-scaling.svg){width="100%" fig-alt="KV cache memory scaling breakdown showing per-token byte formula and scaling comparison between model weights and KV cache memory footprint."}
-
-*KV Cache Memory Scaling: Footprint scales as 2 · B · L · H_kv · S · d_k · b bytes. At long context and high concurrency, KV cache size outgrows model weights, motivating grouped-query attention and paged allocation.*
-:::
-
 Production serving preserves the per-layer keys and values while changing their allocation and access. Hugging Face's [cache strategy documentation](https://huggingface.co/docs/transformers/en/kv_cache) distinguishes a growing `DynamicCache` from a preallocated `StaticCache`. Fixed capacity can support compilation with stable shapes, at the cost of reserving unused positions. TinyTorch preallocates its persistent buffers too, but constructs copies of the growing prefix for attention; its temporary array shapes still change. Fixed storage alone does not establish a fixed-shape compiled decode path.
 
 A production implementation can also prefill several prompt positions together. It computes their projections as a matrix operation and applies a causal mask so that each prompt row sees only its predecessors and itself. Decode then uses one new query against the stored prefix. This separates the time needed to process the prompt from the time for each later output token. TinyTorch's token-by-token prefill exposes the same position invariant with one loop, at the cost of serial calls.
 
-The memory budget follows directly from the reference layout. For $L$ layers, $H$ key/value heads, head width $d_k$, and $b$ bytes per value, each cached position requires $2LHd_kb$ bytes per sequence. Grouped-query attention lets multiple query heads share a key/value head, reducing $H$ in this expression. Quantized caches reduce $b$ by approximating stored values. A sliding window instead limits how many positions remain visible. TinyTorch implements none of these storage changes; its cache retains float32 rows up to its fixed capacity and raises an error when full.
+The memory budget follows directly from the reference layout. For $L$ layers, $H$ key/value heads, head width $d_k$, and $b$ bytes per value, each cached position requires $2LHd_kb$ bytes per sequence. Grouped-query attention lets multiple query heads share a key/value head, reducing $H$ in this expression.[^fn-gqa-mqa-architectures] Quantized caches reduce $b$ by approximating stored values. A sliding window instead limits how many positions remain visible. TinyTorch implements none of these storage changes; its cache retains float32 rows up to its fixed capacity and raises an error when full.
 
 A different allocation strategy can preserve all the rows while reserving less unused space. [PagedAttention](https://arxiv.org/abs/2309.06180), introduced by Kwon and colleagues, divides a request's keys and values into blocks that need not be contiguous in physical memory.[^fn-virtual-memory-paged-kv] A block table maps a logical position to its allocated block. New blocks arrive as the sequence grows, and completed requests release blocks for reuse. This changes where attention finds the keys, rather than which keys the query can see, as analyzed in the production bridge below. Prefix sharing can additionally reuse blocks containing identical earlier context.
 
@@ -364,7 +375,7 @@ In naive serving engines, allocating contiguous memory buffers for `max_seq_len`
 - **External Fragmentation**: Memory gaps between requests of varying length.
 - **Reservation Fragmentation**: Reserving peak sequence capacity before tokens are generated.
 
-The **PagedAttention** algorithm (Kwon et al., 2023, powering **vLLM**) adopts operating system virtual memory principles:
+The **PagedAttention** algorithm (Kwon et al., 2023, powering **vLLM**) adopts operating system virtual memory principles:[^fn-continuous-batching-vllm]
 
 - **Non-Contiguous KV Blocks**: Keys and values are partitioned into fixed-size physical blocks (typically 16 or 32 tokens).
 - **Block Tables**: A dynamic page table maps logical token positions $(0, \dots, t)$ to non-contiguous physical GPU memory pages.
@@ -384,6 +395,8 @@ The **PagedAttention** algorithm (Kwon et al., 2023, powering **vLLM**) adopts o
 
 : **Serving alternatives**: What changes between TinyTorch's cache and a production serving engine. Storage-preserving alternatives retain the recurrence; approximation or eviction needs additional checks. {#tbl-kv-bridge tbl-colwidths="[18,36,46]"}
 
+[^fn-gqa-mqa-architectures]: **Grouped-Query Attention (GQA) and Multi-Query Attention (MQA)**: Standard Multi-Head Attention (MHA) maintains an equal number of query, key, and value heads ($H_q = H_{kv}$). Multi-Query Attention (MQA, Shazeer, 2019) collapses key and value projections into a single head ($H_{kv} = 1$) shared across all query heads, slashing KV cache memory by $H_q\times$. Grouped-Query Attention (GQA, Ainslie et al., 2023, adopted by LLaMA-2/3 and Mistral) strikes a balance by grouping query heads into $G$ groups (e.g., 32 query heads divided into 8 KV heads, $H_{kv} = 8$), reducing KV cache memory traffic by $4\times$ with minimal degradation in model reasoning capability.
+[^fn-continuous-batching-vllm]: **Continuous batching and iteration-level scheduling**: Traditional inference engines employ static batching, locking a batch of requests together until the slowest request finishes, which leads to GPU compute starvation due to request length variance. Orca (Yu et al., 2022) and vLLM introduce continuous batching (iteration-level scheduling). Because the KV cache maintains independent physical page chains for each sequence, completed sequences can be evicted immediately after any decode step, allowing newly arrived prompts to enter the running batch at the next iteration without stalling active generations.
 [^fn-virtual-memory-paged-kv]: **Virtual memory**: the operating system mechanism that lets a program address memory as if it were one contiguous range while the physical pages behind it are scattered wherever the allocator found room, with a page table translating one to the other. PagedAttention applies the same indirection to KV rows so that a 4,000-token sequence can occupy 250 scattered 16-token blocks instead of one reserved 4,096-row buffer.
 [^fn-flash-decoding-parallelism]: **FlashDecoding and sequence-split parallelism**: While standard FlashAttention parallelizes along batch and query sequence dimensions, autoregressive decode features a single query token ($S_q = 1$) attending to thousands of cached keys ($S_{\text{kv}} \gg 1$), underutilizing GPU streaming multiprocessors. FlashDecoding (Dao et al., 2023) resolves this bottleneck by splitting the cached KV sequence length across independent GPU thread blocks. Each block computes local softmax running maxima and partial attention outputs in SRAM; a lightweight secondary reduction kernel combines these partial states via logsumexp rescaling, achieving near-optimal memory bandwidth saturation during decode.
 
