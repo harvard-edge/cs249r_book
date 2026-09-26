@@ -23,9 +23,9 @@
 > [!NOTE]
 > **📌 Early release (2026)**
 >
-> TinyTorch is **live and usable**. It shipped with the **2026** MLSysBook refresh and we expect **steady iteration**—modules, APIs, and course materials will keep improving. Community input drives what we prioritize next.
+> TinyTorch is **live and usable**. It shipped with the **2026** MLSysBook refresh and we expect **steady iteration**: modules, APIs, and course materials will keep improving. Community input drives what we prioritize next.
 >
-> **Classroom release** — Spring 2027 | **Right now** — [Help shape TinyTorch](#-help-shape-tinytorch)
+> **Classroom release**: Spring 2027 | **Right now**: [Help shape TinyTorch](#-help-shape-tinytorch)
 <!-- EARLY-RELEASE-CALLOUT:END -->
 
 ---
@@ -40,7 +40,7 @@ In machine learning, we see the same pattern. Everyone wants to train models, ru
 
 ### The Solution: AI Bricks 🧱
 
-TinyTorch teaches you the **AI bricks**—the stable engineering foundations you can use to build any AI system.
+TinyTorch teaches you the **AI bricks**: the stable engineering foundations you can use to build any AI system.
 
 - **Small enough to learn from**: bite-sized code that runs even on a Raspberry Pi
 - **Big enough to matter**: showing the real architecture of how frameworks are built
@@ -334,9 +334,9 @@ TinyTorch/
 │   ├── 02_1969_xor/            # Minsky's challenge & multi-layer solution
 │   ├── 03_1986_mlp/            # Backpropagation & TinyDigits
 │   ├── 04_1998_cnn/            # LeCun's CNNs & CIFAR-10
-│   ├── 05_2017_transformer/    # Attention mechanisms & language
-│   ├── 06_2018_mlperf/         # Modern optimization & profiling
-│   └── 07_2020_tinygpt/        # Generative LLM & Shakespeare next-token prediction
+│   ├── 05_2017_transformer/    # Attention mechanisms & TinyGPT
+│   ├── 06_2018_mlperf/         # Generative Serving & MLPerf
+│   └── 07_2024_kernels/        # Custom GPU Kernels (Triton & Metal)
 │
 ├── tito/                       # 🎛️ CLI tool for streamlined workflows
 │   ├── main.py                 # Entry point

@@ -1,13 +1,13 @@
 """
-Milestone Smoke Tests — Model Construction
+Milestone Smoke Tests: Model Construction
 ===========================================
 
 Lightweight tests that verify every milestone script can at least
 import its dependencies and construct its model. No data downloads,
-no training — just "does the code not crash on import?"
+no training: just "does the code not crash on import?"
 
 These catch API drift between milestone scripts and the modules they
-import (e.g., pool_size vs kernel_size — see GitHub issue #1278).
+import (e.g., pool_size vs kernel_size; see GitHub issue #1278).
 
 Run time: < 5 seconds total.
 
@@ -158,3 +158,10 @@ class TestModelConstruction:
                 assert module.DigitMLP() is not None
             if hasattr(module, "SimpleCNN"):
                 assert module.SimpleCNN() is not None
+
+    def test_milestone_07_kernels(self):
+        """Milestone 07: Custom GPU kernels script loads."""
+        module = _import_milestone(
+            MILESTONES_DIR / "07_2024_kernels" / "01_custom_kernels.py"
+        )
+        assert module is not None

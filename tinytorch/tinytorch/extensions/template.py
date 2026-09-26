@@ -3,21 +3,37 @@
 Use this file as a canonical starting point when authoring a new extension for TinyTorch.
 
 Extensions live in `tinytorch/extensions/` alongside the 20 core modules. An extension
-can introduce new autograd functions, custom neural network layers, hardware acceleration
-kernels (via C++ / Triton / MPS), or compilation passes.
+can introduce new autograd functions, custom neural network layers, training hooks,
+or hardware acceleration kernels (via C++ / Triton / MPS).
 
-THE EXTENSION CONTRACT:
-1. Systems Framing: Document the concrete systems bottleneck (memory bandwidth, FLOPs,
-   underflow, cache locality) that this extension addresses.
-2. Tensor Interoperability: Functions should accept either `Tensor` or `np.ndarray`.
-   If given `Tensor`, return `Tensor`. If given `np.ndarray`, return `np.ndarray`.
-3. Autograd Transparency: Differentiable operations should inherit from `Function` and
-   implement both `forward` and `backward`. Custom neural network blocks should subclass `Layer`.
-4. Graceful Fallbacks: If custom hardware, compilers, or accelerator drivers are missing,
-   always fall back cleanly to a pure-Python or NumPy reference implementation.
+=============================================================================
+HOW TO BUILD YOUR OWN EXTENSION IN 5 STEPS:
+=============================================================================
+1. IDENTIFY THE BOUNDARY:
+   - Need custom autograd math or activation recomputation? -> Subclass `Function` (Section 1)
+   - Need new layer architectures, adapters, or parameter freezing? -> Subclass `Layer` (Section 2)
+   - Need custom gradient scaling, clipping, or optimizer rules? -> Wrap `Optimizer` (Section 3)
+   - Need bare-metal C++, CUDA, Triton, or Apple MPS speed? -> Use C-ABI FFI (Section 4)
+
+2. COPY THIS TEMPLATE:
+   cp tinytorch/extensions/template.py tinytorch/extensions/my_extension.py
+
+3. IMPLEMENT THE EXTENSION CONTRACT:
+   - Systems Framing: Document the concrete hardware bottleneck (bandwidth, underflow, FLOPS).
+   - Tensor Interoperability: If given `Tensor`, return `Tensor`. If given `ndarray`, return `ndarray`.
+   - Autograd Transparency: Differentiable ops must provide forward & backward passes.
+   - Defensive Fallback: If custom compilers or GPUs are missing, fall back cleanly to NumPy.
+
+4. CREATE UNIT TESTS:
+   cp tests/extensions/test_template.py tests/extensions/test_my_extension.py
+   pytest tinytorch/tests/extensions/test_my_extension.py
+
+5. EXPORT PUBLIC SYMBOLS:
+   Add your classes/functions to `tinytorch/extensions/__init__.py`.
+=============================================================================
 """
 
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 import numpy as np
 
 from tinytorch.core.tensor import Tensor, Function
@@ -88,7 +104,24 @@ class CustomResidualBlock(Layer):
 
 
 # =====================================================================
-# 3. Hardware / Kernel Hook with Automated Fallback
+# 3. Custom Training & Gradient Transformation (wrapping Optimizer)
+# =====================================================================
+
+class CustomGradientTransform:
+    """Example training dynamics hook: scales gradients or clips thresholds."""
+
+    def __init__(self, clip_value: float = 1.0):
+        self.clip_value = clip_value
+
+    def transform_gradients(self, parameters: List[Tensor]) -> None:
+        """In-place gradient transformation before optimizer.step()."""
+        for p in parameters:
+            if p.grad is not None:
+                p.grad = np.clip(p.grad, -self.clip_value, self.clip_value)
+
+
+# =====================================================================
+# 4. Hardware / Kernel Hook with Automated Fallback (Silicon Boundary)
 # =====================================================================
 
 def has_custom_hardware() -> bool:
