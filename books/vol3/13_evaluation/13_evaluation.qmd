@@ -176,7 +176,7 @@ When an automated evaluation harness launches parallel agent trajectories agains
 **Hermeticity** in systems evaluation implies that the execution environment is completely sealed: external network interactions are intercepted, the filesystem begins from a known cryptographic state, and concurrent evaluation workers cannot leak memory, locks, or disk blocks to one another.
 :::
 
-### Why static benchmarks fail for autonomous systems
+### Limitations of static evaluation benchmarks for autonomous systems
 
 The machine learning community spent years evaluating foundation models using static question-answering benchmarks such as Massive Multitask Language Understanding (MMLU), GSM8K, and HumanEval. These benchmarks evaluate conditional probability distributions of the form $P(Y \mid X)$ in a single forward pass or isolated code generation step. In HumanEval, for example, the model receives a Python function signature and docstring, emits an autoregressive completion, and a host runner evaluates whether `candidate_function(*test_inputs) == expected_outputs`. The model operates without agency: it cannot inspect compiler diagnostics, cannot query external documentation, cannot run partial programs to observe intermediate runtime behavior, and cannot correct syntax errors through iterative refinement.
 
@@ -188,7 +188,9 @@ Because the agent interacts dynamically with live binaries and system daemons, s
 
 ### The four architectural pillars of hermetic gyms
 
-Constructing an interactive gym capable of executing thousands of untrusted, state-mutating agent trajectories requires solving four fundamental systems challenges: cross-tenant state leakage, external non-determinism, prohibitive environment reset latency, and verifier tampering. The systems topology required to enforce these boundaries is detailed in @fig-vol3-eval-gym-architecture.
+Moving from static prediction benchmarks to live interactive gyms introduces critical infrastructure demands that distinguish agent evaluation platforms from standard continuous integration pipelines. In a continuous integration system, tests run sequentially on trusted codebases with predictable execution footprints. In an agent evaluation gym, hundreds of untrusted, non-deterministic agent policies execute arbitrary shell commands, install unverified third-party libraries, spawn long-lived background daemons, and mutate filesystem trees in parallel across shared physical hosts.
+
+Under these conditions, naive containerization fails: concurrent workers leak state through shared kernel page caches, external network requests drift across evaluation runs, and slow filesystem teardowns throttle benchmark throughput. Guaranteeing rigorous, reproducible evaluation metrics requires constructing an infrastructure topology grounded in four interdependent systems pillars: hardware-enforced ephemeral isolation, deterministic service virtualization, sub-second copy-on-write storage reset, and out-of-band verifier enclaves. The end-to-end systems architecture integrating these four pillars is illustrated in @fig-vol3-eval-gym-architecture.
 
 ::: {#fig-vol3-eval-gym-architecture fig-env="figure" fig-pos="htb" fig-cap="**The Hermetic Evaluation Gym Architecture**: Hardware-enforced Firecracker microVM boundaries, tiered copy-on-write storage isolation, eBPF network filtering with deterministic local proxy mocks, and out-of-band ground-truth verification oracles." fig-alt="Systems architecture schematic of a hermetic agent evaluation gym showing a physical host hypervisor enclosing a Firecracker microVM with pinned vCPUs, PRNG seed tap, copy-on-write rootfs, and mock proxy, communicating via patch diff to an out-of-band verification oracle enclave."}
 ![](images/svg/ch13-eval-gym-architecture.svg)
@@ -1178,7 +1180,9 @@ Without a systematic forensic protocol, systems teams default to an unscientific
 
 ### Deterministic trajectory replay {#sec-vol3-postmortem-replay}
 
-The foundation of forensic analysis is trajectory reconstruction. When an agent trajectory $\tau = (s_0, a_0, o_0, s_1, a_1, o_1, \dots, s_T)$ terminates in an unhandled exception, a violated safety invariant, or an explicit task rejection, the post-mortem engine must reconstruct the exact sequence of historical context buffers $c_t$ presented to the model. Because the model holds zero ambient authority, every interaction with the operating system, storage layers, and network services passes through a mediated tool invocation that the runtime records as an OpenTelemetry span. Consequently, the telemetry ledger contains an immutable, chronologically ordered log of every model invocation, prompt serialization, raw completion, tool identifier, input argument dictionary, and serialized observation string.
+The foundation of forensic analysis is trajectory reconstruction. When an agent trajectory $\tau = (s_0, a_0, o_0, s_1, a_1, o_1, \dots, s_T)$ terminates in an unhandled exception, a violated safety invariant, or an explicit task rejection, the post-mortem engine must reconstruct the exact sequence of historical context buffers $c_t$ presented to the model. Because the model holds zero ambient authority, every interaction with the operating system, storage layers, and network services passes through a mediated tool invocation that the runtime records.
+
+As established by the Telemetry Duality (perspective \ref{psp-13-telemetry-duality}), this telemetry is structured across two distinct planes. High-throughput distributed tracing via **OpenTelemetry (OTel)** carries lightweight metadata, span durations, exit codes, and cryptographic content hashes ($H_{\text{payload}}$) to avoid saturating network fabrics with multi-megabyte prompt strings. To survive catastrophic worker crashes—such as an abrupt Linux cgroup Out-Of-Memory termination (`SIGKILL 137`) that vaporizes volatile in-memory OTel buffers—the host supervisor writes a synchronous `TraceContextAnchor` event into the local non-volatile Write-Ahead Log (WAL, @sec-vol3-persistence-wal) before dispatching any mutating action. Consequently, forensic post-mortems combine the causal distributed DAG from OTel with the byte-exact, immutable payload blobs dereferenced from durable content-addressed storage.
 
 ::: {.column-margin}
 Replaying an agent trajectory against live external APIs guarantees non-determinism. External databases change, web services return shifting payloads, and mutating calls duplicate transactions. True forensic replay requires an immutable record of past observations.
@@ -1192,19 +1196,22 @@ Forensic replay builds on the reconstruction machinery of durable execution. It 
 Generative replay mirrors the replicated state machine principles articulated by David K. Gifford (1979) in *Weighted Voting for Replicated Data*. Gifford demonstrated that distributed replicas maintain semantic consistency across network partitions only when state transitions are governed by an immutable, quorum-verified log of historical mutations. In an agentic runtime, hermetic mocking constructs a synthetic, local replica of the external world from the telemetry trace. When the agent issues a mutating tool call—such as `DROP TABLE analytics_staging` or `DELETE /v1/instances/i-09a1`—the hermetic mock engine matches the call signature against the recorded span graph, returns the exact status payload received during the live incident, and advances the agent clock without exposing production infrastructure to secondary corruption.
 
 ```python
-# Minimal trajectory replay harness intercepting tool execution via trace mocks
-def replay_step(agent, trace_span, model_client):
-    context = agent.format_context(trace_span.history)
+# Minimal trajectory replay harness resolving payload hashes against durable storage
+def replay_step(agent, trace_span, blob_store, model_client):
+    # Dereference full context payload from durable storage using recorded hash
+    history_payload = blob_store.get(trace_span.attributes["payload.hash"])
+    context = agent.format_context(history_payload)
     predicted_action = model_client.generate(context, temperature=0.0)
     if predicted_action.tool_name != trace_span.expected_action.tool_name:
         raise DivergenceError(f"Drift at step {trace_span.step}: {predicted_action}")
     # Hermetic mock: inject recorded observation without re-executing tool
-    agent.append_observation(trace_span.recorded_observation)
+    obs_payload = blob_store.get(trace_span.attributes["observation.hash"])
+    agent.append_observation(obs_payload)
 ```
 
 If the model re-invoked under $\tau = 0$ reproduces the exact failure action $a_t$ when presented with context $c_t$, the defect is verified to be computationally reproducible. If the model emits a completely different, valid action under zero temperature, the original production failure is classified as an edge-case stochastic excursion driven by high inference temperature or non-deterministic token sampling across distributed inference clusters.
 
-### Subsystem fault attribution: Distinguishing hallucination from interface failure {#sec-vol3-postmortem-attribution}
+### Subsystem fault attribution between model hallucinations and interface failures {#sec-vol3-postmortem-attribution}
 
 When an agent emits an invalid SQL query, attempts to access non-existent file paths, or loops endlessly while parsing a compiler error, operational teams routinely label the incident as an intrinsic "model hallucination." Forensic systems analysis rejects this characterization as intellectually lazy. A foundation model is an autoregressive probability distribution over next tokens conditioned entirely on the sequence of preceding tokens:
 
@@ -1349,7 +1356,7 @@ A cloud infrastructure engineering team updates the runtime supervisor of an aut
 
 **Deploying an updated model, tool schema, or supervisor requires a staged release pipeline that treats every change as an unverified hypothesis (principle \ref{pri-vol3-release-evidence}).** Because offline benchmarks cannot capture the unbounded entropy of live production inputs, systems engineers must construct automated deployment gates that progressively elevate execution privileges through offline gym verification, sandboxed shadow execution, and small-fraction live canary routing guarded by statistical circuit breakers.
 
-### The multi-stage release topology: Offline gyms to shadow escrows
+### Multi-stage release topologies from offline gyms to shadow escrows
 
 The physical architecture of an agent release pipeline must bridge the epistemic gap between synthetic evaluation and production execution. Unlike stateless microservices where functional regressions manifest as immediate HTTP 5xx errors or panics, agent regressions often manifest as semantic drift: subtle alterations in reasoning trajectories, excessive tool parameter verbosity, or unexpected vulnerability to edge-case environment responses. To prevent defective runtimes from corrupting production state, the release pipeline implements a three-stage progressive gating topology, illustrated in @fig-vol3-canary-deployment-pipeline.
 
@@ -1411,15 +1418,19 @@ where $d_n = \sum_{i=1}^n x_i$ is the cumulative number of successful trajectori
 
 $$A = \ln \left( \frac{1 - \beta}{\alpha} \right), \qquad B = \ln \left( \frac{\beta}{1 - \alpha} \right)$$
 
-If $\Lambda_n \ge A$, the control plane accepts the candidate as non-inferior and safely accelerates traffic shifting (for instance, advancing $\rho$ from $0.05$ to $0.25$, and subsequently to $1.0$). If $\Lambda_n \le B$, the candidate is conclusively identified as degraded; the control plane trips an automated circuit breaker that immediately sheds all canary traffic, restores 100 percent routing to $\pi_{\text{base}}$, and triggers an alert for engineering post-mortem.
+Because $p_1 < p_0$, successful completions ($x_i = 1$) contribute negative log-likelihood increments ($\ln \frac{p_1}{p_0} < 0$), driving $\Lambda_n$ downward, whereas failed trajectories ($x_i = 0$) contribute positive increments ($\ln \frac{1 - p_1}{1 - p_0} > 0$), driving $\Lambda_n$ upward. Consequently, the operational decision rules are:
+
+1. If $\Lambda_n \ge A$, the candidate is conclusively identified as degraded; the control plane immediately trips the automated circuit breaker, shedding all canary traffic to restore 100 percent baseline routing ($\rho \to 0$) and alerting on-call engineers.
+2. If $\Lambda_n \le B$, the candidate is statistically validated as non-inferior; the control plane safely promotes the candidate and accelerates traffic shifting (advancing $\rho$ from $0.05$ to $0.25$, and subsequently to $1.0$).
+3. If $B < \Lambda_n < A$, the test remains in the indeterminate region; sampling continues without altering traffic allocation.
 
 ::: {#not-13-sprt-circuit-breaker .callout-note title="Sequential probability ratio test gating"}
 The automated canary circuit breaker evaluates cumulative trajectory observations against two Wald absorbing boundaries defined by the target false-positive rate $\alpha$ and false-negative rate $\beta$:
 
 $$\Lambda_n = d_n \ln \left(\frac{p_1}{p_0}\right) + (n - d_n) \ln \left(\frac{1 - p_1}{1 - p_0}\right)$$
 
-1. **Upper Absorbing Boundary ($A = \ln \frac{1 - \beta}{\alpha}$):** If $\Lambda_n \ge A$, the candidate runtime is statistically validated as non-inferior; the control plane promotes the candidate and accelerates canary traffic shifting.
-2. **Lower Absorbing Boundary ($B = \ln \frac{\beta}{1 - \alpha}$):** If $\Lambda_n \le B$, the candidate runtime is conclusively degraded; the control plane instantly trips the automated circuit breaker, shedding all canary traffic to restore baseline routing.
+1. **Upper Absorbing Boundary ($A = \ln \frac{1 - \beta}{\alpha} > 0$):** If $\Lambda_n \ge A$, the candidate runtime is conclusively degraded; the control plane instantly trips the automated circuit breaker, shedding all canary traffic to restore baseline routing.
+2. **Lower Absorbing Boundary ($B = \ln \frac{\beta}{1 - \alpha} < 0$):** If $\Lambda_n \le B$, the candidate runtime is statistically validated as non-inferior; the control plane promotes the candidate and accelerates canary traffic shifting.
 3. **Indeterminate Region ($B < \Lambda_n < A$):** Sampling continues ($n \leftarrow n + 1$) without adjusting traffic weights.
 :::
 
@@ -1500,7 +1511,7 @@ from mlsysim.core.units import *
 from mlsysim.fmt import check, fmt_percent
 
 class SizingCanaryTrafficCircuitBreaker:
-    excess_reduction = 80.45 / 84.69
+    excess_reduction = 128.85 / 135.63
     check(abs(excess_reduction - 0.9499) < 0.001, "excess_reduction")
 
     reduction_pct_str = fmt_percent(0.95, precision=0, style="prose")
@@ -1519,11 +1530,11 @@ An engineering team deploys a candidate runtime $\pi_{\text{cand}}$ designed to 
 **Quantitative Solution**
 
 **Step 1: Expected Sample Size for Sequential Testing**
-Under Wald's SPRT, when the true underlying parameter is $p = p_1 = 0.75$, the expected sample size to cross the lower decision boundary $B$ is given by:
+Under Wald's SPRT, when the true underlying parameter is $p = p_1 = 0.75$ (the degraded hypothesis $H_1$), the test drifts toward the upper absorbing boundary $A = \ln \frac{1 - \beta}{\alpha}$, which triggers circuit-breaker tripping. The expected log-likelihood ratio at termination is:
 
-$$E_1[N] \approx \frac{(1 - \beta) \ln\left(\frac{\beta}{1 - \alpha}\right) + \beta \ln\left(\frac{1 - \beta}{\alpha}\right)}{E_1[z]}$$
+$$E_1[\Lambda_N] \approx (1 - \beta) A + \beta B = (1 - \beta) \ln\left(\frac{1 - \beta}{\alpha}\right) + \beta \ln\left(\frac{\beta}{1 - \alpha}\right)$$
 
-where $z_i = \ln \frac{P(x_i \mid p_1)}{P(x_i \mid p_0)}$ is the log-likelihood ratio for a single observation. The expectation $E_1[z]$ under the degraded hypothesis $p = p_1$ is:
+where $z_i = \ln \frac{P(x_i \mid p_1)}{P(x_i \mid p_0)}$ is the log-likelihood ratio for a single observation. The expected single-step drift $E_1[z]$ under the degraded hypothesis $p = p_1$ is:
 
 $$E_1[z] = p_1 \ln\left(\frac{p_1}{p_0}\right) + (1 - p_1) \ln\left(\frac{1 - p_1}{1 - p_0}\right)$$
 
@@ -1531,22 +1542,22 @@ Substituting the operational parameters $p_0 = 0.90$ and $p_1 = 0.75$:
 
 $$\frac{p_1}{p_0} = \frac{0.75}{0.90} \approx 0.8333 \implies \ln(0.8333) \approx -0.1823$$
 $$\frac{1 - p_1}{1 - p_0} = \frac{0.25}{0.10} = 2.5000 \implies \ln(2.5000) \approx 0.9163$$
-$$E_1[z] = 0.75 \times (-0.1823) + 0.25 \times (0.9163) = -0.1367 + 0.2291 = 0.0924$$
+$$E_1[z] = 0.75 \times (-0.1823) + 0.25 \times (0.9163) = -0.1367 + 0.2291 = +0.0924$$
 
-Now compute the numerator using error tolerances $\alpha = 0.01$ and $\beta = 0.05$ (for power $1 - \beta = 0.95$):
+Now compute the decision boundaries using error tolerances $\alpha = 0.01$ and $\beta = 0.05$ (for power $1 - \beta = 0.95$):
 
-$$\text{Boundary } B = \ln\left(\frac{0.05}{1 - 0.01}\right) = \ln\left(\frac{0.05}{0.99}\right) \approx \ln(0.0505) \approx -2.9857$$
-$$\text{Boundary } A = \ln\left(\frac{1 - 0.05}{0.01}\right) = \ln(95.0) \approx 4.5539$$
+$$\text{Boundary } A = \ln\left(\frac{1 - 0.05}{0.01}\right) = \ln(95.0) \approx +4.5539$$
+$$\text{Boundary } B = \ln\left(\frac{0.05}{1 - 0.01}\right) = \ln\left(\frac{0.05}{0.99}\right) \approx -2.9857$$
 
-Under hypothesis $H_1$, the probability of hitting boundary $B$ is approximately $1 - \beta = 0.95$, while hitting boundary $A$ is $\beta = 0.05$. The expected numerator is:
+Under hypothesis $H_1$, the probability of hitting the rejection boundary $A$ is approximately $1 - \beta = 0.95$, while prematurely hitting boundary $B$ is $\beta = 0.05$. The expected value of $\Lambda_N$ at termination is:
 
-$$\text{Numerator} = 0.95 \times (-2.9857) + 0.05 \times (4.5539) = -2.8364 + 0.2277 = -2.6087$$
+$$E_1[\Lambda_N] = 0.95 \times (4.5539) + 0.05 \times (-2.9857) = 4.3262 - 0.1493 = +4.1769$$
 
-The expected number of samples required to trip the circuit breaker is:
+By Wald's identity ($E_1[\Lambda_N] = E_1[N] \cdot E_1[z]$), the expected number of samples required to trip the circuit breaker is:
 
-$$E_1[N] = \frac{-2.6087}{-E_1[z]} = \frac{2.6087}{0.0924} \approx 28.23 \text{ trajectories}$$
+$$E_1[N] = \frac{E_1[\Lambda_N]}{E_1[z]} = \frac{4.1769}{0.0924} \approx 45.20 \text{ trajectories}$$
 
-Rounding conservatively to the nearest integer yields $N \approx 29$ canary trajectories.
+Rounding conservatively to the nearest integer yields $N \approx 46$ canary trajectories.
 
 **Step 2: Elapsed Physical Time to Detection**
 The canary receives a traffic fraction $\rho = 0.05$ of the total arrival rate $\lambda = 60 \text{ tasks/hour}$:
@@ -1555,37 +1566,40 @@ $$\lambda_{\text{canary}} = \rho \times \lambda = 0.05 \times 60 = 3.0 \text{ tr
 
 The expected physical time until the circuit breaker trips and initiates rollback is:
 
-$$T_{\text{detect}} = \frac{E_1[N]}{\lambda_{\text{canary}}} = \frac{28.23}{3.0} \approx 9.41 \text{ hours}$$
+$$T_{\text{detect}} = \frac{E_1[N]}{\lambda_{\text{canary}}} = \frac{45.20}{3.0} \approx 15.07 \text{ hours}$$
 
 **Step 3: Blast Radius Comparison**
-We quantify blast radius as the expected number of failed customer tasks resulting from the regression during the $9.41$-hour detection window.
+We quantify blast radius as the expected number of failed customer tasks resulting from the regression during the $15.07$-hour detection window.
 
 *Case A: Managed Canary ($\rho = 0.05$)*
-Total canary runs = $28.23$.
+Total canary runs = $45.20$.
 Expected canary failures at $q_{\text{cand}} = 0.75$:
 
-$$\text{Failures}_{\text{canary}} = 28.23 \times (1 - 0.75) = 28.23 \times 0.25 \approx 7.06 \text{ failures}$$
+$$\text{Failures}_{\text{canary}} = 45.20 \times (1 - 0.75) = 45.20 \times 0.25 \approx 11.30 \text{ failures}$$
 
 The remaining 95 percent of traffic runs on $\pi_{\text{base}}$ ($q_{\text{base}} = 0.90$):
 
-$$\text{Total baseline runs} = 9.41 \text{ hours} \times 57 \text{ tasks/hour} \approx 536.37 \text{ tasks}$$
-$$\text{Failures}_{\text{baseline}} = 536.37 \times (1 - 0.90) \approx 53.64 \text{ failures}$$
-$$\text{Total System Failures} = 7.06 + 53.64 \approx 60.7 \text{ failures}$$
+$$\text{Total baseline runs} = 15.07 \text{ hours} \times 57 \text{ tasks/hour} \approx 858.99 \text{ tasks}$$
+$$\text{Failures}_{\text{baseline}} = 858.99 \times (1 - 0.90) \approx 85.90 \text{ failures}$$
+$$\text{Total System Failures} = 11.30 + 85.90 \approx 97.20 \text{ failures}$$
 
 *Case B: Unmonitored Full Deployment ($\rho = 1.0$)*
-If $\pi_{\text{cand}}$ had been rolled out to 100 percent of traffic, all incoming tasks over the $9.41$-hour window would experience the degraded success rate:
+If $\pi_{\text{cand}}$ had been rolled out to 100 percent of traffic, all incoming tasks over the $15.07$-hour window would experience the degraded success rate:
 
-$$\text{Total runs} = 9.41 \text{ hours} \times 60 \text{ tasks/hour} = 564.6 \text{ tasks}$$
-$$\text{Failures}_{\text{full}} = 564.6 \times (1 - 0.75) = 564.6 \times 0.25 \approx 141.15 \text{ failures}$$
+$$\text{Total runs} = 15.07 \text{ hours} \times 60 \text{ tasks/hour} \approx 904.20 \text{ tasks}$$
+$$\text{Failures}_{\text{full}} = 904.20 \times (1 - 0.75) = 904.20 \times 0.25 \approx 226.05 \text{ failures}$$
 
-*Comparison:*
+*Normal Baseline Expected Failures (without regression):*
+$$\text{Failures}_{\text{normal}} = 904.20 \times (1 - 0.90) = 90.42 \text{ failures}$$
+
+*Comparison of Excess Failures:*
 Routing traffic through the managed canary boundary prevents:
 
-$$\Delta_{\text{failures}} = 141.15 - 60.70 = 80.45 \text{ task failures}$$
+$$\Delta_{\text{failures}} = 226.05 - 97.20 = 128.85 \text{ task failures}$$
 
 The staged canary deployment reduces excess customer-impacting failures by `{python} SizingCanaryTrafficCircuitBreaker.reduction_pct_str`:
 
-$$\frac{141.15 - 60.70}{141.15 - 56.46} = \frac{80.45}{84.69} \approx 95.0\%$$
+$$\frac{226.05 - 97.20}{226.05 - 90.42} = \frac{128.85}{135.63} \approx 95.0\%$$
 
 isolating the blast radius to precisely the statistical threshold required to verify the operational defect.
 :::

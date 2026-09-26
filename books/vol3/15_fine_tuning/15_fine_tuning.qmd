@@ -48,7 +48,7 @@ An agent trajectory interleaves two authors. The model writes reasoning and tool
 
 :::
 
-## What Fine-Tuning Can Change {#sec-vol3-fine-tuning-scope}
+## Scope and Behavioral Boundaries of Supervised Fine-Tuning {#sec-vol3-fine-tuning-scope}
 
 ::: {.column-margin}
 ![](images/svg/hsa_locator_origin.svg){width="100%" fig-alt="H·S·A locator with no axis lit and the origin dot highlighted in purple."}
@@ -156,7 +156,7 @@ Because observations contain stochastic environment returns (ephemeral process i
 
 :::
 
-### Why observations must be masked
+### Observation loss masking and gradient isolation
 
 Observation loss masking (principle \ref{pri-vol3-action-masked-loss}) exists because an agent trajectory is not one author's text. Unmasked training asks one set of weights to learn two different things at once. One is the policy, $P(a_t \mid s_t)$, which maps what the agent has seen to what it should do next. The other is a model of the environment, $P(s_{t+1} \mid s_t, a_t)$, which predicts what a shell, a compiler, or an API will return. In model-based reinforcement learning, learning the second is the point. In an agent with real tools, it is waste. The compiler is present at every turn and returns its output exactly; the model gains nothing from predicting a temporary path, a process identifier, or the column of a syntax error.
 
@@ -206,28 +206,37 @@ $$N_{\text{active}} = 1{,}400 + 960 = 2{,}360, \qquad \frac{2{,}360}{16{,}384} \
 
 ### Reasoning as target or context
 
-While the masking policy for prompts, observations, and tool calls is mechanically dictated by the causality of the execution environment, the treatment of chain-of-thought reasoning tokens ($\mathcal{T}_{\text{rationale}}$) introduces a fundamental systems dilemma. In language models, reasoning tokens precede tool invocations to enable scratchpad deliberation. During fine-tuning, the data loader must decide whether to set $m_t = 1$ (computing cross-entropy loss over reasoning tokens) or $m_t = 0$ (masking reasoning tokens out of the loss while retaining them in the attention prefix).
+While the masking policy for prompts, observations, and tool calls is mechanically dictated by the causality of the execution environment, the treatment of chain-of-thought reasoning tokens ($\mathcal{T}_{\text{rationale}}$) introduces a fundamental systems dilemma. In language models, reasoning tokens precede tool invocations to enable scratchpad deliberation. During fine-tuning, the data loader must decide whether to set $m_t = 1$ (computing cross-entropy loss over reasoning tokens), set $m_t = 0$ (masking reasoning tokens out of the loss while retaining them in the attention prefix), or excise reasoning tokens from the sequence entirely.
 
-Rather than treating this as an arbitrary preference, production agent runtimes evaluate this trade-off using a structured three-way systems decision matrix (@tbl-vol3-reasoning-mask-regimes):
+A common implementation trap in agent training is the **action-only conditioning distribution shift**. Suppose a data loader retains demonstrated reasoning tokens $r_{1:M}$ in the context window to provide causal prefix conditioning, but zeroes out their cross-entropy loss ($m_t = 0$ for all $t \in \mathcal{T}_{\text{rationale}}$), training only on action tokens $a_{1:K}$:
 
-1. **Full Deliberation Cloning ($m_{\text{reason}} = 1$):**
-   The training loss supervises both the rationale tokens and the action tokens.
-   - *Advantage:* Teaches the policy complex multi-step planning, domain-specific problem decomposition, and self-correction patterns exhibited by expert demonstrators.
-   - *Systems Penalty:* Output token inflation. Because the model learns to imitate the demonstrator's verbosity, it emits hundreds of deliberation tokens on every turn. In an autoregressive decode regime, every emitted token requires shuttling weights across accelerator memory buses ($I_{\text{decode}} \approx 1\text{ FLOP/byte}$), multiplying serving latency and inference costs by $3\times\text{ to }5\times$. Furthermore, the policy risks *sycophantic deliberation*—emitting ritualistic reasoning boilerplate ("Let me carefully examine the codebase...") that correlates with teacher formatting but provides zero causal diagnostic value.
-2. **Action-Only Distillation ($m_{\text{reason}} = 0$):**
-   Demonstrated reasoning tokens are retained in the context window to provide causal prefix conditioning, but their cross-entropy loss is zeroed out ($m_t = 0$ for all $t \in \mathcal{T}_{\text{rationale}}$). Only the action tokens (the JSON tool call and arguments) receive gradient updates.
-   - *Advantage:* Forces the neural policy to internalize procedural heuristics directly into its weights. At inference time, the model skips verbal deliberation and emits compact, high-velocity tool calls directly, minimizing Time-to-First-Token ($t_{\text{TTFT}}$) and eliminating decoding overhead.
-   - *Systems Penalty:* Degrades operational accuracy on long-horizon, ambiguous engineering tasks that genuinely require explicit search, hypothesis branching, and multi-file tracking.
-3. **Selective Diagnostic Masking:**
-   The training pipeline partitions reasoning tokens based on verification feedback. Exploratory dead-ends and superficial narration are masked out ($m_t = 0$), whereas verified diagnostic reflections—such as stack trace interpretations and hypothesis pivots preceding successful recovery mutations—are supervised ($m_t = 1$). This delivers optimal token efficiency while preserving self-healing capabilities.
+$$\mathcal{L}_{\text{action}}(\theta) = -\sum_{j=1}^K \log P_\theta(a_j \mid x_{\text{prompt}}, r_{1:M}, a_{<j}).$$
 
-| Regimes                      | Mask Setting                                 | Serving Token Tax      | Planning Capability | Primary Systems Failure Risk                       |
-|:-----------------------------|:---------------------------------------------|:-----------------------|:--------------------|:---------------------------------------------------|
-| **Full Deliberation**        | $m_{\text{reason}} = 1$                      | High ($3\times$)       | High                | Sycophantic verbosity, decode bandwidth saturation |
-| **Action-Only Distillation** | $m_{\text{reason}} = 0$                      | Minimal ($1\times$)    | Low to Moderate     | Heuristic brittleness on multi-hop tasks           |
-| **Selective Diagnostic**     | $m_{\text{reason}} \in \{0, 1\}$ conditional | Moderate ($1.5\times$) | High                | Annotation complexity; requires verified traces    |
+Under teacher forcing, the attention layers learn to attend to representations of $r_{1:M}$ to predict action tokens $a_j$. If the deployed agent is expected to skip verbal deliberation at inference time and emit actions immediately given only $x_{\text{prompt}}$, $r_{1:M}$ is completely absent from the KV cache. Evaluating $P_\theta(a \mid x_{\text{prompt}})$ subjects the neural policy to severe covariate shift: conditioned on missing prompt representations, the model either hallucinates uncalibrated deliberation or fails to generate valid tool syntax.
 
-: **Reasoning Token Masking Regimes**: Trade-offs across loss masking strategies for chain-of-thought tokens. {#tbl-vol3-reasoning-mask-regimes}
+To train an agent that emits actions directly without runtime deliberation, reasoning tokens must be **excised from the training sequence entirely** (true context distillation), forcing parameter weights to absorb the underlying heuristics. Retaining $r_{1:M}$ with $m_t = 0$ is valid *only* when an upstream planner, supervisory model, or latent reasoning phase generates $r_{1:M}$ at serving time.
+
+To navigate this trade-off, production agent training pipelines evaluate four quantitative systems criteria:
+
+1. **Decode Memory-Bandwidth Roofline:**
+   Autoregressive decoding is strictly memory-bandwidth bound ($I_{\text{decode}} \approx 1\text{ FLOP/byte}$). In an $N$-turn agent, serving latency added by verbal reasoning tokens is governed by the weight shuttle across accelerator memory buses:
+   $$\Delta t_{\text{decode}} = N_{\text{turns}} \times \bar{L}_{\text{reason}} \times \frac{2\Phi}{\beta_{\text{HBM}}}.$$
+   For a 70B parameter model ($\Phi = 70 \times 10^9$) served in FP8 across an 8-GPU H100 node ($\beta_{\text{HBM}} \approx 26.8\text{ TB/s}$ aggregate), generating 500 reasoning tokens per turn over a 20-turn trajectory requires 10,000 autoregressive weight sweeps, adding over $50\text{ seconds}$ of pure decode latency. If task service-level agreements (SLAs) require sub-second turn latency, unmasked deliberation ($m_{\text{reason}} = 1$) violates hardware throughput constraints, requiring reasoning excision.
+2. **Model Parameter Scale & Representational Capacity:**
+   Small edge policies ($<14\text{B}$ parameters) lack the parameter depth to compress multi-hop dependency graphs, AST diffs, and backtracking heuristics into static feedforward weights. Excising reasoning causes severe task failure on complex benchmarks; small models require $m_{\text{reason}} = 1$. Conversely, frontier-scale models ($\ge 70\text{B}$) possess sufficient capacity to internalize operational procedures without explicit scratchpads.
+3. **Task Search Entropy & Branching Factor:**
+   Low-entropy tasks with deterministic input-action mappings (such as schema transformation or structured triage) gain negligible benefit from scratchpads; reasoning is excised. High-entropy, open-ended tasks (such as distributed debugging or multi-file codebase refactoring) require dynamic working memory in the KV cache, mandating reasoning generation.
+4. **Selective Diagnostic Masking Criteria:**
+   Rather than binary inclusion, advanced loaders apply counterfactual verification: reasoning tokens are supervised ($m_{\text{reason}} = 1$) *only* on transitions where diagnostic reflection immediately preceded a recovery mutation (a transition from a failing test suite to a passing test suite). Exploratory dead-ends and conversational boilerplate are masked ($m=0$).
+
+| Regimes                              | Sequence Representation | Mask Setting                | Serving Latency Tax              | Planning Capacity | Primary Systems Failure Risk                        |
+|:-------------------------------------|:------------------------|:----------------------------|:---------------------------------|:------------------|:----------------------------------------------------|
+| **Full Deliberation Cloning**        | $[x, r, a]$             | $m_r = 1, m_a = 1$          | High ($3\times\text{--}5\times$) | High              | Decode bandwidth saturation, sycophancy             |
+| **Prefix-Conditioned Execution**     | $[x, r, a]$             | $m_r = 0, m_a = 1$          | High ($3\times\text{--}5\times$) | High              | Training-serving mismatch if $r$ missing at runtime |
+| **Direct Action Distillation**       | $[x, a]$ (excised)      | $m_a = 1$                   | Minimal ($1\times$)              | Low to Moderate   | Heuristic brittleness on multi-hop tasks            |
+| **Selective Diagnostic Supervision** | $[x, r, a]$             | $m_r \in \{0, 1\}, m_a = 1$ | Moderate ($1.5\times$)           | High              | Annotation complexity; requires verified traces     |
+
+: **Reasoning Token Masking and Distillation Regimes**: Trade-offs across sequence representations and loss masking strategies for chain-of-thought tokens. {#tbl-vol3-reasoning-mask-regimes}
 
 ### The end-of-turn token and truncated turns
 
@@ -263,7 +272,7 @@ These questions test the masked objective before batching complicates it.
 
 The mask is defined for one trajectory. Training runs on batches of many, and the way trajectories share a batch can undo the mask's intent, both by weighting some trajectories far more than others and by letting one trajectory read another.
 
-## Packing Without Leakage {#sec-vol3-fine-tuning-batching}
+## Sequence Packing and Cross-Trajectory Contamination Prevention {#sec-vol3-fine-tuning-batching}
 
 An agent corpus mixes a two-turn lookup of a few hundred tokens with a forty-turn debugging session near the context limit. Padding every example to the longest one wastes most of each batch on padding, so training pipelines pack several trajectories into one sequence. Packing is a standard efficiency move, and it creates two agent-specific hazards: a loss that silently favors long trajectories, and attention that crosses from one trajectory into the next.
 
@@ -297,6 +306,8 @@ Per-token normalization (@eq-vol3-loss-token) weights every target token equally
 
 ### Block-diagonal attention and position isolation
 
+Multi-turn agent trajectories exhibit extreme variance in sequence length, spanning from compact single-turn tool queries of a few hundred tokens to protracted debugging traces exceeding tens of thousands of tokens. In a standard distributed training pipeline, batching variable-length sequences naively by padding every example to the maximum sequence length inflates memory footprints and wastes up to 80 percent of accelerator FLOPs computing attention scores over non-informative pad tokens. To achieve high arithmetic throughput without wasting compute on idle tokens, modern training frameworks concatenate multiple trajectories into a single dense sequence buffer while enforcing strict isolation across trajectory boundaries.
+
 ::: {#dfn-sequence-packing .callout-definition title="Sequence packing"}
 
 ***Sequence packing***\index{Sequence packing!definition} is the concatenation of several independent, variable-length training examples into one fixed-length sequence, with attention and position indices partitioned so that each example is processed as if it were alone.
@@ -315,11 +326,26 @@ $$A_{i,j} = \begin{cases} \frac{Q_i K_j^T}{\sqrt{d}} & \text{if } \text{traj}(i)
 ![](images/svg/ch13-block-diagonal-mask.svg)
 :::
 
-Position indices need the same partition. If positions run continuously through the packed sequence, the first system token of $\tau^{(2)}$ sits at a position of several thousand, where the served model never sees a system prompt begin. Resetting positions at each boundary,
+Position indices require equivalent hardware partitioning. Rotary Position Embeddings (RoPE) rotate query and key projections in complex 2D planes via rotation matrix $R_{\Theta, t}^d$. If token positions run continuously through a packed sequence buffer, tokens in trajectory $\tau^{(k)}$ are rotated by cumulative batch offsets $\sum_{i=1}^{k-1} T_i$. This artificial phase shift perturbs frequency modulation and degrades long-context attention. Resetting position IDs at each trajectory boundary:
 
-$$\text{pos}[t] = t - c_k \quad \text{for } t \in [c_k, c_{k+1}),$$
+$$\text{pos}[t] = t - c_k \quad \text{for } t \in [c_k, c_{k+1}),$$ {#eq-vol3-rope-reset}
 
-makes every packed trajectory look positionally identical to the same trajectory served alone. Efficient attention implementations take the boundary offsets directly and skip the masked blocks rather than materializing the full mask in @eq-vol3-block-diagonal-attention, so isolation costs almost nothing. The mechanics of those kernels belong to training-systems texts such as *Machine Learning Systems at Scale*; what matters here is the contract, that each packed trajectory must be indistinguishable from the same trajectory served alone.
+guarantees exact mathematical equivalence with single-sequence serving:
+
+$$q_i^T k_j = \left( R_{\Theta, i-c_k}^d W_q x_i \right)^T \left( R_{\Theta, j-c_k}^d W_k x_j \right).$$
+
+Rather than materializing the dense $O(L_{\text{pack}}^2)$ mask matrix of @eq-vol3-block-diagonal-attention in accelerator memory, modern kernels (such as FlashAttention `varlen`) implement block-diagonal attention directly at the physical hardware layer:
+
+1. **Activation Memory Allocation (Physical HBM Footprint):**
+   Naive padded batching allocates contiguous 3D HBM tensors of shape $[B, L_{\max}, D]$. For an agent batch with $B=8$, $L_{\max}=32\text{k}$, and $\bar{L}=3.8\text{k}$, over $88\%$ of allocated HBM stores non-informative padding tokens. Because backward pass activation tensors must be retained in device memory to evaluate parameter gradients, padded batches waste tens of gigabytes of VRAM, triggering Out-Of-Memory (OOM) faults or forcing micro-batch size $B=1$.
+   In contrast, sequence packing concatenates trajectories into a flattened 1D jagged buffer $[N_{\text{total}}, D]$, where $N_{\text{total}} = \sum_{k=1}^K T_k$. Physical activation memory scales strictly as $O(N_{\text{total}} \cdot D)$, shrinking dynamic HBM consumption by $\frac{B \cdot L_{\max}}{N_{\text{total}}} \approx 8.6\times$ and allowing larger effective packed buffer lengths ($L_{\text{pack}}$) that keep GPU streaming multiprocessors (SMs) fully saturated.
+2. **Kernel Tile Scheduling & SM Warp Divergence:**
+   In padded causal attention, standard GPU kernels launch thread blocks across the uniform $L_{\max} \times L_{\max}$ tile grid. Thread blocks assigned to padded regions either perform dummy GEMM operations or branch off early, causing severe **SM warp divergence** and stranding Tensor Cores.
+   FlashAttention `varlen` accepts the cumulative sequence length vector $\mathtt{cu\_seqlens} = [c_0, c_1, \dots, c_K]$. The CUDA grid scheduler maps thread blocks exclusively to the lower-triangular diagonal blocks of each trajectory $\tau_k \in [c_k, c_{k+1})$.
+3. **Physical FLOP Elimination:**
+   The theoretical floating-point operations evaluated by standard padded attention versus block-diagonal packed attention scale as:
+   $$\text{FLOPs}_{\text{padded}} = 4 B L_{\max}^2 d, \qquad \text{FLOPs}_{\text{varlen}} = 4 \sum_{k=1}^K T_k^2 d.$$ {#eq-vol3-attention-flops}
+   Because $\left(\sum_{k=1}^K T_k\right)^2 = \sum_{k=1}^K T_k^2 + 2\sum_{i<j} T_i T_j$, block-diagonal execution physically skips $4 d \sum_{i<j} T_i T_j$ off-diagonal cross-trajectory interactions, executing zero arithmetic instructions on unneeded blocks without ever allocating or materializing an attention mask in SRAM or HBM.
 
 With serialization, masking, and packing correct, a training step imitates admitted trajectories faithfully. Faithful imitation still has a structural limit, which appears as soon as the trained model runs on its own.
 
@@ -329,7 +355,9 @@ With serialization, masking, and packing correct, a training step imitates admit
 **Distribution shift**: Training samples states from the demonstrator's distribution, $d_{\pi^*}$. Deployment visits states from the policy's own distribution, $d_{\pi_\theta}$. The two agree only until the policy's first mistake.
 :::
 
-A policy fine-tuned exclusively on clean, successful runs encounters an unexpected command syntax error in production, illustrated in @lst-vol3-exposure-bias-trace.
+Supervised fine-tuning trains an agent policy through teacher forcing: at every step along a trajectory, the model predicts the expert's next token conditioned on the ground-truth historical prefix. In an offline dataset, every observation reflects a pristine system state where prior commands succeeded, tools returned expected responses, and environment variables were correctly bound. When that fine-tuned policy is deployed into an autonomous execution loop, however, the teacher is absent. The policy must condition on its own prior generations and observations. The moment the model makes an initial mistake—emitting a slight syntax error, misinterpreting a file diff, or supplying an unrecognized CLI flag—the execution environment transitions into a state that never existed in the training corpus.
+
+Because the supervised training distribution contains zero demonstrations of recovering from errors, the agent lacks any gradient signal instructing it how to repair the situation. The resulting behavioral breakdown is immediate and severe: encountering an unmodeled observation, the policy repeatedly emits the same erroneous action or hallucinates invalid arguments, trapping the execution harness in an infinite failure loop. @Lst-vol3-exposure-bias-trace illustrates this operational breakdown in a production coding agent.
 
 ::: {#lst-vol3-exposure-bias-trace lst-cap="**Failure Trace: Unmitigated Exposure Bias in Autonomous Trajectories**: An agent fine-tuned solely on pristine demonstrations encounters an unfamiliar Git CLI syntax error, entering an unrecoverable infinite loop because its training distribution contained zero recovery paths."}
 ```bash
@@ -347,7 +375,7 @@ A policy fine-tuned exclusively on clean, successful runs encounters an unexpect
 
 Every observation after the first line is outside anything the training corpus contained. The policy never saw conflict markers followed by a correct edit, so it tries a commit, then invents a flag, and the harness spends turns until a budget or watchdog ends the run. The problem is not one bad demonstration. Teacher forcing trains each step on the demonstrator's own prefix, so the model learns what to do in states the demonstrator visited. Once the model makes a mistake of its own, it is in a state no demonstrator visited, and nothing in training told it how to get back. The mismatch between training on reference prefixes and running on the model's own outputs is known in sequence prediction as exposure bias [@bengio2015scheduledsampling]. In text generation it causes drift in phrasing; in an agent, each wrong call changes the environment, and the next observation is further from the training distribution than the last.
 
-### How errors compound with the horizon
+### Autoregressive error compounding over extended horizons
 
 Let an agent task run for $H$ turns, the horizon of human, system, and agent interactions. Let $\pi^*$ be the demonstrator and $\pi_\theta$ the fine-tuned policy, and suppose supervised training reaches a per-step error rate $\epsilon$ on the demonstrator's states:
 
@@ -364,6 +392,8 @@ $$J(\pi_\theta) - J(\pi^*) \le \sum_{t=1}^{H} t\epsilon = \epsilon \frac{H(H+1)}
 The quadratic term in @eq-vol3-quadratic-derivation is the formal statement of the unrecoverable loop in @lst-vol3-exposure-bias-trace. Now suppose the policy is instead trained on states drawn from its own rollouts, so that its per-step error of $\epsilon$ holds on the distribution it actually visits. Each step then costs at most $\epsilon$ in expectation, and
 
 $$J(\pi_\theta) - J(\pi^*) \le \sum_{t=1}^{H} \epsilon = O(\epsilon H).$$ {#eq-vol3-linear-regret-bound}
+
+This reduction from quadratic error compounding $O(\epsilon H^2)$ to linear regret $O(\epsilon H)$ is the primary theoretical motivation for Reinforcement Learning with Verifiable Rewards (@sec-vol3-rlvr). By sampling on-policy trajectories from $\pi_\theta$ directly inside sandboxed environments and rewarding successful completions verified by external software oracles, RLVR trains the policy on the exact state distribution it induces, eliminating the exposure bias inherent to supervised imitation.
 
 @ross2011reduction formalized this reduction and gave the algorithm that achieves it. The move from @eq-vol3-quadratic-derivation to @eq-vol3-linear-regret-bound is the quantitative reason verified trajectory post-training (principle \ref{pri-vol3-trajectory-post-training}) keeps recovery traces in the corpus.
 
@@ -426,7 +456,9 @@ These questions test batching and on-policy data before schemas enter the pictur
 
 ## Schema Robustness {#sec-vol3-fine-tuning-schemas}
 
-A month after a fine-tuned agent ships, a tool team renames an argument from `file_path` to `target_uri`. The new schema is in the system prompt of every call. The fine-tuned model keeps emitting `file_path`, and every call fails validation:
+A foundational promise of generalist foundation models is their ability to adapt dynamically to diverse tool declarations presented in the system prompt. During supervised fine-tuning, however, this in-context flexibility is constantly threatened by weight memorization. When an agent is fine-tuned over thousands of trajectories that share identical, static tool schemas, gradient descent finds a shortcut: rather than attending to the schema parameters declared in the prompt on every turn, the network bakes the exact parameter names and invocation syntax directly into its model weights.
+
+The fragility of this weight memorization becomes glaring the moment production infrastructure evolves. Consider a scenario where a platform engineering team updates a tool definition, renaming a parameter from `file_path` to `target_uri`. The updated schema is injected into the system prompt of every outgoing request. Yet the fine-tuned policy, having internalized the obsolete schema into its attention heads, ignores the prompt and continues emitting the old argument:
 
 ```yaml
 # Runtime schema validation (fine-tuned policy, renamed argument)
@@ -441,7 +473,7 @@ schema:
 
 The base model, which had never been trained on this tool, reads the new schema and calls it correctly. Fine-tuning made the model worse at the one thing the contract depends on. The typed action contract validates every call against the schema the runtime holds now (principle \ref{pri-vol3-strict-action-abi}), so the runtime catches each bad call, but the agent makes no progress. Flywheel split hygiene holds unseen tool families out of evaluation for exactly this reason.
 
-### Why fine-tuning memorizes schemas
+### Schema memorization and out-of-distribution syntax degradation
 
 In the training corpus, the tool schemas in the system prompt are identical across thousands of examples. When every file read in the data uses `read_file` with an argument named `path`, the call's tokens are predictable from the user's request alone. The cheapest way for the optimizer to reduce loss is to store the call's surface form in the weights, and the attention paths from the call back to the schema in the prompt weaken because they no longer help. The model has turned a contract, which belongs in context, into procedure in its weights, which @tbl-vol3-fine-tuning-scope says is the wrong home. @Fig-vol3-schema-memorization-attention illustrates the contrast in schematic attention weights.
 
@@ -482,6 +514,26 @@ $$\mathcal{L}_{\text{DPO}}(\theta; \pi_{\text{ref}}) = -\mathbb{E}_{(\tau_w, \ta
 
 where $\beta$ is a temperature hyperparameter controlling the strength of the implicit KL-divergence constraint relative to $\pi_{\text{ref}}$, and $\sigma(z) = (1 + e^{-z})^{-1}$ denotes the sigmoid function. In @eq-vol3-dpo-trajectory, token log-probabilities are accumulated strictly across active action and reasoning tokens ($m_t = 1$). Crucially, environment observations carry $m_t = 0$ and are omitted from the log-likelihood summations, preventing non-deterministic environment outputs from introducing spurious variance into the preference gradient. When $\pi_\theta$ increases the cumulative log-likelihood ratio margin of $\tau_w$ over $\tau_l$, the objective value approaches zero.
 
+To understand how trajectory preference optimization updates policy representations, examine the analytical gradient of @eq-vol3-dpo-trajectory with respect to parameters $\theta$:
+
+$$\nabla_\theta \mathcal{L}_{\text{DPO}} = -\beta \, \sigma\left(\hat{r}_\theta(\tau_l) - \hat{r}_\theta(\tau_w)\right) \left[ \nabla_\theta \sum_{t=1}^{|\tau_w|} \log \pi_\theta(a_t^w \mid s_t^w) - \nabla_\theta \sum_{t=1}^{|\tau_l|} \log \pi_\theta(a_t^l \mid s_t^l) \right],$$ {#eq-vol3-dpo-gradient}
+
+where $\hat{r}_\theta(\tau) = \beta \sum_{t=1}^{|\tau|} \log \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\text{ref}}(a_t \mid s_t)}$ denotes the scalar implicit trajectory reward. The gradient decomposes into a scalar weighting factor $\sigma\left(\hat{r}_\theta(\tau_l) - \hat{r}_\theta(\tau_w)\right)$ multiplied by a contrastive vector: a positive supervised update on winning actions $a_t^w$ and a negative supervised update on losing actions $a_t^l$.
+
+This analytical decomposition reveals two critical failure modes unique to multi-turn agent systems:
+
+1. **Negative Gradient Destruction and Tool Syntax Degeneration:**
+   The unconstrained negative gradient term $-\nabla_\theta \sum_t \log \pi_\theta(a_t^l \mid s_t^l)$ pushes down the probability of *every* active token generated in the losing trajectory. However, losing agent trajectories are not composed entirely of flawed actions; they frequently contain syntactically valid JSON delimiters (`{`, `"name":`, `}`), standard CLI utilities (`grep`, `find`, `cat`), and valid English reasoning. When negative gradients depress these foundational structural tokens across multiple training iterations, the policy suffers from **tool syntax degeneration**: emitting malformed JSON brackets, truncating argument closures, or hallucinating invalid CLI subcommands.
+   To prevent syntax collapse, production trajectory fine-tuning pipelines combine the preference loss with an auxiliary supervised fine-tuning (SFT) objective on winning trajectories:
+   $$\mathcal{L}_{\text{TDPO}}(\theta; \pi_{\text{ref}}) = \mathcal{L}_{\text{DPO}}(\theta; \pi_{\text{ref}}) + \gamma \mathcal{L}_{\text{SFT}}(\tau_w),$$ {#eq-vol3-dpo-joint-sft}
+   where $\gamma \in [0.1, 0.5]$ anchors the policy's language modeling representations and preserves strict tool calling syntax while optimizing preference margins.
+2. **Trajectory Length Asymmetry and Length Bias:**
+   In agent workflows, paired rollouts often exhibit severe length discrepancies. In an infinite-loop failure mode, a losing trajectory may wander aimlessly until hitting the 30-turn harness ceiling ($|\tau_l| \approx 25{,}000$ tokens), while the winning trajectory completes the repair concisely in two turns ($|\tau_w| \approx 1{,}500$ tokens). Because @eq-vol3-dpo-trajectory uses unnormalized sums, $\tau_l$ contributes nearly twenty times more terms to the loss, allowing minor fluctuations in losing token probabilities to overwhelm the gradient update.
+   Conversely, when a losing trajectory crashes immediately on turn 1 ($|\tau_l| \approx 100$ tokens) while the winning trajectory undertakes complex multi-step debugging ($|\tau_w| \approx 10{,}000$ tokens), the fact that per-token log-probabilities are negative ($\log \pi \le 0$) causes the cumulative sum to penalize the winning trajectory, inducing **length collapse** (where the policy learns to emit early termination tokens to minimize cumulative negative log-likelihood). To eliminate length distortion, loaders apply length-normalized implicit rewards:
+   $$\hat{r}_{\text{norm}}(\tau) = \frac{\beta}{|\tau|} \sum_{t=1}^{|\tau|} \log \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\text{ref}}(a_t \mid s_t)}.$$ {#eq-vol3-dpo-length-norm}
+3. **Multi-Turn Step-Level Credit Assignment:**
+   When $\tau_w$ and $\tau_l$ share an identical prefix up to turn $k$—diverging only when $\tau_l$ selects a catastrophic action while $\tau_w$ selects a correct recovery—full-trajectory DPO naively applies negative gradients to the valid actions taken during turns $1 \dots k-1$. Aligning preference pairs at the branching decision pivot $(a_k^w, a_k^l \mid s_k)$ focuses the gradient update precisely on the divergent decision boundary, eliminating credit assignment noise across shared historical prefixes.
+
 ::: {#psp-15-offline-dpo-vs-online-rlvr .callout-perspective title="The offline-online divide: Static DPO vs. dynamic RLVR"}
 Engineers designing post-training pipelines must decide when to stop optimizing offline preference pairs and when to transition to online reinforcement learning (@sec-vol3-rlvr). The two paradigms occupy opposite sides of an infrastructure and algorithmic trade-off:
 
@@ -499,7 +551,7 @@ In an offline preprocessing pass, a high-throughput inference engine evaluates $
 
 Caching reference model logits offline to NVMe reduces GPU HBM memory pressure by 50 percent during DPO training. Eliminating the 140 GB reference model weight footprint (or 16 GB for an 8B model) and its intermediate activation buffers frees accelerator memory to double the micro-batch size $B$ of the active policy $\pi_\theta$. Concurrently, avoiding reference forward passes eliminates 50 percent of the forward FLOPs per training iteration, directly accelerating post-training throughput on accelerator clusters.
 
-## Distillation {#sec-vol3-fine-tuning-distillation}
+## Policy Distillation for Autonomous Trajectories {#sec-vol3-fine-tuning-distillation}
 
 The sections so far assumed a corpus of admitted trajectories and asked how to train on it. Two practical questions come first. Where do good trajectories come from when production logs are too few or too weak, and how can a model stop paying, on every turn, for instructions it could have learned once? Both have the same answer, which is to let a more expensive configuration of a model generate the behavior and train a cheaper configuration to reproduce it.
 
@@ -519,7 +571,7 @@ Agent-trajectory distillation of this kind is a common way to build smaller agen
 
 Distillation inherits the teacher's ceiling. A student trained to imitate cannot exceed the behavior its teacher demonstrated, and it inherits the teacher's systematic errors wherever the verifiers fail to catch them. That ceiling motivates training with outcome verifiers. Before that, a distilled or fine-tuned policy must be deployed, and for agents the form of the deployed artifact matters as much as its accuracy.
 
-## Adapters for Agents {#sec-vol3-fine-tuning-peft}
+## Parameter-Efficient Fine-Tuning and Low-Rank Adaptation {#sec-vol3-fine-tuning-peft}
 
 A platform runs one agent that triages issues, another that edits code, and a third that writes database migrations. Each benefits from its own fine-tuning, and each must be rolled back independently when an update regresses. Full fine-tuning would produce three full copies of the model's weights, each a separate artifact to store, load, and serve. Parameter-efficient fine-tuning produces instead a small artifact per role on top of one shared base model, and that shape fits the way agent systems are operated.
 
@@ -604,7 +656,7 @@ A fine-tuning run ends with a set of trained weights and a validation loss. Neit
 ↩ Hermetic evaluation gyms, Wilson score intervals, and sequential release gates are established in @sec-vol3-evaluation.
 :::
 
-### Why validation loss misleads {#sec-vol3-fine-tuning-eval-decoupling}
+### Decoupling between validation loss and trajectory success {#sec-vol3-fine-tuning-eval-decoupling}
 
 Validation loss measures how well the model predicts demonstration tokens on the demonstrator's prefix. It averages over all target tokens, so near-certain predictions of JSON punctuation and boilerplate reasoning lower it as much as a correct file path does, though only the path decides whether the call works. It is also computed under teacher forcing on held-out demonstrations, which are mostly clean runs, so it says nothing about the off-path states of @sec-vol3-fine-tuning-exposure-bias where agents fail.
 
@@ -680,7 +732,7 @@ Benchmarking autonomous agents requires hermetic evaluation environments to prev
 
 : **Hermetic Evaluation Harness Architectural Components**: Component roles, isolation boundaries, and determinism mechanisms across benchmarking stages. {#tbl-vol3-evaluation-harness-components}
 
-## What Training Leaves to the Runtime {#sec-vol3-fine-tuning-synthesis}
+## Architectural Division Between Trained Policies and Runtime Governance {#sec-vol3-fine-tuning-synthesis}
 
 The pipeline is now complete, and each stage exists because of a specific way imitation can go wrong. Serialization writes each admitted trajectory in the template the model is served with, in causal order, with evidence preserved. The observation mask trains the model on what it writes and nothing else. Packing isolates trajectories in attention and position and weights them per example. On-policy data and fault injection extend the corpus to the states the policy actually reaches, with every new label admitted through the same cascade as the original data. Schema perturbation keeps the model reading contracts from context. Distillation supplies trajectories and removes procedure from the prompt, adapters package the result per role, and closed-loop evaluation decides whether it ships.
 
@@ -688,7 +740,9 @@ The result is a policy whose proposals pass the runtime's gates more often: more
 
 ### Parameter optimization and release verification pipeline
 
-The end-to-end lifecycle of trajectory collection, validation filtering, schema regularization, parameter-efficient fine-tuning, and empirical scorecard evaluation forms an end-to-end parameter optimization and release workflow over multi-turn trajectory MDPs, diagrammed in @fig-vol3-sft-synthesis-flow.
+Deploying fine-tuned agent policies into production requires synthesizing data curation, loss formulation, parameter optimization, and regression testing into a unified, reproducible release pipeline. Rather than treating supervised fine-tuning as an ad-hoc training script, a dependable systems architecture structures the lifecycle as a deterministic six-stage Directed Acyclic Graph (DAG). Raw multi-turn execution trajectories are systematically ingested, validated against strict schemas, serialized with action-targeted loss masks, and packed into dense sequence buffers. Following low-rank parameter optimization, the resulting adapter artifacts undergo sealed regression sandbox evaluations before promotion to production serving.
+
+The complete parameter optimization and release verification workflow across these six hermetic stages is diagrammed in @fig-vol3-sft-synthesis-flow.
 
 ::: {#fig-vol3-sft-synthesis-flow fig-env="figure" fig-pos="htb" fig-cap="**Trajectory Parameter Optimization and Release Verification Pipeline**: Architectural directed acyclic graph (DAG) of the six hermetic stages governing trajectory parameter optimization and release verification, spanning trajectory data preparation, distributed parameter optimization, and artifact release verification. Raw multi-turn execution trajectories undergo schema validation (Stage 1), deterministic role serialization with action-targeted loss masking (Stage 2), and dynamic sequence packing with block-diagonal attention masking (Stage 3). The packed sequence buffers feed distributed low-rank parameter optimization (Stage 4), producing immutable signed adapter manifests (Stage 5) that must clear sealed regression sandboxes (Stage 6) before promotion to production serving." fig-alt="Six-stage pipeline DAG showing Ingestion, Serialization, Dynamic Packing, Low-Rank Optimization, Artifact Packaging, and Regression Gating with verification and pass-fail promotion paths."}
 ![](images/svg/fig-vol3-sft-synthesis-flow.svg)
@@ -700,7 +754,7 @@ Fine-tuning adapts model priors to favor valid tool schemas, concise reasoning t
 
 ## Fallacies and Pitfalls {#sec-vol3-fine-tuning-fallacies}
 
-Fine-tuning errors are hard to see because the standard offline signals, falling loss and cleaner-looking samples, improve in exactly the cases where the agent gets worse. The following misconceptions recur in agent fine-tuning.
+Fine-tuning foundation models for multi-turn agentic workflows introduces subtle failure modes that confound standard deep learning intuition. In classical supervised learning, optimizing cross-entropy loss over held-out validation sets reliably tracks downstream task performance. In agentic systems, however, offline loss metrics diverge fundamentally from closed-loop trajectory competence: lower training loss frequently signals that a policy has memorized static tool schemas, overfit to demonstrator phrasing, or collapsed into passive conversational chit-chat rather than taking decisive environment actions. Designing resilient fine-tuning pipelines requires recognizing and avoiding four pervasive fallacies and pitfalls.
 
 ::: {.fallacy-pitfall}
 **Fallacy:** *Training on every token of an admitted trajectory teaches the agent more.*

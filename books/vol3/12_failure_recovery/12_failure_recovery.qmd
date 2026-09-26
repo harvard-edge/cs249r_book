@@ -97,13 +97,22 @@ The mechanics of this coordination contract are mapped in @fig-vol3-saga-flow. I
 ::: {#psp-12-cow-vs-saga .callout-perspective title="The two spheres of rollback: Sandbox copy-on-write vs. distributed Sagas"}
 Engineers frequently confuse local filesystem rollbacks with distributed failure recovery. Production agent runtimes partition state into two distinct spheres governed by fundamentally different recovery mechanisms:
 
-1. **Local Sandbox State ($A_1$ - Ephemeral Filesystems & Workspaces):** File modifications, compiled binaries, and temporary scripts created inside local container or microVM environments (@sec-vol3-sandboxes) are governed mechanically by **Copy-on-Write (CoW)** filesystem layers (such as OverlayFS `upperdir`, ZFS clones, or Btrfs snapshots). Rollback is mechanical, atomic, and instantaneous ($< 10\text{ ms}$): the host supervisor simply unmounts and discards the writable upper layer, instantly reverting the sandbox to its base snapshot with zero side effects. No backward compensation logic or semantic unwinding is needed.
+1. **Local Sandbox State ($A_1$ - Ephemeral Filesystems & Workspaces):** File modifications, compiled binaries, and temporary scripts created inside local container or microVM environments (@sec-vol3-sandboxes) are governed mechanically by **Copy-on-Write (CoW)** filesystem layers (such as OverlayFS `upperdir`, ZFS clones, or Btrfs extent reflinks). Rollback is mechanical, atomic, and instantaneous ($< 10\text{ ms}$): the host supervisor simply unmounts and discards the writable upper layer, instantly reverting the sandbox to its base snapshot with zero side effects. No backward compensation logic or semantic unwinding is needed.
 2. **Distributed External State ($A_2$ - Sovereign Network Services):** Cloud infrastructure allocations, database rows, third-party payment transactions, and enterprise ticketing updates cannot be rolled back by discarding local disk blocks. Once emitted across the network, external systems mutate immediately and expose state globally. Rollback in this sphere requires **distributed Sagas**: the supervisor must execute explicit, forward-compensating transactions ($C_i$) in reverse order, reconciling distributed state under eventual consistency.
+
+**The Hermetic Sandbox Boundary Invariant:**
+This clean bifurcation between local mechanical CoW rollback and distributed Saga compensation holds *if and only if* the host supervisor enforces strict isolation boundaries around the guest sandbox:
+
+- *Network Egress Mediation:* If an agent running bash commands inside a local container executes an outbound network mutation (such as `curl -X POST https://api.stripe.com`, `git push`, or `aws s3 cp`), it releases external distributed side effects ($A_2$) disguised as local workspace execution ($A_1$). If the turn subsequently fails, discarding the OverlayFS `upperdir` cleanly reverts local disk blocks while leaving remote infrastructure mutated, unlogged, and uncompensated. To close this leak, guest network namespaces must enforce a **default-deny egress policy** via eBPF traffic control (`tc`) filters or cgroup socket hooks. Any outbound network transmission must be trapped by the host Tool Execution Gateway, assigned a deterministic idempotency key $\kappa_i$, and logged to the WAL before traversing the physical NIC.
+- *Read-Only Persistent Mounts:* Persistent volumes or host sockets (such as `/var/run/docker.sock` or host directory bind mounts) mounted into the sandbox must be configured strictly read-only (`ro`). Any write bypassing the ephemeral CoW layer corrupts persistent state outside the sandbox, defeating mechanical rollback.
+- *Mechanical VFS Unmount vs. Semantic Inverses:* Local CoW rollback must never rely on in-guest application-level inverse commands (such as executing `rm -rf` or `git checkout .`), which are subject to in-guest permission errors, disk exhaustion, or adversarial script tampering. Rollback is executed strictly out-of-band by the host supervisor unmounting the VFS layer (`umount -l`) and purging the backing extent pool.
 :::
 
 ### Formalizing the trajectory as an open saga
 
-In classical transaction theory, Hector Garcia-Molina and Kenneth Salem (1987) defined a Saga as a long-lived transaction consisting of a sequence of relatively short sub-transactions that can be interleaved with other transactions. Applying this formalism to agentic machine learning systems, we define an agent trajectory $\mathcal{T}$ of length $n$ as an ordered sequence of discrete, forward-executing sub-transactions:
+In classical transaction theory, Hector Garcia-Molina and Kenneth Salem [@garciamolina1987sagas] defined a Saga as a long-lived transaction consisting of a sequence of relatively short sub-transactions that can be interleaved with other transactions.[^fn-saga-transaction-lineage] Applying this formalism to agentic machine learning systems, we define an agent trajectory $\mathcal{T}$ of length $n$ as an ordered sequence of discrete, forward-executing sub-transactions:
+
+[^fn-saga-transaction-lineage]: **The Saga Pattern and Long-Lived Transactions**\index{Saga pattern!historical lineage}\index{Distributed transactions!long-lived transactions}: Formulated by Hector Garcia-Molina and Kenneth Salem [@garciamolina1987sagas], a Saga coordinates long-lived distributed workflows through sequences of local transactions paired with compensating actions that semantically undo partial mutations upon failure. In agentic machine learning systems, where external tool calls mutate irreversible real-world environments across open-ended multi-turn trajectories, the Saga pattern provides a principled alternative to two-phase commit protocols that would otherwise induce severe lock starvation.
 
 $$\mathcal{T} = [T_1, T_2, \dots, T_n]$$
 
@@ -249,6 +258,33 @@ When `unwind_saga` catches an unrecoverable `FatalCompensationError`, the host s
 3. **Compensator Stack Preservation:** The supervisor freezes the remainder of the LIFO compensation stack $\mathcal{S}_{\text{comp}}$ in durable storage. Unwind of preceding steps ($C_{i-1}, \dots, C_1$) is suspended because preceding compensations may depend on the state that $C_i$ failed to release.
 4. **Out-of-Band Incident Escalation:** The quarantine event emits an asynchronous high-priority alert to the site reliability engineering (SRE) incident gateway (such as PagerDuty or Alertmanager) annotated with the cryptographic trajectory ID and orphan manifest, transitioning the trajectory to `MANUAL_ESCALATION` for human operator remediation.
 
+### The causal resource dependency DAG versus LIFO saga freezing
+
+While freezing a linear compensation stack $\mathcal{S}_{\text{comp}}$ prevents cascading errors when preceding steps depend on $C_i$, a flat LIFO freeze introduces a severe operational pathology: **head-of-line blocking and capital bleed**.
+
+Consider an autonomous deployment trajectory where sub-transaction $T_1$ provisions an accelerator cluster of 16 $\times$ NVIDIA H100 GPUs ($C_1$ = tear down GPU instances, billing at \$5.50 per minute), $T_2$ mounts an isolated scratch directory on an ephemeral host volume ($C_2$ = unmount scratch volume), and $T_3$ registers an external DNS test record with a third-party registrar ($C_3$ = delete DNS record). Suppose $T_4$ fails, triggering backward recovery. The supervisor executes $C_3$, but the external registrar API returns persistent `500 Server Error`. Under a naive LIFO policy, the supervisor halts the entire stack. Because $C_2$ and $C_1$ sit below $C_3$ on the stack, their execution is suspended indefinitely while the trajectory transitions to `MANUAL_ESCALATION`. Over a representative 45-minute incident triage window, the 16 H100 GPUs remain allocated, completely idle, and burning hundreds of dollars in stranded cloud compute—simply because an unrelated DNS record could not be removed automatically.
+
+In reality, terminating the GPU cluster ($C_1$) shares zero causal or structural dependency with the external DNS entry ($C_3$). To prevent capital bleed, production runtimes organize compensating transactions as a **Causal Resource Dependency DAG** ($\mathcal{G}_{\text{comp}}$):
+
+$$\mathcal{G}_{\text{comp}} = \left( \mathcal{V}_{\text{comp}},\, \mathcal{E}_{\text{comp}} \right)$$
+
+where vertices $\mathcal{V}_{\text{comp}} = \{C_1, \dots, C_k\}$ represent registered compensators, and directed edges $(C_j, C_k) \in \mathcal{E}_{\text{comp}}$ represent strict resource dependencies: $C_k$ can execute if and only if $C_j$ has successfully settled (for example, client database connection pools must drain before the database proxy instance can be terminated).
+
+When a compensator $C_i$ throws an unrecoverable `FatalCompensationError`, the supervisor performs a **topological cut** across $\mathcal{G}_{\text{comp}}$:
+
+1. **Transitive Forward Dependency Closure:** The supervisor computes the transitive closure of all sub-transactions that causally depend on the quarantined resource:
+   $$\mathcal{V}_{\text{frozen}} = \left\{ C_k \in \mathcal{V}_{\text{comp}} \mid C_i \xrightarrow{\quad*\quad} C_k \text{ in } \mathcal{G}_{\text{comp}} \right\} \cup \{C_i\}$$
+   Vertices in $\mathcal{V}_{\text{frozen}}$ are committed to the Orphan Quarantine Ledger and frozen for manual human remediation.
+2. **Asynchronous Parallel Unwind of Independent Resources:** All structurally independent compensators:
+   $$\mathcal{V}_{\text{indep}} = \mathcal{V}_{\text{comp}} \setminus \mathcal{V}_{\text{frozen}}$$
+   continue unwinding asynchronously in parallel. The runtime dispatches $C_1$ and $C_2$ immediately, releasing the GPU cluster and unmounting the volume. Capital bleed is arrested in milliseconds, confining the blast radius of human escalation strictly to the orphaned DNS record.
+3. **Dirty-Read Taint Broadcast:** Because Sagas operate at isolation level zero ($I=0$), external systems, microservices, or downstream agent peers may have observed and acted upon intermediate state emitted by $T_i$ prior to its failure. The supervisor broadcasts a cryptographically signed taint notification:
+   $$\text{Taint}(\tau, T_i) = \left\langle \tau,\, T_i,\, \text{ResourceURI},\, \text{digest}(S_{\text{tainted}}),\, t_{\text{panic}} \right\rangle$$
+   to downstream event brokers, alerting dependent services that the uncompensated state is invalid and quarantined.
+4. **Administrative Reconciliation Lifecycle:** Each quarantined resource entry follows an explicit four-state reconciliation lifecycle:
+   $$\text{QUARANTINED} \longrightarrow \text{ESCALATED} \longrightarrow \text{REMEDIATED} \longrightarrow \text{SETTLED}$$
+   When on-call engineers resolve the dangling dependency out-of-band, they submit an administrative reconciliation token signed with their operator credentials. The supervisor validates the token, updates the entry to `SETTLED`, and allows any downstream dependent vertices in $\mathcal{V}_{\text{frozen}}$ to complete their remaining teardown sequence cleanly.
+
 ::: {.column-margin .margin-pointer}
 ↩ Write-ahead logging, deterministic checkpoints, and crash-state recovery are established in @sec-vol3-durable-execution.
 :::
@@ -327,6 +363,8 @@ Before analyzing forward self-healing policies and anti-spin invariants, verify 
 - [ ] **Compensating semantics**: How does a backward compensator $C_i$ differ from a database rollback when intermediate side effects have already been observed externally?
 - [ ] **Compensation stack**: Why must compensating actions be logged to durable storage in reverse topological order as forward steps complete?
 - [ ] **Sunk cost trade-off**: Under what failure conditions is unwinding an entire saga stack economically and computationally wasteful compared to localized forward repair?
+- [ ] **Compensation DAG**: Why does freezing a linear LIFO saga stack during a compensator failure cause head-of-line blocking and capital bleed, and how does a topological cut in a resource dependency DAG ($\mathcal{G}_{\text{comp}}$) prevent this?
+- [ ] **Hermetic sandbox invariant**: Under what network and storage isolation conditions can a local sandbox CoW layer discard safely substitute for distributed saga compensation?
 :::
 
 ## Forward Recovery {#sec-vol3-sagas-forward-vs-backward}
@@ -409,7 +447,7 @@ To prevent these bursts from destabilizing serving infrastructure, the runtime p
 
 The central engineering challenge is therefore constructing an automated supervisory harness that selects the appropriate recovery strategy based on observable runtime parameters.
 
-### Dynamic arbitration: The recovery policy function
+### Dynamic arbitration and the recovery policy function
 
 A resilient runtime does not treat recovery strategy selection as a static configuration switch. Instead, it evaluates a recovery policy function $\mathcal{D}$ immediately upon intercepting an execution fault. The policy arbitrates between three terminal directives: attempting forward repair, executing backward compensation, or halting execution for operator intervention.
 
@@ -546,7 +584,7 @@ class RepairVsUnwind:
 ⇄ Forward repair attempts low-cost local prompt fixes; backward compensation guarantees distributed cleanup when repair stalls.
 :::
 
-### The anti-spin invariant: Bounding forward repair trajectories
+### Anti-spin invariants for bounded forward repair trajectories
 
 While forward recovery yields dramatic efficiency improvements on benign syntax and configuration errors, it exposes the system to a catastrophic failure mode unique to autoregressive foundation models: *repair spinning*. When a model attempts to repair an error without fundamentally understanding the underlying environmental state, it frequently engages in hallucinated patch cycling. The model modifies superficial code syntax, receives a secondary error, modifies a different irrelevant parameter, and gradually drifts away from the original goal while consuming tokens and API call limits.
 
@@ -554,7 +592,7 @@ While forward recovery yields dramatic efficiency improvements on benign syntax 
 # Observable Trace of an Agent Repair Spin Loop (Pytest Validation Failure)
 Iteration 1: ImportError: cannot import name 'AsyncSession' from 'sqlalchemy.orm'
 Agent Patch 1: from sqlalchemy.ext.asyncio import AsyncSession  # Fixed import
-Iteration 2: AttributeError: 'AsyncSession' object has no attribute 'sync_engine'
+Iteration 2: AttributeError — 'AsyncSession' object has no attribute 'sync_engine'
 Agent Patch 2: engine = session.sync_engine if hasattr(session, 'sync_engine') else None
 Iteration 3: TypeError: NoneType object cannot be interpreted as an integer
 Agent Patch 3: from sqlalchemy.orm import AsyncSession  # Cyclical regression
@@ -626,11 +664,11 @@ Once executed, a pivot action commits an unalterable mutation to an external sta
 
 The operational contracts, side-effect characteristics, and recovery protocols governing these three tiers are synthesized in @tbl-vol3-action-invertibility.
 
-| Reversibility Tier                  | Invertibility Contract                                                  | Canonical Tool Invocations                                        | Observable Residual                               | Runtime Recovery Strategy                                               |
-|:------------------------------------|:------------------------------------------------------------------------|:------------------------------------------------------------------|:--------------------------------------------------|:------------------------------------------------------------------------|
-| **Class I: Invertible**             | $T_i^{-1} \circ T_i = I$                                                | File staging, git checkout, sandboxed memory allocation           | Zero (state physically erased)                    | Exact backward rollback via direct inverse execution                    |
-| **Class II: Compensable**           | $\mathcal{V}_{\text{sem}}(C_i \circ T_i) = \mathcal{V}_{\text{sem}}(I)$ | Stripe charge/refund, cloud VM provisioning, soft database delete | Immutable audit trace, transient resource billing | Semantic backward compensation via registered Saga handlers             |
-| **Class III: Pivot / Irreversible** | $C_i = \emptyset$                                                       | External email delivery, production DNS flip, wire transfer       | Permanent effect observed outside the runtime     | Monotonic forward progress, deterministic retry, or operator escalation |
+| Reversibility Tier                  | Invertibility Contract                                                  | Canonical Tool Invocations                                                | Observable Residual                               | Runtime Recovery Strategy                                               |
+|:------------------------------------|:------------------------------------------------------------------------|:--------------------------------------------------------------------------|:--------------------------------------------------|:------------------------------------------------------------------------|
+| **Class I: Invertible**             | $T_i^{-1} \circ T_i = I$                                                | Ephemeral workspace write, scratch CoW clone, sandboxed memory allocation | Zero (state physically erased)                    | Exact backward rollback via host VFS unmount / CoW layer discard        |
+| **Class II: Compensable**           | $\mathcal{V}_{\text{sem}}(C_i \circ T_i) = \mathcal{V}_{\text{sem}}(I)$ | Stripe charge/refund, cloud VM provisioning, soft database delete         | Immutable audit trace, transient resource billing | Semantic backward compensation via registered Saga handlers             |
+| **Class III: Pivot / Irreversible** | $C_i = \emptyset$                                                       | External email delivery, production DNS flip, wire transfer               | Permanent effect observed outside the runtime     | Monotonic forward progress, deterministic retry, or operator escalation |
 
 : **The Action Invertibility Matrix**: Operational contracts, side-effect characteristics, and recovery protocols governing invertible, compensable, and pivot tools in agentic runtimes. {#tbl-vol3-action-invertibility}
 
@@ -681,6 +719,32 @@ Yet stochastic foundation models possess no innate awareness of this physical bo
 
 **Systems insight**: Reversibility is a property of the environment, not the prompt. High-reliability agent runtimes must enforce the Pivot Action Boundary through structural supervisor compilation: topologically sorting proposed action DAGs so that all invertible and compensable operations execute first, isolating the single irreversible pivot step to the absolute point of terminal commitment.
 :::
+
+### The two-phase pivot settlement protocol
+
+While the pivot action boundary establishes a strict ordering invariant—compensable preparation preceding irreversible execution—the physical dispatch of $T_{\text{pivot}}$ introduces a severe distributed systems hazard: **the network settlement cliff**.
+
+Consider an autonomous deployment agent executing a pivot transaction: issuing an HTTP POST to an external sovereign banking API to settle a wire transfer, or dispatching an API call to flip a public production DNS record. Suppose the client socket disconnects or encounters an `ETIMEDOUT` / `504 Gateway Timeout` after the packet has crossed the network interface:
+
+- **Backward compensation is physically impossible:** Because $T_{\text{pivot}}$ is a Class III action, no inverse operation exists ($C_{\text{pivot}} = \emptyset$).
+- **Blind retry is catastrophic:** If the remote payment or DNS gateway processed the request before the network partition, re-sending the call causes double execution—transferring the funds a second time or corrupting the deployment.
+- **Blind abort is fatal:** Assuming the operation failed and abandoning it strands an active, unmonitored production change or financial transaction in an unknown state.
+
+To guarantee fault tolerance at the irreversible threshold, the runtime executes the **Two-Phase Pivot Settlement Protocol**:
+
+1. **Phase 1 (Durable Outbox Staging):**
+   Prior to dispatching any network packets across the physical interface, the supervisor stages the pivot transaction in a durable, non-volatile Outbox table within the local write-ahead log:
+   $$e_{\text{outbox}} = \left\langle \tau,\, T_{\text{pivot}},\, \kappa_{\text{pivot}},\, \theta_{\text{pivot}},\, \text{STATUS\_STAGED},\, t_{\text{stage}} \right\rangle$$
+   The record carries a deterministic, cryptographic idempotency key:
+   $$\kappa_{\text{pivot}} = \text{HMAC-SHA256}\left(K_{\text{secret}},\, \tau \mathbin{\Vert} k_{\text{pivot}} \mathbin{\Vert} \text{tool\_call\_id}\right)$$
+   The supervisor forces an explicit `fdatasync()` storage barrier, transitioning the trajectory state to `STATUS_PIVOT_STAGED`. If power fails at this instant, reboot recovery finds the staged outbox record and knows the call was never transmitted.
+2. **Phase 2 (Idempotent Actuation and the Reconciliation Probe):**
+   The supervisor transmits $T_{\text{pivot}}$ over the network, embedding $\kappa_{\text{pivot}}$ in external transport headers (`Idempotency-Key` or `ClientToken`).
+   - *Case 1 (Deterministic ACK):* The external endpoint returns `200 OK`. The supervisor commits an outbox transition record to `STATUS_COMMITTED` in the WAL and advances to the finalization phase ($i > k$).
+   - *Case 2 (Network Disconnect or Ambiguous Timeout):* If the connection severs or times out, the supervisor enters a dedicated `STATUS_PIVOT_RECONCILING` state. Both backward rollback and naive re-dispatch are strictly prohibited. The supervisor launches an out-of-band **Reconciliation Probe**, querying the external service's authoritative status endpoint using $\kappa_{\text{pivot}}$:
+     - If the probe confirms the mutation committed externally, the supervisor transitions the outbox entry to `STATUS_COMMITTED` and continues forward progression.
+     - If the probe confirms the request was never received or failed prior to mutation, the supervisor safely re-transmits the staged payload using the identical key $\kappa_{\text{pivot}}$.
+     - If the probe remains indeterminate after a bounded deadline $T_{\text{probe\_max}}$ (e.g., persistent remote cloud provider outage), the supervisor initiates an immediate **Agent Control Block (ACB) Freeze**, escalating the staged outbox record and cryptographic key $\kappa_{\text{pivot}}$ to human engineering escrow.
 
 ### Terminal escalation
 
@@ -878,7 +942,7 @@ class LoopCost:
 
 **Result**: Stopping the loop at the first repeated state is about `{python} LoopCost.ratio_mult_str` cheaper than letting the ceiling stop it.
 
-**Systems insight**: The cost of a loop grows with the square of its length, because every turn re-sends a context that the loop keeps enlarging. Prefix caching lowers the price per re-sent token, but not the turns or the minutes. A ceiling bounds the worst case, and only a progress signal keeps the typical loop short. What that does to the cost of each resolved task across a fleet is the goodput arithmetic of @sec-vol3-intro-macro-vs-micro-efficiency. The detector's contribution is to move the early stop from an arbitrary turn to the first repeated state.
+**Systems insight**: The cost of a loop grows with the square of its length, because every turn re-sends a context that the loop keeps enlarging. Prefix caching lowers the price per re-sent token, but not the turns or the minutes. A ceiling bounds the worst case, and only a progress signal keeps the typical loop short. What that does to the cost of each resolved task across a fleet is the goodput arithmetic of @sec-vol3-intro-fallacies. The detector's contribution is to move the early stop from an arbitrary turn to the first repeated state.
 
 :::
 

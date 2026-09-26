@@ -102,6 +102,19 @@ Rather than relying on the foundation model to recognize and resist this instruc
 5. **Ephemeral Copy-on-Write Overlay Discard (Part III & IV):** Any local filesystem modifications, script injections, or environment variable tamperings executed within the sandbox touch only an ephemeral Copy-on-Write upperdir (@sec-vol3-sandboxes). Upon task abort or step boundary, the host runtime discards the overlay in milliseconds, guaranteeing that host state and base disk images remain immutable.
 6. **Sealed Verification Oracle (Part IV & VII):** Finally, if a compromised agent emits a deceptive candidate deliverable claiming that the incident is resolved, the report is treated as untrusted text. The host-level verification oracle evaluates out-of-band state assertions from outside the guest VM (@sec-vol3-evaluation). Because database SLA metrics and table integrity checks fail, the oracle returns exit code 1, the trajectory is aborted, and the malicious trace is isolated in the Durable Orphan Quarantine ledger (@sec-vol3-failure-recovery).
 
+::: {#lst-vol3-adversarial-telemetry lst-cap="**SRE Telemetry Trace: Defense-in-Depth Under Attack**: Monospace audit event log capturing the deterministic interception and containment of an indirect prompt injection across all six runtime barriers."}
+```text
+2026-09-26T04:12:08.102Z [INGEST:TAINT]      Span [142, 198] marked UNTRUSTED (src: db://pg_stat_activity#L42, sha: a8f9c2)
+2026-09-26T04:12:08.114Z [CONTEXT:DELIM]     Enclosed untrusted span in <untrusted_observation id="obs_42">; escaped markers
+2026-09-26T04:12:09.451Z [DECODE:GPU_PDA]    Token 'curl' rejected (logit -> -inf); DFA grammar clamped to JSON schema
+2026-09-26T04:12:10.024Z [ESCROW:MACAROON]   Action 'db_drop_table' REJECTED: lease macaroon allows SELECT on replicas only
+2026-09-26T04:12:10.038Z [SANDBOX:SECCOMP]   Syscall connect(AF_INET, 198.51.100.1:53) -> EPERM (bpf_deny_egress in tap0)
+2026-09-26T04:12:10.052Z [STORAGE:OVERLAY]   Task aborted; ephemeral upperdir 'snap_984' unmounted and purged in 4.2ms
+2026-09-26T04:12:10.065Z [VERIFIER:ORACLE]   Assertion 'p99_query_latency <= 50ms' FAILED (actual: 1420ms); exit code 1
+2026-09-26T04:12:10.071Z [HARNESS:CIRCUIT]   Circuit breaker TRIP: trajectory aborted -> routed to DurableOrphanQuarantine
+```
+:::
+
 Both the nominal incident remediation and the adversarial defense walkthrough illustrate that agency is an architectural property of runtime boundaries, not the neural model. @Tbl-vol3-capstone-owners condenses these transitions into formal subsystem owners and audit records.
 
 | **Transition**                   | **Owner**                                        | **Record it leaves**                                    |
@@ -561,6 +574,29 @@ While @tbl-vol3-seams captures the principal cross-subsystem failure modes, rigo
 
 : **The Stochastic Computer master seam invariant matrix**: Architectural contracts, boundary invariants, and failure interception guarantees across all six core layers. {#tbl-vol3-master-seam-invariants tbl-colwidths="[20,28,26,26]"}
 
+To convert these tabular invariants into mathematically verifiable systems specifications, the Stochastic Computer formalizes the master seams as state-transition contracts expressed via Hoare logic ($\langle P \rangle \, \mathbf{Operation} \, \langle Q \rangle$):
+
+1. **Harness $\to$ Sandbox Barrier (Execution Containment):**
+   $$\langle \mathcal{J}_t \in \text{WAL}_{\text{synced}} \land \text{cap}(a_t) \sqsubseteq \rho_{\text{task}} \rangle \; \mathbf{Dispatch}(a_t) \; \langle \text{exec}(a_t) \subseteq \text{MicroVM}_{\text{CoW}} \land \Delta S_{\text{host}} = \emptyset \rangle$$ {#eq-vol3-hoare-sandbox}
+   *Precondition:* Proposed action $a_t$ is durably flushed to the Write-Ahead Log on non-volatile media, and its requested privilege is a monotonic attenuation of the active task capability lease ($\text{cap}(a_t) \sqsubseteq \rho_{\text{task}}$).
+   *Postcondition:* Tool execution is strictly confined to an ephemeral Copy-on-Write guest microVM, guaranteeing that host operating system state undergoes zero mutation ($\Delta S_{\text{host}} = \emptyset$).
+2. **Sandbox $\to$ Context / Memory Boundary (State Normalization):**
+   $$\langle \text{mutated}(\text{path}) \rangle \; \mathbf{Normalize}(o_{t+1}) \; \langle \mathcal{P}(o_{t+1}).\tau_{\text{trust}} = \text{TAINTED} \land \text{RadixEvict}(\mathcal{H}_{\text{prefix}}) \rangle$$ {#eq-vol3-hoare-memory}
+   *Precondition:* A sandbox operation mutates a filesystem path or receives data over an external network socket.
+   *Postcondition:* The returned observation $o_{t+1}$ is assigned an explicit taint descriptor in the provenance ledger $\mathcal{P}$, and stale derived KV prefix pages are evicted from the serving engine's Radix tree.
+3. **Harness $\to$ Verifier Seam (Unilateral Certification):**
+   $$\langle \tau \in \text{Completed} \rangle \; \mathbf{Verify}(\tau) \; \langle \bigwedge_{j=1}^M v_j(\text{Env}) = 1 \land \text{SelfReport}(\text{model}) = \bot \rangle$$ {#eq-vol3-hoare-verifier}
+   *Precondition:* The trajectory finishes execution and emits a candidate completion claim.
+   *Postcondition:* Completion is certified if and only if all $M$ external, deterministic verification predicates evaluate to true on the environment ($v_j(\text{Env}) = 1$), while any subjective completion self-reports from the model are treated as completely uninformative ($\bot$).
+4. **Coordination $\to$ Mainline Seam (Branch Convergence):**
+   $$\langle C_i \in \text{Worktree} \land \text{Tests}(C_i) = \text{PASS} \rangle \; \mathbf{Commit} \; \langle (\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} = \emptyset \lor \text{AST\_Disjoint}(C_i, C_{\text{head}})) \land C_{\text{head}} \leftarrow C_{\text{new}} \rangle$$ {#eq-vol3-hoare-commit}
+   *Precondition:* Candidate commit $C_i$ was developed in an isolated worktree and passed local hermetic verification.
+   *Postcondition:* Mainline advances if and only if the worker's write set is disjoint from intervening merges at path or AST level.
+5. **Fleet $\to$ Model Engine Seam (Prefix Cache Isolation & Allocation):**
+   $$\langle x_t \in \mathcal{T}_{\text{prompt}} \rangle \; \mathbf{Prefill} \; \langle \text{pos}[t] = t - c_k \land \text{RadixLookup}(\text{Prefix}) \to \text{HBM}_{\text{hit}} \rangle$$ {#eq-vol3-hoare-prefill}
+   *Precondition:* Prompt tokens $x_t$ arrive for batch prefill.
+   *Postcondition:* Rotary position embeddings are partitioned at trajectory boundaries ($t - c_k$), and static shared prefixes are bound to deduplicated physical KV blocks in accelerator HBM without cross-sequence leakage.
+
 ### Provenance tracking {#sec-vol3-memory-provenance-grounding}
 
 A core vulnerability of autoregressive models is their inability to discern semantic authority from symbolic layout alone. Once external data, whether from a trusted system contract, an authoritative source file, an unverified user comment, or an adversarial web payload, is parsed by Byte-Pair Encoding into a linear sequence of token IDs, all tokens enter the transformer's self-attention matrix on mathematically equal terms. The attention mechanism computes pairwise scaled dot products indiscriminately across the prompt. If a retrieved web snippet contains an adversarial prompt-injection string, the model cannot distinguish between the legitimate system prompt instructions and the embedded malicious payload without out-of-band architectural mediation.
@@ -852,7 +888,11 @@ As shown in @fig-vol3-intervention-ladder-flowchart, the decision architecture s
 
 ### The six tiers of system intervention
 
-The intervention ladder organizes architectural adaptations into six distinct rungs, each characterized by its intervention locus, operational cost profile, and failure-surface radius. Moving up the ladder shifts the point of control from transient runtime state toward durable artifact definitions, compiled weights, and distributed process topologies (\ref{dfn-intervention-hierarchy}).
+When an autonomous agent system fails to satisfy its operational contract, engineers face an immediate diagnostic dilemma: at which layer of the architecture should remediation occur? A team lacking systems discipline frequently defaults to the most expensive, brittle interventions—retraining model checkpoints or deploying multi-agent swarms—to resolve failures that could be eliminated by correcting a JSON schema or tightening a prompt constraint. Because altering neural weights incurs substantial compute capital, introduces regression risks across unrelated capabilities, and demands extensive offline evaluation, remediation must follow a disciplined, cost-ordered escalation protocol.
+
+The intervention ladder formalizes this principle by organizing architectural adaptations into six distinct rungs, each characterized by its intervention locus, capital investment profile, latency impact, and failure-surface radius. Moving up the ladder shifts the point of control from transient runtime context toward durable artifact definitions, compiled model weights, and distributed process topologies (\ref{dfn-intervention-hierarchy}).
+
+Crucially, these six rungs correspond directly to the six-tier architecture of the Stochastic Computer established in @sec-vol3-intro-stochastic-computer: Level 1 (Context) optimizes the **Memory Tier** (Layer 2); Level 2 (Tools) hardens the **I/O Tier** (Layer 3); Level 3 (Guards & Harness) reinforces the **OS Runtime Tier** (Layer 4); Levels 4 and 5 (SFT and RLVR) invoke the **Compiler Tier** (Layer 5) to compile execution traces into parameter weights; and Level 6 (Multi-Agent) scales across the **Network Tier** (Layer 6) to coordinate distributed fleets. By aligning remediation with the physical stack, the engineer ensures that interventions are applied at the exact tier possessing the lowest operational blast radius and highest reversibility.
 
 ::: {#dfn-intervention-hierarchy .callout-definition title="Systems intervention hierarchy"}
 
@@ -1298,6 +1338,15 @@ Furthermore, state modifications spanning multiple microservices cannot be execu
 
 Finally, the architecture establishes formal *operational escalation paths*. When a candidate action's estimated uncertainty exceeds a safety boundary, or when a tool invocation involves an irreversible physical effect (such as deleting durable backups or dispatching public communications), the supervisor must not guess. Instead, the runtime suspends the execution thread, writes its entire deliberative context and state snapshot to durable storage, and elevates the action to an asynchronous Human-in-the-Loop (HITL) approval queue. The human operator is presented with the explicit claim, the model's causal justification, and the exact deterministic diff proposed. Only upon cryptographic confirmation by an authorized human principal does the supervisor release the action from escrow and commit the state transition.
 
+### Closed-loop feedback stability invariant {#sec-vol3-feedback-stability}
+
+When verified trajectories from live production are fed back into offline curation, Supervised Fine-Tuning (SFT), and Reinforcement Learning with Verifiable Rewards (RLVR), the runtime transitions from an open-loop executor into a dynamical feedback system. Without rigorous feedback dampening, this self-improvement loop suffers from catastrophic distribution collapse:
+
+1. **Verifier Separation Principle:** A policy optimized against a static reward verifier eventually games its heuristic loopholes (Goodhart's Law). To ensure dynamical stability, the verification suite must be strictly partitioned into training and evaluation sets:
+   $$\mathcal{V}_{\text{train}} \subset \mathcal{V}_{\text{eval}}, \qquad \mathcal{V}_{\text{holdout}} = \mathcal{V}_{\text{eval}} \setminus \mathcal{V}_{\text{train}} \neq \emptyset.$$ {#eq-vol3-verifier-separation}
+   Candidate model checkpoints are promoted to production canary rings only if they achieve non-inferiority on the adversarial holdout verifiers $\mathcal{V}_{\text{holdout}}$, preventing reward hacking from corrupting model weights.
+2. **Prefix Stability Guarantee:** Fine-tuning across iterations shifts token generation priors and prompt structures. To prevent continuous fine-tuning from fragmenting accelerator memory, trajectory compilation enforces canonical prefix layout invariants: system prompt schemas, static tool declarations, and context anchors must remain byte-identical across model checkpoints, guaranteeing that upgraded models retain $>90\%$ prefix cache hit rates on serving clusters.
+
 As we reflect on the capabilities of the agentic system, what timeless software engineering principles govern what AI can and cannot solve? The architecture of safety cases, mechanical verifiers, and sandboxed runtimes underscores a profound reality: automating the generation of code and actions does not eliminate the intellectual burden of software engineering. To understand the fundamental limits of agentic delegation, we must return to Frederick Brooks’ classic distinction between accidental and essential complexity.
 
 ::: {#chk-19-safety-cases-and-blast-radius .callout-checkpoint title="Evaluating empirical safety cases and blast-radius containment"}
@@ -1622,7 +1671,7 @@ class CreditSearch:
 
 When a long trajectory fails at its final check, finding the step that caused the failure is an inverse problem. The log records one path, but the question of which different action at which step would have succeeded ranges over every branch the agent did not take. With an illustrative four candidate actions per step and a failure detected only at the end of a fifty-step task, that space holds `{python} CreditSearch.full_paths_math` paths, far beyond any replay budget. Intermediate checks change the arithmetic. A check every five steps confines the failure to one window of `{python} CreditSearch.window_paths_math` alternatives, which at about `{python} CreditSearch.t_check_str` per replayed check is roughly twenty minutes of search. Replay and counterfactual branching make that localized search practical after the fact, provided the steps inside the window touched only state the runtime can restore. Assigning credit per turn during multi-turn reinforcement learning is harder, because the signal must be available at training scale rather than one postmortem at a time.
 
-### The actuation threshold: Crossing into physical embodiment {#sec-vol3-frontiers-embodied-handoff}
+### The actuation threshold and embodied physical handoffs {#sec-vol3-frontiers-embodied-handoff}
 
 When an agent's action space transitions from mutating digital bits to actuating physical matter, the foundational systems contract changes completely. The luxury of the isolated sandbox vanishes. In physical environments—whether an autonomous delivery drone, a robotic surgical arm, or a robotic workcell in an advanced semiconductor fabrication facility—actions are physically situated, continuously coupled, and energetically irreversible.
 
@@ -1712,7 +1761,9 @@ The architectural mitigation requires constructing multi-tier empirical safety c
 
 The emergence of autonomous coding and operations agents has revived the recurring historical claim that higher levels of software abstraction render human engineers obsolete. In this narrative, natural language becomes the ultimate specification language: human stakeholders describe requirements to an autonomous agent, and the agent synthesizes, tests, and deploys the entire software artifact without human intervention.
 
-This fallacy conflates *accidental complexity* with *essential complexity*, a foundational distinction articulated by Fred Brooks. Accidental complexity represents the operational friction of expressing conceptual designs in physical computing environments: memorizing programming language syntax, configuring build toolchains, resolving dependency conflicts, writing repetitive boilerplate interfaces, and mechanically refactoring method signatures. Autonomous agents excel at compressing accidental complexity because these operations map onto high-density statistical correlations in their pretraining distributions.
+This fallacy conflates *accidental complexity* with *essential complexity*, a foundational distinction articulated by Fred Brooks.[^fn-brooks-essential-complexity] Accidental complexity represents the operational friction of expressing conceptual designs in physical computing environments: memorizing programming language syntax, configuring build toolchains, resolving dependency conflicts, writing repetitive boilerplate interfaces, and mechanically refactoring method signatures. Autonomous agents excel at compressing accidental complexity because these operations map onto high-density statistical correlations in their pretraining distributions.
+
+[^fn-brooks-essential-complexity]: **Essential vs. Accidental Complexity in Software Systems**\index{Brooks, Fred!essential vs accidental complexity}\index{Complexity!accidental vs essential}: In his classic 1987 essay *No Silver Bullet: Essence and Accidents of Software Engineering*, Frederick P. Brooks distinguishes the essential complexity inherent in conceptual software specifications from the accidental complexity of coding syntax, compilation tools, and machine representation [@brooks1987no]. While stochastic foundation models dramatically compress accidental realization costs, the essential tasks of specifying invariants, bounding fault domains, and validating operational safety remain irreducibly human systems challenges.
 
 Essential complexity, conversely, comprises the fundamental intellectual labor of software engineering: formulating domain abstractions, defining unambiguous system boundaries, resolving conflicting business requirements, choosing consistency models across distributed state, and establishing formal invariants that guarantee correctness under failure. Autonomous agents possess neither domain accountability nor intrinsic understanding of business trade-offs. When human engineers abdicate architectural oversight, an agent tasked with feature implementation optimizes locally against whatever narrow acceptance criteria it can observe. To make a failing integration test pass, the agent will silently bypass security middleware, duplicate stateful components across service boundaries, or hardcode environment-specific assumptions into shared libraries. The resulting codebase suffers from rapid architectural rot: while individual units pass localized checks, the overall system becomes structurally incoherent, unmaintainable, and fragile.
 

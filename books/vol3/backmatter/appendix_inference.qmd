@@ -19,7 +19,9 @@ Start from the agent-level question in @tbl-appdx-inference-lookup and jump to t
 
 : **Question-to-Derivation Lookup**: Agent-level questions and the sections that derive their answers. {#tbl-appdx-inference-lookup tbl-colwidths="[42,26,32]"}
 
-## Why Output Costs More Than Input {#sec-vol3-appendix-inference-roofline}
+## Cost Asymmetry Between Input Prefill and Output Generation {#sec-vol3-appendix-inference-roofline}
+
+Serving foundation models within agentic runtime loops exposes a fundamental operational asymmetry: processing input prompt context and generating autoregressive output tokens incur vastly different hardware resource constraints. While prompt prefill parallelizes efficiently across accelerator tensor cores as a compute-bound matrix multiplication, sequential token decoding executes as a memory-bandwidth-bound vector-matrix operation. Quantifying this disparity provides the mathematical foundation for agent context budgeting, speculative acceleration, and cluster provisioning.
 
 ```{python}
 #| label: calc-vol3-appendix-inference-serving-ref
@@ -183,7 +185,7 @@ When a trajectory resumes after a tool wait, its new observation must be prefill
 
 Three pieces of per-token work sit inside every decode step besides the forward pass: turning logits into a token, applying any grammar mask, and, when speculative decoding is used, checking drafted tokens. Each is cheap only if it stays beside the sampler. This section sizes them.
 
-### Where sampling runs
+### Architectural placement of token sampling logic
 
 At each step the model produces one logit per vocabulary entry. With a vocabulary of $|\mathcal{V}| = 128{,}000$ entries stored in 16-bit precision, one logit vector is
 
@@ -264,6 +266,8 @@ $$\mathbb{E}[\text{waste}] \approx \frac{B_s - 1}{2} \cdot m_{\text{token}}$$
 per trajectory, a few kilobytes to a few megabytes regardless of context length. Blocks can also be shared, which lets forked branches and trajectories with a common prefix hold one copy of it (@sec-vol3-kvcache-pagedattention).
 
 ## Queueing for Trajectories {#sec-vol3-appendix-inference-queueing}
+
+When scaling autonomous agent workloads across shared cluster infrastructure, capacity planning cannot rely on static peak-provisioning assumptions. Unlike conversational chatbot traffic where requests arrive as isolated queries and terminate promptly, agentic tasks unfold over extended multi-turn horizons characterized by bursty actuation, variable generation lengths, and prolonged idle intervals while awaiting tool execution. Modeling these dynamics requires applying classical queueing theory and Little's law to capture the steep non-linear growth in queueing latency as cluster utilization approaches saturation.
 
 ```{python}
 #| label: calc-vol3-appendix-inference-trajectory-queue
@@ -362,7 +366,7 @@ A trajectory of $H$ turns spends each turn in a model call and then in a tool, s
 
 $$W_{\text{traj}} = \sum_{k=1}^{H} \left( T_{\text{model}}^{(k)} + T_{\text{tool}}^{(k)} \right)$$
 
-the duration accounting of @sec-vol3-intro-duration-accounting without the approval and runtime terms. As a worked case, let trajectories start at `{python} TrajectoryQueue.arrival_str` per second, each running `{python} TrajectoryQueue.turns_str` turns of `{python} TrajectoryQueue.t_model_str` s of model time and `{python} TrajectoryQueue.t_tool_str` s of tool time. Each lives `{python} TrajectoryQueue.w_traj_str` s, about `{python} TrajectoryQueue.w_traj_min_str` minutes, so @eq-appdx-littles-law gives `{python} TrajectoryQueue.live_str` live trajectories. Only `{python} TrajectoryQueue.model_share_str` percent of each trajectory's time is spent in a model call, so on average `{python} TrajectoryQueue.in_call_str` of them are calling the model at any moment.
+the duration accounting of @sec-vol3-intro-temporal-stretching without the approval and runtime terms. As a worked case, let trajectories start at `{python} TrajectoryQueue.arrival_str` per second, each running `{python} TrajectoryQueue.turns_str` turns of `{python} TrajectoryQueue.t_model_str` s of model time and `{python} TrajectoryQueue.t_tool_str` s of tool time. Each lives `{python} TrajectoryQueue.w_traj_str` s, about `{python} TrajectoryQueue.w_traj_min_str` minutes, so @eq-appdx-littles-law gives `{python} TrajectoryQueue.live_str` live trajectories. Only `{python} TrajectoryQueue.model_share_str` percent of each trajectory's time is spent in a model call, so on average `{python} TrajectoryQueue.in_call_str` of them are calling the model at any moment.
 
 The gap between those two numbers is the cost of holding state through tool waits. If every live trajectory keeps a `{python} ServingRef.s_agent_str`-token context resident, the attention state totals about `{python} TrajectoryQueue.resident_val_str` TB, about `{python} TrajectoryQueue.nodes_resident_str` nodes' worth of the reference pool of @sec-vol3-appendix-inference-assumptions. If only the trajectories in a model call hold it, the same work needs about `{python} TrajectoryQueue.nodes_in_call_str` nodes' worth, at the price of re-prefilling or reloading each context when its trajectory returns. That trade is the retain, evict, recompute, or offload decision of @sec-vol3-kvcache-swapping, and the same product of rate and lifetime sizes harness workers, sandbox leases, and rate-limit headroom (@sec-vol3-agent-economics-capacity, @sec-vol3-sandboxes-pooling).
 
@@ -374,7 +378,7 @@ $$W_q \approx \frac{c_a^2 + c_s^2}{2} \cdot \frac{\rho}{1 - \rho} \cdot \mathbb{
 
 The first factor is the workload's variability and the second its load. With bursty arrivals ($c_a^2$ = `{python} QueueKnee.ca2_str`) and exponential-like service times ($c_s^2$ = `{python} QueueKnee.cs2_str`), the variability factor is `{python} QueueKnee.var_str`, and the mean wait is about `{python} QueueKnee.w50_str`, `{python} QueueKnee.w70_str`, and `{python} QueueKnee.w90_str` service times at `{python} QueueKnee.rho50_str`, `{python} QueueKnee.rho70_str`, and `{python} QueueKnee.rho90_str` percent utilization. Agent workloads are variable on both counts, since trajectories fan out calls in bursts and generation lengths vary by orders of magnitude, so shared agent infrastructure is run well below saturation. For $c$ identical servers, the Allen-Cunneen approximation replaces $\rho/(1-\rho)$ with the probability that all servers are busy, from the Erlang C formula [@erlang1909telephone], divided by $c(1-\rho)$. Pooling many servers shortens the wait at a given utilization, but the knee remains. When service times are heavy-tailed, a few long trajectories dominate the wait, which is why schedulers separate them from short ones (@sec-vol3-appendix-math-queueing).
 
-### How many trajectories fit
+### Trajectory concurrency capacity under accelerator memory constraints
 
 For a server with memory $M_{\text{HBM}}$, weights of $N b$ bytes, and a runtime reserve $M_{\text{runtime}}$, the memory left for attention state is
 
