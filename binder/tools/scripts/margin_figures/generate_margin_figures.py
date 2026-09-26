@@ -246,8 +246,8 @@ def gen_ch07():
     ax.plot(t, p_frechet, color=RED, lw=1.35)
     ax.plot(t, p_gauss, color=TIME, lw=1.35)
     ax.fill_between(t, p_gauss, p_frechet, color=REDFILL, alpha=0.35)
-    ax.text(0.95, p_frechet[-1] + 0.08, "Heavy tail", color=RED, fontsize=5.0, fontweight="bold", ha="right", va="bottom")
-    ax.text(0.75, 0.18, "Gaussian", color=TIME, fontsize=4.8, ha="right", va="bottom")
+    ax.text(0.95, 0.82, "Heavy tail (Fréchet)", color=RED, fontsize=5.0, fontweight="bold", ha="right")
+    ax.text(0.95, 0.62, "Gaussian (exponential)", color=TIME, fontsize=4.8, ha="right")
     ax.set_xlim(0, 1.0); ax.set_ylim(0, 1.1)
     for s in ("top", "right", "left", "bottom"):
         ax.spines[s].set_visible(False)
@@ -523,9 +523,10 @@ def gen_ch17():
     t_endurance = (160.0 * m_batt) / (150.0 + 42.0 * (15.0 + m_batt))
     ax.plot(m_batt, t_endurance, color=COMP, lw=1.35)
     ax.axhline(3.8, color=RED, ls="--", lw=0.65)
-    ax.text(38, 3.95, "Ceiling: 3.8 h", color=RED, fontsize=5.0, fontweight="bold", ha="right")
-    ax.plot(12.0, 2.3, "o", color=COMP, ms=3.3)
-    ax.text(14.0, 2.0, "12 kg: 2.3 h", color=COMP, fontsize=4.8)
+    m_k = 12.0
+    t_k = (160.0 * m_k) / (150.0 + 42.0 * (15.0 + m_k))
+    ax.plot(m_k, t_k, "o", color=COMP, ms=3.3)
+    ax.text(12.0, 2.2, f"{int(m_k)} kg: {t_k:.1f} h", color=COMP, fontsize=4.8, ha="center")
     ax.set_xlim(0, 42); ax.set_ylim(0, 4.5)
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)

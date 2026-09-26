@@ -6,18 +6,212 @@ This appendix collects the control and dynamics models used throughout this book
 
 Consult this appendix when encountering specific physical systems bottlenecks, control interface boundaries, or design sizing decisions across chapters in this book:
 
-| When you encounter this systems symptom                                                      | Consult                            | For this quantitative tool                                                             |
-|----------------------------------------------------------------------------------------------|------------------------------------|----------------------------------------------------------------------------------------|
-| A learned policy commands unsafe actions near physical obstacles or joint limits             | @sec-appendix-control-cbf          | Control Barrier Function (CBF-QP) safety filters and kinetic stopping insets           |
-| Mode switching (policy handover, human intervention, or fallback) causes torque spikes       | @sec-appendix-control-splines      | $C^2$ quintic splines, $C^1$ cubic Hermite interpolation, and bumpless transfer bounds |
-| Sizing the validity horizon, spatial lease, or watchdog timeout for an action chunk          | @sec-appendix-control-reachability | Triangular, trapezoidal, and jerk-limited kinematic reachability envelopes             |
-| An articulated manipulator stalls, exceeds joint velocity limits, or loses control authority | @sec-appendix-control-kinematics   | Manipulator Jacobian singularities and Yoshikawa manipulability index                  |
-| Spatial sensor offsets or IMU-camera lever arms corrupt state estimation under rotation      | @sec-appendix-control-spatial      | Spatial coordinate transforms ($SE(3)$) and lever-arm acceleration propagation         |
-| Discrete sampling and transport latency erode control loop stability margins                 | @sec-appendix-control-zoh          | Discrete zero-order hold (ZOH) phase lag and latency margin penalties                  |
-| Physics simulation diverges, impacts exceed limits, or wheels spin out during maneuvers      | @sec-appendix-control-contact      | Contact complementarity, elastodynamic impact, and wheel slip boundaries               |
-| Sensor occlusions or unobservable states cause state estimation uncertainty to diverge       | @sec-appendix-control-covariance   | Continuous Lyapunov covariance propagation and Lie derivative observability rank       |
-| Teleoperation or compliant contact chatters due to transport delay                           | @sec-appendix-control-passivity    | Passivity conditions, wave variables, and energy-bounded interaction                   |
-| Underactuated legged or humanoid robots balance dynamic momentum across multi-contact points | @sec-appendix-control-centroidal   | Centroidal momentum equations and hierarchical Whole-Body Control QP                   |
+| When you encounter this systems symptom                                                      | Consult                            | For this quantitative tool                                                                |
+|----------------------------------------------------------------------------------------------|------------------------------------|-------------------------------------------------------------------------------------------|
+| An inner-loop tracking controller drifts or loses asymptotic convergence                     | @sec-appendix-control-statespace   | Continuous and discrete state-space models and Kalman controllability rank                |
+| Balancing trajectory tracking precision against actuator torque and current saturation       | @sec-appendix-control-lqr          | Linear Quadratic Regulator (LQR), Algebraic Riccati Equation, and $60^\circ$ phase margin |
+| Certifying closed-loop convergence or designing stabilizing feedback for nonlinear plants    | @sec-appendix-control-lyapunov     | Lyapunov stability theorems, domain of attraction, and Control Lyapunov Functions (CLFs)  |
+| Receding-horizon trajectory planning under hard state bounds and actuator limits             | @sec-appendix-control-mpc          | Constrained Model Predictive Control (MPC) and recursive feasibility guarantees           |
+| A learned policy commands unsafe actions near physical obstacles or joint limits             | @sec-appendix-control-cbf          | Control Barrier Function (CBF-QP) safety filters and kinetic stopping insets              |
+| Mode switching (policy handover, human intervention, or fallback) causes torque spikes       | @sec-appendix-control-splines      | $C^2$ quintic splines, $C^1$ cubic Hermite interpolation, and bumpless transfer bounds    |
+| Sizing the validity horizon, spatial lease, or watchdog timeout for an action chunk          | @sec-appendix-control-reachability | Triangular, trapezoidal, and jerk-limited kinematic reachability envelopes                |
+| An articulated manipulator stalls, exceeds joint velocity limits, or loses control authority | @sec-appendix-control-kinematics   | Manipulator Jacobian singularities and Yoshikawa manipulability index                     |
+| Spatial sensor offsets or IMU-camera lever arms corrupt state estimation under rotation      | @sec-appendix-control-spatial      | Spatial coordinate transforms ($SE(3)$) and lever-arm acceleration propagation            |
+| Discrete sampling and transport latency erode control loop stability margins                 | @sec-appendix-control-zoh          | Discrete zero-order hold (ZOH) phase lag and latency margin penalties                     |
+| Physics simulation diverges, impacts exceed limits, or wheels spin out during maneuvers      | @sec-appendix-control-contact      | Contact complementarity, elastodynamic impact, and wheel slip boundaries                  |
+| Sensor occlusions or unobservable states cause state estimation uncertainty to diverge       | @sec-appendix-control-covariance   | Continuous Lyapunov covariance propagation and Lie derivative observability rank          |
+| Teleoperation or compliant contact chatters due to transport delay                           | @sec-appendix-control-passivity    | Passivity conditions, wave variables, and energy-bounded interaction                      |
+| Underactuated legged or humanoid robots balance dynamic momentum across multi-contact points | @sec-appendix-control-centroidal   | Centroidal momentum equations and hierarchical Whole-Body Control QP                      |
+
+## Classical and Modern State-Space Control {#sec-appendix-control-statespace}
+
+In machine learning, inference evaluates a static parameterized mapping $\mathbf{y} = \pi_\theta(\mathbf{x})$: given an input observation, the network produces a prediction instantaneously without physical memory or temporal momentum. In physical AI, however, the robot's body is a continuous dynamic plant governed by differential equations (@sec-body-actuator-limits). Motor torque cannot change joint angles instantaneously; it injects acceleration, which must be integrated twice through time to alter position. The state-space framework formalizes this reality by modeling physical machines through their internal states, control inputs, and environmental disturbances.
+
+### Linear and nonlinear state-space representations
+
+A continuous-time Linear Time-Invariant (LTI) dynamic system is represented in canonical state-space form as:\index{State-space representation!linear time-invariant}
+$$ \dot{\mathbf{x}}(t) = \mathbf{A} \mathbf{x}(t) + \mathbf{B} \mathbf{u}(t) $$
+$$ \mathbf{y}(t) = \mathbf{C} \mathbf{x}(t) + \mathbf{D} \mathbf{u}(t) $$
+where $\mathbf{x}(t) \in \mathbb{R}^n$ denotes the internal state vector (e.g., joint angles and velocities, motor winding currents, or vehicle pose and velocity), $\mathbf{u}(t) \in \mathbb{R}^m$ is the control input vector (e.g., commanded motor currents, voltages, or torques), and $\mathbf{y}(t) \in \mathbb{R}^p$ represents the measured output vector produced by physical sensors. The system matrix $\mathbf{A} \in \mathbb{R}^{n \times n}$ governs unforced internal system dynamics, the input matrix $\mathbf{B} \in \mathbb{R}^{n \times m}$ models control authority over state rates, the output matrix $\mathbf{C} \in \mathbb{R}^{p \times n}$ maps internal states to sensor measurements, and $\mathbf{D} \in \mathbb{R}^{p \times m}$ represents direct feedthrough (which vanishes in strictly proper physical plants, $\mathbf{D} = \mathbf{0}$).
+
+When physical dynamics include kinematic nonlinearities, centrifugal couplings, or configuration-dependent gravity (@sec-appendix-control-kinematics), the dynamics generalize to the control-affine nonlinear form:
+$$ \dot{\mathbf{x}}(t) = f(\mathbf{x}(t)) + g(\mathbf{x}(t)) \mathbf{u}(t) $$
+where $f: \mathbb{R}^n \to \mathbb{R}^n$ is the unforced drift vector field and $g: \mathbb{R}^n \to \mathbb{R}^{n \times m}$ is the control effectiveness matrix.
+
+#### Discrete-time equivalent under zero-order hold
+
+Digital microcontrollers and real-time operating systems execute periodic control loops at sampling frequency $f_s = 1 / T_s$ (e.g., $1\text{ kHz}$, $T_s = 1\text{ ms}$; see @sec-nervous-cadences). When the actuator driver holds control inputs constant across each clock tick using a Zero-Order Hold ($\mathbf{u}(t) = \mathbf{u}_k$ for $t \in [k T_s, (k+1) T_s)$), the continuous LTI dynamics integrate into the exact discrete-time state-space model:\index{State-space representation!discrete zero-order hold}
+$$ \mathbf{x}_{k+1} = \mathbf{A}_d \mathbf{x}_k + \mathbf{B}_d \mathbf{u}_k $$
+where the discrete system matrices evaluate via the continuous matrix exponential:
+$$ \mathbf{A}_d = e^{\mathbf{A} T_s} = \mathbf{I} + \mathbf{A} T_s + \frac{1}{2!} \mathbf{A}^2 T_s^2 + \dots $$
+$$ \mathbf{B}_d = \int_0^{T_s} e^{\mathbf{A} \tau} d\tau \, \mathbf{B} = \left( \mathbf{I} T_s + \frac{1}{2!} \mathbf{A} T_s^2 + \dots \right) \mathbf{B} $$
+When $\mathbf{A}$ is non-singular, the discrete input matrix simplifies to $\mathbf{B}_d = \mathbf{A}^{-1}(e^{\mathbf{A} T_s} - \mathbf{I})\mathbf{B}$. For short sampling intervals ($T_s \ll 1$), forward Euler truncation ($\mathbf{A}_d \approx \mathbf{I} + \mathbf{A} T_s$, $\mathbf{B}_d \approx \mathbf{B} T_s$) is common in informal analysis, but exact matrix exponentials are essential in real-time firmware to avoid spurious numerical drift and phase loss (@sec-appendix-control-zoh).
+
+### Controllability and the kalman rank condition
+
+Before designing a tracking controller or evaluating whether an ungrounded neural policy proposal is physically realizable, an engineer must verify whether the physical actuators possess the structural capability to steer the system across its state space.\index{Controllability!Kalman rank criterion}
+
+An LTI system $(\mathbf{A}, \mathbf{B})$ is **controllable** if, for any initial state $\mathbf{x}(0) = \mathbf{x}_0$ and any desired target state $\mathbf{x}_f$, there exists a finite time $T > 0$ and an admissible input trajectory $\mathbf{u}(t)$ that transfers the state from $\mathbf{x}_0$ to $\mathbf{x}_f$. Kalman established that this condition holds if and only if the **controllability matrix** $\mathcal{C}$ has full row rank:
+$$ \mathcal{C} = \begin{bmatrix} \mathbf{B} & \mathbf{A}\mathbf{B} & \mathbf{A}^2\mathbf{B} & \dots & \mathbf{A}^{n-1}\mathbf{B} \end{bmatrix} \in \mathbb{R}^{n \times nm}, \quad \operatorname{rank}(\mathcal{C}) = n $$
+Notice the structural duality: the controllability matrix $\mathcal{C}$ evaluates whether control inputs can reach all $n$ state dimensions through powers of $\mathbf{A}$, exactly dual to the observability matrix $\mathcal{O}$ (@sec-appendix-control-covariance), which evaluates whether sensor outputs can distinguish all $n$ state dimensions.
+
+The Popov-Belevitch-Hautus (PBH) test provides an equivalent spectral condition: the pair $(\mathbf{A}, \mathbf{B})$ is controllable if and only if:
+$$ \operatorname{rank}\left( \begin{bmatrix} \lambda \mathbf{I} - \mathbf{A} & \mathbf{B} \end{bmatrix} \right) = n \quad \forall \lambda \in \mathbb{C} $$
+If $\operatorname{rank}([\lambda \mathbf{I} - \mathbf{A}, \mathbf{B}]) < n$ for some eigenvalue $\lambda$, the mode associated with $\lambda$ cannot be excited or influenced by any control input. If that mode is unstable ($\operatorname{Re}(\lambda) \ge 0$), the physical plant is un-stabilizable—an unyielding physical limitation that no learned policy or reinforcement learning algorithm can overcome. Floating-base legged systems (@sec-appendix-control-centroidal) and ball-and-beam plants are classic examples of underactuated systems where direct control authority over floating-base coordinates is zero, requiring dynamic coupling through ground contact wrenches to achieve stabilization.
+
+### Linear quadratic regulator and algebraic riccati equations {#sec-appendix-control-lqr}
+
+In supervised learning, an optimization algorithm minimizes empirical loss across a training dataset. In modern optimal control, the **Linear Quadratic Regulator (LQR)**\index{Linear Quadratic Regulator!optimal control}\index{Algebraic Riccati Equation!continuous-time} solves an analytical optimization problem over the infinite-horizon temporal trajectory of the physical plant.
+
+Given the controllable continuous LTI system $\dot{\mathbf{x}} = \mathbf{A}\mathbf{x} + \mathbf{B}\mathbf{u}$, the infinite-horizon regulator minimizes the quadratic performance objective:
+$$ J = \int_0^\infty \left( \mathbf{x}(t)^\top \mathbf{Q} \mathbf{x}(t) + \mathbf{u}(t)^\top \mathbf{R} \mathbf{u}(t) \right) dt $$
+where:
+
+- $\mathbf{Q} \in \mathbb{R}^{n \times n}$ is a symmetric positive semi-definite state penalty matrix ($\mathbf{Q} \succeq \mathbf{0}$), penalizing deviations from the target state $\mathbf{x}^* = \mathbf{0}$.
+- $\mathbf{R} \in \mathbb{R}^{m \times m}$ is a symmetric positive definite control penalty matrix ($\mathbf{R} \succ \mathbf{0}$), penalizing control effort.
+
+In physical AI systems, the choice of $\mathbf{Q}$ and $\mathbf{R}$ directly reflects hardware physics (@sec-body-actuator-limits): large penalties in $\mathbf{R}$ constrain motor currents, limit $I^2 R$ stator ohmic heating (@sec-appendix-systems-actuators), and protect gearboxes from high torque slew rates, while large diagonal entries in $\mathbf{Q}$ enforce strict tracking tolerances on safety-critical joint positions.
+
+By dynamic programming and Bellman's principle of optimality [@bellman1957dynamic; @astrom2021feedback], the optimal value function is quadratic: $V^*(\mathbf{x}) = \mathbf{x}^\top \mathbf{P} \mathbf{x}$, where the symmetric positive definite matrix $\mathbf{P} \succ \mathbf{0}$ is the unique stabilizing solution to the **Continuous Algebraic Riccati Equation (ARE)**:
+$$ \mathbf{A}^\top \mathbf{P} + \mathbf{P} \mathbf{A} - \mathbf{P} \mathbf{B} \mathbf{R}^{-1} \mathbf{B}^\top \mathbf{P} + \mathbf{Q} = \mathbf{0} $$
+The optimal state-feedback control law is linear in the state:
+$$ \mathbf{u}^*(t) = -\mathbf{K} \mathbf{x}(t), \quad \text{where } \mathbf{K} = \mathbf{R}^{-1} \mathbf{B}^\top \mathbf{P} $$
+Substituting this control law into the plant dynamics yields the closed-loop system $\dot{\mathbf{x}} = (\mathbf{A} - \mathbf{B}\mathbf{K})\mathbf{x}$. When $(\mathbf{A}, \mathbf{B})$ is controllable and $(\mathbf{A}, \mathbf{Q}^{1/2})$ is observable, all closed-loop eigenvalues are strictly Hurwitz ($\operatorname{Re}(\lambda_i(\mathbf{A} - \mathbf{B}\mathbf{K})) < 0$), guaranteeing exponential convergence to the origin.
+
+#### Robustness margins of continuous LQR
+
+A seminal result by Kalman [@kalman1960new; @astrom2021feedback] proves that continuous-time full-state LQR controllers possess exceptional intrinsic stability robustness:
+
+1. **Infinite Gain Margin:** The closed loop remains asymptotically stable under arbitrary upward gain scaling $\kappa \in [1/2, \infty)$ inserted into the control loop.
+2. **Phase Margin Guarantee:** The continuous LQR design guarantees at least $60^\circ$ of phase margin in each control channel:
+   $$ \Phi_m \ge 60^\circ $$
+
+This guaranteed phase margin explains why classical LQR remains the foundational inner-loop tracking controller in robotics and physical AI firmware: it provides a proven cushion against modeling errors, actuator lag, and high-frequency structural resonances. However, as demonstrated in @sec-appendix-control-zoh, digital zero-order hold sampling erodes this phase margin by $\Delta \Phi = \omega_c T_s / 2$, which directly limits the achievable closed-loop bandwidth.
+
+#### Discrete-time LQR
+
+For digital microcontrollers executing at sampling period $T_s$, the discrete-time LQR formulation minimizes:
+$$ J_d = \sum_{k=0}^\infty \left( \mathbf{x}_k^\top \mathbf{Q} \mathbf{x}_k + \mathbf{u}_k^\top \mathbf{R} \mathbf{u}_k \right) $$
+subject to $\mathbf{x}_{k+1} = \mathbf{A}_d \mathbf{x}_k + \mathbf{B}_d \mathbf{u}_k$. The matrix $\mathbf{P}$ satisfies the **Discrete Algebraic Riccati Equation (DARE)**:
+$$ \mathbf{P} = \mathbf{A}_d^\top \mathbf{P} \mathbf{A}_d - \mathbf{A}_d^\top \mathbf{P} \mathbf{B}_d \left( \mathbf{R} + \mathbf{B}_d^\top \mathbf{P} \mathbf{B}_d \right)^{-1} \mathbf{B}_d^\top \mathbf{P} \mathbf{A}_d + \mathbf{Q} $$
+yielding the discrete optimal state-feedback gain:
+$$ \mathbf{K}_d = \left( \mathbf{R} + \mathbf{B}_d^\top \mathbf{P} \mathbf{B}_d \right)^{-1} \mathbf{B}_d^\top \mathbf{P} \mathbf{A}_d, \quad \mathbf{u}_k^* = -\mathbf{K}_d \mathbf{x}_k $$
+
+### The separation principle and linear quadratic Gaussian control
+
+In physical deployments, full-state access is rarely available; controllers must estimate $\hat{\mathbf{x}}$ from noisy sensor observations $\mathbf{y} = \mathbf{C}\mathbf{x} + \mathbf{v}$. When continuous process noise $\mathbf{w}(t) \sim \mathcal{N}(\mathbf{0}, \mathbf{Q}_w)$ and measurement noise $\mathbf{v}(t) \sim \mathcal{N}(\mathbf{0}, \mathbf{R}_v)$ perturb the plant, the optimal continuous state estimator is the Kalman-Bucy filter (@sec-appendix-control-covariance):\index{Linear Quadratic Gaussian!Separation Principle}
+$$ \dot{\hat{\mathbf{x}}}(t) = \mathbf{A}\hat{\mathbf{x}}(t) + \mathbf{B}\mathbf{u}(t) + \mathbf{L}\left(\mathbf{y}(t) - \mathbf{C}\hat{\mathbf{x}}(t)\right), \quad \mathbf{L} = \mathbf{P}_{\text{est}}\mathbf{C}^\top \mathbf{R}_v^{-1} $$
+where $\mathbf{P}_{\text{est}}$ solves the dual estimation Riccati equation:
+$$ \mathbf{A} \mathbf{P}_{\text{est}} + \mathbf{P}_{\text{est}} \mathbf{A}^\top - \mathbf{P}_{\text{est}} \mathbf{C}^\top \mathbf{R}_v^{-1} \mathbf{C} \mathbf{P}_{\text{est}} + \mathbf{Q}_w = \mathbf{0} $$
+The **Linear Quadratic Gaussian (LQG)** controller cascades this optimal estimator with the optimal LQR regulator by applying feedback directly to the estimated state:
+$$ \mathbf{u}(t) = -\mathbf{K} \hat{\mathbf{x}}(t) $$
+The **Separation Principle** [@astrom2021feedback] proves that under linear-Gaussian assumptions, observer design and state-feedback controller design are completely decoupled: the poles of the closed-loop LQG system are strictly the union of the controller poles $\operatorname{eig}(\mathbf{A} - \mathbf{B}\mathbf{K})$ and the observer poles $\operatorname{eig}(\mathbf{A} - \mathbf{L}\mathbf{C})$.
+
+::: {#psp-appendix-control-doyle .callout-perspective title="The Doyle warning: LQG robustness margins"}
+While full-state LQR provides guaranteed $60^\circ$ phase margins and infinite gain margins, John Doyle's classic 1978 paper demonstrated that output-feedback LQG controllers possess **no guaranteed stability margins whatsoever** [@astrom2021feedback]. The dynamic observer introduces phase lag and state estimation error into the feedback path; unmodeled plant parameter errors or high-frequency sensor noise can destabilize the closed loop even when both the filter and regulator appear individually optimal. In physical AI, where learned neural models feed high-level setpoints into feedback trackers (@sec-enforcement-deterministic-gatekeeper), tracking loops must include explicit robustness checks or frequency-domain Loop Transfer Recovery (LTR) to ensure stability under parameter variation.
+:::
+
+## Stability Theory and Model Predictive Control {#sec-appendix-control-stability-mpc}
+
+Where classical ML evaluates model quality through statistical cross-entropy or mean squared error across a test set, control theory certifies physical dynamical systems through Lyapunov stability and set invariance. A statistical model can achieve a 99 percent benchmark accuracy while occasionally commanding an explosive torque that fractures an actuator; control stability certificates guarantee that state trajectories remain bounded for all initial conditions within a declared domain.
+
+### Lyapunov stability and invariant sets {#sec-appendix-control-lyapunov}
+
+Consider an autonomous nonlinear dynamical system:\index{Lyapunov stability!asymptotic and exponential}\index{Invariant sets!domain of attraction}
+$$ \dot{\mathbf{x}}(t) = f(\mathbf{x}(t)), \quad f(\mathbf{0}) = \mathbf{0} $$
+where $\mathbf{x}^* = \mathbf{0}$ is an isolated equilibrium point, and $f: \mathcal{D} \to \mathbb{R}^n$ is locally Lipschitz on an open domain $\mathcal{D} \subset \mathbb{R}^n$ containing the origin.
+
+A continuously differentiable scalar function $V: \mathcal{D} \to \mathbb{R}$ is a **candidate Lyapunov function** if it is positive definite on $\mathcal{D}$:
+$$ V(\mathbf{0}) = 0, \quad V(\mathbf{x}) > 0 \quad \forall \mathbf{x} \in \mathcal{D} \setminus \{\mathbf{0}\} $$
+The directional derivative of $V$ along the trajectories of $\dot{\mathbf{x}} = f(\mathbf{x})$ evaluates via the Lie derivative:
+$$ \dot{V}(\mathbf{x}) = \nabla V(\mathbf{x})^\top \dot{\mathbf{x}} = \nabla V(\mathbf{x})^\top f(\mathbf{x}) = L_f V(\mathbf{x}) $$
+Alexander Lyapunov established three foundational stability tiers [@slotine1991applied]:
+
+1. **Stability in the Sense of Lyapunov:** If $\dot{V}(\mathbf{x}) \le 0$ for all $\mathbf{x} \in \mathcal{D}$, the origin is stable. Trajectories starting arbitrarily close to the origin remain trapped within bounded neighborhood contours for all $t \ge 0$.
+2. **Asymptotic Stability:** If $\dot{V}(\mathbf{x}) < 0$ for all $\mathbf{x} \in \mathcal{D} \setminus \{\mathbf{0}\}$, the origin is asymptotically stable: $\lim_{t \to \infty} \mathbf{x}(t) = \mathbf{0}$.
+3. **Exponential Stability:** If there exist positive constants $c_1, c_2, c_3 > 0$ such that $c_1 \|\mathbf{x}\|^2 \le V(\mathbf{x}) \le c_2 \|\mathbf{x}\|^2$ and $\dot{V}(\mathbf{x}) \le -c_3 \|\mathbf{x}\|^2$, trajectories converge exponentially:
+   $$ \|\mathbf{x}(t)\| \le \sqrt{\frac{c_2}{c_1}} \|\mathbf{x}_0\| e^{-\frac{c_3}{2 c_2} t} \quad \forall t \ge 0 $$
+
+For mechanical systems with friction and viscous damping, $\dot{V}(\mathbf{x})$ often vanishes on a subspace (for example, when velocities are zero while position errors remain nonzero). **LaSalle's Invariance Principle** [@slotine1991applied] resolves this: if $\dot{V}(\mathbf{x}) \le 0$ on a compact set $\Omega$, all trajectories starting in $\Omega$ asymptotically converge to the largest invariant set contained within $\{ \mathbf{x} \in \Omega \mid \dot{V}(\mathbf{x}) = 0 \}$.
+
+The sublevel set $\Omega_c = \{ \mathbf{x} \in \mathcal{D} \mid V(\mathbf{x}) \le c \}$ forms a verified **domain of attraction (DOA)**: because $\dot{V} \le 0$ on $\Omega_c$, no trajectory initialized inside $\Omega_c$ can ever cross the boundary $V(\mathbf{x}) = c$ outward.
+
+### Control lyapunov functions and stabilization
+
+For a controlled system $\dot{\mathbf{x}} = f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}$, a candidate Lyapunov function $V(\mathbf{x})$ is a **Control Lyapunov Function (CLF)** [@ames2014control; @slotine1991applied] if there exists an admissible control input $\mathbf{u} \in \mathcal{U}$ that forces $V$ to decrease at every non-equilibrium state:\index{Control Lyapunov Function!stabilization}
+$$ \inf_{\mathbf{u} \in \mathcal{U}} \left[ L_f V(\mathbf{x}) + L_g V(\mathbf{x}) \mathbf{u} + \alpha_V(V(\mathbf{x})) \right] \le 0 \quad \forall \mathbf{x} \in \mathcal{D} \setminus \{\mathbf{0}\} $$
+where $\alpha_V$ is an extended class $\mathcal{K}$ function. When this inequality is satisfied, the feedback controller guarantees asymptotic convergence to the origin.
+
+#### The duality between clfs and cbfs
+
+Comparing Control Lyapunov Functions with Control Barrier Functions (@sec-appendix-control-cbf) reveals the central duality of modern safety-critical control:
+
+- **Control Lyapunov Function (CLF) for Performance / Tracking:**
+  $$ V(\mathbf{x}) \ge 0, \quad L_f V(\mathbf{x}) + L_g V(\mathbf{x}) \mathbf{u} \le -\alpha_V(V(\mathbf{x})) $$
+  A CLF defines a positive-definite potential well and forces state trajectories *inward* toward an operating equilibrium ($V \to 0$).
+- **Control Barrier Function (CBF) for Safety / Invariance:**
+  $$ h(\mathbf{x}) \ge 0, \quad L_f h(\mathbf{x}) + L_g h(\mathbf{x}) \mathbf{u} \ge -\alpha_h(h(\mathbf{x})) $$
+  A CBF defines a positive superlevel safe set and prevents state trajectories from escaping *outward* past a safety boundary ($h \ge 0$).
+
+When combining performance tracking (such as following an uncertified trajectory proposed by a vision-language-action policy) with guaranteed collision avoidance, the enforcer solves a unified **CLF-CBF Quadratic Program (CLF-CBF-QP)**:
+$$
+\begin{align*}
+\min_{\mathbf{u} \in \mathcal{U}, \delta \ge 0} \quad & \frac{1}{2} \|\mathbf{u} - \mathbf{u}_{\text{nom}}\|^2 + p \delta^2 \\
+\text{subject to:} \quad & L_f h(\mathbf{x}) + L_g h(\mathbf{x}) \mathbf{u} \ge -\alpha_h(h(\mathbf{x})) \quad \text{(hard safety constraint)} \\
+& L_f V(\mathbf{x}) + L_g V(\mathbf{x}) \mathbf{u} \le -\alpha_V(V(\mathbf{x})) + \delta \quad \text{(soft tracking constraint)}
+\end{align*}
+$$
+where $p \gg 1$ heavily penalizes the tracking relaxation slack $\delta \ge 0$. Under this hierarchy, safety is non-negotiable (hard CBF boundary), while tracking performance is gracefully degraded whenever physical actuator torque saturation forces a trade-off.
+
+### Constrained model predictive control and recursive feasibility {#sec-appendix-control-mpc}
+
+While LQR and CLF feedback laws operate reactively on instantaneous state feedback, **Model Predictive Control (MPC)**\index{Model Predictive Control!constrained QP formulation}\index{Recursive feasibility!terminal invariant set} optimizes trajectories over a predictive finite horizon $N$, explicitly enforcing hard inequality constraints on physical boundaries, motor voltages, and actuator torques.
+
+#### Discrete-time MPC formulation
+
+At discrete sampling tick $k$, given current state measurement $\mathbf{x}_k = \mathbf{x}(t_k)$, the MPC controller solves a constrained finite-horizon optimal control problem over horizon $N$:
+$$
+\begin{align*}
+\min_{\mathbf{u}_{0:N-1}} \quad & \mathbf{x}_N^\top \mathbf{P}_N \mathbf{x}_N + \sum_{i=0}^{N-1} \left( \mathbf{x}_i^\top \mathbf{Q} \mathbf{x}_i + \mathbf{u}_i^\top \mathbf{R} \mathbf{u}_i \right) \\
+\text{subject to:} \quad & \mathbf{x}_{i+1} = \mathbf{A}_d \mathbf{x}_i + \mathbf{B}_d \mathbf{u}_i, \quad \mathbf{x}_0 = \mathbf{x}_k \\
+& \mathbf{x}_i \in \mathcal{X}_{\text{safe}} \subset \mathbb{R}^n \quad \forall i \in \{0, \dots, N\} \\
+& \mathbf{u}_i \in \mathcal{U}_{\text{adm}} \subset \mathbb{R}^m \quad \forall i \in \{0, \dots, N-1\} \\
+& \mathbf{x}_N \in \mathcal{X}_f \subset \mathcal{X}_{\text{safe}}
+\end{align*}
+$$
+where $\mathcal{X}_{\text{safe}} = \{ \mathbf{x} \mid \mathbf{H}_x \mathbf{x} \le \mathbf{b}_x \}$ represents state clearance constraints (joint limits, obstacle margins), $\mathcal{U}_{\text{adm}} = \{ \mathbf{u} \mid \mathbf{u}_{\min} \le \mathbf{u} \le \mathbf{u}_{\max} \}$ bounds actuator torque authority, $\mathcal{X}_f$ is a terminal invariant set, and $\mathbf{P}_N$ is the terminal cost matrix.
+
+#### The receding-horizon principle and closed-loop stability
+
+MPC executes in a receding-horizon closed loop:
+
+1. Solve the constrained QP at step $k$, obtaining optimal sequence $\mathbf{u}_{0:N-1}^* = [\mathbf{u}_0^*, \mathbf{u}_1^*, \dots, \mathbf{u}_{N-1}^*]$.
+2. Apply only the first control setpoint to physical hardware: $\mathbf{u}(t_k) = \mathbf{u}_0^*$.
+3. Advance the hardware clock by $T_s$, discard the remaining trajectory $\mathbf{u}_{1:N-1}^*$, obtain updated state $\mathbf{x}_{k+1}$, and re-solve across the shifted horizon.
+
+Closed-loop stability is established by choosing the terminal cost $\mathbf{P}_N$ and terminal set $\mathcal{X}_f$ to satisfy the classical Rawling-Mayne stability conditions [@astrom2021feedback; @wabersich2021predictive]:
+
+1. **Terminal Invariance:** There exists a local linear feedback law $\mathbf{u} = -\mathbf{K}_f \mathbf{x}$ such that for all $\mathbf{x} \in \mathcal{X}_f$, $(\mathbf{A}_d - \mathbf{B}_d \mathbf{K}_f)\mathbf{x} \in \mathcal{X}_f$ and $-\mathbf{K}_f \mathbf{x} \in \mathcal{U}_{\text{adm}}$.
+2. **Terminal Lyapunov Descent:** $\mathbf{P}_N$ satisfies the discrete Lyapunov inequality:
+   $$ (\mathbf{A}_d - \mathbf{B}_d \mathbf{K}_f)^\top \mathbf{P}_N (\mathbf{A}_d - \mathbf{B}_d \mathbf{K}_f) - \mathbf{P}_N \le -\left( \mathbf{Q} + \mathbf{K}_f^\top \mathbf{R} \mathbf{K}_f \right) $$
+
+Under these conditions, the optimal cost function $J^*(\mathbf{x}_k)$ acts as a discrete Lyapunov function: $J^*(\mathbf{x}_{k+1}) - J^*(\mathbf{x}_k) \le -(\mathbf{x}_k^\top \mathbf{Q} \mathbf{x}_k + \mathbf{u}_k^\top \mathbf{R} \mathbf{u}_k) < 0$. This guarantees that the closed-loop system is asymptotically stable and respects all state and actuator constraints for all time.
+
+#### Recursive feasibility
+
+A critical hazard in constrained control is dynamic trap entry: the system reaches a state where, due to inertia and actuator limits, no control trajectory can prevent constraint violation $N$ steps in the future, rendering the QP infeasible.
+
+A controller possesses **recursive feasibility** if the existence of a feasible solution at step $k$ guarantees that the optimization problem remains feasible at step $k+1$. With terminal invariant set $\mathcal{X}_f$ and unmodeled disturbances bounded, the candidate shifted sequence:
+$$ \tilde{\mathbf{u}}_{0:N-1} = [\mathbf{u}_1^*, \mathbf{u}_2^*, \dots, \mathbf{u}_{N-1}^*, -\mathbf{K}_f \mathbf{x}_N^*] $$
+is guaranteed to satisfy all dynamics, state, input, and terminal constraints at step $k+1$. This candidate sequence serves as a valid warm start, ensuring that the real-time solver never encounters an unexpected infeasibility exception during execution.
+
+#### Classical numerical MPC vs. learned action chunking
+
+As framed in @sec-planning-paradigms, modern physical AI embodies a direct trade-off between numerical MPC and learned generative action chunking:
+
+- **Model Accuracy vs. Semantic Ingestion:** Classical MPC relies on analytical differential equations ($\mathbf{x}_{k+1} = f(\mathbf{x}_k, \mathbf{u}_k)$). It cannot ingest high-dimensional semantic observations (such as 2D camera pixels, depth point clouds, or natural language prompts) and struggles with non-smooth contact mechanics (@sec-appendix-control-contact). In contrast, generative action chunking policies (Diffusion Policy, ACT, Flow Matching) learn complex, multimodal behavioral distributions directly from human demonstrations.
+- **Computational Scaling:** Solving a constrained numerical MPC QP online scales with cubic computational complexity $\mathcal{O}(N^3(n+m)^3)$ in horizon length and constraint count. For complex multi-body manipulators, online solve times range from $5\text{ to }50\text{ ms}$ (limiting execution rates to $20\text{--}200\text{ Hz}$). Action chunking offloads optimization to offline neural training, executing multi-second trajectory generation in a single bounded neural forward pass.
+- **The Physical AI Synthesis:** Rather than treating MPC and learned policies as mutually exclusive, the physical AI architecture partitions them across the proposal and permission boundary: learned neural policies propose uncertified, multi-second action chunks in Cartesian task space (Part II and Part III), while deterministic tracking MPC or CBF-QP safety filters (running on bare-metal MCU firmware at $100\text{ Hz -- }1\text{ kHz}$) enforce kinodynamic feasibility, recursive feasibility, and collision avoidance before any command reaches the motor drives (@sec-enforcement-deterministic-gatekeeper).
 
 ## Safety and Control Barrier Functions {#sec-appendix-control-cbf}
 
@@ -343,7 +537,7 @@ Total available time before available clearance $D_{\text{clear}}$ is exhausted 
 $$ T_{\text{RTT}} \le \frac{D_{\text{clear}} - d_{\text{brake}}}{v} - \left( T_{\text{video}} + T_{\text{human}} + T_{\text{act}} \right) $$
 If network jitter pushes $T_{\text{RTT}}$ beyond this bound, the human operator cannot perceive an obstacle and deliver a corrective command before the vehicle exhausts its stopping distance. Consequently, the local real-time enforcer must evaluate physical invariants independently at $1\text{ kHz}$, revoking operator command authority and executing autonomous braking before physical clearance is lost. @Sec-intervention-human-authority uses this bound to size a handover, where the operator's round trip spends the same pre-brake budget.
 
-#### Kinodynamic bounds versus wave-variable passivity
+#### Kinodynamic bounds vs. wave-variable passivity
 
 Transport delay in teleoperation creates two distinct failure modes: spatial boundary breach (kinematic collision) and high-frequency dynamic chatter (loss of closed-loop passivity). While wave variables (@sec-appendix-control-passivity) preserve port passivity and prevent energy accumulation under delay, passivity guarantees only that the teleoperator will not become an active energy source. It does not bound physical displacement. Safety requires satisfying both invariants simultaneously: wave variables bound interactive contact energy, while the kinodynamic latency inequality guarantees collision-free spatial clearance.
 
@@ -564,3 +758,6 @@ For a deeper theoretical foundation in control theory, robotics, and dynamical s
 * **Modern Robotics: Mechanics, Planning, and Control** [@lynch2017modern] provides an elegant, rigorous treatment of kinematics and dynamics using screw theory and Lie groups.
 * **Robotics: Modelling, Planning and Control** [@siciliano2009robotics] serves as an authoritative reference for multi-body robot dynamics, trajectory generation, and operational space control.
 * **Feedback Systems: An Introduction for Scientists and Engineers** [@astrom2021feedback] establishes classical and state-space control theory, frequency-domain stability margins, and state estimation from first principles.
+* **Applied Nonlinear Control** [@slotine1991applied] provides a foundational treatment of nonlinear dynamical systems, Lyapunov stability certificates, and sliding mode control.
+* **Control Barrier Functions: Theory and Applications** [@ames2019control] establishes the definitive formulation of control barrier functions, safety-critical quadratic programming filters, and forward invariance.
+* **A Predictive Safety Filter for Learning-Based Control of Constrained Nonlinear Dynamical Systems** [@wabersich2021predictive] develops predictive safety filters and constrained MPC methods for safe learning on physical systems.
