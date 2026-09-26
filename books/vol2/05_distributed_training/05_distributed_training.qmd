@@ -1816,168 +1816,218 @@ Per-GPU Memory:
 ZeRO addresses this redundancy through progressive sharding, as @fig-zero-memory illustrates and @tbl-zero-stages summarizes.
 
 ::: {#fig-zero-memory fig-env="figure" fig-pos="htb" fig-cap="**ZeRO memory reduction**: Standard data parallelism (DDP) replicates all model states across every GPU. ZeRO progressively partitions these states: ZeRO-1 shards optimizer states, ZeRO-2 adds gradient sharding, and ZeRO-3 shards the parameters themselves. ZeRO-3 achieves linear memory scaling, enabling models with 100B+ parameters to fit on accelerators that could not hold the replicated state." fig-alt="Bar chart comparing per-GPU memory usage across DDP, ZeRO-1, ZeRO-2, and ZeRO-3 with decreasing memory footprint."}
-```{.tikz}
-\scalebox{0.82}{%
-\begin{tikzpicture}[
-  line join=round, line cap=round,
-  font=\small\sffamily,
-  >=Latex,
-  legend item/.style={
-    font=\scriptsize\sffamily,
-    text=TextBlack
-  },
-  header card/.style={
-    rectangle,
-        line width=0.8pt,
-    minimum width=2.4cm,
-    minimum height=0.75cm,
-    align=center
-  },
-  total pill/.style={
-    rectangle,
-        line width=0.8pt,
-    minimum width=2.4cm,
-    minimum height=0.8cm,
-    align=center
-  }
+```{python}
+#| echo: false
+#| warning: false
+import matplotlib.pyplot as plt
+import numpy as np
+
+plt.style.use('seaborn-v0_8-whitegrid')
+fig, ax = plt.subplots(figsize=(9.6, 5.2))
+
+c_dark = '#0F172A'
+c_blue = '#2563EB'
+c_orange = '#F97316'
+c_green = '#059669'
+c_red = '#DC2626'
+c_gray = '#64748B'
+c_border = '#CBD5E1'
+
+stages = [
+    'Baseline DDP\n(Full Replication)',
+    'ZeRO-1\n(Shard Optimizer)',
+    'ZeRO-2\n(+ Shard Gradients)',
+    'ZeRO-3 / FSDP\n(+ Shard Parameters)',
+]
+x = np.arange(len(stages))
+width = 0.52
+
+opt_states = np.array([84.0, 84.0 / 64.0, 84.0 / 64.0, 84.0 / 64.0])
+gradients = np.array([14.0, 14.0, 14.0 / 64.0, 14.0 / 64.0])
+weights = np.array([14.0, 14.0, 14.0, 14.0 / 64.0])
+
+b_opt = ax.bar(
+    x,
+    opt_states,
+    width,
+    label='Optimizer States (FP32, 12 B/param)',
+    color='#A7F3D0',
+    edgecolor='#059669',
+    linewidth=1.1,
+    zorder=3,
+)
+b_grad = ax.bar(
+    x,
+    gradients,
+    width,
+    bottom=opt_states,
+    label='Gradients (FP16, 2 B/param)',
+    color='#FED7AA',
+    edgecolor='#EA580C',
+    linewidth=1.1,
+    zorder=3,
+)
+b_weight = ax.bar(
+    x,
+    weights,
+    width,
+    bottom=opt_states + gradients,
+    label='Weights (FP16, 2 B/param)',
+    color='#BFDBFE',
+    edgecolor='#2563EB',
+    linewidth=1.1,
+    zorder=3,
+)
+
+totals = opt_states + gradients + weights
+
+# Annotate memory limit of 80 GB GPU
+ax.axhline(80.0, color=c_red, linestyle='--', linewidth=1.6, zorder=4)
+ax.text(
+    3.4,
+    82.0,
+    '80 GB GPU Memory Capacity Limit',
+    color='#991B1B',
+    fontsize=8.2,
+    fontweight='bold',
+    ha='right',
+    va='bottom',
+    bbox=dict(
+        boxstyle='round,pad=0.25',
+        facecolor='#FEF2F2',
+        edgecolor='#FCA5A5',
+        lw=0.9,
+    ),
+)
+
+# Labels on top of bars
+bar_labels = [
+    ('112.0 GB', 'OOM on 80 GB GPU', '#991B1B', '#FEE2E2', '#FCA5A5'),
+    ('29.3 GB', r'3.8$\times$ Reduction', '#C2410C', '#FFEDD5', '#FDBA74'),
+    ('15.5 GB', r'7.2$\times$ Reduction', '#1D4ED8', '#DBEAFE', '#93C5FD'),
+    ('1.75 GB', r'64$\times$ Linear Scaling', '#15803D', '#DCFCE7', '#86EFAC'),
 ]
 
-  % ===========================================================
-  % TOP LEGEND
-  % ===========================================================
-  \node[draw=GrayLine!30, fill=white, line width=0.7pt, minimum width=13.8cm, minimum height=0.7cm] at (7.0, 7.6) {};
+for i, (tot, sub, col, bg, bcol) in enumerate(bar_labels):
+    tot_val = totals[i]
+    y_pos = tot_val + 5.0 if i == 0 else tot_val + 4.5
+    ax.text(
+        x[i],
+        y_pos,
+        f'{tot}\n{sub}',
+        color=col,
+        fontsize=8.0,
+        fontweight='bold',
+        ha='center',
+        va='bottom',
+        bbox=dict(boxstyle='round,pad=0.3', facecolor=bg, edgecolor=bcol, lw=1.0),
+    )
 
-  \node[draw=BlueLine, fill=BlueFill!50, minimum width=0.35cm, minimum height=0.35cm] at (1.0, 7.6) {};
-  \node[legend item, anchor=west] at (1.3, 7.6) {\textbf{Weights} (FP16, 2\,B/param)};
+# Segment labels inside bars
+ax.text(
+    x[0],
+    42.0,
+    'Optimizer States\n(84 GB)',
+    color='#065F46',
+    fontsize=7.8,
+    fontweight='bold',
+    ha='center',
+    va='center',
+)
+ax.text(
+    x[0],
+    91.0,
+    'G (14 GB)',
+    color='#9A3412',
+    fontsize=7.5,
+    fontweight='bold',
+    ha='center',
+    va='center',
+)
+ax.text(
+    x[0],
+    105.0,
+    'W (14 GB)',
+    color='#1E40AF',
+    fontsize=7.5,
+    fontweight='bold',
+    ha='center',
+    va='center',
+)
 
-  \node[draw=OrangeLine, fill=OrangeFill!70, minimum width=0.35cm, minimum height=0.35cm] at (5.1, 7.6) {};
-  \node[legend item, anchor=west] at (5.4, 7.6) {\textbf{Gradients} (FP16, 2\,B/param)};
+ax.text(
+    x[1],
+    8.0,
+    'G (14 GB)',
+    color='#9A3412',
+    fontsize=7.5,
+    fontweight='bold',
+    ha='center',
+    va='center',
+)
+ax.text(
+    x[1],
+    22.0,
+    'W (14 GB)',
+    color='#1E40AF',
+    fontsize=7.5,
+    fontweight='bold',
+    ha='center',
+    va='center',
+)
 
-  \node[draw=GreenLine, fill=GreenFill!70, minimum width=0.35cm, minimum height=0.35cm] at (9.1, 7.6) {};
-  \node[legend item, anchor=west] at (9.4, 7.6) {\textbf{Optimizer States} (FP32, 12\,B/param)};
+ax.text(
+    x[2],
+    8.0,
+    'W (14 GB)',
+    color='#1E40AF',
+    fontsize=7.5,
+    fontweight='bold',
+    ha='center',
+    va='center',
+)
 
-  % ===========================================================
-  % AXIS & GRIDLINES
-  % ===========================================================
-  % y = 0 GB at y = 1.6 cm, 120 GB at y = 6.4 cm (scale: 1 GB = 0.04 cm)
-  \draw[line width=0.7pt, GrayLine] (1.1, 1.6) -- (13.7, 1.6);
+ax.annotate(
+    'Fully Sharded\nState / 64\n(1.75 GB)',
+    xy=(x[3], 1.75),
+    xytext=(x[3] + 0.35, 14.0),
+    fontsize=7.5,
+    fontweight='bold',
+    color='#15803D',
+    arrowprops=dict(arrowstyle='->', color='#059669', lw=1.0),
+)
 
-  \foreach \gb/\y in {0/1.6, 20/2.4, 40/3.2, 60/4.0, 80/4.8, 100/5.6, 120/6.4} {
-    \draw[dashed, GrayLine!25, thin] (1.1, \y) -- (13.7, \y);
-    \node[anchor=east, font=\tiny\bfseries\sffamily, text=TextBlack!70] at (1.0, \y) {\gb};
-  }
-  \node[anchor=south, font=\tiny\bfseries\sffamily, text=TextBlack!70] at (0.6, 6.45) {(GB)};
+ax.set_ylim(0, 138)
+ax.set_ylabel(
+    'Per-GPU Memory Footprint (GB)',
+    fontsize=9.5,
+    fontweight='bold',
+    color=c_dark,
+)
+ax.set_xticks(x)
+ax.set_xticklabels(stages, fontsize=8.8, fontweight='bold', color=c_dark)
 
-  % ===========================================================
-  % COLUMN 1: BASELINE DDP (112 GB)
-  % ===========================================================
-  % Header
-  \node[header card, draw=RedLine, fill=RedFill!50] at (2.2, 6.85) {
-    \textbf{\footnotesize\textcolor{RedLine!90!black}{Baseline DDP}}\\[-1pt]
-    \tiny\textcolor{RedLine!90!black}{Full Replication}
-  };
+ax.legend(
+    loc='upper right',
+    frameon=True,
+    facecolor='#FFFFFF',
+    edgecolor=c_border,
+    fontsize=8.2,
+)
 
-  % Stack:
-  % OS: 84 GB -> height = 3.36 -> from 1.6 to 4.96
-  \draw[draw=GreenLine, fill=GreenFill!70, line width=0.8pt] (1.3, 1.6) rectangle (3.1, 4.96);
-  \node[font=\bfseries\tiny\sffamily, text=GreenLine!90!black] at (2.2, 3.28) {Optimizer (84\,GB)};
+ax.text(
+    0.5,
+    -0.16,
+    'Reference Benchmark: 7B FP16 Model (16 B/param under AdamW) sharded across N = 64 accelerators',
+    transform=ax.transAxes,
+    fontsize=7.6,
+    fontstyle='italic',
+    color=c_gray,
+    ha='center',
+    va='top',
+)
 
-  % G: 14 GB -> height = 0.56 -> from 4.96 to 5.52
-  \draw[draw=OrangeLine, fill=OrangeFill!70, line width=0.8pt] (1.3, 4.96) rectangle (3.1, 5.52);
-  \node[font=\bfseries\tiny\sffamily, text=OrangeLine!90!black] at (2.2, 5.24) {G (14\,GB)};
-
-  % W: 14 GB -> height = 0.56 -> from 5.52 to 6.08
-  \draw[draw=BlueLine, fill=BlueFill!50, line width=0.8pt] (1.3, 5.52) rectangle (3.1, 6.08);
-  \node[font=\bfseries\tiny\sffamily, text=BlueLine] at (2.2, 5.80) {W (14\,GB)};
-
-  % Total Pill
-  \node[total pill, draw=RedLine, fill=RedFill!50] at (2.2, 0.95) {
-    \textbf{\footnotesize\textcolor{RedLine!90!black}{112\,GB}}\\[-1pt]
-    \tiny\bfseries\textcolor{RedLine!90!black}{OOM on 80\,GB GPU}
-  };
-
-  % ===========================================================
-  % COLUMN 2: ZeRO-1 (~29.3 GB)
-  % ===========================================================
-  % Header
-  \node[header card, draw=OrangeLine, fill=OrangeFill!40] at (5.2, 6.85) {
-    \textbf{\footnotesize\textcolor{OrangeLine!90!black}{ZeRO-1}}\\[-1pt]
-    \tiny\textcolor{OrangeLine!90!black}{Shard Optimizer State}
-  };
-
-  % Stack:
-  % OS/N: 1.31 GB -> height = 0.05 -> from 1.6 to 1.65 (emphasized to 1.73 for visibility)
-  \draw[draw=GreenLine, fill=GreenFill!70, line width=0.8pt] (4.3, 1.6) rectangle (6.1, 1.73);
-  \node[font=\tiny\bfseries\sffamily, text=GreenLine!90!black, anchor=west] at (6.18, 1.67) {$\leftarrow$ OS/$N$};
-
-  % G: 14 GB -> from 1.73 to 2.29
-  \draw[draw=OrangeLine, fill=OrangeFill!70, line width=0.8pt] (4.3, 1.73) rectangle (6.1, 2.29);
-  \node[font=\bfseries\tiny\sffamily, text=OrangeLine!90!black] at (5.2, 2.01) {G (14\,GB)};
-
-  % W: 14 GB -> from 2.29 to 2.85
-  \draw[draw=BlueLine, fill=BlueFill!50, line width=0.8pt] (4.3, 2.29) rectangle (6.1, 2.85);
-  \node[font=\bfseries\tiny\sffamily, text=BlueLine] at (5.2, 2.57) {W (14\,GB)};
-
-  % Total Pill
-  \node[total pill, draw=OrangeLine, fill=OrangeFill!50] at (5.2, 0.95) {
-    \textbf{\footnotesize\textcolor{OrangeLine!90!black}{$\approx$ 29.3\,GB}}\\[-1pt]
-    \tiny\bfseries\textcolor{OrangeLine!90!black}{3.8$\times$ Reduction}
-  };
-
-  % ===========================================================
-  % COLUMN 3: ZeRO-2 (~15.5 GB)
-  % ===========================================================
-  % Header
-  \node[header card, draw=BlueLine, fill=BlueFill!40] at (8.2, 6.85) {
-    \textbf{\footnotesize\textcolor{BlueLine}{ZeRO-2}}\\[-1pt]
-    \tiny\textcolor{BlueLine}{+ Shard Gradients}
-  };
-
-  % Stack:
-  % (OS+G)/N: 1.53 GB -> from 1.6 to 1.82
-  \draw[draw=GreenLine, fill=GreenFill!70, line width=0.8pt] (7.3, 1.6) rectangle (9.1, 1.82);
-  \node[font=\tiny\bfseries\sffamily, text=GreenLine!90!black, anchor=west] at (9.18, 1.71) {$\leftarrow$ (OS+G)/$N$};
-
-  % W: 14 GB -> from 1.82 to 2.38
-  \draw[draw=BlueLine, fill=BlueFill!50, line width=0.8pt] (7.3, 1.82) rectangle (9.1, 2.38);
-  \node[font=\bfseries\tiny\sffamily, text=BlueLine] at (8.2, 2.10) {W (14\,GB)};
-
-  % Total Pill
-  \node[total pill, draw=BlueLine, fill=BlueFill!50] at (8.2, 0.95) {
-    \textbf{\footnotesize\textcolor{BlueLine}{$\approx$ 15.5\,GB}}\\[-1pt]
-    \tiny\bfseries\textcolor{BlueLine}{7.2$\times$ Reduction}
-  };
-
-  % ===========================================================
-  % COLUMN 4: ZeRO-3 (~1.75 GB)
-  % ===========================================================
-  % Header
-  \node[header card, draw=GreenLine, fill=GreenFill!50] at (11.4, 6.85) {
-    \textbf{\footnotesize\textcolor{GreenLine!90!black}{ZeRO-3 / FSDP}}\\[-1pt]
-    \tiny\textcolor{GreenLine!90!black}{+ Shard Parameters}
-  };
-
-  % Stack:
-  % (W+G+OS)/N: 1.75 GB -> from 1.6 to 1.86
-  \draw[draw=GreenLine, fill=GreenFill!70, line width=0.8pt] (10.5, 1.6) rectangle (12.3, 1.86);
-  \node[font=\tiny\bfseries\sffamily, text=GreenLine!90!black, anchor=west] at (12.38, 1.73) {$\leftarrow$ State/$N$};
-  \node[font=\tiny\bfseries\sffamily, text=GreenLine!90!black] at (11.4, 2.25) {Fully Sharded};
-
-  % Total Pill
-  \node[total pill, draw=GreenLine, fill=GreenFill!60] at (11.4, 0.95) {
-    \textbf{\footnotesize\textcolor{GreenLine!90!black}{$\approx$ 1.75\,GB}}\\[-1pt]
-    \tiny\bfseries\textcolor{GreenLine!90!black}{64$\times$ Linear Scaling}
-  };
-
-  % ===========================================================
-  % FOOTER STRIP
-  % ===========================================================
-  \node[draw=GrayLine!30, fill=black!2, line width=0.7pt, minimum width=13.8cm, minimum height=0.55cm] at (7.0, 0.25) {
-    \footnotesize\sffamily Reference Benchmark: 7B FP16 Model (16\,B/param under AdamW) Sharded Across $N = 64$ Accelerators
-  };
-
-\end{tikzpicture}%
-}
+plt.tight_layout()
 ```
 :::
 
