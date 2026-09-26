@@ -6770,41 +6770,169 @@ The cost savings demonstrated in example \ref{exmp-inference-predictive-scaling-
 
 ::: {#fig-predictive-reactive-scaling fig-env="figure" fig-pos="htb" fig-cap="**Predictive vs. reactive scaling**: Reactive scaling (red line) responds to traffic spikes after they occur, leading to periods of under-provisioning where SLOs are violated due to cold start latency. Predictive scaling (blue line) anticipates traffic and begins provisioning capacity before the spike arrives, ensuring consistent performance." fig-alt="Time-series plot with traffic curve, reactive capacity lagging behind the spike, and predictive capacity scaling ahead of it."}
 
-```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily, scale=0.8]
-  \definecolor{BlueLine}{HTML}{006395}
-  \definecolor{BlueL}{HTML}{D1E6F3}
-  \definecolor{GreenLine}{HTML}{008F45}
-  \definecolor{GreenL}{HTML}{D4EFDF}
-  \definecolor{OrangeLine}{HTML}{E67817}
-  \definecolor{OrangeL}{HTML}{FCE4CC}
-  \definecolor{RedLine}{HTML}{CB202D}
-  \definecolor{RedL}{HTML}{F5D2D5}
-  \definecolor{VioletLine}{HTML}{7E317B}
-  \definecolor{VioletL}{HTML}{E6D4E5}
-  \definecolor{BrownLine}{HTML}{8B4513}
-  \definecolor{BrownL}{HTML}{F5DEB3}
-  % Axes
-  \draw[->, thick] (0,0) -- (10,0) node[right] {Time};
-  \draw[->, thick] (0,0) -- (0,5) node[above] {Load/Capacity};
+```{python}
+#| echo: false
+#| warning: false
+import matplotlib.pyplot as plt
+import numpy as np
 
-  % Traffic Curve (Sine-like spike)
-  \draw[black!50, ultra thick, dashed, domain=0:9, samples=100] plot (\x, {1 + 3*exp(-(\x-5)^2/2)});
-  \node[black!50, anchor=west] at (6, 4.2) {Actual Traffic};
+plt.style.use('seaborn-v0_8-whitegrid')
+fig, ax = plt.subplots(figsize=(9.2, 4.8))
 
-  % Reactive Capacity (Lagging)
-  \draw[RedLine, thick] (0,1.2) -- (5.2,1.2) -- (5.2,4.2) -- (9,4.2);
-  \node[RedLine, anchor=west] at (5.5, 1.5) {Reactive (Late)};
+c_dark = '#0F172A'
+c_blue = '#2563EB'
+c_red = '#DC2626'
+c_green = '#059669'
+c_gray = '#64748B'
+c_border = '#CBD5E1'
 
-  % Predictive Capacity (Early)
-  \draw[BlueLine, thick] (0,1.2) -- (3.5,1.2) -- (4.5,4.2) -- (9,4.2);
-  \node[BlueLine, anchor=west] at (2, 4.5) {Predictive (On Time)};
+t = np.linspace(0, 9.5, 500)
+traffic = 1.0 + 3.0 * np.exp(-((t - 5.0) ** 2) / (2 * 0.95**2))
 
-  % Deficit Area
-  \fill[RedL, opacity=0.5] (5, 1.2) -- (5.2, 1.2) -- (5.2, 4.2) -- (5, 4.2) -- cycle;
-  \node[RedLine, font=\tiny\sffamily, rotate=90] at (5.1, 2.7) {SLO VIOLATION};
+# Reactive capacity: lags until spike peak approaches at t=5.1, ramps to 4.2 by t=5.7
+reactive = np.piecewise(
+    t,
+    [t < 5.1, (t >= 5.1) & (t <= 5.7), t > 5.7],
+    [1.2, lambda t: 1.2 + (4.2 - 1.2) * ((t - 5.1) / 0.6), 4.2],
+)
 
-\end{tikzpicture}
+# Predictive capacity: anticipates spike, ramps from t=3.2 to t=4.3
+predictive = np.piecewise(
+    t,
+    [t < 3.2, (t >= 3.2) & (t <= 4.3), t > 4.3],
+    [1.2, lambda t: 1.2 + (4.2 - 1.2) * ((t - 3.2) / 1.1), 4.2],
+)
+
+# Curves
+ax.plot(
+    t,
+    traffic,
+    color='#334155',
+    linestyle='--',
+    linewidth=2.3,
+    label='Actual Traffic Demand',
+    zorder=4,
+)
+ax.plot(
+    t,
+    predictive,
+    color=c_blue,
+    linewidth=2.3,
+    label='Predictive Capacity (Proactive)',
+    zorder=5,
+)
+ax.plot(
+    t,
+    reactive,
+    color=c_red,
+    linewidth=2.3,
+    label='Reactive Capacity (Lagging)',
+    zorder=5,
+)
+
+# Shaded deficit (SLO violation)
+slo_mask = traffic > reactive
+ax.fill_between(
+    t,
+    reactive,
+    traffic,
+    where=slo_mask,
+    color='#FEE2E2',
+    edgecolor='#EF4444',
+    hatch='///',
+    alpha=0.85,
+    label='SLO Violation Deficit (Under-provisioned)',
+    zorder=2,
+)
+
+# Shaded proactive safety buffer
+headroom_mask = (predictive > traffic) & (t >= 3.2) & (t <= 6.8)
+ax.fill_between(
+    t,
+    traffic,
+    predictive,
+    where=headroom_mask,
+    color='#EFF6FF',
+    alpha=0.55,
+    zorder=1,
+)
+
+# Annotations with clean arrow placements
+ax.annotate(
+    'SLO VIOLATION DEFICIT\n(Cold-start latency & dropped requests)',
+    xy=(4.4, 2.8),
+    xytext=(2.2, 3.6),
+    fontsize=8.2,
+    fontweight='bold',
+    color='#991B1B',
+    ha='center',
+    bbox=dict(
+        boxstyle='round,pad=0.35',
+        facecolor='#FEF2F2',
+        edgecolor='#FCA5A5',
+        lw=1.0,
+    ),
+    arrowprops=dict(arrowstyle='->', color='#DC2626', lw=1.2),
+)
+
+ax.annotate(
+    'Predictive Scale-Up\n(Capacity ready on-time)',
+    xy=(3.5, 1.8),
+    xytext=(1.8, 2.0),
+    fontsize=8.0,
+    fontweight='bold',
+    color='#1E40AF',
+    ha='center',
+    bbox=dict(
+        boxstyle='round,pad=0.3',
+        facecolor='#EFF6FF',
+        edgecolor='#93C5FD',
+        lw=0.9,
+    ),
+    arrowprops=dict(arrowstyle='->', color=c_blue, lw=1.2),
+)
+
+ax.annotate(
+    'Reactive Detection Lag\n(Late scale-up after traffic onset)',
+    xy=(5.3, 2.4),
+    xytext=(7.4, 2.2),
+    fontsize=8.0,
+    fontweight='bold',
+    color='#B91C1C',
+    ha='center',
+    bbox=dict(
+        boxstyle='round,pad=0.3',
+        facecolor='#FEF2F2',
+        edgecolor='#FCA5A5',
+        lw=0.9,
+    ),
+    arrowprops=dict(arrowstyle='->', color='#DC2626', lw=1.2),
+)
+
+ax.set_xlim(0, 9.5)
+ax.set_ylim(0, 4.8)
+ax.set_xlabel(
+    'Time (Arbitrary Units / Minutes)',
+    fontsize=9.5,
+    fontweight='bold',
+    color=c_dark,
+)
+ax.set_ylabel(
+    'Load / Serving Capacity (Normalized)',
+    fontsize=9.5,
+    fontweight='bold',
+    color=c_dark,
+)
+
+ax.legend(
+    loc='upper right',
+    frameon=True,
+    facecolor='#FFFFFF',
+    edgecolor=c_border,
+    fontsize=8.2,
+)
+
+plt.tight_layout()
 ```
 
 :::
