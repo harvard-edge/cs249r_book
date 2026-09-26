@@ -49,7 +49,7 @@ This chapter writes a GELU expressed with fewer temporary Tensors and a tiled ma
 
 In eager execution, deep learning frameworks evaluate expressions statement by statement. When evaluating a compound expression, such as an activation function or a sequence of linear layers, the runtime allocates a fresh buffer for each intermediate result, writes it to main memory, and reads it back for the subsequent operation. For elementwise operations with low arithmetic intensity, memory bus bandwidth rather than floating-point compute capacity becomes the primary bottleneck. Moving transient values back and forth across the memory bus consumes substantial latency and energy even when the underlying mathematical operations are trivial.
 
-Memory access patterns provide a second concrete performance bottleneck. A two-row array `[[1, 2, 3], [4, 5, 6]]` stores its rows consecutively in ordinary C order. Walking a row visits adjacent floats; walking a column advances three floats between entries. Both traversals sum to 21. @Lst-acceleration-stride-timing enlarges this pattern so that access order can affect timing.
+Memory access patterns provide a second concrete performance bottleneck. A two-row array `[[1, 2, 3], [4, 5, 6]]` stores its rows consecutively in ordinary C order, using the contiguous strides derived in @sec-tensors ($S_0 = 3, S_1 = 1$). Walking a row visits adjacent floats at unit stride; walking a column advances three floats between entries, stepping across row strides. Both traversals sum to 21. @Lst-acceleration-stride-timing enlarges this pattern so that access order can affect timing.
 
 ::: {#lst-acceleration-stride-timing lst-cap="**Access-order experiment**: The same array is traversed by rows and columns."}
 ```python
@@ -83,7 +83,9 @@ for f in (sum_by_rows, sum_by_cols):
 
 The script reports timings for the machine running it; neither traversal has a fixed speedup. Their mathematical sums agree, but changing the reduction order can change the last few floating-point digits. The check compares both answers with `A.sum(dtype=np.float64)` before timing. Its tolerance suits this seeded example; other input magnitudes and sizes may need a different bound.
 
-A cache stores recently accessed data near the processor. Main memory transfers chunks called cache lines, so adjacent floats can share one transfer. For example, a hypothetical 64-byte line holds sixteen float32 values. A row walk can use all sixteen; a column walk may use only one before moving to another line. Whether a later access reuses that line depends on the array size and cache behavior. The stride explains a possible cost; it does not measure transferred bytes.
+A cache stores recently accessed data near the processor. Main memory transfers chunks called cache lines, so adjacent floats can share one transfer. For example, a hypothetical 64-byte line holds sixteen float32 values. A row walk can use all sixteen; a column walk may use only one before moving to another line.[^fn-prefetcher-tlb-stride] Whether a later access reuses that line depends on the array size and cache behavior. The stride explains a possible cost; it does not measure transferred bytes.
+
+[^fn-prefetcher-tlb-stride]: **Hardware prefetchers and TLB thrashing in strided traversals**: Modern processor memory controllers incorporate hardware stream prefetchers that detect sequential cache line access patterns and proactively stream adjacent lines from DRAM into L2 and L1 caches ahead of execution demand. In a row-major traversal, contiguous access maximizes prefetcher accuracy. In a column-major traversal of a $2048 \times 2048$ float32 matrix, each consecutive step jumps by 8,192 bytes (two full 4 KB virtual memory pages). This strided access defeats stream prefetchers and exhausts the Translation Lookaside Buffer (TLB), inducing frequent hardware page table walks for virtual-to-physical address translation.
 
 Now look at what a framework does when you write a GELU. @sec-activations introduced the tanh form,
 
@@ -99,7 +101,13 @@ and `unfused_gelu` evaluates it as eight steps: cube, scale, add, scale, tanh, a
 
 Matrix multiplication presents a different opportunity. Each input element contributes to several outputs. For $C=AB$, a row of $A$ is needed for every output column, and a column of $B$ for every output row. Grouping nearby output calculations can make those reuses occur close together in time. Analysis requires tracking both the accumulation into $C$ and which input blocks each step reads.
 
+::: {.callout-tip title="Pause & Predict: Hardware Cache Line Footprint"}
+On a processor architecture with 64-byte cache lines, how many compulsory cache misses occur when summing a $2048 \times 2048$ float32 matrix by contiguous rows? How many cache misses occur when summing the exact same matrix by columns if the cache cannot hold all 2048 rows simultaneously? What ratio of cache misses separates the two traversals?
+:::
+
 ---
+
+\newpage
 
 ## The Idea
 
@@ -248,6 +256,11 @@ This extra Python loop structure can cost more than one whole-matrix library cal
 
 ### Convolution as one matrix multiply
 
+::: {.column-margin}
+**↩ Jump back:** @sec-convolutions
+*The seven nested loops of Conv2d and the high-performance im2col lowering promise.*
+:::
+
 @sec-convolutions ended with a trade it could only describe. Module 09's `Conv2d` computes every multiply-add as a separate Python operation, and the chapter modeled im2col as the way out: copy each patch into a row, flatten each filter into a column, and let one matrix multiply do every dot product. Module 17 builds that path into the package, and it is the one place in the module where acceleration reaches a layer a model actually uses.
 
 The chapter model in @sec-convolutions filled the patch matrix one output position at a time, which is still a Python loop over $N H_{\text{out}} W_{\text{out}}$ positions. `im2col` turns the loop around. For kernel element $(i, j)$, the input values it touches at every output position form one strided slice of the padded input, so the function copies $K^2$ slices instead of $N H_{\text{out}} W_{\text{out}}$ patches. For a $3 \times 3$ kernel that is nine copies whatever the image size.
@@ -282,7 +295,9 @@ A convolution that only runs forward can evaluate a CNN but not train one. In ma
 
 {{< include _listings/17_acceleration/col2im.qmd >}}
 
-`col2im` walks the same kernel offsets and strided slices as `im2col`, with the copy turned into `+=`. Within one offset the slice touches each pixel at most once, so the in-place add is safe; across offsets, the adds are what combine overlapping patches. Assignment instead of addition would keep only the last patch's gradient for each pixel, and the unit test catches it by sending a gradient of one from every patch entry and checking that the $3 \times 3$ example comes back as the coverage counts `[[1,2,1],[2,4,2],[1,2,1]]`. A second test checks the defining property of a transpose, $\langle \text{im2col}(x), c\rangle = \langle x, \text{col2im}(c)\rangle$, for random $x$ and $c$ with stride and padding.
+`col2im` walks the same kernel offsets and strided slices as `im2col`, with the copy turned into `+=`. Within one offset the slice touches each pixel at most once, so the in-place add is safe; across offsets, the adds are what combine overlapping patches. Assignment instead of addition would keep only the last patch's gradient for each pixel, and the unit test catches it by sending a gradient of one from every patch entry and checking that the $3 \times 3$ example comes back as the coverage counts `[[1,2,1],[2,4,2],[1,2,1]]`. A second test checks the defining property of a transpose, $\langle \text{im2col}(x), c\rangle = \langle x, \text{col2im}(c)\rangle$, for random $x$ and $c$ with stride and padding.[^fn-adjoint-col2im]
+
+[^fn-adjoint-col2im]: **The adjoint relationship of im2col and col2im**: In functional analysis, the inner product identity $\langle A x, y \rangle = \langle x, A^* y \rangle$ defines the adjoint operator $A^*$. Because `im2col` is a linear transformation mapping input pixel arrays to 2D patch matrices, `col2im` is its exact linear adjoint (matrix transpose). In the forward pass, one pixel fans out to multiple overlapping patches; in the backward pass, the adjoint operator accumulates cotangents from all overlapping patches back into that single pixel coordinate.
 
 `Im2colConv2dFunction` puts the three gradients into the same `Function` shape as Module 09's `Conv2dFunction`. Its forward pass saves the patch matrix and the flattened filters; its backward pass uses them.
 
@@ -425,7 +440,9 @@ Take one $3 \times 3$ image holding the values 1 through 9 and a $2 \times 2$ ke
 
 A compiled fused kernel can compute all eight GELU steps on one element before advancing to the next. A kernel is a compiled numerical routine; fusion combines operations that would otherwise run separately. Registers can hold the scalar intermediates, so those intermediates need not become full arrays. This is the hypothetical two-pass baseline in the worked trace, whereas the TinyTorch helpers remain eager NumPy computations.
 
-PyTorch's performance guide describes combining pointwise operations through TorchInductor and `torch.compile`. Such a compiler examines a computation larger than one individual array operation, which lets it choose where to retain intermediates. Whether it fuses a particular chain depends on the supported operations and backend, as examined in the production bridge below. [PyTorch performance tuning guide](https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html).
+PyTorch's performance guide describes combining pointwise operations through TorchInductor and `torch.compile`.[^fn-pointwise-vs-reduction-fusion] Such a compiler examines a computation larger than one individual array operation, which lets it choose where to retain intermediates. Whether it fuses a particular chain depends on the supported operations and backend, as examined in the production bridge below. [PyTorch performance tuning guide](https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html).
+
+[^fn-pointwise-vs-reduction-fusion]: **Pointwise versus reduction kernel fusion**: Compiler backends (such as PyTorch Inductor and OpenAI Triton) classify fusion into two primary categories: pointwise fusion and reduction fusion. Pointwise operations (such as Add, Mul, ReLU, and GELU) require no communication between distinct tensor coordinates, making them embarrassingly parallel and straightforward to fuse into a single loop over processor registers. Reduction operations (such as LayerNorm, Softmax, or GEMM), however, require aggregating values across coordinates. Fusing a reduction requires inter-thread communication through GPU shared memory, tree-based reduction sweeps, or warp-level shuffle instructions (`__shfl_down_sync`).
 
 ::: {#psp-acceleration-torch-compile-inductor .callout-perspective title="Production Bridge: PyTorch 2.0 TorchInductor and Triton Kernel Fusion"}
 In standard eager execution (both PyTorch eager mode and TinyTorch), each operator dispatches an isolated C++ or CUDA kernel. Intermediate tensors are written to high-bandwidth device memory (HBM/DRAM) and immediately read back by the next kernel, consuming memory bandwidth and incurring kernel launch overhead.
