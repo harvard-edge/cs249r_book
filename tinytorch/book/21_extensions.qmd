@@ -55,6 +55,18 @@ Implementing Low-Rank Adaptation (LoRA) in TinyTorch requires only 25 lines of P
 TinyTorch exposes four native extension points that correspond to the four fundamental boundaries of deep learning execution:
 
 1. **The Autograd Boundary (`Function`):** Subclassing `Function` defines custom forward and backward semantics, intercepting the autograd tape to drop or recompute intermediate activations (as in activation checkpointing).
+
+::: {.column-margin}
+**↩ Jump back:** @sec-optimizers
+*Adam moment state tensors ($m_t, v_t$) and memory consumption during gradient descent.*
+
+**↩ Jump back:** @sec-autograd
+*The autograd tape, topological graph traversal, and intermediate tensor lifetimes.*
+
+**↩ Jump back:** @sec-acceleration
+*Hardware cache lines, 2D loop tiling, and register residency.*
+:::
+
 2. **The Architectural Boundary (`Layer`):** Subclassing `Layer` introduces custom architectural primitives, freezes pre-trained weight matrices by toggling `requires_grad=False`, and exposes low-rank adapter parameters to the optimizer (as in LoRA).
 3. **The Training Dynamics Boundary (`Optimizer`):** Interfacing with `optimizer.params` enables custom gradient transformations, loss scaling for mixed-precision arithmetic, gradient clipping, and advanced update rules (such as Lion or Muon).
 4. **The Silicon Boundary (Backend FFI):** Extracting contiguous memory pointers from `Tensor.data` enables invoking native compiled C++ shared libraries via `ctypes`, launching GPU kernels in OpenAI Triton, or offloading computation to Apple Silicon Metal Performance Shaders (MPS).
@@ -162,6 +174,10 @@ Because $W_0$ is frozen, the autograd engine allocates gradients and Adam optimi
 
 {{< include _listings/21_extensions/LoRALinear.qmd >}}
 
+::: {.callout-tip title="Pause & Predict: The Memory Economics of Freezing Base Weights"}
+Suppose you fine-tune a 7-billion parameter language model in 16-bit precision using the Adam optimizer. Each parameter requires 2 bytes for the weight, 2 bytes for the gradient, and 8 bytes for Adam moment states ($m_t$ and $v_t$ in FP32), totaling 12 bytes of training state per parameter (84 GB). If you freeze all base weights and attach a LoRA adapter with rank $r=16$ affecting 0.2% of the parameters (14 million parameters), how much memory do the frozen base weights require? How much memory do the LoRA parameters and their optimizer states require? What is the total reduction in training memory state?
+:::
+
 **The Empirical Scorecard:** Consider a standard transformer feedforward projection layer ($d_{\text{in}} = 4096, d_{\text{out}} = 16384$, totaling 67.1 million parameters). @tbl-lora-memory details the parameter counts and memory footprints across adapter ranks compared to full fine-tuning.
 
 | Configuration | Trainable Parameters | Weight Memory | Adam State Memory | Memory Reduction |
@@ -180,19 +196,19 @@ Because $W_0$ is frozen, the autograd engine allocates gradients and Adam optimi
 
 **The Systems Bottleneck:** In deep networks, the autograd tape saves intermediate tensor activations produced by every forward layer to evaluate gradient chain rules during backpropagation. For an $L$-layer transformer with sequence length $T$ and hidden dimension $D$, activation memory scales linearly with depth: $O(L \cdot T \cdot D)$. On long sequences or deep architectures, activation memory quickly dwarfs parameter storage and causes out-of-memory (OOM) crashes during training.
 
+**Architectural Strategy:** Activation Checkpointing (or gradient recomputation) discards intermediate forward activations from memory. The forward pass runs inside a `no_grad()` context, caching only the input boundary tensors between major layer blocks. During backpropagation, the forward pass for each block is recomputed dynamically from the cached boundary tensors. By dividing an $L$-layer network into $\sqrt{L}$ segments, activation memory scaling drops from $O(L)$ to $O(\sqrt{L})$, trading a 33% increase in compute for an 80% reduction in peak activation memory.
+
+**The Implementation:** `checkpoint` wraps any forward callable inside a custom `Function`, detaching inputs during the backward pass to seed local recomputation:
+
 ::: {.column-margin}
 ![](assets/images/diagrams/21_extensions-margin-checkpoint.svg){width="100%" fig-alt="Activation checkpointing diagram contrasting standard O(L) forward activation retention with checkpointed O(sqrt(L)) boundary storage and backward recomputation."}
 
 *Activation Checkpointing: Standard autograd holds all $L$ layer activations in memory. Checkpointing stores only boundary tensors ($O(\sqrt{L})$), recomputing intermediate activations during backpropagation to reduce peak memory by up to 80 percent at a 33 percent compute overhead.*
 :::
 
-**Architectural Strategy:** Activation Checkpointing (or gradient recomputation) discards intermediate forward activations from memory. The forward pass runs inside a `no_grad()` context, caching only the input boundary tensors between major layer blocks. During backpropagation, the forward pass for each block is recomputed dynamically from the cached boundary tensors. By dividing an $L$-layer network into $\sqrt{L}$ segments, activation memory scaling drops from $O(L)$ to $O(\sqrt{L})$, trading a 33% increase in compute for an 80% reduction in peak activation memory.
-
-**The Implementation:** `checkpoint` wraps any forward callable inside a custom `Function`, detaching inputs during the backward pass to seed local recomputation:
-
 {{< include _listings/21_extensions/checkpoint.qmd >}}
 
-**The Empirical Scorecard:** @tbl-checkpoint-scaling compares activation memory consumption for a 32-layer transformer model ($T = 2048, D = 4096$) with and without activation checkpointing.
+**The Empirical Scorecard:** @tbl-checkpoint-scaling compares activation memory consumption for a 32-layer transformer model ($T = 2048, D = 4096$) with and without activation checkpointing.[^fn-activation-checkpointing-sqrt]
 
 | Layer Depth ($L$) | Standard Forward Memory | Checkpointed Memory | Compute Overhead | Peak Memory Saved |
 | ---: | ---: | ---: | ---: | ---: |
@@ -202,6 +218,8 @@ Because $W_0$ is frozen, the autograd engine allocates gradients and Adam optimi
 | 64 Layers | 67.2 GB | 8.8 GB | +33.3% | 86.9% |
 
 : **Activation memory scaling under activation checkpointing ($T = 2048, D = 4096$, float32).** Standard training scales linearly $O(L)$; checkpointing scales sublinearly $O(\sqrt{L})$ with uniform segments. {#tbl-checkpoint-scaling tbl-colwidths="[18,24,22,18,18]"}
+
+[^fn-activation-checkpointing-sqrt]: **Activation checkpointing trade-offs**: In an $L$-layer neural network, standard autograd retains $L$ activation tensors in memory, scaling as $\mathcal{O}(L)$. Checkpointing segments the model into $k$ subgraphs of length $m = L / k$, storing only the boundary activations. Minimizing total peak memory $M(k) = k + L / k$ yields an optimal segment length $k^* = L^{1/2}$, cutting peak memory from $\mathcal{O}(L)$ to $\mathcal{O}(L^{1/2})$. The cost is exactly one extra forward pass per segment during backpropagation, adding a deterministic $33\%$ computational overhead.
 
 ---
 
@@ -288,8 +306,10 @@ On a 128 × 128 product, this loop runs at just 0.12 GFLOP/s. For a standard 102
 
 1. **Contiguous Pointer Passing:** Extracts raw memory addresses (`.data.ctypes.data_as`) without copying memory.
 2. **Cache-Blocked Tiling:** Tiles the matrix traversal in 64 × 64 blocks, ensuring that active working sets (48 KB) reside inside the 128 KB L1 data cache.
-3. **SIMD Vectorization:** Arranges inner loops in $i, k, j$ order so that memory access along `b_row[j]` and `c_row[j]` is contiguous, allowing compiler auto-vectorization (AVX2 on x86, ARM NEON on Apple Silicon).
+3. **SIMD Vectorization:** Arranges inner loops in $i, k, j$ order so that memory access along `b_row[j]` and `c_row[j]` is contiguous, allowing compiler auto-vectorization (AVX2 on x86, ARM NEON on Apple Silicon).[^fn-simd-register-widths]
 4. **OpenMP Multithreading:** Distributes output tiles across CPU cores using `#pragma omp parallel for collapse(2)`.
+
+[^fn-simd-register-widths]: **SIMD register widths across architectures**: A single Instruction Multiple Data (SIMD) register holds multiple adjacent data values: 128-bit ARM NEON holds 4 float32 values, 256-bit AVX2 holds 8 float32 values, and 512-bit AVX-512 holds 16 float32 values. Modern 2D systolic arrays (such as Google TPUs and Apple Neural Engine) expand vector registers into two-dimensional multiply-accumulate matrices, executing outer products in lock-step across hundreds of processing elements without intermediate register writebacks.
 
 **Pedagogical Choice: Why ctypes instead of pybind11?** Modern PyTorch C++ extensions typically rely on pybind11 and `TORCH_LIBRARY` registration macros to bind native operators into Python. While pybind11 provides seamless class wrapping and exception propagation, it also conceals the actual memory boundary behind layers of C++ template metaprogramming. TinyTorch deliberately chooses Python's built-in `ctypes` foreign function interface: by extracting a raw pointer from the underlying buffer (`tensor.data.ctypes.data_as(ctypes.POINTER(ctypes.c_float))`), the developer directly confronts the C-ABI memory contract, pointer aliasing, and 64-byte cache-line alignment without any framework magic in the middle.
 
