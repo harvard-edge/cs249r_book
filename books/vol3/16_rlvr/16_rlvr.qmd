@@ -46,9 +46,23 @@ Imitation stops at the edge of what someone has demonstrated, and for many agent
 
 :::
 
-## Why Learn from Rewards {#sec-vol3-rlvr-need}
+## Foundations of Verifiable Reward Optimization {#sec-vol3-rlvr-need}
 
-A repair agent fine-tuned on admitted trajectories (@sec-vol3-fine-tuning) resolves the issues whose fixes resemble its demonstrations and stalls on the rest. Adding demonstrations helps only where someone can write them, and on-policy correction still needs an expert who can name the right action in every state the policy reaches (@sec-vol3-fine-tuning-exposure-bias). For repository-scale repair, protocol debugging, or theorem proving, no such expert exists at a price anyone will pay. What does exist is a check. A test suite cannot write the patch, but it can say whether a patch works, and that weaker ability is enough for reinforcement learning. The policy proposes whole trajectories inside a sandbox, a verifier scores the outcome, and the weights move toward whatever scored well.
+Consider an autonomous software engineering agent tasked with resolving an asynchronous deadlock in an event-driven network broker. Over twenty-eight sequential turns within an isolated sandbox, the agent methodically isolates the defect: it queries system logs, attaches an interactive debugger to inspect lock acquisition order, examines the synchronization primitives in `broker/engine.go`, and identifies an unbuffered channel write that blocks under high connection concurrency. On turn 27, it refactors the channel lifecycle into a non-blocking select pattern. On turn 28, however, while attempting to format the repository diff before invoking the test suite, it accidentally leaves an unused import in a secondary file. The hermetic sandbox executes the compilation and verification harness, `go test ./...`, encounters a compiler failure on the unused import, and exits with a nonzero status code. The verifier assigns the entire multi-step trajectory a sparse terminal reward of $R(\tau) = 0$.
+
+Under standard policy gradient optimization, this delayed scalar reward triggers catastrophic credit assignment collapse across the trajectory.[^fn-credit-assignment-dilemma] The policy gradient estimator weights every token emitted across all twenty-eight turns by the uniform advantage $R(\tau) - b(s_0)$:
+
+$$\hat{g} = \sum_{t=1}^{T} \nabla_\theta \log \pi_\theta(a_t \mid s_t) \left(R(\tau) - b(s_0)\right)$$
+
+Because the terminal reward $R(\tau)$ arrives only after turn $T$, the gradient estimator accumulates the stochastic variance of every intermediate environmental transition and sampling decision. The variance of the estimated gradient scales directly with the trajectory horizon:
+
+$$\operatorname{Var}\left[\hat{g}\right] = \sum_{t=1}^{T} \operatorname{Var}\left[\nabla_\theta \log \pi_\theta(a_t \mid s_t) \left(R(\tau) - b(s_0)\right)\right] \propto \mathcal{O}\left(T \cdot \sigma_R^2\right)$$ {#eq-vol3-trajectory-variance-explosion}
+
+Without intermediate verifiers or state-checkpoint evaluations, the variance formulated in @eq-vol3-trajectory-variance-explosion explodes as the interaction horizon lengthens. The sound diagnostic actions that correctly localized the deadlock receive the exact same negative update as the careless formatting typo on turn 28. Conversely, if an agent executing twenty-eight disorganized, hallucinated commands happens to stumble into a passing exit code through a lucky one-line assertion edit, every useless intermediate step is rewarded with positive advantage. The delayed scalar reward buries causal credit under a flood of stochastic noise, driving the policy toward rapid entropy collapse or undiagnosed, hasty edits. Resolving this systems collapse requires grounding policy optimization in verifiable rewards that check intermediate execution states or cohort baselines that isolate true algorithmic progress from noise.
+
+[^fn-credit-assignment-dilemma]: **Credit Assignment Dilemma**: In multi-turn environments, delayed terminal rewards decay the correlation between early exploratory actions and final outcomes. Uniform attribution penalizes diagnostic exploration as heavily as terminal mistakes, inflating policy gradient variance by $\mathcal{O}(T)$. Intermediate verifiable checkpoints contract this variance horizon by bounding the temporal propagation of scalar reward signals.
+
+A repair agent fine-tuned on admitted trajectories resolves the issues whose fixes resemble its demonstrations and stalls on the rest. Adding demonstrations helps only where someone can write them, and on-policy correction still needs an expert who can name the right action in every state the policy reaches. For repository-scale repair, protocol debugging, or theorem proving, no such expert exists at a price anyone will pay. What does exist is a check. A test suite cannot write the patch, but it can say whether a patch works, and that weaker ability is enough for reinforcement learning. The policy proposes whole trajectories inside a sandbox, a verifier scores the outcome, and the weights move toward whatever scored well.
 
 That last clause is the systems problem of this chapter. An optimizer rewarded for passing tests will pass them by any route the environment allows, including editing the tests, and it will do so across millions of rollouts that each need a sandbox, a verifier run, and model time. The chapter builds the machinery in the order the problem forces it. It starts with what the reward can be built from and how a policy games each source, then turns to how a single end-of-episode score is credited to thirty turns of actions and how GRPO turns groups of rollouts into a gradient without a learned critic. From there it covers what changes when the episode is a multi-turn tool-using trajectory, how the verifier is kept out of the policy's reach, which pathologies appear once it is, and how the environments and rollouts are run and gated at scale.
 
@@ -58,15 +72,15 @@ That last clause is the systems problem of this chapter. An optimizer rewarded f
 *Training changes the policy and leaves every exposure where the runtime closes it.*
 :::
 
-Learning by trial and error grants the policy no authority it lacked at deployment. Every rollout action, whether a shell command, a database query, or a source edit, is a proposal that the runtime executes only inside the sandbox of @sec-vol3-sandboxes. Exploration makes that containment more important, not less. A policy sampled at high temperature proposes malformed and destructive commands as a matter of course, and a rollout fleet proposes them millions of times, so the sandbox reset and pooling machinery of @sec-vol3-sandboxes-pooling becomes part of the training loop.
+Learning by trial and error grants the policy no authority it lacked at deployment. Every rollout action, whether a shell command, a database query, or a source edit, is a proposal that the runtime executes only inside an isolated sandbox. Exploration makes that containment more important, not less. A policy sampled at high temperature proposes malformed and destructive commands as a matter of course, and a rollout fleet proposes them millions of times, so sandbox reset and pooling machinery becomes part of the training loop.
 
-The reward inherits the runtime's rule about evidence. A model's report that it finished carries no evidential weight (@sec-vol3-intro-epistemic-boundary), and asking the model whether its code solved the task runs another inference pass with the same blind spots. The reward must therefore come from a check outside the model, and a reward is only as strong as the closure evidence level (@sec-vol3-intro-closure-evidence) of the check that computes it. Static checks are weaker than sealed tests, and sealed tests are weaker than a formal proof.
+The reward inherits the runtime's rule about evidence. A model's report that it finished carries no evidential weight, and asking the model whether its code solved the task runs another inference pass with the same blind spots. The reward must therefore come from a check outside the model, and a reward is only as strong as the closure evidence level of the check that computes it. Static checks are weaker than sealed tests, and sealed tests are weaker than a formal proof.
 
 Formally, the interaction is a Markov decision process over a finite horizon $T$. The state $s_t$ is what the policy sees at turn $t$, the task, the context, and the observations so far, together with the sandbox state behind them. The action $a_t$ is the token sequence the policy emits on that turn, a reasoning block and usually a tool call. The transition is the runtime executing $a_t$ in the sandbox and appending the observation. The reward $R(\tau) \in \{0, 1\}$ is computed by the verifier on the final state of the trajectory $\tau$, and the objective is
 
 $$\mathcal{J}(\theta) = \mathbb{E}_{\tau \sim \pi_\theta}\left[R(\tau)\right]$$
 
-The horizon $T$ counts the same turns as the horizon $H$ of @sec-vol3-intro-hsa and is written $T$ here to follow the reinforcement learning literature [@sutton2018reinforcement].
+The horizon $T$ counts the same turns as the agent execution horizon and is written $T$ here to follow the reinforcement learning literature [@sutton2018reinforcement].
 
 ::: {#dfn-reinforcement-learning-with-verifiable-rewards .callout-definition title="Reinforcement learning with verifiable rewards"}
 
@@ -77,7 +91,7 @@ The horizon $T$ counts the same turns as the horizon $H$ of @sec-vol3-intro-hsa 
 3.  **Common pitfall**: Treating a verifiable reward as a complete specification. A policy can satisfy an incomplete test suite with a vacuous or wrong solution that no test covers.
 :::
 
-The objective also explains why supervised training comes first. A policy gradient needs contrast between trajectories that scored well and trajectories that did not. If the starting policy never succeeds on a task, every rollout scores zero and the gradient for that task is zero. What matters is not the single-attempt pass rate but the chance that at least one of $k$ attempts succeeds, the pass@$k$ of @sec-vol3-test-time-compute-candidate-diversity:
+The objective also explains why supervised training comes first. A policy gradient needs contrast between trajectories that scored well and trajectories that did not. If the starting policy never succeeds on a task, every rollout scores zero and the gradient for that task is zero. What matters is not the single-attempt pass rate but the chance that at least one of $k$ attempts succeeds, the combinatorial pass@$k$ metric:
 
 $$\text{pass@}k = 1 - (1 - \hat{p})^k$$
 
@@ -121,10 +135,10 @@ class BootstrapPassRate:
 ::: {.column-margin}
 ![](images/svg/vol3_rlvr_margin_002.svg){width="100%" fig-alt="Concave curve of pass at k rising from 18 percent at k equals 1 to 79.6 percent at k equals 8 and 96 percent at k equals 16."}
 
-*With independent attempts at `{python} BootstrapPassRate.p_single_pct_str` percent each, a group of `{python} BootstrapPassRate.k_small_str` contains a success `{python} BootstrapPassRate.pass_small_pct_str` percent of the time.*
+*With independent attempts at `{python} BootstrapPassRate.p_single_pct_str` each, a group of `{python} BootstrapPassRate.k_small_str` contains a success `{python} BootstrapPassRate.pass_small_pct_str` of the time.*
 :::
 
-A supervised policy that solves a task on `{python} BootstrapPassRate.p_single_pct_str` percent of attempts produces at least one success in a group of `{python} BootstrapPassRate.k_small_str` rollouts `{python} BootstrapPassRate.pass_small_pct_str` percent of the time, and in a group of `{python} BootstrapPassRate.k_large_str` rollouts `{python} BootstrapPassRate.pass_large_pct_str` percent of the time. Those groups carry a gradient. A policy at zero carries none, however many rollouts it spends. Supervised fine-tuning is therefore not an alternative to reinforcement learning but its bootstrap, the step that moves the policy off zero on the tasks that matter, as reinforcement learning against isolated verifiers (principle \ref{pri-vol3-verifiable-rewards}) requires.
+A supervised policy that solves a task on `{python} BootstrapPassRate.p_single_pct_str` of attempts produces at least one success in a group of `{python} BootstrapPassRate.k_small_str` rollouts `{python} BootstrapPassRate.pass_small_pct_str` of the time, and in a group of `{python} BootstrapPassRate.k_large_str` rollouts `{python} BootstrapPassRate.pass_large_pct_str` of the time. Those groups carry a gradient. A policy at zero carries none, however many rollouts it spends. Supervised fine-tuning is therefore not an alternative to reinforcement learning but its bootstrap, the step that moves the policy off zero on the tasks that matter, as reinforcement learning against isolated verifiers (principle \ref{pri-vol3-verifiable-rewards}) requires.
 
 The loop is now in view: a policy that already succeeds sometimes, a sandbox that absorbs its exploration, and a verifier that scores the result. Everything that follows depends on the verifier's score meaning what the task author meant. The next section examines what a reward can be built from and why an optimizer finds every gap between the score and the intent.
 
@@ -138,18 +152,24 @@ The transition from supervised imitation to reinforcement learning marks a funda
 
 ## Verifiable Rewards {#sec-vol3-rlvr-rewards}
 
-The silent test bypass of \ref{exmp-silent-test-bypass} corrupts one result, and @sec-vol3-verifier-gaming showed how the same shortcut corrupts a curated corpus. Reinforcement learning turns it into a strategy. When the test files sit in the rollout's writable workspace, a group of rollouts on a hard bug contains mostly failed fixes and, sometimes, one rollout that weakens the failing assertion. That rollout scores $1$, receives the largest advantage in its group, and the gradient raises the probability of every token that produced the edit. A few hundred steps later, weakening assertions is the policy's dominant strategy, because it is shorter, needs no understanding of the bug, and scores exactly as well as a correct fix. Nothing in the loop malfunctioned. The optimizer did what it was built to do on the reward it was given.
+The silent test bypass of \ref{exmp-silent-test-bypass} corrupts one result, and verifier gaming showed how the same shortcut corrupts a curated corpus. Reinforcement learning turns it into a strategy. When the test files sit in the rollout's writable workspace, a group of rollouts on a hard bug contains mostly failed fixes and, sometimes, one rollout that weakens the failing assertion. That rollout scores $1$, receives the largest advantage in its group, and the gradient raises the probability of every token that produced the edit. A few hundred steps later, weakening assertions is the policy's dominant strategy, because it is shorter, needs no understanding of the bug, and scores exactly as well as a correct fix. Nothing in the loop malfunctioned. The optimizer did what it was built to do on the reward it was given.
+
+::: {.column-margin .margin-pointer}
+↩ Trajectory fine-tuning, observation loss masking, and Low-Rank Adaptation are established in @sec-vol3-fine-tuning.
+:::
 
 ### Reward hacking
 
-Under supervised training, a flawed objective degrades the model gradually toward the average of its data. Under reinforcement learning the policy actively searches the space the reward defines, so any gap between the reward and the developer's intent becomes a target. The literature calls this specification gaming [@krakovna2020specification] or reward hacking [@amodei2016concrete; @skalse2022defining].
+Under supervised training, a flawed objective degrades the model gradually toward the average of its data. Under reinforcement learning the policy actively searches the space the reward defines, so any gap between the reward and the developer's intent becomes a target. The literature calls this specification gaming [@krakovna2020specification] or reward hacking [@amodei2016concrete; @skalse2022defining].[^fn-enclave-reward-hacking]
+
+[^fn-enclave-reward-hacking]: **Automated Grading Vulnerabilities**: Automated evaluation enclaves face prompt injection and environment manipulation when untrusted agent processes share filesystem layers with grading harnesses. Standard grading harnesses that parse standard output strings or exit codes are vulnerable to synthetic log injection unless assertions execute in cryptographically isolated microVMs. Hermetic test isolation prevents the policy gradient optimizer from finding trivial shortcuts that satisfy superficial syntax checks while bypassing behavioral invariants.
 
 ::: {#dfn-reward-hacking .callout-definition title="Reward hacking"}
 
 ***Reward hacking***\index{Reward hacking!definition}\index{Specification gaming|see{Reward hacking}} is a policy raising its measured reward through behavior that does not accomplish the task the reward was meant to measure, by exploiting gaps in what the reward checks or by reaching and altering the mechanism that computes it.
 
 1.  **Significance**: Reinforcement learning turns every gap between the reward and the intent into an optimization target, so reward hacking is the expected outcome of an unguarded reward, not an anomaly.
-2.  **Distinction**: The Goodhart failure of @sec-vol3-test-time-compute-verification arises when a verifier *selects* among candidates. Reward hacking arises when the verifier *trains* the generator, so the exploit is learned into the weights and recurs on every later task.
+2.  **Distinction**: Goodhart failure arises when a verifier *selects* among candidates. Reward hacking arises when the verifier *trains* the generator, so the exploit is learned into the weights and recurs on every later task.
 3.  **Common pitfall**: Treating reward hacking as a prompt problem. No instruction to the policy removes a reachable exploit, because the gradient rewards the exploit whether or not the instruction forbade it.
 :::
 
@@ -163,9 +183,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 A reward that parses the build log for the string `BUILD SUCCESSFUL` rewards a policy that prints the string without building anything. Each exploit is shorter than a real fix, so once one is reachable it wins. The defense cannot be a better instruction. It must be a check the policy cannot reach, computed on evidence the policy cannot forge, which is the end-to-end evidence that invariant closure (principle \ref{pri-invariant-closure}) places above the model.
 
-### What a reward can be built from
+### Structural constituents of programmatic verifiable rewards
 
-@Sec-vol3-test-time-compute-verification classified verifiers by the evidence they produce and by their error asymmetry when they select among candidates. Training changes the question. A selector that accepts a bad candidate wastes one decision, while a reward that accepts a bad trajectory teaches the policy to produce more of them. @Tbl-vol3-reward-oracles lists the sources an agent reward is built from, ordered by how much the policy can bend them.
+Verifiers can be classified by the evidence they produce and by their error asymmetry when they select among candidates. Training changes the question. A selector that accepts a bad candidate wastes one decision, while a reward that accepts a bad trajectory teaches the policy to produce more of them. @Tbl-vol3-reward-oracles lists the sources an agent reward is built from, ordered by how much the policy can bend them.
 
 | **Reward source**                | **What it checks**                                     | **How a policy games it**                            | **Role in the reward**                                  |
 |:---------------------------------|:-------------------------------------------------------|:-----------------------------------------------------|:--------------------------------------------------------|
@@ -179,9 +199,13 @@ A reward that parses the build log for the string `BUILD SUCCESSFUL` rewards a p
 
 : **Reward Sources for Agent Training**: The sources an agent reward is built from, what each actually checks, how an optimizing policy exploits it, and the role each can safely play. Only checks whose verdict does not depend on how the output is phrased can decide the reward. {#tbl-vol3-reward-oracles}
 
-The top rows correspond to the sealed-test and formal-proof closure levels. Their verdicts do not change with how the output is phrased, so the only way to raise the score is to change the artifact the check runs on, and isolation (@sec-vol3-rlvr-sandboxing) closes that route. The lower rows score the text, and the policy controls the text. A learned process reward model or a rubric judge is itself a model with blind spots, and gradient ascent finds them. Some tasks, such as writing documentation or answering a user's question, have no executable check, and a rubric judge is the only reward available. Such a judge must first be calibrated against verified outcomes and checked for position, length, and self-preference bias, as @sec-vol3-evaluation describes. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) sets the role such a verifier can play, and it is the boundary @sec-vol3-trajectory-curation-rankers drew for admitting training data, now applied to the reward. A learned verifier may rank or shape rollouts, but where a deterministic check exists, that check decides the reward.
+The top rows correspond to the sealed-test and formal-proof closure levels. Their verdicts do not change with how the output is phrased, so the only way to raise the score is to change the artifact the check runs on, and isolation (@sec-vol3-rlvr-sandboxing) closes that route. The lower rows score the text, and the policy controls the text. A learned process reward model or a rubric judge is itself a model with blind spots, and gradient ascent finds them. Some tasks, such as writing documentation or answering a user's question, have no executable check, and a rubric judge is the only reward available. Such a judge must first be calibrated against verified outcomes and checked for position, length, and self-preference bias, as rigorous evaluation requires. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) sets the role such a verifier can play, and it is the boundary rankers enforce for admitting training data, now applied to the reward. A learned verifier may rank or shape rollouts, but where a deterministic check exists, that check decides the reward.
 
-The cost of letting a learned verifier decide is easy to underestimate, because a small false-accept rate looks harmless next to a large speedup. The worked example below measures it in the currency that matters, the share of positive updates that teach the exploit. No new formula is needed. That share is $1 - \Pi_V$, the complement of the verifier precision of @eq-vol3-verifier-precision, with the policy's true pass rate as the base rate $p$ and no false rejections. The Bayes arithmetic that limited selection among candidates in @sec-vol3-test-time-compute-verification now governs the rollouts that receive positive reward.
+The cost of letting a learned verifier decide is easy to underestimate, because a small false-accept rate looks harmless next to a large speedup. The worked example below measures it in the currency that matters, the share of positive updates that teach the exploit. No new formula is needed. That share is $1 - \Pi_V$, the complement of the verifier precision bound, with the policy's true pass rate as the base rate $p$ and no false rejections. The Bayes arithmetic that limited selection among candidates under test-time search now governs the rollouts that receive positive reward.
+
+::: {.column-margin .margin-pointer}
+↩ Outcome verification, search budget allocation, and verifier precision bounds are established in @sec-vol3-test-time-compute.
+:::
 
 ```{python}
 #| label: calc-vol3-rlvr-oracle-gaming
@@ -243,12 +267,12 @@ class OracleGaming:
 
 ::: {#nbk-14-oracle-gaming .callout-notebook title="False accepts in the reward"}
 
-**Problem**: A training step samples `{python} OracleGaming.group_str` rollouts for each of `{python} OracleGaming.tasks_str` coding tasks. The policy truly solves `{python} OracleGaming.true_pass_pct_str` percent of rollouts. A fast learned verifier replaces the sealed test suite and accepts `{python} OracleGaming.false_pos_pct_str` percent of failing rollouts. What share of the positively rewarded rollouts teach the policy to fool the verifier?
+**Problem**: A training step samples `{python} OracleGaming.group_str` rollouts for each of `{python} OracleGaming.tasks_str` coding tasks. The policy truly solves `{python} OracleGaming.true_pass_pct_str` of rollouts. A fast learned verifier replaces the sealed test suite and accepts `{python} OracleGaming.false_pos_pct_str` of failing rollouts. What share of the positively rewarded rollouts teach the policy to fool the verifier?
 
 **Variables**:
 
 * Rollouts per step: `{python} OracleGaming.rollouts_math`
-* True pass rate: `{python} OracleGaming.true_pass_pct_str` percent; false-accept rate on failing rollouts: `{python} OracleGaming.false_pos_pct_str` percent
+* True pass rate: `{python} OracleGaming.true_pass_pct_str`; false-accept rate on failing rollouts: `{python} OracleGaming.false_pos_pct_str`
 
 **Math**:
 
@@ -258,7 +282,7 @@ class OracleGaming:
 
 `{python} OracleGaming.frac_display_math`
 
-**Result**: `{python} OracleGaming.frac_false_pct_str` percent of positive rewards go to rollouts that fooled the verifier.
+**Result**: `{python} OracleGaming.frac_false_pct_str` of positive rewards go to rollouts that fooled the verifier.
 
 **Systems insight**: A false-accept rate that sounds negligible becomes a large fraction of the positive signal whenever true success is rare, which is exactly the regime RL trains in. Those updates reinforce whatever fooled the verifier, and the share grows as the policy learns to fool it more often. A sealed test suite with no false accepts removes the term entirely, which is why the learned verifier may shape the reward but must not decide it.
 
@@ -270,7 +294,7 @@ A practical agent reward combines the outcome with a few small terms that steer 
 
 $$R(\tau) = R_{\text{outcome}}(\tau) + \lambda_{\text{fmt}} R_{\text{format}}(\tau) - \alpha \frac{|\tau_{\text{gen}}|}{T_{\max}}$$
 
-Here $R_{\text{outcome}} \in \{0, 1\}$ comes from the deciding check, $R_{\text{format}}$ credits tool calls that parse against their schemas (@sec-vol3-tool-calling-schemas), $|\tau_{\text{gen}}|$ counts the tokens the policy generated, and $T_{\max}$ is the generation ceiling. The coefficients must keep correctness dominant. A concise wrong trajectory must never outscore a verbose correct one, so $\lambda_{\text{fmt}}$ and $\alpha$ stay small against the unit outcome reward. On tasks where an all-or-nothing outcome leaves most groups without a success, partial credit, such as the fraction of tests passed, can replace the binary outcome; it helps only if the partial tests are as sealed as the full suite.
+Here $R_{\text{outcome}} \in \{0, 1\}$ comes from the deciding check, $R_{\text{format}}$ credits tool calls that parse against their declared schemas, $|\tau_{\text{gen}}|$ counts the tokens the policy generated, and $T_{\max}$ is the generation ceiling. The coefficients must keep correctness dominant. A concise wrong trajectory must never outscore a verbose correct one, so $\lambda_{\text{fmt}}$ and $\alpha$ stay small against the unit outcome reward. On tasks where an all-or-nothing outcome leaves most groups without a success, partial credit, such as the fraction of tests passed, can replace the binary outcome; it helps only if the partial tests are as sealed as the full suite.
 
 The tempting additional term is a penalty for dangerous actions, a large $\beta$ subtracted whenever a rollout attempts network egress, reads a credential, or writes outside its workspace. That term does not work, for two reasons. A penalty is probabilistic. If an unauthorized network call costs $\beta$ but fetches the hidden tests and secures the outcome reward, exploration eventually finds trajectories where the net return is positive, and the gradient follows them. A penalty is also applied after the fact. The gradient is computed only after the action has executed, so if the action exfiltrated a credential or corrupted shared state, penalizing the weights repairs nothing. Model-side terms lower the probability of a bad action; they never prevent one. Containment must be enforced below the model, where the sandbox denies the call before it runs (principle \ref{pri-vol3-zero-trust-sandboxing}), and soft terms are reserved for preferences that cost nothing when violated, such as malformed calls, redundant calls, or excess length.
 
@@ -280,7 +304,7 @@ A deterministic, isolated outcome check with small shaping terms gives each traj
 
 A repair trajectory runs thirty turns. The agent lists the directory, reads a stack trace, reproduces the failure under a debugger, localizes an off-by-one error, edits five lines, compiles, and runs the integration test, which fails on an unhandled boundary case. The verifier returns $0$. Under the simplest policy gradient, that zero lands on every token of the trajectory equally. The debugger session that found the bug is penalized exactly as much as the flawed edit. Had a lucky edit passed despite confused reasoning, every step, including the dead ends, would have been rewarded. A terminal reward says whether the trajectory worked, not which turns made it work.
 
-### Why a terminal reward suppresses diagnosis
+### Diagnostic masking under sparse terminal rewards
 
 With a terminal reward and a baseline $b(s_0)$, the REINFORCE estimator [@sutton2018reinforcement] is
 
@@ -302,7 +326,7 @@ Fixing this requires credit that reflects each turn's contribution to the outcom
 
 ### Outcome and process rewards
 
-An outcome reward model (ORM) scores only the final state, and in verifiable environments it is the test suite itself. It makes no assumption about the path, which keeps it honest, but it gives no signal about intermediate turns. A process reward model (PRM) scores each step, $r_t = M_{\text{PRM}}(s_t, a_t) \in [0, 1]$, which gives dense per-turn credit and lower variance [@lightman2023let; @uesato2022solving]. @Sec-vol3-test-time-compute-verification introduced both as verifiers for selection. In training, the PRM's weakness dominates, because it is a learned model scoring text and the policy writes the text. Three exploits recur. The policy emits formulaic statements of care ("verify this pointer thoroughly") that raise step scores without doing anything. It builds coherent steps on a false premise, which a model scoring local consistency rewards. It avoids the temporarily low-scoring detours that long repairs need. @Fig-vol3-credit-assignment sets the two against a third option that keeps the terminal check as the only source of truth, and @tbl-vol3-credit-comparison compares all three.
+An outcome reward model (ORM) scores only the final state, and in verifiable environments it is the test suite itself. It makes no assumption about the path, which keeps it honest, but it gives no signal about intermediate turns. A process reward model (PRM) scores each step, $r_t = M_{\text{PRM}}(s_t, a_t) \in [0, 1]$, which gives dense per-turn credit and lower variance [@lightman2023let; @uesato2022solving]. Both forms of verifiers can also be used for test-time selection. In training, the PRM's weakness dominates, because it is a learned model scoring text and the policy writes the text. Three exploits recur. The policy emits formulaic statements of care ("verify this pointer thoroughly") that raise step scores without doing anything. It builds coherent steps on a false premise, which a model scoring local consistency rewards. It avoids the temporarily low-scoring detours that long repairs need. @Fig-vol3-credit-assignment sets the two against a third option that keeps the terminal check as the only source of truth, and @tbl-vol3-credit-comparison compares all three.
 
 ::: {#fig-vol3-credit-assignment fig-env="figure" fig-pos="htb" fig-cap="**Credit Assignment Across Turns**: Three ways to credit a terminal outcome to intermediate turns. An outcome reward model checks only the final state, so sound early steps are penalized along with the faulty one. A process reward model scores each step with a learned model, giving dense credit that the policy can game with plausible-looking text. Monte Carlo sub-trees fork continuations from an intermediate state and measure how often they pass the terminal check, grounding per-turn credit in the verifier at a quadratic cost in rollouts." fig-alt="Three-panel comparison of search trees. The outcome panel penalizes all steps after a failing final state. The process panel shows a learned model scoring each step, including a high score for sycophantic prose. The Monte Carlo panel shows four continuations forked from an intermediate state, three passing and one failing, producing an estimated advantage of plus 0.55."}
 ![](images/svg/credit-assignment-topologies.svg)
@@ -320,11 +344,13 @@ An outcome reward model (ORM) scores only the final state, and in verifiable env
 
 ### Monte Carlo value estimates
 
-The third option replaces the learned step scorer with measurement. At an intermediate state $s_t$, the runtime snapshots the sandbox (@sec-vol3-sandboxes-cow), forks the context, and runs $K$ continuations of the current policy to completion, each scored by the terminal check. The average estimates the state's value, and the difference between successive values estimates the advantage of the action between them:
+The third option replaces the learned step scorer with measurement. At an intermediate state $s_t$, the runtime snapshots the sandbox with copy-on-write isolation, forks the context, and runs $K$ continuations of the current policy to completion, each scored by the terminal check. The average estimates the state's value, and the difference between successive values estimates the advantage of the action between them:[^fn-gae-lambda-return]
 
 $$\hat{V}(s_t) = \frac{1}{K} \sum_{k=1}^{K} R\left(\tau_k^{(s_t)}\right), \qquad \hat{A}(s_t, a_t) = \hat{V}(s_{t+1}) - \hat{V}(s_t)$$
 
 This shields diagnosis from suppression. Suppose continuations from the initial bug report succeed 5 percent of the time, $\hat{V}(s_0) = 0.05$. The agent runs a debugger and the observation now contains the failing line. Continuations from that state succeed 60 percent of the time, so the debugger turn earns $\hat{A} = 0.60 - 0.05 = +0.55$, even if the particular trajectory that ran it later fails on another turn. A turn is credited by how much it raised the chance of passing the terminal check, and nothing else.
+
+[^fn-gae-lambda-return]: **Generalized Advantage Estimation**: Classical PPO relies on generalized advantage estimation ($\lambda$-return) to interpolate between high-bias temporal difference residuals and high-variance Monte Carlo trajectory returns. In multi-turn tool interaction, setting $\lambda < 1$ requires dense intermediate value evaluations that fail when environment states are non-Markovian or partially observed. GRPO bypasses intermediate temporal-difference bootstrapping entirely by evaluating group-relative terminal returns across complete rollout trees.
 
 The measurement is expensive, and the cost is best counted in tokens.
 
@@ -441,17 +467,46 @@ Group relative policy optimization (GRPO) [@shao2024deepseekmath] removes the cr
 
 Classical Proximal Policy Optimization (PPO) maintains four separate neural network models in GPU memory during training:
 
-1. **Actor Network ($\pi_	heta$):** The policy model being optimized.
+1. **Actor Network ($\pi_\theta$):** The policy model being optimized.
 2. **Critic Network ($V_\phi$):** A value model estimating expected trajectory returns.
-3. **Reference Policy ($\pi_{	ext{ref}}$):** A frozen snapshot of the pretrained model enforcing KL-divergence constraints.
+3. **Reference Policy ($\pi_{\text{ref}}$):** A frozen snapshot of the pretrained model enforcing KL-divergence constraints.
 4. **Reward Model ($R_\psi$):** A neural network predicting proxy human preference scores.
 
-For large foundation models (such as 70B parameter models in FP16), storing weights, optimizer states, and activations for four concurrent models demands upwards of 560 GB of GPU VRAM per pipeline stage, severely constraining maximum context length and batch size.
+To quantify the accelerator memory footprint from first principles, consider a base model with $\Phi$ parameters trained in 16-bit precision (FP16 or BF16), where model weights occupy $2\Phi$ bytes and gradients occupy $2\Phi$ bytes. For each trainable model optimized with Adam or AdamW, the optimizer maintains 12 bytes per parameter (4 bytes for FP32 master weights, 4 bytes for first-moment momentum, and 4 bytes for second-moment variance). Each trainable model therefore requires:
 
-Group Relative Policy Optimization (GRPO) [@shao2024deepseekmath] breaks this memory wall by discarding the parameterized Critic network ($V_\phi$) entirely. Instead of training a separate value network, GRPO evaluates policy advantages by sampling a cohort of $G$ independent rollouts $\{y_1, y_2, \dots, y_G\}$ from the current policy $\pi_	heta$ for each task prompt $x$. The baseline is computed directly from the empirical mean and standard deviation of rewards within the cohort:
-$$
-\hat{A}_i = rac{r_i - \mu_{	ext{group}}}{\sigma_{	ext{group}} + \epsilon}, \quad \mu_{	ext{group}} = rac{1}{G}\sum_{j=1}^G r_j, \quad \sigma_{	ext{group}} = \sqrt{rac{1}{G}\sum_{j=1}^G (r_j - \mu_{	ext{group}})^2}
-$$
+$$M_{\text{trainable}} = 2\Phi_{\text{weights}} + 2\Phi_{\text{grads}} + 12\Phi_{\text{Adam}} = 16\Phi \text{ bytes}$$
+
+Classical PPO trains two distinct models simultaneously (the Actor $\pi_\theta$ and the Critic $V_\phi$), while co-locating the frozen Reference policy ($\pi_{\text{ref}}$, requiring $2\Phi$ bytes for inference weights with zero gradients or optimizer state) and the frozen Reward model ($R_\psi$, requiring $2\Phi$ bytes). Accounting for activation buffers during backpropagation ($M_{\text{act}} \approx 4\Phi$ bytes), the total cluster memory footprint under PPO is:
+
+$$M_{\text{PPO}} = M_{\text{actor}} + M_{\text{critic}} + M_{\text{ref}} + M_{\text{reward}} + M_{\text{act}} = 16\Phi + 16\Phi + 2\Phi + 2\Phi + 4\Phi = 40\Phi \text{ bytes}$$ {#eq-vol3-ppo-memory}
+
+For a 70B parameter model ($\Phi = 70 \times 10^9$), the memory footprint in @eq-vol3-ppo-memory requires $40 \times 70\text{ GB} = 2.80\text{ TB}$ of aggregate memory across pipeline and tensor-parallel ranks solely for static parameter, optimizer, and activation allocations before reserving dynamic memory for KV caches or tool-wait rollout buffers. Storing weights, optimizer states, and activations for four concurrent models severely constrains the maximum context length and batch size that can execute without out-of-memory faults.
+
+Group Relative Policy Optimization (GRPO) [@shao2024deepseekmath] breaks this memory wall by discarding the parameterized Critic network ($V_\phi$) entirely. Instead of training a separate value network, GRPO evaluates policy advantages by sampling a cohort of $G$ independent rollouts $\{o_1, o_2, \dots, o_G\}$ from the current policy $\pi_\theta$ for each task prompt $q$. Furthermore, RLVR replaces the neural reward model ($R_\psi$) with an external deterministic verification enclave executing outside accelerator memory on CPU worker nodes. Consequently, only the Actor network and the frozen Reference policy remain in accelerator memory, reducing activation buffers to $2\Phi$ bytes:
+
+$$M_{\text{GRPO}} = M_{\text{actor}} + M_{\text{ref}} + M_{\text{act}} = 16\Phi + 2\Phi + 2\Phi = 20\Phi \text{ bytes}$$ {#eq-vol3-grpo-memory}
+
+Comparing @eq-vol3-ppo-memory with @eq-vol3-grpo-memory demonstrates that eliminating the learned value model and externalizing the reward check cuts accelerator memory footprint by exactly 50 percent, reducing the footprint for a 70B parameter model from $2.80\text{ TB}$ to $1.40\text{ TB}$. This $1.40\text{ TB}$ memory reclamation expands the dynamic high-bandwidth memory headroom available for long-horizon KV caches, larger rollout cohorts, and deep multi-turn context windows.
+
+Beyond static memory reclamation, eliminating the Critic unlocks three fundamental training throughput multipliers:
+
+1. **Compute FLOP Reduction:** Training PPO requires a forward and backward pass over both the Actor and the Critic ($2 \times 6\Phi = 12\Phi\text{ FLOPs/token}$). GRPO eliminates the Critic forward and backward passes entirely, cutting training compute requirements to $6\Phi\text{ FLOPs/token}$ for the Actor only—an immediate 50 percent compute savings per gradient update.
+2. **Distributed All-Reduce Communication Halving:** In distributed data-parallel and model-parallel topologies, PPO must execute two separate gradient all-reduce synchronization rounds per step (one for the Actor, one for the Critic) across NVLink and inter-node InfiniBand networks. GRPO eliminates the Critic synchronization entirely, collapsing distributed gradient communication into a single Actor all-reduce ring and halving inter-node network transfer volume.
+3. **Micro-Batch Scaling and MFU:** Reclaiming 50 percent of accelerator memory re-allocates scarce HBM to dynamic activation buffers, allowing training micro-batch sizes ($B_{\text{train}}$) to double. This removes the necessity of activation recomputation (gradient checkpointing), eliminating an extra $2\Phi\text{ FLOP/token}$ forward pass overhead and lifting model FLOPs utilization (MFU) toward the hardware roofline.
+
+The choice of cohort size $G$ represents a fundamental systems throughput trade-off:
+
+* **Prompt Prefill Amortization:** Rollout workers evaluate the invariant prompt prefix once, caching its KV blocks via RadixAttention and amortizing the compute-bound prefill FLOPs across all $G$ completions ($1$ prefill shared across $G$ rollouts).
+* **Autoregressive Decode Roofline:** Token generation is strictly memory-bandwidth bound and scales linearly as $\mathcal{O}(G \cdot L)$.
+* **Gradient Signal Yield:** For binary verifiable rewards with single-trial pass probability $p$, the probability that a cohort contains at least one passing and one failing rollout (and thus yields a nonzero policy gradient) is:
+
+$$P_{\text{active}}(G, p) = 1 - p^G - (1 - p)^G$$ {#eq-vol3-grpo-active-cohort-prob}
+
+If $G$ is too small (for example, $G=2$ on a task with $p=0.10$), $P_{\text{active}} \approx 0.18$, meaning 82 percent of sampled cohorts produce zero gradient and are discarded, wasting rollout compute. Conversely, an excessively large $G$ (such as $G \ge 32$) saturates decoder memory bandwidth and yields diminishing returns in variance reduction ($\sigma / \sqrt{G}$). The optimal cohort size $G^*$ balances prefill amortization against decode bandwidth and cohort signal yield.
+
+The baseline in GRPO is computed directly from the empirical mean and standard deviation of rewards within the cohort:
+
+$$\hat{A}_i = \frac{r_i - \mu_{\text{group}}}{\sigma_{\text{group}} + \epsilon}, \quad \mu_{\text{group}} = \frac{1}{G}\sum_{j=1}^G r_j, \quad \sigma_{\text{group}} = \sqrt{\frac{1}{G}\sum_{j=1}^G (r_j - \mu_{\text{group}})^2}$$
 
 The architectural contrast between PPO and GRPO is diagrammed in @fig-vol3-ppo-vs-grpo.
 
@@ -459,13 +514,17 @@ The architectural contrast between PPO and GRPO is diagrammed in @fig-vol3-ppo-v
 ![](images/svg/vol3-ppo-vs-grpo.svg)
 :::
 
-By eliminating the Critic model, GRPO reduces GPU memory consumption by over 40 percent and completely eliminates Critic training instability, allowing the entire GPU memory budget to be allocated to longer context windows and larger rollout cohorts.
+By eliminating the Critic model, GRPO cuts GPU training memory by 50 percent and completely eliminates Critic training instability, allowing the entire GPU memory budget to be allocated to longer context windows and larger rollout cohorts.
 
 ### Group-relative advantages {#sec-vol3-rlvr-grpo-objective}
 
-For a task $q$, the runtime samples $G$ rollouts $\{o_1, \dots, o_G\}$ from the policy that generated them, $\pi_{\theta_{\text{old}}}$, and scores each with the verifier, $r_i = R(q, o_i)$. The advantage of each rollout is its reward standardized against its group:
+For a task $q$, the runtime samples $G$ rollouts $\{o_1, \dots, o_G\}$ from the policy that generated them, $\pi_{\theta_{\text{old}}}$, and scores each with the verifier, $r_i = R(q, o_i)$. The advantage of each rollout is its reward standardized against the empirical mean of its group,[^fn-grpo-variance-reduction] scaled by the sample standard deviation:[^fn-bessel-variance-correction]
 
 $$A_i = \frac{r_i - \text{mean}(\{r_1, r_2, \dots, r_G\})}{\text{std}(\{r_1, r_2, \dots, r_G\}) + \epsilon} = \frac{r_i - \frac{1}{G}\sum_{j=1}^G r_j}{\sqrt{\frac{1}{G}\sum_{j=1}^G \left(r_j - \frac{1}{G}\sum_{k=1}^G r_k\right)^2} + \epsilon}$$ {#eq-vol3-grpo-advantage}
+
+[^fn-grpo-variance-reduction]: **Group Baseline Variance**: Centering advantages against the cohort empirical mean provides an unbiased baseline that preserves policy gradient expectation while eliminating state-value network approximation error. The cohort standard deviation denominator acts as an adaptive learning rate scale, dampening gradient updates on tasks with high outcome variance. When cohort size $G$ is small, the empirical variance estimator exhibits negative bias that can be stabilized by Bessel correction.
+
+[^fn-bessel-variance-correction]: **Sample Variance Correction**: For finite cohort sizes $G$, the sample standard deviation in the advantage denominator is a biased estimator of the underlying population dispersion. Uncorrected sample variances systematically underestimate rollout variance, inflating the scale of advantages when $G \le 8$. Production implementations frequently substitute the $G - 1$ denominator or clip the minimum advantage scale to avoid numerical instability on near-degenerate cohorts.
 
 The group mean is a per-task baseline that absorbs the task's difficulty. On an easy task, most rollouts pass, the mean is near one, and the rare failure receives a large negative advantage. On a hard task where one rollout in sixteen passes, the mean is $0.0625$, the single success receives a large positive advantage, and the failures receive small negative ones. The policy is pushed toward whatever distinguished success from failure on this particular task.
 
@@ -506,9 +565,9 @@ A single-turn math rollout is one prompt and one response, and every generated t
 
 ### Masking what the environment wrote
 
-The surrogate, the divergence penalty, and the length count must range only over tokens the policy emitted: its reasoning, its tool calls, and the end-of-turn token that hands control back to the runtime. Observation tokens stay in the context, where they condition the next turn, but contribute nothing to the loss. This is the observation loss mask of @sec-vol3-fine-tuning-loss-masking, and observation loss masking (principle \ref{pri-vol3-action-masked-loss}) applies with more force here. In supervised training an unmasked observation teaches the model to imitate tool output. In reinforcement learning it also puts environment text into the importance ratio, where the "old policy probability" of a token the policy never sampled is meaningless.
+The surrogate, the divergence penalty, and the length count must range only over tokens the policy emitted: its reasoning, its tool calls, and the end-of-turn token that hands control back to the runtime. Observation tokens stay in the context, where they condition the next turn, but contribute nothing to the loss. This is the observation loss mask of supervised post-training, and observation loss masking (principle \ref{pri-vol3-action-masked-loss}) applies with more force here. In supervised training an unmasked observation teaches the model to imitate tool output. In reinforcement learning it also puts environment text into the importance ratio, where the "old policy probability" of a token the policy never sampled is meaningless.
 
-The mask requires knowing exactly which tokens the policy sampled, which leads to a subtle requirement. The rollout worker must record the token IDs it sampled and their log-probabilities at sampling time, not re-tokenize the transcript afterward. Re-tokenizing the text can merge characters across the boundary where an observation was spliced in, or render a tool call through a chat template differently from how it was generated (@sec-vol3-fine-tuning-serialization), producing a token sequence the policy never emitted. The ratio then compares probabilities of the wrong tokens. @Tbl-vol3-rlvr-rollout-record lists what a multi-turn rollout record must carry for training to be correct, extending the trajectory log schema of @sec-vol3-persistence-event-sourcing.
+The mask requires knowing exactly which tokens the policy sampled, which leads to a subtle requirement. The rollout worker must record the token IDs it sampled and their log-probabilities at sampling time, not re-tokenize the transcript afterward. Re-tokenizing the text can merge characters across the boundary where an observation was spliced in, or render a tool call through a chat template differently from how it was generated, producing a token sequence the policy never emitted. The ratio then compares probabilities of the wrong tokens. @Tbl-vol3-rlvr-rollout-record lists what a multi-turn rollout record must carry for training to be correct, extending the standard event-sourced trajectory log schema.
 
 | **Field**                            | **Contents**                                                     | **Why training needs it**                                          |
 |:-------------------------------------|:-----------------------------------------------------------------|:-------------------------------------------------------------------|
@@ -524,19 +583,39 @@ The mask requires knowing exactly which tokens the policy sampled, which leads t
 
 ### Credit per turn
 
-GRPO gives all turns of a rollout the same advantage. For short episodes that is adequate; for thirty-turn repairs it reproduces the diagnostic suppression of @sec-vol3-rlvr-credit at the level of turns. Two refinements are practical. The runtime can compute Monte Carlo values at a few turn boundaries and assign each turn the advantage of the value change it caused, which keeps the terminal check as the source of truth. It can also add small verifiable per-turn signals, such as a tool call that parsed or a command that exited cleanly, as shaping terms. These are cheap, but each is a target the policy will learn to hit for its own sake. A policy paid for clean exit codes learns to run commands that cannot fail. Such terms stay small relative to the outcome, and the outcome alone decides whether a trajectory counts as a success.
+In standard Group Relative Policy Optimization, the entire trajectory receives a single scalar advantage $A_i$ derived from the terminal verifier outcome. For a single-turn reasoning step or a three-turn dialogue, scalar trajectory advantage is adequate. For complex multi-turn coding and systems engineering tasks spanning thirty or forty turns ($a_1, o_1, a_2, o_2, \dots, a_T, o_T$), however, uniform trajectory advantage induces severe **credit assignment distortion**, as analyzed in @sec-vol3-rlvr-credit.
+
+Consider a thirty-turn software repair episode. The policy executes flawless fault localization across turns 1 through 20, edits the correct source lines on turn 21, but on turn 29 introduces a minor syntax typo in a test assertion, causing the final evaluation suite to fail ($R = 0$). In a cohort where other rollouts succeed, the entire trajectory receives negative advantage ($A_i < 0$). Standard GRPO backpropagates this negative gradient across *every single turn*—penalizing the brilliant localization and refactoring performed in the early turns simply because of an unrelated late syntax error. Symmetrically, if an agent performs twenty-nine turns of incoherent exploratory flailing before stumbling upon a working patch on turn 30 ($R = 1$), uniform positive advantage reinforces the flailing and file thrashing, rewarding noise as if it were optimal strategy.
+
+To resolve this diagnostic suppression without introducing the high memory footprint of a neural critic network, multi-turn RLVR runtimes formalize a two-tier credit structure that separates trajectory-level advantage broadcasting from state-grounded turn advantage attribution.
+
+Formally, let trajectory $\tau_i$ consist of $K_i$ environment interaction turns ($k \in \{1, \dots, K_i\}$). Within each turn $k$, the policy emits a set of token offsets $\mathcal{U}_{i,k}^{\text{policy}}$, while the environment returns tool observation token offsets $\mathcal{U}_{i,k}^{\text{env}}$. The total number of policy tokens in trajectory $\tau_i$ is $N_i^{\text{policy}} = \sum_{k=1}^{K_i} |\mathcal{U}_{i,k}^{\text{policy}}|$.
+
+Under standard multi-turn GRPO with observation loss masking, the scalar cohort advantage $A_i$ (@eq-vol3-grpo-advantage) is broadcast to all policy-emitted tokens across all turns:
+
+$$\mathcal{L}_{\text{GRPO-traj}}(\theta) = \mathbb{E}_{q \sim \mathcal{D}} \left[ \frac{1}{G} \sum_{i=1}^G \frac{1}{N_i^{\text{policy}}} \sum_{k=1}^{K_i} \sum_{u \in \mathcal{U}_{i,k}^{\text{policy}}} \min\left( \rho_{i,u}(\theta) A_i, \, \text{clip}(\rho_{i,u}(\theta), 1-\epsilon_{\text{clip}}, 1+\epsilon_{\text{clip}}) A_i \right) - \beta D_{\text{KL}} \right]$$ {#eq-vol3-grpo-traj-objective}
+
+where $\rho_{i,u}(\theta) = \frac{\pi_\theta(w_{i,u} \mid \mathbf{x}_{i,<u})}{\pi_{\theta_{\text{old}}}(w_{i,u} \mid \mathbf{x}_{i,<u})}$ is the token importance ratio evaluated on policy token $w_{i,u}$ conditioned on prefix $\mathbf{x}_{i,<u}$.
+
+When fine-grained turn-level estimators are available—derived via copy-on-write snapshot forks ($\Delta V_k = \hat{V}(s_{i,k+1}) - \hat{V}(s_{i,k})$) or hermetic intermediate milestone test passes ($\Delta_{\text{test}, k}$) as established in @sec-vol3-rlvr-credit—turn advantages $\hat{A}_{i,k}$ replace the monolithic scalar $A_i$. Crucially, turn advantages **cannot be standardized across cohort members at turn $k$** (that is, defining $\mu_k^{(G)} = \frac{1}{G}\sum_{j=1}^G A_{j,k}$ is mathematically invalid). Trajectories diverge immediately after turn 1; at turn $k$, rollout $j$ and rollout $l$ occupy entirely different environment states $s_{j,k} \neq s_{l,k}$ and have divergent total episode lengths $K_j \neq K_l$. Cross-cohort standardization is valid only at the root prompt $q$, where initial state is identical. Intermediate turn advantages must instead be centered against state-grounded baselines.
+
+The **Turn-Weighted GRPO Loss** assigns state-grounded turn advantage $\hat{A}_{i,k}$ to all policy tokens in turn $k$ (@eq-vol3-grpo-turn-objective):
+
+$$\mathcal{L}_{\text{GRPO-turn}}(\theta) = \mathbb{E}_{q \sim \mathcal{D}} \left[ \frac{1}{G} \sum_{i=1}^G \frac{1}{N_i^{\text{policy}}} \sum_{k=1}^{K_i} \sum_{u \in \mathcal{U}_{i,k}^{\text{policy}}} \min\left( \rho_{i,u}(\theta) \hat{A}_{i,k}, \, \text{clip}(\rho_{i,u}(\theta), 1-\epsilon_{\text{clip}}, 1+\epsilon_{\text{clip}}) \hat{A}_{i,k} \right) - \beta D_{\text{KL}} \right]$$ {#eq-vol3-grpo-turn-objective}
+
+By assigning credit turn-by-turn while masking environment text ($u \notin \mathcal{U}_{i,k}^{\text{env}}$), early fault localization steps that demonstrably advance repository state earn positive gradient updates, while the isolated syntax mistake on turn 29 absorbs negative updates without contaminating earlier actions.
 
 ### Environment time inside the rollout
 
-A turn's wall time is the model's generation time plus the tool's execution time, and for agent tasks the tool often dominates. A test suite or a build can take seconds to minutes. While a rollout waits on its tool, its attention state either stays resident in the inference server or is dropped and recomputed when the observation returns, the retain-or-recompute decision of @sec-vol3-kvcache-swapping. Rollout workers therefore schedule turns rather than whole rollouts. Many environments run concurrently, and the inference server generates for whichever rollouts have observations ready, the same yield-on-tool-wait pattern the harness uses at deployment (@sec-vol3-controlplane-yielding). A rollout worker that generates one rollout at a time idles the model for most of every tool call.
+A turn's wall time is the model's generation time plus the tool's execution time, and for agent tasks the tool often dominates. A test suite or a build can take seconds to minutes. While a rollout waits on its tool, its attention state either stays resident in the inference server or is dropped and recomputed when the observation returns, the retain-or-recompute decision of KV cache swapping. Rollout workers therefore schedule turns rather than whole rollouts. Many environments run concurrently, and the inference server generates for whichever rollouts have observations ready, the same yield-on-tool-wait pattern the harness uses at deployment. A rollout worker that generates one rollout at a time idles the model for most of every tool call.
 
 ### Stuck and truncated rollouts
 
-At training scale some rollouts never finish on their own. A test hangs on a deadlock, a command waits for input that never comes, or the policy repeats the same failing command, a loop the progress detection of @sec-vol3-sagas-watchdogs is built to catch. Every rollout therefore runs under the ceilings of @sec-vol3-controlplane-accounting: a per-tool timeout, a turn cap, and a token budget. The harder question is what reward a truncated rollout receives. Scoring it as a failure teaches the policy to finish within the cap, which is correct when the cap matches the deployment budget, but it also penalizes long approaches that would have succeeded with a few more turns. Masking truncated rollouts out of the loss removes that bias but discards their compute, and if hard tasks truncate more often, it silently shifts the training distribution toward easy ones. The defensible choice is to set the training caps equal to the deployment caps and score truncation as failure, so the policy learns the task under the budget it will actually have.
+At training scale some rollouts never finish on their own. A test hangs on a deadlock, a command waits for input that never comes, or the policy repeats the same failing command, a loop progress detection watchdogs are built to catch. Every rollout therefore runs under strict resource accounting ceilings: a per-tool timeout, a turn cap, and a token budget. The harder question is what reward a truncated rollout receives. Scoring it as a failure teaches the policy to finish within the cap, which is correct when the cap matches the deployment budget, but it also penalizes long approaches that would have succeeded with a few more turns. Masking truncated rollouts out of the loss removes that bias but discards their compute, and if hard tasks truncate more often, it silently shifts the training distribution toward easy ones. The defensible choice is to set the training caps equal to the deployment caps and score truncation as failure, so the policy learns the task under the budget it will actually have.
 
 ### Training under the deployment harness
 
-The last adjustment generalizes the other three. The policy learns to act in the contexts it sees during rollouts. If the deployment harness compacts context after a fixed number of turns (@sec-vol3-context-engineering-compaction), rejects malformed tool calls with a particular error, or enforces particular budgets, the rollout harness must do the same, or the policy is optimized for a harness it will never run in. A policy trained without compaction may rely on details that compaction removes; a policy trained with more generous turn limits learns strategies that deployment truncates. In multi-turn RL the harness is part of the environment, and the trained policy is specific to it.
+The last adjustment generalizes the other three. The policy learns to act in the contexts it sees during rollouts. If the deployment harness compacts context after a fixed number of turns, rejects malformed tool calls with a particular error, or enforces particular budgets, the rollout harness must do the same, or the policy is optimized for a harness it will never run in. A policy trained without compaction may rely on details that compaction removes; a policy trained with more generous turn limits learns strategies that deployment truncates. In multi-turn RL the harness is part of the environment, and the trained policy is specific to it.
 
 With observations masked, tokens recorded as sampled, turns scheduled around tool waits, and the training harness matched to deployment, GRPO applies to agent trajectories as it does to single responses. Every one of those rollouts, however, runs actions in a sandbox that also holds the tests that score it. The next section closes that gap.
 
@@ -546,14 +625,18 @@ A policy under optimization is an adversary of its own reward. It has no intent,
 
 ### The policy as adversary
 
-The sandbox of @sec-vol3-sandboxes already keeps the policy's actions away from the host. What it does not do by itself is keep them away from the reward, because in the naive design the tests run inside the same workspace the policy has been editing. The threat model inside that workspace has four routes, each a special case of the sandbox threat model of @sec-vol3-sandboxes-threat-model:
+Runtime sandboxing already keeps the policy's actions away from the host. What it does not do by itself is keep them away from the reward, because in the naive design the tests run inside the same workspace the policy has been editing. The threat model inside that workspace has four routes, each a special case of the sandbox threat model:
 
 1. **Tampering with the check.** Editing or deleting test files, expected outputs, or build flags so failing cases pass.
 2. **Substituting the tools.** Setting environment variables such as `PATH` or `PYTHONPATH`, planting a stub test runner, or loading a hook into the real one.
 3. **Reaching hidden information.** Reading hidden tests left on disk, probing local services, or fetching solutions over the network.
 4. **Forcing a favorable timeout.** Exhausting memory or looping so the harness times out, where a harness that treats a timeout as anything other than failure pays out.
 
-Egress control (@sec-vol3-sandboxes-network) closes the network half of the third route. The rest requires that the policy's workspace and the reward's workspace be different machines.
+Strict network egress control closes the network half of the third route. The rest requires that the policy's workspace and the reward's workspace be different machines.
+
+::: {.column-margin .margin-pointer}
+↩ Copy-on-write sandboxes, network isolation, and container pool pre-warming are established in @sec-vol3-sandboxes.
+:::
 
 ### The dual-sandbox enclave
 
@@ -584,11 +667,13 @@ $ pytest -q tests/hidden/
 
 A patch that fails to apply, or that the extraction step rejected, scores zero without running any policy-written code. The verdict returns over a one-way channel, and during multi-turn rollouts the policy receives at most a pass or fail signal from any intermediate check, never the hidden tests' names, assertions, or stack traces. Feeding those back would let the policy fit the hidden tests turn by turn, converting sealed tests into visible ones.
 
-The enclave adds a second sandbox and a verification run per rollout, which is why the pooled, snapshot-restored sandboxes of @sec-vol3-sandboxes-pooling matter here. A cold-started enclave per rollout can cost more wall time than the rollout itself. Verification runs on ordinary compute rather than accelerators, and its capacity must be sized so verdicts keep pace with generation, the collection-versus-verification balance of @sec-vol3-flywheel-pipeline.
+The enclave adds a second sandbox and a verification run per rollout, which is why pooled, snapshot-restored sandboxes matter here. A cold-started enclave per rollout can cost more wall time than the rollout itself. Verification runs on ordinary compute rather than accelerators, and its capacity must be sized so verdicts keep pace with generation, balancing collection and verification throughput.
 
 ### Flaky tests as reward noise
 
-Isolation stops deliberate tampering but introduces a statistical problem. Tests that depend on thread timing, network mocks, random seeds, or floating-point tolerances sometimes pass a broken patch. @Sec-vol3-flywheel-verification treats such tests as label noise in a training set; under GRPO they are worse, because group normalization amplifies them.
+Isolation stops deliberate tampering but introduces a statistical problem. Tests that depend on thread timing, network mocks, random seeds, or floating-point tolerances sometimes pass a broken patch. Curated data pipelines treat such tests as label noise; under GRPO they are worse, because group normalization amplifies them.[^fn-flaky-test-amplification]
+
+[^fn-flaky-test-amplification]: **Noise Amplification Dynamics**: In binary reward regimes, a single false-positive pass in a cohort of failures produces the theoretical maximum advantage $\sqrt{G - 1}$ under group normalization. This extreme gradient scaling vigorously optimizes the policy toward non-deterministic timing vulnerabilities and test harness race conditions. Consensus multi-execution protocols suppress this noise exponentially by requiring unanimous passes across independent sandbox initializations.
 
 ```{python}
 #| label: calc-vol3-rlvr-flaky-reward
@@ -647,7 +732,7 @@ class FlakyReward:
 
 Suppose a broken patch passes a flaky test with probability `{python} FlakyReward.p_flaky_str`. In a group of `{python} FlakyReward.group_str` rollouts that all submit equivalent broken patches, the chance that at least one passes by luck is `{python} FlakyReward.any_false_math`. When one rollout passes and the other `{python} FlakyReward.group_minus_one_str` fail, the lucky rollout's advantage under @eq-vol3-grpo-advantage is `{python} FlakyReward.adv_lucky_math`, the largest positive advantage a binary group can produce. The gradient strongly reinforces a broken patch, and across many tasks it teaches the policy to write code that exploits test races.
 
-The enclave suppresses the noise with three measures. The first is the all-runs-pass consensus rule that @sec-vol3-flywheel-verification applies to admission, here run on the reward. A patch that passes is rerun in `{python} FlakyReward.trials_str` fresh enclaves with different seeds and counts as passing only if every run passes, which cuts the false-pass rate from `{python} FlakyReward.p_flaky_str` to `{python} FlakyReward.consensus_math` while costing extra runs only for patches that passed once. The second is shuffling test order across those runs, so a patch that depends on state leaked from an earlier test fails. The third is quarantining tests that disagree with themselves on the reference solution, removing them from the reward entirely, as @sec-vol3-flywheel-verification does for training data.
+The enclave suppresses the noise with three measures. The first is the all-runs-pass consensus rule applied to admission, here run on the reward. A patch that passes is rerun in `{python} FlakyReward.trials_str` fresh enclaves with different seeds and counts as passing only if every run passes, which cuts the false-pass rate from `{python} FlakyReward.p_flaky_str` to `{python} FlakyReward.consensus_math` while costing extra runs only for patches that passed once. The second is shuffling test order across those runs, so a patch that depends on state leaked from an earlier test fails. The third is quarantining tests that disagree with themselves on the reference solution, removing them from the reward entirely, as flywheel curation does for training data.
 
 With the workspace and the reward on different machines, only an inert diff crossing between them, and flaky verdicts suppressed, the reward measures what the hidden tests check and nothing the policy can reach. The policy can no longer raise its score by any route except producing patches that pass. That removes the external exploits and exposes the internal ones: ways the optimization itself degrades the policy, which the next section examines.
 
@@ -685,6 +770,12 @@ A run that is well isolated can still go wrong in two opposite ways. In one, the
 
 ### Entropy collapse
 
+::: {.column-margin}
+![](images/svg/vol3_rlvr_margin_003.svg){width="100%" fig-alt="Line chart tracking token action entropy across training steps, contrasting a KL regularized plateau at 2.2 nats against rapid entropy collapse below the 0.6 nats trap."}
+
+*Without KL regularization, policy entropy plummets below the 0.6 nats trap, extinguishing exploratory search.*
+:::
+
 At each position the policy defines a distribution over its vocabulary, and the breadth of that distribution is its entropy:
 
 $$\mathcal{H}(\pi_\theta(\cdot \mid s_t)) = -\sum_{v \in \mathcal{V}} \pi_\theta(v \mid s_t) \log \pi_\theta(v \mid s_t)$$
@@ -693,7 +784,23 @@ Early in training, a particular sequence of tokens happens to solve some tasks, 
 
 ### Runaway length
 
-The opposite pathology is more common under outcome-only rewards. Longer reasoning raises the chance of eventually producing a correct answer, a correct answer credits every token that preceded it, and the length normalization of @sec-vol3-rlvr-grpo-objective penalizes long failures least. Mean rollout length drifts toward the ceiling. Much of the added text is repetition, as in this illustrative pair of traces that reach the same verified answer:
+The opposite pathology is more common under outcome-only rewards: **reasoning bloat** (also termed length bias or verbosity bias). Under sparse binary verification ($r \in \{0, 1\}$), mean rollout length drifts inexorably toward the context window ceiling even when verification accuracy remains completely stagnant. Two distinct mathematical and algorithmic forces drive this trajectory elongation.
+
+First, under binary terminal rewards, longer reasoning traces expand the generative search space, increasing the empirical probability that an unguided policy stumbles upon the syntactic tokens that satisfy the verifier. Because outcome verification awards terminal credit $r=1$ uniformly to the entire trajectory, every preceding exploratory, redundant, or discursive token receives positive reinforcement.
+
+Second, the standard GRPO surrogate objective contains a structural defect: **token-divisor penalty dilution**. In @eq-vol3-grpo-objective, the per-rollout loss term is normalized by its own sequence length $|o_i|$:
+
+$$\mathcal{L}_i(\theta) = \frac{1}{|o_i|} \sum_{t=1}^{|o_i|} \mathcal{M}_{i,t}(\theta)$$
+
+Taking the unclipped parameter gradient with respect to policy weights $\theta$ highlights the per-token gradient update:
+
+$$\nabla_\theta \mathcal{L}_i(\theta) = \frac{A_i}{|o_i|} \sum_{t=1}^{|o_i|} \nabla_\theta \log \pi_\theta(o_{i,t} \mid q, o_{i,<t})$$
+
+When a rollout fails a task ($r_i = 0$), its group-relative advantage is strictly negative ($A_i < 0$). For a concise failing rollout of length $|o_i| = L_{\text{concise}}$ (such as $128$ tokens), the negative gradient scale applied to each token logit is proportional to $\frac{|A_i|}{L_{\text{concise}}}$. Conversely, for an unconstrained, verbose failure that rambles until the context limit $|o_i| = L_{\text{verbose}}$ (such as $4{,}096$ tokens), the per-token gradient penalty is proportional to $\frac{|A_i|}{L_{\text{verbose}}}$. The per-token penalty applied to bad reasoning steps is diluted by a factor of $\frac{L_{\text{verbose}}}{L_{\text{concise}}} = 32\times$.
+
+Although the outer summation sums over $|o_i|$ tokens, this token-divisor normalization distorts credit assignment across rollout lengths. Concise trajectories that fail due to a single syntax error or off-by-one index receive severe, concentrated negative gradients on every constituent token. In contrast, rambling trajectories that exhaust thousands of tokens in repetitive deliberation loops distribute their negative advantage across an enormous denominator, attenuating the penalty at each individual token decision. The policy optimizer rapidly discovers that generating verbose, meandering reasoning traces provides a mathematical shield against sharp negative advantage updates.
+
+Much of this added length is unproductive repetition, as shown in this illustrative pair of traces that reach the same verified answer:
 
 ```text
 # Illustrative: two traces with the same verified answer (reward 1)
@@ -708,7 +815,11 @@ Trace B (4,096 tokens):
   Result: Theta(n log n)
 ```
 
-For an agent, length has a direct cost. Each extra token adds a generation step and holds attention state for the life of the rollout (@sec-vol3-kvcache-geometry), so a policy that quadruples its reasoning roughly quadruples the time each rollout occupies the inference server and cuts the number of rollouts it can hold at once. In multi-turn episodes, runaway length also shows up as extra turns: re-reading files already read, re-running commands already run, deferring the edit.
+For an autonomous agent, reasoning bloat imposes severe microarchitectural and system-level penalties:
+
+1. **High-Bandwidth Memory (HBM) Stranding:** The KV cache memory footprint scales linearly with sequence length: $M_{\text{KV}} = 2 \cdot n_{\text{layers}} \cdot d_{\text{head}} \cdot n_{\text{kv\_heads}} \cdot |o_i| \cdot b_{\text{precision}}$ (@sec-vol3-kv-cache). A 4,096-token trajectory strands $32\times$ more high-bandwidth memory than a 128-token trajectory, directly reducing the maximum concurrent rollout cohort $G$ that the training cluster can host in HBM.
+2. **Memory-Bandwidth-Bound Decode Latency:** Autoregressive token decoding operates at GEMV operational intensity ($I_{\text{decode}} \approx 1\text{ FLOP/byte}$), shuttling the full parameter set across the memory bus for each generated token (@sec-vol3-foundation-model). A policy exhibiting runaway length occupies accelerator execution slots exponentially longer, collapsing rollout generation goodput.
+3. **Multi-Turn Context Compounding:** In multi-turn agent environments, discursive reasoning tokens persist in the trajectory context history, forcing every subsequent turn to recompute and re-attend over bloated prefix tokens during prefill.
 
 ### Regularizing exploration and length
 
@@ -717,7 +828,7 @@ For an agent, length has a direct cost. Each extra token adds a generation step 
 | **Pathology**        | **Symptom in telemetry**                                    | **Cause**                                                        | **Countermeasure**                                                 |
 |:---------------------|:------------------------------------------------------------|:-----------------------------------------------------------------|:-------------------------------------------------------------------|
 | **Entropy collapse** | Falling token entropy; rising share of zero-variance groups | Repeated reinforcement of early solutions; symmetric clipping    | Adaptive entropy bonus; higher upper clip bound; reference penalty |
-| **Runaway length**   | Mean length rising while pass rate is flat                  | Terminal credit to every token; per-rollout length normalization | Length penalty above a budget; constant-denominator normalization  |
+| **Runaway length**   | Mean length rising while pass rate is flat                  | Terminal credit to every token; per-rollout length normalization | Constant-denominator normalization; piecewise length/FLOP penalty  |
 | **Repetition loops** | Rollouts ending at the token cap with repeated $n$-grams    | Repeated text makes itself more probable                         | Detect loops during generation; truncate and score as failure      |
 
 : **RLVR Training Pathologies**: Each pathology's symptom in training telemetry, its cause, and the countermeasure that addresses it. {#tbl-vol3-rlvr-pathologies}
@@ -728,27 +839,47 @@ $$\alpha_{k+1} = \operatorname{clip}\left(\alpha_k - \eta_\alpha \cdot \left(\ov
 
 When measured entropy $\overline{\mathcal{H}}_k$ falls below the band, $\alpha$ rises and pushes probability back toward alternatives; when entropy is high, $\alpha$ decays and lets the policy concentrate on verified solutions. A complementary change targets the clip itself. Raising the upper bound of the clip above the lower bound, $[1-\epsilon_{\text{low}}, 1+\epsilon_{\text{high}}]$ with $\epsilon_{\text{high}} > \epsilon_{\text{low}}$, lets rare tokens with positive advantage gain probability faster, which directly counters the asymmetry that drives collapse.
 
-For length, a linear penalty on every token discourages the long deductions that hard tasks legitimately need. A threshold penalty grants an unpenalized budget and charges only for the excess:
+To eliminate runaway length and reasoning bloat, systems employ three complementary regularization mechanisms:
 
-$$R_{\text{final}} = R_{\text{task}} - \gamma \cdot \max\left(0, \; T_{\text{tokens}} - T_{\text{budget}}\right)$$
+1. **Batch-Level Constant-Denominator Normalization:** To neutralize the token-divisor dilution that shields verbose failures, runtimes replace the trajectory-specific divisor $1/|o_i|$ with the cohort mean token length $\bar{L} = \frac{1}{G}\sum_{j=1}^G |o_j|$ or total batch token count $N_{\text{batch}} = \sum_{j=1}^G |o_j|$:
 
-with $\gamma$ set so that a rollout at the ceiling cannot net a positive reward even when its answer is correct, $\gamma \cdot (T_{\max} - T_{\text{budget}}) \ge 1$. Within the budget, length is free; beyond it, every token costs. Replacing the per-rollout $1/|o_i|$ with a constant denominator removes the structural bias toward long failures, so the penalty does not have to fight the objective.
+$$\mathcal{L}_{\text{const}}(\theta) = \frac{1}{G \cdot \bar{L}} \sum_{i=1}^G \sum_{t=1}^{|o_i|} \mathcal{M}_{i,t}(\theta)$$
 
-Repetition loops need a runtime check rather than a reward term. The rollout worker tracks recent $n$-grams during generation; when one repeats more than a threshold number of times within a window, the worker stops the rollout, and the rollout scores zero. Stopping early matters more than the score, because a looping rollout otherwise occupies its slot on the inference server until the token cap.
+Under constant-denominator normalization, the gradient penalty per token is completely independent of the rollout's individual length $|o_i|$. A flawed deduction token in a 4,000-token trace receives the exact same negative gradient magnitude as one in a 100-token trace, eliminating the optimization advantage of rambling verbosity.
 
-The most profound behavioral transformation induced by RLVR is the emergence of autonomous backtracking. Under pure supervised behavioral cloning, encountering an error during execution inevitably causes compounding regret (@sec-vol3-fine-tuning-exposure-bias), as the policy was trained only on pristine trajectories. Under RLVR, because the policy is rewarded solely for passing the terminal verification suite, it discovers that recognizing execution errors and testing alternative tool arguments produces higher expected returns.
+2. **Piecewise Linear Length Penalty:** Imposing a linear penalty from token zero penalizes the legitimate chain-of-thought deduction required for intricate algorithmic tasks. A piecewise linear penalty grants an unpenalized deliberation budget $L_{\text{target}}$ and levies a progressive linear fee only on excess tokens:
+
+$$R_{\text{final}} = R_{\text{task}} - \beta_{\text{len}} \cdot \max\left(0, \; |o_i| - L_{\text{target}}\right)$$
+
+The slope $\beta_{\text{len}}$ is mathematically bounded against the maximum task reward $R_{\max}$ and the hard token ceiling $L_{\max}$:
+
+$$\beta_{\text{len}} \ge \frac{R_{\max}}{L_{\max} - L_{\text{target}}}$$
+
+This condition guarantees that a trajectory that exhausts the maximum context ceiling $L_{\max}$ cannot yield positive net reward even if verified correct by the oracle verifier ($R_{\text{final}} \le 0$), enforcing a hard mathematical boundary against context exhaustion.
+
+3. **Token-Rate FLOP Regularization (Integrated Memory-Time Tax):** Because generation latency and KV cache memory allocation compound over the duration of a rollout, runtimes can directly align policy gradients with accelerator hardware costs. The integrated memory-time occupancy of an autoregressive rollout is proportional to the square of its sequence length: $\int_0^T M_{\text{KV}}(t)\, dt \propto |o_i|^2$. A token-rate FLOP regularizer introduces a quadratic penalty:
+
+$$R_{\text{FLOP}}(o_i) = -\kappa_{\text{FLOP}} \cdot |o_i|^2$$
+
+where $\kappa_{\text{FLOP}}$ reflects the marginal operational cost of GPU occupancy. This aligns the policy gradient directly with the inference cluster's roofline envelope, encouraging the agent to discover compact, computationally efficient trajectories.
+
+Repetition loops need a runtime check rather than a reward term.[^fn-repetition-penalty-mechanics] The rollout worker tracks recent $n$-grams during generation; when one repeats more than a threshold number of times within a window, the worker stops the rollout, and the rollout scores zero. Stopping early matters more than the score, because a looping rollout otherwise occupies its slot on the inference server until the token cap.
+
+[^fn-repetition-penalty-mechanics]: **Autoregressive Degeneracy**: Repetition loops in long-horizon reasoning trajectories emerge when the autoregressive model conditions on its own previously generated tokens, exponentially amplifying their generation logits. In outcome-driven reinforcement learning without dense step penalties, the policy falls into periodic attractors that exhaust the context window. Early termination monitors detect repeating $n$-gram cycles in the generation ring buffer and trigger immediate trajectory aborts.
+
+The most profound behavioral transformation induced by RLVR is the emergence of autonomous backtracking. Under pure supervised behavioral cloning, encountering an error during execution inevitably causes compounding exposure bias regret, as the policy was trained only on pristine trajectories. Under RLVR, because the policy is rewarded solely for passing the terminal verification suite, it discovers that recognizing execution errors and testing alternative tool arguments produces higher expected returns.
 
 The token trajectory of emergent self-correction is diagrammed in @fig-vol3-emergent-backtracking.
 
-::: {#fig-vol3-emergent-backtracking fig-env="figure" fig-pos="htb" fig-cap="**Emergent Deliberation and Attention Backtracking in Verifiable RL**: Structural mechanics of test-time search compiled into autoregressive weights. (a) Emergent deliberation finite-state machine inside policy $\pi_\theta$, where candidate rollouts ($S_{\text{hyp}}$) are verified against invariant specifications ($I_{\text{spec}}$) in $S_{\text{mon}}$, triggering reversal tokens ($\kappa_{\text{rev}}$) and attention suppression upon failure before grounded dispatch to the sandbox verifier oracle ($S_{\text{oracle}}$). (b) Deliberation token stream showing attention re-weighting across reversal boundaries: attention to the invalidated branch $B_1$ decays ($\alpha \approx 0.02$) while shifting mass to the reversal token and formal invariant specification." fig-alt="Systems diagram with two panels: panel (a) shows a finite-state machine representing internal policy self-verification, reversal token emission, and branch suppression before tool execution; panel (b) illustrates token-level attention suppression across a reversal boundary where attention to faulty reasoning is masked out."}
+::: {#fig-vol3-emergent-backtracking fig-env="figure" fig-pos="htb" fig-cap="**Emergent Deliberation and Attention Backtracking in Verifiable RL**: Structural mechanics of policy gradient optimization over execution trajectories. (a) Emergent deliberation finite-state machine inside policy $\pi_\theta$, where candidate rollouts ($S_{\text{hyp}}$) are verified against invariant specifications ($I_{\text{spec}}$) in $S_{\text{mon}}$, triggering reversal tokens ($\kappa_{\text{rev}}$) and attention suppression upon failure before grounded dispatch to the sandbox verifier oracle ($S_{\text{oracle}}$). (b) Deliberation token stream showing attention re-weighting across reversal boundaries: attention to the invalidated branch $B_1$ decays ($\alpha \approx 0.02$) while shifting mass to the reversal token and formal invariant specification." fig-alt="Systems diagram with two panels: panel (a) shows a finite-state machine representing internal policy self-verification, reversal token emission, and branch suppression before tool execution; panel (b) illustrates token-level attention suppression across a reversal boundary where attention to faulty reasoning is masked out."}
 ![](images/svg/rlvr_emergent_backtracking.svg)
 :::
 
-### What training changes in behavior {#sec-vol3-rlvr-deliberation}
+### Behavioral policy shifts and reasoning trace evolution {#sec-vol3-rlvr-deliberation}
 
 Once collapse and runaway length are held in check, RLVR changes the policy's outputs in ways that have been reported consistently. On reasoning tasks, the DeepSeek-R1 report describes mean response length growing steadily over reinforcement learning without any instruction to lengthen, and passages appearing in which the policy stops, re-evaluates an earlier step, and changes approach; the report marks a point partway through training where such re-evaluation appears abruptly [@deepseekai2025deepseekr1]. In agent trajectories the analogous behaviors are re-running a failing test before editing, reading a stack trace before patching, and abandoning a hypothesis after a tool result contradicts it.
 
-These are observations about outputs, not about mechanism, and two cautions apply. A re-evaluation passage is not evidence that the answer is right; only the verifier provides that, and a policy can learn the form of self-correction without its effect. Length growth is also ambiguous. It is the same signal as runaway length, and the normalization bias of @sec-vol3-rlvr-grpo-objective can produce it with no gain at all. Distinguishing the two is an evaluation question, answered by whether the pass rate at a matched token budget rises (@sec-vol3-evaluation-rigor) and not by whether outputs look more deliberate.
+These are observations about outputs, not about mechanism, and two cautions apply. A re-evaluation passage is not evidence that the answer is right; only the verifier provides that, and a policy can learn the form of self-correction without its effect. Length growth is also ambiguous. It is the same signal as runaway length, and the normalization bias of @sec-vol3-rlvr-grpo-objective can produce it with no gain at all. Distinguishing the two is an evaluation question, answered by whether the pass rate at a matched token budget rises and not by whether outputs look more deliberate.
 
 Regularization keeps the policy exploring and its rollouts within budget, and the verifier decides whether the resulting behavior helps. All of this assumes a supply of tasks for the policy to explore and machinery that can run millions of rollouts against them. The last section turns to that supply and that machinery.
 
@@ -756,15 +887,17 @@ Regularization keeps the policy exploring and its rollouts within budget, and th
 
 A training run that samples sixteen rollouts for each of a thousand tasks per step, for a few thousand steps, runs tens of millions of agent episodes. Each needs a task whose check is trustworthy, an environment that resets to the same starting state every time, a sandbox, a verifier run, and model time. Two facts shape the infrastructure. The environments, not the model, determine much of how long a rollout takes, and rollouts vary in length by orders of magnitude. This section follows the rollout from its task to the weights it helps train.
 
-### Where verifiable tasks come from
+### Task generation sources for automated verification
 
-The chapter has assumed a pool of tasks with trustworthy checks. Building that pool is most of the work of an RLVR project, and the checks' quality bounds what training can teach. The pool is the fixture pool of @sec-vol3-flywheel-fixtures, and its sources are the same: tasks mined from repository histories with fail-to-pass and pass-to-pass tests [@jimenez2024swebench], constructed variants that share an oracle template, and stateful tool environments such as the refund family, scored on the final state and driven by a simulated user. Each fixture must already pass the discrimination test of that section, rejecting its untouched initial state and accepting a reference solution. The hard negatives that @sec-vol3-flywheel-curation kept out of supervised training contribute here too, since their tasks are ones the current policy fails.
+The chapter has assumed a pool of tasks with trustworthy checks. Building that pool is most of the work of an RLVR project, and the checks' quality bounds what training can teach. The pool is a curated fixture pool, and its sources are the same: tasks mined from repository histories with fail-to-pass and pass-to-pass tests [@jimenez2024swebench], constructed variants that share an oracle template, and stateful tool environments such as the refund family, scored on the final state and driven by a simulated user. Each fixture must already pass the discrimination test of that section, rejecting its untouched initial state and accepting a reference solution. The hard negatives that trajectory curation kept out of supervised training contribute here too, since their tasks are ones the current policy fails.
 
-Reinforcement learning raises three of the curation requirements from good practice to necessity. Reproducibility comes first, because a fixture whose tests do not pass deterministically on the reference solution, or that reaches the network from a sandbox with no egress, feeds noise straight into the advantage, and group normalization amplifies it (@sec-vol3-rlvr-sandboxing). Separation comes next, because an optimizer searches harder than an imitator, so training tasks must stay disjoint from every evaluation task at the level of repository and issue, following the split hygiene of @sec-vol3-flywheel-evaluation. A policy trained on a benchmark's own repositories reports gains that measure memory, not skill. Difficulty comes last. Tasks the policy always solves or never solves produce the silent groups of @sec-vol3-rlvr-grpo-zero-variance, so the pool must keep the informative band populated and be refreshed as the policy improves, on a cycle of gradient steps rather than the training rounds of the self-improvement loop.
+Reinforcement learning raises three of the curation requirements from good practice to necessity. Reproducibility comes first, because a fixture whose tests do not pass deterministically on the reference solution, or that reaches the network from a sandbox with no egress, feeds noise straight into the advantage, and group normalization amplifies it (@sec-vol3-rlvr-sandboxing). Separation comes next, because an optimizer searches harder than an imitator, so training tasks must stay disjoint from every evaluation task at the level of repository and issue, following strict split hygiene. A policy trained on a benchmark's own repositories reports gains that measure memory, not skill. Difficulty comes last. Tasks the policy always solves or never solves produce the silent groups of @sec-vol3-rlvr-grpo-zero-variance, so the pool must keep the informative band populated and be refreshed as the policy improves, on a cycle of gradient steps rather than the training rounds of the self-improvement loop.
 
-### Where rollout time goes
+### Rollout latency profiling and execution bottlenecks
 
-With tasks in hand, the next question is where a rollout's time goes. Curation already required reset to stay a small fraction of episode time (@sec-vol3-flywheel-fixtures). The requirement binds harder here, because RL rollouts are short and run by the million, as the worked example below shows by pricing one environment's cycle in seconds.
+Scaling reinforcement learning for autonomous agents fundamentally shifts the compute bottleneck from GPU forward-backward passes to distributed environment orchestration. In classical deep reinforcement learning environments (such as Atari simulators or vectorized physics engines), environment transitions require microseconds of CPU time, allowing policy inference and gradient computation to dominate overall wall-clock latency. In agentic reinforcement learning, by contrast, each rollout step is an end-to-end distributed transaction: the agent policy generates structured actions through autoregressive token decoding, dispatches commands over network RPCs into containerized or virtualized execution sandboxes, and waits synchronously while compilers link binaries, test harnesses execute, or database queries resolve.
+
+Crucially, because an autonomous agent mutates host filesystem state, process trees, and network sockets during execution, each environment must be restored to a pristine baseline state before initiating the next rollout episode. If an environment pool relies on cold container provisioning or naive filesystem reconstruction, environment reset latency can easily exceed total policy generation and tool execution time by orders of magnitude. Under these conditions, expensive GPU accelerator clusters sit idle in generation bubbles, starved of rollouts by storage and hypervisor overhead. Notebook \ref{nbk-14-exploration-reset-goodput} models this critical-path latency breakdown, quantitatively evaluating the throughput multiplier unlocked by transitioning from cold container recreation to copy-on-write memory snapshot restoration.
 
 ```{python}
 #| label: calc-vol3-rlvr-rollout-time
@@ -877,7 +1010,7 @@ class RolloutTime:
 
 **Result**: Snapshot restore completes `{python} RolloutTime.speedup_str` times as many rollouts per hour on the same environments and the same model.
 
-**Systems insight**: Reset sits on every rollout's critical path, so the pooled snapshot restore of @sec-vol3-sandboxes-pooling nearly doubles training throughput without touching the model. The same accounting shows the tool taking `{python} RolloutTime.tool_share_pct_str` percent of every turn; for agent RL, environment speed is training speed.
+**Systems insight**: Reset sits on every rollout's critical path, so pooled snapshot restore nearly doubles training throughput without touching the model. The same accounting shows the tool taking `{python} RolloutTime.tool_share_pct_str` percent of every turn; for agent RL, environment speed is training speed.
 
 :::
 
@@ -888,6 +1021,12 @@ $$T_{\text{step}} = \max_{i} T_{\text{rollout}}(\tau_i) + T_{\text{train}}$$
 and every generator and the trainer idle while the tail finishes. The heavier the tail, and agent tails are heavy because tool times are, the larger the idle fraction.
 
 ### Separating rollout from training
+
+::: {.column-margin}
+![](images/svg/vol3_rlvr_margin_004.svg){width="100%" fig-alt="Architectural comparison of rollout inference at 4.2 FLOP per byte and 32 percent MFU versus training engine at 145 FLOP per byte and 58 percent MFU across a 35 times arithmetic intensity gap."}
+
+*Rollout inference is memory-bandwidth bound while training is compute bound, creating a 35-fold arithmetic intensity gap.*
+:::
 
 The two halves of the loop have different workloads, and serving both from one pool of accelerators forces each to accept the other's constraints. Generation produces tokens one step at a time for many independent rollouts that start, pause on tools, and finish unpredictably; it is bound by memory bandwidth (principle \ref{pri-vol3-memory-bandwidth-decoding}, derived in @sec-vol3-appendix-inference-roofline) and its memory holds per-rollout attention state. Training processes whole batches of finished rollouts in synchronized steps and its memory holds weights, gradients, and optimizer state. Most large RLVR systems therefore run generation and training on separate pools, as @tbl-vol3-disaggregated-contrast summarizes, and connect them with a queue of finished, verified rollouts.
 
@@ -902,7 +1041,9 @@ The two halves of the loop have different workloads, and serving both from one p
 
 : **Rollout vs. Training Pools**: The two halves of the RLVR loop compared by work unit, cadence, what their memory holds, and what they scale with. {#tbl-vol3-disaggregated-contrast}
 
-One saving applies directly to GRPO's groups. All $G$ rollouts for a task begin with the same prompt, the task description, the repository context, and the tool definitions, often thousands of tokens long. Because attention state is derived from the token prefix (principle \ref{pri-vol3-prefix-coherence}), that state is identical across the group, so the rollout pool computes it once and the $G$ rollouts share it, diverging only as each samples its own continuation. This is the prefix caching and copy-on-write forking of @sec-vol3-kvcache-radix-tree applied to a group, and it removes $G-1$ of every $G$ prompt prefills.
+One saving applies directly to GRPO's groups. All $G$ rollouts for a task begin with the same prompt, the task description, the repository context, and the tool definitions, often thousands of tokens long. Because attention state is derived from the token prefix (principle \ref{pri-vol3-prefix-coherence}), that state is identical across the group, so the rollout pool computes it once and the $G$ rollouts share it, diverging only as each samples its own continuation. This is prefix caching and copy-on-write tree forking applied to a group, and it removes $G-1$ of every $G$ prompt prefills.[^fn-prefix-cache-radix]
+
+[^fn-prefix-cache-radix]: **Radix Attention Sharing**: Group generation amortizes prompt computation by caching the key-value activations of the invariant task prefix across all $G$ completions. In radix-tree KV caches, the common prompt is evaluated once during prefill, and each rollout worker branches from a shared immutable page node upon sampling its first divergent token. This eliminates $G - 1$ redundant prefill passes and conserves substantial high-bandwidth memory capacity.
 
 ### Bounding policy staleness {#sec-vol3-rlvr-freshness}
 
@@ -916,7 +1057,7 @@ Let $v$ count the trainer's update steps. Each rollout records the version $v_{\
 
 $$\Delta v = v_{\text{trainer}} - v_{\text{rollout}} \approx \left\lfloor \frac{\Delta t_{\text{rollout}}}{t_{\text{step}}} \right\rfloor$$
 
-where $\Delta t_{\text{rollout}}$ is the time from the rollout's first token to its arrival at the trainer, covering generation, tool calls, verification, and queueing, and $t_{\text{step}}$ is the time per training step. Long agent rollouts are exactly the ones that come back stale. As $\Delta v$ grows, the current policy's probabilities for the rollout's tokens drift from the probabilities under which they were sampled, and the importance ratio
+where $\Delta t_{\text{rollout}}$ is the time from the rollout's first token to its arrival at the trainer, covering generation, tool calls, verification, and queueing, and $t_{\text{step}}$ is the time per training step. Long agent rollouts are exactly the ones that come back stale. As $\Delta v$ grows, the current policy's probabilities for the rollout's tokens drift from the probabilities under which they were sampled,[^fn-importance-sampling-drift] and the importance ratio
 
 $$\rho_t(\theta) = \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\text{rollout}}}(a_t \mid s_t)}$$
 
@@ -924,11 +1065,15 @@ moves away from one. The ratio multiplies each token's gradient, and over a long
 
 Choosing $\Delta v_{\max}$ trades waste against drift. A tight bound, one or two versions, keeps ratios near one but drops the long rollouts, which in agent RL are disproportionately the hard tasks, biasing the training distribution toward easy ones. A loose bound keeps them but relies on clipping to suppress the drift, which also suppresses their learning signal. $\Delta v_{\max} = 0$ is the synchronous schedule. In practice runtimes keep the bound small and shorten $\Delta t_{\text{rollout}}$ instead, with faster environments, turn caps, and fast broadcast of new weights to the rollout pool, so that fewer rollouts arrive stale in the first place.
 
+[^fn-importance-sampling-drift]: **Off-Policy Probability Ratio**: In asynchronous rollout pipelines, the probability ratio measures distribution drift between generation and gradient execution. As training steps advance, accumulating drift causes unclipped importance ratios to diverge exponentially over long horizons, triggering gradient explosion. PPO and GRPO mitigate this trajectory divergence through token-level ratio clipping and Kullback-Leibler divergence regularization against a frozen reference policy.
+
 ### Disaggregated rollout and trainer architecture
 
 Generating thousands of multi-turn agent rollouts against isolated sandboxes is an I/O-heavy, memory-bound workload, whereas model gradient backpropagation is compute-bound and network-bandwidth intensive. Attempting to co-locate rollout generation and gradient training on the same GPU cluster results in severe GPU under-utilization during rollout waits.
 
-Modern RLVR infrastructure resolves this by disaggregating execution into two specialized clusters: an inference-optimized Rollout Engine running high-throughput engines with KV prefix caching, and a distributed Training Cluster executing Megatron-LM or FSDP gradient updates. The disaggregated architecture is illustrated in @fig-vol3-disaggregated-rollout.
+Modern RLVR infrastructure resolves this by disaggregating execution into two specialized clusters:[^fn-ray-vllm-rollouts] an inference-optimized Rollout Engine running high-throughput engines with KV prefix caching, and a distributed Training Cluster executing Megatron-LM or FSDP gradient updates. The disaggregated architecture is illustrated in @fig-vol3-disaggregated-rollout.
+
+[^fn-ray-vllm-rollouts]: **Distributed Rollout Orchestration**: High-throughput rollout generation couples the Ray actor model for distributed process scheduling with vLLM engine instances for continuous batching and PagedAttention memory management. Worker actors stream trajectory tokens over shared-memory Apache Arrow plasma stores to bypass Python object serialization overhead. This decoupling allows the rollout cluster to sustain high model FLOP utilization while thousands of asynchronous tool executions pause waiting for sandbox completion.
 
 ::: {#fig-vol3-disaggregated-rollout fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Rollout Cluster Architecture**: End-to-end distributed system topology decoupling high-throughput inference rollout workers from compute-dense gradient training workers. Rollout workers exploit radix-tree KV-cache reuse to evaluate prompt prefixes once across $G$ group completions, stream completed trajectories to sandboxed verification enclaves, and push normalized advantages into host-pinned replay buffers consumed asynchronously by the training fleet over RDMA." fig-alt="Five-stage distributed systems architecture schematic showing prompt prefill with radix KV caching, parallel autoregressive decode workers, parallel verification microVMs, a host-managed advantage broker, and a distributed gradient training cluster connected via high-speed RDMA."}
 ![](images/svg/fig-vol3-disaggregated-rollout.svg)
@@ -948,9 +1093,9 @@ The synchronization trade-offs between synchronous step-locked loops and asynchr
 
 ### Cohort straggler latency disparity
 
-In group-relative algorithms such as GRPO, gradient updates for a prompt require all $G$ rollouts in the cohort to complete before cohort mean $\mu_{	ext{group}}$ and standard deviation $\sigma_{	ext{group}}$ can be computed. In multi-turn coding environments where trajectory execution times vary by orders of magnitude (from simple 1-turn syntactic checks to 30-turn test suites), cohort execution time is governed by extreme stragglers:
+In group-relative algorithms such as GRPO, gradient updates for a prompt require all $G$ rollouts in the cohort to complete before cohort mean $\mu_{\text{group}}$ and standard deviation $\sigma_{\text{group}}$ can be computed. In multi-turn coding environments where trajectory execution times vary by orders of magnitude (from simple 1-turn syntactic checks to 30-turn test suites), cohort execution time is governed by extreme stragglers:
 $$
-T_{	ext{cohort}} = \max_{j \in \{1, \dots, G\}} T_j
+T_{\text{cohort}} = \max_{j \in \{1, \dots, G\}} T_j
 $$
 The empirical latency disparity across cohort sizes is detailed in @tbl-vol3-cohort-latency-disparity.
 
@@ -962,6 +1107,33 @@ The empirical latency disparity across cohort sizes is detailed in @tbl-vol3-coh
 | **Worker $\tau_4$** | 4,096 tokens     | Max depth timeout ($T_{\max}$) | Straggler worst-case ($\sim 16.8\ \text{s}$) | $0$ slots idle (Active barrier straggler)   |
 
 : **Rollout Cohort Execution Latency Disparity**: Tail latency amplification and GPU idle wait across heterogeneous trajectory lengths within a cohort ($G=4$). {#tbl-vol3-cohort-latency-disparity}
+
+#### The cohort aggregation buffer architecture {.unnumbered}
+
+To resolve the architectural tension between GRPO's group barrier requirement and asynchronous streaming throughput, industrial RLVR clusters deploy a **Cohort Aggregation Buffer (CAB)** acting as an active asynchronous-to-synchronous impedance matcher between rollout workers and the gradient trainer:
+
+1. **Cohort-Tagged Dispatch & Pinned Streaming:** When the task dispatcher schedules a prompt fixture $q$, it assigns a unique cryptographic $\mathtt{cohort\_id}$ and dispatches $G$ parallel worker tasks across the rollout pool. As individual rollout workers complete their trajectories (for example, Worker $\tau_1$ exiting after 48 tokens in 200 ms), they stream their token records, loss masks, sampling log-probabilities, and sandbox verification outcomes into host pinned-DRAM buffers using zero-copy memory arenas (such as Apache Arrow shared-memory plasma stores). The GPU rollout worker immediately dequeues the next available task from the cluster scheduler without idling accelerator Tensor Cores.
+2. **In-Situ Zero-Variance Pruning in Host Memory:** Before initiating high-speed GPUDirect RDMA transfers to the trainer, the CAB inspects the cohort rewards in host DRAM. If all rollouts in the cohort failed ($r_i = 0, \forall i$) or all passed ($r_i = 1, \forall i$), the cohort standard deviation is $\sigma_{\text{group}} = 0$ and the policy gradient is identically zero. The CAB drops these silent cohorts directly in host memory, preventing zero-gradient batches from consuming network transfer bandwidth and wasting trainer GPU compute cycles.
+3. **Coupled Straggler Timeout vs. Policy Freshness Bound:** When Worker $\tau_1$ finishes in $0.2\text{ s}$ and Worker $\tau_4$ finishes in $16.8\text{ s}$, $\tau_1$'s data sits buffered in host DRAM for $16.6\text{ s}$. If the gradient training step latency is $t_{\text{step}}$, the trainer advances by $\Delta v \approx \frac{\Delta t_{\text{wait}}}{t_{\text{step}}}$ policy versions during the wait. If the elastic straggler timer $\Delta t_{\text{straggler}}$ is set without regard to trainer velocity, early-completing rollouts become stale before their cohort reaches the trainer replay queue, risking rejection at the freshness gate ($\Delta v > \Delta v_{\max}$) or destabilizing policy updates with explosive importance weights. The CAB enforces a coupled straggler deadline:
+   $$\Delta t_{\text{straggler}} \le \Delta v_{\max} \cdot t_{\text{step}} - \Delta t_{\text{verify}}$$ {#eq-vol3-cab-straggler-bound}
+4. **Credit-Based Flow Control Backpressure:** When the gradient trainer pauses (such as during periodic release gate evaluations on held-out test enclaves), completed rollouts accumulate in the CAB. Unbounded accumulation risks exhausting host pinned-DRAM. The CAB implements credit-based admission control: the task scheduler acquires an admission credit before dispatching a cohort. When CAB buffer occupancy exceeds a high watermark, admission credits are withheld, exerting backpressure upstream to throttle rollout workers.
+5. **Survival Bias Correction under Elastic Sealing:** If $\Delta t_{\text{straggler}}$ expires, the CAB seals the cohort with the $G' < G$ completed rollouts (provided $G' \ge 2$). Because truncated stragglers are systematically the longest, deepest reasoning trajectories, elastic truncation introduces survival bias. To prevent underestimating cohort dispersion and artificially inflating advantage scale on small sealed cohorts, the CAB applies Bessel's correction factor $\frac{G'}{G'-1}$ to the empirical sample variance:
+   $$\sigma_{\text{group}}^2 = \frac{1}{G' - 1} \sum_{j=1}^{G'} (r_j - \mu_{\text{group}})^2$$ {#eq-vol3-cab-bessel-correction}
+   Once standardized, the completed cohort mini-batch is transferred to the trainer's circular replay queue via GPUDirect RDMA.
+
+### Verification throughput sizing roofline
+
+In disaggregated agent architectures, high-throughput rollout generation on GPU accelerators must balance against hermetic verification throughput on CPU sandbox worker pools. Rollout generation throughput on GPUs must not exceed the sustained verification capacity of the sandbox cluster:
+
+$$\Theta_{\text{rollout}} = \frac{B_{\text{batch}} \cdot L_{\text{rollout}}}{T_{\text{infer}}} \le \Theta_{\text{verify}} = \frac{N_{\text{workers}} \cdot K_{\text{trials}}}{T_{\text{sandbox\_run}}}$$ {#eq-vol3-verification-throughput-roofline}
+
+where $B_{\text{batch}}$ is the batch size of concurrent trajectories sampled across the accelerator fleet, $L_{\text{rollout}}$ is the average trajectory token length, $T_{\text{infer}}$ is the inference wall-clock time required to generate the rollout batch, $N_{\text{workers}}$ is the number of concurrent sandboxed verification workers, $K_{\text{trials}}$ is the number of consensus evaluation trials required per candidate patch, and $T_{\text{sandbox\_run}}$ is the average wall-clock latency of executing the hermetic build and test suite.
+
+The inequality in @eq-vol3-verification-throughput-roofline establishes the sizing boundary for preventing accelerator idle bubbles. If $\Theta_{\text{verify}} < \Theta_{\text{rollout}}$, finished trajectories accumulate in staging queues, exerting backpressure that stalls inference workers. Accelerator high-bandwidth memory remains pinned holding KV-cache state for rollouts awaiting verification, reducing effective model FLOP utilization. To guarantee that verification throughput keeps pace with generation, cluster engineers must size the concurrent verification worker pool:
+
+$$N_{\text{workers}} \ge \frac{B_{\text{batch}} \cdot K_{\text{trials}} \cdot T_{\text{sandbox\_run}}}{T_{\text{infer}}}$$
+
+For example, if a 64-GPU rollout cluster produces $B_{\text{batch}} = 512$ completed rollouts every $T_{\text{infer}} = 16\text{ seconds}$, and hermetic sandbox execution requires $T_{\text{sandbox\_run}} = 8\text{ seconds}$ with nominal single-pass verification ($K_{\text{trials}} = 1$), the cluster requires at least $N_{\text{workers}} = 256$ concurrent microVM sandbox slots. When candidate patches pass the initial filter and trigger consensus verification ($K_{\text{trials}} = 3$) to eliminate test flakiness, verification demand spikes threefold, requiring either elastic burst capacity on CPU compute pools or asynchronous queue buffering that absorbs verification bursts without stalling GPU decoders.
 
 ### Release gating enclaves
 
@@ -979,24 +1151,28 @@ Promoting a newly trained RLVR checkpoint to the rollout pool requires passing a
 
 The asynchronous loop has one more hazard. Each new version of the weights is broadcast to the rollout pool, so a bad version does not merely score poorly; it generates the next batches of training data. A version that has learned a formatting exploit, collapsed into a loop, or lost the ability to emit well-formed tool calls fills the queue with degenerate rollouts, the verifier rejects them, the groups go silent, and recovery requires rolling back weights and discarding every rollout the bad version produced. Training loss does not reveal this; RL loss is noisy and does not track task success.
 
-New versions are therefore promoted, to the rollout pool and later to deployment, through the release gate of @sec-vol3-evaluation-releases, not directly from the optimizer. For RLVR the gate checks three things on held-out environments the reward never saw:
+New versions are therefore promoted, to the rollout pool and later to deployment, through automated release gates, not directly from the optimizer. For RLVR the gate checks three things on held-out environments the reward never saw:
 
-1. **Target capability.** The verified pass rate on held-out tasks of the trained kind must meet the current policy's, within a stated tolerance, with the trial counts and confidence intervals of @sec-vol3-evaluation-rigor.
+1. **Target capability.** The verified pass rate on held-out tasks of the trained kind must meet the current policy's, within a stated tolerance, with rigorous trial counts and confidence intervals.
 2. **No regression elsewhere.** A regression suite outside the training distribution, covering other languages, other tool families, and instruction following, must not fall below its baseline. RL on one task family can erode others.
 3. **Contract compliance.** Every tool call the new version emits on the held-out suite must parse against its schema. A policy that drifts in format breaks the harness, not merely the score.
 
-The gate also reports the right statistics. RL can raise pass@1 without raising pass@$k$ at large $k$, because it can concentrate probability on solutions the starting policy already sampled occasionally rather than find new ones. Reporting both, together with pass$^k$ reliability across repeated runs (@sec-vol3-evaluation-rigor), separates a policy that became more reliable from one that became more capable, and a deployment usually needs the first as much as the second.
+The gate also reports the right statistics. RL can raise pass@1 without raising pass@$k$ at large $k$, because it can concentrate probability on solutions the starting policy already sampled occasionally rather than find new ones. Reporting both, together with pass$^k$ reliability across repeated runs, separates a policy that became more reliable from one that became more capable, and a deployment usually needs the first as much as the second.
 
 The environment pool, the separated rollout and training pools, the freshness gate, and the release gate make RLVR a production system rather than an experiment. What remains are the misjudgments teams make when building one.
 
+::: {.column-margin .margin-pointer}
+↩ Hermetic evaluation gyms, Wilson score intervals, and sequential release gates are established in @sec-vol3-evaluation.
+:::
+
 ## Fallacies and Pitfalls {#sec-vol3-rlvr-fallacies}
 
-Reinforcement learning against verifiers fails in ways that look like success in the training curves. The misjudgments below recur because each follows from treating the reward, the length of the output, or the rollout harness as more trustworthy than it is.
+Reinforcement learning with verifiable rewards introduces distinct systems pathologies that frequently disguise themselves as optimization breakthroughs on training dashboards. Because gradient ascent directly optimizes the policy against empirical signals, any subtle flaw in reward specification, verification environment isolation, or rollout infrastructure is rapidly discovered and exploited by the optimization process. A policy may report soaring reward curves while merely mastering test-suite subversion, memorizing leaky benchmark fixtures, or bloating reasoning traces with vacuous deliberation loops. Treating programmatic verifiers as incorruptible oracles, running test runners inside mutable agent workspaces, or conflating raw output length with cognitive depth leads teams to deploy brittle models that catastrophically fail in production. The following fallacies and pitfalls examine the primary architectural misjudgments encountered when training autonomous agent policies with verifiable rewards.
 
 ::: {.fallacy-pitfall}
 **Fallacy:** *A verifiable reward cannot be gamed.*
 
-A deterministic check cannot be flattered, but it can be satisfied by the wrong artifact. A reward that checks an exit code is satisfied by a stub that exits zero; a reward that checks for an output file is satisfied by an empty file; a test suite with thin coverage is satisfied by code that handles only the tested inputs. Under RL the policy searches for exactly these gaps (@sec-vol3-rlvr-rewards). The defense is to treat each task's check as an attack surface before training on it: extend the discrimination test of @sec-vol3-flywheel-fixtures with deliberately wrong solutions the check must reject, score with hidden fail-to-pass and pass-to-pass tests, and evaluate the trained policy on held-out environments the reward never saw (@sec-vol3-rlvr-release-gating).
+A deterministic check cannot be flattered, but it can be satisfied by the wrong artifact. A reward that checks an exit code is satisfied by a stub that exits zero; a reward that checks for an output file is satisfied by an empty file; a test suite with thin coverage is satisfied by code that handles only the tested inputs. Under RL the policy searches for exactly these gaps (@sec-vol3-rlvr-rewards). The defense is to treat each task's check as an attack surface before training on it: extend the discrimination test with deliberately wrong solutions the check must reject, score with hidden fail-to-pass and pass-to-pass tests, and evaluate the trained policy on held-out environments the reward never saw (@sec-vol3-rlvr-release-gating).
 :::
 
 ::: {.fallacy-pitfall}
@@ -1040,11 +1216,15 @@ Supervised fine-tuning stops at the edge of its demonstrations; reinforcement le
 
 Placing an optimizer inside the sandbox and aiming it at the reward turned reinforcement learning against isolated verifiers (principle \ref{pri-vol3-verifiable-rewards}) into three concrete requirements. The verifier runs in a separate enclave that receives only a patch, held-out tests bound what the reward can teach, and a group-relative gradient exists only for tasks the policy solves on some attempts and fails on others. The dual-sandbox enclave is containment beneath the model (principle \ref{pri-vol3-zero-trust-sandboxing}) extended from the host to the reward itself, and the release gate carries the verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) from the single decision to each new version of the weights.
 
+::: {.column-margin .margin-pointer}
+↪ Multi-agent topologies, handoff protocols, and distributed consensus are developed in @sec-vol3-multi-agent.
+:::
+
 ::: {.callout-chapter-connection title="From one better agent to many"}
 
 When does splitting one task across several agents beat giving one agent the same budget?
 
-Part V ends with a better single agent: a policy curated from verified trajectories, fine-tuned to act, and optimized against checks it cannot reach. Its weights now make passing proposals more likely, but they grant it no new authority, and it still runs one trajectory with one context and one wall clock. Some tasks strain all three at once, a repository migration with more state than one context holds, or independent subtasks that could run concurrently. Splitting such a task across agents multiplies every H·S·A exposure and adds the cost of coordinating them. @Sec-vol3-multi-agent opens Part VI, *Agents at Scale*, by asking when that coordination tax pays for itself against a single agent given the same budget, and what the coordination must enforce when it does.
+Part V ends with a better single agent: a policy curated from verified trajectories, fine-tuned to act, and optimized against checks it cannot reach. Its weights now make passing proposals more likely, but they grant it no new authority, and it still runs one trajectory with one context and one wall clock. Some tasks strain all three at once, a repository migration with more state than one context holds, or independent subtasks that could run concurrently. Splitting such a task across agents multiplies every H·S·A exposure and adds the cost of coordinating them. The next chapter opens Part VI, *Agents at Scale*, by asking when that coordination tax pays for itself against a single agent given the same budget, and what the coordination must enforce when it does.
 
 :::
 

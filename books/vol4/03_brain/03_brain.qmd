@@ -40,7 +40,7 @@ A robot operating among humans must interpret dynamic environments and propose a
 To keep actuators continuously supplied between deliberative updates, the Brain must emit prospective action chunks—temporal sequences of future setpoints. However, these proposed setpoints age with the stale observation that generated them, and a proposal that arrives on time can still be physically disastrous. High prediction confidence does not entitle a statistical model to command the physical machine. The Brain generates candidate behaviors across the proposal boundary, while the deterministic Nervous System evaluates each chunk against current sensor telemetry and safety envelopes before allowing low-level commands to cross the causal boundary.
 
 ::: {.column-margin .margin-pointer}
-↰ **Prerequisite:** A learned proposal stays unprivileged until the permission path admits it, the third law of @sec-boundary-bedrock-laws.
+↩ A learned proposal stays unprivileged until the permission path admits it, the third law of @sec-boundary-bedrock-laws.
 :::
 
 {{< pagebreak >}}
@@ -190,7 +190,7 @@ Rather than an opaque monolith, an embodied foundation model is a three-stage ne
    The design rule for this deliberative boundary is that learned models operating at the Brain's inference cadences ($1\text{--}50\text{ Hz}$) propose kinematic setpoints ($\mathbf{q}, \dot{\mathbf{q}}, \ddot{\mathbf{q}}$ or Cartesian poses), **never unbuffered, open-loop motor torques ($\boldsymbol{\tau}$)** directly to inverter switches. Motor torque is coupled to the plant through the manipulator equation of the classical-dynamics note in @sec-brain-classical-wall, plus a contact term $\boldsymbol{\tau}_{\text{contact}}$. Because inertia $\mathbf{M}(\mathbf{q})$ and Coriolis forces $\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})$ vary non-linearly with instantaneous joint configuration and velocity, commanding open-loop torques, without high-frequency feedback, from a neural model that updates at tens of hertz at most can destabilize the limb when model error, friction, or payload variation is large enough. Kinematic setpoints, by contrast, specify an intended spatial path and leave high-gain closed-loop torque synthesis to the Body's drives, whose field-oriented current loops run at $10\text{--}25\text{ kHz}$, once the permission path has admitted each setpoint. (Where specialized high-rate reinforcement learning policies operating at $100\text{--}500\text{ Hz}$ output torques directly, they still require an independently validated high-rate permission path, as @sec-nervous-invariant-checking argues; passivity checks for such torque streams are derived in @sec-appendix-control-passivity.)
 
 ::: {.column-margin .margin-pointer}
-↳ **Downstream:** Zero-copy proposal passing between the Brain and the Nervous System relies on the lock-free buffers analyzed in @sec-nervous-cadences.
+↪ Zero-copy proposal passing between the Brain and the Nervous System relies on the lock-free buffers analyzed in @sec-nervous-cadences.
 :::
 
    Proposals reach the permission path through the handoff of @sec-nervous, and the permission path can refuse a hallucinated proposal when independent measurements, modeled limits, and a feasible fallback support that decision.[^fn-math-unprivileged-control]
@@ -216,7 +216,7 @@ After ingestion (the tokenization of @sec-brain-learned-representations), four s
 :::
 
 ::: {.column-margin .margin-pointer}
-↳ **Downstream:** High-throughput neural inference accelerators are isolated from deterministic cores in @sec-placement-two-paths-one-die.
+↪ High-throughput neural inference accelerators are isolated from deterministic cores in @sec-placement-two-paths-one-die.
 :::
 
 ### The memory wall {.unnumbered}
@@ -307,11 +307,32 @@ plt.show()
 
 :::
 
+The roofline model in @fig-patterson-roofline formalizes the hardware boundary governing embodied inference by plotting attainable computational throughput against **arithmetic intensity** ($I$), defined as:
+$$I = \frac{\text{FLOPs}}{\text{Bytes transferred from off-chip memory}}$$
+For single-token autoregressive decoding, generating each subsequent action token requires evaluating a matrix-vector product $\mathbf{y} = \mathbf{W}\mathbf{x}$ across all model weights with batch size 1. In 16-bit floating-point precision (FP16, 2 bytes per parameter), each weight participates in exactly one multiply-accumulate operation (2 FLOPs), yielding an arithmetic intensity of:
+$$I_{\text{token}} = \frac{2\,\text{FLOPs}}{2\,\text{Bytes}} = 1.0\,\text{FLOP/byte}$$
+On an embedded application processor with peak compute $\Pi_{\text{peak}} = 32\,\text{TFLOPs/s}$ and LPDDR5 memory bandwidth $\beta_{\text{mem}} = 100\,\text{GB/s}$, the hardware ridge point occurs at:
+$$I_{\text{ridge}} = \frac{\Pi_{\text{peak}}}{\beta_{\text{mem}}} = \frac{32 \times 10^{12}\,\text{FLOPs/s}}{100 \times 10^9\,\text{Bytes/s}} = 320\,\text{FLOP/byte}$$
+Because single-token autoregressive decoding operates at $I_{\text{token}} = 1.0 \ll I_{\text{ridge}}$, it sits deep in the memory-bound regime, throttled to $\beta_{\text{mem}} \cdot I_{\text{token}} = 100\,\text{GFLOPs/s}$—a meager 0.3 percent of the silicon's arithmetic capacity.
+
+Action chunking and trajectory diffusion overcome this memory bottleneck by shifting the operating point two orders of magnitude to the right:
+
+* **Action Chunking ($H = 16$):** Predicting a chunk of $H=16$ future waypoints in a single forward pass reuses model parameters across 16 outputs, increasing arithmetic intensity sixteenfold to $I \approx 16\,\text{FLOP/byte}$.
+* **Diffusion Policy ($H = 16, K = 10$):** Running $K = 10$ iterative refinement steps over the compact action head yields $H \times K = 160$, driving arithmetic intensity to $I \approx 160\,\text{FLOP/byte}$. This brings the workload within reach of the hardware ridge point, allowing the accelerator to operate near its full arithmetic capability.
+
 ### Action chunking {.unnumbered}
+
+Classical digital control loops evaluate sensors and compute scalar feedback corrections synchronously at high rates ($100\text{--}1000\,\text{Hz}$). In physical AI architectures driven by multi-billion-parameter neural networks, however, single-step closed-loop evaluation at millisecond cadences is physically infeasible due to the memory wall and compute latency. If a neural policy requiring $100\,\text{ms}$ of inference time were evaluated strictly for single-step commands, the physical plant would spend $99\,\text{ms}$ out of every $100\,\text{ms}$ interval unguided, leading to discrete limit cycles and instability. Instead, physical AI decouples deliberation from tracking by predicting continuous trajectory segments.
 
 To supply dense waypoints despite slow full-model inference, modern physical AI policies employ **action chunking**\index{Action chunking!temporal trajectory} (\ref{dfn-brain-action-chunking}) [@zhao2023learning; @chi2024diffusionpolicy]. Each chunk then crosses the proposal boundary as one packet, the chunk payload of @sec-nervous-cadences.
 
-A chunking policy (such as Action Chunking with Transformers [ACT], Diffusion Policy, or Flow Matching) generates its whole chunk of $H$ setpoints in one backbone pass followed, for an iterative decoder, by an assumed $K = 10\text{--}16$ refinement steps. Each refinement re-evaluates the smaller action head, so full latency is $t_{\text{vision}}+t_{\text{backbone}}+K t_{\text{head}}+t_{\text{transfer}}$, not just one weight sweep. A new observation changes the plan only after another backbone and decoder pass; see @sec-appendix-ml for the generative mechanism.
+A chunking policy (such as Action Chunking with Transformers [ACT], Diffusion Policy, or Flow Matching) generates its whole chunk of $H$ setpoints in one backbone pass followed, for an iterative decoder, by $K = 10\text{--}16$ refinement steps.
+
+To understand why physical AI systems rely on trajectory diffusion rather than standard regression, consider the problem of multimodality in human demonstration data. Standard behavioral cloning trains a deterministic network using mean squared error (MSE) loss: $\mathcal{L}_{\text{MSE}} = \|\pi(\mathbf{o}) - \mathbf{a}\|^2$. This objective implicitly assumes a unimodal Gaussian conditional distribution. In real-world manipulation, however, demonstrations are inherently multimodal: faced with an obstacle, a human demonstrator may navigate either to the left or to the right with equal probability. Under MSE loss, minimizing error across both modes forces the network to predict the conditional expectation—the arithmetic mean of the two trajectories—directing the robot straight into the obstacle.
+
+Diffusion policies resolve mode averaging by representing actions as a continuous multi-step trajectory tensor $\mathbf{A} \in \mathbb{R}^{H \times d_a}$, where $H$ is the trajectory horizon and $d_a$ is the action dimension (e.g., 6-DoF end-effector delta poses and gripper states). Denoising begins by sampling pure Gaussian noise $\mathbf{A}^{(K)} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$. Over $K$ discrete denoising iterations, a learned noise prediction head $\boldsymbol{\epsilon}_\theta(\mathbf{A}^{(k)}, k, \mathbf{o})$ conditioned on visual and proprioceptive context $\mathbf{o}$ iteratively reconstructs the trajectory:
+$$\mathbf{A}^{(k-1)} = \frac{1}{\sqrt{\alpha_k}} \left( \mathbf{A}^{(k)} - \frac{1 - \alpha_k}{\sqrt{1 - \bar{\alpha}_k}} \boldsymbol{\epsilon}_\theta(\mathbf{A}^{(k)}, k, \mathbf{o}) \right) + \sigma_k \mathbf{z}$$
+where $\alpha_k$ and $\bar{\alpha}_k$ follow a precomputed noise schedule and $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ (for stochastic DDPM sampling) or $\mathbf{z} = \mathbf{0}$ (for deterministic DDIM sampling). In $K = 10\text{--}16$ steps, this transforms Gaussian noise into a smooth, kinematically consistent trajectory tensor $\mathbf{A}^{(0)} = [\mathbf{a}_t, \mathbf{a}_{t+1}, \dots, \mathbf{a}_{t+H-1}]$, faithfully capturing complex multimodal behaviors without mode collapse.
 
 ::: {#dfn-brain-action-chunking .callout-definition title="Temporal action chunking"}
 
@@ -338,7 +359,12 @@ $$\mathbf{a}_t = \frac{\sum_{i=0}^{\min(t, H-1)} w_i \, \mathbf{a}_{t \mid t-i}}
 
 where $\mathbf{a}_{t \mid t-i}$ represents the action predicted for time step $t$ by the action chunk initiated at time $t-i$, and $m > 0$ is a tunable temporal discount factor. The permission path interpolates the blended waypoints below the proposal boundary (@sec-nervous-cadences). Ensembling averages setpoints without enforcing derivative continuity, so a seam can still need the $C^2$ bridge that @sec-planning-kinodynamic-feasibility builds.
 
-This operational tension between neural deliberation capacity and physical control latency defines the central scaling frontier of modern robotic brains (@fig-03-vla-scaling-timeline). Between 2020 and 2023, pioneering vision-language-action (VLA)\index{Vision-language-action model} models such as RT-1 [@brohan2023rt1], RT-2 [@brohan2023rt2], and OpenVLA [@kim2024openvla] tokenized continuous actions into discrete bins, predicting one action step per autoregressive forward pass. However, because each forward pass requires streaming every model parameter from DRAM across the silicon memory bus, policy update rates collapsed as model capacity scaled ($f_{\text{action}} \propto 1 / M_{\text{weights}}$)—trapping multi-billion-parameter models behind an insurmountable "deliberation wall" ($1\text{--}3\,\text{Hz}$) that fell far below the $50\,\text{Hz}$ closed-loop threshold required for dynamic contact and reactive manipulation.
+This operational tension between neural deliberation capacity and physical control latency defines the central scaling frontier of modern robotic brains (@fig-03-vla-scaling-timeline). To understand this frontier, consider the fundamental distinction between two architectural paradigms:
+
+* **Vision-Language Models (VLMs):** Multimodal foundation models (such as GPT-4V, PaLM-E, and Gemini) ingest camera frames and text prompts to output discrete linguistic tokens ($y \in \mathcal{V}_{\text{text}}$). While VLMs excel at open-world semantic scene understanding, object categorization, and task decomposition, their representations live in abstract linguistic space without spatial coordinates, joint torque limits, or physical time awareness.
+* **Vision-Language-Action Models (VLAs):** Physical AI policies (such as RT-1, RT-2, OpenVLA, and $\pi_0$) extend multimodal transformers directly into the physical world. Rather than producing descriptive text, a VLA grounds visual observations and natural language instructions into physical robotic actions ($\mathbf{a}_t \in \mathbb{R}^{d_a}$)—such as 6-DoF end-effector delta poses, gripper open/close triggers, or continuous joint setpoints.
+
+Between 2020 and 2023, pioneering vision-language-action (VLA)\index{Vision-language-action model} models such as RT-1 [@brohan2023rt1], RT-2 [@brohan2023rt2], and OpenVLA [@kim2024openvla] tokenized continuous actions into discrete bins (typically 256 uniform bins per dimension), predicting one action step per autoregressive forward pass. However, because each forward pass requires streaming every model parameter from DRAM across the silicon memory bus, policy update rates collapsed as model capacity scaled ($f_{\text{action}} \propto 1 / M_{\text{weights}}$)—trapping multi-billion-parameter models behind an insurmountable "deliberation wall" ($1\text{--}3\,\text{Hz}$) that fell far below the $50\,\text{Hz}$ closed-loop threshold required for dynamic contact and reactive manipulation.
 
 Action chunking fundamentally decoupled deliberation from actuation frequency. Instead of streaming billions of parameters for every low-level setpoint, architectures such as ACT [@zhao2023learning], Diffusion Policy [@chi2024diffusionpolicy], and modern flow-matching foundation models (e.g., Physical Intelligence $\pi_0$ [@black2024pi0] and NVIDIA Project GR00T) evaluate their large perceptual backbones periodically to generate entire multi-step action trajectories ($H = 16\text{--}64$). Compact, highly optimized generative action heads then denoise or integrate these trajectories at $50\text{--}100\,\text{Hz}$, shattering the autoregressive memory wall and reconciling multi-billion parameter semantic reasoning with millisecond closed-loop physical control.
 
@@ -901,7 +927,7 @@ At the pick station, the mobile manipulator's arm takes the mug from a conveyor 
 That open-loop span also sets the minimum supply, because a chunk shorter than `{python} ConveyorChunkSizing.h_min_str` setpoints would leave the arm waiting for its successor. The machine's chunk carries `{python} ConveyorChunkSizing.chunk_horizon_str` setpoints at `{python} ConveyorChunkSizing.chunk_step_str` spacing, `{python} ConveyorChunkSizing.chunk_span_str` of motion, longer than the tracked evidence horizon; executed open-loop to its end, it would drift `{python} ConveyorChunkSizing.drift_full_str`, past the tolerance. The setpoints beyond the next replanning instant are therefore a supply buffer, consumed only when renewals stop, and the lease derived in @sec-nervous-cadences ends execution long before that buffer runs out. Overlapping chunks and temporal ensembling then blend the executed motion across each renewal.
 
 ::: {.column-margin .margin-pointer}
-↳ **Downstream:** Bounded action chunk proposals are filtered against forward-invariant barriers in @sec-enforcement-safe-sets-conditional-permission.
+↪ Bounded action chunk proposals are filtered against forward-invariant barriers in @sec-enforcement-safe-sets-conditional-permission.
 :::
 
 These are the proposer limits Part I hands forward: one chunk covers `{python} ConveyorChunkSizing.chunk_span_str` of motion, a new chunk takes up to `{python} ConveyorChunkSizing.chunk_latency_str`, and the evidence behind it stays within tolerance for about `{python} ConveyorChunkSizing.tau_ev_str`. They bound when a proposal arrives and how long it remains true, and each enters the handoff record of @sec-nervous as a limit record in the form of @sec-body-measuring-limits. None of them says whether the proposal was right when it was made.

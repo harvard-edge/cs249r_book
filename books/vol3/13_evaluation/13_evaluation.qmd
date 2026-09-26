@@ -47,7 +47,7 @@ A runtime that enforces budgets, survives crashes, and recovers from bad actions
 
 :::
 
-## The multi-layer evaluation contract {#sec-vol3-evaluation-contract}
+## The Multi-Layer Evaluation Contract {#sec-vol3-evaluation-contract}
 
 ::: {.column-margin}
 ![](images/svg/vol3_observability_margin_004.svg){width="100%" fig-alt="Two rising trend curves, a green curve pulling away from a flatter blue one, with the gap between them shaded."}
@@ -56,7 +56,7 @@ A runtime that enforces budgets, survives crashes, and recovers from bad actions
 :::
 Consider an autonomous balance reconciliation agent deployed across an enterprise billing infrastructure. Standard application performance monitoring (APM) dashboards report nominal operational health: five-nines service availability (99.999 percent HTTP 200 responses) and sub-100-millisecond tool execution latencies ($T_{\text{tool}} = 78\text{ ms}$). Yet a subsequent financial audit reveals that the agent erroneously disbursed \$450,000 in duplicate balance credits. Forensic analysis of the causal execution graph exposes the failure mechanism: the agent encountered transient socket read timeouts when querying the central ledger database for prior transaction identifiers. The tool wrapper caught the network exception and, attempting to remain resilient, returned an empty string rather than propagating an operational fault. The foundation model, observing an empty transaction list, inferred that zero prior disbursements had occurred. It repeatedly executed the balance-credit tool until the downstream payment gateway returned an HTTP 200 response. To the operating system process monitors, network sockets, and APM monitors, every system component functioned without error; to the transactional state machine, the agent violated the core double-entry bookkeeping invariant.
 
-Nothing in that incident was invisible to the runtime. Every tool call, every empty result, and every duplicate credit was recorded somewhere, yet no signal the team watched could say that the task had failed, and no record could say why. We call this condition *the fallacy of green dashboards*. A tool call can exit cleanly while its task fails, which is the fail-plausible behavior of @sec-vol3-intro-fail-plausible, and the five-part contract of @sec-vol3-intro-five-part-contract already defines what success means. The runtime built in earlier chapters contains actuation (@sec-vol3-sandboxes), logs every event (@sec-vol3-durable-execution), and coordinates teams of agents (@sec-vol3-multi-agent), yet none of that machinery says whether a task succeeded.
+Nothing in that incident was invisible to the runtime. Every tool call, every empty result, and every duplicate credit was recorded somewhere, yet no signal the team watched could say that the task had failed, and no record could say why. We call this condition *the fallacy of green dashboards*. A tool call can exit cleanly while its task fails, which is the fail-plausible behavior of the foundation model, and the five-part contract defines what success means. The runtime built in earlier chapters contains actuation in sandboxes, logs every event, and coordinates teams of agents, yet none of that machinery says whether a task succeeded.
 
 The question this chapter answers is what evidence would have caught the failure. Before release, that evidence is a verified change in environment state, measured over enough independent tasks to separate a real gain from sampling noise. In production, it is a causal trace that follows one trajectory across model calls, tools, sandboxes, and cooperating agents, so that a failure like this one, or a stalled multi-agent pipeline, can be attributed to the component that caused it. Causal and statistical release evidence (principle \ref{pri-vol3-release-evidence}) requires both halves, and this chapter builds the machinery that produces them.
 
@@ -101,18 +101,18 @@ An empirical observability and evaluation mechanism that measures the validity o
 *Observability watches all three exposures, verifying state, bounding horizon, and auditing authority.*
 :::
 
-The final layer, *Constraint Compliance*, enforces physical resource envelopes and operational boundaries. A trajectory that mutates state correctly but consumes unbounded computational resources violates the operational contract. Constraint evaluation bounds total trajectory latency $T_{\text{task}}$, the duration accounting identity of @sec-vol3-intro-duration-accounting summed over the trajectory's $N$ steps, and aggregate token consumption $C_{\text{task}}$ against fixed operational ceilings:
+The final layer, *Constraint Compliance*, enforces physical resource envelopes and operational boundaries. A trajectory that mutates state correctly but consumes unbounded computational resources violates the operational contract. Constraint evaluation bounds total trajectory latency $T_{\text{task}}$, the duration accounting identity summed over the trajectory's $N$ steps, and aggregate token consumption $C_{\text{task}}$ against fixed operational ceilings:
 
 $$T_{\text{task}} = \sum_{t=1}^N \left( T_{\text{model}, t} + T_{\text{tool}, t} + T_{\text{wait}, t} + T_{\text{runtime}, t} \right) \le T_{\max}$$
 
 $$C_{\text{task}} = \sum_{t=1}^N \left( c_{\text{prompt}, t} + c_{\text{completion}, t} \right) \le C_{\max}$$
 
-where trajectory steps $N$ are bounded by $N \le N_{\max}$ to terminate infinite reasoning loops. Concurrently, security checks verify that execution remained within the designated sandbox namespace, respected capability tokens, and never attempted privilege escalation. Together the four layers observe all three exposures of @sec-vol3-intro-hsa, since state delta verification checks what the trajectory did to state, the step and wall-clock budgets bound its horizon, and the security checks confirm it never acted beyond its authority.
+where trajectory steps $N$ are bounded by $N \le N_{\max}$ to terminate infinite reasoning loops. Concurrently, security checks verify that execution remained within the designated sandbox namespace, respected capability tokens, and never attempted privilege escalation. Together the four layers observe all three exposures of the H·S·A framework, since state delta verification checks what the trajectory did to state, the step and wall-clock budgets bound its horizon, and the security checks confirm it never acted beyond its authority.
 
-Model-based graders sit outside this contract. A second model prompted to score a transcript against a rubric measures rhetorical plausibility, and Zheng et al. [-@zheng2023judging] document three systematic distortions in such judges, a self-preference bias toward outputs from their own model family, a verbosity bias toward long and elaborate answers over concise correct ones, and a position bias in pairwise comparisons. A judge also reads only tokens. It cannot inspect a filesystem, query a write-ahead log, or run a regression suite, so it adds no closure evidence level of its own (@sec-vol3-intro-closure-evidence). Graders therefore remain advisory, confined to open-ended criteria such as documentation readability, code idiomaticity, or user intent alignment, where no algorithmic oracle can be constructed. Even there, their scores must be calibrated against human expert ground truth using inter-annotator agreement metrics (such as Cohen's $\kappa$ or Spearman's $\rho$), and they must be given grounded evidence (the state delta $\Delta S$ and execution logs) rather than raw conversational transcripts.
+Model-based graders sit outside this contract. A second model prompted to score a transcript against a rubric measures rhetorical plausibility, and Zheng et al. [-@zheng2023judging] document three systematic distortions in such judges, a self-preference bias toward outputs from their own model family, a verbosity bias toward long and elaborate answers over concise correct ones, and a position bias in pairwise comparisons. A judge also reads only tokens. It cannot inspect a filesystem, query a write-ahead log, or run a regression suite, so it adds no closure evidence level of its own. Graders therefore remain advisory, confined to open-ended criteria such as documentation readability, code idiomaticity, or user intent alignment, where no algorithmic oracle can be constructed. Even there, their scores must be calibrated against human expert ground truth using inter-annotator agreement metrics (such as Cohen's $\kappa$ or Spearman's $\rho$), and they must be given grounded evidence (the state delta $\Delta S$ and execution logs) rather than raw conversational transcripts.
 
 ```{python}
-#| label: lego-16-evaluating-the-four-layer-contract-on
+#| label: lego-13-evaluating-the-four-layer-contract-on
 #| echo: false
 # │ Show: Multi-layer task contract exposes lock contention and partial state write.
 # │ How: Layer 1 JSON syntax, Layer 2 execution invariants, Layer 3 state deltas, Layer 4 budgets.
@@ -134,7 +134,7 @@ class EvaluatingFourLayerTaskContract:
     overrun_pct_str = fmt_percent(overrun_ratio, precision=1, style="prose")
 ```
 
-::: {#nbk-16-evaluating-the-four-layer-contract-on .callout-notebook title="Evaluating the four-layer task contract"}
+::: {#nbk-13-evaluating-the-four-layer-contract-on .callout-notebook title="Evaluating the four-layer task contract"}
 Consider an autonomous database administrator agent tasked with executing an online schema migration against a sharded PostgreSQL cluster: adding a composite index on `(tenant_id, created_at)` to an `audit_events` table containing 12,000,000 records, backfilling a non-null `status` column, and validating query latency against a service-level objective (SLO). The host supervisor executes the agent under an automated evaluation harness and inspects the resulting trajectory across the four contract layers.
 
 Under Layer 1 (Syntactic Validity), the agent emits an initial tool invocation payload serialized as a JSON object: `run_migration(shard_id="shard-04", ddl_statement="...", backfill_batch_size=5000)`. The runtime intercepts the payload in memory escrow and dispatches it to a JSON Schema validator. The schema confirms that `shard_id` resolves to a known cluster endpoint, `ddl_statement` parses as a valid SQL string without dangling delimiters, and `backfill_batch_size` is an integer within the permitted range $[100, 10000]$. Verification completes in $0.4\text{ ms}$. Layer 1 records an unqualified pass.
@@ -159,14 +159,14 @@ $$C_{\text{task}} = 14{,}200\text{ prompt tokens} + 3{,}150\text{ completion tok
 
 $$N_{\text{steps}} = 6 \le 10 \quad (\text{PASS})$$
 
-The trajectory breached the maximum latency threshold by {python} EvaluatingFourLayerTaskContract.overrun_s_str ({python} EvaluatingFourLayerTaskContract.overrun_pct_str overrun) due to the table lock contention.
+The trajectory breached the maximum latency threshold by `{python} EvaluatingFourLayerTaskContract.overrun_s_str` (`{python} EvaluatingFourLayerTaskContract.overrun_pct_str` overrun) due to the table lock contention.
 
 Systems Accounting: The agent achieved flawless syntactic validity (Layer 1) and generated a polite, reassuring narrative that convinced a model judge. However, it violated operational execution invariants by locking production tables (Layer 2), corrupted persistent database state through incomplete batch execution (Layer 3), and exceeded wall-clock latency budgets (Layer 4). Evaluating an autonomous agent via conversational telemetry or process exit codes certifies an operational failure as a production success; only an explicit multi-layer contract enforces correctness.
 :::
 
 If the ground-truth foundation of autonomous agent evaluation is the physical state delta $\Delta S = S_{\text{post}} - S_{\text{pre}}$, the evaluation infrastructure must guarantee that $S_{\text{pre}}$ is clean, immutable, and perfectly reproducible across experimental runs, and that $S_{\text{post}}$ is captured without cross-talk or leakage from concurrent tasks. In production engineering, running thousands of state-mutating agent trajectories against live or poorly isolated environments introduces catastrophic test contamination, non-reproducible external network dependencies, and destructive side effects. How do systems engineers construct interactive evaluation environments that provide complete containerized isolation, deterministic mock service stubs, and sub-second filesystem resets without incurring prohibitive storage and virtualization overhead? That architectural requirement governs the design of hermetic evaluation gyms.
 
-## Hermetic evaluation gyms {#sec-vol3-evaluation-gyms}
+## Hermetic Evaluation Gyms {#sec-vol3-evaluation-gyms}
 
 When an automated evaluation harness launches parallel agent trajectories against live external services, the evaluation framework collapses under its own operational side effects. An agent tasked with debugging an issue in an open-source repository may issue hundreds of unthrottled API requests to GitHub, triggering IP-level rate limits that cause subsequent benchmark tasks to fail spuriously. A second agent, granted root shell privileges to install a missing C++ compiler inside a shared host container, might execute a recursive deletion across `/var/log` or mutate global environment variables, corrupting the workspace for every concurrent worker thread. Worse still, an agent instructed to fix a database schema migration might execute a live `DROP TABLE` command against a persistent testing instance, turning all downstream evaluations into guaranteed runtime exceptions.
 
@@ -176,25 +176,29 @@ When an automated evaluation harness launches parallel agent trajectories agains
 **Hermeticity** in systems evaluation implies that the execution environment is completely sealed: external network interactions are intercepted, the filesystem begins from a known cryptographic state, and concurrent evaluation workers cannot leak memory, locks, or disk blocks to one another.
 :::
 
-### Why static benchmarks fail for autonomous systems
+### Limitations of static evaluation benchmarks for autonomous systems
 
-The machine learning community spent years evaluating foundation models using static question-answering benchmarks such as MMLU, GSM8K, and HumanEval. These benchmarks evaluate conditional probability distributions of the form $P(Y \mid X)$ in a single forward pass or isolated code generation step. In HumanEval, for example, the model receives a Python function signature and docstring, emits an autoregressive completion, and a host runner evaluates whether `candidate_function(*test_inputs) == expected_outputs`. The model operates without agency: it cannot inspect compiler diagnostics, cannot query external documentation, cannot run partial programs to observe intermediate runtime behavior, and cannot correct syntax errors through iterative refinement.
+The machine learning community spent years evaluating foundation models using static question-answering benchmarks such as Massive Multitask Language Understanding (MMLU), GSM8K, and HumanEval. These benchmarks evaluate conditional probability distributions of the form $P(Y \mid X)$ in a single forward pass or isolated code generation step. In HumanEval, for example, the model receives a Python function signature and docstring, emits an autoregressive completion, and a host runner evaluates whether `candidate_function(*test_inputs) == expected_outputs`. The model operates without agency: it cannot inspect compiler diagnostics, cannot query external documentation, cannot run partial programs to observe intermediate runtime behavior, and cannot correct syntax errors through iterative refinement.
 
-Autonomous agents break this static evaluation paradigm. An agent runs the closed loop of @sec-vol3-intro-formal-systems-definition, in which actions $a_t$ drawn from a policy $\pi_\theta(a_t \mid s_t, h_t)$ mutate the physical state of an underlying operating system, browser, or distributed service. The environment responds with a physical state transition $S_{t+1} \sim \mathcal{T}(S_t, a_t)$ and emits an observation $o_{t+1}$ that is appended to the agent's context history $h_{t+1}$. The agent's performance depends not merely on its internal parametric knowledge, but on its capacity to navigate partial observability, recover from failing tool invocations, manage long-horizon dependency graphs, and synthesize diagnostic feedback across multi-turn trajectories.
+Autonomous agents break this static evaluation paradigm. An agent runs a closed loop in which actions $a_t$ drawn from a policy $\pi_\theta(a_t \mid s_t, h_t)$ mutate the physical state of an underlying operating system, browser, or distributed service. The environment responds with a physical state transition $S_{t+1} \sim \mathcal{T}(S_t, a_t)$ and emits an observation $o_{t+1}$ that is appended to the agent's context history $h_{t+1}$. The agent's performance depends not merely on its internal parametric knowledge, but on its capacity to navigate partial observability, recover from failing tool invocations, manage long-horizon dependency graphs, and synthesize diagnostic feedback across multi-turn trajectories.
 
 Evaluating such systems requires an *interactive evaluation gym*. Derived from the reinforcement learning formulation of environments with explicit action and observation spaces, an agent gym wraps an entire operating system runtime—including the POSIX filesystem, process table, network stack, and package manager—into an interactive harness. The evaluation harness does not grade the fluency of the agent's prose; it measures whether the terminal state $S_{\text{post}}$ satisfies the operational invariants defined in the task acceptance contract.
 
 Because the agent interacts dynamically with live binaries and system daemons, static mocking frameworks fail. If an agent executes `apt-get install -y libpq-dev` or attempts to recompile a CPython extension with `python setup.py build_ext --inplace`, the gym must provide an authentic operating system environment capable of executing real ELF binaries, linking dynamic libraries, and handling system calls. If the gym attempts to fake these interactions with heuristic text mocks, the agent's reasoning loop degrades into an exercise in gaming the mock harness rather than solving the underlying engineering problem.
 
-### The three architectural pillars of hermetic gyms
+### The four architectural pillars of hermetic gyms
 
-Constructing an interactive gym capable of executing thousands of untrusted, state-mutating agent trajectories requires solving three fundamental systems challenges: cross-tenant state leakage, external non-determinism, and prohibitive environment reset latency. The systems topology required to enforce these boundaries is detailed in @fig-vol3-eval-gym-architecture.
+Moving from static prediction benchmarks to live interactive gyms introduces critical infrastructure demands that distinguish agent evaluation platforms from standard continuous integration pipelines. In a continuous integration system, tests run sequentially on trusted codebases with predictable execution footprints. In an agent evaluation gym, hundreds of untrusted, non-deterministic agent policies execute arbitrary shell commands, install unverified third-party libraries, spawn long-lived background daemons, and mutate filesystem trees in parallel across shared physical hosts.
+
+Under these conditions, naive containerization fails: concurrent workers leak state through shared kernel page caches, external network requests drift across evaluation runs, and slow filesystem teardowns throttle benchmark throughput. Guaranteeing rigorous, reproducible evaluation metrics requires constructing an infrastructure topology grounded in four interdependent systems pillars: hardware-enforced ephemeral isolation, deterministic service virtualization, sub-second copy-on-write storage reset, and out-of-band verifier enclaves. The end-to-end systems architecture integrating these four pillars is illustrated in @fig-vol3-eval-gym-architecture.
 
 ::: {#fig-vol3-eval-gym-architecture fig-env="figure" fig-pos="htb" fig-cap="**The Hermetic Evaluation Gym Architecture**: Hardware-enforced Firecracker microVM boundaries, tiered copy-on-write storage isolation, eBPF network filtering with deterministic local proxy mocks, and out-of-band ground-truth verification oracles." fig-alt="Systems architecture schematic of a hermetic agent evaluation gym showing a physical host hypervisor enclosing a Firecracker microVM with pinned vCPUs, PRNG seed tap, copy-on-write rootfs, and mock proxy, communicating via patch diff to an out-of-band verification oracle enclave."}
-![](images/svg/ch16-eval-gym-architecture.svg)
+![](images/svg/ch13-eval-gym-architecture.svg)
 :::
 
-As depicted in @fig-vol3-eval-gym-architecture, the physical evaluation host executes bare-metal Linux with KVM virtualization to spawn single-use Firecracker microVM sandboxes in under 5 milliseconds. Within the guest boundary, the agent runtime operates as PID 1 under strict resource quotas (pinned vCPUs and a 4 GB RAM ceiling) while drawing entropy from a deterministic PRNG seed tap to guarantee trajectory replayability. The storage architecture decouples state into an immutable, read-only base root filesystem (`rootfs.ext4`) and a writable `tmpfs` copy-on-write (CoW) delta layer, enabling environment resets via `blkdiscard` in under 50 milliseconds without disk writes. Concurrently, a virtual TAP network interface paired with eBPF filter rules drops all public WAN egress, redirecting outbound HTTP requests to deterministic local mock proxies. Upon trajectory conclusion, only the candidate artifact patch (`git diff HEAD..worktree`) crosses the isolation wall into an isolated out-of-band verifier enclave, where hidden acceptance test suites execute against a pristine repository snapshot to emit a tamper-proof binary evaluation verdict $V(\tau) \in \{0, 1\}$.
+As depicted in @fig-vol3-eval-gym-architecture, the physical evaluation host executes bare-metal Linux with KVM virtualization to spawn single-use Firecracker microVM sandboxes in under 5 milliseconds.[^fn-firecracker-vm-isolation] Within the guest boundary, the agent runtime operates as PID 1 under strict resource quotas (pinned vCPUs and a 4 GB RAM ceiling) while drawing entropy from a deterministic PRNG seed tap to guarantee trajectory replayability. The storage architecture decouples state into an immutable, read-only base root filesystem (`rootfs.ext4`) and a writable `tmpfs` copy-on-write (CoW) delta layer, enabling environment resets via `blkdiscard` in under 50 milliseconds without disk writes. Concurrently, a virtual TAP network interface paired with eBPF filter rules drops all public WAN egress, redirecting outbound HTTP requests to deterministic local mock proxies. Upon trajectory conclusion, only the candidate artifact patch (`git diff HEAD..worktree`) crosses the isolation wall into an isolated out-of-band verifier enclave, where hidden acceptance test suites execute against a pristine repository snapshot to emit a tamper-proof binary evaluation verdict $V(\tau) \in \{0, 1\}$.
+
+[^fn-firecracker-vm-isolation]: **Firecracker microVM isolation**: Firecracker utilizes the Linux Kernel-based Virtual Machine (KVM) to launch minimalist virtual machines in approximately 5 milliseconds with less than 5 MB of memory overhead per instance [@agache2020firecracker]. In contrast to shared-kernel container runtimes, each microVM executes a dedicated guest kernel and isolated page tables. This hardware-assisted virtualization provides defense-in-depth against kernel privilege escalation vulnerabilities during untrusted agent execution.
 
 #### Ephemeral sandbox isolation {.unnumbered}
 Every evaluation task must execute within a disposable, isolated sandbox that prevents state cross-talk. When evaluating an agent on a software repository task, the sandbox must ensure that file modifications, temporary compilation artifacts, running background daemons, and modified system configuration files are strictly quarantined. If Worker 1 modifies `/etc/hosts` or leaves an unkilled background Postgres process bound to port 5432, Worker 2 must not inherit this polluted environment.
@@ -217,8 +221,17 @@ To render large-scale agent evaluation computationally tractable, hermetic gyms 
 
 The agent reads directly from the immutable golden base layer at raw storage bus speeds. When the agent writes or modifies a file, the storage driver allocates new physical blocks exclusively within the transient upper layer. Once the trajectory completes and the oracle evaluates the resulting state delta, the supervisor tears down the sandbox by simply unmounting the overlay and discarding the upper layer metadata—an operation that completes in tens of milliseconds, regardless of the size of the underlying base image.
 
+#### Out-of-band verification oracles {.unnumbered}
+In a naive evaluation framework, validation assertions execute within the same guest environment as the agent—running `pytest` inside the agent's container or invoking a grader script with ambient access to the guest filesystem. In an autonomous agent system, this design violates the fundamental security invariant of adversarial containment: an agent with shell execution privileges can inspect the test runner, locate hidden evaluation test cases, mutate test assertions in place, or mock the grading binary to unconditionally return exit code 0.
+
+To maintain absolute grading integrity, hermetic gyms implement *out-of-band verification*. The guest microVM or container boundary holds zero verification logic, zero grading scripts, and zero ground-truth test files. When the agent issues a termination action signaling task completion, the host hypervisor immediately freezes the guest execution domain via `cgroups` and unmounts the guest filesystem. The host supervisor then inspects the persistent state delta by mounting the guest Copy-on-Write upper layer (`upperdir`) as a *read-only* volume inside a separate, clean verifier container. The verifier container injects the hidden evaluation test suite—never visible to the guest—and executes grading assertions against the agent's modified workspace. Because the agent environment is physically detached and frozen before grading begins, the candidate policy cannot tamper with test oracles, inspect acceptance assertions, or falsify evaluation telemetry.
+
+::: {.column-margin .margin-pointer}
+↩ Ephemeral isolation, rootfs copy-on-write layering, and microVM containment are established in @sec-vol3-sandboxes.
+:::
+
 ```{python}
-#| label: lego-16-storage-io-and-reset-amortization
+#| label: lego-13-storage-io-and-reset-amortization
 #| echo: false
 # │ Show: Copy-on-write snapshotting delivers 102x reset speedup and 150x less write I/O.
 # │ How: Transient overlay mounts vs sequential 12 GB directory duplication across 64 workers.
@@ -239,7 +252,7 @@ class StorageIoResetAmortization:
     speedup_mult_str = fmt_multiple(round(speedup))
 ```
 
-::: {#nbk-16-storage-io-and-reset-amortization .callout-notebook title="Storage I/O and reset amortization"}
+::: {#nbk-13-storage-io-and-reset-amortization .callout-notebook title="Storage I/O and reset amortization"}
 Consider an evaluation cluster with $W = 64$ parallel worker slots running an evaluation sweep of $N = 2,500$ tasks from a software engineering benchmark. Each task requires a Linux environment containing a full C++ toolchain, Python virtual environments, pre-indexed git trees, and database binaries, totaling $S_{\text{env}} = 12\text{ GB}$ of uncompressed disk state.
 
 During an average trajectory, the agent modifies or creates an average of $S_{\Delta} = 80\text{ MB}$ of files (source diffs, test logs, `.pyc` caches). The host cluster uses enterprise NVMe SSDs capable of sustained sequential write throughput of $B_{\text{write}} = 2.5\text{ GB/s}$ and sequential read throughput of $B_{\text{read}} = 5.0\text{ GB/s}$.
@@ -262,12 +275,14 @@ Total data written to storage across the sweep:
 $$D_{\text{total, CoW}} = N \times S_{\Delta} = 2,500 \times 0.08\text{ GB} = 200\text{ GB}$$
 Storage write volume is reduced by a factor of:
 $$\frac{D_{\text{total, naive}}}{D_{\text{total, CoW}}} = \frac{30,000\text{ GB}}{200\text{ GB}} = 150\times$$
-Reset latency drops from {python} StorageIoResetAmortization.t_reset_naive_s_str to {python} StorageIoResetAmortization.t_reset_cow_s_str, yielding a {python} StorageIoResetAmortization.speedup_mult_str speedup and eliminating storage bus saturation across the 64-worker evaluation fleet.
+Reset latency drops from `{python} StorageIoResetAmortization.t_reset_naive_s_str` to `{python} StorageIoResetAmortization.t_reset_cow_s_str`, yielding a `{python} StorageIoResetAmortization.speedup_mult_str` speedup and eliminating storage bus saturation across the 64-worker evaluation fleet.
 :::
 
 ### Benchmark contamination hazards
 
-In traditional machine learning, benchmark integrity focuses almost exclusively on *data contamination*: the risk that the evaluation dataset's question-answer pairs were accidentally included in the model's pretraining web scrape. If an LLM memorized the solutions to HumanEval during pretraining, its high pass rate reflects rote retrieval rather than generalized code synthesis.
+In traditional machine learning, benchmark integrity focuses almost exclusively on *data contamination*: the risk that the evaluation dataset's question-answer pairs were accidentally included in the model's pretraining web scrape. If a large language model (LLM) memorized the solutions to HumanEval during pretraining, its high pass rate reflects rote retrieval rather than generalized code synthesis.[^fn-minhash-ngram-deduplication]
+
+[^fn-minhash-ngram-deduplication]: **MinHash contamination filtering**: Standard data hygiene protocols compute 13-gram or 8-gram Jaccard similarities using MinHash sketches to detect overlap between benchmark tasks and trillion-token pretraining corpora [@lee2022]. Test instances exhibiting greater than 0.80 Jaccard similarity to any training document are flagged as contaminated and quarantined from release evaluation suites. This filtering prevents models from achieving inflated benchmark scores through memorized solutions rather than genuine tool-actuation reasoning.
 
 In autonomous agent systems, engineers face a second, more pernicious failure mode: *runtime information leakage* (or harness penetration). Because an agent possesses general-purpose tool use—including terminal execution, filesystem traversal, and process inspection—it can actively probe its own execution environment to discover, read, or manipulate the evaluation harness itself.
 
@@ -314,7 +329,9 @@ To understand how these architectural principles manifest in concrete implementa
 #### SWE-bench: Repository execution at scale {.unnumbered}
 Introduced by @jimenez2024swebench, SWE-bench evaluates an agent's ability to resolve real-world software engineering issues collected from popular GitHub repositories (e.g., `django`, `sympy`, `scikit-learn`, `pytest`). Each task instance consists of a natural language problem statement (extracted from a real GitHub issue) and a base repository commit.
 
-The systems mechanics of SWE-bench require strict isolation. Each repository relies on complex, mutually incompatible dependency graphs: one task may require Python 3.8 with a specific legacy version of NumPy, while another requires Python 3.11 with customized Cython extensions. SWE-bench addresses this by maintaining pre-built base container images for each repository family.
+The systems mechanics of SWE-bench require strict isolation. Each repository relies on complex, mutually incompatible dependency graphs: one task may require Python 3.8 with a specific legacy version of NumPy, while another requires Python 3.11 with customized Cython extensions. SWE-bench addresses this by maintaining pre-built base container images for each repository family.[^fn-swebench-sandbox-security]
+
+[^fn-swebench-sandbox-security]: **SWE-bench sandbox security**: Automated evaluation harnesses for SWE-bench isolate untrusted agent patches using single-use Docker containers stripped of privileged capabilities (`--cap-drop=ALL`) and mounted with read-only root filesystems [@jimenez2024swebench]. Linux seccomp filters block raw socket creation and `ptrace` system calls to prevent breakout attacks against host hypervisors. Transient copy-on-write scratch directories guarantee that malicious repository hooks or recursive fork bombs cannot corrupt adjacent evaluation runners.
 
 When a task executes, the harness clones the repository at the base commit, applies an environment setup script, and exposes a shell interface to the agent. Crucially, SWE-bench separates verification tests into two distinct categories:
 
@@ -352,42 +369,73 @@ WebArena resets this distributed web ecosystem using coordinated database transa
 
 ---
 
-## Grading trajectories {#sec-vol3-evaluation-grading}
+## Grading Trajectories {#sec-vol3-evaluation-grading}
 
 Two trajectories for the same refund task leave the order refunded exactly once. One took four tool calls. The other issued the refund twice, noticed, and reversed the duplicate, and the customer's statement will show both entries. An outcome check on final state scores them identically. Grading decides which properties of a trajectory count and which instrument measures each one, and the choice determines what an improvement in the score means.
 
 ### Outcome verifiers
 
-The primary grader is a mechanical outcome verifier of the kind @sec-vol3-test-time-compute-verification classifies: tests, schema and database assertions, file checks, and exact-match answers. In evaluation its errors matter in one direction more than the other. A false rejection lowers the score of a good agent. A false acceptance counts a failure as a success. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) applies to evaluation as it did to search. A measured gain no larger than the verifier's false acceptance rate cannot be told apart from a candidate that has learned to satisfy the verifier more often without doing the task. That rate can be estimated only by reading a random sample of accepted trajectories by hand, and the estimate belongs in every evaluation report alongside the score.
+The primary grader is a mechanical outcome verifier: tests, schema and database assertions, file checks, and exact-match answers. In evaluation its errors matter in one direction more than the other. A false rejection lowers the score of a good agent. A false acceptance counts a failure as a success. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) applies to evaluation as it did to search. A measured gain no larger than the verifier's false acceptance rate cannot be told apart from a candidate that has learned to satisfy the verifier more often without doing the task. That rate can be estimated only by reading a random sample of accepted trajectories by hand, and the estimate belongs in every evaluation report alongside the score.
 
 ### Process grading and step-level metrics
 
-An outcome verifier says whether the task ended well. Process grading scores the steps. Uesato et al. [-@uesato2022solving] found that outcome and process feedback reached similar final-answer accuracy on math word problems, but that process feedback substantially reduced the rate of flawed reasoning behind correct answers, and Lightman et al. [-@lightman2023let] found that process-supervised reward models selected correct solutions more reliably than outcome-supervised ones. For agents, the process includes actions as well as reasoning, and several step-level metrics come directly from the trace (@sec-vol3-evaluation-tracing):
+An outcome verifier says whether the task ended well. Process grading scores the steps. Uesato et al. [-@uesato2022solving] found that outcome and process feedback reached similar final-answer accuracy on math word problems, but that process feedback substantially reduced the rate of flawed reasoning behind correct answers, and Lightman et al. [-@lightman2023let] found that process-supervised reward models selected correct solutions more reliably than outcome-supervised ones. For agents, the process includes actions as well as reasoning, and several step-level metrics come directly from the trace:
 
 - *Tool-call validity*, the fraction of proposed calls that pass their schemas (Layer 1 counted per call rather than per task).
 - *Call correctness*, whether the tool and arguments match a reference call where one exists. Patil et al. [-@patil2023gorilla] check generated API calls by matching their structure against reference calls, which separates a wrong argument from a wrong tool.
-- *Recovery rate*, the fraction of error observations after which the agent's next action addresses the error rather than repeating the call, which measures the forward recovery of @sec-vol3-sagas-forward-vs-backward.
-- *Efficiency*, turns, tokens, and redundant calls per accepted task, compared only at matched budgets (@sec-vol3-evaluation-matched-budgets).
+- *Recovery rate*, the fraction of error observations after which the agent's next action addresses the error rather than repeating the call, measuring forward recovery.
+- *Efficiency*, turns, tokens, and redundant calls per accepted task, compared only at matched budgets.
 - *Partial credit*, the fraction of a task's subgoals whose state checks pass, which distinguishes an agent that finished four of five steps from one that did nothing.
 
-Step-level metrics diagnose. They should rarely gate. A candidate that raises tool-call validity while lowering accepted tasks has improved a proxy, and the gate in @sec-vol3-evaluation-releases counts accepted tasks.
+Step-level metrics diagnose. They should rarely gate. A candidate that raises tool-call validity while lowering accepted tasks has improved a proxy, and the release gate counts accepted tasks.
 
 ### LLM judges
 
-Some criteria have no mechanical verifier: whether a support reply followed the tone policy, whether a report answers the question asked, whether a code change is idiomatic. For these, evaluation uses a large language model (LLM) judge\index{LLM judge}, a second model prompted with a rubric to score a trajectory or compare two. @Sec-vol3-test-time-compute-candidate-diversity used a judge to pick among candidates during a task. Evaluation asks more of it, because its scores become the evidence a release decision rests on.
+Some criteria have no mechanical verifier: whether a support reply followed the tone policy, whether a report answers the question asked, whether a code change is idiomatic. For these, evaluation uses a large language model (LLM) judge\index{LLM judge}, a second model prompted with a rubric to score a trajectory or compare two. A judge can pick among candidates during a task. Evaluation asks more of it, because its scores become the evidence a release decision rests on.
 
-Zheng et al. [-@zheng2023judging] document three systematic distortions in such judges: a preference for outputs from their own model family, a preference for longer and more elaborate answers over concise correct ones, and a preference for whichever answer appears first in a pairwise comparison. A judge also reads only tokens. It cannot run a test or query a database, so it adds no closure evidence level of its own (@sec-vol3-intro-closure-evidence), and text the agent wrote can steer it. Using a judge responsibly follows from those limits:
+Zheng et al. [-@zheng2023judging] document three systematic distortions in such judges: a preference for outputs from their own model family, a preference for longer and more elaborate answers over concise correct ones, and a preference for whichever answer appears first in a pairwise comparison.[^fn-judge-position-bias] A judge also reads only tokens. It cannot run a test or query a database, so it adds no closure evidence level of its own, and text the agent wrote can steer it. Using a judge responsibly follows from those limits:
+
+[^fn-judge-position-bias]: **Judge position-bias mitigation**: LLM judges exhibit a pronounced primacy effect, favoring the candidate presented first in pairwise evaluation prompts regardless of substantive quality [@zheng2023judging]. Systems mitigating this bias execute symmetric evaluations by swapping prompt ordering $((A, B)$ and $(B, A))$ and computing the average win margin. Inconsistent trials where the judge selects whichever candidate appears first are discarded or classified as ties to prevent systematic scoring drift.
 
 1. *Scope it.* The judge grades only criteria no verifier can check, and its score never overrides a failing verifier.
 2. *Ground it.* The judge receives evidence, such as the state delta, test output, and tool results, rather than the agent's own summary, and its rubric names discrete criteria rather than an overall impression.
 3. *Debias it.* Pairwise comparisons run in both orders, and a judge from a different model family than the candidate is preferred.
 4. *Calibrate it.* The judge's labels are compared with expert labels on a held-out sample, reporting chance-corrected agreement such as Cohen's $\kappa$, and with verifier verdicts on tasks where both exist. A judge that disagrees with the verifier on verifiable tasks should not be trusted on unverifiable ones.
 
-A calibrated judge lowers the probability that a bad trajectory is scored as good. It never guarantees it. The guarantee, where one exists, comes from a verifier the agent could not reach. When the agent can reach the grader and learns to exploit it, the problem becomes reward hacking, which @sec-vol3-rlvr treats in the setting where it is most dangerous.
+To quantify inter-judge agreement beyond raw percentage concordance, the evaluation harness calculates Cohen's kappa $\kappa$ [@cohen1960]:
+
+$$\kappa = \frac{p_o - p_e}{1 - p_e}$$ {#eq-vol3-cohens-kappa}
+
+where $p_o$ represents observed proportional agreement across $N$ evaluated trajectories:
+
+$$p_o = \frac{1}{N} \sum_{c=1}^C n_{cc}$$
+
+for $C$ evaluation categories, and $p_e$ is the expected agreement under chance given each judge's marginal category distribution:
+
+$$p_e = \sum_{c=1}^C p_{c, 1} p_{c, 2}$$
+
+where $p_{c, j}$ is the marginal probability that judge $j \in \{1, 2\}$ assigns category $c$. When evaluating binary task completion on benchmarks with high baseline pass rates (e.g., 90 percent), two judges assigning passes at chance achieve $p_o = 0.82$, yet @eq-vol3-cohens-kappa yields $\kappa = 0$, correctly diagnosing the lack of genuine discriminative reliability. Production harnesses require $\kappa \ge 0.70$ against expert human labels before an LLM judge is admitted to the automated gating pipeline.
+
+Similarly, when determining whether an observed performance difference between candidate runtime $\pi_{\text{cand}}$ and baseline $\pi_{\text{base}}$ across a shared benchmark suite represents a genuine architectural capability shift rather than stochastic noise, independent two-sample tests are invalid due to task-level pairing. The evaluation suite constructs the $2 \times 2$ paired contingency table shown in @tbl-vol3-mcnemar-contingency.
+
+| Baseline ($\pi_{\text{base}}$) | Candidate ($\pi_{\text{cand}}$) Pass | Candidate ($\pi_{\text{cand}}$) Fail |
+|:-------------------------------|:-------------------------------------|:-------------------------------------|
+| **Pass**                       | $n_{11}$ (concordant pass)           | $b = n_{10}$ (baseline win)          |
+| **Fail**                       | $c = n_{01}$ (candidate win)         | $n_{00}$ (concordant fail)           |
+
+: **Paired Benchmark Contingency Matrix**: Concordant and discordant task completion outcomes for candidate versus baseline runtimes across identical benchmark fixtures. {#tbl-vol3-mcnemar-contingency}
+
+Concordant pairs ($n_{11}$ and $n_{00}$) provide zero discriminatory evidence between the two runtimes. The evaluation gate applies McNemar's paired test to evaluate the discordant pairs ($b$ and $c$). Under the null hypothesis $H_0: p_{01} = p_{10}$ that both runtimes exhibit identical marginal success rates, McNemar's test statistic with Edwards' continuity correction is:
+
+$$\chi^2 = \frac{(|b - c| - 1)^2}{b + c}$$ {#eq-mcnemar-test}
+
+Under $H_0$, $\chi^2$ in @eq-mcnemar-test asymptotically follows a chi-squared distribution with 1 degree of freedom ($\chi^2 \sim \chi^2(1)$). At significance level $\alpha = 0.05$, the candidate is certified as achieving a statistically significant capability shift only when $\chi^2 > 3.841$.
+
+A calibrated judge lowers the probability that a bad trajectory is scored as good. It never guarantees it. The guarantee, where one exists, comes from a verifier the agent could not reach. When the agent can reach the grader and learns to exploit it, the problem becomes reward hacking, treated in reinforcement learning where it is most dangerous.
 
 Each graded trial now yields a trustworthy verdict and a set of diagnostic scores. A single trial, however well graded, is one draw from a stochastic system, and the next question is how many draws a claim requires.
 
-## Statistical evaluation rigor {#sec-vol3-evaluation-rigor}
+## Statistical Evaluation Rigor {#sec-vol3-evaluation-rigor}
 
 Once an evaluation gym achieves complete hermetic isolation—eliminating network flakiness, preventing disk corruption, and sealing oracle verification boundaries—the systems engineer encounters an inescapable mathematical reality: foundation models are stochastic inference engines. Even within an identical initial state $S_{\text{pre}}$, variations in autoregressive decoding paths, sampling temperatures, and numerical floating-point execution across GPU clusters produce high trajectory variance. A single pass rate measured across a single evaluation sweep provides zero statistical guarantee that an agent system is safe for production deployment. How do systems engineers model this stochastic uncertainty, compute rigorous confidence intervals across finite task distributions, and mathematically separate an agent's latent reasoning potential from its deployed operational reliability? That question governs the statistical mechanics of agent evaluation.
 
@@ -442,7 +490,9 @@ For agentic systems, the Wald interval is disastrously unsuited. The normal appr
 - **Boundary Catastrophe:** When an agent achieves zero successes ($X=0$) or perfect success ($X=N$) on a benchmark, the estimated standard error $\sqrt{\hat{p}(1-\hat{p})/N}$ evaluates to zero. The Wald formulation asserts with 100 percent mathematical certainty that the agent will never succeed (or never fail) in production. If an early prototype fails on all 50 tasks in an evaluation harness, claiming a 95 percent confidence interval of $[0.0, 0.0]$ is completely invalid; the true success rate could easily be 3 percent or 5 percent.
 - **Severe Skewness in Extreme Regimes:** Complex agent tasks (such as automated repository-level bug fixing or multi-hop web extraction) routinely exhibit low baseline pass rates ($\hat{p} \in [0.05, 0.20]$). In this asymmetric regime, the true binomial sampling distribution is highly skewed. The symmetric Wald interval extends downward into physically impossible negative territory ($\text{CI}_{\text{lower}} < 0$) while drastically under-covering the true parameter on the upper bound.
 
-To obtain mathematically sound bounds on binary task outcomes, systems engineers employ the Wilson score interval, established by Edwin B. Wilson in 1927. Rather than evaluating standard error at the noisy empirical point estimate $\hat{p}$, the Wilson score method inverts the hypothesis test under the null distribution, calculating variance at the hypothesized true parameter $p$:
+To obtain mathematically sound bounds on binary task outcomes, systems engineers employ the Wilson score interval, established by Edwin B. Wilson in 1927.[^fn-wilson-score-inversion] Rather than evaluating standard error at the noisy empirical point estimate $\hat{p}$, the Wilson score method inverts the hypothesis test under the null distribution, calculating variance at the hypothesized true parameter $p$:
+
+[^fn-wilson-score-inversion]: **Wilson score interval inversion**: Edwin Bidwell Wilson formulated this confidence interval by inverting the score test for a binomial proportion without continuity correction. Rather than approximating binomial variance with sample proportion $\hat{p}$, the method solves the quadratic inequality for the true parameter $p$ directly. This prevents interval bounds from overshooting $[0, 1]$ or collapsing to zero width at extreme pass rates.
 
 $$\tilde{p} = \frac{X + \frac{z^2}{2}}{N + z^2}, \quad \text{CI}_{\text{Wilson}} = \tilde{p} \pm \frac{z}{N + z^2}\sqrt{\frac{X(N-X)}{N} + \frac{z^2}{4}}$$ {#eq-wilson-interval}
 
@@ -505,11 +555,33 @@ When an agent system is evaluated non-deterministically across multiple trajecto
 
 In the foundational work on evaluating generative models on code, @chen2021evaluating formalized the metric $pass@k$. When an agent generates $k$ candidate solution trajectories for a given task, $pass@k$ measures the probability that *at least one* of the $k$ trajectories passes all verification gates.
 
-Evaluating this quantity naively by generating exactly $k$ trajectories per task and checking if any passed yields an empirical estimator with high sampling variance. Instead, @chen2021evaluating established the unbiased, low-variance hypergeometric estimator. The harness executes $n$ independent candidate runs per task ($n \ge k$) and observes the number of successful runs $c$. The expected probability that a randomly drawn subset of size $k$ contains at least one passing trajectory is:
+Suppose an evaluation harness generates $n$ candidate trajectories per task ($n \ge k$) and observes $c$ successful runs. A naive approach to estimating pass@$k$ computes the empirical success proportion $\hat{p} = c/n$ and plugs it into the binomial formula for at least one success across $k$ independent draws:
+
+$$\widehat{\text{pass}}@k^{\text{naive}} = 1 - \left(1 - \frac{c}{n}\right)^k$$ {#eq-pass-at-k-naive}
+
+This naive plug-in estimator in @eq-pass-at-k-naive is systematically biased for finite sample sizes $n$. Because the function $g(p) = 1 - (1 - p)^k$ is strictly concave for $k > 1$ across $p \in (0, 1)$—its second derivative $g''(p) = -k(k-1)(1-p)^{k-2}$ is negative everywhere on the open interval—Jensen's inequality dictates that:
+
+$$\mathbb{E}\left[ 1 - \left(1 - \frac{c}{n}\right)^k \right] < 1 - \left(1 - \mathbb{E}\left[\frac{c}{n}\right]\right)^k = 1 - (1 - p)^k$$ {#eq-jensen-bias-pass-k}
+
+Consequently, as formulated in @eq-jensen-bias-pass-k, $\widehat{\text{pass}}@k^{\text{naive}}$ systematically underestimates the true latent pass probability whenever $n$ is finite. Moreover, evaluating pass@$k$ by generating exactly $k$ trajectories per task ($n = k$) and checking whether any passed yields an empirical estimator with high sampling variance, requiring thousands of task instances to stabilize.
+
+To eliminate finite-sample bias while minimizing evaluation variance, @chen2021evaluating established the unbiased combinatorial estimator.[^fn-humaneval-metric-derivation] By generating a larger evaluation pool of $n \ge k$ candidate runs per task and drawing subsets of size $k$ without replacement, the probability that all $k$ selected trajectories fail corresponds to the hypergeometric probability of drawing $k$ consecutive failures from the $n - c$ failed runs. The unbiased estimator evaluates as:
 
 $$\text{pass}@k = \mathbb{E}_{\tau \sim \mathcal{D}_{\text{task}}} \left[ 1 - \frac{\binom{n-c}{k}}{\binom{n}{k}} \right]$$ {#eq-pass-at-k}
 
-where $\binom{n-c}{k} / \binom{n}{k}$ represents the combinatorial probability that all $k$ selected trajectories were drawn entirely from the $n-c$ failed attempts.
+[^fn-humaneval-metric-derivation]: **HumanEval combinatorial derivation**: @chen2021evaluating derived the unbiased pass@$k$ estimator by modeling the selection of $k$ candidate programs from an evaluation pool of $n$ samples as hypergeometric sampling without replacement. Evaluating the expectation analytically over the combinatorial failure probability $\binom{n-c}{k}/\binom{n}{k}$ eliminates the negative bias inherent in finite binomial plug-in estimators. Generating $n \ge 100$ candidate runs per task stabilizes variance while maintaining mathematical equivalence to evaluating independent draw subsets.
+
+The combinatorial coefficient ratio expands directly via falling factorials:
+
+$$1 - \frac{\binom{n-c}{k}}{\binom{n}{k}} = 1 - \prod_{j=0}^{k-1} \frac{n - c - j}{n - j}$$ {#eq-pass-at-k-expansion}
+
+Across a benchmark suite of $N$ independent evaluation tasks, let $Y_i = 1 - \binom{n_i - c_i}{k} / \binom{n_i}{k}$ denote the unbiased pass@$k$ estimate computed via @eq-pass-at-k-expansion for task $i \in \{1, \dots, N\}$. The benchmark-level metric is the sample mean $\overline{\text{pass}}@k = \frac{1}{N} \sum_{i=1}^N Y_i$. The sample variance $s^2$ across the benchmark suite in @eq-pass-at-k-variance is:
+
+$$s^2 = \frac{1}{N - 1} \sum_{i=1}^N \left( Y_i - \overline{\text{pass}}@k \right)^2$$ {#eq-pass-at-k-variance}
+
+and the standard error of the benchmark estimate in @eq-pass-at-k-se is:
+
+$$\text{SE}(\overline{\text{pass}}@k) = \sqrt{\frac{s^2}{N}} = \sqrt{\frac{1}{N(N - 1)} \sum_{i=1}^N \left( Y_i - \overline{\text{pass}}@k \right)^2}$$ {#eq-pass-at-k-se}
 
 ```python
 import math
@@ -519,6 +591,15 @@ def compute_pass_at_k(n: int, c: int, k: int) -> float:
     if n - c < k:
         return 1.0
     return 1.0 - (math.comb(n - c, k) / math.comb(n, k))
+
+def benchmark_pass_at_k(task_results: list[tuple[int, int]], k: int) -> tuple[float, float]:
+    """Compute benchmark-level mean pass@k and standard error across N tasks."""
+    estimates = [compute_pass_at_k(n, c, k) for n, c in task_results]
+    n_tasks = len(estimates)
+    mean_pass = sum(estimates) / n_tasks
+    variance = sum((y - mean_pass) ** 2 for y in estimates) / (n_tasks - 1)
+    standard_error = math.sqrt(variance / n_tasks)
+    return mean_pass, standard_error
 ```
 
 ::: {.column-margin}
@@ -562,7 +643,23 @@ Statistical rigor across task fixtures establishes whether an agent system's agg
 
 A candidate that is allowed more turns, more samples, or a larger model will often score higher, and the gain says nothing about the change being tested. Every comparison therefore fixes the budget: the same turn ceiling, token ceiling, and wall-clock limit, and the same number of samples per task. The last row of @tbl-vol3-statistical-metrics formalizes this requirement via @eq-pass-at-budget.
 
-Alongside the pass@$B$ metric, an evaluation report should state the cost per accepted task for each candidate, total spend divided by accepted tasks, because a candidate that gains two points while tripling spend has changed the operating point rather than improved the agent. How that cost is minimized across a fleet belongs to @sec-vol3-agent-economics.
+Alongside the pass@$B$ metric, an evaluation report must quantify the economics of candidate selection by computing the *cost per accepted task* ($C_{\text{task}}$). When an agent generates up to $k$ candidate trajectories per task and routes them through a verification filter, the expected cost per accepted task follows the analytical scaling law:
+
+$$C_{\text{task}}(k) = \frac{\sum_{i=1}^k \left( C_{\text{sample}, i} + C_{\text{verify}, i} \right)}{P(\text{pass}@k)}$$ {#eq-cost-per-accepted-task}
+
+where $C_{\text{sample}, i}$ represents the sampling compute expenditure (GPU prefill and autoregressive decode FLOPs, host orchestrator token spend) for candidate trajectory $i$, $C_{\text{verify}, i}$ denotes the verification compute cost (compilation CPU cycles, Firecracker microVM provisioning, sandbox execution time, or model judge token invocations) for candidate $i$, and $P(\text{pass}@k)$ is the probability that at least one of the $k$ candidates satisfies all verification criteria. Under homogeneous candidates with mean sampling cost $C_{\text{sample}}$, mean verification cost $C_{\text{verify}}$, and independent candidate success probability $p_1$, @eq-cost-per-accepted-task simplifies to:
+
+$$C_{\text{task}}(k) = \frac{k \left( C_{\text{sample}} + C_{\text{verify}} \right)}{1 - (1 - p_1)^k}$$ {#eq-cost-per-accepted-task-iid}
+
+This scaling law in @eq-cost-per-accepted-task-iid demonstrates how verification compute trades off against sampling compute across two operational regimes:[^fn-cost-verification-tradeoff]
+
+1. *Cheap Verification Regime ($C_{\text{verify}} \ll C_{\text{sample}}$):* When verification is computationally negligible—such as running a compiled unit test in an ephemeral microVM in under 50 milliseconds ($C_{\text{verify}} \approx \$0.0001$) compared to generating 4,096 tokens through a 70-billion parameter model ($C_{\text{sample}} \approx \$0.03$)—scaling $k$ is highly cost-effective. Systems engineers can deploy smaller, cheaper generator models with lower single-shot accuracy $p_1$ and compensate by increasing candidate draws $k$, because the marginal verification cost of inspecting additional candidates is trivial compared to the cost savings of downsized generation.
+2. *Expensive Verification Regime ($C_{\text{verify}} \gg C_{\text{sample}}$):* When verification requires spinning up multi-container web environments, executing minutes-long integration suites, or querying an expensive reasoning model as an LLM judge ($C_{\text{verify}} \gg C_{\text{sample}}$), verification compute dominates the numerator. Because the denominator $1 - (1 - p_1)^k$ exhibits rapid saturation with diminishing marginal returns as $k$ increases, expanding $k$ causes the cost per accepted task to scale nearly linearly with $k$. In this regime, the optimal MLSys design reallocates compute upstream into prompt optimization, fine-tuning, or larger generator models to maximize single-shot pass rate $p_1$, keeping $k$ as small as possible.
+3. *Sequential Verification with Early Exit:* Rather than executing all $k$ candidate runs in a parallel batch, the harness can evaluate candidates sequentially, halting at the first trajectory that passes verification ($T^* = \min \{ i \le k : V(\tau_i) = 1 \}$). The expected verification steps drop from $k$ to $\mathbb{E}[T^*] = \frac{1 - (1 - p_1)^k}{p_1}$. This amortizes verification compute down to $\frac{1 - (1 - p_1)^k}{p_1} C_{\text{verify}}$, substantially reducing $C_{\text{task}}(k)$ while preserving pass@$k$ reliability.
+
+[^fn-cost-verification-tradeoff]: **Verification compute allocation**: Optimizing the trade-off between generation compute and verification compute defines a Pareto frontier in agent system design [@snell2024scaling]. When verification oracles are computationally lightweight, generating numerous cheap candidate trajectories minimizes total expenditure per accepted task. Conversely, expensive verification regimes require shifting compute upstream into larger generator models to maximize single-shot pass rates.
+
+Alongside the pass@$B$ metric, an evaluation report should state the cost per accepted task for each candidate, total spend divided by accepted tasks, because a candidate that gains two points while tripling spend has changed the operating point rather than improved the agent. How that cost is minimized across a fleet belongs to the study of agent economics.
 
 Intervals, reliability metrics, and matched budgets tell us whether a candidate improved. They cannot say why a task failed, whether a regression came from retrieval, a tool, a truncated observation, or the model. For that we need to see inside individual trajectories.
 
@@ -577,7 +674,7 @@ Check that you can defend a measured difference before reading how traces explai
 
 :::
 
-## Distributed trajectory tracing {#sec-vol3-evaluation-tracing}
+## Distributed Trajectory Tracing {#sec-vol3-evaluation-tracing}
 
 ::: {.column-margin}
 ![](images/svg/vol3_observability_margin_001.svg){width="100%" fig-alt="Log-scale column chart comparing trajectory telemetry footprints: 100 MB raw trace in-band vs. 17 MB zstd compressed blob vs. 100 KB OTLP metadata index, achieving a 99.9% wire reduction."}
@@ -587,6 +684,15 @@ Check that you can defend a measured difference before reading how traces explai
 Consider an autonomous software engineering agent operating on a production codebase that abruptly exhausts its thirty-second wall-clock deadline during a routine refactoring task. The client application records an unadorned `DEADLINE_EXCEEDED` error code, while the host runtime's log directory is an uncoordinated graveyard of isolated log lines: an inference server logged eight autoregressive decode bursts; an in-memory vector database logged three $k$-nearest-neighbor index traversals; a container runtime logged two POSIX `git` subprocess executions; and a peer review agent recorded an incoming JSON-RPC message exchange. Because each subsystem maintained its own isolated log stream with uncoordinated wall-clock timestamps and disjoint correlation identifiers, systems engineers cannot determine whether the deadline was consumed by GPU memory-bus saturation during model prefill, an unindexed table scan in the vector database, an unbuffered pipe stall in the bash sandbox, or an asynchronous RPC queue lockup between cooperating agents.
 
 **End-to-end trajectory observability requires unifying these fragmented runtime domains into a single causal directed acyclic graph (DAG). By structuring agent execution as an OpenTelemetry trace hierarchy, every neural inference pass, sandboxed tool invocation, memory retrieval, and inter-agent message is bound by deterministic causality and cryptographic identifiers.** Rather than treating the agent as a monolithic black box that emits an opaque stream of tokens, distributed trajectory tracing applies the foundational principles of Dapper [@sigelman2010dapper] to stochastic agent architectures, making latency breakdowns, token expenditures, tool side effects, and structural failures mathematically traceable to their originating execution step.
+
+::: {#psp-13-telemetry-duality .callout-note title="Telemetry duality: Internal write-ahead logs vs. external OpenTelemetry DAGs"}
+Engineers designing agent observability frequently conflate two fundamentally distinct telemetry streams: the runtime's internal **Trajectory Log** and its external **OpenTelemetry (OTel) DAG**. While both capture chronological execution records, they serve opposing physical objectives and operate on fundamentally different data contracts:
+
+1. **The Internal Trajectory Log (Durable Replay & Fencing):** As established in @sec-vol3-durable-execution, the agent runtime maintains an append-only Write-Ahead Log (WAL) on local, high-durability NVMe storage. Its sole purpose is **deterministic state reconstruction and monotonic crash recovery**. The trajectory log captures verbatim token strings, prompt prefixes, tool parameter dictionaries, standard error streams, and monotonic sequence fencing tokens $\gamma$. It must execute synchronously on the critical path of each step, requiring strict fsync boundaries to prevent split-brain execution across worker crashes. It is a private, monolithic state journal for the agent runtime.
+2. **The External OpenTelemetry DAG (Fleet Observability & Root-Cause Attribution):** The OpenTelemetry trace hierarchy formalized in this chapter serves **fleet-wide performance engineering, cost governance, and root-cause failure analysis**. It structures execution as a distributed causal DAG across heterogeneous microservices (inference engines, vector stores, microVM hypervisors). Because distributed tracing aggregators (such as Jaeger or Tempo) cannot ingest raw 100,000-token prompt strings without catastrophic gRPC buffer exhaustion and network saturation, the OTel stream transmits lightweight, structured metadata: span durations, token counts, model identifiers, monetary costs, exit codes, and cryptographic content hashes pointing to out-of-band blob storage.
+
+Conflating these systems produces fatal failure modes. Attempting to use OpenTelemetry spans as a crash recovery mechanism fails because trace pipelines use asynchronous, lossy tail-sampling that drops packets under network partition. Conversely, attempting to stream full, verbatim trajectory WAL records through distributed tracing collectors exhausts cluster network bandwidth, inducing cascading telemetry brownouts. Robust architectures maintain a strict decoupling: the high-durability, synchronous WAL reconstructs state; the asynchronous, lightweight OTel DAG explains performance.
+:::
 
 ### The anatomy of a hybrid trajectory DAG
 
@@ -625,7 +731,7 @@ As formalized in the distributed trace decomposition (@tbl-vol3-trace-hierarchy)
 ![](images/svg/fig-vol3-opentelemetry-trace-waterfall.svg)
 :::
 
-The distributed trace waterfall in @fig-vol3-opentelemetry-trace-waterfall visually grounds the operational breakdown recorded in @tbl-vol3-trace-hierarchy. Root span $s_0$ (`agent.orchestration`) encloses the 14.85-second lifecycle under Trace ID `4bf92f35...`, incurring a total model cost of \$0.042. Execution commences with span $s_1$ (`agent.memory`), consuming 185 ms to query an HNSW index and retrieve three episodic memory chunks. Grounded by this context, the host dispatches planning span $s_2$ (`gen_ai.client`) to `llama-3-70b` over $[0.18, 4.25]\text{ s}$ ($\Delta t = 4.07\text{ s}$); the visualization isolates the 120 ms Time-to-First-Token ($t_{\text{TTFT}}$) prefill phase across 4,096 prompt tokens from the autoregressive generation of 256 completion tokens. The emitted plan triggers tool span $s_3$ (`agent.tool`), which executes `git apply patch.diff` inside an isolated microVM sandbox over $[4.26, 8.46]\text{ s}$ ($\Delta t = 4.20\text{ s}$). The agent then delegates verification across an asynchronous JSON-RPC barrier in span $s_4$ (`agent.message`, $\Delta t = 1.85\text{ s}$), while downstream subagent `reviewer-01` runs child review span $s_{4.1}$ (`gen_ai.client` on `llama-3-8b`, $\Delta t = 1.78\text{ s}$). Finally, synthesis span $s_5$ runs for 4.52 seconds on `llama-3-70b` to generate the concluding response. The cumulative latency profile at the bottom exposes an immediate systems bottleneck: while neural inference represents 69.8% (10.37 s) of execution time, sandbox tool execution consumes 28.3% (4.20 s). By the Amdahl bound of @sec-vol3-intro-duration-accounting, infinitely accelerating neural inference can at best yield a $3.3\times$ end-to-end speedup ($1/(1 - 0.698)$) unless sandbox virtualization overhead and tool I/O are optimized in tandem.
+The distributed trace waterfall in @fig-vol3-opentelemetry-trace-waterfall visually grounds the operational breakdown recorded in @tbl-vol3-trace-hierarchy. Root span $s_0$ (`agent.orchestration`) encloses the 14.85-second lifecycle under Trace ID `4bf92f35...`, incurring a total model cost of \$0.042. Execution commences with span $s_1$ (`agent.memory`), consuming 185 ms to query an HNSW index and retrieve three episodic memory chunks. Grounded by this context, the host dispatches planning span $s_2$ (`gen_ai.client`) to `llama-3-70b` over $[0.18, 4.25]\text{ s}$ ($\Delta t = 4.07\text{ s}$); the visualization isolates the 120 ms Time-to-First-Token ($t_{\text{TTFT}}$) prefill phase across 4,096 prompt tokens from the autoregressive generation of 256 completion tokens. The emitted plan triggers tool span $s_3$ (`agent.tool`), which executes `git apply patch.diff` inside an isolated microVM sandbox over $[4.26, 8.46]\text{ s}$ ($\Delta t = 4.20\text{ s}$). The agent then delegates verification across an asynchronous JSON-RPC barrier in span $s_4$ (`agent.message`, $\Delta t = 1.85\text{ s}$), while downstream subagent `reviewer-01` runs child review span $s_{4.1}$ (`gen_ai.client` on `llama-3-8b`, $\Delta t = 1.78\text{ s}$). Finally, synthesis span $s_5$ runs for 4.52 seconds on `llama-3-70b` to generate the concluding response. The cumulative latency profile at the bottom exposes an immediate systems bottleneck: while neural inference represents 69.8 percent (10.37 s) of execution time, sandbox tool execution consumes 28.3 percent (4.20 s). By the Amdahl bound, infinitely accelerating neural inference can at best yield a $3.3\times$ end-to-end speedup ($1/(1 - 0.698)$) unless sandbox virtualization overhead and tool I/O are optimized in tandem.
 
 ### OpenTelemetry semantic conventions for agent systems
 
@@ -635,7 +741,7 @@ The Cloud Native Computing Foundation (CNCF), through the OpenTelemetry Generati
 
 #### Model invocation spans (`genai.client` / `genai.server`) {.unnumbered}
 
-A model invocation span instruments a single forward transaction between the agent host supervisor and the neural inference engine. Because inference is split into a compute-bound prefill phase (GEMM) and a memory-bandwidth-bound autoregressive decode phase (GEMV), the span must capture operational metrics that differentiate these two hardware regimes:
+A model invocation span instruments a single forward transaction between the agent host supervisor and the neural inference engine. Because inference is split into a compute-bound prefill phase (general matrix multiply (GEMM)) and a memory-bandwidth-bound autoregressive decode phase (GEMV), the span must capture operational metrics that differentiate these two hardware regimes:
 
 - `gen_ai.system`: The provider or runtime engine identifier (e.g., `vllm`, `sglang`, `triton`).
 - `gen_ai.request.model`: The logical checkpoint requested by the agent (e.g., `llama-3-70b-instruct`).
@@ -692,7 +798,9 @@ The core semantic attributes, causal links, and detectable failure modes across 
 
 The primary mechanical hurdle in instrumenting agent systems lies in context propagation. In standard web services, distributed context propagation is solved by middleware libraries that inject HTTP headers into outbound network calls. However, an agent supervisor regularly dispatches operations across boundaries that do not use HTTP or gRPC network layers: it spawns local POSIX processes inside containers, executes arbitrary bash commands, queries local file caches, and writes to message queues.
 
-To maintain an unbroken causal DAG across these non-network interfaces, the agent runtime must implement context serialization and extraction protocols conformant with the W3C Trace Context specification. The standard encodes trace context within the `traceparent` header, a 4-field hyphenated string formatted as `00-${trace_id}-${span_id}-${trace_flags}`.
+To maintain an unbroken causal DAG across these non-network interfaces, the agent runtime must implement context serialization and extraction protocols conformant with the W3C Trace Context specification.[^fn-opentelemetry-context-propagation] The standard encodes trace context within the `traceparent` header, a 4-field hyphenated string formatted as `00-${trace_id}-${span_id}-${trace_flags}`.
+
+[^fn-opentelemetry-context-propagation]: **W3C trace context serialization**: Distributed tracing standards encode causal context into standard 55-character string headers containing a 16-byte trace identifier and an 8-byte parent span identifier. Agent execution supervisors serialize these headers into POSIX environment variables or file metadata when crossing non-network subprocess boundaries. In-memory queues reconstruct parent-child DAG edges across asynchronous thread boundaries using these serialized tokens.
 
 When invoking a sandboxed shell tool, the supervisor cannot rely on network middleware. Instead, it must explicitly inject the serialized trace context into the sandbox environment, either as POSIX environment variables or as command-line envelope wrappers. Inside the sandbox, instrumented CLI tools or sub-scripts read the `TRACEPARENT` environment variable, extract the active `trace_id` and `span_id`, and register themselves as legitimate child spans within the global execution graph.
 
@@ -714,8 +822,12 @@ def execute_traced_tool(cmd: list[str], parent_span: Span) -> tuple[int, str]:
 
 The preceding implementation demonstrates this boundary traversal. The runtime extracts the active trace context from the `parent_span`, injects the W3C `traceparent` representation into the process environment dictionary, and wraps the execution within a dedicated `agent.tool` span. Crucially, the span records the physical tool name, argument schema, process return code, and payload byte size. If the process encounters a nonzero exit code or terminal exception, the failure is bound directly to the active span through `record_exception`, preserving the exact execution context without truncating the surrounding trace hierarchy.
 
+::: {.column-margin .margin-pointer}
+↪ Inter-agent delegation fabrics, message envelopes, and consensus protocols are developed in @sec-vol3-multi-agent.
+:::
+
 ```{python}
-#| label: lego-16-critical-path-latency-and-bottleneck
+#| label: lego-13-critical-path-latency-and-bottleneck
 #| echo: false
 # │ Show: Critical path decomposition shows tool execution and inference dominate latency.
 # │ How: Summing causal span durations across retrieval, generation, sandbox, and fan-out.
@@ -748,7 +860,7 @@ class CriticalPathLatencyDecomposition:
     pct_orchestration_str = fmt_percent(round(pct_orchestration, 3), precision=1, style="prose")
 ```
 
-::: {#nbk-16-critical-path-latency-and-bottleneck .callout-notebook title="Critical path latency decomposition"}
+::: {#nbk-13-critical-path-latency-and-bottleneck .callout-notebook title="Critical path latency decomposition"}
 Consider an autonomous coding agent that executes a 5-step loop: retrieving documentation, generating a code patch, executing a test suite in a container sandbox, fanning out review requests to two subagents in parallel, and synthesizing the final pull request.
 
 The host supervisor instruments the entire trajectory under a root trace $\mathcal{T}_{\text{root}}$ and observes a total wall-clock duration of $T_{\text{wall}} = 18.25\text{ s}$. The underlying OpenTelemetry spans record the following hardware and execution parameters:
@@ -791,19 +903,19 @@ To determine whether the agent's performance is compute-bound, I/O-bound, or coo
 $$T_{\text{crit}} = t_1 + t_2 + t_3 + \max(t_{4a}, t_{4b}) + t_5$$
 $$T_{\text{crit}} = 0.08\text{ s} + 3.39\text{ s} + 6.20\text{ s} + 3.85\text{ s} + 3.74\text{ s} = 17.26\text{ s}$$
 
-The remaining latency ($T_{\text{wall}} - T_{\text{crit}} = 18.25\text{ s} - 17.26\text{ s} = 0.99\text{ s}$, or {python} CriticalPathLatencyDecomposition.pct_orchestration_str) represents host runtime orchestration overhead (JSON serialization, process context switching, and RPC queue wait times).
+The remaining latency ($T_{\text{wall}} - T_{\text{crit}} = 18.25\text{ s} - 17.26\text{ s} = 0.99\text{ s}$, or `{python} CriticalPathLatencyDecomposition.pct_orchestration_str`) represents host runtime orchestration overhead (JSON serialization, process context switching, and RPC queue wait times).
 
 Decomposing the critical path reveals the governing operational bottleneck:
 
-- Sandboxed tool execution accounts for {python} CriticalPathLatencyDecomposition.pct_tool_str ($6.20\text{ s}$) of critical path time.
-- Neural model inference accounts for {python} CriticalPathLatencyDecomposition.pct_model_str ($3.39\text{ s} + 3.74\text{ s} = 7.13\text{ s}$).
-- Multi-agent coordination barrier accounts for {python} CriticalPathLatencyDecomposition.pct_barrier_str ($3.85\text{ s}$).
-- Vector retrieval accounts for only {python} CriticalPathLatencyDecomposition.pct_retrieval_str ($0.08\text{ s}$).
+- Sandboxed tool execution accounts for `{python} CriticalPathLatencyDecomposition.pct_tool_str` ($6.20\text{ s}$) of critical path time.
+- Neural model inference accounts for `{python} CriticalPathLatencyDecomposition.pct_model_str` ($3.39\text{ s} + 3.74\text{ s} = 7.13\text{ s}$).
+- Multi-agent coordination barrier accounts for `{python} CriticalPathLatencyDecomposition.pct_barrier_str` ($3.85\text{ s}$).
+- Vector retrieval accounts for only `{python} CriticalPathLatencyDecomposition.pct_retrieval_str` ($0.08\text{ s}$).
 
 Without distributed tracing, an engineer might intuitively attempt to optimize retrieval latency or upgrade GPU hardware. The trace data definitively disproves both intuitions: memory retrieval is negligible, and inference is dominated by tool execution and parallel subagent latency. Optimizing the system requires addressing the sandbox I/O overhead in Step 3 and the straggler latency of Subagent B in Step 4.
 :::
 
-::: {#chk-16-trajectory-instrumentation .callout-checkpoint title="Evaluating distributed trajectory tracing and spans"}
+::: {#chk-13-trajectory-instrumentation .callout-checkpoint title="Evaluating distributed trajectory tracing and spans"}
 Before analyzing tail-based sampling budgets and redaction pipelines, verify your understanding of trajectory instrumentation:
 
 - [ ] **Hybrid DAG spans**: How do distributed trace trees represent both millisecond-scale neural decode spans and multi-minute POSIX tool spans?
@@ -812,11 +924,13 @@ Before analyzing tail-based sampling budgets and redaction pipelines, verify you
 - [ ] **Critical path analysis**: How does span duration breakdown prevent misallocating engineering effort to fast subsystems like vector retrieval?
 :::
 
-## Tail-based sampling budgets {#sec-vol3-evaluation-budgets}
+## Tail-Based Sampling Budgets {#sec-vol3-evaluation-budgets}
 
 An enterprise platform orchestrating thousands of autonomous agent trajectories per hour encounters a physical telemetry dilemma that classical distributed tracing systems were never engineered to withstand. In microservice architectures, an individual OpenTelemetry span typically records a lightweight remote procedure call (RPC) consisting of HTTP metadata, database query text, and microsecond-scale execution timings—yielding on the order of two to five kilobytes per end-to-end trace. In stark contrast, an autonomous agent executing a complex task accumulates history across dozens of autoregressive inference steps, sandbox terminal interactions, and external tool invocations. Because every turn must preserve the exact input context, generated completion tokens, tool arguments, and standard I/O streams required to reproduce the agent's internal state machine, a single trajectory trace routinely consumes tens of megabytes of raw structured data.
 
-Persisting every production trace across an enterprise agent fleet rapidly saturates network egress bandwidth and overwhelms downstream observability storage clusters with petabytes of redundant, uninformative execution logs. Yet adopting conventional head-based sampling—where a fixed percentage of traces are randomly selected at trajectory initiation—cripples post-incident reliability engineering. In autonomous software systems operating at high baseline success rates, the critical operational signals that engineers must inspect—such as sandbox permission violations, multi-turn reasoning loops, and rare tool timeouts—occur in less than 1 percent of executions. Randomly dropping 99 percent of incoming tasks at the front door guarantees that when a catastrophic failure corrupts production data, the causal telemetry trace required to diagnose the root cause was discarded before the error manifested. Managing the observability overhead of autonomous agents therefore demands an architectural shift from blind head-based filtering to state-aware, tail-based sampling buffers combined with cryptographic privacy sanitization.
+Persisting every production trace across an enterprise agent fleet rapidly saturates network egress bandwidth and overwhelms downstream observability storage clusters with petabytes of redundant, uninformative execution logs. Yet adopting conventional head-based sampling—where a fixed percentage of traces are randomly selected at trajectory initiation—cripples post-incident reliability engineering. In autonomous software systems operating at high baseline success rates, the critical operational signals that engineers must inspect—such as sandbox permission violations, multi-turn reasoning loops, and rare tool timeouts—occur in less than 1 percent of executions. Randomly dropping 99 percent of incoming tasks at the front door guarantees that when a catastrophic failure corrupts production data, the causal telemetry trace required to diagnose the root cause was discarded before the error manifested. Managing the observability overhead of autonomous agents therefore demands an architectural shift from blind head-based filtering to state-aware, tail-based sampling buffers combined with cryptographic privacy sanitization.[^fn-tail-sampling-reservoir]
+
+[^fn-tail-sampling-reservoir]: **Tail-sampling escrow reservoirs**: In-memory trace escrow buffers reserve fixed circular ring buffers to hold uncommitted span graphs until trajectory termination [@sigelman2010dapper]. If high-volume traffic bursts threaten memory ceilings, the collector drops routine success spans while strictly prioritizing anomalous failure traces. This selective degradation guarantees zero data loss for operational incidents under extreme cluster saturation.
 
 ### Telemetry volume explosion
 
@@ -868,7 +982,7 @@ that an anomalous behavior leaves almost no forensic footprint across the entire
 Head-based sampling forces a false dichotomy between storage insolvency and diagnostic blindness. The fundamental architectural defect of head-based sampling in agentic systems is that the decision to retain telemetry is executed under maximal uncertainty: at turn $t=0$, before the non-deterministic policy has committed its first action, encountered its first tool error, or drifted into an infinite execution loop.
 
 ```{python}
-#| label: lego-16-telemetry-ingestion-inverted-economics
+#| label: lego-13-telemetry-ingestion-inverted-economics
 #| echo: false
 # │ Show: Tail-based sampling slashes agent telemetry ingestion by 93.1% (14.5x reduction).
 # │ How: In-memory escrow retention of anomalies vs blind head-based sampling discard rates.
@@ -889,7 +1003,7 @@ class TelemetryIngestionInvertedEconomics:
     reduction_mult_str = fmt_multiple(round(reduction_ratio, 1), precision=1)
 ```
 
-::: {#nbk-16-telemetry-ingestion-inverted-economics .callout-notebook title="Telemetry ingestion inverted economics"}
+::: {#nbk-13-telemetry-ingestion-inverted-economics .callout-notebook title="Telemetry ingestion inverted economics"}
 Consider an autonomous software engineering agent deployment executing 10,000 tasks per hour across a distributed worker cluster.
 
 **Cluster Workload Parameters:**
@@ -928,7 +1042,7 @@ Consider an autonomous software engineering agent deployment executing 10,000 ta
 - Ingestion reduction relative to full logging:
   $$\text{Data Reduction} = 1 - \frac{23.2}{336} = 93.1\%$$
 
-By retaining telemetry based on terminal execution properties rather than initial randomization, the tail-based architecture achieves a {python} TelemetryIngestionInvertedEconomics.reduction_mult_str storage reduction while capturing $100\%$ of all operational failures and performance anomalies.
+By retaining telemetry based on terminal execution properties rather than initial randomization, the tail-based architecture achieves a `{python} TelemetryIngestionInvertedEconomics.reduction_mult_str` storage reduction while capturing $100\%$ of all operational failures and performance anomalies.
 :::
 
 ### Tail-based routing policies
@@ -941,7 +1055,7 @@ Implementing tail-based sampling requires an intermediate, low-latency telemetry
 ![](images/svg/tail-sampling-pipeline.svg)
 :::
 
-The architectural pipeline in @fig-vol3-tail-sampling-pipeline formalizes the complete lifecycle of agent telemetry across three physical processing stages. In Stage 1, streaming span DAGs generated by a concurrent fleet of $C=128$ workers (ingesting 336.0 GB/day) flow into an in-memory circular escrow buffer sized to $M_{\text{escrow}} \ge 2.0\text{ GB RAM}$. Before spans cross node boundaries, an inline regex and named-entity recognition (NER) redaction filter scrubs API credentials, bearer tokens, and customer PII. In Stage 2, completed trajectories trigger a priority cascade of deterministic routing predicates matching @tbl-vol3-tail-sampling-policies: Priority 1 (sandbox faults, schema errors, and security trips) retains 100 percent of traces (560 MB/hr); Priority 2 (latency stragglers $>p99$, prompt bloat $>p95$, or turn count $>3\times$ median) retains 100 percent (140 MB/hr); Priority 3 (human overrides and permission escalations) retains 100 percent (28 MB/hr); while Priority 4 (routine verified completions with duration $\le p90$) applies a 2 percent uniform downsampling rule (266 MB/hr), releasing the remaining 98 percent from memory. In Stage 3, the telemetry router dispatches traces to specialized backend tiers: 100 percent of anomalous and escalated trajectories persist to the forensic incident queue for automated regression synthesis, while sampled nominal runs flow to high-cardinality columnar OLAP stores (such as ClickHouse or Parquet on object storage). This multi-tier architecture slashes fleet wire storage from 336.0 GB/day to 23.2 GB/day—a 93.1 percent ($14.5\times$) reduction—while guaranteeing that every anomalous execution event is captured with bit-accurate fidelity.
+The architectural pipeline in @fig-vol3-tail-sampling-pipeline formalizes the complete lifecycle of agent telemetry across three physical processing stages. In Stage 1, streaming span DAGs generated by a concurrent fleet of $C=128$ workers (ingesting 336.0 GB/day) flow into an in-memory circular escrow buffer sized to $M_{\text{escrow}} \ge 2.0\text{ GB RAM}$. Before spans cross node boundaries, an inline regex and named-entity recognition (NER) redaction filter scrubs API credentials, bearer tokens, and customer PII. In Stage 2, completed trajectories trigger a priority cascade of deterministic routing predicates matching @tbl-vol3-tail-sampling-policies: Priority 1 (sandbox faults, schema errors, and security trips) retains 100 percent of traces (560 MB/hr); Priority 2 (latency stragglers $>p99$, prompt bloat $>p95$, or turn count $>3\times$ median) retains 100 percent (140 MB/hr); Priority 3 (human overrides and permission escalations) retains 100 percent (28 MB/hr); while Priority 4 (routine verified completions with duration $\le p90$) applies a 2 percent uniform downsampling rule (266 MB/hr), releasing the remaining 98 percent from memory. In Stage 3, the telemetry router dispatches traces to specialized backend tiers: 100 percent of anomalous and escalated trajectories persist to the forensic incident queue for automated regression synthesis, while sampled nominal runs flow to high-cardinality columnar online analytical processing (OLAP) stores (such as ClickHouse or Parquet on object storage). This multi-tier architecture slashes fleet wire storage from 336.0 GB/day to 23.2 GB/day—a 93.1 percent ($14.5\times$) reduction—while guaranteeing that every anomalous execution event is captured with bit-accurate fidelity.
 
 | Trajectory Category          | Classification Predicates                                                                                   | Sampling Policy                        | Primary Engineering Utility                                                             |
 |:-----------------------------|:------------------------------------------------------------------------------------------------------------|:---------------------------------------|:----------------------------------------------------------------------------------------|
@@ -989,7 +1103,7 @@ Under memory pressure, an escrow buffer must drop unclassified or routine-succes
 
 ### Cryptographic secret redaction
 
-While tail-based sampling solves the data volume crisis, it exacerbates an equally severe security and compliance vulnerability, the exfiltration of sensitive information into observability backends. The model holds zero ambient authority, yet the tasks it runs read proprietary code repositories, private customer databases, internal APIs, and configuration files. Read access is itself an authority exposure (@sec-vol3-intro-hsa), because whatever an agent reads can leave through any channel that carries it outward, and telemetry is such a channel. During standard execution, the model's prompts and tool outputs inevitably capture confidential tokens:
+While tail-based sampling solves the data volume crisis, it exacerbates an equally severe security and compliance vulnerability, the exfiltration of sensitive information into observability backends. The model holds zero ambient authority, yet the tasks it runs read proprietary code repositories, private customer databases, internal APIs, and configuration files. Read access is itself an authority exposure, because whatever an agent reads can leave through any channel that carries it outward, and telemetry is such a channel. During standard execution, the model's prompts and tool outputs inevitably capture confidential tokens:
 
 1. **Authentication Secrets:** AWS access keys (`AKIA...`), GitHub personal access tokens (`ghp_...`), Bearer tokens, private SSH keys, and database connection strings containing embedded plaintext passwords.
 2. **Personally Identifiable Information (PII):** Customer names, national identification numbers, credit card sequences, physical addresses, and electronic mail headers encountered during data processing tasks.
@@ -1054,7 +1168,7 @@ By coupling in-sandbox cryptographic redaction with state-aware tail sampling, t
 
 ***
 
-## Forensic incident post-mortems {#sec-vol3-evaluation-postmortems}
+## Forensic Incident Post-Mortems {#sec-vol3-evaluation-postmortems}
 
 When an anomalous, high-latency, or failed trajectory is successfully retained by the tail-sampling engine, the raw telemetry trace represents an immutable, causal record of an operational breakdown. However, a captured trace is merely diagnostic evidence; it does not explain why the non-deterministic policy deviated from its expected trajectory or which specific tool interaction precipitated the systemic collapse. Converting an isolated error trace into an actionable, durable software fix requires a rigorous engineering methodology for post-mortem analysis. That forensic challenge motivates the systematic techniques of trajectory replay and counterfactual ablation.
 
@@ -1066,13 +1180,15 @@ Without a systematic forensic protocol, systems teams default to an unscientific
 
 ### Deterministic trajectory replay {#sec-vol3-postmortem-replay}
 
-The foundation of forensic analysis is trajectory reconstruction. When an agent trajectory $\tau = (s_0, a_0, o_0, s_1, a_1, o_1, \dots, s_T)$ terminates in an unhandled exception, a violated safety invariant, or an explicit task rejection, the post-mortem engine must reconstruct the exact sequence of historical context buffers $c_t$ presented to the model. Because the model holds zero ambient authority, every interaction with the operating system, storage layers, and network services passes through a mediated tool invocation that the runtime records as an OpenTelemetry span. Consequently, the telemetry ledger contains an immutable, chronologically ordered log of every model invocation, prompt serialization, raw completion, tool identifier, input argument dictionary, and serialized observation string.
+The foundation of forensic analysis is trajectory reconstruction. When an agent trajectory $\tau = (s_0, a_0, o_0, s_1, a_1, o_1, \dots, s_T)$ terminates in an unhandled exception, a violated safety invariant, or an explicit task rejection, the post-mortem engine must reconstruct the exact sequence of historical context buffers $c_t$ presented to the model. Because the model holds zero ambient authority, every interaction with the operating system, storage layers, and network services passes through a mediated tool invocation that the runtime records.
+
+As established by the Telemetry Duality (perspective \ref{psp-13-telemetry-duality}), this telemetry is structured across two distinct planes. High-throughput distributed tracing via **OpenTelemetry (OTel)** carries lightweight metadata, span durations, exit codes, and cryptographic content hashes ($H_{\text{payload}}$) to avoid saturating network fabrics with multi-megabyte prompt strings. To survive catastrophic worker crashes—such as an abrupt Linux cgroup Out-Of-Memory termination (`SIGKILL 137`) that vaporizes volatile in-memory OTel buffers—the host supervisor writes a synchronous `TraceContextAnchor` event into the local non-volatile Write-Ahead Log (WAL, @sec-vol3-persistence-wal) before dispatching any mutating action. Consequently, forensic post-mortems combine the causal distributed DAG from OTel with the byte-exact, immutable payload blobs dereferenced from durable content-addressed storage.
 
 ::: {.column-margin}
 Replaying an agent trajectory against live external APIs guarantees non-determinism. External databases change, web services return shifting payloads, and mutating calls duplicate transactions. True forensic replay requires an immutable record of past observations.
 :::
 
-Forensic replay builds on the reconstruction machinery of @sec-vol3-persistence-replay. It replays recorded observations rather than expecting regenerated model output to match (principle \ref{pri-vol3-release-evidence}), and it runs in two modes, each answering a different diagnostic question.
+Forensic replay builds on the reconstruction machinery of durable execution. It replays recorded observations rather than expecting regenerated model output to match (principle \ref{pri-vol3-release-evidence}), and it runs in two modes, each answering a different diagnostic question.
 
 1. *Pure Playback Replay (State Machine Verification):* The runtime supervisor reads the recorded trajectory log and steps through the execution sequence without invoking the foundation model or executing external tool RPCs. The replay harness feeds recorded actions $a_t$ directly into the supervisor's state machine to verify whether validation logic, rate limiters, token counting estimators, or sandboxing policies malfunctioned. If the supervisor crashed due to an unhandled JSON parsing exception or an integer overflow in context-window accounting, pure playback surfaces the defect in milliseconds at zero inference cost.
 2. *Generative Replay with Hermetic Mocking (Policy Verification):* To diagnose why the foundation model selected an erroneous action $a_t$, the replay harness re-instantiates the agent runtime, loads the prompt template, system instructions, and historical context buffer $c_t$, but intercepts all outbound tool dispatches. Instead of executing the requested tool against live infrastructure, the harness queries the recorded trace for the corresponding observation $o_t$ and injects it into the next context frame. The foundation model is then re-queried under identical generation hyperparameters (temperature $\tau \to 0$, fixed random seed, identical logit penalties).
@@ -1080,19 +1196,22 @@ Forensic replay builds on the reconstruction machinery of @sec-vol3-persistence-
 Generative replay mirrors the replicated state machine principles articulated by David K. Gifford (1979) in *Weighted Voting for Replicated Data*. Gifford demonstrated that distributed replicas maintain semantic consistency across network partitions only when state transitions are governed by an immutable, quorum-verified log of historical mutations. In an agentic runtime, hermetic mocking constructs a synthetic, local replica of the external world from the telemetry trace. When the agent issues a mutating tool call—such as `DROP TABLE analytics_staging` or `DELETE /v1/instances/i-09a1`—the hermetic mock engine matches the call signature against the recorded span graph, returns the exact status payload received during the live incident, and advances the agent clock without exposing production infrastructure to secondary corruption.
 
 ```python
-# Minimal trajectory replay harness intercepting tool execution via trace mocks
-def replay_step(agent, trace_span, model_client):
-    context = agent.format_context(trace_span.history)
+# Minimal trajectory replay harness resolving payload hashes against durable storage
+def replay_step(agent, trace_span, blob_store, model_client):
+    # Dereference full context payload from durable storage using recorded hash
+    history_payload = blob_store.get(trace_span.attributes["payload.hash"])
+    context = agent.format_context(history_payload)
     predicted_action = model_client.generate(context, temperature=0.0)
     if predicted_action.tool_name != trace_span.expected_action.tool_name:
         raise DivergenceError(f"Drift at step {trace_span.step}: {predicted_action}")
     # Hermetic mock: inject recorded observation without re-executing tool
-    agent.append_observation(trace_span.recorded_observation)
+    obs_payload = blob_store.get(trace_span.attributes["observation.hash"])
+    agent.append_observation(obs_payload)
 ```
 
 If the model re-invoked under $\tau = 0$ reproduces the exact failure action $a_t$ when presented with context $c_t$, the defect is verified to be computationally reproducible. If the model emits a completely different, valid action under zero temperature, the original production failure is classified as an edge-case stochastic excursion driven by high inference temperature or non-deterministic token sampling across distributed inference clusters.
 
-### Subsystem fault attribution: Distinguishing hallucination from interface failure {#sec-vol3-postmortem-attribution}
+### Subsystem fault attribution between model hallucinations and interface failures {#sec-vol3-postmortem-attribution}
 
 When an agent emits an invalid SQL query, attempts to access non-existent file paths, or loops endlessly while parsing a compiler error, operational teams routinely label the incident as an intrinsic "model hallucination." Forensic systems analysis rejects this characterization as intellectually lazy. A foundation model is an autoregressive probability distribution over next tokens conditioned entirely on the sequence of preceding tokens:
 
@@ -1145,7 +1264,7 @@ If the single-variable modification $\Delta X$ restores trajectory recovery acro
 - *Context Pruning Refinement:* Replacing naive sliding-window FIFO token eviction with semantic summarization or selective observation masking, preventing the eviction of foundational task instructions.
 - *Deliberation Scaffolding:* Inserting a deterministic verification gate or structured scratchpad requirement prior to the generation of mutating actions.
 
-::: {#exmp-16-counterfactual-ablation-of-a-silent .callout-example title="Counterfactual ablation of tool truncation"}
+::: {#exmp-13-counterfactual-ablation-of-a-silent .callout-example title="Counterfactual ablation of tool truncation"}
 **Physical Scenario:** An autonomous maintenance agent operating on a 128,000-token context budget ($\approx 512\text{ KB}$ text) fails while executing a dependency audit across a mono-repository. At step $t=8$, the agent invokes `list_directory(path="/services/auth", depth=3)`. The underlying filesystem contains 420 files. The runtime tool RPC wrapper limits stdout buffers to $16\text{ KB}$ ($16,384\text{ bytes}$), truncating the file listing mid-path at file 118 (`/services/auth/models/us...`) without an EOF token or warning banner.
 
 **Observed Manifestation:** At step $t=9$, the agent emits a hallucinated conclusion: *"The directory `/services/auth/models` is corrupt; regenerating default models file."* The agent issues a destructive write action overwriting the live database model definition, triggering an immediate integration test failure.
@@ -1175,7 +1294,11 @@ The forensic engineer sets up a controlled replay harness at step $t=8$. The tes
 **Forensic Conclusion:** Root cause attributed to Subsystem 2 (Tool Contract). The tool wrapper violated the typed action contract (principle \ref{pri-vol3-strict-action-abi}), under which an observation must be bounded and typed before it enters context, by truncating its output without marking the truncation. The model's destructive action was a rational deduction over that corrupted observation.
 :::
 
-The completion of a forensic post-mortem is not a static text document; it is an automated software artifact. The ultimate goal of the post-mortem protocol is to guarantee that the diagnosed failure mode can never silently recur in production. The systems engineer converts the captured trajectory, the ablated context, and the verified tool interface fix into a permanent regression test fixture within the hermetic evaluation gym (@sec-vol3-evaluation-gyms).
+::: {.column-margin .margin-pointer}
+↩ Deterministic log replay, state snapshotting, and observation recording are established in @sec-vol3-durable-execution.
+:::
+
+The completion of a forensic post-mortem is not a static text document; it is an automated software artifact. The ultimate goal of the post-mortem protocol is to guarantee that the diagnosed failure mode can never silently recur in production. The systems engineer converts the captured trajectory, the ablated context, and the verified tool interface fix into a permanent regression test fixture within the hermetic evaluation gym.
 
 ```python
 # Automated regression test synthesized from forensic post-mortem INC-4921
@@ -1213,7 +1336,7 @@ The comprehensive findings of the investigation are compiled into a formal Syste
 
 : **Structured Trajectory Post-Mortem Incident Template**: Required investigation sections, formal field definitions, telemetry artifacts, and concrete forensics evidence from production incidents. {#tbl-vol3-postmortem-template}
 
-::: {#chk-16-fleet-sre-metrics .callout-checkpoint title="Evaluating forensic post-mortems and fault attribution"}
+::: {#chk-13-fleet-sre-metrics .callout-checkpoint title="Evaluating forensic post-mortems and fault attribution"}
 Before analyzing staged canary deployments and sequential hypothesis testing, verify your understanding of post-mortem diagnostics:
 
 - [ ] **Trace replay harness**: How does replaying recorded tool outputs through mock interfaces distinguish model hallucination from environmental failure?
@@ -1222,18 +1345,18 @@ Before analyzing staged canary deployments and sequential hypothesis testing, ve
 - [ ] **Regression fixtures**: How do forensic incident traces synthesize deterministic integration tests to prevent historical regressions?
 :::
 
-## Staged canary deployments {#sec-vol3-evaluation-releases}
+## Staged Canary Deployments {#sec-vol3-evaluation-releases}
 
 ::: {.column-margin}
 ![](images/svg/vol3_observability_margin_003.svg){width="100%" fig-alt="Sequential hypothesis testing corridor showing log-likelihood ratio boundaries: candidate routing breaches the upper abort threshold at sample 8, terminating rollout without waiting for fixed sample batching."}
 
 *Wald sequential probability ratio testing detects degraded candidate policies within 8 turns, cutting canary rollout blast radius by 80 percent.*
 :::
-A cloud infrastructure engineering team updates the runtime supervisor of an autonomous site-reliability agent, replacing a heuristic prompt-injection filter and repointing the underlying model client to an optimized inference endpoint. In a conventional compiled service, passing a deterministic integration suite guarantees invariant preservation across memory allocation routines, network protocol parsers, and remote procedure call (RPC) schemas. In an agentic architecture, however, the candidate runtime passes all offline benchmark suites with an apparent $pass@1$ improvement of $3.2\%$, yet catastrophic degradation emerges the moment the system encounters live production inputs: subtle variations in user intent phrasing trigger pathological tool-retry loops, transient cloud API rate limits induce unhandled exception trajectories, and autonomous operations exhaust context windows without completing tasks. The system emits HTTP 200 success codes and generates polite, conversational progress updates while silently stalling database migrations and exhausting token budgets.
+A cloud infrastructure engineering team updates the runtime supervisor of an autonomous site-reliability agent, replacing a heuristic prompt-injection filter and repointing the underlying model client to an optimized inference endpoint. In a conventional compiled service, passing a deterministic integration suite guarantees invariant preservation across memory allocation routines, network protocol parsers, and remote procedure call (RPC) schemas. In an agentic architecture, however, the candidate runtime passes all offline benchmark suites with an apparent pass@1 improvement of 3.2 percent, yet catastrophic degradation emerges the moment the system encounters live production inputs: subtle variations in user intent phrasing trigger pathological tool-retry loops, transient cloud API rate limits induce unhandled exception trajectories, and autonomous operations exhaust context windows without completing tasks. The system emits HTTP 200 success codes and generates polite, conversational progress updates while silently stalling database migrations and exhausting token budgets.
 
 **Deploying an updated model, tool schema, or supervisor requires a staged release pipeline that treats every change as an unverified hypothesis (principle \ref{pri-vol3-release-evidence}).** Because offline benchmarks cannot capture the unbounded entropy of live production inputs, systems engineers must construct automated deployment gates that progressively elevate execution privileges through offline gym verification, sandboxed shadow execution, and small-fraction live canary routing guarded by statistical circuit breakers.
 
-### The multi-stage release topology: Offline gyms to shadow escrows
+### Multi-stage release topologies from offline gyms to shadow escrows
 
 The physical architecture of an agent release pipeline must bridge the epistemic gap between synthetic evaluation and production execution. Unlike stateless microservices where functional regressions manifest as immediate HTTP 5xx errors or panics, agent regressions often manifest as semantic drift: subtle alterations in reasoning trajectories, excessive tool parameter verbosity, or unexpected vulnerability to edge-case environment responses. To prevent defective runtimes from corrupting production state, the release pipeline implements a three-stage progressive gating topology, illustrated in @fig-vol3-canary-deployment-pipeline.
 
@@ -1241,9 +1364,9 @@ The physical architecture of an agent release pipeline must bridge the epistemic
 ![](images/svg/vol3-canary-deployment-pipeline.svg)
 :::
 
-As structured in @fig-vol3-canary-deployment-pipeline, release progression advances through three rigorous verification stages before candidate configurations reach production promotion. In Stage 1 (Hermetic Eval Gym), release candidate $\theta_{\text{cand}}$ undergoes offline benchmarking across $N \ge 2,500$ deterministic tasks, requiring the empirical pass rate to satisfy the Wilson score non-inferiority hypothesis ($p_{\text{cand}} \ge p_{\text{base}} - \delta_{\text{tol}}$ at $\alpha = 0.05$) before receiving any production traffic. In Stage 2 (Shadow Escrow / Dark Traffic), the ingress router duplicates live production requests; baseline policy $\pi_{\text{base}}$ executes live with the task's full production authority, while candidate $\pi_{\text{cand}}$ reads from replicas and snapshots and confines every mutation to a discardable sandbox ($A_1$), with mutating syscalls mocked. The differential divergence monitor computes semantic distance $D_{\text{sem}}(a_{\text{cand}}, a_{\text{base}}) \le \epsilon$, halting promotion if tool drift or argument bloat exceeds tolerance. In Stage 3 (Canary Gating), a dynamic traffic throttle allocates $\rho = 1\%\text{--}5\%$ of live mutating traffic to $\pi_{\text{cand}}$. Telemetry sentinels evaluate per-trajectory outcomes against Wald's Sequential Probability Ratio Test (SPRT), whose two decision boundaries either promote the candidate to the 100 percent production baseline or trip an automated circuit breaker. Underpinning the entire architecture, the Global Automated Rollback & Traffic Clamp Bus enforces an MTTR of under 10 seconds: if any hard invariant tripwire is breached (a cost spike $>1.5\times$, context-exhaustion $>1\%$, or repetitive tool loops), the bus immediately clamps canary traffic $\rho \to 0\%$ and reverts all live routing to verified baseline $\pi_{\text{base}}$.
+As structured in @fig-vol3-canary-deployment-pipeline, release progression advances through three rigorous verification stages before candidate configurations reach production promotion. In Stage 1 (Hermetic Eval Gym), release candidate $\theta_{\text{cand}}$ undergoes offline benchmarking across $N \ge 2,500$ deterministic tasks, requiring the empirical pass rate to satisfy the Wilson score non-inferiority hypothesis ($p_{\text{cand}} \ge p_{\text{base}} - \delta_{\text{tol}}$ at $\alpha = 0.05$) before receiving any production traffic. In Stage 2 (Shadow Escrow / Dark Traffic), the ingress router duplicates live production requests; baseline policy $\pi_{\text{base}}$ executes live with the task's full production authority, while candidate $\pi_{\text{cand}}$ reads from replicas and snapshots and confines every mutation to a discardable sandbox ($A_1$), with mutating syscalls mocked. The differential divergence monitor computes semantic distance $D_{\text{sem}}(a_{\text{cand}}, a_{\text{base}}) \le \epsilon$, halting promotion if tool drift or argument bloat exceeds tolerance. In Stage 3 (Canary Gating), a dynamic traffic throttle allocates $\rho = 0.01\text{ to }0.05$ (1 to 5 percent) of live mutating traffic to $\pi_{\text{cand}}$. Telemetry sentinels evaluate per-trajectory outcomes against Wald's Sequential Probability Ratio Test (SPRT), whose two decision boundaries either promote the candidate to the 100 percent production baseline or trip an automated circuit breaker. Underpinning the entire architecture, the Global Automated Rollback & Traffic Clamp Bus enforces a mean time to recovery (MTTR) of under 10 seconds: if any hard invariant tripwire is breached (a cost spike $>1.5\times$, context-exhaustion rate exceeding 1 percent, or repetitive tool loops), the bus immediately clamps canary traffic $\rho \to 0$ and reverts all live routing to verified baseline $\pi_{\text{base}}$.
 
-Stage 1 enforces an offline benchmark gate within hermetic evaluation gyms. Candidate runtime configurations—encompassing updated foundation model checkpoints $M_{\text{cand}}$, modified system prompts $c_0$, or restructured tool definitions $\mathcal{A}$—must execute against a standardized, held-out task distribution $\mathcal{D}_{\text{task}}$. Performance is measured using Wilson score confidence intervals over the empirical pass rate $\hat{p}$, as established in @sec-vol3-evaluation-rigor. The release automation evaluates a non-inferiority hypothesis against the current production baseline policy $\pi_{\text{base}}$:
+Stage 1 enforces an offline benchmark gate within hermetic evaluation gyms. Candidate runtime configurations—encompassing updated foundation model checkpoints $M_{\text{cand}}$, modified system prompts $c_0$, or restructured tool definitions $\mathcal{A}$—must execute against a standardized, held-out task distribution $\mathcal{D}_{\text{task}}$. Performance is measured using Wilson score confidence intervals over the empirical pass rate $\hat{p}$, as established in statistical evaluation. The release automation evaluates a non-inferiority hypothesis against the current production baseline policy $\pi_{\text{base}}$:
 
 $$H_0: p_{\text{cand}} < p_{\text{base}} - \delta_{\text{tol}} \quad \text{versus} \quad H_1: p_{\text{cand}} \ge p_{\text{base}} - \delta_{\text{tol}}$$
 
@@ -1276,7 +1399,7 @@ Telemetry systems during Stage 2 do not evaluate final environmental state, as m
 
 ### Canary traffic shifting
 
-When a candidate runtime clears shadow execution, it enters Stage 3: live canary deployment. In this phase, the traffic routing layer dynamically diverts a small fraction of live production traffic—typically $\rho \in [0.01, 0.05]$, or $1\%$ to $5\%$—directly to $\pi_{\text{cand}}$, granting it full mutating authority over live environment states. Canary deployments balance two competing physical constraints: minimizing the blast radius of undetected failure modes while acquiring statistical power rapidly enough to detect performance regressions before an operational outage occurs.
+When a candidate runtime clears shadow execution, it enters Stage 3: live canary deployment. In this phase, the traffic routing layer dynamically diverts a small fraction of live production traffic—typically $\rho \in [0.01, 0.05]$, or 1 to 5 percent—directly to $\pi_{\text{cand}}$, granting it full mutating authority over live environment states. Canary deployments balance two competing physical constraints: minimizing the blast radius of undetected failure modes while acquiring statistical power rapidly enough to detect performance regressions before an operational outage occurs.
 
 ::: {.column-margin}
 **The Blast Radius Invariant**
@@ -1285,37 +1408,60 @@ In an agentic system, blast radius is not measured merely in failed HTTP request
 
 In traditional microservices, canary gating relies on fixed-duration observation windows (such as monitoring error rates over twelve hours). In stochastic agent fleets, fixed-time windows are fundamentally flawed. If traffic volume fluctuates, a fixed-time window may sample too few complex, multi-turn trajectories to achieve statistical significance, or alternatively, subject thousands of users to an active regression long after a failure mode became statistically discernible.
 
-To overcome this limitation, the telemetry control plane implements continuous sequential testing using Wald's Sequential Probability Ratio Test (SPRT). Rather than fixing sample size $N$ in advance, SPRT updates the log-likelihood ratio $\Lambda_n$ after observing each completed trajectory outcome $x_i \in \{0, 1\}$, where $x_i = 1$ denotes a successfully verified trajectory and $x_i = 0$ denotes a failed trajectory:
+To overcome this limitation, the telemetry control plane implements continuous sequential testing using Wald's Sequential Probability Ratio Test (SPRT).[^fn-sprt-optimal-stopping] Rather than fixing sample size $N$ in advance, SPRT updates the log-likelihood ratio $\Lambda_n$ after observing each completed trajectory outcome $x_i \in \{0, 1\}$, where $x_i = 1$ denotes a successfully verified trajectory and $x_i = 0$ denotes a failed trajectory:
 
 $$\Lambda_n = \sum_{i=1}^n \ln \frac{P(x_i \mid p_1)}{P(x_i \mid p_0)} = d_n \ln \left(\frac{p_1}{p_0}\right) + (n - d_n) \ln \left(\frac{1 - p_1}{1 - p_0}\right)$$
+
+[^fn-sprt-optimal-stopping]: **SPRT optimal stopping**: Abraham Wald and Jacob Wolfowitz proved that the Sequential Probability Ratio Test minimizes the expected sample size $\mathbb{E}[N]$ among all tests with bounded Type I and Type II error probabilities [@wald1945sequential]. In continuous canary monitoring, this optimality enables the control plane to abort defective releases with minimal traffic exposure. Fixed-horizon sample batching requires significantly more trials to reach identical statistical confidence.
 
 where $d_n = \sum_{i=1}^n x_i$ is the cumulative number of successful trajectories, $p_0$ is the acceptable baseline success probability, and $p_1 = p_0 - \Delta$ represents the unacceptably degraded success probability threshold. The test compares $\Lambda_n$ against two absorbing boundaries defined by false positive tolerance $\alpha$ and false negative tolerance $\beta$:
 
 $$A = \ln \left( \frac{1 - \beta}{\alpha} \right), \qquad B = \ln \left( \frac{\beta}{1 - \alpha} \right)$$
 
-If $\Lambda_n \ge A$, the control plane accepts the candidate as non-inferior and safely accelerates traffic shifting (for instance, advancing $\rho$ from $0.05$ to $0.25$, and subsequently to $1.0$). If $\Lambda_n \le B$, the candidate is conclusively identified as degraded; the control plane trips an automated circuit breaker that immediately sheds all canary traffic, restores $100\%$ routing to $\pi_{\text{base}}$, and triggers an alert for engineering post-mortem.
+Because $p_1 < p_0$, successful completions ($x_i = 1$) contribute negative log-likelihood increments ($\ln \frac{p_1}{p_0} < 0$), driving $\Lambda_n$ downward, whereas failed trajectories ($x_i = 0$) contribute positive increments ($\ln \frac{1 - p_1}{1 - p_0} > 0$), driving $\Lambda_n$ upward. Consequently, the operational decision rules are:
 
-::: {#not-16-sprt-circuit-breaker .callout-note title="Sequential probability ratio test gating"}
+1. If $\Lambda_n \ge A$, the candidate is conclusively identified as degraded; the control plane immediately trips the automated circuit breaker, shedding all canary traffic to restore 100 percent baseline routing ($\rho \to 0$) and alerting on-call engineers.
+2. If $\Lambda_n \le B$, the candidate is statistically validated as non-inferior; the control plane safely promotes the candidate and accelerates traffic shifting (advancing $\rho$ from $0.05$ to $0.25$, and subsequently to $1.0$).
+3. If $B < \Lambda_n < A$, the test remains in the indeterminate region; sampling continues without altering traffic allocation.
+
+::: {#not-13-sprt-circuit-breaker .callout-note title="Sequential probability ratio test gating"}
 The automated canary circuit breaker evaluates cumulative trajectory observations against two Wald absorbing boundaries defined by the target false-positive rate $\alpha$ and false-negative rate $\beta$:
 
 $$\Lambda_n = d_n \ln \left(\frac{p_1}{p_0}\right) + (n - d_n) \ln \left(\frac{1 - p_1}{1 - p_0}\right)$$
 
-1. **Upper Absorbing Boundary ($A = \ln \frac{1 - \beta}{\alpha}$):** If $\Lambda_n \ge A$, the candidate runtime is statistically validated as non-inferior; the control plane promotes the candidate and accelerates canary traffic shifting.
-2. **Lower Absorbing Boundary ($B = \ln \frac{\beta}{1 - \alpha}$):** If $\Lambda_n \le B$, the candidate runtime is conclusively degraded; the control plane instantly trips the automated circuit breaker, shedding all canary traffic to restore baseline routing.
+1. **Upper Absorbing Boundary ($A = \ln \frac{1 - \beta}{\alpha} > 0$):** If $\Lambda_n \ge A$, the candidate runtime is conclusively degraded; the control plane instantly trips the automated circuit breaker, shedding all canary traffic to restore baseline routing.
+2. **Lower Absorbing Boundary ($B = \ln \frac{\beta}{1 - \alpha} < 0$):** If $\Lambda_n \le B$, the candidate runtime is statistically validated as non-inferior; the control plane promotes the candidate and accelerates canary traffic shifting.
 3. **Indeterminate Region ($B < \Lambda_n < A$):** Sampling continues ($n \leftarrow n + 1$) without adjusting traffic weights.
 :::
 
-As formalized in \ref{not-16-sprt-circuit-breaker}, the automated circuit breaker must operate with minimal Mean Time to Detect (MTTD) and Mean Time to Recovery (MTTR), adhering to the tail-tolerance principles articulated by @dean2013tail. Beyond sequential hypothesis tests on aggregate task success, the release path reuses the circuit breakers of @sec-vol3-sagas-containment, now tripped by fleet-level conditions that signal hard safety violations:
+As formalized in \ref{not-13-sprt-circuit-breaker}, the automated circuit breaker must operate with minimal Mean Time to Detect (MTTD) and Mean Time to Recovery (MTTR), adhering to the tail-tolerance principles articulated by @dean2013tail. Beyond sequential hypothesis tests on aggregate task success, the release path reuses runtime circuit breakers, now tripped by fleet-level conditions that signal hard safety violations:
 
 1. *Cost-Per-Trajectory Spikes:* If the rolling median of token consumption per trajectory exceeds the baseline threshold by more than $K_{\text{cost}} = 1.5\times$ over a window of $W = 50$ runs, the breaker trips to prevent financial depletion.
-2. *Context-Exhaustion Cascades:* If the proportion of trajectories terminated due to context-window saturation ($K \ge K_{\max}$) exceeds $1\%$, execution halts immediately.
+2. *Context-Exhaustion Cascades:* If the proportion of trajectories terminated due to context-window saturation ($K \ge K_{\max}$) exceeds 1 percent, execution halts immediately.
 3. *Repetitive Tool Calling Loops:* If any individual canary worker issues identical tool invocations with identical parameters more than three times consecutively without state mutation, the host runtime terminates the worker and flags a regression in policy grounding.
 
 When a circuit breaker trips, automated rollback latency must be deterministic. Because the foundation model inference endpoint is decoupled from the host supervisor, rollback does not require redeploying container images or restarting server daemons. The traffic proxy alters its upstream weight vector in memory, immediately draining canary concurrency and ensuring that subsequent user turns execute exclusively against the golden baseline.
 
+#### Trajectory-level sticky routing {.unnumbered}
+
+A fatal pitfall when deploying canary models in multi-turn agent systems is applying naive, request-level traffic routing. In traditional stateless web services, an edge proxy routes each incoming HTTP request independently according to canary traffic weights $\rho$. If applied to an autonomous agent, request-level routing causes Turn 1 to execute on the canary model $\pi_{\text{cand}}$, Turn 2 on the baseline $\pi_{\text{base}}$, and Turn 3 on $\pi_{\text{cand}}$.
+
+This request-level alternation induces two catastrophic systems failures:
+
+1. *Prefix Cache Invalidation:* Every time execution switches between distinct model checkpoints or inference clusters, the accumulated Key-Value (KV) cache cannot be reused. As derived in @sec-vol3-kv-cache, cross-model prefill forces the engine to recompute the entire prompt history from scratch ($T_{\text{prefill}} \propto S$), thrashing accelerator memory buses and multiplying inference latency by an order of magnitude.
+2. *Context Distributional Mismatch:* Different model checkpoints exhibit subtle variations in reasoning token style, tool-call formatting delimiters, and prompt structure. When $\pi_{\text{base}}$ attempts to continue an autoregressive trajectory initiated by $\pi_{\text{cand}}$, the mismatched reasoning traces in context induce out-of-distribution hallucinations, breaking agent invariants and artificially spiking failure rates.
+
+Consequently, agent canary routing must enforce **trajectory-level sticky routing**. The traffic proxy computes a deterministic hash of the root session or trajectory identifier ($\text{trace\_id}$):
+$$\mathcal{H}(\text{trace\_id}) \pmod{100} < 100 \times \rho$$
+Once an agent trajectory is assigned to either $\pi_{\text{base}}$ or $\pi_{\text{cand}}$ at step $t=0$, *all subsequent turns across the entire multi-step task lifecycle remain strictly pinned to that exact model instance and inference cluster*. Session state is stored in an ephemeral distributed routing table with a time-to-live matching the task deadline, guaranteeing that prefix caches remain warm and context distributions remain homogeneous throughout the agent's execution.
+
+::: {.column-margin .margin-pointer}
+↩ Tool circuit breakers, blast radius quarantines, and compensating unwind are established in @sec-vol3-failure-recovery.
+:::
+
 ### Core agent SRE metrics
 
-Operating stochastic agent fleets requires a fundamental transformation of Site Reliability Engineering (SRE) metrics. Classical web platforms quantify health through the Four Golden Signals: latency, traffic, errors, and saturation [@beyer2016sre]. For an agentic system, these signals are necessary but entirely insufficient. An agent runtime can run with $0\%$ network-level packet drops, return HTTP 200 OK on every invocation, maintain low CPU saturation on host machines, and yet execute an operational failure by consuming 120,000 tokens across 40 ungrounded tool calls before abandoning the user's objective.
+Operating stochastic agent fleets requires a fundamental transformation of Site Reliability Engineering (SRE) metrics. Classical web platforms quantify health through the Four Golden Signals: latency, traffic, errors, and saturation [@beyer2016sre]. For an agentic system, these signals are necessary but entirely insufficient. An agent runtime can run with 0 percent network-level packet drops, return HTTP 200 OK on every invocation, maintain low CPU saturation on host machines, and yet execute an operational failure by consuming 120,000 tokens across 40 ungrounded tool calls before abandoning the user's objective.
 
 To establish meaningful operational visibility, systems engineers monitor an expanded SRE telemetry triad specifically designed for autonomous agent dynamics (@tbl-vol3-sre-metrics): Goodput, Behavioral Drift, and Human Intervention Rates.
 
@@ -1329,11 +1475,11 @@ To establish meaningful operational visibility, systems engineers monitor an exp
 
 : **Core SRE Telemetry Triad for Autonomous Agent Fleets**: Traditional microservice metrics versus agentic SRE indicators, mathematical formulations, and failure indications across operational dimensions. {#tbl-vol3-sre-metrics}
 
-Trajectory goodput\index{Trajectory goodput} $\mathcal{G}$, the share of fleet resources that reaches independently verified trajectories (@sec-vol3-intro-macro-vs-micro-efficiency), serves as the primary service level indicator (SLI) for an agent fleet. Only accepted tasks deliver value, so every resource spent on failed or unverified attempts is charged to the accepted ones (principle \ref{pri-vol3-trajectory-goodput}). Computing $\mathcal{G}$ requires a per-trajectory acceptance test, and the release machinery of this section counts the outcomes of that test directly. We call the fraction of initiated trajectories that pass their deterministic post-condition verifiers while remaining within resource and latency budgets the *verified completion rate* $q$:
+Trajectory goodput\index{Trajectory goodput} $\mathcal{G}$, the share of fleet resources that reaches independently verified trajectories, serves as the primary service level indicator (SLI) for an agent fleet. Only accepted tasks deliver value, so every resource spent on failed or unverified attempts is charged to the accepted ones (principle \ref{pri-vol3-trajectory-goodput}). Computing $\mathcal{G}$ requires a per-trajectory acceptance test, and the release machinery of this section counts the outcomes of that test directly. We call the fraction of initiated trajectories that pass their deterministic post-condition verifiers while remaining within resource and latency budgets the *verified completion rate* $q$:
 
 $$q = \frac{1}{N} \sum_{i=1}^N \mathbf{1}\left(\text{Verify}(s_T^{(i)}) = 1 \;\land\; \text{Cost}(\tau_i) \le C_{\max} \;\land\; T_i \le T_{\max}\right)$$
 
-where $\text{Verify}(s_T^{(i)})$ evaluates the environmental state at the terminal step $T$ against mechanical contract checkers (compilers, linters, or database assertions as established in @sec-vol3-evaluation-contract), $\text{Cost}(\tau_i)$ aggregates the monetary token expense and API fees accrued across trajectory $\tau_i$, and $T_i$ is the number of interactive turns. A trajectory that produces valid code but consumes $\$50.00$ in inference costs against a $\$2.00$ service budget fails this test, and every resource it consumed counts as badput in $\mathcal{G}$.
+where $\text{Verify}(s_T^{(i)})$ evaluates the environmental state at the terminal step $T$ against mechanical contract checkers (compilers, linters, or database assertions as established in the evaluation contract), $\text{Cost}(\tau_i)$ aggregates the monetary token expense and API fees accrued across trajectory $\tau_i$, and $T_i$ is the number of interactive turns. A trajectory that produces valid code but consumes $\$50.00$ in inference costs against a $\$2.00$ service budget fails this test, and every resource it consumed counts as badput in $\mathcal{G}$.
 
 *Behavioral Drift* measures the statistical divergence between the action distributions of the candidate policy $\pi_{\text{cand}}$ and the baseline $\pi_{\text{base}}$ over identical or statistically comparable inputs. Telemetry engines track the discrete probability distribution of tool invocations $P(a_{\text{tool}})$. The divergence is quantified using the Jensen-Shannon divergence ($D_{\text{JS}}$), a symmetric, bounded information-theoretic metric:
 
@@ -1352,10 +1498,10 @@ $$I_{\text{rate}} = \frac{N_{\text{interventions}}}{N_{\text{trajectories}}} = \
 
 A rise in $I_{\text{rate}}$ serves as a sensitive leading indicator of alignment degradation. If an updated foundation model generates ambiguous tool parameters or proposes high-risk shell commands that trigger approval escrows, human operators are forced to intervene repeatedly. Even if the verified completion rate remains constant due to human corrections, the operational cost and cognitive friction increase, indicating that the candidate runtime is unfit for autonomous deployment.
 
-Finally, *Mean Time to Recovery* (MTTR) in agentic systems accounts for both traffic draining and state restoration. If a canary failure corrupts external systems before the circuit breaker trips, recovery requires executing Saga compensating transactions (@sec-vol3-failure-recovery) to reverse partial modifications. Monitoring the full MTTR ensures that automated release systems account for both the speed of the software rollback and the latency of physical state reconciliation.
+Finally, MTTR in agentic systems accounts for both traffic draining and state restoration. If a canary failure corrupts external systems before the circuit breaker trips, recovery requires executing Saga compensating transactions to reverse partial modifications. Monitoring the full MTTR ensures that automated release systems account for both the speed of the software rollback and the latency of physical state reconciliation.
 
 ```{python}
-#| label: lego-16-sizing-canary-traffic-and-circuit
+#| label: lego-13-sizing-canary-traffic-and-circuit
 #| echo: false
 # │ Show: Managed canary deployment limits blast radius, preventing 95% of excess failures.
 # │ How: Wald SPRT sample size and detection latency under 5% traffic routing vs full rollout.
@@ -1365,17 +1511,17 @@ from mlsysim.core.units import *
 from mlsysim.fmt import check, fmt_percent
 
 class SizingCanaryTrafficCircuitBreaker:
-    excess_reduction = 80.45 / 84.69
+    excess_reduction = 128.85 / 135.63
     check(abs(excess_reduction - 0.9499) < 0.001, "excess_reduction")
 
     reduction_pct_str = fmt_percent(0.95, precision=0, style="prose")
 ```
 
-::: {#nbk-16-sizing-canary-traffic-and-circuit .callout-notebook title="Sizing canary traffic and circuit breaker MTTR"}
+::: {#nbk-13-sizing-canary-traffic-and-circuit .callout-notebook title="Sizing canary traffic and circuit breaker MTTR"}
 **Problem Formulation**
 An enterprise software engineering agent fleet processes incoming bug repair tasks at an arrival rate of $\lambda = 60$ trajectories per hour. The verified baseline production runtime $\pi_{\text{base}}$ maintains a verified completion rate of $q_{\text{base}} = 0.90$.
 
-An engineering team deploys a candidate runtime $\pi_{\text{cand}}$ designed to reduce inference latency. Unbeknownst to the team, $\pi_{\text{cand}}$ introduces a regression on complex multi-file patches, reducing its true verified completion rate to $q_{\text{cand}} = 0.75$. The release engineering pipeline routes $\rho = 0.05$ ($5\%$) of production traffic to the canary. The automated circuit breaker monitors verified completions over completed canary trajectories using a sequential hypothesis test configured with type I error $\alpha = 0.01$, power $1 - \beta = 0.95$, and indifference points $p_0 = 0.90$ and $p_1 = 0.75$.
+An engineering team deploys a candidate runtime $\pi_{\text{cand}}$ designed to reduce inference latency. Unbeknownst to the team, $\pi_{\text{cand}}$ introduces a regression on complex multi-file patches, reducing its true verified completion rate to $q_{\text{cand}} = 0.75$. The release engineering pipeline routes $\rho = 0.05$ (5 percent) of production traffic to the canary. The automated circuit breaker monitors verified completions over completed canary trajectories using a sequential hypothesis test configured with type I error $\alpha = 0.01$, power $1 - \beta = 0.95$, and indifference points $p_0 = 0.90$ and $p_1 = 0.75$.
 
 1. Compute the average number of canary trajectories $E[N]$ required for the circuit breaker to detect the regression and trip.
 2. Determine the expected elapsed physical time (in hours) before the circuit breaker trips.
@@ -1384,11 +1530,11 @@ An engineering team deploys a candidate runtime $\pi_{\text{cand}}$ designed to 
 **Quantitative Solution**
 
 **Step 1: Expected Sample Size for Sequential Testing**
-Under Wald's SPRT, when the true underlying parameter is $p = p_1 = 0.75$, the expected sample size to cross the lower decision boundary $B$ is given by:
+Under Wald's SPRT, when the true underlying parameter is $p = p_1 = 0.75$ (the degraded hypothesis $H_1$), the test drifts toward the upper absorbing boundary $A = \ln \frac{1 - \beta}{\alpha}$, which triggers circuit-breaker tripping. The expected log-likelihood ratio at termination is:
 
-$$E_1[N] \approx \frac{(1 - \beta) \ln\left(\frac{\beta}{1 - \alpha}\right) + \beta \ln\left(\frac{1 - \beta}{\alpha}\right)}{E_1[z]}$$
+$$E_1[\Lambda_N] \approx (1 - \beta) A + \beta B = (1 - \beta) \ln\left(\frac{1 - \beta}{\alpha}\right) + \beta \ln\left(\frac{\beta}{1 - \alpha}\right)$$
 
-where $z_i = \ln \frac{P(x_i \mid p_1)}{P(x_i \mid p_0)}$ is the log-likelihood ratio for a single observation. The expectation $E_1[z]$ under the degraded hypothesis $p = p_1$ is:
+where $z_i = \ln \frac{P(x_i \mid p_1)}{P(x_i \mid p_0)}$ is the log-likelihood ratio for a single observation. The expected single-step drift $E_1[z]$ under the degraded hypothesis $p = p_1$ is:
 
 $$E_1[z] = p_1 \ln\left(\frac{p_1}{p_0}\right) + (1 - p_1) \ln\left(\frac{1 - p_1}{1 - p_0}\right)$$
 
@@ -1396,22 +1542,22 @@ Substituting the operational parameters $p_0 = 0.90$ and $p_1 = 0.75$:
 
 $$\frac{p_1}{p_0} = \frac{0.75}{0.90} \approx 0.8333 \implies \ln(0.8333) \approx -0.1823$$
 $$\frac{1 - p_1}{1 - p_0} = \frac{0.25}{0.10} = 2.5000 \implies \ln(2.5000) \approx 0.9163$$
-$$E_1[z] = 0.75 \times (-0.1823) + 0.25 \times (0.9163) = -0.1367 + 0.2291 = 0.0924$$
+$$E_1[z] = 0.75 \times (-0.1823) + 0.25 \times (0.9163) = -0.1367 + 0.2291 = +0.0924$$
 
-Now compute the numerator using error tolerances $\alpha = 0.01$ and $\beta = 0.05$ (for power $1 - \beta = 0.95$):
+Now compute the decision boundaries using error tolerances $\alpha = 0.01$ and $\beta = 0.05$ (for power $1 - \beta = 0.95$):
 
-$$\text{Boundary } B = \ln\left(\frac{0.05}{1 - 0.01}\right) = \ln\left(\frac{0.05}{0.99}\right) \approx \ln(0.0505) \approx -2.9857$$
-$$\text{Boundary } A = \ln\left(\frac{1 - 0.05}{0.01}\right) = \ln(95.0) \approx 4.5539$$
+$$\text{Boundary } A = \ln\left(\frac{1 - 0.05}{0.01}\right) = \ln(95.0) \approx +4.5539$$
+$$\text{Boundary } B = \ln\left(\frac{0.05}{1 - 0.01}\right) = \ln\left(\frac{0.05}{0.99}\right) \approx -2.9857$$
 
-Under hypothesis $H_1$, the probability of hitting boundary $B$ is approximately $1 - \beta = 0.95$, while hitting boundary $A$ is $\beta = 0.05$. The expected numerator is:
+Under hypothesis $H_1$, the probability of hitting the rejection boundary $A$ is approximately $1 - \beta = 0.95$, while prematurely hitting boundary $B$ is $\beta = 0.05$. The expected value of $\Lambda_N$ at termination is:
 
-$$\text{Numerator} = 0.95 \times (-2.9857) + 0.05 \times (4.5539) = -2.8364 + 0.2277 = -2.6087$$
+$$E_1[\Lambda_N] = 0.95 \times (4.5539) + 0.05 \times (-2.9857) = 4.3262 - 0.1493 = +4.1769$$
 
-The expected number of samples required to trip the circuit breaker is:
+By Wald's identity ($E_1[\Lambda_N] = E_1[N] \cdot E_1[z]$), the expected number of samples required to trip the circuit breaker is:
 
-$$E_1[N] = \frac{-2.6087}{-E_1[z]} = \frac{2.6087}{0.0924} \approx 28.23 \text{ trajectories}$$
+$$E_1[N] = \frac{E_1[\Lambda_N]}{E_1[z]} = \frac{4.1769}{0.0924} \approx 45.20 \text{ trajectories}$$
 
-Rounding conservatively to the nearest integer yields $N \approx 29$ canary trajectories.
+Rounding conservatively to the nearest integer yields $N \approx 46$ canary trajectories.
 
 **Step 2: Elapsed Physical Time to Detection**
 The canary receives a traffic fraction $\rho = 0.05$ of the total arrival rate $\lambda = 60 \text{ tasks/hour}$:
@@ -1420,37 +1566,40 @@ $$\lambda_{\text{canary}} = \rho \times \lambda = 0.05 \times 60 = 3.0 \text{ tr
 
 The expected physical time until the circuit breaker trips and initiates rollback is:
 
-$$T_{\text{detect}} = \frac{E_1[N]}{\lambda_{\text{canary}}} = \frac{28.23}{3.0} \approx 9.41 \text{ hours}$$
+$$T_{\text{detect}} = \frac{E_1[N]}{\lambda_{\text{canary}}} = \frac{45.20}{3.0} \approx 15.07 \text{ hours}$$
 
 **Step 3: Blast Radius Comparison**
-We quantify blast radius as the expected number of failed customer tasks resulting from the regression during the $9.41$-hour detection window.
+We quantify blast radius as the expected number of failed customer tasks resulting from the regression during the $15.07$-hour detection window.
 
 *Case A: Managed Canary ($\rho = 0.05$)*
-Total canary runs = $28.23$.
+Total canary runs = $45.20$.
 Expected canary failures at $q_{\text{cand}} = 0.75$:
 
-$$\text{Failures}_{\text{canary}} = 28.23 \times (1 - 0.75) = 28.23 \times 0.25 \approx 7.06 \text{ failures}$$
+$$\text{Failures}_{\text{canary}} = 45.20 \times (1 - 0.75) = 45.20 \times 0.25 \approx 11.30 \text{ failures}$$
 
-The remaining $95\%$ of traffic runs on $\pi_{\text{base}}$ ($q_{\text{base}} = 0.90$):
+The remaining 95 percent of traffic runs on $\pi_{\text{base}}$ ($q_{\text{base}} = 0.90$):
 
-$$\text{Total baseline runs} = 9.41 \text{ hours} \times 57 \text{ tasks/hour} \approx 536.37 \text{ tasks}$$
-$$\text{Failures}_{\text{baseline}} = 536.37 \times (1 - 0.90) \approx 53.64 \text{ failures}$$
-$$\text{Total System Failures} = 7.06 + 53.64 \approx 60.7 \text{ failures}$$
+$$\text{Total baseline runs} = 15.07 \text{ hours} \times 57 \text{ tasks/hour} \approx 858.99 \text{ tasks}$$
+$$\text{Failures}_{\text{baseline}} = 858.99 \times (1 - 0.90) \approx 85.90 \text{ failures}$$
+$$\text{Total System Failures} = 11.30 + 85.90 \approx 97.20 \text{ failures}$$
 
 *Case B: Unmonitored Full Deployment ($\rho = 1.0$)*
-If $\pi_{\text{cand}}$ had been rolled out to $100\%$ of traffic, all incoming tasks over the $9.41$-hour window would experience the degraded success rate:
+If $\pi_{\text{cand}}$ had been rolled out to 100 percent of traffic, all incoming tasks over the $15.07$-hour window would experience the degraded success rate:
 
-$$\text{Total runs} = 9.41 \text{ hours} \times 60 \text{ tasks/hour} = 564.6 \text{ tasks}$$
-$$\text{Failures}_{\text{full}} = 564.6 \times (1 - 0.75) = 564.6 \times 0.25 \approx 141.15 \text{ failures}$$
+$$\text{Total runs} = 15.07 \text{ hours} \times 60 \text{ tasks/hour} \approx 904.20 \text{ tasks}$$
+$$\text{Failures}_{\text{full}} = 904.20 \times (1 - 0.75) = 904.20 \times 0.25 \approx 226.05 \text{ failures}$$
 
-*Comparison:*
+*Normal Baseline Expected Failures (without regression):*
+$$\text{Failures}_{\text{normal}} = 904.20 \times (1 - 0.90) = 90.42 \text{ failures}$$
+
+*Comparison of Excess Failures:*
 Routing traffic through the managed canary boundary prevents:
 
-$$\Delta_{\text{failures}} = 141.15 - 60.70 = 80.45 \text{ task failures}$$
+$$\Delta_{\text{failures}} = 226.05 - 97.20 = 128.85 \text{ task failures}$$
 
-The staged canary deployment reduces excess customer-impacting failures by {python} SizingCanaryTrafficCircuitBreaker.reduction_pct_str:
+The staged canary deployment reduces excess customer-impacting failures by `{python} SizingCanaryTrafficCircuitBreaker.reduction_pct_str`:
 
-$$\frac{141.15 - 60.70}{141.15 - 56.46} = \frac{80.45}{84.69} \approx 95.0\%$$
+$$\frac{226.05 - 97.20}{226.05 - 90.42} = \frac{128.85}{135.63} \approx 95.0\%$$
 
 isolating the blast radius to precisely the statistical threshold required to verify the operational defect.
 :::
@@ -1459,7 +1608,7 @@ isolating the blast radius to precisely the statistical threshold required to ve
 
 When offline benchmark suites, dark traffic shadow execution, and automated canary circuit breakers are operating in concert, an engineering organization establishes empirical control over the deployment of stochastic models. Yet, treating these release gates as isolated, ad-hoc scripts leaves an operational system vulnerable to telemetry fragmentation, uncoordinated data retention policies, and blind spots during real-time incident resolution. To achieve true production reliability, systems engineers must assemble these disparate capabilities—hermetic evaluation gyms, OpenTelemetry trajectory tracing, tail-based sampling budgets, forensic post-mortems, and staged canary gates—into a unified, continuously operating control plane. The architectural realization of that complete telemetry platform is the empirical observability harness.
 
-## Empirical observability harness synthesis {#sec-vol3-evaluation-synthesis}
+## Empirical Observability Harness Synthesis {#sec-vol3-evaluation-synthesis}
 
 Operating an autonomous agent fleet without an integrated control plane produces an insidious failure mode known as the *telemetry silo paradox*. When an agent fleet executes thousands of complex multi-step trajectories per hour across containerized sandboxes, model inference gateways, and distributed tool backends, each diagnostic subsystem captures only a partial, uncoordinated projection of system state. An offline evaluation harness reports synthetic benchmark pass rates; an OpenTelemetry collector records distributed spans across tool RPCs; an edge proxy measures HTTP latencies; and a logging pipeline aggregates unredacted console outputs into cold storage. When a candidate prompt update, routing heuristic, or model checkpoint regresses in production, these disconnected systems generate contradictory signals. The model gateway reports healthy token generation latencies and HTTP 200 completion statuses, while the tool sandbox experiences cascading permission faults. Meanwhile, the benchmark suite indicates zero regression because its static fixtures fail to mirror the non-deterministic state space of live user environments. The engineering team is left sifting through millions of disconnected JSON spans, unable to establish whether a catastrophic task abort originated from model hallucination, context window truncation, tool network timeouts, or an invariant violation in the host supervisor.
 
@@ -1469,7 +1618,7 @@ An empirical observability harness cannot exist as a fragmented collection of po
 The principles of closed-loop telemetry and fault isolation in distributed agent runtimes directly mirror the architectural foundations established by @sigelman2010dapper in Google's Dapper distributed systems tracing infrastructure, and the operational rigor codified by @beyer2016sre in Google's Site Reliability Engineering framework.
 :::
 
-The architectural challenge of agent observability is fundamentally an information routing and verification problem. Because neither an agent's report of its own success nor its chain of thought carries evidential weight (@sec-vol3-intro-closure-evidence), the runtime must capture objective, causal evidence instead: the exact prompt tokens dispatched to the model, the raw completion tokens returned, the cryptographic hashes of sandbox state transitions, the network payloads of tool executions, and the precise timing of every inference phase. To synthesize the individual mechanisms developed throughout this chapter into an industrial-grade deployment, we formalize the five-layer control-plane architecture, specify its strict production readiness contract, and derive the composite mathematical release gate that governs autonomous fleet operations.
+The architectural challenge of agent observability is fundamentally an information routing and verification problem. Because neither an agent's report of its own success nor its chain of thought carries evidential weight, the runtime must capture objective, causal evidence instead: the exact prompt tokens dispatched to the model, the raw completion tokens returned, the cryptographic hashes of sandbox state transitions, the network payloads of tool executions, and the precise timing of every inference phase. To synthesize the individual mechanisms developed throughout this chapter into an industrial-grade deployment, we formalize the five-layer control-plane architecture, specify its strict production readiness contract, and derive the composite mathematical release gate that governs autonomous fleet operations.
 
 ### The unified control-plane architecture {#sec-vol3-evaluation-synthesis-architecture}
 
@@ -1479,7 +1628,7 @@ The end-to-end empirical observability harness organizes the life cycle of agent
 ![](images/svg/observability-synthesis-architecture.svg)
 :::
 
-The architectural schematic in @fig-vol3-observability-synthesis-architecture maps the end-to-end dataflow and feedback control loops across all five functional layers. In Layer 1 (Execution Layer), host supervisors, model gateways, and microVM sandboxes emit rich OpenTelemetry span streams carrying W3C context headers and GenAI attributes with strictly bounded overhead ($\le 2\%$). In Layer 2 (Telemetry Collector), incoming spans undergo streaming secret redaction and enter an in-memory escrow buffer, where a tail-based classifier routes 100 percent of faults and stragglers to diagnostic services while downsampling routine completions to 2 percent to achieve a 93.1 percent volume reduction. In Layer 3 (Evaluation Engine), hermetic microVM gyms execute offline benchmark suites ($N \ge 2,500$) under Wilson score confidence bounds to gate candidates prior to deployment. In Layer 4 (Forensic Diagnostic Service), anomalous traces are subjected to deterministic replay and counterfactual perturbation, localizing the root cause of execution faults and synthesizing new regression test fixtures that are injected directly back into Layer 3's benchmark suite. Finally, in Layer 5 (Release Gateway), candidates undergo staged dark traffic mirroring and live canary routing governed by Wald sequential probability ratio testing (SPRT). Two critical upward feedback buses close the control loop: forensic diagnostics continually expand offline verification fixtures (left bus), while the release gateway dynamically regulates execution traffic weights and asserts sub-10-second rollback clamps upon anomaly detection (right bus).
+The architectural schematic in @fig-vol3-observability-synthesis-architecture maps the end-to-end dataflow and feedback control loops across all five functional layers. In Layer 1 (Execution Layer), host supervisors, model gateways, and microVM sandboxes emit rich OpenTelemetry span streams carrying W3C context headers and GenAI attributes with strictly bounded overhead of at most 2 percent. In Layer 2 (Telemetry Collector), incoming spans undergo streaming secret redaction and enter an in-memory escrow buffer, where a tail-based classifier routes 100 percent of faults and stragglers to diagnostic services while downsampling routine completions to 2 percent to achieve a 93.1 percent volume reduction. In Layer 3 (Evaluation Engine), hermetic microVM gyms execute offline benchmark suites ($N \ge 2,500$) under Wilson score confidence bounds to gate candidates prior to deployment. In Layer 4 (Forensic Diagnostic Service), anomalous traces are subjected to deterministic replay and counterfactual perturbation, localizing the root cause of execution faults and synthesizing new regression test fixtures that are injected directly back into Layer 3's benchmark suite. Finally, in Layer 5 (Release Gateway), candidates undergo staged dark traffic mirroring and live canary routing governed by Wald sequential probability ratio testing (SPRT). Two critical upward feedback buses close the control loop: forensic diagnostics continually expand offline verification fixtures (left bus), while the release gateway dynamically regulates execution traffic weights and asserts sub-10-second rollback clamps upon anomaly detection (right bus).
 
 The operational progression through these five layers proceeds across structured interfaces:
 
@@ -1506,7 +1655,7 @@ The input invariants, telemetry outputs, latency bounds, and dominant failure mo
 An agent runtime cannot be admitted into production simply because its individual unit tests pass. Before deploying a model, tool library, or orchestration graph to live traffic, the engineering platform must verify that the candidate system fulfills a rigorous *Telemetry and Evaluation Readiness Contract*. This contract guarantees that the agent runtime exposes the necessary interfaces for causal reconstruction, respects privacy invariants, and provides statistical guarantees under production workloads.
 
 ::: {.column-margin}
-The readiness contract applies the invariant closure principle of @sec-vol3-intro-invariant-closure. Rather than relying on the model to describe its own execution or police its own memory state, the host platform enforces context headers, cryptographic data masking, and container reset invariants.
+The readiness contract applies invariant closure. Rather than relying on the model to describe its own execution or police its own memory state, the host platform enforces context headers, cryptographic data masking, and container reset invariants.
 :::
 
 The readiness contract comprises four mandatory architectural specifications:
@@ -1604,7 +1753,7 @@ where $M = \frac{1}{2}(P_{\text{base}} + P_{\text{cand}})$. The criterion requir
 $$\mathcal{C}_{\text{drift}} \iff D_{\text{JS}}(P_{\text{base}} \parallel P_{\text{cand}}) \le \kappa_{\max}$$
 
 ```{python}
-#| label: lego-16-automated-canary-verification-and-release
+#| label: lego-13-automated-canary-verification-and-release
 #| echo: false
 # │ Show: Candidate runtime satisfies non-inferiority accuracy gate and throughput bounds.
 # │ How: Wilson score lower bounds and empirical throughput degradation vs production baseline.
@@ -1620,7 +1769,7 @@ class CanaryVerificationReleaseGates:
     throughput_deg_pct_str = fmt_percent(0.0824, precision=2, style="prose")
 ```
 
-::: {#nbk-16-automated-canary-verification-and-release .callout-notebook title="Canary verification and release gates"}
+::: {#nbk-13-automated-canary-verification-and-release .callout-notebook title="Canary verification and release gates"}
 An engineering team operates an autonomous database migration agent. The current production baseline runtime ($M_{\text{base}}$) was evaluated across $N_{\text{base}} = 1000$ trials in a hermetic gym, achieving $k_{\text{base}} = 820$ verified task completions ($\hat{p}_{\text{base}} = 0.820$). The cumulative wall-clock execution time across all 1000 trials was $24{,}500\,\text{s}$, yielding an empirical baseline verified throughput of:
 
 $$\Theta(M_{\text{base}}) = \frac{820}{24{,}500\,\text{s}} \approx 0.03347\,\text{tasks/s}$$
@@ -1654,12 +1803,12 @@ $$w^{-}(\hat{p}_{\text{cand}}, 400) = \frac{0.86480 - 0.03434}{1.00960} = \frac{
 
 Evaluating $\mathcal{C}_{\text{accuracy}}$:
 $$w^{-}(\hat{p}_{\text{cand}}, 400) \ge w^{-}(\hat{p}_{\text{base}}, 1000) - \delta_{\text{tol}} \iff 0.82256 \ge 0.79498 - 0.01000 = 0.78498$$
-The condition is satisfied, so the candidate is non-inferior within the $\delta_{\text{tol}}$ margin. It has not been shown to be better. A candidate lower bound above the baseline lower bound ($0.82256 > 0.79498$) is not a test of superiority, and applying the sample-size calculation of @sec-vol3-evaluation-wilson at this pass rate ($\bar{p} = 0.84$, $\Delta p = 0.04$) calls for about 1,320 tasks per arm, more than three times the candidate's 400. The gate may promote the candidate, but the four-point lead remains unconfirmed.
+The condition is satisfied, so the candidate is non-inferior within the $\delta_{\text{tol}}$ margin. It has not been shown to be better. A candidate lower bound above the baseline lower bound ($0.82256 > 0.79498$) is not a test of superiority, and applying the sample-size calculation at this pass rate ($\bar{p} = 0.84$, $\Delta p = 0.04$) calls for about 1,320 tasks per arm, more than three times the candidate's 400. The gate may promote the candidate, but the four-point lead remains unconfirmed.
 
 **Step 2: Evaluate the throughput degradation criterion ($\mathcal{C}_{\text{throughput}}$).**
 $$\text{Allowable Throughput Threshold} = (1 - 0.10) \cdot 0.03347 = 0.03012\,\text{tasks/s}$$
 $$\text{Observed Candidate Throughput} = 0.03071\,\text{tasks/s}$$
-Because $0.03071 \ge 0.03012$, the candidate satisfies the throughput criterion (exhibiting an {python} CanaryVerificationReleaseGates.throughput_deg_pct_str degradation, safely within the $10\%$ tolerance budget).
+Because $0.03071 \ge 0.03012$, the candidate satisfies the throughput criterion (exhibiting an `{python} CanaryVerificationReleaseGates.throughput_deg_pct_str` degradation, safely within the 10 percent tolerance budget).
 
 **Step 3: Evaluate latency, safety, and drift criteria.**
 
@@ -1696,7 +1845,7 @@ When evaluated continuously against dark traffic shadows and progressive canary 
 
 Yet, even when an engineering team implements every layer of this synthesis harness—instrumenting OpenTelemetry spans, enforcing streaming escrow, and evaluating Wilson score confidence bounds—subtle operational pitfalls and conceptual fallacies frequently undermine system reliability. Developing an intuitive understanding of how these mechanisms fail under real-world pressures is essential for every systems architect. We now turn to examine the critical fallacies and common operational pitfalls that arise when deploying, monitoring, and evaluating autonomous machine learning systems.
 
-## Fallacies and pitfalls {#sec-vol3-evaluation-fallacies}
+## Fallacies and Pitfalls {#sec-vol3-evaluation-fallacies}
 
 Designing and operating an observability control plane for non-deterministic agentic systems exposes an architectural tension: the software interfaces that govern transport-level execution provide no guarantee of semantic or physical correctness. Systems engineers accustomed to deterministic distributed services often port classical monitoring assumptions directly into stochastic agent architectures, producing brittle evaluation pipelines, catastrophic telemetry costs, and silent production regressions. Avoiding these operational failures requires treating the foundation model as an unprivileged, stochastic predictor whose execution traces must be isolated, mechanically verified, and statistically bounded.
 
@@ -1763,11 +1912,15 @@ Evaluation turns the question of whether an agent works into measurements the ag
 
 :::
 
-This chapter put causal and statistical release evidence (principle \ref{pri-vol3-release-evidence}) into operation. The composite gate's accuracy term counts verified state changes over independent tasks with a stated interval, the trace ties each failure to the calls that caused it, and replay was shown to reproduce recorded observations exactly but model output only in distribution, which is why attribution replays a failing turn many times. The worked gate also showed where that evidence stops, since a sample large enough to show a candidate is no worse can be far too small to show it is better. The verified completion rate gave trajectory goodput (@sec-vol3-intro-macro-vs-micro-efficiency) its per-trajectory acceptance test, so the accepted task that later parts train on and price is now something a runtime can count.
+This chapter put causal and statistical release evidence (principle \ref{pri-vol3-release-evidence}) into operation. The composite gate's accuracy term counts verified state changes over independent tasks with a stated interval, the trace ties each failure to the calls that caused it, and replay was shown to reproduce recorded observations exactly but model output only in distribution, which is why attribution replays a failing turn many times. The worked gate also showed where that evidence stops, since a sample large enough to show a candidate is no worse can be far too small to show it is better. The verified completion rate gave trajectory goodput its per-trajectory acceptance test, so the accepted task that later parts train on and price is now something a runtime can count.
+
+::: {.column-margin .margin-pointer}
+↪ Trajectory harvesting, verified trace curation, and synthetic preference filtering are developed in @sec-vol3-trajectory-curation.
+:::
 
 ::: {.callout-chapter-connection title="From evaluation to learning from trajectories"}
 
-Evaluation now tells us where an agent fails and certifies which trajectories succeeded. When failures persist after context, tool, and runtime fixes, can those verified trajectories teach the model to do better? They can, but only if the same discipline governs what enters training: triage first, admit only what a verifier supports, and keep evaluation tasks out of the training set. @Sec-vol3-trajectory-curation opens Part V by turning logged, verified trajectories into training data, and the gates of this chapter are what make learning from them safe.
+Evaluation now tells us where an agent fails and certifies which trajectories succeeded. When failures persist after context, tool, and runtime fixes, can those verified trajectories teach the model to do better? They can, but only if the same discipline governs what enters training: triage first, admit only what a verifier supports, and keep evaluation tasks out of the training set. Trajectory harvesting opens Part V by turning logged, verified trajectories into training data, and the gates of this chapter are what make learning from them safe.
 
 :::
 

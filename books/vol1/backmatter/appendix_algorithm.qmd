@@ -523,23 +523,23 @@ If we instead used forward-mode AD or finite differences to compute $\nabla f \i
 
 ## FlashAttention Tiling & Online Softmax Recurrence Proof {#sec-appdx-algorithm-flash-attention}
 
-Standard self-attention in transformers requires materializing an $N \times N$ attention score matrix in HBM, creating an $\mathcal{O}(N^2)$ memory bandwidth bottleneck. FlashAttention [@dao2022] eliminates this bottleneck by tiling query, key, and value matrices and recomputing attention using an online softmax recurrence without materializing intermediate scores to HBM.
+Standard self-attention in transformers requires materializing an $S \times S$ attention score matrix in HBM, creating an $\mathcal{O}(S^2)$ memory bandwidth bottleneck. FlashAttention [@dao2022] eliminates this bottleneck by tiling query, key, and value matrices and recomputing attention using an online softmax recurrence without materializing intermediate scores to HBM.
 
 ### Standard softmax HBM I/O bottleneck {#sec-appdx-algorithm-flash-attention-hbm-bottleneck}
 
-Given queries $\mathbf{Q} \in \mathbb{R}^{N \times d}$, keys $\mathbf{K} \in \mathbb{R}^{N \times d}$, and values $\mathbf{V} \in \mathbb{R}^{N \times d}$ for sequence length $N$ and head dimension $d$, standard attention evaluates:
-$$ \mathbf{S} = \mathbf{Q} \mathbf{K}^T \in \mathbb{R}^{N \times N}, \qquad \mathbf{A} = \text{softmax}(\mathbf{S}) \in \mathbb{R}^{N \times N}, \qquad \mathbf{O} = \mathbf{A} \mathbf{V} \in \mathbb{R}^{N \times d} $$
+Given queries $\mathbf{Q} \in \mathbb{R}^{S \times d}$, keys $\mathbf{K} \in \mathbb{R}^{S \times d}$, and values $\mathbf{V} \in \mathbb{R}^{S \times d}$ for sequence length $S$ and head dimension $d$, standard attention evaluates:
+$$ \mathbf{S} = \mathbf{Q} \mathbf{K}^T \in \mathbb{R}^{S \times S}, \qquad \mathbf{A} = \text{softmax}(\mathbf{S}) \in \mathbb{R}^{S \times S}, \qquad \mathbf{O} = \mathbf{A} \mathbf{V} \in \mathbb{R}^{S \times d} $$
 
-To prevent numerical overflow, row-wise softmax subtracts the row maximum $m_i = \max_{1 \le j \le N} S_{ij}$:
-$$ A_{ij} = \frac{\exp(S_{ij} - m_i)}{\sum_{k=1}^N \exp(S_{ik} - m_i)} $$
+To prevent numerical overflow, row-wise softmax subtracts the row maximum $m_i = \max_{1 \le j \le S} S_{ij}$:
+$$ A_{ij} = \frac{\exp(S_{ij} - m_i)}{\sum_{k=1}^S \exp(S_{ik} - m_i)} $$
 
 Standard GPU implementations execute this in three discrete kernel launches:
 
-1. Compute $\mathbf{S} = \mathbf{Q}\mathbf{K}^T$ in SRAM, then write $\mathbf{S} \in \mathbb{R}^{N \times N}$ to HBM ($\Theta(N^2)$ writes).
-2. Read $\mathbf{S}$ from HBM, compute row max $m$ and row sum $d$, compute $\mathbf{A} = \text{softmax}(\mathbf{S})$, write $\mathbf{A} \in \mathbb{R}^{N \times N}$ to HBM ($\Theta(N^2)$ reads + writes).
-3. Read $\mathbf{A}$ and $\mathbf{V}$ from HBM, compute $\mathbf{O} = \mathbf{A}\mathbf{V}$, write $\mathbf{O} \in \mathbb{R}^{N \times d}$ to HBM ($\Theta(N^2 + Nd)$ reads + writes).
+1. Compute $\mathbf{S} = \mathbf{Q}\mathbf{K}^T$ in SRAM, then write $\mathbf{S} \in \mathbb{R}^{S \times S}$ to HBM ($\Theta(S^2)$ writes).
+2. Read $\mathbf{S}$ from HBM, compute row max $m$ and row sum $d$, compute $\mathbf{A} = \text{softmax}(\mathbf{S})$, write $\mathbf{A} \in \mathbb{R}^{S \times S}$ to HBM ($\Theta(S^2)$ reads + writes).
+3. Read $\mathbf{A}$ and $\mathbf{V}$ from HBM, compute $\mathbf{O} = \mathbf{A}\mathbf{V}$, write $\mathbf{O} \in \mathbb{R}^{S \times d}$ to HBM ($\Theta(S^2 + Sd)$ reads + writes).
 
-Total HBM memory traffic is $\Theta(N^2 + Nd)$ elements. For $N = 8192$, $d = 128$ in FP16, $\mathbf{S}$ requires $8192^2 \times 2 \text{ B} = 134 \text{ MB}$ per head per layer. Because modern GPUs feature massive compute throughput relative to HBM bandwidth, repeatedly reading and writing intermediate matrices $\mathbf{S}$ and $\mathbf{A}$ leaves GPU execution units memory-bound.
+Total HBM memory traffic is $\Theta(S^2 + Sd)$ elements. For $S = 8192$, $d = 128$ in FP16, $\mathbf{S}$ requires $8192^2 \times 2 \text{ B} = 134 \text{ MB}$ per head per layer. Because modern GPUs feature massive compute throughput relative to HBM bandwidth, repeatedly reading and writing intermediate matrices $\mathbf{S}$ and $\mathbf{A}$ leaves GPU execution units memory-bound.
 
 ### Online softmax recurrence proof {#sec-appdx-algorithm-flash-attention-online-softmax-proof}
 
@@ -612,7 +612,9 @@ The measurements show the systems consequence of the I/O bound: substantially le
 
 ## Kaplan & Chinchilla Compute-Optimal Scaling Law Derivation {#sec-appdx-algorithm-chinchilla-derivation}
 
-Determining the compute-optimal allocation between model parameters $N$ and training dataset tokens $D$ for a given floating-point budget $C$ is a central decision in large language model system design. This section provides the rigorous mathematical derivation of compute-optimal scaling laws using Lagrange multipliers, contrasting the original findings of @kaplan2020scaling with the compute-optimal corrections of @hoffmann2022chinchilla.
+Determining the compute-optimal allocation between model parameters and training dataset tokens for a given floating-point budget $C$ is a central decision in large language model system design. This section provides the rigorous mathematical derivation of compute-optimal scaling laws using Lagrange multipliers, contrasting the original findings of @kaplan2020scaling with the compute-optimal corrections of @hoffmann2022chinchilla.
+
+*Notation note: To remain consistent with the original scaling literature of Kaplan et al. [-@kaplan2020scaling] and Hoffmann et al. [-@hoffmann2022chinchilla], this derivation denotes model parameters as $N$ (contrasting with the book's canonical parameter symbol $P$) and dataset size in tokens as $D$.*
 
 ### Parametric loss surface formulation {#sec-appdx-algorithm-chinchilla-loss-surface}
 

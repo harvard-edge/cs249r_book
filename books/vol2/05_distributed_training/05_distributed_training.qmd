@@ -1484,7 +1484,11 @@ Gradient mismatches occur when workers disagree on which tensors to synchronize 
 
 Straggler-induced delays arise because iteration time equals the slowest worker's time plus synchronization overhead. A single slow worker, whether due to thermal throttling, network congestion, or OS jitter, delays all workers and reduces cluster utilization. At 1,000 GPUs with 1 percent probability of straggler per GPU per step, approximately 10 GPUs straggle every iteration.
 
-Deployed systems address these issues through timeouts, heartbeat monitoring, and elastic training mechanisms. @Sec-fault-tolerance-reliability provides comprehensive coverage of failure detection, checkpointing strategies, and recovery mechanisms that enable training jobs to complete despite inevitable hardware failures.
+Deployed systems address these issues through timeouts, heartbeat monitoring, and elastic training mechanisms.
+
+::: {.column-margin .margin-pointer}
+↪ Failure detection, heartbeat monitors, and elastic recovery mechanisms are detailed in @sec-fault-tolerance-reliability.
+:::
 
 #### Parameter updating {#sec-distributed-training-systems-systems-parameter-updating-bb64}
 
@@ -2422,9 +2426,17 @@ Hierarchy-aware systems recover much of that lost efficiency by combining data p
 
 The scaling efficiency analysis shows that the effective parallelism strategy is not determined by the *model architecture alone* but by the *interaction*\index{Parallelism!infrastructure interaction} between the model's communication requirements and the infrastructure's bandwidth hierarchy. Each combination of parallelism strategy and infrastructure topology produces a different scaling efficiency curve, and selecting the wrong combination can waste a significant fraction of the cluster's capacity. The preceding napkin math showed pure data parallelism stalling near 37.5 percent efficiency at this scale; recovering that lost capacity means mapping each parallelism dimension onto the bandwidth tier that can carry its traffic. @Sec-distributed-training-systems-systems-hybrid-parallelism-12a0 works that combination through three concrete configurations and formalizes it as hierarchy-aware parallelism, once tensor and pipeline parallelism have been developed.
 
-Selecting and combining parallelism strategies therefore leads directly to the traffic they create. @Sec-network-fabrics examined how topology is co-designed with the parallelism mapping to maximize scaling efficiency; here the next question is how the collective operations themselves shape the step time. AllReduce operations can consume 10--40 percent of total training time in data parallel systems, and this overhead grows with cluster size. BERT-Large on 128 GPUs can experience communication overhead reaching a large fraction of total runtime, while GPT-3-scale models require tensor, pipeline, and data parallelism plus communication overlap to avoid data-parallel gradient synchronization dominating the step.
+Selecting and combining parallelism strategies therefore leads directly to the traffic they create. Topology is co-designed with the parallelism mapping to maximize scaling efficiency; the next question is how the collective operations themselves shape the step time. AllReduce operations can consume 10--40 percent of total training time in data parallel systems, and this overhead grows with cluster size. BERT-Large on 128 GPUs can experience communication overhead reaching a large fraction of total runtime, while GPT-3-scale models require tensor, pipeline, and data parallelism plus communication overlap to avoid data-parallel gradient synchronization dominating the step.
 
-AllReduce complexity depends on two components: latency $(\alpha)$ and bandwidth $(\beta)$. Ring AllReduce achieves bandwidth-efficient communication with $(N-1)/N$ utilization, while tree-based approaches offer lower latency at $\mathcal{O}(\log N)$ steps. The choice depends on message size: tree algorithms win for latency-dominated small messages, ring algorithms win for bandwidth-dominated large gradients. High-performance implementations such as NCCL use hierarchical algorithms that combine tree latency within nodes and ring bandwidth between nodes. @Sec-collective-communication provides detailed algorithm analysis, including complexity formulas, hierarchical variants, and topology-aware optimizations for large-scale collective operations.
+::: {.column-margin .margin-pointer}
+↩ Cluster topology design and physical bisection bandwidth limits are analyzed in @sec-network-fabrics.
+:::
+
+AllReduce complexity depends on two components: latency $(\alpha)$ and bandwidth $(\beta)$. Ring AllReduce achieves bandwidth-efficient communication with $(N-1)/N$ utilization, while tree-based approaches offer lower latency at $\mathcal{O}(\log N)$ steps. The choice depends on message size: tree algorithms win for latency-dominated small messages, ring algorithms win for bandwidth-dominated large gradients. High-performance implementations such as NCCL use hierarchical algorithms that combine tree latency within nodes and ring bandwidth between nodes.
+
+::: {.column-margin .margin-pointer}
+↪ Complexity models, ring versus tree topologies, and NCCL primitives are developed in @sec-collective-communication.
+:::
 
 ```{python}
 #| echo: false
@@ -5228,7 +5240,11 @@ class ThreeDParallelism:
 
 The Blackwell architecture provides a concrete example of how accelerator packaging changes the 3D parallelism trade-offs. First, NVLink 5 provides `{python} ThreeDParallelism.nvlink5_bw_tb_per_s_str` of bidirectional bandwidth per GPU, doubling the intra-node capacity of the Hopper generation. This allows for larger tensor parallelism $(t)$ groups (for example, $t=$ `{python} ThreeDParallelism.tp_blackwell_value_str` or $t=$ `{python} ThreeDParallelism.tp_alt_value_str` across multiple nodes) with lower latency overhead. Second, Blackwell adds FP4 Tensor Core support, improving low-precision throughput and memory efficiency for supported workloads; whether FP4 is used for training depends on the numerical recipe and software stack.
 
-For a `{python} ThreeDParallelism.params_trillion_str`-parameter model, a Blackwell-class configuration can use $t=$ `{python} ThreeDParallelism.tp_blackwell_value_str` (spanning two `{python} ThreeDParallelism.gpus_per_node_value_str`-GPU nodes via NVLink Switch) and $p=$ `{python} ThreeDParallelism.pp_blackwell_value_str`. Relative to the Hopper reference's $t=8$ and $p=16$, this keeps the model-partition product at 128 while halving the number of pipeline stages and its associated bubble term. The `{python} ThreeDParallelism.die_to_die_bw_tb_per_s_str` die-to-die interconnect within the Blackwell GPU further collapses the distinction between intra-chip and intra-package communication, allowing the two reticle-limited dies to function as a single high-bandwidth tensor parallel unit. The general systems lesson is that improving local bandwidth shifts pressure outward: once intra-node communication is less binding, rail-optimized topologies (@sec-network-fabrics-rail-optimized) and All-to-All optimization become more important for larger Machine Learning Fleet configurations.
+For a `{python} ThreeDParallelism.params_trillion_str`-parameter model, a Blackwell-class configuration can use $t=$ `{python} ThreeDParallelism.tp_blackwell_value_str` (spanning two `{python} ThreeDParallelism.gpus_per_node_value_str`-GPU nodes via NVLink Switch) and $p=$ `{python} ThreeDParallelism.pp_blackwell_value_str`. Relative to the Hopper reference's $t=8$ and $p=16$, this keeps the model-partition product at 128 while halving the number of pipeline stages and its associated bubble term. The `{python} ThreeDParallelism.die_to_die_bw_tb_per_s_str` die-to-die interconnect within the Blackwell GPU further collapses the distinction between intra-chip and intra-package communication, allowing the two reticle-limited dies to function as a single high-bandwidth tensor parallel unit. The general systems lesson is that improving local bandwidth shifts pressure outward: once intra-node communication is less binding, rail-optimized topologies and All-to-All optimization become more important for larger Machine Learning Fleet configurations.
+
+::: {.column-margin .margin-pointer}
+↩ Rail-optimized fabric topologies and rail-switch architectures are detailed in @sec-network-fabrics-rail-optimized.
+:::
 
 The same placement constraints can be made operational through design-space search.
 
@@ -6037,7 +6053,11 @@ Engineers use gradient accumulation to simulate larger batch sizes, reducing syn
 
 **Pitfall**: *Using fixed checkpoint intervals regardless of system characteristics.*
 
-Engineers checkpoint distributed training "every hour" or "every 1000 steps" based on intuition rather than analysis. @Sec-fault-tolerance-reliability derives the Young-Daly checkpoint law\index{Young-Daly Checkpoint Law!optimal interval} (principle \ref{pri-young-daly}); the training lesson here is that checkpoint cadence is not a constant. It depends on the mathematical relationship between checkpoint write cost and failure rate.
+Engineers checkpoint distributed training "every hour" or "every 1000 steps" based on intuition rather than analysis. The Young-Daly checkpoint law\index{Young-Daly Checkpoint Law!optimal interval} (principle \ref{pri-young-daly}) establishes that checkpoint cadence is not a constant: it depends on the mathematical relationship between checkpoint write cost and failure rate.
+
+::: {.column-margin .margin-pointer}
+↪ The Young-Daly checkpoint formula and MTBF derivations are established in @sec-fault-tolerance-reliability.
+:::
 
 ```{python}
 #| echo: false
@@ -6377,8 +6397,12 @@ Beneath the cube and its three axes lies a single trade. No way of splitting a m
 
 ::: {.callout-chapter-connection title="From logic to traffic"}
 
-Splitting the mathematics defines the *logical* traffic patterns of the Machine Learning Fleet. These patterns eventually reach the *physical* wires of the data center. @Sec-collective-communication opens the black box of the collective operations (AllReduce, AllToAll) that preserve consistency, moving from what must be sent to how it is routed through rings, trees, and rails.
+Splitting the mathematics defines the *logical* traffic patterns of the Machine Learning Fleet. These patterns eventually reach the *physical* wires of the data center, where collective operations preserve consistency and route communication through rings, trees, and rails.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Collective communication routing, ring and tree algorithms, and NCCL scheduling are explored in @sec-collective-communication.
 :::
 
 ::: { .quiz-end }

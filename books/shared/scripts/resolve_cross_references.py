@@ -376,6 +376,17 @@ PRINCIPLE_PARTS_ORDER: dict[str, list[str]] = {
         "vol2/parts/deployment_principles.qmd",
         "vol2/parts/responsible_fleet_principles.qmd",
     ],
+    "vol3": [
+        "vol3/01_introduction/01_introduction.qmd",
+        "vol3/parts/model_principles.qmd",
+        "vol3/02_foundation_model/02_foundation_model.qmd",
+        "vol3/parts/memory_principles.qmd",
+        "vol3/parts/tool_use_principles.qmd",
+        "vol3/parts/runtime_principles.qmd",
+        "vol3/parts/learning_principles.qmd",
+        "vol3/parts/scale_principles.qmd",
+        "vol3/parts/synthesis_principles.qmd",
+    ],
 }
 
 
