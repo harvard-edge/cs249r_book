@@ -659,6 +659,12 @@ class MilestoneCommand(BaseCommand):
             action='store_true',
             help='Skip prerequisite checks (not recommended)'
         )
+        run_parser.add_argument(
+            '--non-interactive', '-y', '--yes',
+            dest='non_interactive',
+            action='store_true',
+            help='Run non-interactively without prompting'
+        )
 
         # Info subcommand (NEW)
         info_parser = subparsers.add_parser(
@@ -1225,6 +1231,8 @@ class MilestoneCommand(BaseCommand):
 
     def _handle_run_command(self, args: Namespace) -> int:
         """Handle milestone run command - run a milestone with checks."""
+        if getattr(args, 'non_interactive', False):
+            os.environ["TINYTORCH_NON_INTERACTIVE"] = "1"
         console = self.console
         milestone_id = args.milestone_id
 
