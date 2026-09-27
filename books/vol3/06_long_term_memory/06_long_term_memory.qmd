@@ -891,7 +891,9 @@ As demonstrated in @tbl-vol3-rrf-scoring, `fd_cleanup_orphans` appears at Rank 2
 ![](images/svg/vol3_ch06_hnsw_rrf.svg)
 :::
 
-To achieve maximal precision before context insertion, state-of-the-art architectures deploy the multi-stage retrieval pipeline illustrated in @fig-vol3-hnsw-rrf. An agent query $Q$ (such as `"reclaim orphaned file descriptors"`) branches simultaneously into two complementary retrieval substrates: a sparse lexical engine scanning BM25 inverted postings for exact term and symbol matches, and a dense vector engine traversing an HNSW or IVF-PQ index for geometric cosine proximity. Each engine retrieves an initial broad candidate pool of top-100 entries. In Stage 2, Reciprocal Rank Fusion (RRF) reconciles their fundamentally incommensurate scoring scales by taking parameter-free reciprocal ranks ($\text{RRF}(d) = \sum_{m} \frac{1}{60 + r_m(d)}$), producing a consolidated candidate pool of $K_{\text{pool}} \approx 50$ documents. In Stage 3, this compressed candidate set is evaluated by a full-attention cross-encoder transformer model. Unlike decoupled bi-encoders, the cross-encoder computes full all-to-all token attention between query and candidate text ($\text{Softmax}(\mathbf{Q} \mathbf{K}^T / \sqrt{d_k})$), evaluating prepositional logic, syntactic negation, and subtle architectural invariants. Because cross-encoders evaluate only the 50 candidate passages pre-filtered by the hybrid stage, their $O(K_{\text{pool}} \cdot L^2)$ computational overhead requires mere tens of milliseconds, filtering out subtle semantic false positives and admitting only high-assurance evidence ($k^* \in [3, 5]$) into the agent's constrained working context window.
+To achieve maximal precision before context insertion, state-of-the-art architectures deploy the multi-stage retrieval pipeline illustrated in @fig-vol3-hnsw-rrf. An agent query $Q$ (such as `"reclaim orphaned file descriptors"`) branches simultaneously into two complementary retrieval substrates: a sparse lexical engine scanning BM25 inverted postings for exact term and symbol matches, and a dense vector engine traversing an HNSW or IVF-PQ index for geometric cosine proximity. Each engine retrieves an initial broad candidate pool of top-100 entries. In Stage 2, Reciprocal Rank Fusion (RRF) reconciles their fundamentally incommensurate scoring scales by taking parameter-free reciprocal ranks ($\text{RRF}(d) = \sum_{m} \frac{1}{60 + r_m(d)}$), producing a consolidated candidate pool of $K_{\text{pool}} \approx 50$ documents. In Stage 3, this compressed candidate set is evaluated by a full-attention cross-encoder transformer model. Unlike decoupled bi-encoders, the cross-encoder computes full all-to-all token attention between query and candidate text ($\text{Softmax}(\mathbf{Q} \mathbf{K}^T / \sqrt{d_k})$), evaluating prepositional logic, syntactic negation, and subtle architectural invariants.
+
+Because full all-to-all cross-encoder attention scales quadratically ($O(K_{\text{pool}} \cdot L^2)$), evaluating 50 candidate passages of 300 tokens each with a 100-token query requires processing 20,000 concatenated tokens through a transformer. On CPU or shared serving workers, a 50-candidate cross-encoder pass can consume $50\text{--}150\text{ ms}$, threatening tight interactive latency budgets ($T_{\text{budget}} \le 25\text{ ms}$). Production runtimes resolve this budget tension by either restricting the cross-encoder stage to a high-confidence top-slice ($K_{\text{pool}} \le 15$), deploying lightweight late-interaction architectures (such as ColBERT token-level MaxSim operations), or dispatching cross-encoder re-ranking asynchronously on non-interactive deliberation paths. This filters out subtle semantic false positives and admits only high-assurance evidence ($k^* \in [3, 5]$) into the agent's constrained working context window.
 
 Yet even this two-stage hybrid pipeline presumes that the information required to validate an architectural hypothesis resides entirely within a single localized text chunk. When an agent must resolve complex bugs in distributed systems, the evidence rarely sits neatly partitioned inside one file or function. The causal chain linking an anomalous HTTP payload to a corrupted storage record spans network deserializers, state machine dispatchers, memory allocators, and disk commit logs. If the required evidence must be assembled across multiple structural hops, individual passage retrieval—no matter how finely fused—fails to reveal the topology of the system. What persistent storage structures allow an agent to traverse these interconnected execution paths when single-hop hybrid queries cannot see beyond the horizon of an isolated chunk?
 
@@ -982,6 +984,8 @@ To enforce relevance during expansion, production systems apply *Personalized Pa
 
 $$s_i = \begin{cases} \frac{1}{|V_0|} & \text{if } v_i \in V_0 \\ 0 & \text{otherwise} \end{cases}$$
 
+where each vector element $s_i$ corresponds to vertex $v_i \in V$ for $i \in \{1, \dots, |V|\}$.
+
 The stationary probability distribution $\mathbf{p} \in \mathbb{R}^{|V|}$ satisfies the recursive balance equation:
 
 $$\mathbf{p} = (1 - \alpha)\mathbf{s} + \alpha \mathbf{P}^\top \mathbf{p}$$
@@ -1022,7 +1026,7 @@ class GraphNeighborhoodExpansion:
     v_ppr = 38
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    v_bfs = int(round(v0 * (d_out**d_hop)))
+    v_bfs = int(v0 * (d_out**d_hop))
     t_required = v_bfs * tokens_per_fn
     overflow_mult = t_required / s_max
 
@@ -1030,9 +1034,9 @@ class GraphNeighborhoodExpansion:
     t_remaining = s_max - t_ppr
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(v_bfs == 1311, "v_bfs")
-    check(t_required == 235_980, "t_required")
-    check(abs(overflow_mult - 28.8) < 0.1, "overflow_mult")
+    check(v_bfs == 1310, "v_bfs")
+    check(t_required == 235_800, "t_required")
+    check(abs(overflow_mult - 28.78) < 0.1, "overflow_mult")
     check(t_ppr == 6_840, "t_ppr")
     check(t_remaining == 1_352, "t_remaining")
 
@@ -1042,7 +1046,7 @@ class GraphNeighborhoodExpansion:
     tokens_per_fn_str = fmt_int(tokens_per_fn)
     v0_str = fmt_int(v0)
     d_hop_str = fmt_int(d_hop)
-    v_bfs_str = fmt_int(1310)
+    v_bfs_str = fmt_int(v_bfs)
     overflow_mult_str = fmt_multiple(overflow_mult, precision=1)
     v_ppr_str = fmt_int(v_ppr)
     t_remaining_str = fmt_int(t_remaining)
@@ -1181,10 +1185,14 @@ A naive implementation of agent memory couples storage mutation directly to the 
 
 This synchronous write design introduces a disastrous latency tax. Computing transformer embeddings and updating multi-tier index graphs introduces hundreds of milliseconds of compute delay ($T_{\text{index}} \gg 100\text{ ms}$), while invoking a secondary model for trajectory reflection introduces multi-second inference stalls ($T_{\text{reflect}} > 5\text{ s}$). Pausing the interactive agent loop ($B=1$) to execute heavy memory transformations on every turn violates interactive latency budgets and monopolizes accelerator resources.
 
-To reconcile real-time execution with durable learning, dependable agent runtimes decouple storage mutation into a **Dual Write Path Architecture** (@tbl-vol3-dual-write-path):
+To reconcile real-time execution with durable learning, dependable agent runtimes decouple storage mutation into a **Dual Write Path Architecture** (@fig-vol3-dual-write-path-quarantine and @tbl-vol3-dual-write-path):
 
 1. **The Fast Append Write Path (Synchronous, Sub-Millisecond):** On the critical interactive execution path, the runtime treats memory writes with append-only write-ahead semantics. When an agent emits a tool call, receives an environment observation, or records an immediate progress note, the supervisor appends the serialized event tuple directly to a local, append-only Write-Ahead Log (WAL) or in-memory circular buffer ($T_{\text{append}} < 1\text{ ms}$). No embedding models are invoked, no vector graphs are traversed, and no LLM reflections are triggered. The agent proceeds immediately to its next reasoning step with zero latency penalty.
 2. **The Asynchronous Background Reflection Path (Offline, Batch Consolidation):** Operating completely out-of-band—during multi-second tool waits, inter-turn idle windows, or after task completion—an asynchronous memory consolidation daemon ingests recent WAL segments. This background pipeline evaluates surprisal filters (@sec-vol3-memory-admission-gate), triggers deliberative LLM reflection passes [@shinn2023reflexion], extracts generalized semantic schemas (@sec-vol3-memory-consolidation), updates HNSW vector graphs, and applies tombstone bitsets to prune obsolete records.
+
+::: {#fig-vol3-dual-write-path-quarantine fig-env="figure" fig-pos="htb" fig-cap="**The Dual Write Path and Write Admission Quarantine Pipeline**: Decoupling synchronous, append-only write-ahead logging (WAL) on the interactive critical path ($< 1\\text{ ms}$) from asynchronous, surprisal-gated episodic consolidation. Path 1 appends raw event tuples $e_t$ to an in-memory ring buffer and local NVMe SSD without embedding computation or GPU stalls. Path 2 gates background episodic admission through a five-stage quarantine sieve—enforcing tenant isolation, secret scrubbing, SHA-256 provenance anchoring, deterministic verification closure, and geometric surprisal filtering ($\\\\mathcal{N}(e) > \\tau_{\\text{novel}}$)—before deliberative LLM reflection compresses traces and materializes them across vector indexes and in-memory tombstone bitsets." fig-alt="Systems architecture diagram of the Dual Write Path and Write Admission Quarantine Pipeline showing Tier 1 agent event emission splitting into Path 1 synchronous append-only WAL on the left and Path 2 asynchronous admission quarantine gate on the right, flowing into Tier 3 offline episodic consolidation and multi-substrate materialization, contrasted with naive synchronous coupling in Tier 4."}
+![](images/png/fig-vol3-dual-write-path-quarantine.png){#fig-vol3-dual-write-path-quarantine-img width="100%"}
+:::
 
 | **Operational Dimension**  | **Fast Append Write Path**                   | **Asynchronous Reflection Path**                    |
 |:---------------------------|:---------------------------------------------|:----------------------------------------------------|
@@ -1434,7 +1442,7 @@ class IndexSyncLatency:
 ::: {#nbk-06-latency-and-throughput-cost-of .callout-notebook title="Latency and throughput cost of index synchronization"}
 Consider an autonomous coding agent operating on a local workstation equipped with a dedicated NVIDIA L4 GPU (24 GB VRAM, 300 GB/s memory bandwidth) and an 8-core host CPU. The target codebase consists of $N = 10,000$ files averaging 1,200 tokens each. Documents are chunked into 512-token segments with 128-token overlap ($C = 4$ chunks per file).
 
-The dense vector store uses 1024-dimensional float16 embeddings. Local embedding inference via an optimized model (`bge-large-en-v1.5`) exhibits a forward-pass latency of $t_{\text{emb}} = 12\text{ ms}$ for batch size $B=1$, and $t_{\text{batch}} = 28\text{ ms}$ for batch size $B=16$. CPU-based tree-sitter AST parsing requires $t_{\text{ast}} = 3.5\text{ ms}$ per file, and lexical index updates require $t_{\text{lex}} = 2.0\text{ ms}$ per chunk.
+The dense vector store uses 1024-dimensional float16 embeddings. Local embedding inference via an optimized model (`bge-large-en-v1.5`) exhibits a forward-pass latency of $t_{\text{emb}} = 12\text{ ms}$ for batch size $B=1$, and $t_{\text{batch}} = 28\text{ ms}$ for batch size $B=16$. CPU-based Tree-sitter AST parsing requires $t_{\text{ast}} = 3.5\text{ ms}$ per file (representing a cold re-parse of un-cached source files from disk; sub-millisecond if incremental re-parsing over hot editor buffers), and lexical index updates require $t_{\text{lex}} = 2.0\text{ ms}$ per chunk.
 
 **The Workload:** The agent executes an automated refactoring tool that modifies $M =$ `{python} IndexSyncLatency.m_files_str` files simultaneously. Each file has changes affecting 2 chunks, generating a total of $M_{\text{chunks}} =$ `{python} IndexSyncLatency.m_chunks_str` dirty chunks.
 
