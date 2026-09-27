@@ -14,7 +14,7 @@ Consult this appendix when encountering specific physical systems bottlenecks, c
 | Receding-horizon trajectory planning under hard state bounds and actuator limits             | @sec-appendix-control-mpc          | Constrained Model Predictive Control (MPC) and recursive feasibility guarantees           |
 | A learned policy commands unsafe actions near physical obstacles or joint limits             | @sec-appendix-control-cbf          | Control Barrier Function (CBF-QP) safety filters and kinetic stopping insets              |
 | Mode switching (policy handover, human intervention, or fallback) causes torque spikes       | @sec-appendix-control-splines      | $C^2$ quintic splines, $C^1$ cubic Hermite interpolation, and bumpless transfer bounds    |
-| Sizing the validity horizon, spatial lease, or watchdog timeout for an action chunk          | @sec-appendix-control-reachability | Triangular, trapezoidal, and jerk-limited kinematic reachability envelopes                |
+| Sizing safety envelopes, validity leases, or worst-case sets under adversarial disturbance   | @sec-appendix-control-reachability | Kinematic profiles, watchdog leases, and Hamilton-Jacobi differential games               |
 | An articulated manipulator stalls, exceeds joint velocity limits, or loses control authority | @sec-appendix-control-kinematics   | Manipulator Jacobian singularities and Yoshikawa manipulability index                     |
 | Spatial sensor offsets or IMU-camera lever arms corrupt state estimation under rotation      | @sec-appendix-control-spatial      | Spatial coordinate transforms ($SE(3)$) and lever-arm acceleration propagation            |
 | Discrete sampling and transport latency erode control loop stability margins                 | @sec-appendix-control-zoh          | Discrete zero-order hold (ZOH) phase lag and latency margin penalties                     |
@@ -25,43 +25,43 @@ Consult this appendix when encountering specific physical systems bottlenecks, c
 
 ## Classical and Modern State-Space Control {#sec-appendix-control-statespace}
 
-In machine learning, inference evaluates a static parameterized mapping $\mathbf{y} = \pi_\theta(\mathbf{x})$: given an input observation, the network produces a prediction instantaneously without physical memory or temporal momentum. In physical AI, however, the robot's body is a continuous dynamic plant governed by differential equations (@sec-body-actuator-limits). Motor torque cannot change joint angles instantaneously; it injects acceleration, which must be integrated twice through time to alter position. The state-space framework formalizes this reality by modeling physical machines through their internal states, control inputs, and environmental disturbances.
+In machine learning, standard inference evaluates a static parameterized mapping $\mathbf{y} = \pi_\theta(\mathbf{x})$: given an input observation, the network produces a prediction instantaneously without physical memory or temporal momentum. When ML systems reason about temporal state, they employ discrete recurrent networks, continuous-depth models (Neural ODEs), or structured state-space models (SSMs such as S4 and Mamba). In physical AI, the robot's physical body is itself the ultimate continuous dynamic plant governed by differential equations (@sec-body-actuator-limits). The internal state $\mathbf{x}(t)$ is not an ungrounded latent vector; it stores physical momentum, kinetic energy, winding currents, and thermal mass. Furthermore, control inputs $\mathbf{u}(t)$ cannot overwrite state variables arbitrarily. Motor actuators inject generalized forces (torques, currents, pressures) that modify state rates of change $\dot{\mathbf{x}}(t)$, requiring integration over physical time to alter coordinates. The state-space framework formalizes this physical recurrence by modeling machines through continuous differential transitions, input couplings, and sensor projections.
 
 ### Linear and nonlinear state-space representations
 
 A continuous-time Linear Time-Invariant (LTI) dynamic system is represented in canonical state-space form as:\index{State-space representation!linear time-invariant}
 $$ \dot{\mathbf{x}}(t) = \mathbf{A} \mathbf{x}(t) + \mathbf{B} \mathbf{u}(t) $$
 $$ \mathbf{y}(t) = \mathbf{C} \mathbf{x}(t) + \mathbf{D} \mathbf{u}(t) $$
-where $\mathbf{x}(t) \in \mathbb{R}^n$ denotes the internal state vector (e.g., joint angles and velocities, motor winding currents, or vehicle pose and velocity), $\mathbf{u}(t) \in \mathbb{R}^m$ is the control input vector (e.g., commanded motor currents, voltages, or torques), and $\mathbf{y}(t) \in \mathbb{R}^p$ represents the measured output vector produced by physical sensors. The system matrix $\mathbf{A} \in \mathbb{R}^{n \times n}$ governs unforced internal system dynamics, the input matrix $\mathbf{B} \in \mathbb{R}^{n \times m}$ models control authority over state rates, the output matrix $\mathbf{C} \in \mathbb{R}^{p \times n}$ maps internal states to sensor measurements, and $\mathbf{D} \in \mathbb{R}^{p \times m}$ represents direct feedthrough (which vanishes in strictly proper physical plants, $\mathbf{D} = \mathbf{0}$).
+where $\mathbf{x}(t) \in \mathbb{R}^n$ denotes the internal state vector (e.g., joint angles and velocities, motor winding currents, or vehicle pose and velocity), $\mathbf{u}(t) \in \mathbb{R}^m$ is the control input vector (e.g., commanded motor currents, voltages, or torques), and $\mathbf{y}(t) \in \mathbb{R}^p$ represents the measured output vector produced by physical sensors. The system matrix $\mathbf{A} \in \mathbb{R}^{n \times n}$ governs unforced internal system dynamics (the natural drift vector field), the input matrix $\mathbf{B} \in \mathbb{R}^{n \times m}$ models control authority over state rates, the output matrix $\mathbf{C} \in \mathbb{R}^{p \times n}$ maps internal states to sensor measurements, and $\mathbf{D} \in \mathbb{R}^{p \times m}$ represents direct feedthrough (which vanishes in strictly proper physical plants, $\mathbf{D} = \mathbf{0}$).
 
 When physical dynamics include kinematic nonlinearities, centrifugal couplings, or configuration-dependent gravity (@sec-appendix-control-kinematics), the dynamics generalize to the control-affine nonlinear form:
 $$ \dot{\mathbf{x}}(t) = f(\mathbf{x}(t)) + g(\mathbf{x}(t)) \mathbf{u}(t) $$
-where $f: \mathbb{R}^n \to \mathbb{R}^n$ is the unforced drift vector field and $g: \mathbb{R}^n \to \mathbb{R}^{n \times m}$ is the control effectiveness matrix.
+where $f: \mathbb{R}^n \to \mathbb{R}^n$ is the unforced drift vector field and $g: \mathbb{R}^n \to \mathbb{R}^{n \times m}$ is the state-dependent control effectiveness matrix.
 
 #### Discrete-time equivalent under zero-order hold
 
-Digital microcontrollers and real-time operating systems execute periodic control loops at sampling frequency $f_s = 1 / T_s$ (e.g., $1\text{ kHz}$, $T_s = 1\text{ ms}$; see @sec-nervous-cadences). When the actuator driver holds control inputs constant across each clock tick using a Zero-Order Hold ($\mathbf{u}(t) = \mathbf{u}_k$ for $t \in [k T_s, (k+1) T_s)$), the continuous LTI dynamics integrate into the exact discrete-time state-space model:\index{State-space representation!discrete zero-order hold}
+Digital microcontrollers and real-time operating systems execute periodic control loops at sampling frequency $f_s = 1 / T_s$ (e.g., $1\text{ kHz}$, $T_s = 1\text{ ms}$; see @sec-nervous-cadences). When the actuator driver holds control inputs constant across each clock tick using a Zero-Order Hold ($\mathbf{u}(t) = \mathbf{u}_k$ for $t \in [k T_s, (k+1) T_s)$), the continuous LTI dynamics integrate into the exact discrete-time recurrence:\index{State-space representation!discrete zero-order hold}
 $$ \mathbf{x}_{k+1} = \mathbf{A}_d \mathbf{x}_k + \mathbf{B}_d \mathbf{u}_k $$
-where the discrete system matrices evaluate via the continuous matrix exponential:
+where the discrete transition operators evaluate via the continuous matrix exponential:
 $$ \mathbf{A}_d = e^{\mathbf{A} T_s} = \mathbf{I} + \mathbf{A} T_s + \frac{1}{2!} \mathbf{A}^2 T_s^2 + \dots $$
 $$ \mathbf{B}_d = \int_0^{T_s} e^{\mathbf{A} \tau} d\tau \, \mathbf{B} = \left( \mathbf{I} T_s + \frac{1}{2!} \mathbf{A} T_s^2 + \dots \right) \mathbf{B} $$
-When $\mathbf{A}$ is non-singular, the discrete input matrix simplifies to $\mathbf{B}_d = \mathbf{A}^{-1}(e^{\mathbf{A} T_s} - \mathbf{I})\mathbf{B}$. For short sampling intervals ($T_s \ll 1$), forward Euler truncation ($\mathbf{A}_d \approx \mathbf{I} + \mathbf{A} T_s$, $\mathbf{B}_d \approx \mathbf{B} T_s$) is common in informal analysis, but exact matrix exponentials are essential in real-time firmware to avoid spurious numerical drift and phase loss (@sec-appendix-control-zoh).
+When $\mathbf{A}$ is non-singular, the discrete input matrix simplifies to $\mathbf{B}_d = \mathbf{A}^{-1}(e^{\mathbf{A} T_s} - \mathbf{I})\mathbf{B}$. Just as deep learning state-space models (such as S4 and Mamba) discretize continuous differential operators to unroll recurrent state transitions across token sequences, physical AI controllers use this exact matrix exponential to propagate continuous multi-body mechanics across digital clock cycles. For short sampling intervals ($T_s \ll 1$), forward Euler truncation ($\mathbf{A}_d \approx \mathbf{I} + \mathbf{A} T_s$, $\mathbf{B}_d \approx \mathbf{B} T_s$) is common in informal analysis, but exact matrix exponentials are essential in real-time firmware to avoid spurious numerical drift and phase loss (@sec-appendix-control-zoh).
 
 ### Controllability and the kalman rank condition
 
-Before designing a tracking controller or evaluating whether an ungrounded neural policy proposal is physically realizable, an engineer must verify whether the physical actuators possess the structural capability to steer the system across its state space.\index{Controllability!Kalman rank criterion}
+In deep learning, model capacity measures whether a neural architecture can represent a desired target function class. In physical systems, **controllability** addresses an even more fundamental structural question: does the physical actuator allocation $\mathbf{B}$ provide sufficient authority to steer the plant's internal state $\mathbf{x}$ to an arbitrary target configuration across the continuous dynamic transition graph $\mathbf{A}$?\index{Controllability!Kalman rank criterion}
 
 An LTI system $(\mathbf{A}, \mathbf{B})$ is **controllable** if, for any initial state $\mathbf{x}(0) = \mathbf{x}_0$ and any desired target state $\mathbf{x}_f$, there exists a finite time $T > 0$ and an admissible input trajectory $\mathbf{u}(t)$ that transfers the state from $\mathbf{x}_0$ to $\mathbf{x}_f$. Kalman established that this condition holds if and only if the **controllability matrix** $\mathcal{C}$ has full row rank:
 $$ \mathcal{C} = \begin{bmatrix} \mathbf{B} & \mathbf{A}\mathbf{B} & \mathbf{A}^2\mathbf{B} & \dots & \mathbf{A}^{n-1}\mathbf{B} \end{bmatrix} \in \mathbb{R}^{n \times nm}, \quad \operatorname{rank}(\mathcal{C}) = n $$
-Notice the structural duality: the controllability matrix $\mathcal{C}$ evaluates whether control inputs can reach all $n$ state dimensions through powers of $\mathbf{A}$, exactly dual to the observability matrix $\mathcal{O}$ (@sec-appendix-control-covariance), which evaluates whether sensor outputs can distinguish all $n$ state dimensions.
+Each column block $\mathbf{A}^k \mathbf{B}$ represents the directional reach of the control input after $k$ steps of dynamic diffusion through the unforced system matrix $\mathbf{A}$. If $\operatorname{rank}(\mathcal{C}) < n$, the state space decomposes into a controllable subspace and an unactuated, unreachable null space. Notice the structural duality: the controllability matrix $\mathcal{C}$ evaluates whether control inputs can reach all $n$ state dimensions through powers of $\mathbf{A}$, exactly dual to the observability matrix $\mathcal{O}$ (@sec-appendix-control-covariance), which evaluates whether sensor outputs can distinguish all $n$ state dimensions.
 
 The Popov-Belevitch-Hautus (PBH) test provides an equivalent spectral condition: the pair $(\mathbf{A}, \mathbf{B})$ is controllable if and only if:
 $$ \operatorname{rank}\left( \begin{bmatrix} \lambda \mathbf{I} - \mathbf{A} & \mathbf{B} \end{bmatrix} \right) = n \quad \forall \lambda \in \mathbb{C} $$
-If $\operatorname{rank}([\lambda \mathbf{I} - \mathbf{A}, \mathbf{B}]) < n$ for some eigenvalue $\lambda$, the mode associated with $\lambda$ cannot be excited or influenced by any control input. If that mode is unstable ($\operatorname{Re}(\lambda) \ge 0$), the physical plant is un-stabilizable—an unyielding physical limitation that no learned policy or reinforcement learning algorithm can overcome. Floating-base legged systems (@sec-appendix-control-centroidal) and ball-and-beam plants are classic examples of underactuated systems where direct control authority over floating-base coordinates is zero, requiring dynamic coupling through ground contact wrenches to achieve stabilization.
+If $\operatorname{rank}([\lambda \mathbf{I} - \mathbf{A}, \mathbf{B}]) < n$ for some eigenvalue $\lambda$, the dynamic mode associated with $\lambda$ cannot be excited or influenced by any control input. If that uncontrollable mode is unstable ($\operatorname{Re}(\lambda) \ge 0$), the physical plant is un-stabilizable—an unyielding physical limitation that no learned policy, foundation model, or reinforcement learning algorithm can overcome. Floating-base legged systems (@sec-appendix-control-centroidal) and ball-and-beam plants are classic examples of underactuated systems where direct control authority over floating-base coordinates is zero ($\mathbf{B}_{\text{base}} = \mathbf{0}$), requiring dynamic coupling through ground contact wrenches to achieve stabilization.
 
 ### Linear quadratic regulator and algebraic riccati equations {#sec-appendix-control-lqr}
 
-In supervised learning, an optimization algorithm minimizes empirical loss across a training dataset. In modern optimal control, the **Linear Quadratic Regulator (LQR)**\index{Linear Quadratic Regulator!optimal control}\index{Algebraic Riccati Equation!continuous-time} solves an analytical optimization problem over the infinite-horizon temporal trajectory of the physical plant.
+In reinforcement learning, policy optimization searches for an action policy $\pi(a \mid s)$ that maximizes expected cumulative reward via trial-and-error sampling or learned critic networks, often struggling with high gradient variance, non-convex loss landscapes, and empirical stability failures. In contrast, for linear-quadratic physical dynamics, the **Linear Quadratic Regulator (LQR)**\index{Linear Quadratic Regulator!optimal control}\index{Algebraic Riccati Equation!continuous-time} provides the exact, analytical solution to the continuous-state Bellman optimality equation over an infinite time horizon.
 
 Given the controllable continuous LTI system $\dot{\mathbf{x}} = \mathbf{A}\mathbf{x} + \mathbf{B}\mathbf{u}$, the infinite-horizon regulator minimizes the quadratic performance objective:
 $$ J = \int_0^\infty \left( \mathbf{x}(t)^\top \mathbf{Q} \mathbf{x}(t) + \mathbf{u}(t)^\top \mathbf{R} \mathbf{u}(t) \right) dt $$
@@ -72,9 +72,9 @@ where:
 
 In physical AI systems, the choice of $\mathbf{Q}$ and $\mathbf{R}$ directly reflects hardware physics (@sec-body-actuator-limits): large penalties in $\mathbf{R}$ constrain motor currents, limit $I^2 R$ stator ohmic heating (@sec-appendix-systems-actuators), and protect gearboxes from high torque slew rates, while large diagonal entries in $\mathbf{Q}$ enforce strict tracking tolerances on safety-critical joint positions.
 
-By dynamic programming and Bellman's principle of optimality [@bellman1957dynamic; @astrom2021feedback], the optimal value function is quadratic: $V^*(\mathbf{x}) = \mathbf{x}^\top \mathbf{P} \mathbf{x}$, where the symmetric positive definite matrix $\mathbf{P} \succ \mathbf{0}$ is the unique stabilizing solution to the **Continuous Algebraic Riccati Equation (ARE)**:
+By dynamic programming and Bellman's principle of optimality [@bellman1957dynamic; @astrom2021feedback], the optimal value function (the continuous critic) is quadratic: $V^*(\mathbf{x}) = \mathbf{x}^\top \mathbf{P} \mathbf{x}$, where the symmetric positive definite matrix $\mathbf{P} \succ \mathbf{0}$ is the unique stabilizing solution to the **Continuous Algebraic Riccati Equation (ARE)**:
 $$ \mathbf{A}^\top \mathbf{P} + \mathbf{P} \mathbf{A} - \mathbf{P} \mathbf{B} \mathbf{R}^{-1} \mathbf{B}^\top \mathbf{P} + \mathbf{Q} = \mathbf{0} $$
-The optimal state-feedback control law is linear in the state:
+The optimal state-feedback control law (the optimal policy) is linear in the state:
 $$ \mathbf{u}^*(t) = -\mathbf{K} \mathbf{x}(t), \quad \text{where } \mathbf{K} = \mathbf{R}^{-1} \mathbf{B}^\top \mathbf{P} $$
 Substituting this control law into the plant dynamics yields the closed-loop system $\dot{\mathbf{x}} = (\mathbf{A} - \mathbf{B}\mathbf{K})\mathbf{x}$. When $(\mathbf{A}, \mathbf{B})$ is controllable and $(\mathbf{A}, \mathbf{Q}^{1/2})$ is observable, all closed-loop eigenvalues are strictly Hurwitz ($\operatorname{Re}(\lambda_i(\mathbf{A} - \mathbf{B}\mathbf{K})) < 0$), guaranteeing exponential convergence to the origin.
 
@@ -117,18 +117,20 @@ Where classical ML evaluates model quality through statistical cross-entropy or 
 
 ### Lyapunov stability and invariant sets {#sec-appendix-control-lyapunov}
 
-Consider an autonomous nonlinear dynamical system:\index{Lyapunov stability!asymptotic and exponential}\index{Invariant sets!domain of attraction}
+In machine learning, gradient descent optimizes a scalar objective over parameter weights: $\dot{\boldsymbol{\theta}} = -\nabla_{\boldsymbol{\theta}} \mathcal{L}(\boldsymbol{\theta})$, ensuring empirical loss monotonically decreases along the optimization trajectory. In physical control, a **Lyapunov function** $V(\mathbf{x})$ acts as an analytical, state-space loss function that certifies the asymptotic convergence of the physical plant's continuous trajectories without simulating every rollout to infinity.\index{Lyapunov stability!asymptotic and exponential}\index{Invariant sets!domain of attraction}
+
+Consider an autonomous nonlinear dynamical system:
 $$ \dot{\mathbf{x}}(t) = f(\mathbf{x}(t)), \quad f(\mathbf{0}) = \mathbf{0} $$
 where $\mathbf{x}^* = \mathbf{0}$ is an isolated equilibrium point, and $f: \mathcal{D} \to \mathbb{R}^n$ is locally Lipschitz on an open domain $\mathcal{D} \subset \mathbb{R}^n$ containing the origin.
 
 A continuously differentiable scalar function $V: \mathcal{D} \to \mathbb{R}$ is a **candidate Lyapunov function** if it is positive definite on $\mathcal{D}$:
 $$ V(\mathbf{0}) = 0, \quad V(\mathbf{x}) > 0 \quad \forall \mathbf{x} \in \mathcal{D} \setminus \{\mathbf{0}\} $$
-The directional derivative of $V$ along the trajectories of $\dot{\mathbf{x}} = f(\mathbf{x})$ evaluates via the Lie derivative:
-$$ \dot{V}(\mathbf{x}) = \nabla V(\mathbf{x})^\top \dot{\mathbf{x}} = \nabla V(\mathbf{x})^\top f(\mathbf{x}) = L_f V(\mathbf{x}) $$
-Alexander Lyapunov established three foundational stability tiers [@slotine1991applied]:
+The directional derivative of $V$ along the trajectories of $\dot{\mathbf{x}} = f(\mathbf{x})$ evaluates via the multivariable chain rule:
+$$ \dot{V}(\mathbf{x}) = \nabla V(\mathbf{x})^\top \dot{\mathbf{x}} = \nabla V(\mathbf{x})^\top f(\mathbf{x}) = \nabla V(\mathbf{x}) \cdot f(\mathbf{x}) $$
+Control theory traditionally denotes this inner product as the **Lie derivative** $L_f V(\mathbf{x}) = \nabla V(\mathbf{x}) \cdot f(\mathbf{x})$. For an ML systems engineer, this is simply the **directional derivative** or Jacobian-vector product ($JVP$) of the scalar loss $V$ in the direction of the physical drift vector field $f(\mathbf{x})$. Alexander Lyapunov established three foundational stability tiers [@slotine1991applied]:
 
 1. **Stability in the Sense of Lyapunov:** If $\dot{V}(\mathbf{x}) \le 0$ for all $\mathbf{x} \in \mathcal{D}$, the origin is stable. Trajectories starting arbitrarily close to the origin remain trapped within bounded neighborhood contours for all $t \ge 0$.
-2. **Asymptotic Stability:** If $\dot{V}(\mathbf{x}) < 0$ for all $\mathbf{x} \in \mathcal{D} \setminus \{\mathbf{0}\}$, the origin is asymptotically stable: $\lim_{t \to \infty} \mathbf{x}(t) = \mathbf{0}$.
+2. **Asymptotic Stability:** If $\dot{V}(\mathbf{x}) < 0$ for all $\mathbf{x} \in \mathcal{D} \setminus \{\mathbf{0}\}$, the origin is asymptotically stable: $\lim_{t \to \infty} \mathbf{x}(t) = \mathbf{0}$. The system is guaranteed to descend the energy landscape toward the origin.
 3. **Exponential Stability:** If there exist positive constants $c_1, c_2, c_3 > 0$ such that $c_1 \|\mathbf{x}\|^2 \le V(\mathbf{x}) \le c_2 \|\mathbf{x}\|^2$ and $\dot{V}(\mathbf{x}) \le -c_3 \|\mathbf{x}\|^2$, trajectories converge exponentially:
    $$ \|\mathbf{x}(t)\| \le \sqrt{\frac{c_2}{c_1}} \|\mathbf{x}_0\| e^{-\frac{c_3}{2 c_2} t} \quad \forall t \ge 0 $$
 
@@ -138,9 +140,11 @@ The sublevel set $\Omega_c = \{ \mathbf{x} \in \mathcal{D} \mid V(\mathbf{x}) \l
 
 ### Control lyapunov functions and stabilization
 
-For a controlled system $\dot{\mathbf{x}} = f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}$, a candidate Lyapunov function $V(\mathbf{x})$ is a **Control Lyapunov Function (CLF)** [@ames2014control; @slotine1991applied] if there exists an admissible control input $\mathbf{u} \in \mathcal{U}$ that forces $V$ to decrease at every non-equilibrium state:\index{Control Lyapunov Function!stabilization}
+For a controlled system $\dot{\mathbf{x}} = f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}$, the directional derivative along the closed-loop dynamics splits into unforced drift and control effectiveness:\index{Control Lyapunov Function!stabilization}
+$$ \dot{V}(\mathbf{x}, \mathbf{u}) = \nabla V(\mathbf{x}) \cdot (f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}) = L_f V(\mathbf{x}) + L_g V(\mathbf{x}) \mathbf{u} $$
+where $L_f V(\mathbf{x}) = \nabla V(\mathbf{x}) \cdot f(\mathbf{x}) \in \mathbb{R}$ is the unforced directional drift and $L_g V(\mathbf{x}) = \nabla V(\mathbf{x})^\top g(\mathbf{x}) \in \mathbb{R}^{1 \times m}$ is the control effectiveness gradient. A candidate Lyapunov function $V(\mathbf{x})$ is a **Control Lyapunov Function (CLF)** [@ames2014control; @slotine1991applied] if there exists an admissible control input $\mathbf{u} \in \mathcal{U}$ that forces $V$ to decrease at every non-equilibrium state:
 $$ \inf_{\mathbf{u} \in \mathcal{U}} \left[ L_f V(\mathbf{x}) + L_g V(\mathbf{x}) \mathbf{u} + \alpha_V(V(\mathbf{x})) \right] \le 0 \quad \forall \mathbf{x} \in \mathcal{D} \setminus \{\mathbf{0}\} $$
-where $\alpha_V$ is an extended class $\mathcal{K}$ function. When this inequality is satisfied, the feedback controller guarantees asymptotic convergence to the origin.
+where $\alpha_V$ is an extended class $\mathcal{K}$ function (a strictly increasing function with $\alpha_V(0)=0$). For ML practitioners, $\alpha_V(V(\mathbf{x}))$ acts as a state-dependent convergence rate floor: the larger the current error $V(\mathbf{x})$, the steeper the required rate of descent. When this inequality is satisfied, the feedback controller guarantees asymptotic convergence to the origin.
 
 #### The duality between clfs and cbfs
 
@@ -215,73 +219,88 @@ As framed in @sec-planning-paradigms, modern physical AI embodies a direct trade
 
 ## Safety and Control Barrier Functions {#sec-appendix-control-cbf}
 
-An independent enforcer can check a learned policy proposal against a control barrier constraint before actuation. A Control Barrier Function (CBF)\index{Control barrier function!safety filtering} describes a candidate invariant set; its protection depends on observed state, feasible input, plant model, and sampled response time. Torque ceilings and obstacle clearance may require separate constraints.
+An independent enforcer can check a learned policy proposal against a control barrier constraint before actuation. In reliable software systems, safety properties are proven using inductive loop invariants: if an invariant holds initially and is preserved across every state transition, it holds for all executions. A Control Barrier Function (CBF)\index{Control barrier function!safety filtering} lifts this principle to continuous physical systems, framing safety as an inductive loop invariant over continuous trajectories:
 
-Let the system state be $x \in \mathcal{X} \subset \mathbb{R}^n$ and the control input be $u \in \mathcal{U} \subset \mathbb{R}^m$. Suppose we define a safe operating set $\mathcal{S}$ as the superlevel set of a continuously differentiable scalar function $h(x)$:
-$$ \mathcal{S} = \{ x \in \mathcal{X} \mid h(x) \ge 0 \}, \quad \partial \mathcal{S} = \{ x \in \mathcal{X} \mid h(x) = 0 \} $$
+1. **Base Case:** The system initializes within the safe operating envelope: $h(\mathbf{x}_0) \ge 0$.
+2. **Inductive Step:** Along all continuous transitions governed by plant dynamics and control inputs $\mathbf{u}_t \in \mathcal{U}$, the instantaneous rate of change satisfies:
+   $$ \dot{h}(\mathbf{x}_t, \mathbf{u}_t) \ge -\alpha(h(\mathbf{x}_t)) $$
+   where $\alpha(\cdot)$ is an extended class $\mathcal{K}_\infty$ function (or linear decay $\alpha(h) = \alpha h$ with design bandwidth $\alpha > 0$). As the state approaches the boundary ($h(\mathbf{x}_t) \to 0^+$), the permissible rate of decrease $-\alpha(h)$ contracts to zero, enforcing $\dot{h}(\mathbf{x}_t, \mathbf{u}_t) \ge 0$. Consequently, $h(\mathbf{x}_t)$ can never cross zero with a negative slope.
+3. **Conclusion:** By induction over continuous time, $h(\mathbf{x}_t) \ge 0$ for all $t \ge 0$, guaranteeing forward invariance of the safe set $\mathcal{S}$.
 
-- $h(x) > 0$ when the system is strictly inside the safe interior.
-- $h(x) = 0$ on the boundary of the safe set.
-- $h(x) < 0$ when the system violates safety.
+Let the system state be $\mathbf{x} \in \mathcal{X} \subset \mathbb{R}^n$ and the control input be $\mathbf{u} \in \mathcal{U} \subset \mathbb{R}^m$. Suppose we define a safe operating set $\mathcal{S}$ as the superlevel set of a continuously differentiable scalar certificate function $h(\mathbf{x})$:
+$$ \mathcal{S} = \{ \mathbf{x} \in \mathcal{X} \mid h(\mathbf{x}) \ge 0 \}, \quad \partial \mathcal{S} = \{ \mathbf{x} \in \mathcal{X} \mid h(\mathbf{x}) = 0 \} $$
+
+- $h(\mathbf{x}) > 0$ when the system is strictly inside the safe interior.
+- $h(\mathbf{x}) = 0$ on the boundary of the safe set.
+- $h(\mathbf{x}) < 0$ when the system violates safety.
 
 ### Lie derivatives and forward invariance
 
-Forward invariance\index{Forward invariance!Nagumo viability} means a trajectory starting in $\mathcal{S}$ remains there for the modeled time interval. This claim requires an initial state in $\mathcal{S}$ and an admissible control at every reachable state.
-
-For a continuously differentiable relative-degree-one barrier under continuous-time control, one sufficient condition is:[^fn-control-nagumo-viability]
-$$ \dot{h}(x, u) \ge -\alpha h(x) $$
-where $\alpha > 0$ is a chosen gain in $\text{s}^{-1}$, not a measured braking bandwidth.
+Forward invariance\index{Forward invariance!Nagumo viability} means a trajectory starting in $\mathcal{S}$ remains in $\mathcal{S}$ for all future time. For a control-affine continuous dynamical system $\dot{\mathbf{x}} = \mathbf{f}(\mathbf{x}) + \mathbf{g}(\mathbf{x})\mathbf{u}$, the total time derivative $\dot{h}$ evaluates via the multivariate chain rule as directional derivatives along system dynamics:[^fn-control-nagumo-viability]
+$$ \dot{h}(\mathbf{x}, \mathbf{u}) = \nabla h(\mathbf{x})^\top \dot{\mathbf{x}} = \nabla h(\mathbf{x})^\top \mathbf{f}(\mathbf{x}) + \left(\nabla h(\mathbf{x})^\top \mathbf{g}(\mathbf{x})\right)\mathbf{u} = L_{\mathbf{f}} h(\mathbf{x}) + L_{\mathbf{g}} h(\mathbf{x}) \mathbf{u} $$
+In machine learning systems terminology, the Lie derivatives\index{Lie derivative!directional clearance decay} $L_{\mathbf{f}} h(\mathbf{x})$ and $L_{\mathbf{g}} h(\mathbf{x})$ are Jacobian-vector products (JVPs) of the scalar safety function $h$ evaluated along the drift and control vector fields:
+$$ L_{\mathbf{f}} h(\mathbf{x}) = \nabla h(\mathbf{x}) \cdot \mathbf{f}(\mathbf{x}) \in \mathbb{R}, \quad L_{\mathbf{g}} h(\mathbf{x}) = \nabla h(\mathbf{x})^\top \mathbf{g}(\mathbf{x}) \in \mathbb{R}^{1 \times m} $$
+where $L_{\mathbf{f}} h(\mathbf{x})$ captures the unforced directional drift of clearance (passive momentum, centrifugal forces, gravity), and $L_{\mathbf{g}} h(\mathbf{x})$ is the directional control effectiveness row vector mapping control inputs into instantaneous safety margin growth.
 
 [^fn-control-nagumo-viability]: **Boundary Viability**\index{Nagumo viability theorem!boundary condition}: Nagumo's tangent-cone condition characterizes invariance under regularity assumptions. The displayed CBF inequality is a sufficient design condition for the stated smooth control-affine model. A sampled implementation needs a separate bound for state error, computation, hold interval, and actuator response; failure of one candidate inequality does not prove contact within one integration step.
 
-When $h(x)$ is large, the condition permits some decrease. At $h(x)=0$, it requires $\dot h\ge0$ in the continuous model. The selected barrier must first encode the plant's momentum and available braking; raw distance cannot be regulated directly by torque in a second-order plant.
-
-For a control-affine dynamical system $\dot{x} = f(x) + g(x)u$, the time derivative $\dot{h}$ is evaluated via chain-rule directional derivatives (Lie derivatives\index{Lie derivative!directional clearance decay}):
-$$ \dot{h}(x, u) = \frac{\partial h}{\partial x} \dot{x} = \frac{\partial h}{\partial x} f(x) + \frac{\partial h}{\partial x} g(x) u = L_f h(x) + L_g h(x) u $$
-where $L_f h(x) \in \mathbb{R}$ represents the unforced drift of clearance (momentum, gravity), and $L_g h(x) \in \mathbb{R}^{1 \times m}$ represents the directional control effectiveness matrix.
-
 ### Nagumo's viability theorem and contingent cones
 
-The geometric foundation of set invariance for dynamic systems is Nagumo's Viability Theorem [@blanchini1999set]. Let $\mathcal{S} \subset \mathbb{R}^n$ be a non-empty closed set. The **Bouligand contingent cone** (or tangent cone) $T_{\mathcal{S}}(x)$ to $\mathcal{S}$ at a point $x \in \mathcal{S}$ is defined as:\index{Nagumo theorem!contingent cone}\index{Set invariance!Bouligand cone}
+The geometric foundation of set invariance for dynamic systems is Nagumo's Viability Theorem [@blanchini1999set]. Let $\mathcal{S} \subset \mathbb{R}^n$ be a non-empty closed set. The **Bouligand contingent cone** (or tangent cone) $T_{\mathcal{S}}(\mathbf{x})$ to $\mathcal{S}$ at a point $\mathbf{x} \in \mathcal{S}$ is defined as:\index{Nagumo theorem!contingent cone}\index{Set invariance!Bouligand cone}
 $$
-T_{\mathcal{S}}(x) = \left\{ v \in \mathbb{R}^n \;\middle|\; \liminf_{\tau \to 0^+} \frac{\text{dist}(x + \tau v, \mathcal{S})}{\tau} = 0 \right\}
+T_{\mathcal{S}}(\mathbf{x}) = \left\{ \mathbf{v} \in \mathbb{R}^n \;\middle|\; \liminf_{\tau \to 0^+} \frac{\text{dist}(\mathbf{x} + \tau \mathbf{v}, \mathcal{S})}{\tau} = 0 \right\}
 $$
-where $\text{dist}(y, \mathcal{S}) = \inf_{z \in \mathcal{S}} \|y - z\|$. Nagumo's theorem proves that for an autonomous system $\dot{x} = f(x)$ with locally Lipschitz vector field $f$, the set $\mathcal{S}$ is forward-invariant if and only if the velocity vector satisfies the **subtangentiality condition**:
+where $\text{dist}(\mathbf{y}, \mathcal{S}) = \inf_{\mathbf{z} \in \mathcal{S}} \|\mathbf{y} - \mathbf{z}\|$. Nagumo's theorem proves that for an autonomous system $\dot{\mathbf{x}} = \mathbf{f}(\mathbf{x})$ with locally Lipschitz vector field $\mathbf{f}$, the set $\mathcal{S}$ is forward-invariant if and only if the velocity vector satisfies the **subtangentiality condition**:
 $$
-f(x) \in T_{\mathcal{S}}(x) \quad \forall x \in \mathcal{S}
+\mathbf{f}(\mathbf{x}) \in T_{\mathcal{S}}(\mathbf{x}) \quad \forall \mathbf{x} \in \mathcal{S}
 $$
-In the interior $\text{int}(\mathcal{S})$, $T_{\mathcal{S}}(x) = \mathbb{R}^n$, so the condition is trivially satisfied. On the boundary $\partial \mathcal{S}$ of a smooth set defined by the zero-superlevel set of $h(x)$ ($\mathcal{S} = \{x \mid h(x) \ge 0\}$ with $\nabla h(x) \neq \mathbf{0}$), the inward normal is $\nabla h(x)$. The contingent cone becomes the closed half-space pointing into or along the tangent plane of the safe set:
+In the interior $\text{int}(\mathcal{S})$, $T_{\mathcal{S}}(\mathbf{x}) = \mathbb{R}^n$, so the condition is trivially satisfied. On the boundary $\partial \mathcal{S}$ of a smooth set defined by the zero-superlevel set of $h(\mathbf{x})$ ($\mathcal{S} = \{\mathbf{x} \mid h(\mathbf{x}) \ge 0\}$ with $\nabla h(\mathbf{x}) \neq \mathbf{0}$), the inward normal is $\nabla h(\mathbf{x})$. The contingent cone becomes the closed half-space of inward or tangent velocities:
 $$
-T_{\mathcal{S}}(x) = \left\{ v \in \mathbb{R}^n \;\middle|\; \nabla h(x)^\top v \ge 0 \right\} \quad \forall x \in \partial \mathcal{S}
+T_{\mathcal{S}}(\mathbf{x}) = \left\{ \mathbf{v} \in \mathbb{R}^n \;\middle|\; \nabla h(\mathbf{x})^\top \mathbf{v} \ge 0 \right\} \quad \forall \mathbf{x} \in \partial \mathcal{S}
 $$
-Consequently, the system cannot exit the set if and only if $\dot{h}(x) = \nabla h(x)^\top f(x) \ge 0$ whenever $h(x) = 0$.
+Consequently, the system cannot exit the set if and only if the directional derivative satisfies $\dot{h}(\mathbf{x}) = \nabla h(\mathbf{x})^\top \mathbf{f}(\mathbf{x}) \ge 0$ whenever $h(\mathbf{x}) = 0$.
 
-Control Barrier Functions [@ames2019control] extend Nagumo's subtangentiality to controlled affine systems $\dot{x} = f(x) + g(x)u$. For safety, there must exist an admissible control $u \in \mathcal{U}$ such that $f(x) + g(x)u \in T_{\mathcal{S}}(x)$. By introducing an extended class $\mathcal{K}_\infty$ decay rate $\alpha(h(x))$ satisfying $\alpha(0) = 0$, the CBF inequality:
+Control Barrier Functions [@ames2019control] extend Nagumo's subtangentiality to controlled affine systems $\dot{\mathbf{x}} = \mathbf{f}(\mathbf{x}) + \mathbf{g}(\mathbf{x})\mathbf{u}$. For safety, there must exist an admissible control $\mathbf{u} \in \mathcal{U}$ such that $\mathbf{f}(\mathbf{x}) + \mathbf{g}(\mathbf{x})\mathbf{u} \in T_{\mathcal{S}}(\mathbf{x})$. By introducing an extended class $\mathcal{K}_\infty$ decay rate $\alpha(h(\mathbf{x}))$ satisfying $\alpha(0) = 0$, the CBF inequality:
 $$
-\dot{h}(x, u) = L_f h(x) + L_g h(x)u \ge -\alpha(h(x))
+\dot{h}(\mathbf{x}, \mathbf{u}) = L_{\mathbf{f}} h(\mathbf{x}) + L_{\mathbf{g}} h(\mathbf{x})\mathbf{u} \ge -\alpha(h(\mathbf{x}))
 $$
-ensures that as the state approaches the boundary ($h(x) \to 0$), the admissible decay rate contracts to zero ($-\alpha(h(x)) \to 0$). At the boundary $h(x) = 0$, it strictly enforces $\dot{h}(x, u) \ge 0$, directly preserving Nagumo's subtangentiality invariant and preventing trajectory exit into the unsafe set.
+ensures that as the state approaches the boundary ($h(\mathbf{x}) \to 0$), the admissible decay rate contracts to zero ($-\alpha(h(\mathbf{x})) \to 0$). At the boundary $h(\mathbf{x}) = 0$, it strictly enforces $\dot{h}(\mathbf{x}, \mathbf{u}) \ge 0$, directly preserving Nagumo's subtangentiality invariant and preventing trajectory exit into the unsafe set.
 
 ### Relative degree and kinetic stopping insets
 
-The **relative degree**\index{Relative degree!definition} $r$ of a barrier function $h(x)$ is the number of times it must be differentiated with respect to time before the control input $u$ explicitly appears:
-$$ L_g L_f^k h(x) = 0 \quad \forall k < r - 1, \quad \text{and} \quad L_g L_f^{r-1} h(x) \neq 0 $$
-For a one-dimensional approach to a stationary obstacle, let raw clearance be $h_r=D$, approach speed $v>0$, and commanded approach acceleration $a_{\rm cmd}$. Then $\dot D=-v$ and $\ddot D=-a_{\rm cmd}$. Acceleration enters raw clearance only at the second derivative, so $h_r$ has relative degree two with respect to this input.
-One approach uses a kinetic inset. In a one-dimensional approach to a stationary obstacle, let $D$ be measured clearance, $v>0$ approach speed, and $a_{\text{brake}}>0$ a validated *lower bound* on available braking deceleration for the operating state. Then:\index{Kinetic stopping distance!barrier inset}
-$$ h_k(D,v)=D-\frac{v^2}{2a_{\text{brake}}},\qquad \dot D=-v,\quad \dot v=a_{\rm cmd}. $$
-For immediate commanded acceleration, $\dot h_k=-v-(v/a_{\text{brake}})a_{\rm cmd}$. Thus $\dot h_k+\gamma h_k\ge0$ gives the affine constraint $a_{\rm cmd}\le(a_{\text{brake}}/v)(\gamma h_k-v)$ for $v>0$. At standstill, use a separate start/clearance rule. State error, sampling, and brake-onset delay need additional clearance reserves; the continuous calculation alone does not cover them.
+The **relative degree**\index{Relative degree!definition} $r$ of a barrier function $h(\mathbf{x})$ is the number of times it must be differentiated with respect to continuous time before the control input $\mathbf{u}$ explicitly appears:
+$$ L_{\mathbf{g}} L_{\mathbf{f}}^k h(\mathbf{x}) = \mathbf{0} \quad \forall k < r - 1, \quad \text{and} \quad L_{\mathbf{g}} L_{\mathbf{f}}^{r-1} h(\mathbf{x}) \neq \mathbf{0} $$
+For a one-dimensional approach to a stationary obstacle, let raw spatial clearance be $h_r = D$, approach speed $v > 0$, and commanded approach acceleration $a_{\text{cmd}}$. Differentiating reveals:
+$$ \dot{D} = -v, \quad \ddot{D} = -a_{\text{cmd}} $$
+Because acceleration enters raw clearance only at the second time derivative ($L_{\mathbf{g}} h_r = 0$ and $L_{\mathbf{g}} L_{\mathbf{f}} h_r \neq 0$), raw clearance has **relative degree two** ($r = 2$) with respect to force or acceleration inputs. An actuator torque command cannot instantaneously change position or velocity; commanding maximum braking at the boundary $D = 0$ is futile because momentum carries the system across the boundary before velocity can reach zero.
+
+To restore relative degree one ($r = 1$), the barrier coordinate must be augmented with kinetic energy and available stopping capacity. In a one-dimensional approach to a stationary obstacle, let $D$ be measured clearance, $v > 0$ approach speed, and $a_{\text{brake}} > 0$ a validated lower bound on available braking deceleration for the operating state. Defining the **kinetic stopping inset**:\index{Kinetic stopping distance!barrier inset}
+$$ h_k(D, v) = D - \frac{v^2}{2a_{\text{brake}}}, \qquad \dot{D} = -v, \quad \dot{v} = a_{\text{cmd}} $$
+Differentiating $h_k(D, v)$ along the system dynamics yields:
+$$ \dot{h}_k = \dot{D} - \frac{v}{a_{\text{brake}}} \dot{v} = -v - \frac{v}{a_{\text{brake}}} a_{\text{cmd}} $$
+Notice that commanded acceleration $a_{\text{cmd}}$ now appears directly in the first time derivative ($r = 1$). The CBF condition $\dot{h}_k + \gamma h_k \ge 0$ (with gain $\gamma > 0$) enforces the linear affine inequality on commanded acceleration:
+$$ a_{\text{cmd}} \le \frac{a_{\text{brake}}}{v} \left( \gamma h_k - v \right) \quad \text{for } v > 0 $$
+At standstill ($v \to 0$), a separate static clearance rule must be evaluated. State estimation error, digital sampling, and brake-onset delay require additional clearance reserves; the continuous kinematic calculation alone does not cover them.
 
 ### Minimal-intervention quadratic program {#sec-appendix-control-cbf-qp}
 
-For a barrier $h_b$ whose first derivative actually depends on $u$, the enforcer can choose a command near the nominal proposal while respecting the feasible input set:
+In modern operating systems, an extended Berkeley Packet Filter (eBPF) program hooks the kernel network stack, inspecting ingress and egress packets at line rate before they reach physical network interface cards. If a packet satisfies verified safety rules, it passes through untouched with sub-microsecond overhead; if non-compliant, it is filtered or rewritten.
+
+The Control Barrier Function Quadratic Program (CBF-QP) functions as an inline **eBPF actuator packet firewall** for cyber-physical robotics. Deployed on real-time motor drive firmware or hard-real-time microcontroller loops ($100\text{ Hz -- }1\text{ kHz}$), it intercepts uncertified action proposals $\mathbf{u}_{\text{nom}}$ produced by high-level neural policies (Diffusion Policy, ACT, Transformer planners) before commands touch motor inverter power stages:
 $$
 \begin{align*}
-u^* &= \arg\min_{u \in \mathcal{U}} \frac{1}{2} \| u - u_{\text{nom}} \|^2 \\
-&\text{subject to:} \quad L_f h_b(x) + L_g h_b(x) u \ge -\alpha h_b(x), \quad u_{\min} \le u \le u_{\max}
+\mathbf{u}^* &= \arg\min_{\mathbf{u} \in \mathcal{U}} \frac{1}{2} \| \mathbf{u} - \mathbf{u}_{\text{nom}} \|^2 \\
+&\text{subject to:} \quad L_{\mathbf{f}} h(\mathbf{x}) + L_{\mathbf{g}} h(\mathbf{x}) \mathbf{u} \ge -\alpha(h(\mathbf{x})), \quad \mathbf{u}_{\min} \le \mathbf{u} \le \mathbf{u}_{\max}
 \end{align*}
 $$
-Writing its half-space as $a^\top u\le b$, with $a=-L_g h_b(x)^\top$ and $b=L_f h_b(x)+\alpha h_b(x)$, gives this projection for one constraint when $a\ne0$ and no box bound is active:\index{Quadratic program!closed-form projection}
-$$ u^* = u_{\text{nom}} - \lambda^* a, \quad \text{where } \lambda^* = \max\left( 0, \frac{a^\top u_{\text{nom}} - b}{\|a\|^2} \right) $$
+Writing the affine CBF constraint in standard half-space form $\mathbf{a}^\top \mathbf{u} \le b$, with normal vector $\mathbf{a} = -L_{\mathbf{g}} h(\mathbf{x})^\top \in \mathbb{R}^m$ and scalar threshold $b = L_{\mathbf{f}} h(\mathbf{x}) + \alpha(h(\mathbf{x}))$, the QP projection exhibits two distinct operating regimes:\index{Quadratic program!closed-form projection}\index{Control barrier function!eBPF actuator firewall}
+
+- **Permissive Pass-Through:** When the nominal neural proposal $\mathbf{u}_{\text{nom}}$ satisfies the safety constraint ($\mathbf{a}^\top \mathbf{u}_{\text{nom}} \le b$), the optimal Lagrange multiplier is $\lambda^* = 0$. The filter acts as an identity pass-through:
+  $$ \mathbf{u}^* = \mathbf{u}_{\text{nom}} $$
+  Zero control effort is distorted, preserving the full behavioral fidelity of the learned policy during normal task execution.
+- **Active Minimal-Intervention Projection:** When the neural policy proposes an unsafe command that attempts to penetrate the barrier ($\mathbf{a}^\top \mathbf{u}_{\text{nom}} > b$), the QP performs an exact, closed-form Euclidean projection onto the safe half-space boundary (when $\mathbf{a} \neq \mathbf{0}$ and box bounds are inactive):
+  $$ \mathbf{u}^* = \mathbf{u}_{\text{nom}} - \lambda^* \mathbf{a}, \quad \text{where } \lambda^* = \frac{\mathbf{a}^\top \mathbf{u}_{\text{nom}} - b}{\|\mathbf{a}\|^2} $$
+
 If the feasible set is nonempty and convex, the strictly convex objective has a unique minimizer. Solver response time and total dispatch delay must be measured for the selected dimension and hardware.
 
 ::: {#psp-appendix-control-feasibility .callout-perspective title="Check feasibility before relying on invariance"}
@@ -459,7 +478,7 @@ $$ \Delta \Phi = \omega_c \frac{T_s}{2} \quad \text{(radians)} \approx 28.65^\ci
 
 For fixed modeled compute and bus delays, the added phase lag near crossover is approximately $\Delta\Phi_{\rm total}=\omega_c(\tau_{\rm comp}+\tau_{\rm bus}+T_s/2)$. The controller must validate phase margin over the measured latency and operating envelope; the formula alone does not predict a particular contact response.
 
-## Kinematic Reachability and Intent Envelopes {#sec-appendix-control-reachability}
+## Dynamic Reachability, Intent Envelopes, and Differential Games {#sec-appendix-control-reachability}
 
 Kinematic reachability characterizes the spatial set of configurations or end-effector poses an embodied system can reach over a given planning or intent horizon $\tau$.\index{Kinematic reachability!intent horizon}
 
@@ -487,6 +506,35 @@ Below $d_{\text{crit}}$ the reachable distance grows with the square of the avai
 With $|\dot a|\le j_{\max}$, reaching full acceleration from zero takes at least $a_{\max}/j_{\max}$, if the profile reaches it at all. The bound exists because an acceleration step is a torque step, which shocks gearbox backlash, excites structural modes, and drives motor current toward the inverter's fault limits. The minimum-time trajectory may have four or seven jerk phases, so an unconditional additive offset to the trapezoidal time is invalid. Solve the constrained profile for the stated start/end velocity and acceleration, then include the stopping suffix and response delay when sizing a lease.
 
 The idealized profiles still serve admission, because each added limit (jerk, torque, or thermal derating) can only shrink the **dynamic reachable set** $\mathcal{R}(\tau)$, the states reachable from the measured state within the remaining time $\tau=t_{\text{exp}}-t_{\text{now}}$.\index{Dynamic reachability!reachable set} Their transit times are therefore necessary lower bounds, and a proposal whose idealized time already exceeds $\tau$ can be rejected before a full path, torque, and stopping check. @Sec-intent-admissible-goal-sets applies this rejection to the arm's reach against the tracked horizon.
+
+### Hamilton-Jacobi reachability and worst-case differential games {#sec-appendix-control-hj-reachability}
+
+While kinematic reachability examines static geometry and idealized transit bounds, dynamic reachability under external disturbances and modeling errors requires analyzing system evolution as a continuous differential game [@mitchell2005time]. Consider a nonlinear dynamical system governed by:
+$$ \dot{\mathbf{x}}(t) = \mathbf{f}(\mathbf{x}(t), \mathbf{u}(t), \mathbf{d}(t)) $$
+where $\mathbf{x} \in \mathbb{R}^n$ is the system state, $\mathbf{u} \in \mathcal{U} \subset \mathbb{R}^m$ is the control input (seeking to maintain safety), and $\mathbf{d} \in \mathcal{D} \subset \mathbb{R}^p$ is an adversarial disturbance (representing unmodeled friction, wind gusts, dynamic obstacles, or worst-case model discrepancies).
+
+Let the failure or collision region be represented by the open zero-sublevel set of a Lipschitz continuous surface function $l(\mathbf{x})$:
+$$ \mathcal{L} = \{ \mathbf{x} \in \mathbb{R}^n \mid l(\mathbf{x}) < 0 \} $$
+The safe set is the superlevel set $\{ \mathbf{x} \mid l(\mathbf{x}) \ge 0 \}$. The **Backward Reachable Tube (BRT)** $\mathcal{R}(t)$\index{Backward reachable tube!definition}\index{Hamilton-Jacobi reachability!differential game} is defined as the set of states from which the disturbance can force the system into collision at any time $\tau \in [t, T]$, even if the control executes optimal evasive action:
+$$ \mathcal{R}(t) = \left\{ \mathbf{x} \in \mathbb{R}^n \;\middle|\; \forall \mathbf{u}(\cdot) \in \mathcal{U}, \; \exists \mathbf{d}(\cdot) \in \mathcal{D}, \; \exists \tau \in [t, T] \text{ s.t. } \mathbf{x}(\tau) \in \mathcal{L} \right\} $$
+
+Formulating safety verification as a continuous two-player zero-sum differential game, the value function $V(\mathbf{x}, t)$ represents the outcome of **continuous-state minimax Bellman dynamic programming** over trajectory time:
+$$ V(\mathbf{x}, t) = \sup_{\mathbf{u} \in \mathcal{U}} \inf_{\mathbf{d} \in \mathcal{D}} \min_{\tau \in [t, T]} l(\mathbf{x}(\tau)) $$
+The system is guaranteed safe over $[t, T]$ if and only if $V(\mathbf{x}, t) \ge 0$. The zero-sublevel set of $V(\mathbf{x}, t)$ corresponds exactly to the Backward Reachable Tube: $\mathcal{R}(t) = \{ \mathbf{x} \mid V(\mathbf{x}, t) < 0 \}$.
+
+Applying Bellman's principle of dynamic programming in continuous state space yields the **Hamilton-Jacobi-Isaacs (HJI)** variational inequality:
+$$ \min \left\{ \frac{\partial V}{\partial t} + H(\mathbf{x}, \nabla V(\mathbf{x}, t)), \; l(\mathbf{x}) - V(\mathbf{x}, t) \right\} = 0, \quad V(\mathbf{x}, T) = l(\mathbf{x}) $$
+where the Hamiltonian $H(\mathbf{x}, \mathbf{p})$ evaluates the directional derivative of the value function along system dynamics under worst-case minimax competition:
+$$ H(\mathbf{x}, \mathbf{p}) = \max_{\mathbf{u} \in \mathcal{U}} \min_{\mathbf{d} \in \mathcal{D}} \mathbf{p}^\top \mathbf{f}(\mathbf{x}, \mathbf{u}, \mathbf{d}) $$
+Here $\mathbf{p} = \nabla V(\mathbf{x}, t) \in \mathbb{R}^n$ is the costate vector, representing the spatial gradient (directional sensitivity vector) of the safety boundary.
+
+Because the value function $V(\mathbf{x}, t)$ develops non-differentiable kinks and gradient discontinuities where characteristics collide or bifurcate, classical smooth solutions do not exist globally. The PDE is solved in the sense of **viscosity solutions** [@mitchell2005time].[^fn-control-viscosity-solution]
+
+[^fn-control-viscosity-solution]: **Viscosity Solutions and Level Set Methods**\index{Hamilton-Jacobi reachability!viscosity solution}\index{Level set methods!implicit surface propagation}: Introduced by Crandall and Lions, viscosity solutions provide the mathematically rigorous framework for continuous weak solutions to first-order Hamilton-Jacobi PDEs where spatial gradients $\nabla V$ are discontinuous. High-order numerical schemes (such as WENO spatial discretization and TVD Runge-Kutta time integration) evaluate the sub- and super-differentials of $V$ on regular Eulerian grids, tracking the implicit zero-level set without explicit front parameterization.
+
+Direct numerical solution of the HJI PDE on regular Eulerian grids scales with exponential complexity $\mathcal{O}(N^d)$ in state dimension $d$ (Bellman's curse of dimensionality), typically restricting grid-based HJI solvers to systems of dimension $d \le 5\text{--}6$. However, offline HJI reachability provides the theoretical foundation for online safety filters: the infinite-horizon converged value function $h^*(\mathbf{x}) = \lim_{T \to \infty} V(\mathbf{x}, 0)$ is the *maximal control barrier function*.
+
+At runtime, the offline-computed value function $h^*(\mathbf{x})$ (stored as a gridded lookup or distilled into a compact neural implicit representation) provides both the scalar margin $h^*(\mathbf{x})$ and its directional gradient $\nabla h^*(\mathbf{x}) = \mathbf{p}$. These supply the exact directional derivatives $L_{\mathbf{f}} h^*(\mathbf{x}) = \nabla h^*(\mathbf{x})^\top \mathbf{f}(\mathbf{x})$ and $L_{\mathbf{g}} h^*(\mathbf{x}) = \nabla h^*(\mathbf{x})^\top \mathbf{g}(\mathbf{x})$ for the online CBF-QP (@sec-appendix-control-cbf-qp). This bridges global dynamic programming guarantees computed offline with microsecond minimal-intervention safety filtering executed online.
 
 ### Spatial coordinate frames and lever-arm kinematics {#sec-appendix-control-spatial}
 
@@ -543,35 +591,51 @@ Transport delay in teleoperation creates two distinct failure modes: spatial bou
 
 ## Rigid Body Contact Mechanics {#sec-appendix-control-contact}
 
-Simulating and controlling physical interaction—such as locomotion, dexterous grasping, and tool assembly—requires modeling mechanical contact. The governing physical challenge of contact is its non-smooth complementarity: interaction forces arise strictly when bodies establish physical contact.
+Simulating and controlling physical interaction—such as locomotion, dexterous manipulation, and tool assembly—requires modeling mechanical contact. The governing physical challenge of contact is its non-smooth complementarity: interaction forces arise strictly when bodies establish physical contact.
 
-Let $\phi(q)$ be the signed distance between two bodies:
+Let $\mathbf{q} \in \mathbb{R}^n$ denote generalized configuration coordinates. Let $\phi(\mathbf{q})$ be the signed distance (or gap function) between contact geometries:
 
-- $\phi(q) > 0$: Bodies are separated.
-- $\phi(q) = 0$: Bodies are touching.
-- $\phi(q) < 0$: Bodies are penetrating (a geometric interpenetration that rigid mechanics strictly forbids).
+- $\phi(\mathbf{q}) > 0$: Bodies are separated.
+- $\phi(\mathbf{q}) = 0$: Bodies are touching (contact established).
+- $\phi(\mathbf{q}) < 0$: Bodies are penetrating (a geometric interpenetration that rigid mechanics strictly forbids).
 
-Let $f_n$ be the normal contact force pushing the bodies apart:
+Let $\lambda_n$ (or $f_n$) denote the normal contact force pushing the bodies apart. In constrained mathematical optimization, the non-penetration condition corresponds to the inequality constraint $g(\mathbf{q}) = \phi(\mathbf{q}) \ge 0$. The governing physical law of unilateral rigid contact is precisely the **Karush-Kuhn-Tucker (KKT) complementary slackness condition**\index{Linear complementarity problem!contact mechanics}\index{Karush-Kuhn-Tucker!contact complementarity}:
 
-- If $\phi(q) > 0$, there is no contact, so $f_n = 0$.
-- If bodies are touching, they can only exert repulsive contact force, so $f_n \ge 0$.
+1. Non-penetration (primal feasibility): $\phi(\mathbf{q}) \ge 0$
+2. Repulsive unilateral force (dual feasibility): $\lambda_n \ge 0$
+3. Complementary slackness: $\phi(\mathbf{q}) \lambda_n = 0$
 
-Ideal unilateral contact is represented by **complementarity conditions**\index{Linear complementarity problem!contact mechanics}:
+Just as Lagrange multipliers in constrained optimization become nonzero ($\lambda > 0$) only when constraints are active and tight ($g = 0$), normal contact forces materialize exclusively upon contact closure:
 
-1. Non-penetration: $\phi(q) \ge 0$
-2. Unilateral force: $f_n \ge 0$
-3. Complementarity: $\phi(q) f_n = 0$
+- If bodies are separated ($\phi(\mathbf{q}) > 0$), the constraint is inactive, enforcing $\lambda_n = 0$.
+- If bodies are touching ($\phi(\mathbf{q}) = 0$), the constraint is active, permitting repulsive normal forces $\lambda_n \ge 0$ to prevent interpenetration.
+- Tensile contact forces ($\lambda_n < 0$) are strictly forbidden (the environment cannot pull on the robot).
 
-These conditions exclude tensile normal contact. A time-discretized rigid-contact problem becomes a linear complementarity problem only under suitable linearization and contact assumptions; frictional multi-contact models can be nonlinear or require other solvers. They do not establish sim-to-real fidelity by themselves.
+A time-discretized rigid-contact problem becomes a linear complementarity problem (LCP) under polyhedral friction approximations, solvable via pivoting algorithms (Lemke's algorithm) or quadratic programming (QP). Frictional multi-contact models with Coulomb cones require second-order cone complementarity or convex relaxations.
 
 ### Non-smooth collision manifolds and velocity jumps
 
-For frictionless normal impact against a stationary rigid plane, let $v_n^-<0$ be the pre-impact normal velocity and $e\in[0,1]$ the restitution coefficient. The normal component obeys $v_n^+=-e v_n^-$; tangential velocity and a moving boundary require additional equations. With effective normal mass $m_{\rm eff}$, the normal impulse is $P_n=m_{\rm eff}(v_n^+-v_n^-)$. In an ideal zero-duration impact, velocity jumps and acceleration is an impulse rather than an ordinary finite derivative:[^fn-control-moreau-timestepping]
-$$ \lim_{\Delta t \to 0} \frac{\| \dot{x}(t + \Delta t) - \dot{x}(t) \|}{\Delta t} = \infty $$
+When rigid bodies collide, the impact occurs over an infinitesimal duration $\Delta t \to 0$. For frictionless normal impact against a stationary rigid plane, let $v_n^- < 0$ be the pre-impact normal velocity and $e \in [0, 1]$ the coefficient of restitution. The post-impact normal velocity jumps discontinuously according to Poisson or Newton impact laws:
+$$ v_n^+ = -e v_n^- \implies \Delta v_n = v_n^+ - v_n^- = -(1 + e) v_n^- $$
+With effective normal mass $m_{\text{eff}}$, the normal impulse is $P_n = m_{\text{eff}} \Delta v_n$. In an idealized rigid impact, velocity changes discontinuously, meaning the acceleration is a Dirac delta distribution $\delta(t - t_{\text{impact}})$ rather than an ordinary finite derivative:[^fn-control-moreau-timestepping]
+$$ \lim_{\Delta t \to 0} \frac{\| \dot{\mathbf{x}}(t + \Delta t) - \dot{\mathbf{x}}(t) \|}{\Delta t} = \infty $$
 
 [^fn-control-moreau-timestepping]: **Moreau Time-Stepping and Non-Smooth Mechanics**\index{Non-smooth mechanics!Moreau time-stepping}: Measure-differential models represent ideal impulses without resolving microscopic contact duration. Numerical contact solvers still require a validated geometry, friction law, and step-size study for the plant; a smooth optimizer that omits impact can miss a relevant force transient.
 
-Smooth learned models and trajectory gradients may be inaccurate at contact-mode changes. A controller can use an explicit hybrid/contact model, while compliance, pads, or torque limiters can reduce force only within validated stroke, energy, wear, and load-path conditions. Neither modeling nor a passive element alone guarantees safe contact.
+#### Implications for automatic differentiation and backpropagation through time
+
+In end-to-end policy learning, trajectory optimization, and system identification, gradients of an objective $\mathcal{L}$ with respect to policy or model parameters $\boldsymbol{\theta}$ are propagated backward across time steps via backpropagation through time (BPTT):
+$$ \frac{\partial \mathcal{L}}{\partial \boldsymbol{\theta}} = \sum_{t=0}^T \frac{\partial \mathcal{L}}{\partial \mathbf{x}_t} \left( \prod_{k=\tau}^{t-1} \frac{\partial \mathbf{x}_{k+1}}{\partial \mathbf{x}_k} \right) \frac{\partial \mathbf{x}_\tau}{\partial \boldsymbol{\theta}} $$
+The discrete velocity jump creates an essential discontinuity across the contact boundary manifold $\phi(\mathbf{q}) = 0$. The transition Jacobian $\frac{\partial \mathbf{x}_{k+1}}{\partial \mathbf{x}_k}$ contains Dirac delta distributions or discontinuous step functions. Consequently, evaluating gradients through standard reverse-mode automatic differentiation across contact mode switches introduces severe failure modes:
+
+- **Gradient Explosion:** Unbounded gradient spikes at the exact impact boundary, destabilizing gradient descent.
+- **Zero-Gradient Plateaus:** Vanishing gradients when slightly separated ($\phi(\mathbf{q}) > 0$), providing zero directional signal to the optimizer that establishing contact is beneficial.
+- **Non-Informative Directional Chatter:** Extreme gradient variance and sign flips across alternating contact mode switches.
+
+Physics engines and differentiable simulators resolve this challenge using two complementary paradigms:
+
+1. **Soft Contact Relaxations:** Penalty-based or compliant contact models approximate rigid boundaries using stiff spring-damper or sigmoidal complementarity potentials. While smoothing the contact boundary enables stable backpropagation through time, it introduces non-physical interpenetration and requires careful tuning of stiffness and damping hyperparameters.
+2. **Contact-Implicit Trajectory Optimization and Moreau Time-Stepping:** Moreau's time-stepping framework formulates contact mechanics at the velocity-impulse level over finite time steps $\Delta t$, integrating measure-differential inclusions without resolving instantaneous infinite accelerations. In differentiable physics pipelines, implicit function differentiation through the underlying LCP or QP enables computing informative gradients across contact events without differentiating through the singular impact step.
 
 ### Elastodynamic impact force and compliance deformation
 
@@ -669,13 +733,25 @@ This derivation explains the distinct physical error regimes during sensor occlu
 
 ### Observability rank and Lie derivative extensions
 
-A linear system is observable on $[0,T]$ if its initial state can be uniquely recovered from outputs and known inputs. For the linear time-invariant pair $(\mathbf{A},\mathbf{C})$, the **observability matrix** has full *column* rank $n$ exactly when the state is observable:\index{Observability!Kalman rank criterion}
+In machine learning and state estimation, observability is the mathematical dual of reachability: whereas reachability asks whether latent internal states can be steered by control inputs, observability asks whether latent states can be reconstructed from external sensor observations $\mathbf{y}(t)$.
+
+A linear time-invariant system $(\mathbf{A}, \mathbf{C})$ is observable on $[0, T]$ if and only if the **Kalman observability matrix** has full column rank $n$:\index{Observability!Kalman rank criterion}
 $$ \mathcal{O} = \begin{bmatrix} \mathbf{C} \\ \mathbf{C}\mathbf{A} \\ \vdots \\ \mathbf{C}\mathbf{A}^{n-1} \end{bmatrix}, \quad \text{rank}(\mathcal{O}) = n $$
-For a smooth autonomous nonlinear system $\dot{\mathbf{x}}=\mathbf{f}(\mathbf{x})$, $\mathbf{y}=\mathbf{h}(\mathbf{x})$, a local rank test builds the codistribution from differentials of successive Lie derivatives $dL_{\mathbf f}^k\mathbf h(\mathbf x)$ until its rank stops growing.[^fn-control-hermann-krener] Full local rank $n$ is a sufficient local weak-observability condition under its regularity assumptions; a finite truncation at $n-1$ is not universally sufficient.
+If $\operatorname{rank}(\mathcal{O}) < n$, the unobservable subspace $\ker(\mathcal{O})$ contains initial state trajectories that produce identical output measurements. No linear estimator can distinguish between initial states that differ along $\ker(\mathcal{O})$.
+
+For a smooth autonomous nonlinear system $\dot{\mathbf{x}} = \mathbf{f}(\mathbf{x})$, $\mathbf{y} = \mathbf{h}(\mathbf{x})$ where $\mathbf{h} = [h_1(\mathbf{x}), \dots, h_p(\mathbf{x})]^\top$, the Hermann-Krener observability criterion [@hermann1977nonlinear] generalizes the Kalman rank test via successive directional derivatives along system dynamics. Differentiating the measurement output equation $\mathbf{y}(t) = \mathbf{h}(\mathbf{x}(t))$ with respect to continuous time yields:
+$$ \dot{\mathbf{y}}(t) = \frac{\partial \mathbf{h}}{\partial \mathbf{x}} \dot{\mathbf{x}} = \frac{\partial \mathbf{h}}{\partial \mathbf{x}} \mathbf{f}(\mathbf{x}) = L_{\mathbf{f}} \mathbf{h}(\mathbf{x}) $$
+Differentiating repeatedly produces the sequence of Lie derivatives—which are directional derivatives of the measurement channels along the unforced drift vector field $\mathbf{f}$:
+$$ \mathbf{y}^{(k)}(t) = L_{\mathbf{f}}^k \mathbf{h}(\mathbf{x}), \quad \text{where } L_{\mathbf{f}}^k h_i(\mathbf{x}) = \nabla (L_{\mathbf{f}}^{k-1} h_i(\mathbf{x})) \cdot \mathbf{f}(\mathbf{x}) $$
+These successive directional derivatives reveal how temporal variations in output channels encode higher-order kinematic and dynamic states (such as recovering joint velocities and accelerations from encoder or camera position sequences) without requiring real-time numerical differentiation of noisy signals.
+
+The **Hermann-Krener observation space** $\mathcal{O}_{\text{NL}}$ is the real vector space of all repeated Lie derivatives $\{L_{\mathbf{f}}^k h_i\}_{k \ge 0, 1 \le i \le p}$. Its gradient differentials span the **observability codistribution**:\index{Observability!Hermann-Krener criterion}
+$$ \mathrm{d}\mathcal{O}(\mathbf{x}) = \operatorname{span}\left\{ \mathrm{d}L_{\mathbf{f}}^k h_i(\mathbf{x}) \;\middle|\; k \ge 0, \; 1 \le i \le p \right\} $$
+where $\mathrm{d}\phi(\mathbf{x}) = \frac{\partial \phi}{\partial \mathbf{x}}$. The system satisfies the **nonlinear observability rank condition** at $\mathbf{x}_0$ if:[^fn-control-hermann-krener]
+$$ \operatorname{dim}(\mathrm{d}\mathcal{O}(\mathbf{x}_0)) = n $$
+When full rank $n$ is achieved, the directional gradients span the cotangent space $T_{\mathbf{x}}^* \mathcal{X}$, guaranteeing local weak observability: any infinitesimal deviation in latent state produces a distinguishable signature in the measurement sequence or its temporal derivatives.
 
 [^fn-control-hermann-krener]: **Hermann-Krener Nonlinear Observability**\index{Observability!Hermann-Krener criterion}: Full rank of the observation codistribution is a local structural test, not a sensor-noise or finite-horizon accuracy bound. A missing state direction may require another sensor, an active maneuver with its own permission, or a restricted operating envelope.
-
-If $\operatorname{rank}(\mathcal O)<n$, $\ker(\mathcal O)$ contains initial-state differences that produce identical ideal outputs. Measurement updates cannot resolve those directions from this sensor model, though a particular Kalman gain need not contain literal zero entries. The estimator should expose such unobservable components and maintain an independent growth bound or restrict the task.
 
 ## Centroidal Dynamics and Floating-Base Control {#sec-appendix-control-centroidal}
 
@@ -712,16 +788,26 @@ Because the environment cannot pull on the robot and contact surfaces exhibit fi
 
 ### Hierarchical whole-body control quadratic program {#sec-appendix-control-wbc}
 
-One whole-body controller can track torso and foot tasks while constraining dynamics and contact forces. For an illustrative sampled implementation, a conservative *polyhedral* friction approximation makes the following convex quadratic program possible; the exact circular norm cone in the preceding equation instead gives a second-order cone constraint:\index{Whole-body control!hierarchical QP}
+In floating-base humanoid and legged systems, high-level policies (such as learned vision-language-action models or action chunking policies) propose desired kinematic behaviors: end-effector manipulation paths, torso orientation, gaze directions, or swing-foot trajectories. However, because the 6-DoF floating base is unactuated, these kinematic proposals cannot be executed directly by joint motors.
+
+The **Hierarchical Whole-Body Control (WBC) Quadratic Program**\index{Whole-body control!hierarchical QP}\index{Whole-body control!multi-task optimization} acts as a real-time multi-task constrained optimization projection layer. It projects competing operational-space task accelerations $\ddot{\mathbf{x}}_i^{\text{des}}$ through a prioritized or weighted optimization hierarchy while strictly enforcing rigid-body Newton-Euler dynamics, friction cones, and actuator limits.
+
+For an illustrative sampled implementation, a conservative polyhedral inner approximation to the circular Coulomb friction cone enables the following convex quadratic program executed at $1\text{ kHz}$ in embedded controller firmware:
 $$
 \begin{aligned}
-\min_{\ddot{\mathbf{q}}, \mathbf{f}, \boldsymbol{\tau}} \quad & \sum_{i} w_i \| \mathbf{J}_i \ddot{\mathbf{q}} + \dot{\mathbf{J}}_i \dot{\mathbf{q}} - \ddot{\mathbf{x}}_i^{\text{des}} \|^2 + w_\tau \| \boldsymbol{\tau} \|^2 + w_f \| \mathbf{f} \|^2 \\
-\text{subject to:} \quad & \mathbf{M}(\mathbf{q}) \ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) = \mathbf{S}^\top \boldsymbol{\tau} + \sum_{k=1}^{N_c} \mathbf{J}_k^\top \mathbf{f}_k \\
-& \mathbf F_k\mathbf f_k\le\mathbf 0,\quad f_{k,\perp}\ge0 \qquad\text{(conservative friction pyramid)} \\
+\min_{\ddot{\mathbf{q}}, \mathbf{f}, \boldsymbol{\tau}} \quad & \sum_{i} w_i \| \mathbf{J}_i(\mathbf{q}) \ddot{\mathbf{q}} + \dot{\mathbf{J}}_i(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} - \ddot{\mathbf{x}}_i^{\text{des}} \|^2 + w_\tau \| \boldsymbol{\tau} \|^2 + w_f \| \mathbf{f} \|^2 \\
+\text{subject to:} \quad & \mathbf{M}(\mathbf{q}) \ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) = \mathbf{S}^\top \boldsymbol{\tau} + \sum_{k=1}^{N_c} \mathbf{J}_k(\mathbf{q})^\top \mathbf{f}_k \\
+& \mathbf{F}_k \mathbf{f}_k \le \mathbf{0}, \quad f_{k,\perp} \ge 0 \qquad \text{(conservative friction pyramid)} \\
 & |\boldsymbol{\tau}| \le \boldsymbol{\tau}_{\max}, \quad \mathbf{q}_{j,\min} \le \mathbf{q}_j \le \mathbf{q}_{j,\max}
 \end{aligned}
 $$
-Here $\mathbf F_k$ describes the chosen inner approximation to the measured friction cone. The displayed joint-position bounds concern the current configuration; a real controller must also constrain predicted motion between samples. A 1 ms solve is an example deadline to validate with the selected contact count, solver, processor, friction estimate, and fallback. A feasible numerical solution does not itself prove that a foothold will support the load.
+In this multi-task optimization architecture:
+
+- **Dynamic Feasibility:** The equality constraint enforces the coupled multi-body floating-base equations of motion, ensuring that the unactuated floating base is accelerated solely through admissible ground reaction forces ($\mathbf{f}_k$).
+- **Multi-Task Null-Space Projection:** The objective weights $w_i$ establish task hierarchy. High-priority tasks (maintaining center-of-mass balance, stance-foot grounding, and trunk stability) dominate lower-priority goals (arm trajectory tracking or joint posture regularization toward nominal rest configurations). In strict hierarchical null-space formulations, secondary tasks are algebraically projected into the null-space of primary task Jacobians ($\mathbf{N}_1 = \mathbf{I} - \mathbf{J}_1^\dagger \mathbf{J}_1$), ensuring zero interference with balance stability.
+- **Physical Contact and Torque Protection:** The linear inequalities enforce contact friction pyramids ($\mathbf{F}_k \mathbf{f}_k \le \mathbf{0}$) and motor saturation limits ($|\boldsymbol{\tau}| \le \boldsymbol{\tau}_{\max}$), guaranteeing that commands dispatched to low-level motor drives never cause foot slippage, inverter overcurrent, or joint limit breaches.
+
+Here $\mathbf{F}_k$ describes the chosen inner approximation to the measured friction cone. The displayed joint-position bounds concern the current configuration; a real controller must also constrain predicted motion between samples. A 1 ms solve is an example deadline to validate with the selected contact count, solver, processor, friction estimate, and fallback. A feasible numerical solution does not itself prove that a foothold will support the load.
 
 ## Passivity and Energy-Bounded Interaction {#sec-appendix-control-passivity}
 
@@ -760,4 +846,5 @@ For a deeper theoretical foundation in control theory, robotics, and dynamical s
 * **Feedback Systems: An Introduction for Scientists and Engineers** [@astrom2021feedback] establishes classical and state-space control theory, frequency-domain stability margins, and state estimation from first principles.
 * **Applied Nonlinear Control** [@slotine1991applied] provides a foundational treatment of nonlinear dynamical systems, Lyapunov stability certificates, and sliding mode control.
 * **Control Barrier Functions: Theory and Applications** [@ames2019control] establishes the definitive formulation of control barrier functions, safety-critical quadratic programming filters, and forward invariance.
+* **A Time-Dependent Hamilton-Jacobi Formulation of Reachable Sets for Continuous Dynamic Games** [@mitchell2005time] establishes the level set method and viscosity solutions for continuous-state differential games and safety verification.
 * **A Predictive Safety Filter for Learning-Based Control of Constrained Nonlinear Dynamical Systems** [@wabersich2021predictive] develops predictive safety filters and constrained MPC methods for safe learning on physical systems.
