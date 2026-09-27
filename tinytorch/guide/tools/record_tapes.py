@@ -15,9 +15,92 @@ import sys
 import tempfile
 from pathlib import Path
 
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 TAPES_DIR = Path(__file__).resolve().parent / "tapes"
 DEMOS_DIR = Path(__file__).resolve().parent.parent / "assets" / "images" / "demos"
+
+TAPE_TITLES = {
+    "01_install_and_run": "tinytorch · install & run",
+    "02_modules_mastery": "tinytorch · module status",
+    "03_tinygpt_chat": "tinytorch · tinygpt chat",
+    "04_tinygpt_code": "tinytorch · code completion",
+    "05_mlperf_opt": "tinytorch · mlperf optimization",
+}
+
+
+def create_window_template(term_w: int, term_h: int, title: str) -> tuple[Path, int, int]:
+    """Generate a Terminalizer-style macOS window frame with traffic lights, border, and drop shadow."""
+    pad_x = 16
+    pad_y = 12
+    bar_h = 36
+    radius = 12
+    margin = 12
+
+    win_w = term_w + 2 * pad_x
+    win_h = term_h + bar_h + 2 * pad_y
+    canvas_w = win_w + 2 * margin
+    canvas_h = win_h + 2 * margin
+
+    # Canvas with dark slate background matching site card aesthetics
+    canvas = Image.new("RGBA", (canvas_w, canvas_h), (15, 20, 28, 255))
+
+    # Soft drop shadow
+    shadow_mask = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+    sdraw = ImageDraw.Draw(shadow_mask)
+    sdraw.rounded_rectangle(
+        [margin, margin + 4, margin + win_w, margin + win_h + 4],
+        radius=radius,
+        fill=(0, 0, 0, 180),
+    )
+    shadow = shadow_mask.filter(ImageFilter.GaussianBlur(radius=8))
+    canvas.alpha_composite(shadow)
+
+    # Window surface
+    win = Image.new("RGBA", (win_w, win_h), (0, 0, 0, 0))
+    wdraw = ImageDraw.Draw(win)
+    wdraw.rounded_rectangle([0, 0, win_w, win_h], radius=radius, fill=(30, 30, 46, 255))
+
+    # Window title bar (Catppuccin Mantle)
+    header_mask = Image.new("L", (win_w, win_h), 0)
+    hmask_draw = ImageDraw.Draw(header_mask)
+    hmask_draw.rounded_rectangle([0, 0, win_w, win_h], radius=radius, fill=255)
+    hmask_draw.rectangle([0, bar_h, win_w, win_h], fill=0)
+
+    header = Image.new("RGBA", (win_w, win_h), (24, 24, 37, 255))
+    win.paste(header, (0, 0), header_mask)
+    wdraw.line([(0, bar_h), (win_w, bar_h)], fill=(49, 50, 68, 255), width=1)
+
+    # macOS traffic lights
+    btn_y = (bar_h - 12) // 2
+    wdraw.ellipse([16, btn_y, 16 + 12, btn_y + 12], fill=(255, 95, 86, 255), outline=(224, 68, 62, 255))
+    wdraw.ellipse([36, btn_y, 36 + 12, btn_y + 12], fill=(255, 189, 46, 255), outline=(222, 161, 35, 255))
+    wdraw.ellipse([56, btn_y, 56 + 12, btn_y + 12], fill=(39, 201, 63, 255), outline=(26, 171, 41, 255))
+
+    # Window title
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/SFNSMono.ttf", 12)
+    except Exception:
+        font = ImageFont.load_default()
+
+    bbox = font.getbbox(title)
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
+    tx = (win_w - tw) // 2
+    ty = (bar_h - th) // 2 - 1
+    wdraw.text((tx, ty), title, fill=(166, 173, 200, 255), font=font)
+
+    # 1px border outline
+    wdraw.rounded_rectangle([0, 0, win_w - 1, win_h - 1], radius=radius, outline=(69, 71, 90, 255), width=1)
+
+    canvas.alpha_composite(win, (margin, margin))
+    tpl_path = Path(tempfile.gettempdir()) / f"vhs_tpl_{win_w}_{win_h}_{abs(hash(title))}.png"
+    canvas.save(tpl_path)
+
+    term_x = margin + pad_x
+    term_y = margin + bar_h + pad_y
+    return tpl_path, term_x, term_y
 
 
 def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
@@ -35,7 +118,6 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
     shutil.rmtree(frames_dir)
 
     # Replace Output directive to point to the frames folder with trailing slash
-    # If no Output directive exists, add it at the top
     output_line = f'Output "{frames_dir}/"'
     if re.search(r'^Output\s+.*$', content, flags=re.MULTILINE):
         tape_content = re.sub(r'^Output\s+.*$', output_line, content, count=1, flags=re.MULTILINE)
@@ -44,6 +126,7 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
 
     temp_tape = Path(tempfile.gettempdir()) / f"run_{tape_path.name}"
     temp_tape.write_text(tape_content, encoding="utf-8")
+    tpl_path = None
 
     try:
         print(f"  ▶ Executing VHS session (recording frames into {frames_dir.name})...")
@@ -81,12 +164,18 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
         duration_s = total_frames / capture_fps
         print(f"  ✓ Captured {total_frames} frames ({duration_s:.1f}s at {capture_fps} fps)")
 
-        # Compile frames to GIF using ffmpeg with dual-overlay and optimal color palette
+        # Prepare Terminalizer-style window frame
+        first_img = Image.open(text_frames[0])
+        title = TAPE_TITLES.get(tape_path.stem, f"tinytorch · {tape_path.stem}")
+        tpl_path, term_x, term_y = create_window_template(first_img.width, first_img.height, title)
+
+        # Compile frames to GIF using ffmpeg with window overlay and optimal color palette
         print(f"  ▶ Compiling GIF with ffmpeg -> {output_gif.name}...")
         output_gif.parent.mkdir(parents=True, exist_ok=True)
 
         ffmpeg_cmd = [
             "ffmpeg", "-y",
+            "-loop", "1", "-i", str(tpl_path),
             "-framerate", str(capture_fps),
             "-start_number", "1",
             "-i", str(frames_dir / "frame-text-%05d.png"),
@@ -94,7 +183,7 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
             "-start_number", "1",
             "-i", str(frames_dir / "frame-cursor-%05d.png"),
             "-filter_complex",
-            f"[0][1]overlay=shortest=1[merged];[merged]fps={fps},split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer",
+            f"[1][2]overlay=shortest=1[term];[0][term]overlay=x={term_x}:y={term_y}:shortest=1[merged];[merged]fps={fps},split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer",
             str(output_gif),
         ]
 
@@ -111,6 +200,8 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
     finally:
         if temp_tape.exists():
             temp_tape.unlink()
+        if tpl_path and tpl_path.exists():
+            tpl_path.unlink()
         if frames_dir.exists():
             shutil.rmtree(frames_dir, ignore_errors=True)
 

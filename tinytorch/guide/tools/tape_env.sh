@@ -18,7 +18,7 @@ cd "$REPO_DIR" || exit 1
 # Mock/wrap installer for offline reproducibility and instant responsiveness
 curl() {
   if [[ "$*" == *"install.sh"* ]]; then
-    "$REPO_DIR/tinytorch/guide/tools/demo_installer.sh"
+    cat "$REPO_DIR/tinytorch/guide/tools/demo_installer.sh"
   else
     command curl "$@"
   fi
