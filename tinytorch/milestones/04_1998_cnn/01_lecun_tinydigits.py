@@ -156,55 +156,7 @@ console = Console()
 
 
 # ============================================================================
-# 📊 DATA LOADING
-# ============================================================================
-
-def load_digits_dataset():
-    """
-    Load the TinyDigits dataset (8×8 curated digits).
-
-    Returns 150 training + 47 test grayscale images of handwritten digits (0-9).
-    Each image is 8×8 pixels, perfect for quick CNN demonstrations.
-    Ships with TinyTorch - no downloads needed!
-    """
-    # Load from TinyDigits dataset (shipped with TinyTorch)
-    project_root = Path(__file__).parent.parent.parent
-    train_path = project_root / "datasets" / "tinydigits" / "train.pkl"
-    test_path = project_root / "datasets" / "tinydigits" / "test.pkl"
-
-    if not train_path.exists() or not test_path.exists():
-        console.print(f"[red]✗ TinyDigits dataset not found![/red]")
-        console.print(f"[yellow]Expected location: {train_path.parent}[/yellow]")
-        console.print("[yellow]Run: python3 datasets/tinydigits/create_tinydigits.py[/yellow]")
-        sys.exit(1)
-
-    # Load training data
-    with open(train_path, 'rb') as f:
-        train_data = pickle.load(f)
-    train_images = train_data['images']  # (150, 8, 8)
-    train_labels = train_data['labels']  # (150,)
-
-    # Load test data
-    with open(test_path, 'rb') as f:
-        test_data = pickle.load(f)
-    test_images = test_data['images']  # (47, 8, 8)
-    test_labels = test_data['labels']  # (47,)
-
-    # CNN expects (batch, channels, height, width)
-    # Add channel dimension: (N, 8, 8) → (N, 1, 8, 8)
-    train_images = train_images[:, np.newaxis, :, :]  # (150, 1, 8, 8)
-    test_images = test_images[:, np.newaxis, :, :]    # (47, 1, 8, 8)
-
-    return (
-        Tensor(train_images.astype(np.float32)),
-        Tensor(train_labels.astype(np.int64)),
-        Tensor(test_images.astype(np.float32)),
-        Tensor(test_labels.astype(np.int64))
-    )
-
-
-# ============================================================================
-# 🏗️ NETWORK ARCHITECTURE
+# 🎓 ZONE 1: STUDENT LEGO BRICKS (LeNet CNN Architecture)
 # ============================================================================
 
 class SimpleCNN:
@@ -260,6 +212,54 @@ class SimpleCNN:
 
 
 # ============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & TRAINING UX
+# ============================================================================
+
+def load_digits_dataset():
+    """
+    Load the TinyDigits dataset (8×8 curated digits).
+
+    Returns 150 training + 47 test grayscale images of handwritten digits (0-9).
+    Each image is 8×8 pixels, perfect for quick CNN demonstrations.
+    Ships with TinyTorch - no downloads needed!
+    """
+    # Load from TinyDigits dataset (shipped with TinyTorch)
+    project_root = Path(__file__).parent.parent.parent
+    train_path = project_root / "datasets" / "tinydigits" / "train.pkl"
+    test_path = project_root / "datasets" / "tinydigits" / "test.pkl"
+
+    if not train_path.exists() or not test_path.exists():
+        console.print(f"[red]✗ TinyDigits dataset not found![/red]")
+        console.print(f"[yellow]Expected location: {train_path.parent}[/yellow]")
+        console.print("[yellow]Run: python3 datasets/tinydigits/create_tinydigits.py[/yellow]")
+        sys.exit(1)
+
+    # Load training data
+    with open(train_path, 'rb') as f:
+        train_data = pickle.load(f)
+    train_images = train_data['images']  # (150, 8, 8)
+    train_labels = train_data['labels']  # (150,)
+
+    # Load test data
+    with open(test_path, 'rb') as f:
+        test_data = pickle.load(f)
+    test_images = test_data['images']  # (47, 8, 8)
+    test_labels = test_data['labels']  # (47,)
+
+    # CNN expects (batch, channels, height, width)
+    # Add channel dimension: (N, 8, 8) → (N, 1, 8, 8)
+    train_images = train_images[:, np.newaxis, :, :]  # (150, 1, 8, 8)
+    test_images = test_images[:, np.newaxis, :, :]    # (47, 1, 8, 8)
+
+    return (
+        Tensor(train_images.astype(np.float32)),
+        Tensor(train_labels.astype(np.int64)),
+        Tensor(test_images.astype(np.float32)),
+        Tensor(test_labels.astype(np.int64))
+    )
+
+
+# ============================================================================
 # 🎯 TRAINING & EVALUATION
 # ============================================================================
 
@@ -295,11 +295,13 @@ def evaluate_accuracy(model, images, labels):
     avg_loss = float(CrossEntropyLoss()(logits, labels).data)
     return accuracy, avg_loss
 
-def press_enter_to_continue() :
-    if sys.stdin.isatty() and sys.stdout.isatty() :
-        try :
+def press_enter_to_continue():
+    if os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true":
+        return
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
             console.input("\n[yellow]Press Enter to continue...[/yellow] ")
-        except EOFError :
+        except EOFError:
             pass
         console.print()
 
@@ -496,7 +498,7 @@ def train_cnn():
     table.add_row(
         "Training Time",
         f"{training_time*1000:.0f}ms",
-        "—"
+        "-"
     )
 
     console.print(table)

@@ -117,6 +117,10 @@ def press_enter_to_continue(pause: bool = False):
         console.print()
 
 
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Model Architecture & Generation)
+# =============================================================================
+
 class TinyGPT:
     """
     Complete Decoder-Only Generative Pretrained Transformer (TinyGPT).
@@ -361,6 +365,10 @@ def check_c_syntax_validity(full_code: str) -> Tuple[bool, str]:
             stack.pop()
     return True, "Valid C syntax (balanced delimiters)"
 
+
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & VALIDATION UX
+# =============================================================================
 
 def load_tinypy_corpus(sample_only: bool = False, lang: str = "python") -> str:
     """Load the TinyPy or TinyC dataset with robust path resolution."""

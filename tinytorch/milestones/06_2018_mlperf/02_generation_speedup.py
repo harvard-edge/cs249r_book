@@ -103,7 +103,7 @@ def main():
         console.print("Export modules 01-08, 11-13, and 18, including their prerequisites.")
         return 1
 
-    console.print('[bold cyan]Milestone 06.2: KV Cache — Same Computation, Less Repetition[/bold cyan]')
+    console.print('[bold cyan]Milestone 06.2: KV Cache: Same Computation, Less Repetition[/bold cyan]')
     model = GPT(vocab_size=27, embed_dim=32, num_layers=2, num_heads=2, max_seq_len=64)
     tokens = np.random.default_rng(7).integers(0, model.vocab_size, (1, 64))
     results = compare_cached_replay(model, tokens)

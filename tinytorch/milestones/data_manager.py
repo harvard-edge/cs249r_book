@@ -180,7 +180,7 @@ class DatasetManager:
             print("=" * 60)
             return False
         except KeyboardInterrupt:
-            print("\n  Download cancelled.")
+            print("\n  Download canceled.")
             print("=" * 60)
             return False
 
@@ -252,7 +252,7 @@ class DatasetManager:
             if not data_file.exists():
                 # Confirm download with user
                 if not self.confirm_download('cifar10'):
-                    raise RuntimeError("CIFAR-10 download cancelled by user")
+                    raise RuntimeError("CIFAR-10 download canceled by user")
 
                 url = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
                 self.download_with_progress(url, data_file)
@@ -316,8 +316,12 @@ class DatasetManager:
 
         if not data_file.exists():
             if not self.confirm_download('tinyshakespeare'):
+                if sample_path.exists():
+                    print(f"📖 Loaded offline Shakespeare sample: {sample_path.name}")
+                    with open(sample_path, 'r', encoding='utf-8') as f:
+                        return f.read()
                 raise RuntimeError(
-                    "TinyShakespeare download canceled. To run offline with the bundled sample, pass sample_only=True or --sample."
+                    "TinyShakespeare download canceled and no offline sample found."
                 )
 
             url = DATASET_INFO['tinyshakespeare']['url']
@@ -355,8 +359,12 @@ class DatasetManager:
 
         if not data_file.exists():
             if not self.confirm_download('tinypy'):
+                if sample_path.exists():
+                    print(f"📖 Loaded offline TinyPy sample: {sample_path.name}")
+                    with open(sample_path, 'r', encoding='utf-8') as f:
+                        return f.read()
                 raise RuntimeError(
-                    "TinyPy download canceled. To run offline with the bundled sample, pass sample_only=True or --sample."
+                    "TinyPy download canceled and no offline sample found."
                 )
 
             url = DATASET_INFO['tinypy']['url']
@@ -409,8 +417,12 @@ class DatasetManager:
 
         if not data_file.exists():
             if not self.confirm_download('tinytalks'):
+                if sample_path.exists():
+                    print(f"📖 Loaded offline TinyTalks sample: {sample_path.name}")
+                    with open(sample_path, 'r', encoding='utf-8') as f:
+                        return f.read()
                 raise RuntimeError(
-                    "TinyTalks download canceled. To run offline with the bundled sample, pass sample_only=True or --sample."
+                    "TinyTalks download canceled and no offline sample found."
                 )
 
             url = DATASET_INFO['tinytalks']['url']

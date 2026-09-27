@@ -233,7 +233,7 @@ def step_2_quantize(model, param_bytes, baseline_acc, X_test, y_test, Quantizer,
     console.print(Panel(
         "[bold yellow]⚠️  MLSys Reality Check: Storage Compression ≠ Compute Speedup[/bold yellow]\n\n"
         "• [bold green]What INT8 achieves:[/bold green] 4.0× reduction in weight storage footprint and memory bandwidth.\n"
-        "• [bold yellow]Why latency is flat:[/bold yellow] In pure Python/NumPy, we perform [dim]simulated quantization[/dim]—weights\n"
+        "• [bold yellow]Why latency is flat:[/bold yellow] In pure Python/NumPy, we perform [dim]simulated quantization[/dim]: weights\n"
         "  are stored as 8-bit integers but dequantized back to float32 at runtime to execute standard BLAS GEMM.\n"
         "• [bold cyan]Hardware reality:[/bold cyan] Without hardware-native INT8 GEMM tensor cores (e.g., NVIDIA DP4A,\n"
         "  Apple Neural Engine, or ARM NEON/dotprod), quantization yields massive memory savings but zero CPU speedup.",
@@ -676,7 +676,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     ))
 
     # -------------------------------------------------------------------------
-    # DIVISION 1: Edge & Embedded Inference — DigitMLP (Dense, Parameter-Bound)
+    # DIVISION 1: Edge & Embedded Inference: DigitMLP (Dense, Parameter-Bound)
     # -------------------------------------------------------------------------
     mlp_bytes = mlp_baseline['param_bytes']
     mlp_q_bytes = mlp_quant['quant_size']
@@ -693,7 +693,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     mlp_frontier = set(pareto_frontier(mlp_pts, (True, True)))
 
     console.print(Panel(
-        "[bold cyan]📍 DIVISION 1: Edge & Embedded Inference — DigitMLP (Dense)[/bold cyan]\n"
+        "[bold cyan]📍 DIVISION 1: Edge & Embedded Inference: DigitMLP (Dense)[/bold cyan]\n"
         "[dim]Primary Bottleneck: Dense weight memory capacity (SRAM/Flash footprint)\n"
         "Harness: Measured via Module 19 Benchmark on held-out TinyDigits test set[/dim]",
         border_style="cyan",
@@ -715,7 +715,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
 
 
     # -------------------------------------------------------------------------
-    # DIVISION 2: Spatial Vision & Compute — SimpleCNN (Spatial, Compute-Bound)
+    # DIVISION 2: Spatial Vision & Compute: SimpleCNN (Spatial, Compute-Bound)
     # -------------------------------------------------------------------------
     cnn_base = SimpleCNN()
     cnn_bytes = sum(p.data.nbytes for p in cnn_base.parameters())
@@ -761,7 +761,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     cnn_frontier = set(pareto_frontier(cnn_pts, (True, True)))
 
     console.print(Panel(
-        "[bold magenta]📍 DIVISION 2: Spatial Vision & Compute — SimpleCNN (Spatial)[/bold magenta]\n"
+        "[bold magenta]📍 DIVISION 2: Spatial Vision & Compute: SimpleCNN (Spatial)[/bold magenta]\n"
         "[dim]Primary Bottleneck: 2D sliding convolution loops & spatial feature extraction\n"
         "Harness: Measured via Module 19 Benchmark; quality is measured output signal fidelity[/dim]",
         border_style="magenta",
@@ -776,14 +776,14 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     t2.add_column("Status", justify="center")
     for r in cnn_records:
         is_p = r[0] in cnn_frontier
-        status_str = "[bold green]★ Pareto (Peak)[/bold green]" if r[0] == "INT8 Quantized" else ("[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]")
+        status_str = "[bold green]★ Pareto (Optimal)[/bold green]" if r[0] == "INT8 Quantized" else ("[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]")
         res = r[2]
         t2.add_row(r[0], f"{r[1]:,} B", r[3], f"{res.mean:.2f} ms", status_str)
     console.print(t2)
 
 
     # -------------------------------------------------------------------------
-    # DIVISION 3: Generative LLM Serving — TinyGPT (Autoregressive, Prefix-Bound)
+    # DIVISION 3: Generative LLM Serving: TinyGPT (Autoregressive, Prefix-Bound)
     # -------------------------------------------------------------------------
     gpt_base = GPT(vocab_size=28, embed_dim=32, num_layers=2, num_heads=2, max_seq_len=32)
     gpt_bytes = sum(p.data.nbytes for p in gpt_base.parameters())
@@ -849,7 +849,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     gpt_frontier = set(pareto_frontier(gpt_pts, (True, True, True)))
 
     console.print(Panel(
-        "[bold green]📍 DIVISION 3: Generative LLM Serving — TinyGPT (Autoregressive)[/bold green]\n"
+        "[bold green]📍 DIVISION 3: Generative LLM Serving: TinyGPT (Autoregressive)[/bold green]\n"
         "[dim]Primary Bottleneck: O(N²) causal prefix recomputation & DRAM weight streaming\n"
         "Harness: Measured via Module 19 BenchmarkResult; sequence replay across 10 trials[/dim]",
         border_style="green",
@@ -874,7 +874,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     # CROSS-DIVISION SYSTEMS SYNTHESIS
     # -------------------------------------------------------------------------
     console.print(Panel(
-        "[bold]💡 Key Systems Takeaway — Optimization is Workload-Specific:[/bold]\n\n"
+        "[bold]💡 Key Systems Takeaway: Optimization is Workload-Specific:[/bold]\n\n"
         "• [cyan]Dense MLP (Edge):[/cyan] Dominated by weight storage. [green]INT8 Quantization (4× smaller)[/green] preserves 100% test accuracy on TinyDigits.\n"
         "• [cyan]Spatial CNN (Vision):[/cyan] Dominated by spatial convolution loops. [green]INT8 Quantization[/green] shrinks footprint 4× with 100% signal fidelity, while pruning introduces a Pareto trade-off.\n"
         "• [cyan]Autoregressive GPT (LLM):[/cyan] Dominated by causal attention history and weight streaming. [green]KV-Cache memoization[/green] preserves exact logit outputs, and combining it with [green]INT8 quantization[/green] forms the non-dominated Pareto optimum for real-world serving.",
