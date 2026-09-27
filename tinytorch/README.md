@@ -115,7 +115,7 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
       <td></td>
     </tr>
     <tr>
-      <td>✅ Historical milestones (1958 Perceptron to 2018 MLPerf)</td>
+      <td>✅ Historical milestones (1958 Perceptron to 2024 GPU Kernels)</td>
       <td></td>
       <td></td>
     </tr>
@@ -320,6 +320,12 @@ TinyTorch/
 │   └── ...                     # (20 module directories)
 │                               # Exported code lands in tinytorch/core/, not here
 │
+├── datasets/                   # 💾 TinyVerse offline educational micro-datasets (<550 KB)
+│   ├── tinydigits/             # 8x8 handwritten digits (1,000 train / 200 test)
+│   ├── tinypy/                 # Algorithmic Python & C code snippets for TinyGPT
+│   ├── tinytalks/              # Q&A pairs on deep learning & TinyTorch concepts
+│   └── tinyshakespeare/        # Bundled Shakespeare sample for instant next-token LM
+│
 ├── guide/                      # 🌐 Course website & lab guide (Quarto)
 │   ├── index.qmd               # Landing page
 │   ├── _quarto.yml             # Site navigation & configuration
@@ -334,7 +340,7 @@ TinyTorch/
 │   ├── 02_1969_xor/            # Minsky's challenge & multi-layer solution
 │   ├── 03_1986_mlp/            # Backpropagation & TinyDigits
 │   ├── 04_1998_cnn/            # LeCun's CNNs & CIFAR-10
-│   ├── 05_2017_transformer/    # Attention mechanisms & TinyGPT
+│   ├── 05_2017_transformer/    # Attention mechanisms, TinyGPT & code completion
 │   ├── 06_2018_mlperf/         # Generative Serving & MLPerf
 │   └── 07_2024_kernels/        # Custom GPU Kernels (Triton & Metal)
 │
@@ -364,7 +370,7 @@ TinyTorch features an automated, multi-tiered test suite (~1,400 tests across 20
   3. **Phase 3: Cumulative Integration Tests** - Runs cross-module integration tests inherited up through the current module.
 - **Cross-Module Integration (`tests/integration/`)**: Backpropagation validation across deep layers, full training loops, and end-to-end computer vision and NLP pipelines.
 - **Bug & Hardware Regressions (`tests/regression/`)**: Prevents silent backprop regressions, verifies shape compatibility, and validates hardware acceleration parity (C++ SIMD, Apple Metal MPS, Triton).
-- **Historical Milestones (`tests/milestones/`)**: Proves student-built frameworks can train real neural architectures (1958 Perceptron to 2018 MLPerf).
+- **Historical Milestones (`tests/milestones/`)**: Proves student-built frameworks can train real neural architectures (1958 Perceptron to 2024 GPU Kernels).
 
 For the full test suite breakdown, conventions, and running instructions, see **[tests/README.md](tests/README.md)**.
 
