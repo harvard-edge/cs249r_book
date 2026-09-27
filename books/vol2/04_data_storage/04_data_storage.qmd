@@ -662,7 +662,9 @@ class StoragePyramidContext:
 @Fig-storage-pyramid maps these six tiers into a spatial hierarchy, showing how bandwidth decreases and capacity increases at each step away from the accelerator.
 
 ::: {#fig-storage-pyramid fig-env="figure" fig-pos="htb" fig-cap="**ML storage hierarchy**: The hierarchy groups the canonical tiers in @tbl-storage-hierarchy-merged into hot, warm, and cold bands, from GPU HBM down to archival storage. Bandwidth generally falls as capacity grows and unit cost declines; the parallel filesystem is highlighted as the shared tier most likely to starve a large training cluster." fig-alt="Storage tiers from GPU HBM through host DRAM, local NVMe, a parallel file system, object storage, and archival storage. The parallel file system is highlighted as the shared cluster bottleneck. A left-hand ribbon groups the tiers into hot, warm, and cold bands."}
+![](images/svg/storage-hierarchy.svg)
 
+<!--
 ```{.tikz}
 \scalebox{0.88}{%
 \begin{tikzpicture}[
@@ -897,6 +899,7 @@ class StoragePyramidContext:
 \end{tikzpicture}%
 }
 ```
+-->
 
 :::
 
@@ -909,7 +912,9 @@ The engineering challenge is to ensure that data flows upward through the pyrami
 The bandwidth ratios between adjacent tiers reveal the severity of each transition in the hierarchy (@fig-storage-bandwidth-cliffs). Between HBM and host DRAM, the ratio is roughly `{python} StoragePyramidContext.hbm_host_dram_ratio_mult_str` (`{python} StoragePyramidContext.h100_bw_tb_per_s_str` vs. ~`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str`). Between host DRAM and NVMe, the ratio is roughly `{python} StoragePyramidContext.dram_nvme_ratio_mult_str` (`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str` vs. ~`{python} StoragePyramidContext.raid0_bw_gb_per_s_str` from a 4-drive RAID-0). Between NVMe and a parallel file system, the ratio depends on the per-node allocation: if a 1 TB/s aggregate parallel file system (PFS) serves 256 nodes, each node receives roughly 4 GB/s, a 7$\times$ reduction from local NVMe. Between the parallel file system and object storage, the ratio is typically 10$\times$ or more, depending on the number of concurrent clients and network bandwidth.
 
 ::: {#fig-storage-bandwidth-cliffs fig-env="figure" fig-pos="htb" fig-cap="**Bandwidth cliffs between storage tiers**: Bandwidth drops by 10--100$\times$ between successive levels of the ML storage pyramid. The training pipeline must bridge these gaps through continuous prefetching and hierarchical staging." fig-alt="Waterfall diagram illustrating bandwidth cliffs between GPU HBM, host DRAM, local NVMe, parallel file systems, and object storage."}
+![](images/svg/bandwidth-cliffs.svg){width="100%"}
 
+<!--
 ```{.tikz}
 \scalebox{0.88}{%
 \begin{tikzpicture}[
@@ -1103,6 +1108,7 @@ The bandwidth ratios between adjacent tiers reveal the severity of each transiti
 \end{tikzpicture}%
 }
 ```
+-->
 
 :::
 
@@ -1671,7 +1677,9 @@ Beyond the single node, the workload requires a shared namespace where all worke
 The architecture of a Lustre-style parallel file system separates two concerns that traditional file systems handle together (@fig-storage-pfs-architecture) [@schwan2003lustre]. **Metadata Servers (MDS)**\index{Metadata Server}\index{MDS} manage the namespace: file creation, directory listings, permission checks, and lock management. **Object Storage Servers (OSS)**\index{Object Storage Server}\index{OSS}[^fn-oss-pfs-disambiguation] manage the actual data blocks, each serving a stripe of every large file. When a client opens a 10 GB training shard, the MDS tells the client which OSS nodes hold which stripes, and the client reads from all of them in parallel. A Lustre[^fn-lustre-parallel-origin] deployment with 100 OSS nodes, each providing 10 GB/s, delivers an aggregate 1 TB/s.
 
 ::: {#fig-storage-pfs-architecture fig-env="figure" fig-pos="htb" fig-cap="**Parallel file system architecture**: Separation of metadata operations (MDS $\to$ MDT) from high-throughput parallel data streaming (Clients $\to$ OSS $\to$ OST), illustrating how file striping aggregates cluster storage bandwidth." fig-alt="Architecture diagram showing compute clients querying a metadata server for stripe maps, then issuing parallel reads across multiple object storage servers."}
+![](images/svg/pfs-architecture.svg){width="100%"}
 
+<!--
 ```{.tikz}
 \scalebox{0.92}{%
 \begin{tikzpicture}[
@@ -1947,6 +1955,7 @@ The architecture of a Lustre-style parallel file system separates two concerns t
 \end{tikzpicture}%
 }
 ```
+-->
 
 :::
 
@@ -2501,7 +2510,9 @@ The pipeline equation also reveals a scaling challenge that worsens with cluster
 The primary weapon against data stalls is **Pipelining**\index{Pipelining!data loading}: the CPU prepares batch $i+1$ while the GPU processes batch $i$, overlapping storage transfer with accelerator execution (@fig-data-pipeline-vol2). When I/O time is less than compute time, pipelining hides the storage latency entirely, and the accelerator never stalls.
 
 ::: {#fig-data-pipeline-vol2 fig-env="figure" fig-pos="htb" fig-cap="**Pipelined data loading**: The CPU prepares batch $i+1$ while the GPU processes batch $i$. Pipelining hides storage latency, but only if the prefetch buffer is deep enough to absorb variance." fig-alt="Pipelining diagram showing CPU loading batches while GPU trains on previous batches."}
+![](images/svg/data-pipelining.svg)
 
+<!--
 ```{.tikz}
 \scalebox{0.90}{%
 \begin{tikzpicture}[
@@ -2753,6 +2764,7 @@ The primary weapon against data stalls is **Pipelining**\index{Pipelining!data l
 \end{tikzpicture}%
 }
 ```
+-->
 
 :::
 
@@ -3058,7 +3070,9 @@ GDS changes the payload path without eliminating the software control path. The 
 The latency reduction from GDS matters most when the training pipeline is already optimized and the remaining bottleneck is the CPU's ability to mediate transfers. In a node with 8 GPUs, each running a data loader with 4 workers, the CPU must manage 32 concurrent I/O streams. At `{python} GDSLatency.gds_trad_us_str` per transfer, the CPU spends significant time in interrupt handling and buffer management. GDS offloads this work to hardware DMA engines, freeing CPU cores for data augmentation and other preprocessing tasks. @Fig-gds-path contrasts the two data paths side by side, showing where GDS eliminates the CPU-mediated copies that dominate per-transfer overhead.
 
 ::: {#fig-gds-path fig-env="figure" fig-pos="htb" fig-cap="**Traditional vs. GPUDirect Storage path**: The traditional path (top) requires two CPU-mediated payload copies. The GDS path (bottom) uses DMA to transfer data directly from NVMe to GPU memory, eliminating those bounce copies while retaining CPU submission and coordination." fig-alt="Diagram comparing traditional three-hop storage path with GDS direct DMA path from NVMe to GPU."}
+![](images/svg/gds-path.svg)
 
+<!--
 ```{.tikz}
 \scalebox{0.92}{%
 \begin{tikzpicture}[
@@ -3321,6 +3335,7 @@ The latency reduction from GDS matters most when the training pipeline is alread
 \end{tikzpicture}%
 }
 ```
+-->
 
 :::
 

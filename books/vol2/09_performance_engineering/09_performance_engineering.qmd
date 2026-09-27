@@ -152,7 +152,9 @@ Verify understanding of system-level performance diagnosis:
 The same diagnostic process can be codified as a decision flowchart, mapping each bottleneck to its corresponding optimization technique. The flowchart in @fig-iron-law-flowchart makes the sequencing explicit: rule out I/O, CPU, and communication overheads before classifying the remaining workload as compute-bound or memory-bound.
 
 ::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron law diagnostic flowchart**: A training-slow-down troubleshooting flow that starts from observed symptoms (slow training, low GPU utilization), branches through I/O, CPU, and communication-overhead checks, and classifies the workload as compute-bound or memory-bound at the leaves. Compute-bound paths point to precision engineering and algorithmic change; memory-bound paths point to operator fusion and tiling. Overhead-bound symptoms (graph dispatch, communication) are surfaced earlier in the flow and addressed before the final compute/memory classification." fig-alt="Troubleshooting flowchart starting from 'Training is slow', branching through GPU-utilization, I/O, CPU, and communication checks, with two terminal labels: Compute Bound and Memory Bound."}
+![](images/svg/diagnostic-flow.svg)
 
+<!--
 ```{.tikz}
 \providecolor{NavyBlue}{HTML}{1E293B}     % Deep Oxford Navy
 \providecolor{SlateGrey}{HTML}{475569}    % Slate Steel Blue
@@ -396,6 +398,7 @@ The same diagnostic process can be codified as a decision flowchart, mapping eac
 \end{tikzpicture}
 }
 ```
+-->
 
 :::
 
@@ -529,6 +532,9 @@ The energy cost of data movement has a direct economic consequence at data cente
 The performance engineering challenge reduces to a data placement problem (@fig-performance-engineering-gpu-memory-hierarchy): keep the data that the compute units need in the fastest memory that can hold it. When a kernel reads a tensor from HBM, processes it, and writes the result back to HBM, the HBM round-trip dominates execution time for any operation with low arithmetic intensity. Every technique here shares the same goal: keeping data closer to compute for longer.
 
 ::: {#fig-performance-engineering-gpu-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**GPU memory hierarchy and data movement**: Visual hierarchy from fast on-chip registers and SRAM down through L2 cache to off-chip HBM3. Latency scales from 1 clock cycle (~0.01 pJ) to hundreds of nanoseconds (~640 pJ per transaction), illustrating the extreme cost disparity between SRAM-resident computation and off-chip memory traffic." fig-alt="Pyramid diagram of GPU memory hierarchy from registers at the top through shared memory and L2 cache to HBM at the base, with capacity, bandwidth, and energy metrics per level."}
+![](images/svg/gpu-memory-hierarchy.svg)
+
+<!--
 ```{.tikz}
 \providecolor{NavyBlue}{HTML}{1E293B}     % Deep Oxford Navy
 \providecolor{SlateGrey}{HTML}{475569}    % Slate Steel Blue
@@ -658,6 +664,8 @@ The performance engineering challenge reduces to a data placement problem (@fig-
 \end{tikzpicture}
 }
 ```
+-->
+
 :::
 
 ::: {#psp-performance-engineering-analogy-scholars-library .callout-perspective title="Analogy: The scholar's library"}
@@ -1726,7 +1734,9 @@ class FusionTrafficCalc:
 Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $Y$. For a hidden dimension of 4096 and batch size of 2048 in FP16, each intermediate tensor is `{python} FusionTrafficCalc.tensor_mb_str`. The unfused execution materializes `{python} FusionTrafficCalc.materialized_mb_str` of intermediate tensors and performs `{python} FusionTrafficCalc.traffic_mb_str` of intermediate HBM traffic, writing and then rereading each tensor. A fused kernel avoids that traffic entirely by holding $Z_1$ and $Z_2$ in registers or shared memory within the SM. @Fig-fusion-before-after contrasts these two execution paths, making the HBM traffic savings visible.
 
 ::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator fusion before and after**: Top: three separate kernels each read from and write to HBM, materializing intermediates $Z_1$ and $Z_2$, with six HBM round-trips along the unfused path. Bottom: a single fused kernel reads inputs once, holds intermediates in SRAM, and writes only the final output, leaving just two HBM round-trips. The fused path delivers roughly a 3$\times$ reduction in HBM traffic per layer." fig-alt="Two stacked dataflow panels. Top unfused path: six HBM round-trip arrows. Bottom fused path: two HBM round-trip arrows, intermediates staying in SRAM. The fused path is labeled as a 3 times reduction."}
+![](images/svg/operator-fusion.svg)
 
+<!--
 ```{.tikz}
 \providecolor{NavyBlue}{HTML}{1E293B}     % Deep Oxford Navy
 \providecolor{SlateGrey}{HTML}{475569}    % Slate Steel Blue
@@ -1887,6 +1897,7 @@ Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $
 \end{tikzpicture}
 }
 ```
+-->
 
 :::
 
@@ -2060,6 +2071,9 @@ class FlashAttentionTiling:
 The mechanism behind this traffic reduction is tiling, as diagrammed in @fig-performance-engineering-flashattention-tiling. FlashAttention processes the computation in tiles (typically $128{\times}128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), a block of $K$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), and a block of $V$ (`{python} FlashAttentionTiling.block_kb_str`), totaling approximately `{python} FlashAttentionTiling.total_kb_str`. This fits comfortably in the H100's `{python} FlashAttentionTiling.shared_kb_str` of shared memory per SM. The tile score $A_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 =$ `{python} FlashAttentionTiling.tiles_per_dim_str` column tiles for each of `{python} FlashAttentionTiling.tiles_per_dim_str` row tiles, reloading tiles as required by the kernel schedule. The important point is that the quadratic $S{\times}S$ score and probability matrices are never materialized: the persistent per-head tensors are $Q$, $K$, $V$, $Y$, and $\mathcal{O}(S)$ softmax statistics.
 
 ::: {#fig-performance-engineering-flashattention-tiling fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention memory hierarchy tiling**: Block-by-block scheduling of Q, K, and V matrices loaded into on-chip shared memory (SRAM). Attention scores are computed and rescaled online without materializing the quadratic $S \times S$ intermediate matrix in off-chip HBM, reducing memory traffic from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$." fig-alt="FlashAttention tiling diagram showing Q, K, V blocks loaded into fast SRAM with online softmax accumulation, avoiding materialization of the full intermediate attention matrix in HBM."}
+![](images/svg/flashattention-tiling.svg)
+
+<!--
 ```{.tikz}
 \providecolor{NavyBlue}{HTML}{1E293B}     % Deep Oxford Navy
 \providecolor{SlateGrey}{HTML}{475569}    % Slate Steel Blue
@@ -2247,6 +2261,8 @@ The mechanism behind this traffic reduction is tiling, as diagrammed in @fig-per
 \end{tikzpicture}
 }
 ```
+-->
+
 :::
 
 FlashAttention-2 [@dao2023flashattention2] further optimizes the algorithm for GPU architectures with many streaming multiprocessors by restructuring the parallelism pattern. The original FlashAttention parallelizes over batch and head dimensions, meaning each thread block handles one (batch, head) pair and iterates over the full sequence. FlashAttention-2 additionally parallelizes over the sequence dimension of the query matrix, distributing work across thread blocks more efficiently and achieving better occupancy. It also reduces the number of non-GEMM FLOPs by restructuring the rescaling operations and exploiting the asymmetry between the Q loop (outer) and K/V loop (inner).
@@ -2405,6 +2421,9 @@ The first inference-side precision decision is how to shrink weights while prote
 The structural contrast between per-tensor and block-wise quantization is illustrated in @fig-performance-engineering-block-quantization. In per-tensor quantization, a single outlier expands the scaling factor across the entire tensor, quantizing the majority of weights to zero and destroying precision. In block-wise quantization, the outlier's dynamic-range penalty is strictly contained within its local group, preserving high-resolution representation for the surrounding weights.
 
 ::: {#fig-performance-engineering-block-quantization fig-env="figure" fig-pos="htb" fig-cap="**Block-wise versus per-tensor quantization**: Under per-tensor scaling (left), an extreme outlier weight forces a wide scale factor that crushes normal weights to zero and destroys precision. Under block-wise quantization (right), weights are partitioned into independent groups, strictly isolating outlier damage to a single block and preserving full INT8 dynamic range across remaining parameters." fig-alt="Side-by-side comparison of per-tensor quantization with crushed precision versus block-wise quantization with localized outlier containment and preserved dynamic range."}
+![](images/svg/block-quantization.svg)
+
+<!--
 ```{.tikz}
 \providecolor{NavyBlue}{HTML}{1E293B}     % Deep Oxford Navy
 \providecolor{SlateGrey}{HTML}{475569}    % Slate Steel Blue
@@ -2627,6 +2646,8 @@ The structural contrast between per-tensor and block-wise quantization is illust
 \end{tikzpicture}
 }
 ```
+-->
+
 :::
 
 LLM.int8() keeps the outlier cost at runtime by decomposing each matrix multiplication into two parts: a small set of outlier dimensions processed in FP16, and the remaining dimensions processed in INT8. The system identifies outlier dimensions at runtime (those exceeding a magnitude threshold, typically 6.0), routes them to an FP16 GEMM, and routes the remaining dimensions to an INT8 GEMM. The results are combined to produce the final output. This achieves nearly lossless INT8 inference for models that would otherwise degrade substantially under uniform quantization.
@@ -2818,6 +2839,9 @@ The deeper payoff of compilation is spatial, not just arithmetic. A compiler lik
 A graph compiler transforms a high-level model definition (Python code) into optimized hardware instructions through a multi-stage pipeline, as shown in @fig-performance-engineering-compilation-pipeline. To visualize this process, consider a standard transformer feed-forward network (FFN) block consisting of a projection, an activation, a second projection, and a layer normalization: `LayerNorm(Linear(GELU(Linear(x))))`. In standard PyTorch eager execution, this sequence triggers four separate kernel launches, each reading from and writing to HBM.
 
 ::: {#fig-performance-engineering-compilation-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Deep learning compilation pipeline**: The four-stage lowering flow from eager Python bytecode through graph capture (TorchDynamo), graph-level optimization (AOTAutograd), target-aware operator fusion (TorchInductor), to code generation and autotuned GPU kernel compilation (Triton and cuBLAS)." fig-alt="Four-stage ML compilation pipeline showing graph capture, graph optimization, operator fusion, and code generation lowering high-level code to hardware-optimized GPU kernels."}
+![](images/svg/compilation-pipeline.svg)
+
+<!--
 ```{.tikz}
 \providecolor{NavyBlue}{HTML}{1E293B}     % Deep Oxford Navy
 \providecolor{SlateGrey}{HTML}{475569}    % Slate Steel Blue
@@ -3053,6 +3077,8 @@ A graph compiler transforms a high-level model definition (Python code) into opt
 \end{tikzpicture}
 }
 ```
+-->
+
 :::
 
 In the **graph capture**\index{Graph Capture} stage, the compiler traces the model's execution to construct a computational graph, a directed acyclic graph where nodes represent operations and edges represent tensor dependencies. For the FFN block, this results in a graph with four primary nodes plus their associated parameter tensors. Dynamic Python control flow (loops, conditionals) must be handled by either tracing through a representative execution path or by using compiler-specific annotations to mark dynamic dimensions.
@@ -3854,6 +3880,9 @@ The effect is particularly pronounced in PyTorch workloads. Enabling `torch.auto
 Profiling levels are useful only if they guide the drill-down from symptom to intervention. ML system profiling operates at four levels, each providing different granularity and targeting different bottleneck categories. @Fig-optimization-hierarchy makes this drill-down explicit, starting from application-level symptoms and descending toward kernel and hardware-counter evidence.
 
 ::: {#fig-optimization-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The profiling hierarchy**: Diagnosis begins with application-level symptoms, then narrows through framework and kernel evidence to hardware counters. Each lower level trades breadth for the detail needed to isolate a root cause." fig-alt="Four-level profiling hierarchy with hardware counters at the base, followed by kernel profiling, framework profiling, and application profiling at the top. A downward arrow shows diagnosis narrowing from application symptoms toward hardware evidence."}
+![](images/svg/profiling-hierarchy.svg)
+
+<!--
 ```{.tikz}
 \providecolor{NavyBlue}{HTML}{1E293B}     % Deep Oxford Navy
 \providecolor{SlateGrey}{HTML}{475569}    % Slate Steel Blue
@@ -4059,6 +4088,8 @@ Profiling levels are useful only if they guide the drill-down from symptom to in
 \end{tikzpicture}
 }
 ```
+-->
+
 :::
 
 The drill-down starts at the application level, where end-to-end metrics such as tokens per second, time-to-first-token, P99 latency, and GPU utilization over time reveal that the user-facing system has missed its target. It then descends to distributed profiling across GPUs and nodes, where communication patterns show whether collectives overlap with compute, which operation dominates step time, and whether load imbalance exists across ranks. Trace-level profiling narrows the diagnosis to the timeline of GPU kernels, CPU operations, and data transfers within a training step or inference request, exposing launch gaps, idle bubbles, sequential bottlenecks, and overlap opportunities. Operation-level profiling completes the chain with tools like NVIDIA Nsight Compute\index{Nsight Compute}, where achieved memory bandwidth, compute utilization, occupancy, and instruction mix determine whether a specific kernel is memory-bound, compute-bound, or limited by implementation details, including whether it is issuing Tensor Core instructions (half-precision matrix multiply-accumulate for FP16/BF16; integer matrix multiply-accumulate for INT8) rather than falling back to scalar CUDA Core instructions (fused multiply-add or arithmetic logic units). A matrix multiplication whose hidden-dimension or sequence-length tile is not divisible by the Tensor Core alignment requirement (multiples of 8 for FP16, 16 for INT8) silently bypasses Tensor Cores entirely and executes on CUDA Cores at a fraction of the peak throughput. This shape mismatch is one of the most common silent performance bugs in custom ML kernels and is invisible without inspecting the instruction mix counter.
@@ -4527,6 +4558,9 @@ Optimization begins by measuring the whole workload before touching individual k
 The optimization playbook decision tree is mapped in @fig-performance-engineering-optimization-decision-tree. Profiling classifies the workload into memory-bound, compute-bound, or communication-bound regimes, directing the engineer toward targeted interventions that yield predictable throughput improvements.
 
 ::: {#fig-performance-engineering-optimization-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Optimization playbook decision tree**: Systematic troubleshooting flow beginning with workload profiling and roofline classification, routing into memory-bound, compute-bound, or communication-bound playbooks with expected throughput speedups and iterative re-profiling." fig-alt="Decision tree branching from workload profiling into memory-bound, compute-bound, and communication-bound branches with specific optimization techniques and expected speedups."}
+![](images/svg/optimization-decision-tree.svg)
+
+<!--
 ```{.tikz}
 \providecolor{NavyBlue}{HTML}{1E293B}     % Deep Oxford Navy
 \providecolor{SlateGrey}{HTML}{475569}    % Slate Steel Blue
@@ -4766,6 +4800,8 @@ The optimization playbook decision tree is mapped in @fig-performance-engineerin
 \end{tikzpicture}
 }
 ```
+-->
+
 :::
 
 The fourth step is to apply and verify. Implement the highest-impact optimization, reprofile, and verify improvement. Then iterate from the roofline classification step with the new profile, as the bottleneck may have shifted.
