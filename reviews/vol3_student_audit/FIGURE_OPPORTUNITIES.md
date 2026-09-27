@@ -1,0 +1,33 @@
+# Volume III: Conceptual Figure Opportunities & Visual Guide Registry
+
+This registry tracks opportunities across Volume III where a student (senior undergraduate, master's, or early PhD in ML) faces high cognitive friction that can be eliminated or substantially reduced through an authoritative, clean diagram or state machine.
+
+## Master Figure Opportunities by Chapter
+
+| Chapter | Proposed Diagram Title | Target Section | Core Problem / Invisible State Visualized | Recommended Format (TikZ / SVG / Standalone) |
+| :--- | :--- | :--- | :--- | :--- |
+| **01 Intro** | **The Stochastic Computer Architecture** | `sec-vol3-intro-live-loop` | High-level computer engineering mapping: Unprivileged Core, Memory Hierarchy, Host Control Plane, Sandbox Airlock, Trajectory Learning Recompiler. Replaces messy SVG. | Standalone TikZ (PDF + SVG + PNG) |
+| **01 Intro** | Six-Phase Turn Execution State Machine | `sec-vol3-intro-execution-lifecycle` | Phase 1 to 6 lifecycle: transient pause, escrow, out-of-band verification oracle, commit vs abort. | TikZ / SVG |
+| **02 Model** | Roofline & Token Latency Anatomy | `sec-vol3-foundation-model-cost` | Prefill (GEMM compute-bound, arithmetic intensity $I > 150$) vs Decode (GEMV memory-bandwidth-bound, $I = 2$) hardware timeline. | TikZ / Python |
+| **02 Model** | PDA Stack Constrained Decoding | `sec-vol3-foundation-model-structured-generation` | Pushdown Automata stack transition showing brace depth $[Q, \Sigma, \Gamma, \delta]$ and dynamic vocabulary token mask logit slicing. | TikZ |
+| **03 Deliberation** | Speculative Verification Hardware Pipeline Timeline | `sec-vol3-test-time-compute-speculative-verification` | Concurrent timeline: 8B draft decode (memory-bound GEMV) overlapping with 70B verifier prefill (compute-bound GEMM), rollback on rejection vs commit. | TikZ |
+| **03 Deliberation** | Pretraining vs. Test-Time Compute Iso-Accuracy Frontier ($Q^*$) | `sec-vol3-test-time-compute-strategy-design` | Iso-accuracy curves ($\mathcal{A}^*$) with marginal rate of technical substitution (MRTS) and query crossover volume $Q^*$. | Python / TikZ |
+| **04 Context** | Hysteretic Watermark Compaction & Radix Cache Amortization Timeline | `sec-vol3-context-engineering-compaction` | Sawtooth token accumulation between $\tau_{\text{low}}$ and $\tau_{\text{high}}$, showing Radix cache hits vs amortized trunk prefix-bust prefill recomputations. | TikZ / Python |
+| **04 Context** | Hard Eviction vs. Append-Only Tombstoning Prefix-Tree Alignment | `sec-vol3-context-engineering-context-rot` | Side-by-side memory layout: Hard Eviction busting Radix page tables for downstream turns ($1.704\text{ s}$ stall) vs Append-Only Tombstoning ($8.9\text{ ms}$, $191\times$ speedup). | TikZ |
+| **05 KV Cache** | Disaggregated Prefill-Decode KV Scatter-Gather Pipeline | `sec-vol3-kvcache-disaggregated` | Cross-parallelism asymmetry ($TP_P=8 \to TP_D=1$), GPUDirect RDMA 800G fabric scatter-gather direct memory placement into PagedAttention blocks without host CPU copy. | TikZ / Systems Schematic |
+| **05 KV Cache** | Copy-on-Write Deliberation Forking & Block Reclamation Lifecycle | `sec-vol3-kvcache-pagedattention` | Dynamic temporal lifecycle: common prefix (ref=1), 3-branch speculative fork (ref=3, zero HBM copy), divergent tail CoW allocation, candidate pruning and block reclamation. | TikZ |
+| **06 Long-Term Memory** | Dual Write Path & Write Admission Quarantine Pipeline | `sec-vol3-memory-dual-write-path` | Synchronous trajectory WAL logging (< 1 ms interactive) vs asynchronous surprisal-gated episodic reflection and consolidation. | TikZ / Systems Schematic |
+| **06 Long-Term Memory** | Asymmetric Distance Computation (ADC) in IVF-PQ Table Lookup | `sec-vol3-persistent-dense-retrieval` | Query sub-vector decomposition ($M=64$), precomputed $M \times 256$ distance table, and zero-multiplication byte-code summation. | TikZ |
+| **07 Tool Calling** | Tool Deserialization & Escrow Airlock | Section 2 | Model JSON string $\to$ Grammar FSM $\to$ Capability Verification $\to$ Hermetic Dispatch. | TikZ |
+| **08 Sandboxes** | Isolation Rings & Host Protection | Section 2 | Kernel namespaces, cgroups, seccomp-BPF filters, microVM boundaries vs native process. | TikZ |
+| **09 Security** | Indirect Prompt Injection & Privilege Attenuation | Section 2 | Untrusted environment input vs system prompt, capability token degradation. | TikZ |
+| **10 Harness** | Agent Control Block (ACB) & Reactor Lifecycle | Section 2 | Event demultiplexer (`epoll`/`kqueue`), descriptor handling, cooperative yielding. | TikZ |
+| **11 Durable Execution** | Write-Ahead Logging & Deterministic Hydration | Section 2 | Event stream, crash recovery, replay avoiding duplicate tool calls (idempotency tokens). | TikZ |
+| **12 Failure Recovery** | Saga Compensating Transactions & Circuit Breakers | Section 2 | Forward execution failure $\to$ compensating action rollback cascade. | TikZ |
+| **13 Evaluation** | Verification Oracle vs LLM-as-a-Judge | Section 2 | Deterministic environment tests vs subjective LLM judges, pass@k, contamination detection. | TikZ |
+| **14 Curation** | Trajectory Telemetry Harvesting & Sieve | Section 2 | Raw multi-turn traces $\to$ step filtering $\to$ deduplication $\to$ loss-masking preparation. | TikZ |
+| **15 Fine-Tuning** | Trajectory Loss Masking & SFT | Section 2 | Action-only vs thought-token loss masking in multi-turn assistant trajectories. | TikZ |
+| **16 RLVR** | Verifiable Reinforcement Learning (GRPO) | Section 2 | Rollout generation $\to$ deterministic oracle reward $\to$ group relative policy update. | TikZ |
+| **17 Multi-Agent** | Multi-Agent Coordination Topologies | Section 2 | Centralized orchestrator vs peer-to-peer gossip vs hierarchical supervisor. | TikZ |
+| **18 Economics** | Tokenomics & Cost-per-Accepted-Task Frontier | Section 2 | Cost vs accuracy Pareto frontier, model routing, SLA arbitrage. | Python / TikZ |
+| **19 Conclusion** | The Unified Trajectory Spine & Specification Boundary | Section 2 | End-to-end synthesis connecting all 6 layers along the trajectory state bus. | TikZ |
