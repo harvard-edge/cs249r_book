@@ -61,7 +61,7 @@ for name, fid, tput, color, subtitle, infra in stages:
     ax.plot([-5, fid], [tput, tput], color=paleink, linewidth=0.6,
             linestyle="--", zorder=1)
 
-# Transition arrows
+# Transition arrows — shrink endpoints so arrowheads don't hide behind dots
 for label, i_from, i_to in transitions:
     _, f1, t1, _, _, _ = stages[i_from]
     _, f2, t2, _, _, _ = stages[i_to]
@@ -70,8 +70,9 @@ for label, i_from, i_to in transitions:
     ax.annotate("",
                 xy=(f2, t2), xytext=(f1, t1),
                 arrowprops=dict(arrowstyle="-|>", color=ethdarkblue,
-                               lw=1.8, connectionstyle="arc3,rad=-0.15"),
-                zorder=4)
+                               lw=1.8, connectionstyle="arc3,rad=-0.15",
+                               shrinkA=8, shrinkB=8),
+                zorder=7)
     ax.text(mid_f, mid_t, label, fontsize=7.5, fontweight="bold",
             color=ethdarkblue, ha="left", va="center")
 
