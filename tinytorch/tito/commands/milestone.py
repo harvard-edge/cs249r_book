@@ -160,7 +160,7 @@ MILESTONE_SCRIPTS = {
         ],
         "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13],  # TinyGPT training requirements
         "description": "Train TinyGPT from scratch on Shakespeare, code completion, and concept Q&A",
-        "historical_context": "Vaswani et al. (2017) and the Generative LLM revolution (2020–2022) proved transformers and emergent autoregressive scaling",
+        "historical_context": "Vaswani et al. (2017) and the Generative LLM revolution (2020-2022) proved transformers and emergent autoregressive scaling",
         "emoji": "🤖"
     },
     "06": {
@@ -647,6 +647,11 @@ class MilestoneCommand(BaseCommand):
             '--part',
             type=int,
             help='Run only a specific part (for multi-part milestones)'
+        )
+        run_parser.add_argument(
+            '--all',
+            action='store_true',
+            help='Run all parts sequentially (for multi-part milestones)'
         )
         run_parser.add_argument(
             '--skip-checks',
@@ -1249,8 +1254,13 @@ class MilestoneCommand(BaseCommand):
             all_script_configs = milestone["scripts"]
             all_scripts = [(s["name"], s["script"], s.get("description", "")) for s in all_script_configs]
 
+            # Check --all flag
+            run_all = getattr(args, "all", False)
+
             # Handle --part flag for multipart milestones
             if args.part is not None:
+                if run_all:
+                    console.print("[yellow]Notice: Both --part and --all specified; prioritizing --part[/yellow]\n")
                 if args.part < 1 or args.part > len(all_scripts):
                     console.print(Panel(
                         f"[red]Invalid part number: {args.part}[/red]\n\n"
@@ -1265,20 +1275,34 @@ class MilestoneCommand(BaseCommand):
                 scripts_to_run = [all_scripts[args.part - 1]]
                 script_configs = [all_script_configs[args.part - 1]]
                 console.print(f"[dim]Running Part {args.part} of {len(all_scripts)}[/dim]\n")
+            elif run_all:
+                scripts_to_run = all_scripts
+                script_configs = all_script_configs
+                console.print(f"[bold cyan]Running all {len(all_scripts)} parts sequentially[/bold cyan]\n")
             else:
                 # Check if milestone has a default_part (e.g., TinyDigits for CNN milestone)
-                # This allows multi-part milestones to have a "no-download" default
+                # This allows multi-part milestones to have a fast default
                 default_part = milestone.get("default_part")
                 if default_part is not None and 1 <= default_part <= len(all_scripts):
                     scripts_to_run = [all_scripts[default_part - 1]]
                     script_configs = [all_script_configs[default_part - 1]]
-                    console.print(f"[dim]Running Part {default_part} (default). Use --part N for other parts.[/dim]\n")
+                    parts_overview = "\n".join(
+                        f"  {'▶' if i+1 == default_part else ' '} Part {i+1}: {s[0]} ({s[2]})"
+                        for i, s in enumerate(all_scripts)
+                    )
+                    console.print(
+                        f"[dim]Milestone {milestone_id} has {len(all_scripts)} parts:[/dim]\n"
+                        f"[dim]{parts_overview}[/dim]\n"
+                        f"[dim]Running Part {default_part} (default). Use --part N for other parts or --all to run all.[/dim]\n"
+                    )
                 else:
                     scripts_to_run = all_scripts
                     script_configs = all_script_configs
         else:
             if args.part is not None:
-                console.print(f"[yellow]⚠️ Milestone {milestone_id} has only one part, ignoring --part flag[/yellow]\n")
+                console.print(f"[yellow]Notice: Milestone {milestone_id} has only one part, ignoring --part flag[/yellow]\n")
+            if getattr(args, "all", False):
+                console.print(f"[yellow]Notice: Milestone {milestone_id} has only one part, ignoring --all flag[/yellow]\n")
             scripts_to_run = [("Main", milestone["script"], milestone.get("description", ""))]
             script_configs = [milestone]  # Single script uses milestone-level config
 
