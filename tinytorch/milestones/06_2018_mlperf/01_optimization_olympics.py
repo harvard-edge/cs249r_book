@@ -64,6 +64,24 @@ def load_tinydigits_arrays(project_root=None):
     )
 
 # =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Model Architecture & Optimization Targets)
+# =============================================================================
+#
+# This milestone optimizes the neural network architectures built in earlier
+# milestones (Perceptron, DigitMLP, SimpleCNN, MinimalTransformer from networks.py)
+# using the systems optimization modules YOU authored:
+#   Module 14: Profiler (FLOPs, latency, and memory counting)
+#   Module 15: Quantizer (INT8 symmetric and asymmetric affine mapping)
+#   Module 16: Compressor (Magnitude pruning and sparsity masking)
+#   Module 17: Accelerator (Vectorized tiled GEMM)
+#   Module 18: Memoization (KV Cache serving speedup)
+#   Module 19: Benchmarker (Statistical MLPerf measurement discipline)
+#
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & MLPERF BENCHMARK UX
+# =============================================================================
+
+# =============================================================================
 # CONFIGURATION
 # =============================================================================
 

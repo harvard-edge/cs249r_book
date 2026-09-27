@@ -37,8 +37,9 @@ def print_banner():
     print("  Verifying C++ SIMD, Apple Metal MPS, and OpenAI Triton GPU Shaders")
     print("=" * 76)
     print(f"  Platform: {platform.system()} ({platform.machine()}) | Python {sys.version.split()[0]}")
-    print("-" * 76)
-
+# =============================================================================
+# 🎓 ZONE 1: STUDENT HARDWARE EXTENSIONS (C++ SIMD, Apple Metal MPS, OpenAI Triton)
+# =============================================================================
 
 def test_cpp_simd():
     print("\n[1/3] Testing Compiled C++ SIMD Vectorized Kernel...")
@@ -141,6 +142,10 @@ def test_triton_shader():
         print(f"      [NOTE] Triton shader check: {e}")
         return False, f"Note: {e}"
 
+
+# =============================================================================
+# 📊 ZONE 2: HARDWARE VERIFICATION HARNESS & REPORTING
+# =============================================================================
 
 def main():
     print_banner()

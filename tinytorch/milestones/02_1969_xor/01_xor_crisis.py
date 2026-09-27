@@ -135,13 +135,13 @@ XOR_TARGETS = np.array([
 ])
 
 
-# ============================================================================
-# SINGLE-LAYER PERCEPTRON
-# ============================================================================
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Model Architecture)
+# =============================================================================
 
 class SingleLayerPerceptron:
     """
-    Single-layer perceptron - the architecture that CANNOT solve XOR.
+    Single-layer perceptron: the architecture that CANNOT solve XOR.
 
     This is the exact architecture Minsky proved insufficient in 1969.
     Decision boundary: w1*x1 + w2*x2 + b = 0 (always a straight line)
@@ -168,6 +168,10 @@ class SingleLayerPerceptron:
         b = float(self.linear.bias.data.item())
         return w[0], w[1], b
 
+
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & VALIDATION UX
+# =============================================================================
 
 def evaluate_on_xor(model):
     """Evaluate model on XOR and return accuracy + predictions."""

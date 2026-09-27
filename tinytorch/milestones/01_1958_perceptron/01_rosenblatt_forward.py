@@ -108,9 +108,9 @@ from rich.text import Text
 
 console = Console()
 
-# ============================================================================
-# 🎓 STUDENT CODE: This is what YOU built with Modules 01-03!
-# ============================================================================
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Model Architecture)
+# =============================================================================
 
 class Perceptron:
     """
@@ -144,9 +144,10 @@ class Perceptron:
         """PyTorch-style: model(x) calls forward(x)"""
         return self.forward(x)
 
-# ============================================================================
-# 📊 VISUALIZATION CODE: Rich CLI formatting (you can ignore this!)
-# ============================================================================
+
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & VALIDATION UX
+# =============================================================================
 
 def draw_network_architecture():
     """Draw the perceptron architecture using ASCII art."""

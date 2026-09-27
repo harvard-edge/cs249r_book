@@ -337,13 +337,23 @@ def evaluate_dataloader_loss(
 
 def load_qa_splits(
     sample_only: bool = False,
+    data_path: Optional[str] = None,
 ) -> Tuple[str, str]:
     """
-    Load train and test splits for the TinyTorch Q&A dataset.
+    Load train and test splits for the TinyTorch Q&A dataset or a custom file.
 
     Returns:
         Tuple of (train_text, test_text).
     """
+    if data_path:
+        custom_path = Path(data_path)
+        if not custom_path.exists():
+            raise FileNotFoundError(f"Custom Q&A dataset not found at {data_path}")
+        with open(custom_path, "r", encoding="utf-8") as f:
+            full_text = f.read()
+        split_idx = int(len(full_text) * 0.8)
+        return full_text[:split_idx], full_text[split_idx:]
+
     dm = DatasetManager()
     train_text = ""
     test_text = ""
@@ -413,6 +423,7 @@ def create_token_windows(
 def run_milestone(args=None):
     """Main milestone execution flow for TinyGPT conversational Q&A."""
     args = args or argparse.Namespace()
+    data_path = getattr(args, "data_path", None)
     is_quick = getattr(args, "quick", False)
     is_sample = getattr(args, "sample", False)
     sample_only = is_quick or is_sample
@@ -437,6 +448,7 @@ def run_milestone(args=None):
     # =========================================================================
     # 1. BANNER AND INTRO
     # =========================================================================
+    dataset_title = Path(data_path).name if data_path else "tinytalks_tinytorch"
     banner_lines = [
         "[bold cyan]MILESTONE 05: TRANSFORMER ERA (PART 4)[/bold cyan]",
         "",
@@ -444,7 +456,7 @@ def run_milestone(args=None):
         "[yellow]and The Overfitting Detective Experiment[/yellow]",
         "",
         "• Model: Causal Pre-LN Transformer (Vaswani / GPT-4)",
-        "• Dataset: Curated TinyTorch concept Q&A pairs (tinytalks_tinytorch)",
+        f"• Dataset: Curated concept Q&A pairs ({dataset_title})",
         "• Overfitting Detective: Train Loss vs Held-Out Test Loss divergence",
         "• Decoding: Temperature scaling, top-k filtering, and live streaming",
     ]
@@ -461,8 +473,8 @@ def run_milestone(args=None):
     # =========================================================================
     # 2. LOAD DATASET SPLITS
     # =========================================================================
-    with console.status("[bold green]Loading TinyTorch Q&A dataset splits..."):
-        train_text, test_text = load_qa_splits(sample_only=sample_only)
+    with console.status(f"[bold green]Loading {dataset_title} dataset splits..."):
+        train_text, test_text = load_qa_splits(sample_only=sample_only, data_path=data_path)
 
     console.print(
         f"📖 Train split loaded : [bold]{len(train_text):,} characters[/bold] "
@@ -836,6 +848,12 @@ def main():
         "--sample",
         action="store_true",
         help="Run fast verification on sample dataset with fewer windows",
+    )
+    parser.add_argument(
+        "--data-path",
+        type=str,
+        default=None,
+        help="Path to custom Q&A text file to train on",
     )
     parser.add_argument(
         "--prompt",

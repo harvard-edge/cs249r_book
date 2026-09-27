@@ -139,9 +139,51 @@ console = Console()
 # =============================================================================
 
 
-# ============================================================================
-# 🎲 DATA GENERATION
-# ============================================================================
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Model Architecture)
+# =============================================================================
+
+class XORNetwork:
+    """
+    Multi-layer network that SOLVES XOR!
+
+    The hidden layer creates new features that make XOR linearly separable.
+    This is the architecture that ended the AI Winter.
+    """
+
+    def __init__(self, hidden_size=4):
+        # Hidden layer: the key innovation!
+        self.hidden = Linear(2, hidden_size)
+        self.relu = ReLU()  # Non-linearity is essential!
+
+        # Output layer
+        self.output = Linear(hidden_size, 1)
+        self.sigmoid = Sigmoid()
+
+    def __call__(self, x):
+        """
+        Forward pass through hidden layer.
+
+        Input → Hidden Layer → ReLU → Output Layer → Sigmoid
+        """
+        # Hidden layer transforms input space
+        h = self.hidden(x)
+        h_activated = self.relu(h)
+
+        # Output layer in new feature space
+        logits = self.output(h_activated)
+        output = self.sigmoid(logits)
+
+        return output
+
+    def parameters(self):
+        """Return all trainable parameters."""
+        return self.hidden.parameters() + self.output.parameters()
+
+
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & VALIDATION UX
+# =============================================================================
 
 def generate_xor_data(n_samples=100):
     """Generate balanced XOR cases with slight noise."""
@@ -175,48 +217,6 @@ def generate_xor_data(n_samples=100):
     y = y[indices]
 
     return Tensor(X), Tensor(y)
-
-
-# ============================================================================
-# 🏗️ MULTI-LAYER NETWORK (The Solution!)
-# ============================================================================
-
-class XORNetwork:
-    """
-    Multi-layer network that SOLVES XOR!
-
-    The hidden layer creates new features that make XOR linearly separable.
-    This is the architecture that ended the AI Winter.
-    """
-
-    def __init__(self, hidden_size=4):
-        # Hidden layer - THE KEY INNOVATION!
-        self.hidden = Linear(2, hidden_size)
-        self.relu = ReLU()  # Non-linearity is essential!
-
-        # Output layer
-        self.output = Linear(hidden_size, 1)
-        self.sigmoid = Sigmoid()
-
-    def __call__(self, x):
-        """
-        Forward pass through hidden layer.
-
-        Input → Hidden Layer → ReLU → Output Layer → Sigmoid
-        """
-        # Hidden layer transforms input space
-        h = self.hidden(x)
-        h_activated = self.relu(h)
-
-        # Output layer in new feature space
-        logits = self.output(h_activated)
-        output = self.sigmoid(logits)
-
-        return output
-
-    def parameters(self):
-        """Return all trainable parameters."""
-        return self.hidden.parameters() + self.output.parameters()
 
 
 # ============================================================================

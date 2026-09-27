@@ -370,8 +370,15 @@ def check_c_syntax_validity(full_code: str) -> Tuple[bool, str]:
 # 📊 ZONE 2: MILESTONE HARNESS & VALIDATION UX
 # =============================================================================
 
-def load_tinypy_corpus(sample_only: bool = False, lang: str = "python") -> str:
-    """Load the TinyPy or TinyC dataset with robust path resolution."""
+def load_tinypy_corpus(sample_only: bool = False, lang: str = "python", data_path: Optional[str] = None) -> str:
+    """Load the TinyPy, TinyC, or custom dataset with robust path resolution."""
+    if data_path:
+        custom_path = Path(data_path)
+        if not custom_path.exists():
+            raise FileNotFoundError(f"Custom dataset file not found at {data_path}")
+        with open(custom_path, "r", encoding="utf-8") as f:
+            return f.read()
+
     if lang == "c":
         c_path = (
             Path(__file__).resolve().parent.parent.parent
@@ -412,6 +419,7 @@ def load_tinypy_corpus(sample_only: bool = False, lang: str = "python") -> str:
 def run_milestone(args=None):
     """Main milestone execution flow for TinyGPT code completion."""
     args = args or argparse.Namespace()
+    data_path = getattr(args, "data_path", None)
     lang = getattr(args, "lang", "python")
     is_quick = getattr(args, "quick", False)
     is_sample = getattr(args, "sample", False)
@@ -419,7 +427,7 @@ def run_milestone(args=None):
     pause = getattr(args, "pause", False)
 
     lang_title = "C" if lang == "c" else "Python"
-    dataset_title = "TinyC" if lang == "c" else "TinyPy"
+    dataset_title = Path(data_path).name if data_path else ("TinyC" if lang == "c" else "TinyPy")
 
     default_prompt = "def add(a, b):" if lang == "python" else "int add(int a, int b) {"
     custom_prompt = getattr(args, "prompt", default_prompt)
@@ -464,7 +472,7 @@ def run_milestone(args=None):
     # 2. LOAD DATASET
     # =========================================================================
     with console.status(f"[bold green]Loading {dataset_title} dataset..."):
-        text = load_tinypy_corpus(sample_only=sample_only, lang=lang)
+        text = load_tinypy_corpus(sample_only=sample_only, lang=lang, data_path=data_path)
 
     console.print(
         f"📖 Dataset loaded: [bold]{len(text):,} characters[/bold] "
@@ -836,6 +844,12 @@ def main():
         default="python",
         choices=["python", "c"],
         help="Programming language: 'python' for TinyPy or 'c' for TinyC",
+    )
+    parser.add_argument(
+        "--data-path",
+        type=str,
+        default=None,
+        help="Path to custom source code or text file to train on",
     )
     parser.add_argument(
         "--stream",

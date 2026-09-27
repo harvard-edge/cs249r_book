@@ -24,6 +24,19 @@ from rich.table import Table
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (KV Cache & Autoregressive Serving)
+# =============================================================================
+#
+# This benchmark pairs your TinyGPT Transformer (Module 13) with your
+# KV Cache Memoization engine (Module 18):
+#   Baseline: O(S^2) prefix recomputation on every new token
+#   Accelerated: O(1) single-token incremental decode using YOUR KV Cache
+#
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & VERIFICATION
+# =============================================================================
+
 def replay_prefixes(model, tokens, cache=None):
     """Return the next-token logits at every position of one fixed sequence.
 

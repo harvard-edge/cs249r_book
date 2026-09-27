@@ -1280,21 +1280,70 @@ class MilestoneCommand(BaseCommand):
                 script_configs = all_script_configs
                 console.print(f"[bold cyan]Running all {len(all_scripts)} parts sequentially[/bold cyan]\n")
             else:
-                # Check if milestone has a default_part (e.g., TinyDigits for CNN milestone)
-                # This allows multi-part milestones to have a fast default
-                default_part = milestone.get("default_part")
-                if default_part is not None and 1 <= default_part <= len(all_scripts):
-                    scripts_to_run = [all_scripts[default_part - 1]]
-                    script_configs = [all_script_configs[default_part - 1]]
-                    parts_overview = "\n".join(
-                        f"  {'▶' if i+1 == default_part else ' '} Part {i+1}: {s[0]} ({s[2]})"
-                        for i, s in enumerate(all_scripts)
-                    )
-                    console.print(
-                        f"[dim]Milestone {milestone_id} has {len(all_scripts)} parts:[/dim]\n"
-                        f"[dim]{parts_overview}[/dim]\n"
-                        f"[dim]Running Part {default_part} (default). Use --part N for other parts or --all to run all.[/dim]\n"
-                    )
+                # Check if milestone has multiple parts and handle interactive selection
+                default_part = milestone.get("default_part", 1)
+                chosen_part = None
+                is_interactive = (
+                    sys.stdin.isatty()
+                    and sys.stdout.isatty()
+                    and os.environ.get("TINYTORCH_NON_INTERACTIVE") != "1"
+                    and os.environ.get("CI") != "true"
+                )
+
+                if is_interactive and len(all_scripts) > 1:
+                    menu_lines = []
+                    for i, s in enumerate(all_scripts):
+                        tag = " (default)" if (i + 1) == default_part else ""
+                        menu_lines.append(f"  [{i+1}] {s[0]}: {s[2]}{tag}")
+                    menu_lines.append("  [A] Run all parts sequentially")
+                    console.print(Panel(
+                        f"[bold cyan]Milestone {milestone_id} Parts Menu:[/bold cyan]\n\n"
+                        + "\n".join(menu_lines)
+                        + f"\n\n[dim]Press Enter to run default (Part {default_part})[/dim]",
+                        title="Choose Part to Run",
+                        border_style="cyan"
+                    ))
+                    try:
+                        prompt_text = f"[bold yellow]Select part (1 to {len(all_scripts)}, A for all, or Enter for {default_part}): [/bold yellow]"
+                        user_choice = console.input(prompt_text).strip()
+                        if user_choice.lower() in ("a", "all"):
+                            run_all = True
+                        elif user_choice.isdigit():
+                            val = int(user_choice)
+                            if 1 <= val <= len(all_scripts):
+                                chosen_part = val
+                            else:
+                                console.print(f"[yellow]Invalid selection '{user_choice}'; using default Part {default_part}[/yellow]\n")
+                                chosen_part = default_part
+                        elif user_choice == "":
+                            chosen_part = default_part
+                        else:
+                            console.print(f"[yellow]Invalid selection '{user_choice}'; using default Part {default_part}[/yellow]\n")
+                            chosen_part = default_part
+                    except (EOFError, KeyboardInterrupt):
+                        chosen_part = default_part
+                else:
+                    chosen_part = default_part
+
+                if run_all:
+                    scripts_to_run = all_scripts
+                    script_configs = all_script_configs
+                    console.print(f"[bold cyan]Running all {len(all_scripts)} parts sequentially[/bold cyan]\n")
+                elif chosen_part is not None and 1 <= chosen_part <= len(all_scripts):
+                    scripts_to_run = [all_scripts[chosen_part - 1]]
+                    script_configs = [all_script_configs[chosen_part - 1]]
+                    if not is_interactive:
+                        parts_overview = "\n".join(
+                            f"  {'▶' if i+1 == chosen_part else ' '} Part {i+1}: {s[0]} ({s[2]})"
+                            for i, s in enumerate(all_scripts)
+                        )
+                        console.print(
+                            f"[dim]Milestone {milestone_id} has {len(all_scripts)} parts:[/dim]\n"
+                            f"[dim]{parts_overview}[/dim]\n"
+                            f"[dim]Running Part {chosen_part} (default). Specify a part flag or the all flag to customize.[/dim]\n"
+                        )
+                    else:
+                        console.print(f"[bold green]Running Part {chosen_part}: {all_scripts[chosen_part-1][0]}[/bold green]\n")
                 else:
                     scripts_to_run = all_scripts
                     script_configs = all_script_configs

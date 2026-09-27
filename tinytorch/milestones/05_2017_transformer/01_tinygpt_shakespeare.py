@@ -286,11 +286,21 @@ def run_milestone(args=None):
     # ─────────────────────────────────────────────────────────────────────────
     # 2. LOAD DATASET
     # ─────────────────────────────────────────────────────────────────────────
-    dm = DatasetManager()
-    with console.status("[bold green]Loading TinyShakespeare dataset..."):
-        text = dm.get_tinyshakespeare(sample_only=sample_only)
+    data_path = getattr(args, "data_path", None)
+    if data_path:
+        custom_file = Path(data_path)
+        if not custom_file.exists():
+            raise FileNotFoundError(f"Custom text file not found at {data_path}")
+        with open(custom_file, "r", encoding="utf-8") as f:
+            text = f.read()
+        dataset_name = custom_file.name
+    else:
+        dm = DatasetManager()
+        with console.status("[bold green]Loading TinyShakespeare dataset..."):
+            text = dm.get_tinyshakespeare(sample_only=sample_only)
+        dataset_name = "Shakespeare"
 
-    console.print(f"📖 Dataset loaded: [bold]{len(text):,} characters[/bold] of Shakespeare")
+    console.print(f"📖 Dataset loaded: [bold]{len(text):,} characters[/bold] of {dataset_name}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # 3. TOKENIZATION
@@ -454,6 +464,7 @@ def run_milestone(args=None):
 def main():
     parser = argparse.ArgumentParser(description="Milestone 05: TinyGPT on TinyShakespeare")
     parser.add_argument("--quick", "--sample", action="store_true", help="Run on offline sample dataset")
+    parser.add_argument("--data-path", type=str, default=None, help="Path to custom text file to train on")
     parser.add_argument("--prompt", type=str, default="First Citizen:", help="Seed prompt for text generation")
     parser.add_argument("--temperature", "--temp", type=float, default=0.8, help="Sampling temperature")
     parser.add_argument("--epochs", type=int, default=12, help="Number of training epochs")

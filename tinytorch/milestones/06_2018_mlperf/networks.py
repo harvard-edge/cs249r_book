@@ -32,15 +32,19 @@ if repo_root not in sys.path:
 import numpy as np
 
 
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Architectures from Milestones 01 to 05)
+# =============================================================================
+
 # ============================================================================
-# MILESTONE 01: Perceptron (1958 - Rosenblatt)
+# MILESTONE 01: Perceptron (1958: Rosenblatt)
 # ============================================================================
 
 class Perceptron:
     """
     The original Perceptron from Milestone 01.
 
-    A single-layer linear classifier - the foundation of neural networks.
+    A single-layer linear classifier: the foundation of neural networks.
     Architecture: Input → Linear(in_features, num_classes)
 
     From: Rosenblatt (1958) "The Perceptron: A Probabilistic Model"
