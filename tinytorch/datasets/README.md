@@ -10,6 +10,7 @@ datasets/
 ├── tinypy/             ← curated, verified Python code for code completion (~67KB)
 ├── tinyshakespeare/    ← bundled sample of Shakespeare plays (~21KB)
 ├── tinytalks/          ← conversational Q&A text for transformers (~40KB)
+├── DATASHEET.md        ← Comprehensive TinyVerse suite datasheet (Gebru et al.)
 └── README.md           ← This file
 ```
 

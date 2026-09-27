@@ -182,6 +182,8 @@ class TestModelConstruction:
                 assert module.DigitMLP() is not None
             if hasattr(module, "SimpleCNN"):
                 assert module.SimpleCNN() is not None
+            if hasattr(module, "TinyGPT"):
+                assert module.TinyGPT() is not None
 
     def test_milestone_07_kernels(self):
         """Milestone 07: Custom GPU kernels script loads."""

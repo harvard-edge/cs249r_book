@@ -42,6 +42,20 @@ not language quality.
 
 Required modules: 01-08, 11-13, and 18.
 
+## Pre-Built Architectures (`networks.py`)
+
+`networks.py` provides clean reference implementations of the architectures assembled across Milestones 01 to 05, allowing students to focus purely on systems optimization:
+- `Perceptron`: Single-layer linear classifier (Milestone 01)
+- `DigitMLP`: Multi-layer perceptron with ReLU (Milestone 03)
+- `SimpleCNN`: LeNet-style spatial convolutional network (Milestone 04)
+- `MinimalTransformer`: Toy sequence transformer with self-attention (Milestone 05)
+- `TinyGPT`: Decoder-only generative transformer with Pre-LN blocks and causal masking (Milestone 05)
+
+Import them directly:
+```python
+from networks import DigitMLP, SimpleCNN, MinimalTransformer, TinyGPT
+```
+
 ## Run
 
 From the TinyTorch project root:
