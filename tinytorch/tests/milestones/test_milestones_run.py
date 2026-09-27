@@ -150,6 +150,15 @@ class TestMilestoneRuns:
         assert "TinyGPT" in stdout or "Code Completion" in stdout
 
     @pytest.mark.slow
+    def test_milestone_05_conversational_chat(self):
+        """Milestone 05 Part 4: Conversational Q&A & Overfitting Detective."""
+        returncode, stdout, stderr = run_milestone("05", part=4, timeout=180)
+
+        assert returncode == 0, f"Milestone 05 Part 4 failed:\nstdout: {stdout}\nstderr: {stderr}"
+        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 05" in stdout
+        assert "Overfitting Detective" in stdout or "TinyGPT" in stdout
+
+    @pytest.mark.slow
     def test_milestone_06_mlperf(self):
         """Milestone 06: MLPerf Benchmarks (2018) - Optimization techniques."""
         returncode, stdout, stderr = run_milestone("06", timeout=180)

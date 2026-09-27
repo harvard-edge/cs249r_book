@@ -222,7 +222,7 @@ As you progress, unlock recreations of landmark ML achievements:
     <tr>
       <td align="center"><b>2017</b></td>
       <td>Transformer Era (TinyGPT)</td>
-      <td>Autoregressive Shakespeare generation with Pre-LN GPT</td>
+      <td>Autoregressive Shakespeare generation, Python/C code completion, and concept Q&A</td>
     </tr>
     <tr>
       <td align="center"><b>2018+</b></td>
@@ -232,7 +232,7 @@ As you progress, unlock recreations of landmark ML achievements:
   </tbody>
 </table>
 
-**These aren't toy demos** - they're historically significant ML achievements rebuilt with YOUR framework!
+**These aren't toy demos**: they're historically significant ML achievements rebuilt with YOUR framework!
 
 ---
 

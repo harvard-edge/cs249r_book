@@ -150,10 +150,16 @@ MILESTONE_SCRIPTS = {
                 "script": "milestones/05_2017_transformer/03_tinygpt_code_completion.py",
                 "description": "Train TinyGPT on Python code to complete functions and syntax",
                 "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
+            },
+            {
+                "name": "Conversational Q&A",
+                "script": "milestones/05_2017_transformer/04_tinygpt_chat.py",
+                "description": "Train conversational TinyGPT on TinyTorch Q&A and analyze overfitting",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
             }
         ],
         "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13],  # TinyGPT training requirements
-        "description": "Train TinyGPT from scratch on Shakespeare and Python code",
+        "description": "Train TinyGPT from scratch on Shakespeare, code completion, and concept Q&A",
         "historical_context": "Vaswani et al. (2017) and the Generative LLM revolution (2020–2022) proved transformers and emergent autoregressive scaling",
         "emoji": "🤖"
     },
@@ -1647,7 +1653,7 @@ class MilestoneCommand(BaseCommand):
         Delegates to the shared :func:`auto_sync_after_completion` helper so the
         CI / interactivity / logged-in rules match the module-completion path.
         Crucially, this no longer skips the sync on a non-TTY shell (Git Bash /
-        IDE terminals) -- that silent skip left progress unsynced (#1849).
+        IDE terminals): that silent skip left progress unsynced (#1849).
         """
         from ..core.submission import auto_sync_after_completion
 

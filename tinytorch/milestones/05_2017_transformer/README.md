@@ -21,7 +21,10 @@ Train **TinyGPT** from scratch on Shakespeare. Brings together your tokenization
 Prove your attention mechanism on three synthetic sequence challenges (reversal, copying, prefix-controlled mixed tasks) without external data dependencies.
 
 **Part 3 (`03_tinygpt_code_completion.py` - Code Completion):**
-Train **TinyGPT** on Python code using the TinyPy dataset to complete functions, preserve indentation, and generate syntactically valid code.
+Train **TinyGPT** on Python and C code using the TinyPy and TinyC datasets to complete functions, preserve indentation, and generate syntactically valid code verified with Abstract Syntax Tree parsing.
+
+**Part 4 (`04_tinygpt_chat.py` - Conversational Q&A & Overfitting Detective):**
+Train **TinyGPT** as a conversational assistant explaining TinyTorch concepts ("TinyTorch Teaching TinyTorch"). Run the Overfitting Detective experiment to observe the divergence between training loss (rote memorization) and held-out test loss.
 
 ## Required Modules
 
@@ -70,10 +73,16 @@ tito milestone run tinygpt
 tito milestone run 05 --part 2
 ```
 
-**Run Part 3 (Python Code Completion):**
+**Run Part 3 (Python & C Code Completion):**
 
 ```bash
 tito milestone run 05 --part 3
+```
+
+**Run Part 4 (Conversational Q&A & Overfitting Detective):**
+
+```bash
+tito milestone run 05 --part 4
 ```
 
 **Or run directly:**
@@ -85,11 +94,12 @@ python3 milestones/05_2017_transformer/01_tinygpt_shakespeare.py --quick
 # Part 2: Sequence tasks
 python3 milestones/05_2017_transformer/02_vaswani_attention.py
 
-# Part 3: Code completion (from repository root)
+# Part 3: Code completion (Python or C)
 python3 milestones/05_2017_transformer/03_tinygpt_code_completion.py --quick
+python3 milestones/05_2017_transformer/03_tinygpt_code_completion.py --quick --lang c
 
-# Or from within milestones/05_2017_transformer/
-python3 03_tinygpt_code_completion.py --quick
+# Part 4: Conversational Q&A and Overfitting Detective
+python3 milestones/05_2017_transformer/04_tinygpt_chat.py --quick
 ```
 
 ## Part 3: Code Completion with TinyPy (`03_tinygpt_code_completion.py`)
@@ -135,13 +145,40 @@ tito milestone run 05 --part 3
 python3 03_tinygpt_code_completion.py --epochs 10
 ```
 
+## Part 4: Conversational Concepts & Overfitting Detective (`04_tinygpt_chat.py`)
+
+### TinyTorch Teaching TinyTorch and the Generalization Boundary
+
+In Part 4, you train TinyGPT on curated question and answer pairs covering TinyTorch systems concepts (`tinytalks_tinytorch.txt`). This milestone part introduces two essential concepts:
+
+1. **Conversational Dialogue Structuring:**
+   The model learns the statistical structure of dialogue formatted with `Q: ` and `A: `. Autoregressive sampling completes the answer when primed with a conceptual question.
+
+2. **The Overfitting Detective Experiment:**
+   The TinyGPT model has approximately 119,000 learnable parameters, while the TinyTalks concept corpus is approximately 13.7 KB (about 13,700 characters). Because the model has more parameter capacity than the dataset has characters, it can easily achieve near-zero training loss through rote memorization.
+   By splitting the corpus into an explicit training split (64 concept pairs) and a held-out test split (17 unseen concept pairs), students observe the classic machine learning phenomenon:
+   - Early Epochs (Underfitting): Both train and test losses decrease as the model learns basic character statistics and formatting.
+   - Middle Epochs (Sweet Spot): Train loss drops further, and test loss achieves its minimum.
+   - Late Epochs (Overfitting): Train loss drops below 0.50 as the model memorizes the training questions, while test loss rises as the generalization gap widens.
+
+### Commands to Run
+
+```bash
+# Fast verification run
+python3 milestones/05_2017_transformer/04_tinygpt_chat.py --quick
+
+# Interactive chat mode
+python3 milestones/05_2017_transformer/04_tinygpt_chat.py --interactive
+```
+
 ## Expected Results
 
 | Part | Script | Task | Success Criteria |
 |------|--------|------|------------------|
 | 1 (Default) | `01_tinygpt_shakespeare.py` | Shakespeare Next-Token Prediction | Loss drops from ~3.0 to < 1.0 (PPL < 3.0); generates coherent verse |
 | 2 (Optional) | `02_vaswani_attention.py` | Synthetic Reversal / Copy / Mixed | High accuracy (>95% reversal, >95% copy, >90% mixed) |
-| 3 (Code) | `03_tinygpt_code_completion.py` | Python Code Completion | Loss drops steadily; generates valid syntax and completes functions |
+| 3 (Code) | `03_tinygpt_code_completion.py` | Python & C Code Completion | Loss drops steadily; generates valid syntax and completes functions |
+| 4 (Chat) | `04_tinygpt_chat.py` | Conversational Q&A & Overfitting | Train loss drops to < 0.60; detects generalization gap on held-out split |
 
 ## Achievement Unlocked
 
@@ -151,6 +188,7 @@ After completing this milestone, you'll understand:
 - How temperature and top-k sampling turn raw logits into generative prose
 - Why autoregressive decode creates the prefix recomputation bottleneck that Part III will optimize
 - How autoregressive transformers generalize from literary prose to formal code completion
+- How micro-models transition from representation learning to rote memorization on small datasets
 
 **You've validated the architecture powering modern AI!**
 

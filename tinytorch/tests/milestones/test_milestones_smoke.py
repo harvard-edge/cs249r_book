@@ -158,6 +158,18 @@ class TestModelConstruction:
             assert model is not None
             assert total_params > 0
 
+    def test_milestone_05_conversational_chat(self):
+        """Milestone 05 Part 4: Conversational Q&A model constructs and script loads."""
+        module = _import_milestone(
+            MILESTONES_DIR / "05_2017_transformer" / "04_tinygpt_chat.py"
+        )
+        assert module is not None
+        if hasattr(module, "build_model"):
+            with patch("builtins.print"):
+                model, total_params = module.build_model(vocab_size=50, embed_dim=32, num_layers=1, num_heads=2, max_seq_len=32)
+            assert model is not None
+            assert total_params > 0
+
     def test_milestone_06_networks(self):
         """Milestone 06: All network classes in networks.py construct."""
         module = _import_milestone(

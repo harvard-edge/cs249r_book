@@ -17,30 +17,34 @@ datasets/
 
 ### TinyDigits
 - **Used by:** Milestones 03 & 04 (MLP and CNN examples)
-- **Contents:** 1,000 training + 200 test samples
-- **Format:** 8×8 grayscale images, pickled
+- **Contents:** 1,000 training + 200 test samples (balanced 0 to 9)
+- **Format:** 8x8 grayscale images, pickled
 - **Size:** ~310 KB
+- **Documentation:** README.md and DATASHEET.md
 - **Purpose:** Fast iteration on real image classification
 
-### TinyPy
-- **Used by:** Code completion and generative modeling (e.g. Milestone 05 and modern generative AI tasks)
-- **Contents:** 102 curated Python snippets (148 functions/methods, 12 classes across 4 domains)
-- **Format:** Clean, 100% AST-valid Python source code with full type annotations and docstrings
-- **Size:** ~67 KB
-- **Purpose:** Fast, offline code completion, syntax learning, and next-token prediction
+### TinyPy & TinyC
+- **Used by:** Milestone 05 Part 3 (Code completion and syntax verification)
+- **Contents:** 102 curated Python snippets (73 KB) and C algorithms (8 KB)
+- **Format:** Clean, 100% AST-valid Python source code and standard C99 functions
+- **Size:** ~81 KB combined
+- **Documentation:** README.md and DATASHEET.md
+- **Purpose:** Fast, offline code completion, syntax learning, and AST compiler gates
 
 ### TinyTalks
-- **Used by:** Transformer / language teaching (e.g. Milestone 05 materials and extensions)
-- **Contents:** 350 Q&A pairs across 5 difficulty levels
-- **Format:** Plain text (`Q:` / `A:` lines), character-level friendly
-- **Size:** ~40 KB
-- **Purpose:** Fast, offline conversational text for attention and GPT-style experiments
+- **Used by:** Milestone 05 Part 4 (Conversational modeling and Overfitting Detective)
+- **Contents:** 350 general Q&A pairs plus 81 specialized TinyTorch Concepts Q&A pairs with train/test splits
+- **Format:** Plain text (Q: / A: lines), character-level friendly
+- **Size:** ~53 KB combined
+- **Documentation:** README.md and DATASHEET.md
+- **Purpose:** Conversational text, concept retrieval, and measuring memorization versus generalization
 
 ### TinyShakespeare (Sample)
-- **Used by:** Milestone 05 (Transformer Era: TinyGPT autoregressive language modeling)
-- **Contents:** Curated excerpt from William Shakespeare's plays
+- **Used by:** Milestone 05 Part 1 (TinyGPT character-level language modeling)
+- **Contents:** Curated excerpt from William Shakespeare plays
 - **Format:** Plain text, character-level friendly
 - **Size:** ~21 KB
+- **Documentation:** README.md and DATASHEET.md
 - **Purpose:** Fast, offline next-token prediction and autoregressive sampling without downloading the full corpus
 
 ## Downloaded Datasets (On-Demand)

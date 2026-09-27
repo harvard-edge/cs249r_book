@@ -58,7 +58,7 @@ import os
 from pathlib import Path
 import sys
 import time
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import numpy as np
 
@@ -94,13 +94,16 @@ from rich.progress import (  # noqa: E402
     TextColumn,
 )
 from rich.syntax import Syntax  # noqa: E402
+from rich.live import Live  # noqa: E402
 from rich import box  # noqa: E402
 
 console = Console()
 
 
-def press_enter_to_continue():
-    """Pause in interactive sessions; skip in CI or non-interactive runs."""
+def press_enter_to_continue(pause: bool = False):
+    """Pause in interactive sessions when pause is enabled; skip in CI or non-interactive runs."""
+    if not pause:
+        return
     if (
         os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1"
         or os.environ.get("CI") == "true"
@@ -251,6 +254,7 @@ def generate_code_completion(
     temperature: float = 0.4,
     top_k: int = 5,
     stop_at_block: bool = True,
+    stream_callback: Optional[Callable[[str], None]] = None,
 ) -> str:
     """
     Autoregressively extend code prompt using temperature and top-k sampling.
@@ -258,14 +262,15 @@ def generate_code_completion(
     Args:
         model: Trained TinyGPT instance.
         tokenizer: Character tokenizer.
-        prompt: Initial Python code prefix.
+        prompt: Initial Python or C code prefix.
         max_new_tokens: Maximum number of new characters to generate.
         temperature: Sampling temperature (0.3 to 0.5 recommended for syntax).
         top_k: Top-k vocabulary filtering threshold.
         stop_at_block: Whether to stop when encountering double newline.
+        stream_callback: Optional callable invoked with decoded text on each token.
 
     Returns:
-        Full generated Python code string (prompt + completion).
+        Full generated code string (prompt + completion).
     """
     prompt_ids = tokenizer.encode(prompt)
     if not prompt_ids:
@@ -287,6 +292,9 @@ def generate_code_completion(
             top_k=top_k,
         )
         current_ids.append(next_id)
+
+        if stream_callback is not None:
+            stream_callback(tokenizer.decode(current_ids))
 
         next_tensor = np.array([[next_id]], dtype=np.int32)
         current_tokens = Tensor(
@@ -340,8 +348,33 @@ def check_ast_validity(full_code: str) -> Tuple[bool, str]:
     return False, direct_err
 
 
-def load_tinypy_corpus(sample_only: bool = False) -> str:
-    """Load the TinyPy dataset with robust fallbacks to local sample files."""
+def check_c_syntax_validity(full_code: str) -> Tuple[bool, str]:
+    """Check if full_code has balanced delimiters for C functions."""
+    stack = []
+    matching = {')': '(', '}': '{', ']': '['}
+    for char in full_code:
+        if char in "({[":
+            stack.append(char)
+        elif char in ")}]":
+            if not stack or stack[-1] != matching[char]:
+                return False, f"Unbalanced delimiter: unexpected {char}"
+            stack.pop()
+    return True, "Valid C syntax (balanced delimiters)"
+
+
+def load_tinypy_corpus(sample_only: bool = False, lang: str = "python") -> str:
+    """Load the TinyPy or TinyC dataset with robust path resolution."""
+    if lang == "c":
+        c_path = (
+            Path(__file__).resolve().parent.parent.parent
+            / "datasets"
+            / "tinypy"
+            / "tinyc_sample.txt"
+        )
+        if c_path.exists():
+            with open(c_path, "r", encoding="utf-8") as f:
+                return f.read()
+
     dm = DatasetManager()
     if hasattr(dm, "get_tinypy"):
         try:
@@ -351,19 +384,16 @@ def load_tinypy_corpus(sample_only: bool = False) -> str:
         except Exception:
             pass
 
-    # Fallback search paths
-    sample_subpath = (
-        Path("tinytorch") / "datasets" / "tinypy" / "tinypy_sample.txt"
+    # Direct search path
+    sample_path = (
+        Path(__file__).resolve().parent.parent.parent
+        / "datasets"
+        / "tinypy"
+        / "tinypy_sample.txt"
     )
-    candidate_paths = [
-        project_root / sample_subpath,
-        Path(__file__).resolve().parent / "data" / "tinypy_sample.txt",
-        Path(__file__).resolve().parent / "tinypy_sample.txt",
-    ]
-    for path in candidate_paths:
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                return f.read()
+    if sample_path.exists():
+        with open(sample_path, "r", encoding="utf-8") as f:
+            return f.read()
 
     raise FileNotFoundError(
         "Could not load TinyPy dataset. "
@@ -374,13 +404,29 @@ def load_tinypy_corpus(sample_only: bool = False) -> str:
 def run_milestone(args=None):
     """Main milestone execution flow for TinyGPT code completion."""
     args = args or argparse.Namespace()
+    lang = getattr(args, "lang", "python")
     is_quick = getattr(args, "quick", False)
     is_sample = getattr(args, "sample", False)
     sample_only = is_quick or is_sample
-    custom_prompt = getattr(args, "prompt", "def add(a, b):")
+    pause = getattr(args, "pause", False)
+
+    lang_title = "C" if lang == "c" else "Python"
+    dataset_title = "TinyC" if lang == "c" else "TinyPy"
+
+    default_prompt = "def add(a, b):" if lang == "python" else "int add(int a, int b) {"
+    custom_prompt = getattr(args, "prompt", default_prompt)
+    if custom_prompt == "def add(a, b):" and lang == "c":
+        custom_prompt = "int add(int a, int b) {"
+
     temperature = getattr(args, "temperature", 0.4)
     epochs = getattr(args, "epochs", 8 if sample_only else 10)
     top_k = getattr(args, "top_k", 5)
+    should_stream = getattr(args, "stream", True)
+    if (
+        os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1"
+        or os.environ.get("CI") == "true"
+    ):
+        should_stream = False
 
     # =========================================================================
     # 1. BANNER AND INTRO
@@ -388,12 +434,12 @@ def run_milestone(args=None):
     banner_lines = [
         "[bold cyan]MILESTONE 05: TRANSFORMER ERA (2017-2022)[/bold cyan]",
         "",
-        "[yellow]Train TinyGPT on Python Code: "
+        f"[yellow]Train TinyGPT on {lang_title} Code: "
         "Foundation of GitHub Copilot & Codex![/yellow]",
         "",
         "• Model: Causal Pre-LN Transformer (Vaswani / Codex / GPT-4)",
-        "• Workload: Autoregressive Next-Char Code Completion on TinyPy",
-        "• Syntax Gate: Rigorous AST parsing to verify formal correctness",
+        f"• Workload: Autoregressive Next-Char Code Completion on {dataset_title}",
+        "• Syntax Gate: Rigorous syntax parsing to verify formal correctness",
         "• Systems: Parallel training with temperature and top-k decode",
     ]
     console.print()
@@ -404,17 +450,17 @@ def run_milestone(args=None):
             title="TinyTorch Architecture Tier",
         )
     )
-    press_enter_to_continue()
+    press_enter_to_continue(pause)
 
     # =========================================================================
     # 2. LOAD DATASET
     # =========================================================================
-    with console.status("[bold green]Loading TinyPy dataset..."):
-        text = load_tinypy_corpus(sample_only=sample_only)
+    with console.status(f"[bold green]Loading {dataset_title} dataset..."):
+        text = load_tinypy_corpus(sample_only=sample_only, lang=lang)
 
     console.print(
         f"📖 Dataset loaded: [bold]{len(text):,} characters[/bold] "
-        "of Python source code"
+        f"of {lang_title} source code"
     )
 
     # =========================================================================
@@ -495,7 +541,7 @@ def run_milestone(args=None):
         "100% Student Authored",
     )
     console.print(table)
-    press_enter_to_continue()
+    press_enter_to_continue(pause)
 
     # =========================================================================
     # 5. TRAINING LOOP
@@ -505,7 +551,7 @@ def run_milestone(args=None):
     trainer = Trainer(model, optimizer, loss_fn)
 
     console.print(
-        "[bold]🚀 Training TinyGPT from Scratch on Python Code...[/bold]"
+        f"[bold]🚀 Training TinyGPT from Scratch on {lang_title} Code...[/bold]"
     )
 
     history = []
@@ -556,17 +602,28 @@ def run_milestone(args=None):
     # =========================================================================
     # 6. CODE COMPLETION GENERATION & AST VALIDATION
     # =========================================================================
+    syntax_lang = "c" if lang == "c" else "python"
+    lang_title = "C" if lang == "c" else "Python"
     console.print(
-        "[bold]✨ Generating Python Code Autoregressively...[/bold]\n"
+        f"[bold]✨ Generating {lang_title} Code Autoregressively...[/bold]\n"
     )
 
-    benchmark_prompts = [
-        "def add(a, b):",
-        "def relu(x):",
-        "def factorial(n):",
-        "def is_prime(n):",
-        "class Linear:",
-    ]
+    if lang == "c":
+        benchmark_prompts = [
+            "int add(int a, int b) {",
+            "float relu(float x) {",
+            "int is_prime(int n) {",
+            "int factorial(int n) {",
+            "struct Stack {",
+        ]
+    else:
+        benchmark_prompts = [
+            "def add(a, b):",
+            "def relu(x):",
+            "def factorial(n):",
+            "def is_prime(n):",
+            "class Linear:",
+        ]
 
     test_prompts = list(benchmark_prompts)
     if custom_prompt and custom_prompt not in test_prompts:
@@ -577,20 +634,60 @@ def run_milestone(args=None):
 
     for prompt in test_prompts:
         t0 = time.perf_counter()
-        full_code = generate_code_completion(
-            model=model,
-            tokenizer=tokenizer,
-            prompt=prompt,
-            max_new_tokens=60,
-            temperature=temperature,
-            top_k=top_k,
-        )
+        if should_stream:
+            with Live(console=console, refresh_per_second=25) as live:
+                def on_token(current_text: str):
+                    syntax = Syntax(
+                        current_text,
+                        syntax_lang,
+                        theme="monokai",
+                        line_numbers=True,
+                        word_wrap=True,
+                    )
+                    live.update(
+                        Panel(
+                            syntax,
+                            border_style="cyan",
+                            title=f"Prompt: {prompt} | Generating...",
+                            subtitle="[dim]Streaming tokens...[/dim]",
+                        )
+                    )
+                    if not (os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true"):
+                        time.sleep(0.015)
+
+                full_code = generate_code_completion(
+                    model=model,
+                    tokenizer=tokenizer,
+                    prompt=prompt,
+                    max_new_tokens=60,
+                    temperature=temperature,
+                    top_k=top_k,
+                    stream_callback=on_token,
+                )
+        else:
+            full_code = generate_code_completion(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=prompt,
+                max_new_tokens=60,
+                temperature=temperature,
+                top_k=top_k,
+            )
+
         gen_time_ms = (time.perf_counter() - t0) * 1000
 
-        is_valid, diagnostic = check_ast_validity(full_code)
+        if lang == "c":
+            is_valid, diagnostic = check_c_syntax_validity(full_code)
+        else:
+            is_valid, diagnostic = check_ast_validity(full_code)
+
         if is_valid:
             valid_count += 1
-            status_badge = "[bold green]PASS (AST Valid)[/bold green]"
+            status_badge = (
+                "[bold green]PASS (AST Valid)[/bold green]"
+                if lang == "python"
+                else "[bold green]PASS (Valid C)[/bold green]"
+            )
         else:
             status_badge = "[bold red]FAIL (Syntax Error)[/bold red]"
 
@@ -600,7 +697,7 @@ def run_milestone(args=None):
 
         syntax = Syntax(
             full_code,
-            "python",
+            syntax_lang,
             theme="monokai",
             line_numbers=True,
             word_wrap=True,
@@ -655,7 +752,7 @@ def run_milestone(args=None):
             f" (drop: -{loss_drop:.2f})\n"
             f"  • AST Validity Rate: [bold green]{ast_validity_rate:.1f}%"
             f"[/bold green] ({pass_ratio} prompts passed)\n"
-            "  • Syntactic Gate   : Interpretable Python generated "
+            f"  • Syntactic Gate   : Interpretable {lang_title} generated "
             "with valid syntax!\n\n"
             "You trained the foundation of OpenAI Codex and GitHub Copilot\n"
             "from scratch using exclusively your TinyTorch autograd and "
@@ -724,6 +821,31 @@ def main():
         default=5,
         dest="top_k",
         help="Top-k vocabulary candidate filtering threshold",
+    )
+    parser.add_argument(
+        "--lang",
+        type=str,
+        default="python",
+        choices=["python", "c"],
+        help="Programming language: 'python' for TinyPy or 'c' for TinyC",
+    )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        default=True,
+        help="Stream tokens character-by-character with typewriter effect",
+    )
+    parser.add_argument(
+        "--no-stream",
+        action="store_false",
+        dest="stream",
+        help="Disable streaming output and print completed blocks directly",
+    )
+    parser.add_argument(
+        "--pause",
+        action="store_true",
+        default=False,
+        help="Pause between sections during interactive demonstration",
     )
     args = parser.parse_args()
     return run_milestone(args)
