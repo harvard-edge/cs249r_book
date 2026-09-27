@@ -1,4 +1,4 @@
-# Milestone 05: The Transformer Era (2017–2022)
+# Milestone 05: The Transformer Era (2017-2022)
 
 ## Historical Context
 

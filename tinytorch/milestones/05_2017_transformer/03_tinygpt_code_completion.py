@@ -379,7 +379,15 @@ def load_tinypy_corpus(sample_only: bool = False, lang: str = "python", data_pat
         with open(custom_path, "r", encoding="utf-8") as f:
             return f.read()
 
+    dm = DatasetManager()
     if lang == "c":
+        if hasattr(dm, "get_tinyc"):
+            try:
+                text = dm.get_tinyc(sample_only=sample_only)
+                if text and len(text) > 0:
+                    return text
+            except Exception:
+                pass
         c_path = (
             Path(__file__).resolve().parent.parent.parent
             / "datasets"
@@ -389,8 +397,11 @@ def load_tinypy_corpus(sample_only: bool = False, lang: str = "python", data_pat
         if c_path.exists():
             with open(c_path, "r", encoding="utf-8") as f:
                 return f.read()
+        raise FileNotFoundError(
+            "Could not load TinyC dataset. "
+            "Please ensure datasets/tinypy/tinyc_sample.txt exists."
+        )
 
-    dm = DatasetManager()
     if hasattr(dm, "get_tinypy"):
         try:
             text = dm.get_tinypy(sample_only=sample_only)

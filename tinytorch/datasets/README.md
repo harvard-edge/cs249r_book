@@ -52,7 +52,7 @@ datasets/
 The milestones automatically download larger datasets when needed:
 
 ### MNIST
-- **Used by:** `milestones/03_1986_mlp/02_rumelhart_mnist.py`
+- **Used by:** Optional scaling benchmark via `DatasetManager().get_mnist()`
 - **Downloads to:** `milestones/datasets/mnist/`
 - **Contents:** 60K training + 10K test samples
 - **Format:** 28×28 grayscale images

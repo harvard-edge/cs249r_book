@@ -25,7 +25,7 @@ MLPerf's measurement discipline (2018) to modern ChatGPT-scale production servin
 
 Each division computes its own **Pareto frontier** using Module 19 (`pareto_frontier`) and plots a tailored ASCII trade-off curve, illustrating why optimization strategies must match the workload category.
 
-Required modules: 01–08 and 14–19.
+Required modules: 01-08 and 14-19.
 
 ## Part 2: Cached inference
 
@@ -40,7 +40,7 @@ once per token. Speedup depends on machine and sequence length; a small workload
 may become slower. This untrained-model microbenchmark tests inference mechanics,
 not language quality.
 
-Required modules: 01–08, 11–13, and 18.
+Required modules: 01-08, 11-13, and 18.
 
 ## Run
 
