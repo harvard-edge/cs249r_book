@@ -442,7 +442,8 @@ def run_milestone(args=None):
         os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1"
         or os.environ.get("CI") == "true"
     ):
-        should_stream = False
+        if not getattr(args, "stream", False):
+            should_stream = False
         is_interactive = False
 
     # =========================================================================
@@ -687,11 +688,7 @@ def run_milestone(args=None):
                             subtitle="[dim]Streaming tokens...[/dim]",
                         )
                     )
-                    if not (
-                        os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1"
-                        or os.environ.get("CI") == "true"
-                    ):
-                        time.sleep(0.015)
+                    time.sleep(0.025)
 
                 response = generate_chat_response(
                     model=model,
