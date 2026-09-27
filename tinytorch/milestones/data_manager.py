@@ -67,13 +67,6 @@ DATASET_INFO = {
         'description': 'Targeted Q&A concept pairs covering TinyTorch modules and ML concepts',
         'url': 'https://raw.githubusercontent.com/harvard-edge/tinytorch/main/datasets/tinytalks/tinytalks_tinytorch.txt'
     },
-    'tinyc': {
-        'name': 'TinyC',
-        'download_size_mb': 0.1,
-        'extracted_size_mb': 0.1,
-        'description': 'Curated C functions and hardware kernel primitives',
-        'url': 'https://raw.githubusercontent.com/harvard-edge/tinytorch/main/datasets/tinypy/tinyc_sample.txt'
-    },
     'tinydigits': {
         'name': 'TinyDigits',
         'download_size_mb': 0.3,
@@ -346,76 +339,12 @@ class DatasetManager:
         if not sample_path.exists():
             sample_path = Path(__file__).parent / "05_2017_transformer" / "tinypy_sample.txt"
 
-        if sample_only:
-            if not sample_path.exists():
-                raise FileNotFoundError(f"Offline TinyPy sample not found at {sample_path}")
+        if sample_path.exists():
             print(f"📖 Loaded offline TinyPy sample: {sample_path.name}")
             with open(sample_path, 'r', encoding='utf-8') as f:
                 return f.read()
 
-        tinypy_dir = self.data_dir / "tinypy"
-        tinypy_dir.mkdir(exist_ok=True)
-        data_file = tinypy_dir / "tinypy_sample.txt"
-
-        if not data_file.exists():
-            if not self.confirm_download('tinypy'):
-                if sample_path.exists():
-                    print(f"📖 Loaded offline TinyPy sample: {sample_path.name}")
-                    with open(sample_path, 'r', encoding='utf-8') as f:
-                        return f.read()
-                raise RuntimeError(
-                    "TinyPy download canceled and no offline sample found."
-                )
-
-            url = DATASET_INFO['tinypy']['url']
-            self.download_with_progress(url, data_file)
-
-        print(f"📖 Loaded full TinyPy dataset: {data_file.name}")
-        with open(data_file, 'r', encoding='utf-8') as f:
-            return f.read()
-
-    def get_tinyc(self, sample_only=False):
-        """Download and prepare TinyC dataset for C code completion milestone.
-
-        Args:
-            sample_only: If True, return the offline bundled sample (no download).
-
-        Returns:
-            str: The raw text content of C code.
-        """
-        sample_path = Path(__file__).resolve().parent.parent / "datasets" / "tinypy" / "tinyc_sample.txt"
-        if not sample_path.exists():
-            sample_path = Path(__file__).parent / "05_2017_transformer" / "data" / "tinyc_sample.txt"
-        if not sample_path.exists():
-            sample_path = Path(__file__).parent / "05_2017_transformer" / "tinyc_sample.txt"
-
-        if sample_only:
-            if not sample_path.exists():
-                raise FileNotFoundError(f"Offline TinyC sample not found at {sample_path}")
-            print(f"📖 Loaded offline TinyC sample: {sample_path.name}")
-            with open(sample_path, 'r', encoding='utf-8') as f:
-                return f.read()
-
-        tinyc_dir = self.data_dir / "tinyc"
-        tinyc_dir.mkdir(exist_ok=True)
-        data_file = tinyc_dir / "tinyc_sample.txt"
-
-        if not data_file.exists():
-            if not self.confirm_download('tinyc'):
-                if sample_path.exists():
-                    print(f"📖 Loaded offline TinyC sample: {sample_path.name}")
-                    with open(sample_path, 'r', encoding='utf-8') as f:
-                        return f.read()
-                raise RuntimeError(
-                    "TinyC download canceled and no offline sample found."
-                )
-
-            url = DATASET_INFO['tinyc']['url']
-            self.download_with_progress(url, data_file)
-
-        print(f"📖 Loaded full TinyC dataset: {data_file.name}")
-        with open(data_file, 'r', encoding='utf-8') as f:
-            return f.read()
+        raise FileNotFoundError(f"Offline TinyPy sample not found at {sample_path}")
 
     def get_tinytalks(self, sample_only=False, topic="tinytorch", split=None):
         """Download and prepare TinyTalks Q&A dataset for conversational milestone.
@@ -447,33 +376,12 @@ class DatasetManager:
         if not sample_path.exists():
             sample_path = Path(__file__).resolve().parent.parent / "datasets" / "tinytalks" / "tinytalks_v1.txt"
 
-        if sample_only:
-            if not sample_path.exists():
-                raise FileNotFoundError(f"Offline TinyTalks sample not found at {sample_path}")
+        if sample_path.exists():
             print(f"📖 Loaded offline TinyTalks sample: {sample_path.name}")
             with open(sample_path, 'r', encoding='utf-8') as f:
                 return f.read()
 
-        talks_dir = self.data_dir / "tinytalks"
-        talks_dir.mkdir(exist_ok=True)
-        data_file = talks_dir / filename
-
-        if not data_file.exists():
-            if not self.confirm_download('tinytalks'):
-                if sample_path.exists():
-                    print(f"📖 Loaded offline TinyTalks sample: {sample_path.name}")
-                    with open(sample_path, 'r', encoding='utf-8') as f:
-                        return f.read()
-                raise RuntimeError(
-                    "TinyTalks download canceled and no offline sample found."
-                )
-
-            url = DATASET_INFO['tinytalks']['url']
-            self.download_with_progress(url, data_file)
-
-        print(f"📖 Loaded TinyTalks dataset: {data_file.name}")
-        with open(data_file, 'r', encoding='utf-8') as f:
-            return f.read()
+        raise FileNotFoundError(f"Offline TinyTalks sample not found at {sample_path}")
 
     def get_tinydigits(self):
         """Load bundled TinyDigits dataset (1,797 samples of 8x8 digits).

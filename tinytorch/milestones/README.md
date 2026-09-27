@@ -125,7 +125,7 @@ Each milestone has specific success criteria. Passing means your implementation 
 - **Milestone 02**: Demonstrates XOR is unsolvable with single layer (75% max accuracy)
 - **Milestone 03**: Part 1 solves XOR (100% accuracy), Part 2 achieves 85%+ on TinyDigits
 - **Milestone 04**: TinyDigits achieves 90%+ accuracy with CNN
-- **Milestone 05**: Part 1 trains TinyGPT on Shakespeare (loss < 2.50, generates text); Part 2 passes sequence challenges; Part 3 trains TinyGPT on Python/C code (TinyPy/TinyC) with syntactic AST verification; Part 4 trains conversational TinyTorch Q&A and illustrates the overfitting generalization gap
+- **Milestone 05**: Part 1 trains TinyGPT on Shakespeare (loss < 2.50, generates text); Part 2 passes sequence challenges; Part 3 trains TinyGPT on Python code (TinyPy) with syntactic AST verification; Part 4 trains conversational TinyTorch Q&A and illustrates the overfitting generalization gap
 - **Milestone 06**: Part 1 completes optimization pipeline, Part 2 shows KV-cache speedup on TinyGPT
 - **Milestone 07**: Compiles C++ SIMD, dispatches Apple Metal MPS or executes OpenAI Triton GPU kernels with numerical verification
 

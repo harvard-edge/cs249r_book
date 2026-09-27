@@ -23,11 +23,11 @@ datasets/
 - **Documentation:** README.md and DATASHEET.md
 - **Purpose:** Fast iteration on real image classification
 
-### TinyPy & TinyC
+### TinyPy
 - **Used by:** Milestone 05 Part 3 (Code completion and syntax verification)
-- **Contents:** 102 curated Python snippets (73 KB) and C algorithms (8 KB)
-- **Format:** Clean, 100% AST-valid Python source code and standard C99 functions
-- **Size:** ~81 KB combined
+- **Contents:** 102 curated Python snippets across math, sorting, data structures, and deep learning primitives
+- **Format:** Clean, 100% AST-valid Python source code
+- **Size:** ~73 KB
 - **Documentation:** README.md and DATASHEET.md
 - **Purpose:** Fast, offline code completion, syntax learning, and AST compiler gates
 

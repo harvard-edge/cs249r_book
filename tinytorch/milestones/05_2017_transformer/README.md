@@ -21,7 +21,7 @@ Train **TinyGPT** from scratch on Shakespeare. Brings together your tokenization
 Prove your attention mechanism on three synthetic sequence challenges (reversal, copying, prefix-controlled mixed tasks) without external data dependencies.
 
 **Part 3 (`03_tinygpt_code_completion.py` - Code Completion):**
-Train **TinyGPT** on Python and C code using the TinyPy and TinyC datasets to complete functions, preserve indentation, and generate syntactically valid code verified with Abstract Syntax Tree parsing.
+Train **TinyGPT** on Python code using the TinyPy dataset to complete functions, preserve indentation, and generate syntactically valid code verified with Abstract Syntax Tree parsing.
 
 **Part 4 (`04_tinygpt_chat.py` - Conversational Q&A & Overfitting Detective):**
 Train **TinyGPT** as a conversational assistant explaining TinyTorch concepts ("TinyTorch Teaching TinyTorch"). Run the Overfitting Detective experiment to observe the divergence between training loss (rote memorization) and held-out test loss.
@@ -73,7 +73,7 @@ tito milestone run tinygpt
 tito milestone run 05 --part 2
 ```
 
-**Run Part 3 (Python & C Code Completion):**
+**Run Part 3 (Python Code Completion):**
 
 ```bash
 tito milestone run 05 --part 3
@@ -94,9 +94,8 @@ python3 milestones/05_2017_transformer/01_tinygpt_shakespeare.py --quick
 # Part 2: Sequence tasks
 python3 milestones/05_2017_transformer/02_vaswani_attention.py
 
-# Part 3: Code completion (Python or C)
+# Part 3: Code completion (Python)
 python3 milestones/05_2017_transformer/03_tinygpt_code_completion.py --quick
-python3 milestones/05_2017_transformer/03_tinygpt_code_completion.py --quick --lang c
 
 # Part 4: Conversational Q&A and Overfitting Detective
 python3 milestones/05_2017_transformer/04_tinygpt_chat.py --quick
@@ -177,7 +176,7 @@ python3 milestones/05_2017_transformer/04_tinygpt_chat.py --interactive
 |------|--------|------|------------------|
 | 1 (Default) | `01_tinygpt_shakespeare.py` | Shakespeare Next-Token Prediction | Loss drops from ~3.0 to < 1.0 (PPL < 3.0); generates coherent verse |
 | 2 (Optional) | `02_vaswani_attention.py` | Synthetic Reversal / Copy / Mixed | High accuracy (>95% reversal, >95% copy, >90% mixed) |
-| 3 (Code) | `03_tinygpt_code_completion.py` | Python & C Code Completion | Loss drops steadily; generates valid syntax and completes functions |
+| 3 (Code) | `03_tinygpt_code_completion.py` | Python Code Completion | Loss drops steadily; generates valid syntax and completes functions |
 | 4 (Chat) | `04_tinygpt_chat.py` | Conversational Q&A & Overfitting | Train loss drops to < 0.60; detects generalization gap on held-out split |
 
 ## Achievement Unlocked

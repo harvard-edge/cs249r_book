@@ -322,7 +322,7 @@ TinyTorch/
 │
 ├── datasets/                   # 💾 TinyVerse offline educational micro-datasets (<550 KB)
 │   ├── tinydigits/             # 8x8 handwritten digits (1,000 train / 200 test)
-│   ├── tinypy/                 # Algorithmic Python & C code snippets for TinyGPT
+│   ├── tinypy/                 # Algorithmic Python code snippets for TinyGPT
 │   ├── tinytalks/              # Q&A pairs on deep learning & TinyTorch concepts
 │   └── tinyshakespeare/        # Bundled Shakespeare sample for instant next-token LM
 │
