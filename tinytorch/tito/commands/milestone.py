@@ -18,6 +18,7 @@ from rich.tree import Tree
 from rich.columns import Columns
 from rich.cells import cell_len
 import sys
+import os
 import json
 import time
 import subprocess
@@ -1417,8 +1418,7 @@ class MilestoneCommand(BaseCommand):
             # Test imports work
             console.print("[bold cyan]🧪 Testing YOUR implementations...[/bold cyan]\n")
 
-            import sys as _sys
-            _sys.path.insert(0, str(Path.cwd()))
+            sys.path.insert(0, str(Path.cwd()))
 
             export_failures = _validate_required_exports(required_modules)
             if export_failures:
@@ -1474,8 +1474,6 @@ class MilestoneCommand(BaseCommand):
         ))
 
         # Only prompt if in interactive terminal and not non-interactive mode
-        import sys
-        import os
         if sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get("TINYTORCH_NON_INTERACTIVE") != "1" and os.environ.get("CI") != "true":
             try:
                 console.input("\n[yellow]Press Enter to begin...[/yellow] ")
