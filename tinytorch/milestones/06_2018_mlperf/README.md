@@ -25,7 +25,7 @@ MLPerf's measurement discipline (2018) to modern ChatGPT-scale production servin
 
 Each division computes its own **Pareto frontier** using Module 19 (`pareto_frontier`) and plots a tailored ASCII trade-off curve, illustrating why optimization strategies must match the workload category.
 
-Required modules: 01–08 and 14–19.
+Required modules: 01-08 and 14-19.
 
 ## Part 2: Cached inference
 
@@ -40,7 +40,21 @@ once per token. Speedup depends on machine and sequence length; a small workload
 may become slower. This untrained-model microbenchmark tests inference mechanics,
 not language quality.
 
-Required modules: 01–08, 11–13, and 18.
+Required modules: 01-08, 11-13, and 18.
+
+## Pre-Built Architectures (`networks.py`)
+
+`networks.py` provides clean reference implementations of the architectures assembled across Milestones 01 to 05, allowing students to focus purely on systems optimization:
+- `Perceptron`: Single-layer linear classifier (Milestone 01)
+- `DigitMLP`: Multi-layer perceptron with ReLU (Milestone 03)
+- `SimpleCNN`: LeNet-style spatial convolutional network (Milestone 04)
+- `MinimalTransformer`: Toy sequence transformer with self-attention (Milestone 05)
+- `TinyGPT`: Decoder-only generative transformer with Pre-LN blocks and causal masking (Milestone 05)
+
+Import them directly:
+```python
+from networks import DigitMLP, SimpleCNN, MinimalTransformer, TinyGPT
+```
 
 ## Run
 

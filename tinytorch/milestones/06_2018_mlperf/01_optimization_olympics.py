@@ -1,39 +1,77 @@
 #!/usr/bin/env python3
-"""Milestone 06.1: compare optimization candidates against one trained baseline.
+"""
+The MLPerf Era (2018-Present): The Hardware Optimization Olympics
+=============================================================================
 
-Train a small DigitMLP, then independently round and prune copies of its weights.
-Measure each candidate's accuracy and latency on the same workload. TinyTorch
-executes both candidates as dense float32 arrays: INT8 code storage is a modeled
-artifact size, and zero weights alone do not reduce allocated model memory.
+📚 HISTORICAL CONTEXT:
+In 2018, a consortium of 30+ leading AI companies and academic institutions (including
+Google, Harvard, Stanford, and Intel) founded MLPerf (now MLCommons). Their core
+insight was transformative: accuracy alone is meaningless without measuring efficiency,
+latency, and hardware throughput under strict statistical measurement discipline.
 
-The cache lifecycle and vectorized-matmul examples are separate mechanisms, not
-additional optimizations applied to this MLP. Part 06.2 measures equivalent GPT
-inference with and without a cache. These are classroom experiments inspired by
-MLPerf's measurement discipline, not official MLPerf submissions or guarantees
-of speed, compression, or preserved accuracy.
+In the post-Moore era, deploying deep learning models in production demands a
+principled optimization cascade:
+1. Profiling (Module 14): Pinpointing latency, FLOPs, and memory bottlenecks.
+2. Quantization (Module 15): Compressing 32-bit floats to 8-bit integers (4x memory drop).
+3. Compression (Module 16): Pruning insignificant weights to exploit parameter sparsity.
+4. Acceleration (Module 17): Fusing memory operations and vectorizing GEMM arithmetic.
+5. Memoization (Module 18): Reusing prior key-value state to slash autoregressive decode.
+6. Benchmarking (Module 19): Computing the Pareto frontier across accuracy vs latency.
+
+🎯 MILESTONE 06: THE OPTIMIZATION OLYMPICS
+Using YOUR Tiny🔥Torch systems implementations, you will optimize trained neural
+networks and evaluate them against rigorous MLPerf-inspired benchmarks. You will
+measure real wall-clock latency, parameter memory reduction, and Pareto trade-offs!
+
+✅ REQUIRED MODULES (Run after Module 20):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Module 01 (Tensor)        : YOUR strided tensor data structure
+  Module 03 (Layers)        : YOUR Linear projection layers
+  Module 13 (Transformers)  : YOUR MinimalTransformer architecture
+  Module 14 (Profiling)     : YOUR Profiler for FLOPs, memory, and latency
+  Module 15 (Quantization)  : YOUR INT8 Quantizer (symmetric and asymmetric)
+  Module 16 (Compression)   : YOUR Magnitude Pruning and Sparsity Compressor
+  Module 17 (Acceleration)  : YOUR im2col and Vectorized GEMM Kernels
+  Module 18 (Memoization)   : YOUR KV Cache state reuse engine
+  Module 19 (Benchmarking)  : YOUR Statistical MLPerf Benchmarking Engine
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🏗️ ARCHITECTURE (The Systems Optimization Cascade):
+    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+    │  Baseline   │───▶│  Profile    │───▶│  Quantize   │───▶│    Prune    │
+    │ FP32 Model  │    │  YOUR M14   │    │  YOUR M15   │    │  YOUR M16   │
+    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+                                                 │                  │
+                                            4x Smaller!        50% Sparse!
+                                                 ▼                  ▼
+    ┌─────────────┐    ┌─────────────┐    ┌────────────────────────────────┐
+    │   Pareto    │◀───│  Benchmark  │◀───│ Accelerate & Cache (M17 & M18) │
+    │  Frontier   │    │  YOUR M19   │    │ im2col, SIMD GEMM, KV Cache    │
+    └─────────────┘    └─────────────┘    └────────────────────────────────┘
 """
 
-import sys
-import os
-import time
+from contextlib import nullcontext, redirect_stdout
 import copy
-import pickle
 import io
-from contextlib import redirect_stdout, nullcontext
-import numpy as np
-rng = np.random.default_rng(7)
+import os
 from pathlib import Path
+import pickle
+import sys
+import time
+
+import numpy as np
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
+
+rng = np.random.default_rng(7)
 
 # Add project root
 repo_root = str(Path(__file__).resolve().parents[2])
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
-
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich import box
 
 console = Console()
 
@@ -62,6 +100,24 @@ def load_tinydigits_arrays(project_root=None):
         test_data["images"],
         test_data["labels"],
     )
+
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Model Architecture & Optimization Targets)
+# =============================================================================
+#
+# This milestone optimizes the neural network architectures built in earlier
+# milestones (Perceptron, DigitMLP, SimpleCNN, MinimalTransformer from networks.py)
+# using the systems optimization modules YOU authored:
+#   Module 14: Profiler (FLOPs, latency, and memory counting)
+#   Module 15: Quantizer (INT8 symmetric and asymmetric affine mapping)
+#   Module 16: Compressor (Magnitude pruning and sparsity masking)
+#   Module 17: Accelerator (Vectorized tiled GEMM)
+#   Module 18: Memoization (KV Cache serving speedup)
+#   Module 19: Benchmarker (Statistical MLPerf measurement discipline)
+#
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & MLPERF BENCHMARK UX
+# =============================================================================
 
 # =============================================================================
 # CONFIGURATION
@@ -233,7 +289,7 @@ def step_2_quantize(model, param_bytes, baseline_acc, X_test, y_test, Quantizer,
     console.print(Panel(
         "[bold yellow]⚠️  MLSys Reality Check: Storage Compression ≠ Compute Speedup[/bold yellow]\n\n"
         "• [bold green]What INT8 achieves:[/bold green] 4.0× reduction in weight storage footprint and memory bandwidth.\n"
-        "• [bold yellow]Why latency is flat:[/bold yellow] In pure Python/NumPy, we perform [dim]simulated quantization[/dim]—weights\n"
+        "• [bold yellow]Why latency is flat:[/bold yellow] In pure Python/NumPy, we perform [dim]simulated quantization[/dim]: weights\n"
         "  are stored as 8-bit integers but dequantized back to float32 at runtime to execute standard BLAS GEMM.\n"
         "• [bold cyan]Hardware reality:[/bold cyan] Without hardware-native INT8 GEMM tensor cores (e.g., NVIDIA DP4A,\n"
         "  Apple Neural Engine, or ARM NEON/dotprod), quantization yields massive memory savings but zero CPU speedup.",
@@ -676,7 +732,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     ))
 
     # -------------------------------------------------------------------------
-    # DIVISION 1: Edge & Embedded Inference — DigitMLP (Dense, Parameter-Bound)
+    # DIVISION 1: Edge & Embedded Inference: DigitMLP (Dense, Parameter-Bound)
     # -------------------------------------------------------------------------
     mlp_bytes = mlp_baseline['param_bytes']
     mlp_q_bytes = mlp_quant['quant_size']
@@ -693,7 +749,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     mlp_frontier = set(pareto_frontier(mlp_pts, (True, True)))
 
     console.print(Panel(
-        "[bold cyan]📍 DIVISION 1: Edge & Embedded Inference — DigitMLP (Dense)[/bold cyan]\n"
+        "[bold cyan]📍 DIVISION 1: Edge & Embedded Inference: DigitMLP (Dense)[/bold cyan]\n"
         "[dim]Primary Bottleneck: Dense weight memory capacity (SRAM/Flash footprint)\n"
         "Harness: Measured via Module 19 Benchmark on held-out TinyDigits test set[/dim]",
         border_style="cyan",
@@ -715,7 +771,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
 
 
     # -------------------------------------------------------------------------
-    # DIVISION 2: Spatial Vision & Compute — SimpleCNN (Spatial, Compute-Bound)
+    # DIVISION 2: Spatial Vision & Compute: SimpleCNN (Spatial, Compute-Bound)
     # -------------------------------------------------------------------------
     cnn_base = SimpleCNN()
     cnn_bytes = sum(p.data.nbytes for p in cnn_base.parameters())
@@ -761,7 +817,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     cnn_frontier = set(pareto_frontier(cnn_pts, (True, True)))
 
     console.print(Panel(
-        "[bold magenta]📍 DIVISION 2: Spatial Vision & Compute — SimpleCNN (Spatial)[/bold magenta]\n"
+        "[bold magenta]📍 DIVISION 2: Spatial Vision & Compute: SimpleCNN (Spatial)[/bold magenta]\n"
         "[dim]Primary Bottleneck: 2D sliding convolution loops & spatial feature extraction\n"
         "Harness: Measured via Module 19 Benchmark; quality is measured output signal fidelity[/dim]",
         border_style="magenta",
@@ -776,14 +832,14 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     t2.add_column("Status", justify="center")
     for r in cnn_records:
         is_p = r[0] in cnn_frontier
-        status_str = "[bold green]★ Pareto (Peak)[/bold green]" if r[0] == "INT8 Quantized" else ("[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]")
+        status_str = "[bold green]★ Pareto (Optimal)[/bold green]" if r[0] == "INT8 Quantized" else ("[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]")
         res = r[2]
         t2.add_row(r[0], f"{r[1]:,} B", r[3], f"{res.mean:.2f} ms", status_str)
     console.print(t2)
 
 
     # -------------------------------------------------------------------------
-    # DIVISION 3: Generative LLM Serving — TinyGPT (Autoregressive, Prefix-Bound)
+    # DIVISION 3: Generative LLM Serving: TinyGPT (Autoregressive, Prefix-Bound)
     # -------------------------------------------------------------------------
     gpt_base = GPT(vocab_size=28, embed_dim=32, num_layers=2, num_heads=2, max_seq_len=32)
     gpt_bytes = sum(p.data.nbytes for p in gpt_base.parameters())
@@ -849,7 +905,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     gpt_frontier = set(pareto_frontier(gpt_pts, (True, True, True)))
 
     console.print(Panel(
-        "[bold green]📍 DIVISION 3: Generative LLM Serving — TinyGPT (Autoregressive)[/bold green]\n"
+        "[bold green]📍 DIVISION 3: Generative LLM Serving: TinyGPT (Autoregressive)[/bold green]\n"
         "[dim]Primary Bottleneck: O(N²) causal prefix recomputation & DRAM weight streaming\n"
         "Harness: Measured via Module 19 BenchmarkResult; sequence replay across 10 trials[/dim]",
         border_style="green",
@@ -874,7 +930,7 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     # CROSS-DIVISION SYSTEMS SYNTHESIS
     # -------------------------------------------------------------------------
     console.print(Panel(
-        "[bold]💡 Key Systems Takeaway — Optimization is Workload-Specific:[/bold]\n\n"
+        "[bold]💡 Key Systems Takeaway: Optimization is Workload-Specific:[/bold]\n\n"
         "• [cyan]Dense MLP (Edge):[/cyan] Dominated by weight storage. [green]INT8 Quantization (4× smaller)[/green] preserves 100% test accuracy on TinyDigits.\n"
         "• [cyan]Spatial CNN (Vision):[/cyan] Dominated by spatial convolution loops. [green]INT8 Quantization[/green] shrinks footprint 4× with 100% signal fidelity, while pruning introduces a Pareto trade-off.\n"
         "• [cyan]Autoregressive GPT (LLM):[/cyan] Dominated by causal attention history and weight streaming. [green]KV-Cache memoization[/green] preserves exact logit outputs, and combining it with [green]INT8 quantization[/green] forms the non-dominated Pareto optimum for real-world serving.",

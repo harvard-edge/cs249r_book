@@ -176,6 +176,10 @@ console = Console()
 # =============================================================================
 
 
+# =============================================================================
+# 🎓 ZONE 1: STUDENT LEGO BRICKS (Attention Transformer Architecture)
+# =============================================================================
+
 class AttentionTransformer:
     """
     Transformer for proving attention works across multiple tasks.
@@ -262,7 +266,7 @@ COPY_TOKEN = 28     # [C] prefix
 
 
 # =============================================================================
-# 📦 SEQUENCE DATASET - Using YOUR DataLoader from Module 05
+# 📊 ZONE 2: MILESTONE HARNESS & SEQUENCE PIPELINE
 # =============================================================================
 
 class SequenceDataset(Dataset):
@@ -382,11 +386,13 @@ def train_epoch(model, dataloader, optimizer, loss_fn):
 
     return total_loss / total_samples, (correct_sequences / total_samples) * 100
 
-def press_enter_to_continue() :
-    if sys.stdin.isatty() and sys.stdout.isatty() :
-        try :
+def press_enter_to_continue():
+    if os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true":
+        return
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
             console.input("\n[yellow]Press Enter to continue...[/yellow] ")
-        except EOFError :
+        except EOFError:
             pass
         console.print()
 
@@ -433,7 +439,7 @@ def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs
         TimeElapsedColumn(),
         console=console
     ) as progress:
-        task = progress.add_task(f"[cyan]Training...", total=epochs)
+        task = progress.add_task("[cyan]Training...", total=epochs)
 
         for epoch in range(epochs):
             train_loss, train_acc = train_epoch(model, train_loader, optimizer, loss_fn)

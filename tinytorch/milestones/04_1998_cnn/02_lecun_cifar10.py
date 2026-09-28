@@ -160,54 +160,7 @@ from data_manager import DatasetManager
 
 
 # =============================================================================
-# DATASET CLASS - Your Module 05 Enables This Pattern
-# =============================================================================
-# The Dataset abstraction YOU built defines a contract: __len__() and __getitem__().
-# This simple interface lets YOUR DataLoader handle any data source uniformly.
-
-class CIFARDataset(Dataset):
-    """Custom CIFAR-10 Dataset using YOUR Dataset interface from Module 05!
-
-    Now with data augmentation support using YOUR transforms from Module 05!
-    """
-
-    def __init__(self, data, labels, transform=None):
-        """Initialize with data, labels, and optional transforms."""
-        self.data = data
-        self.labels = labels
-        self.transform = transform  # Module 05: YOUR augmentation transforms!
-
-    def __getitem__(self, idx):
-        """Get a single sample - YOUR Dataset interface!"""
-        img = self.data[idx]
-
-        # Apply augmentation if provided (training only!)
-        if self.transform is not None:
-            img = self.transform(img)
-            # Convert back to numpy if it became a Tensor
-            if isinstance(img, Tensor):
-                img = img.data
-
-        return Tensor(img), Tensor([self.labels[idx]])
-
-    def __len__(self):
-        """Return dataset size - YOUR Dataset interface!"""
-        return len(self.data)
-
-    def get_num_classes(self):
-        """Return number of classes."""
-        return 10
-
-
-# Training augmentation using YOUR transforms from Module 05!
-train_transforms = Compose([
-    RandomHorizontalFlip(p=0.5),   # 50% chance to flip - cars/animals look similar flipped!
-    RandomCrop(32, padding=4),      # Random crop with 4px padding - simulates translation
-])
-
-
-# =============================================================================
-# CNN MODEL - Your Convolution Modules Power Feature Extraction
+# 🎓 ZONE 1: STUDENT LEGO BRICKS (CIFAR-10 CNN Architecture)
 # =============================================================================
 # CNNs revolutionized vision by exploiting spatial structure. YOUR Conv2d uses
 # local connectivity + weight sharing to detect patterns with 100x fewer params.
@@ -222,6 +175,7 @@ def flatten(x):
     """
     batch_size = x.data.shape[0]
     return x.reshape(batch_size, -1)
+
 
 class CIFARCNN:
     """
@@ -319,6 +273,53 @@ class CIFARCNN:
             self.fc1.weight, self.fc1.bias,
             self.fc2.weight, self.fc2.bias
         ]
+
+
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & DATASET PIPELINE
+# =============================================================================
+# The Dataset abstraction YOU built defines a contract: __len__() and __getitem__().
+# This simple interface lets YOUR DataLoader handle any data source uniformly.
+
+class CIFARDataset(Dataset):
+    """Custom CIFAR-10 Dataset using YOUR Dataset interface from Module 05!
+
+    Now with data augmentation support using YOUR transforms from Module 05!
+    """
+
+    def __init__(self, data, labels, transform=None):
+        """Initialize with data, labels, and optional transforms."""
+        self.data = data
+        self.labels = labels
+        self.transform = transform  # Module 05: YOUR augmentation transforms!
+
+    def __getitem__(self, idx):
+        """Get a single sample - YOUR Dataset interface!"""
+        img = self.data[idx]
+
+        # Apply augmentation if provided (training only!)
+        if self.transform is not None:
+            img = self.transform(img)
+            # Convert back to numpy if it became a Tensor
+            if isinstance(img, Tensor):
+                img = img.data
+
+        return Tensor(img), Tensor([self.labels[idx]])
+
+    def __len__(self):
+        """Return dataset size - YOUR Dataset interface!"""
+        return len(self.data)
+
+    def get_num_classes(self):
+        """Return number of classes."""
+        return 10
+
+
+# Training augmentation using YOUR transforms from Module 05!
+train_transforms = Compose([
+    RandomHorizontalFlip(p=0.5),   # 50% chance to flip - cars/animals look similar flipped!
+    RandomCrop(32, padding=4),      # Random crop with 4px padding - simulates translation
+])
 
 # =============================================================================
 # VISUALIZATIONS - Teaching Aids for Understanding
