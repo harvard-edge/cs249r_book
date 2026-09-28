@@ -834,8 +834,10 @@ Holding a load motionless at full reach places deceptive demands on an articulat
 
 ### Thermal capacity and insulation breakdown thresholds {#sec-body-thermal-capacity}
 
-In classical mechanics, holding a stationary mass stationary involves zero mechanical work ($W = \int F \cdot dx = 0$). In an electromechanical robot, however, sustaining holding torque against gravity requires continuous phase current to produce magnetic Lorentz force ($\tau = K_t I$). That current continuously dissipates Joule heat directly within the copper windings:
+In classical mechanics, holding a stationary mass stationary involves zero mechanical work ($W = \int F \cdot dx = 0$). In an electromechanical robot, however, sustaining holding torque against gravity requires continuous phase current to produce magnetic Lorentz force ($\tau = K_t I$). The lumped thermal model uses $I$ in the same convention as its torque constant $K_t$. Here $R$ denotes the effective aggregate loss resistance for that current, so total winding copper loss is:
 $$P_{\text{loss}} = I^2 R = \frac{\tau^2}{K_t^2} R$$
+For the amplitude-invariant drive convention above, with balanced phase currents, $I=i_q$ and $i_d=0$, this effective resistance is $R=R_{\text{eff}}=\frac{3}{2}R_{\text{phase}}$, where $R_{\text{phase}}$ is resistance per phase. Thus $R$ in the thermal calculations includes the phase-summing factor; it is not the per-phase resistance used in the earlier electrical current-rise model. The following illustrative thermal examples stipulate this effective resistance and matching current convention.
+
 This equation reveals the fundamental physical identity of electric actuation: **torque is current, and current is heat.** Commanded torque scales linearly with current ($\tau = K_t I$), but stator copper loss scales **quadratically with torque** ($\tau^2$). Demanding twice the torque requires four times the thermal dissipation. Because heat has no fast exit, thermal accumulation limits how long an arm can maintain static poses or execute dynamic bursts without mechanical brakes.
 
 Reducing motor current to shed heat also reduces holding torque. A loaded arm therefore needs a response that preserves support, such as transferring the load to a mechanical brake, rather than assuming that thermal derating leaves the task unchanged. Excess winding temperature can damage electrical insulation, while excess rotor temperature can permanently reduce magnet strength. Those material limits bound the allowable temperature trajectory.
@@ -909,7 +911,7 @@ class CopperResistanceRise:
     rise_pct_str = fmt_percent(rise, precision=1, style="prose")
 ```
 
-The loss term must also change with temperature. Copper's positive temperature coefficient\index{Copper resistance!temperature dependence}\index{Stator resistance!thermal coefficient} (`{python} CopperResistanceRise.alpha_cu_math`) increases phase resistance by `{python} CopperResistanceRise.rise_pct_str` from `{python} CopperResistanceRise.t_0_str` to the `{python} CopperResistanceRise.t_ceiling_str` engineering ceiling, according to $R(T) = R_0 [1 + \alpha_{\text{Cu}}(T - T_0)]$. Holding the same torque therefore dissipates `{python} CopperResistanceRise.rise_pct_str` more winding power. A fixed-resistance calculation omits this feedback; the burst example below uses that approximation explicitly, and the subsequent stall calculation restores it.
+The loss term must also change with temperature. Copper's positive temperature coefficient\index{Copper resistance!temperature dependence}\index{Stator resistance!thermal coefficient} (`{python} CopperResistanceRise.alpha_cu_math`) increases the effective winding resistance by `{python} CopperResistanceRise.rise_pct_str` from `{python} CopperResistanceRise.t_0_str` to the `{python} CopperResistanceRise.t_ceiling_str` engineering ceiling, according to $R(T) = R_0 [1 + \alpha_{\text{Cu}}(T - T_0)]$. Holding the same torque therefore dissipates `{python} CopperResistanceRise.rise_pct_str` more winding power. A fixed-resistance calculation omits this feedback; the burst example below uses that approximation explicitly, and the subsequent stall calculation restores it.
 
 Datasheet thermal ratings are optimistic because they are measured on an unconstrained motor mounted to a large heat sink in free air at $20^\circ\text{C}$ or $25^\circ\text{C}$. Installed in a sealed chassis beside power electronics, battery packs, and other joints, the motor loses convective airflow, which raises $\theta_{JA}$, and neighboring loads can raise its local ambient to $45^\circ\text{C}$ to $55^\circ\text{C}$ before its own coils carry current. Thermal margins must therefore be budgeted from heating and cooling time constants measured with the enclosure sealed and adjacent loads at their $P_{99}$ power draw.
 
@@ -967,14 +969,14 @@ class ThermalBurst:
     """Burst horizons, duty-cycle screen, and periodic peak for an arm shoulder joint."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    r_wind = 1.2 * ureg.ohm  # category: illustrative (winding resistance, held fixed)
+    r_wind = 1.2 * ureg.ohm  # category: illustrative (aggregate loss resistance for amplitude-invariant i_q, i_d=0; held fixed)
     c_th = 120.0 * joule / K  # category: illustrative (lumped thermal capacitance)
     theta_ja = 2.5 * K / ureg.watt  # category: illustrative (installed thermal resistance)
     t_amb = ureg.Quantity(40.0, ureg.degC).to(K)  # category: illustrative (enclosed ambient)
     t_limit = ureg.Quantity(155.0, ureg.degC).to(K)  # category: sourced (IEC 60085 Class F hotspot)
     t_ceiling = CopperResistanceRise.t_ceiling  # category: chosen (engineering ceiling, declared once in CopperResistanceRise)
-    i_cont = 5.0 * ureg.ampere  # category: illustrative (continuous rated current)
-    i_peak = 15.0 * ureg.ampere  # category: illustrative (threefold burst)
+    i_cont = 5.0 * ureg.ampere  # category: illustrative (continuous amplitude-invariant i_q, i_d=0)
+    i_peak = 15.0 * ureg.ampere  # category: illustrative (threefold i_q burst)
     t_on = 3.0 * second  # category: illustrative (burst length)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
@@ -1035,7 +1037,7 @@ class ThermalBurst:
 ```
 
 ::: {#nbk-body-thermal-burst-limits .callout-notebook title="Thermal accumulation across duty cycles"}
-An arm shoulder joint has winding resistance $R =$ `{python} ThermalBurst.r_wind_str`, lumped thermal capacitance $C_{\text{th}} =$ `{python} ThermalBurst.c_th_str`, and installed thermal resistance $\theta_{JA} =$ `{python} ThermalBurst.theta_ja_str`, and it runs in an enclosed ambient $T_{\text{amb}} =$ `{python} ThermalBurst.t_amb_str` with Class F insulation rated to `{python} ThermalBurst.t_limit_str`. The thermal time constant is $\tau = \theta_{JA} C_{\text{th}} =$ `{python} ThermalBurst.tau_str`.
+An illustrative arm shoulder joint has effective aggregate loss resistance $R =$ `{python} ThermalBurst.r_wind_str`, lumped thermal capacitance $C_{\text{th}} =$ `{python} ThermalBurst.c_th_str`, and installed thermal resistance $\theta_{JA} =$ `{python} ThermalBurst.theta_ja_str`, and it runs in an enclosed ambient $T_{\text{amb}} =$ `{python} ThermalBurst.t_amb_str` with Class F insulation rated to `{python} ThermalBurst.t_limit_str`. The thermal time constant is $\tau = \theta_{JA} C_{\text{th}} =$ `{python} ThermalBurst.tau_str`.
 
 **Problem**: How does the initial winding temperature change how long a threefold rated-current burst can last before the insulation limit?
 
@@ -1114,8 +1116,8 @@ class StallDerating:
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     tau_hold = 42.5 * ureg.newton * meter  # category: illustrative (static holding torque)
-    k_t = 0.10 * ureg.newton * meter / ureg.ampere  # category: illustrative (torque constant)
-    r_0 = 0.80 * ureg.ohm  # category: illustrative (cold resistance at T_0)
+    k_t = 0.10 * ureg.newton * meter / ureg.ampere  # category: illustrative (torque per amplitude-invariant i_q, i_d=0)
+    r_0 = 0.80 * ureg.ohm  # category: illustrative (aggregate loss resistance for i_q at T_0, not per-phase resistance)
     t_0 = ureg.Quantity(20.0, ureg.degC).to(K)  # category: illustrative (resistance reference)
     theta_ja = 1.80 * K / ureg.watt  # category: illustrative (unventilated limb)
     t_amb = ureg.Quantity(40.0, ureg.degC).to(K)  # category: illustrative (limb ambient)
@@ -1175,7 +1177,7 @@ class StallDerating:
 ```
 
 ::: {#nbk-body-thermal-stall-derating .callout-notebook title="Static holding torque and stall derating"}
-An arm elbow holds $\tau_{\text{hold}} =$ `{python} StallDerating.tau_hold_str` at stall ($\omega = 0$) through an $N =$ `{python} StallDerating.n_gear_str`:1 cycloidal gearbox ($\eta =$ `{python} StallDerating.eta_str`). Its motor has $K_t =$ `{python} StallDerating.k_t_str`, cold resistance $R_0 =$ `{python} StallDerating.r_0_str` at $T_0 =$ `{python} StallDerating.t_0_str`, and $\theta_{JA} =$ `{python} StallDerating.theta_ja_str`, with a Class F limit of `{python} StallDerating.t_limit_str`, inside an unventilated limb at $T_{\text{amb}} =$ `{python} StallDerating.t_amb_str`.
+An arm elbow holds $\tau_{\text{hold}} =$ `{python} StallDerating.tau_hold_str` at stall ($\omega = 0$) through an $N =$ `{python} StallDerating.n_gear_str`:1 cycloidal gearbox ($\eta =$ `{python} StallDerating.eta_str`). Its motor has $K_t =$ `{python} StallDerating.k_t_str`, cold effective aggregate loss resistance $R_0 =$ `{python} StallDerating.r_0_str` at $T_0 =$ `{python} StallDerating.t_0_str`, and $\theta_{JA} =$ `{python} StallDerating.theta_ja_str`, with a Class F limit of `{python} StallDerating.t_limit_str`, inside an unventilated limb at $T_{\text{amb}} =$ `{python} StallDerating.t_amb_str`.
 
 **Problem**: With copper's resistance rising with temperature, where does the stalled winding settle, and what holding torque is thermally sustainable?
 
@@ -1201,17 +1203,17 @@ Rail sag, regenerative overvoltage, and thermal accumulation are manifestations 
 
 ### Power distribution impedance, transient droop, and brownout resets {#sec-body-power-distribution-impedance}
 
-The mobile machine's battery, harnesses, connectors, and protection switches all contribute source impedance.[^fn-hw-bus-resistance] Local capacitors buffer transient demand but cannot eliminate a sustained resistive drop. When compute and drives draw an aggregate current step $\Delta I$ with transition time $\Delta t$, rail droop combines resistive, inductive, and capacitive contributions:
-$$\Delta V_{\text{droop}} \approx \Delta I R_{\text{bus}} + L_{\text{bus}} \left(\frac{dI}{dt}\right) + \frac{\Delta I \Delta t}{2 C_{\text{bus}}}$$ {#eq-body-droop}
-where $R_{\text{bus}}$ is the lumped harness and cell resistance, $L_{\text{bus}}$ is the loop inductance of the power cabling, and $C_{\text{bus}}$ is the local bank of link capacitors (@sec-appendix-systems derives this response).
+The mobile machine's battery, harnesses, connectors, and protection switches all contribute source impedance.[^fn-hw-bus-resistance] Local capacitors supply part of a sudden load increase, so current drawn by the loads need not equal current arriving through the harness. For a source feeding one bus node through resistance and inductance,
+$$V_{\text{source}}(t)-V_{\text{bus}}(t)=R_{\text{bus}}I_{\text{source}}(t)+L_{\text{bus}}\frac{dI_{\text{source}}}{dt}$$ {#eq-body-droop}
+where $R_{\text{bus}}$ is the lumped source resistance, $L_{\text{bus}}$ is the loop inductance, and $I_{\text{source}}$ is the current through that source path. The local capacitor bank $C_{\text{bus}}$ supplies the difference between load current $I_{\text{load}}$ and source current. In the ideal-capacitor model, charge removed from that bank lowers the same bus voltage:
+$$V_{\text{bus}}(0)-V_{\text{bus}}(t)=\frac{1}{C_{\text{bus}}}\int_0^t\left[I_{\text{load}}(s)-I_{\text{source}}(s)\right]ds.$$
+These equations jointly determine the voltage response; the capacitor's voltage change is not an additional drop to add to @eq-body-droop. @Sec-appendix-systems-power develops this source-and-capacitor model.
 
 Compute and motion must be budgeted together because they share this path. An obstacle response can require fresh inference at the same time as a large drive-current change. Testing each load separately misses the combined step that the supply must support.
 
-The loop inductance $L_{\text{bus}} = L_{\text{cable}} + L_{\text{trace}}$ of long battery-to-inverter wiring harnesses (typically $1\text{--}5\,\mu\text{H}$) governs this high-frequency transient. When multiple brushless motor inverters switch on and accelerate links simultaneously, the total current slew rate $\frac{dI}{dt} = \sum_j \frac{di_j}{dt}$ across this parasitic inductance generates an immediate **inductive voltage collapse**:
-$$V_{\text{inductive}} = L_{\text{bus}} \left(\frac{dI}{dt}\right)$$
-Local bypass capacitors suppress fast switching transients, while the bulk capacitor bank buffers the slower load step. Harness resistance continues to lower the rail for as long as current flows. If the resulting voltage crosses a regulator's undervoltage threshold, computation or communication may stop or reset. Power qualification must establish the voltage at the supplied devices during coincident load and the physical response if those devices lose power.
+Harness inductance limits how quickly source current can rise. Local capacitors supply the initial current deficit, while harness resistance continues to lower the rail after source current catches up with a sustained load. Once the currents settle, the inductive voltage is zero and the sustained drop is $I_{\text{source}}R_{\text{bus}}$. The worked example below screens that sustained condition; it does not establish the minimum voltage during the transient. If the actual voltage crosses a regulator's undervoltage threshold, computation or communication may stop or reset. Power qualification must establish the voltage at the supplied devices during coincident load and the physical response if those devices lose power.
 
-[^fn-hw-bus-resistance]: **Power distribution bus impedance and time-scale separation**\index{Bus impedance!power distribution}\index{Brownout reset!undervoltage}: The lumped source impedance of an embodied direct-current bus is $R_{\text{bus}} = R_{\text{cell}} + R_{\text{harness}} + R_{\text{switch}}$, the sum of battery cell, harness and connector, and protection-switch on-state resistances. The three droop components in @eq-body-droop operate across distinct physical time scales: inductive kick $L_{\text{bus}}(dI/dt)$ is an instantaneous transient ($\tau \approx 1\text{--}10\,\mu\text{s}$) suppressed by local ceramic bypass capacitors; capacitive discharge $\frac{\Delta I \Delta t}{2 C_{\text{bus}}}$ buffers mid-frequency steps ($0.1\text{--}2\text{ ms}$); while resistive drop $\Delta I R_{\text{bus}}$ persists for the entire multi-second duration of the motor acceleration. The critical brownout risk on depleted batteries is this sustained ohmic sag.
+[^fn-hw-bus-resistance]: **Power distribution bus impedance and capacitor buffering**\index{Bus impedance!power distribution}\index{Brownout reset!undervoltage}: The lumped source resistance is $R_{\text{bus}} = R_{\text{cell}} + R_{\text{harness}} + R_{\text{switch}}$, the sum of battery cell, harness and connector, and protection-switch on-state resistances. Source inductance governs how quickly harness current changes; capacitor discharge bridges the resulting current deficit. Both affect the same bus voltage, so their effects must be solved together rather than added as independent droop estimates. Capacitor series resistance and the actual source response also matter during a transient. The sustained ohmic sag alone is enough to reject the depleted-battery case below.
 
 That reset turns the electrical fault into a mechanical one. Voltage supervisors pull the reset line on microcontrollers and gate drivers, clocks halt, register configurations vanish, and communication buses float. An acceleration command issued just before the reset stays physically active until the gate-driver stage collapses. If the driver then floats, phase current ceases, torque falls to zero, and the body coasts under gravity and inertia into workpieces or hardstops. If it instead shorts the low-side switches for dynamic braking, back-EMF ($e_{\text{bemf}} = K_e \omega$) produces an immediate, violent counter-torque that jerks the mechanics at the joint limits.
 
@@ -1274,9 +1276,9 @@ The capacitor-only endpoint is a screening calculation: if it exceeds a componen
 Power integrity is an architectural constraint. The design sets coordinated power budgets and current slew-rate limits across accelerators and drives, the permission path arbitrates simultaneous multi-axis accelerations so that their $dI/dt$ transients do not compound, and brake choppers protect the inverters from regenerative feedback during emergency stops. \ref{nbk-body-dc-bus-power-integrity} works both halves of that budget, the rail's sag and the stop's regenerative surge, on the mobile manipulator's battery rail.
 
 ::: {.column-margin}
-![](images/svg/margin_pdn_voltage_droop_envelope.svg){width="100%" fig-alt="Two horizontal bars on a rail-voltage scale against the 18 V regulator dropout. From the 24 V full-charge rail, the 70 A step droops 5.3 V and ends above the dropout. From the 21.5 V battery-low point, the 4.2 V ohmic term alone ends below it, and the part past the dropout is red."}
+![](images/svg/margin_pdn_voltage_droop_envelope.svg){width="100%" fig-alt="Sustained-load voltage comparison against the 18 V regulator dropout. The 70 A load causes a 4.2 V resistive drop: from 24 V to 19.8 V at full charge, and from 21.5 V to 17.3 V when depleted. This comparison does not establish the transient minimum."}
 
-*A combined inference and drive current step fits the rail's headroom at full charge; from a depleted battery, its sustained ohmic drop alone crosses the regulator dropout.*
+*The sustained resistive drop fits the rail's headroom at full charge but crosses regulator dropout from a depleted battery. The transient minimum requires separate qualification.*
 :::
 
 ```{python}
@@ -1288,16 +1290,16 @@ Power integrity is an architectural constraint. The design sets coordinated powe
 # │ BATTERY-RAIL DROOP AND REGENERATIVE SURGE ON THE RUNNING MACHINE (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: \ref{nbk-body-dc-bus-power-integrity} in @sec-body-power-integrity.
-# │ Goal:    Check whether the warehouse mobile manipulator's 24 V battery rail
-# │          stays inside its regulator and inverter limits during the coincident
-# │          inference and drive transient and during a stop from the drive limit.
-# │ Show:    70 A step droops the 24 V rail by 5.28 V to 18.72 V, 0.72 V above
+# │ Goal:    Screen sustained coincident load on the 24 V battery rail and
+# │          regenerative voltage during a stop from the drive limit; the
+# │          transient minimum requires separate qualification.
+# │ Show:    70 A sustained load drops the 24 V rail by 4.2 V to 19.8 V, 1.8 V above
 # │          the 18 V regulator dropout at full charge; from the 21.5 V
 # │          battery-low point the sustained ohmic term alone crosses it;
 # │          75 percent of 414 J regenerated = 310.5 J; capacitor-only endpoint
 # │          about 169.7 V; stop lasts 750 ms, so the regenerative peak is
 # │          828 W and the chopper resistor <= 1.09 Ohm at a 30 V clamp.
-# │ How:     R, L, C droop terms (ohmic term via calc_voltage_droop) with the
+# │ How:     Sustained ohmic screen via calc_voltage_droop with the
 # │          machine's rail fields (RM.control_rail_*) and the site transient
 # │          (AISLE.i_rail_transient); E_k reused from MachineMomentum.e_k;
 # │          capacitor energy balance; triangular power pulse under constant
@@ -1341,10 +1343,8 @@ class DriveBusIntegrity:
     v_uvlo = RM.control_rail_dropout  # category: illustrative (point-of-load regulator dropout)
     di = AISLE.i_rail_transient  # category: illustrative (inference burst plus drive)
     i_compute = 4.0 * ureg.ampere  # category: illustrative (application processor's share of the step)
-    l_bus = 2.0 * ureg.microhenry  # category: illustrative (harness inductance)
     c_bus = 22000.0 * ureg.microfarad  # category: illustrative (bulk link capacitance)
     v_breakdown = 40.0 * volt  # category: illustrative (inverter MOSFET rating)
-    dt_step = 0.5 * millisecond  # category: illustrative (step rise time)
     regen_fraction = 0.75  # category: illustrative (share of E_k returned to the rail)
     v_clamp = 30.0 * volt  # category: chosen (chopper clamp threshold)
     r_candidate = 1.0 * ureg.ohm  # category: chosen (candidate chopper resistor)
@@ -1352,12 +1352,9 @@ class DriveBusIntegrity:
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     i_drive = (di - i_compute).to(ureg.ampere)
-    didt = (di / dt_step).to(ureg.ampere / second)
     dv_r = calc_voltage_droop(di, r_bus).to(volt)
-    dv_l = (l_bus * didt).to(volt)
-    dv_c = (di * dt_step / (2 * c_bus)).to(volt)
-    dv = (dv_r + dv_l + dv_c).to(volt)
-    v_min = (v_bus_nom - dv).to(volt)
+    dv = dv_r  # sustained resistive drop, not a transient minimum
+    v_sustained = (v_bus_nom - dv).to(volt)
     headroom = (v_bus_nom - v_uvlo).to(volt)
     margin = (headroom - dv).to(volt)
     v_sag_low = (v_battery_low - dv_r).to(volt)
@@ -1370,9 +1367,9 @@ class DriveBusIntegrity:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(dv_r.magnitude - 4.2) < 1e-9, f"Ohmic term must be the canon 4.2 V: {dv_r}")
-    check(abs(dv.magnitude - 5.2755) < 1e-3, f"Unexpected droop: {dv}")
-    check(abs(v_min.magnitude - 18.7245) < 1e-3, f"Unexpected minimum rail voltage: {v_min}")
-    check(v_min > v_uvlo, "At full charge the transient must stay above the regulator dropout.")
+    check(abs(dv.magnitude - 4.2) < 1e-9, f"Unexpected sustained droop: {dv}")
+    check(abs(v_sustained.magnitude - 19.8) < 1e-9, f"Unexpected sustained rail voltage: {v_sustained}")
+    check(v_sustained > v_uvlo, "At full charge the sustained-load screen must stay above dropout.")
     check(abs(v_sag_low.magnitude - 17.3) < 1e-9, f"Battery-low ohmic sag must be the canon 17.3 V: {v_sag_low}")
     check(v_sag_low < v_uvlo, "From the battery-low point the ohmic term alone must cross the dropout.")
     check(abs(e_k.magnitude - 414.0) < 1e-6, f"Unexpected kinetic energy: {e_k}")
@@ -1395,23 +1392,20 @@ class DriveBusIntegrity:
     v_bus_nom_str = fmt_voltage(v_bus_nom, unit=volt, precision=0)
     v_battery_low_str = fmt_voltage(v_battery_low, unit=volt, precision=1)
     r_bus_str = fmt_resistance(r_bus, unit=ureg.milliohm, precision=0)
-    l_bus_str = fmt_inductance(l_bus, unit=ureg.microhenry, precision=0)
     c_bus_str = fmt_capacitance(c_bus, unit=ureg.microfarad, precision=0, commas=True)
     v_uvlo_str = fmt_voltage(v_uvlo, unit=volt, precision=0)
     v_breakdown_str = fmt_voltage(v_breakdown, unit=volt, precision=0)
     i_drive_str = fmt_current(i_drive, unit=ureg.ampere, precision=0)
     i_compute_str = fmt_current(i_compute, unit=ureg.ampere, precision=0)
     di_str = fmt_current(di, unit=ureg.ampere, precision=0)
-    dt_step_str = fmt_latency(dt_step, unit=millisecond, precision=1)
-    didt_math = fmt_math(rf"dI/dt = {sci_latex(didt.magnitude, precision=1)}\,\text{{A/s}}")
     dv_display_math = fmt_display_math(
-        rf"\Delta V_{{\text{{droop}}}} = {fmt_voltage(dv_r, unit=volt, precision=2)} + {fmt_voltage(dv_l, unit=volt, precision=2)} + {fmt_voltage(dv_c, unit=volt, precision=2)} = {fmt_voltage(dv, unit=volt, precision=2)}"
+        rf"\Delta V_{{\text{{sustained}}}} = \Delta I R_{{\text{{bus}}}} = {fmt_voltage(dv, unit=volt, precision=2)}"
     )
-    v_min_display_math = fmt_display_math(
-        rf"V_{{\text{{rail, min}}}} = {fmt_voltage(v_bus_nom, unit=volt, precision=0)} - {fmt_voltage(dv, unit=volt, precision=2)} = {fmt_voltage(v_min, unit=volt, precision=2)}"
+    v_sustained_display_math = fmt_display_math(
+        rf"V_{{\text{{rail, sustained}}}} = {fmt_voltage(v_bus_nom, unit=volt, precision=0)} - {fmt_voltage(dv, unit=volt, precision=2)} = {fmt_voltage(v_sustained, unit=volt, precision=2)}"
     )
     dv_str = fmt_voltage(dv, unit=volt, precision=2)
-    v_min_str = fmt_voltage(v_min, unit=volt, precision=2)
+    v_sustained_str = fmt_voltage(v_sustained, unit=volt, precision=2)
     v_sag_low_str = fmt_voltage(v_sag_low, unit=volt, precision=1)
     headroom_str = fmt_voltage(headroom, unit=volt, precision=0)
     margin_str = fmt_voltage(margin, unit=volt, precision=2)
@@ -1446,16 +1440,15 @@ The mobile manipulator's battery feeds one nominal `{python} DriveBusIntegrity.v
 
 1. **Parameters**:
    - Machine mass, travel speed, and credible deceleration: $m =$ `{python} DriveBusIntegrity.m_str` (upper bound, full tote rack), $v =$ `{python} DriveBusIntegrity.v_str`, $a_{\text{brake}} =$ `{python} DriveBusIntegrity.a_brake_str`
-   - Rail characteristics: $V_{\text{rail, nom}} =$ `{python} DriveBusIntegrity.v_bus_nom_str`, harness resistance $R_{\text{bus}} =$ `{python} DriveBusIntegrity.r_bus_str`, parasitic inductance $L_{\text{bus}} =$ `{python} DriveBusIntegrity.l_bus_str`, bulk link capacitance $C_{\text{bus}} =$ `{python} DriveBusIntegrity.c_bus_str`
+   - Rail characteristics: $V_{\text{rail, nom}} =$ `{python} DriveBusIntegrity.v_bus_nom_str`, harness resistance $R_{\text{bus}} =$ `{python} DriveBusIntegrity.r_bus_str`, bulk link capacitance $C_{\text{bus}} =$ `{python} DriveBusIntegrity.c_bus_str`
    - Operating limits: point-of-load regulator dropout $V_{\text{uvlo}} =$ `{python} DriveBusIntegrity.v_uvlo_str`, inverter MOSFET breakdown $V_{\text{breakdown}} =$ `{python} DriveBusIntegrity.v_breakdown_str`
-2. **Transient droop**:
-   - As an illustrative coincident load, the two drive motors and the arm's joint drives add `{python} DriveBusIntegrity.i_drive_str` while the application processor adds `{python} DriveBusIntegrity.i_compute_str` on the same rail. Their aggregate step is $\Delta I =$ `{python} DriveBusIntegrity.di_str` over $\Delta t =$ `{python} DriveBusIntegrity.dt_step_str` (`{python} DriveBusIntegrity.didt_math`). The example assumes no separate compute-rail hold-up during this step.
-   - Transient voltage droop evaluates across resistive, inductive, and capacitive terms:
-     $$\Delta V_{\text{droop}} \approx \Delta I R_{\text{bus}} + L_{\text{bus}} \left(\frac{dI}{dt}\right) + \frac{\Delta I \Delta t}{2 C_{\text{bus}}}$$
+2. **Sustained-load screen**:
+   - As an illustrative coincident load, the two drive motors and the arm's joint drives add `{python} DriveBusIntegrity.i_drive_str` while the application processor adds `{python} DriveBusIntegrity.i_compute_str` on the same rail. Their aggregate increase is $\Delta I =$ `{python} DriveBusIntegrity.di_str`. Assume the stated rail voltage is the unloaded source voltage and this coincident demand is the total load in the screen, with no separate compute-rail hold-up.
+   - After source current settles to the increased load, the additional resistive drop is:
      `{python} DriveBusIntegrity.dv_display_math`
-   - Minimum rail voltage at full charge:
-     `{python} DriveBusIntegrity.v_min_display_math`
-   - The headroom to the regulators' dropout is `{python} DriveBusIntegrity.headroom_str`, and the modeled `{python} DriveBusIntegrity.dv_str` droop leaves `{python} DriveBusIntegrity.margin_str` of it. The inductive and capacitive terms last only through the rise, but the ohmic term persists for as long as the load does, and the shared-rail fallacy in @sec-body-fallacies-pitfalls follows it from a depleted battery.
+   - The resulting sustained rail voltage at full charge is:
+     `{python} DriveBusIntegrity.v_sustained_display_math`
+   - The headroom to the regulators' dropout is `{python} DriveBusIntegrity.headroom_str`, and this `{python} DriveBusIntegrity.dv_str` drop leaves `{python} DriveBusIntegrity.margin_str` of it. This screen does not establish the transient minimum or complete brownout qualification. From the depleted battery, the same sustained drop alone leaves only `{python} DriveBusIntegrity.v_sag_low_str`, below dropout.
 3. **Regenerative surge**:
    - During a stop from the drive limit, the loaded machine's kinetic energy must be dissipated:
      `{python} DriveBusIntegrity.e_k_display_math`
@@ -1467,7 +1460,7 @@ The mobile manipulator's battery feeds one nominal `{python} DriveBusIntegrity.v
    - To clamp the bus at $V_{\text{clamp}} =$ `{python} DriveBusIntegrity.v_clamp_str` below the switch breakdown rating, the brake chopper must divert this peak power through an absorption resistor:
      `{python} DriveBusIntegrity.r_max_display_math`
 
-**Result**: At full charge the coincident step leaves the rail at `{python} DriveBusIntegrity.v_min_str`, only `{python} DriveBusIntegrity.margin_str` above the `{python} DriveBusIntegrity.v_uvlo_str` regulator dropout, so a depleted battery erases the margin. Unbuffered regenerative braking would drive the bus past the `{python} DriveBusIntegrity.v_breakdown_str` MOSFET rating, which calls for a dynamic brake chopper whose resistor is no larger than `{python} DriveBusIntegrity.r_max_str` and absorbs an `{python} DriveBusIntegrity.p_peak_str` peak (satisfied by an illustrative `{python} DriveBusIntegrity.r_candidate_str`, `{python} DriveBusIntegrity.p_candidate_str` component).
+**Result**: At full charge the sustained-load screen leaves the rail at `{python} DriveBusIntegrity.v_sustained_str`, only `{python} DriveBusIntegrity.margin_str` above the `{python} DriveBusIntegrity.v_uvlo_str` regulator dropout, so a depleted battery erases the margin. Unbuffered regenerative braking would drive the bus past the `{python} DriveBusIntegrity.v_breakdown_str` MOSFET rating, which calls for a dynamic brake chopper whose resistor is no larger than `{python} DriveBusIntegrity.r_max_str` and absorbs an `{python} DriveBusIntegrity.p_peak_str` peak (satisfied by an illustrative `{python} DriveBusIntegrity.r_candidate_str`, `{python} DriveBusIntegrity.p_candidate_str` component).
 
 **Systems insight**: Mechanical motion and electrical power are bidirectionally coupled. Acceleration requires a supply that sustains the coincident current demand; deceleration requires an adequate absorption or dissipation path. The illustrative chopper meets the modeled peak-power screen, but pulse energy, repetition, cooling, and component tolerances also require qualification.
 :::
@@ -1638,7 +1631,7 @@ These changes make characterization a standing obligation. **Lifecycle degradati
 # │          give the decision paragraph its hold-up values.
 # │ Show:    a_brake 2.0 m/s^2, binding only on floors with mu >= 0.204, loaded
 # │          to at most 368 kg, 100 mm protective clearance; dropout 18 V,
-# │          0.72 V margin at full charge, valid only with the permission path
+# │          1.8 V sustained-load margin at full charge, valid only with the permission path
 # │          on its isolated rail; that rail is held up for 2.0 s (70 W,
 # │          2.025 F, 140 J), stated at the decision, not in the record.
 # │ How:     mu_min = a_brake / g; store C = 2 P t / (V_low^2 - V_dropout^2)
@@ -1677,7 +1670,7 @@ class LimitRecords:
     holdup = RM.permission_rail_holdup  # category: chosen (permission-rail hold-up)
     p_rail = RM.permission_rail_load  # category: illustrative (permission-path load)
     c_store = RM.permission_rail_holdup_capacitance  # category: derived (store sized for the hold-up)
-    margin_full = DriveBusIntegrity.margin  # category: derived (full-charge margin under the 70 A step)
+    margin_full = DriveBusIntegrity.margin  # category: derived (full-charge margin under the sustained 70 A load)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     mu_min = (a_brake / ureg.standard_gravity).to("dimensionless").magnitude
@@ -1697,7 +1690,7 @@ class LimitRecords:
         abs((0.5 * c_store * (v_battery_low**2 - v_dropout**2)).to(joule).magnitude - e_store.magnitude) < 1e-6,
         "The store's usable energy between battery-low and dropout must equal load x hold-up.",
     )
-    check(abs(margin_full.to(volt).magnitude - 0.7245) < 1e-3, f"Unexpected full-charge margin: {margin_full}")
+    check(abs(margin_full.to(volt).magnitude - 1.8) < 1e-9, f"Unexpected full-charge margin: {margin_full}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     imu_name_str = MarkdownStr(imu_name)
@@ -1722,7 +1715,7 @@ A foundational distinction governs this structure: *uncertainty describes what y
 | **Value**       | The value or empirical distribution, with its sample count and the tail percentiles it reports                                                       | `{python} LimitRecords.a_brake_str`, taken as the credible low tail of loaded stops; no samples yet                                                                                                                             | `{python} LimitRecords.v_dropout_str` at the point-of-load regulators; no samples yet                                                                                                                 |
 | **Conditions**  | The context listed earlier under which it was established, plus the surface for any limit that depends on traction                                   | Loaded to at most `{python} LimitRecords.m_loaded_str`; dry floor with $\mu \ge$ `{python} LimitRecords.mu_min_str`; configured drive current limits; usable powered braking and energy absorption; tires at commissioning wear | Regulator dropout under the characterized load; isolation keeps the permission path available during a shared-rail sag, but drive power and physical stopping behavior require separate qualification |
 | **Uncertainty** | The measurement uncertainty of each instrument, with its observation point and bandwidth                                                             | Not established                                                                                                                                                                                                                 | Not established                                                                                                                                                                                       |
-| **Margin**      | The engineering margin separating the operating target from the breakdown threshold                                                                  | No justified deceleration margin yet; the chosen `{python} LimitRecords.delta_margin_str` protective clearance must be checked against the eventual uncertainty bound                                                           | `{python} LimitRecords.margin_full_str` at full charge under the coincident step; none from a depleted battery                                                                                        |
+| **Margin**      | The engineering margin separating the operating target from the breakdown threshold                                                                  | No justified deceleration margin yet; the chosen `{python} LimitRecords.delta_margin_str` protective clearance must be checked against the eventual uncertainty bound                                                           | `{python} LimitRecords.margin_full_str` at full charge under sustained coincident load; transient minimum not established; none from a depleted battery                                                                                        |
 | **Detector**    | The runtime check that catches an excursion while the machine runs, such as a phase-current sensor, an optical interrupter, or a supply-rail monitor | Deceleration monitor comparing commanded with measured deceleration from the wheel encoders and the `{python} LimitRecords.imu_name_str` inertial unit, on every stop                                                           | Rail-voltage monitor flags undervoltage; the permission path selects a response whose power and mechanical premises still hold                                                                        |
 | **Provenance**  | The evidence category and the instrument or model that produced the value                                                                            | Illustrative, from the base's class profile; to be replaced by loaded stopping trials                                                                                                                                           | Illustrative, from the machine's profile; to be replaced by a rail characterization under coincident load                                                                                             |
 
@@ -1763,8 +1756,8 @@ Those class labels suggest where to look; the current maneuver determines which 
 | **1. Measurement Freshness & Age**  | $\Delta t_{\text{fresh}} \le \frac{e_{\max}}{v_{\max}}$; $\delta \theta = \frac{2\pi}{2^n}$; end-to-end age measured from exposure                                                                                                   | *Illusion:* High inference rate ($50\text{ Hz}$) guarantees real-time control. *Truth:* Age begins at exposure; encoder differentiation amplifies quantization noise; vibration harmonics alias into IMU attitude drift.                          | **Class 1 & 2:** Erodes clearance margins and destabilizes high-gain contact loops.                                      | Tag frames with hardware timestamps; enforce $t_{\text{age}} \le$ the budgeted age at motor registers; drop stale commands.                                            |
 | **2. Momentum & Stopping Distance** | $d_{\text{stop}} = v\,\tau_{\text{delay}} + \frac{v^2}{2 a_{\text{brake}}} + \delta_{\text{loc}} + \delta_{\text{margin}} \le D_{\text{clear}}$; $m_{\text{eff}} = m + \sum_i \frac{N_i^2 J_{\text{rotor}, i}}{r_{\text{wheel}}^2}$  | *Illusion:* Deceleration can be commanded instantaneously. *Truth:* Braking distance scales quadratically ($v^2$); retarding torque must decelerate reflected rotor inertia; the stopping system must absorb or dissipate energy.                 | **Class 1 (Mobility):** Primary constraint. Doubling speed quadruples the braking term.                                  | Solve clearance quadratic $v_{\max}(D_{\text{clear}}, \tau_{\text{delay}})$ on the safety microcontroller at the rate the stopping budget sets; clamp policy velocity. |
 | **3. Actuator & Reflected Inertia** | $J_{\text{ref}} = N^2 J_{\text{rotor}}$; $\tau = K_t i_q$; $\tau_e = \frac{L}{R}$; $\frac{d\tau}{dt} \le \frac{K_t(V_{\text{bus}} - e_{\text{bemf}})}{L}$                                                                            | *Illusion:* Motor torque tracks policy tensors instantaneously. *Truth:* Current rise limits response; gearboxes square rotor inertia ($N^2$); high ratios increase resistance to rapid contact motion.                                           | **Class 2 (Manipulation):** Contact stiffness and reflected inertia constrain interaction.                               | Limit acceleration and torque slew; measure load-side response; select gearing and compliance for the qualified contact envelope.                                      |
-| **4. Thermal Limits & Duty Cycle**  | $C_{\text{th}} \frac{dT}{dt} = \frac{\tau^2}{K_t^2} R(T) - \frac{\Delta T}{\theta_{JA}}$; $\tau_{\text{cont}} = K_t \sqrt{\frac{T_{\max} - T_{\text{amb}}}{R(T_{\max}) \theta_{JA}}}$                                                | *Illusion:* Motors deliver catalog peak torque continuously. *Truth:* Torque is current, current is heat ($P_{\text{loss}} \propto \tau^2$); continuous torque is strictly limited by thermal dissipation ($T_{\max} \approx 150^\circ\text{C}$). | **Class 3 (Thermal) & Class 2:** Static holding draws stall current, overheating coils in seconds.                       | Run discrete $I^2 t$ thermal observers on the safety microcontroller; dynamically derate speed and torque when hotspot models approach limits.                         |
-| **5. Electrical Power Integrity**   | $\Delta V_{\text{droop}} \approx \Delta I R_{\text{bus}} + L_{\text{bus}}\frac{dI}{dt} + \frac{\Delta I \Delta t}{2 C_{\text{bus}}}$; $V_{\text{final}} = \sqrt{V_{\text{rail, nom}}^2 + \frac{2 E_{\text{regen}}}{C_{\text{bus}}}}$ | *Illusion:* Power rails act as infinite, ideal voltage sources. *Truth:* Bus impedance collapses rail voltage under combined compute+motor bursts; braking surges overvoltage.                                                                    | **Class 1 & 3:** Peak multi-axis acceleration trips microcontroller brownout resets; regen surges destroy inverter FETs. | Enforce coordinated compute-actuation power budgets and $dI/dt$ limits; install dynamic brake choppers; characterize unpowered fallbacks.                              |
+| **4. Thermal Limits & Duty Cycle**  | $C_{\text{th}} \frac{dT}{dt} = \frac{\tau^2}{K_t^2} R(T) - \frac{\Delta T}{\theta_{JA}}$; $\tau_{\text{cont}} = K_t \sqrt{\frac{T_{\max} - T_{\text{amb}}}{R(T_{\max}) \theta_{JA}}}$                                                | *Illusion:* Motors deliver catalog peak torque continuously. *Truth:* Torque is current, current is heat ($P_{\text{loss}} \propto \tau^2$); continuous torque is limited by heat rejection at the characterized winding-temperature limit $T_{\max}$. | **Class 3 (Thermal) & Class 2:** Holding above the qualified continuous torque can overheat the windings.                       | Run discrete $I^2 t$ thermal observers on the safety microcontroller; dynamically derate speed and torque when hotspot models approach limits.                         |
+| **5. Electrical Power Integrity**   | $V_{\text{source}}-V_{\text{bus}}=R_{\text{bus}}I_{\text{source}}+L_{\text{bus}}\frac{dI_{\text{source}}}{dt}$; $C_{\text{bus}}\frac{dV_{\text{bus}}}{dt}=I_{\text{source}}-I_{\text{load}}$; $V_{\text{final}} = \sqrt{V_{\text{rail, nom}}^2 + \frac{2 E_{\text{regen}}}{C_{\text{bus}}}}$ | *Illusion:* Power rails act as infinite, ideal voltage sources. *Truth:* Bus impedance collapses rail voltage under combined compute+motor bursts; braking surges overvoltage.                                                                    | **Class 1 & 3:** Peak multi-axis acceleration trips microcontroller brownout resets; regen surges destroy inverter FETs. | Enforce coordinated compute-actuation power budgets and $dI/dt$ limits; install dynamic brake choppers; characterize unpowered fallbacks.                              |
 
 : **Cross-class physical constraint matrix**: The five budgets, the law that governs each, the assumption a software-trained policy makes about it, the class it binds first, and the runtime invariant that answers it. {#tbl-02-cross-archetype-matrix tbl-colwidths="[18,20,24,18,20]"}
 

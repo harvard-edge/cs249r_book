@@ -1,10 +1,10 @@
 # Machine Learning Background {#sec-appendix-ml}
 
-This appendix collects the machine learning architectures, statistical verification bounds, and spatial representations used throughout this book. Transitioning from digital machine learning to Physical AI systems requires replacing unconstrained software-bound heuristics with physically grounded, time-deterministic continuous control foundations. Each section states the formal assumptions under which its results hold, enabling physical AI systems engineers to rigorously evaluate memory traffic, arithmetic intensity, execution latency, and safety boundaries on physical machines.
+This appendix supplies the machine learning and statistical tools needed to interpret learned action proposals, size their computation, and evaluate the evidence for their use. It develops uncertainty measures, spatial representations, policy-learning objectives, and rare-event bounds as consultable references for the main text. Each tool separates what a model or test establishes from the physical clearance and timing conditions that the permission path must enforce.
 
 ## How to Use This Appendix
 
-Consult this appendix when encountering specific learning systems bottlenecks, statistical verification limits, or representation boundaries across chapters in this book:
+Use the table to enter at the relevant problem. The probability section explains expectations, densities, and uncertainty; spatial representations then connect image arrays to metric geometry. Policy sections distinguish the training objective from runtime execution, and the final sections distinguish statistical evidence from a physical guarantee. The derivations use matrix multiplication, derivatives, and integrals; the prose following each result states the engineering consequence so that a reader can consult the result before working through its proof.
 
 | When you encounter this systems symptom                                           | Consult                           | For this quantitative tool                                                      |
 |-----------------------------------------------------------------------------------|-----------------------------------|---------------------------------------------------------------------------------|
@@ -25,7 +25,7 @@ Consult this appendix when encountering specific learning systems bottlenecks, s
 | Verifying time-varying physical safety properties across continuous traces        | @sec-appendix-ml-stl              | Signal Temporal Logic (STL) syntax and quantitative robustness degree           |
 | Zero-failure fleet testing encounters the Poisson Exposure Wall                   | @sec-appendix-ml-exposure         | Rule of Three ($T \ge 3.0/\lambda$), Wald breakdown, and Clopper-Pearson bounds |
 | Physical testbed wear explodes during fixed-sample policy qualification           | @sec-appendix-ml-sprt             | Sequential Probability Ratio Test (SPRT) and Wald stopping boundaries           |
-| Contact collision shocks and latency spikes exceed Gaussian $6\sigma$ bounds      | @sec-appendix-ml-evt              | Heavy-tail ($\xi > 0$) EVT (GEV/GPD) and high-quantile hardware sizing          |
+| Contact collision shocks and latency spikes exceed Gaussian $6\sigma$ bounds      | @sec-appendix-ml-evt              | Tail-family selection, GEV/GPD fits, and conditional high-quantile sizing          |
 
 ## Probability, Information Theory, and Calibration {#sec-appendix-ml-probability}
 
@@ -33,7 +33,7 @@ Autonomous machines must reason quantitatively about uncertainty across percepti
 
 ### Conditional probability and bayes' rule
 
-The conditional probability $P(Y \mid X)$ characterizes the probability of event $Y$ given observed evidence $X$. By Bayes' rule:\index{Bayes' rule!parameter estimation}
+The conditional probability $P(Y \mid X)$ characterizes the probability of event $Y$ given observed evidence $X$. For continuous parameters, $P$ in the following expressions denotes a density; probabilities over regions require integration. By Bayes' rule:\index{Bayes' rule!parameter estimation}
 $$ P(\theta \mid \mathcal{D}) = \frac{P(\mathcal{D} \mid \theta) P(\theta)}{P(\mathcal{D})} = \frac{P(\mathcal{D} \mid \theta) P(\theta)}{\int_\Theta P(\mathcal{D} \mid \theta') P(\theta') \, d\theta'} $$
 where $P(\theta)$ represents prior belief over model parameters or latent states $\theta \in \Theta$, $P(\mathcal{D} \mid \theta)$ represents the likelihood of physical dataset or sensor observation sequence $\mathcal{D} = \{\mathbf{x}_1, \dots, \mathbf{x}_N\}$, and $P(\theta \mid \mathcal{D})$ represents the updated posterior belief.
 
@@ -41,10 +41,10 @@ In high-dimensional learning systems, integrating over the parameter manifold $\
 
 1. **Maximum a posteriori (MAP) estimation:** Replacing posterior integration with point optimization:
    $$ \theta_{\text{MAP}} = \arg\max_\theta \left[ \sum_{i=1}^N \ln P(\mathbf{x}_i \mid \theta) + \ln P(\theta) \right] $$
-   When adopting a zero-mean isotropic Gaussian prior $P(\theta) = \mathcal{N}(\mathbf{0}, \sigma_0^2 \mathbf{I}_d)$, the log-prior evaluates to $\ln P(\theta) = -\frac{\|\theta\|_2^2}{2\sigma_0^2} - \frac{d}{2}\ln(2\pi\sigma_0^2)$. Maximizing the posterior objective is mathematically identical to minimizing negative log-likelihood with an explicit $L_2$ weight decay regularizer $\frac{\lambda_{\text{reg}}}{2} \|\theta\|_2^2$, where $\lambda_{\text{reg}} = 1/\sigma_0^2$. However, MAP estimation yields only a single deterministic point estimate $\theta_{\text{MAP}}$. It collapses posterior variance to zero, leaving the robot blind to its own epistemic uncertainty when queried in unvisited state space. In continuous control, epistemic uncertainty (ignorance arising from lack of training data in unfamiliar operational domains) must be sharply distinguished from aleatoric uncertainty (stochasticity inherent to sensor noise, turbulent airflow, or non-deterministic contact friction). Point estimates conflate these modalities, outputting confident yet physically baseless commands when encountering novel obstacle geometries.
+   With conditionally independent observations and a summed log-likelihood, a zero-mean isotropic Gaussian prior $P(\theta) = \mathcal{N}(\mathbf{0}, \sigma_0^2 \mathbf{I}_d)$ gives the log-prior $\ln P(\theta) = -\frac{\|\theta\|_2^2}{2\sigma_0^2} - \frac{d}{2}\ln(2\pi\sigma_0^2)$. Maximizing the posterior objective is mathematically identical to minimizing negative log-likelihood with an explicit $L_2$ penalty $\frac{\lambda_{\text{reg}}}{2} \|\theta\|_2^2$, where $\lambda_{\text{reg}} = 1/\sigma_0^2$. However, MAP estimation yields only a single deterministic point estimate $\theta_{\text{MAP}}$. The point estimate does not report posterior variance; it does not establish that the underlying uncertainty is zero. In continuous control, epistemic uncertainty (ignorance arising from lack of training data in unfamiliar operational domains) must be sharply distinguished from aleatoric uncertainty (stochasticity inherent to sensor noise, turbulent airflow, or non-deterministic contact friction). A point-estimated model can still predict observation noise, but that output alone does not quantify uncertainty about its fitted parameters.
 2. **Variational inference:** Approximating the true posterior $P(\theta \mid \mathcal{D})$ with a tractable variational distribution family $q_\phi(\theta)$ by maximizing the Evidence Lower Bound (ELBO):
    $$ \ln P(\mathcal{D}) = \mathbb{E}_{\theta \sim q_\phi(\theta)} \left[ \ln \frac{P(\mathcal{D}, \theta)}{q_\phi(\theta)} \right] + D_{\text{KL}}\left( q_\phi(\theta) \,\parallel\, P(\theta \mid \mathcal{D}) \right) \ge \mathbb{E}_{\theta \sim q_\phi(\theta)} [\ln P(\mathcal{D} \mid \theta)] - D_{\text{KL}}\left( q_\phi(\theta) \,\parallel\, P(\theta) \right) $$
-   Because the Kullback-Leibler divergence is non-negative ($D_{\text{KL}} \ge 0$), the lower bound holds strictly. Variational inference converts intractable high-dimensional integration into continuous gradient-based optimization over variational parameters $\phi$. This formulation provides the analytical foundation for the latent-variable action chunking and generative decoders derived in @sec-appendix-ml-multimodal, where latent variables capture human demonstrator intent and style without collapsing multimodal physical actions into destructive spatial averages.
+   Because the Kullback-Leibler divergence is non-negative ($D_{\text{KL}} \ge 0$), the lower bound holds, with equality when the variational distribution equals the posterior almost everywhere. Variational inference converts intractable high-dimensional integration into continuous gradient-based optimization over variational parameters $\phi$. This formulation provides the analytical foundation for the latent-variable action chunking and generative decoders derived in @sec-appendix-ml-multimodal, where latent variables capture human demonstrator intent and style without collapsing multimodal physical actions into destructive spatial averages.
 
 ### Shannon entropy and ambiguity thresholds
 
@@ -60,7 +60,7 @@ h(X) &= -\mathbb{E}\left[ -\frac{d}{2}\ln(2\pi) - \frac{1}{2}\ln(\det \boldsymbo
 &= \frac{1}{2} \ln\left( (2\pi e)^d \det \boldsymbol{\Sigma} \right)
 \end{aligned}
 $$
-Differential entropy directly scales with the logarithmic volume of the physical uncertainty ellipsoid $\det \boldsymbol{\Sigma}$. In state estimation, sensor fusion, and Kalman filtering, an informative measurement update shrinks $\det \boldsymbol{\Sigma}$, producing an exact physical information gain $\Delta h = h_{\text{prior}} - h_{\text{post}} = \frac{1}{2} \ln(\det \boldsymbol{\Sigma}_{\text{prior}} / \det \boldsymbol{\Sigma}_{\text{post}})$. Under an isotropic Gaussian distribution $\mathcal{N}(\boldsymbol{\mu}, \sigma^2 \mathbf{I}_d)$, this reduces to $h(X) = \frac{d}{2} \ln(2\pi e \sigma^2)$. In continuous reinforcement learning, such as Soft Actor-Critic (SAC), maximizing the differential entropy of the policy distribution $\mathcal{H}(\pi(\cdot \mid \mathbf{s})) = \frac{D_a}{2}(1 + \ln(2\pi)) + \sum_{i=1}^{D_a} \ln \sigma_i(\mathbf{s})$ prevents policy premature collapse onto suboptimal local extrema and forces broad exploration across continuous torque limits.
+Unlike discrete entropy, differential entropy depends on coordinate units and can be negative. Comparisons require the same coordinates and units. For a Gaussian it scales with the logarithmic volume of the physical uncertainty ellipsoid $\det \boldsymbol{\Sigma}$. In state estimation, sensor fusion, and Kalman filtering, an informative measurement update shrinks $\det \boldsymbol{\Sigma}$, producing an exact physical information gain $\Delta h = h_{\text{prior}} - h_{\text{post}} = \frac{1}{2} \ln(\det \boldsymbol{\Sigma}_{\text{prior}} / \det \boldsymbol{\Sigma}_{\text{post}})$. Under an isotropic Gaussian distribution $\mathcal{N}(\boldsymbol{\mu}, \sigma^2 \mathbf{I}_d)$, this reduces to $h(X) = \frac{d}{2} \ln(2\pi e \sigma^2)$. In continuous reinforcement learning, such as Soft Actor-Critic (SAC), the unsquashed diagonal Gaussian policy has entropy $\mathcal{H}(\pi(\cdot \mid \mathbf{s})) = \frac{D_a}{2}(1 + \ln(2\pi)) + \sum_{i=1}^{D_a} \ln \sigma_i(\mathbf{s})$ with $D_a$ action dimensions and conditional standard deviations $\sigma_i$. Entropy regularization encourages exploration; after bounding actions with a nonlinear transformation, its Jacobian changes this entropy, as the SAC derivation below shows.
 
 To quantify information divergence between an empirical demonstrator distribution $P$ and a learned policy distribution $Q$, information theory defines the **Kullback-Leibler (KL) divergence** (relative entropy):
 $$ D_{\text{KL}}(P \,\parallel\, Q) = \int_{\mathbb{R}^d} p(\mathbf{x}) \ln \left( \frac{p(\mathbf{x})}{q(\mathbf{x})} \right) d\mathbf{x} $$
@@ -74,19 +74,19 @@ In closed-loop decision making, Shannon entropy provides an instantaneous monito
 
 Standard neural classification heads normalize raw logit vectors $\mathbf{z} = [z_1, \dots, z_K]^\top \in \mathbb{R}^K$ into categorical distributions using the softmax function:
 $$ \sigma(\mathbf{z})_i = \frac{e^{z_i / T}}{\sum_{j=1}^K e^{z_j / T}} $$
-where $T > 0$ is a temperature hyperparameter (defaulting to $T = 1$). The softmax operator projects logits onto the open probability simplex $\Delta^{K-1} = \{\mathbf{p} \in \mathbb{R}^K : \sum_i p_i = 1, p_i > 0\}$ strictly through algebraic exponentiation.
+where $T > 0$ is a temperature hyperparameter (defaulting to $T = 1$). The softmax operator maps logits onto the open probability simplex $\Delta^{K-1} = \{\mathbf{p} \in \mathbb{R}^K : \sum_i p_i = 1, p_i > 0\}$ strictly through algebraic exponentiation.
 
-Deep neural networks trained via cross-entropy loss exhibit severe empirical overconfidence. For target class $y \in \{1, \dots, K\}$, the cross-entropy loss evaluates to $\mathcal{L}_{\text{CE}}(\mathbf{z}, y) = -z_y + \ln \sum_{j=1}^K e^{z_j}$. Differentiating with respect to any logit $z_i$:
+A cross-entropy training objective does not by itself establish calibration. At $T=1$, for target class $y \in \{1, \dots, K\}$, the cross-entropy loss evaluates to $\mathcal{L}_{\text{CE}}(\mathbf{z}, y) = -z_y + \ln \sum_{j=1}^K e^{z_j}$. Differentiating with respect to any logit $z_i$:
 $$ \frac{\partial \mathcal{L}_{\text{CE}}}{\partial z_i} = \frac{e^{z_i}}{\sum_{j=1}^K e^{z_j}} - \mathbf{1}(i = y) = \sigma(\mathbf{z})_i - \mathbf{1}(i = y) $$
-For the ground-truth class $y$, the gradient evaluates to $\frac{\partial \mathcal{L}_{\text{CE}}}{\partial z_y} = \sigma(\mathbf{z})_y - 1 < 0$. This gradient vanishes if and only if the predicted probability approaches unity ($\sigma(\mathbf{z})_y \to 1.0$). On the softmax simplex, driving $\sigma(\mathbf{z})_y \to 1.0$ requires the relative logit separation $z_y - z_j \to +\infty$ for all non-target classes $j \ne y$. Because cross-entropy has no minimum at any finite logit vector, unregularized gradient descent continually drives winning logits toward positive infinity, pushing predicted probabilities to extreme values ($\sigma(\mathbf{z})_y \to 1.0$) even on noisy or out-of-distribution inputs. A large output probability indicates only large relative separation between logits, not genuine epistemic certainty.
+For the ground-truth class $y$, the derivative is negative until its predicted probability approaches unity. For an individually fitted example, cross-entropy decreases as the correct class separates from the other logits; separable, unregularized training can therefore keep increasing those margins. This is not a proof that every trained network is overconfident or that noisy examples can all be fitted simultaneously. A large softmax output measures relative logit separation, while calibration asks whether predictions with that confidence are correct at the corresponding frequency.
 
 To quantify whether predicted probabilities match empirical physical frequencies, reliability engineering computes the **Expected Calibration Error (ECE)** and **Maximum Calibration Error (MCE)**:[^fn-ml-binned-ece]
 $$ \text{ECE} = \sum_{m=1}^M \frac{|B_m|}{N} \left| \text{acc}(B_m) - \text{conf}(B_m) \right|, \qquad \text{MCE} = \max_{m \in \{1, \dots, M\}} \left| \text{acc}(B_m) - \text{conf}(B_m) \right| $$
-where the unit confidence interval $[0, 1]$ is partitioned into $M$ equal-width bins $B_m = (\frac{m-1}{M}, \frac{m}{M}]$, $|B_m|$ is the sample count in bin $m$, $N$ is the total validation sample count, $\text{conf}(B_m) = \frac{1}{|B_m|} \sum_{i \in B_m} \hat{p}_i$ is the mean predicted confidence, and $\text{acc}(B_m) = \frac{1}{|B_m|} \sum_{i \in B_m} \mathbf{1}(\hat{y}_i = y_i)$ is the empirical accuracy.
+Empty bins contribute zero to ECE and are omitted from MCE; accuracy and confidence averages are defined only for nonempty bins. Here $B_m$ is the set of validation examples whose predicted confidence falls in $((m-1)/M,m/M]$, $|B_m|$ is the sample count in bin $m$, $N$ is the total validation sample count, $\text{conf}(B_m) = \frac{1}{|B_m|} \sum_{i \in B_m} \hat{p}_i$ is the mean predicted confidence, and $\text{acc}(B_m) = \frac{1}{|B_m|} \sum_{i \in B_m} \mathbf{1}(\hat{y}_i = y_i)$ is the empirical accuracy.
 
 To recalibrate an overconfident model post-hoc without altering its classification accuracy, **temperature scaling** optimizes a single scalar parameter $T > 0$ on a held-out calibration dataset $\mathcal{D}_{\text{cal}}$:
 $$ T^* = \arg\min_{T > 0} \left[ - \sum_{(\mathbf{x}, y) \in \mathcal{D}_{\text{cal}}} \ln \left( \frac{e^{z_y(\mathbf{x}) / T}}{\sum_{j=1}^K e^{z_j(\mathbf{x}) / T}} \right) \right] $$
-Because $T^*$ scales all logits uniformly, the ranking $\arg\max_i (z_i / T) = \arg\max_i z_i$ remains unchanged for all $T > 0$, preserving top-1 accuracy while softening the predicted probability distribution to match empirical accuracy. However, temperature scaling rests on the classical assumption that deployment data is identically distributed to calibration data ($P_{\text{deploy}} = P_{\text{cal}}$). In Physical AI, an embodied agent continually encounters non-stationary environmental shifts: lens flare, wet floor reflectance, novel obstacle textures, or altered motor dynamics. Temperature scaling cannot repair or detect true epistemic invalidity: scaling an out-of-distribution logit vector by scalar $T^*$ still yields near-unity confidence if the raw relative logit separation remains large. In safety-critical autonomy, post-hoc calibration must be paired with distribution-free conformal prediction bounds or deterministic runtime spatial clearance monitors that enforce physical clearance regardless of neural confidence.
+Because $T^*$ scales all logits uniformly, the ranking $\arg\max_i (z_i / T) = \arg\max_i z_i$ remains unchanged for all $T > 0$, preserving top-1 accuracy. Temperatures above one soften probabilities, while temperatures below one sharpen them; optimizing calibration loss does not guarantee exact calibration. However, temperature scaling rests on the classical assumption that deployment data is identically distributed to calibration data ($P_{\text{deploy}} = P_{\text{cal}}$). In Physical AI, an embodied agent continually encounters non-stationary environmental shifts: lens flare, wet floor reflectance, novel obstacle textures, or altered motor dynamics. Temperature scaling cannot repair or detect true epistemic invalidity: scaling an out-of-distribution logit vector by scalar $T^*$ still yields near-unity confidence if the raw relative logit separation remains large. In safety-critical autonomy, post-hoc calibration requires separately validated uncertainty and clearance checks. Conformal coverage also depends on its sampling assumptions, commonly exchangeability; it does not automatically survive deployment shift.
 
 [^fn-ml-binned-ece]: **Expected Calibration Error**\index{Expected Calibration Error!binned accuracy metric}: Binned calibration metrics quantify the divergence between neural prediction confidence and realized empirical accuracy across confidence intervals. Standard unregularized deep networks exhibit substantial overconfidence because cross-entropy minimization drives logits to extreme values. Relying on uncalibrated confidence scores to gate safety fallbacks permits undetected distribution shifts to corrupt closed-loop actuation.
 
@@ -109,30 +109,30 @@ $$ \mathbf{T}^{-1} = \begin{bmatrix} \mathbf{R}^\top & -\mathbf{R}^\top \mathbf{
 
 Because $SE(3)$ forms a smooth, non-Euclidean Riemannian manifold rather than a linear vector space, unconstrained optimization (such as gradient descent during camera pose estimation or neural trajectory generation) cannot directly add matrices ($\mathbf{T}_1 + \mathbf{T}_2 \notin SE(3)$). Regressing 3D rotations directly using Euler angles induces topological singularities (gimbal lock at pitch $\pm 90^\circ$) where degrees of freedom collapse, whereas unconstrained unit quaternions $\mathbf{q} \in S^3$ suffer from the antipodal double-cover ambiguity ($\mathbf{q}$ and $-\mathbf{q}$ represent the identical physical rotation). In continuous neural policy training, minimizing $L_2$ regression loss over quaternions produces severe gradient cancellation when the network predicts opposite hemispheres for nearby states. To ensure topological continuity across continuous rotations, modern spatial policies either output continuous 6D rotation representations (the first two columns of $\mathbf{R}$ orthonormalized via Gram-Schmidt) or parameterize local variations in the tangent space at the identity: the Lie algebra $\mathfrak{se}(3)$.
 
-A twist vector $\boldsymbol{\xi} = [\mathbf{v}^\top, \boldsymbol{\omega}^\top]^\top \in \mathbb{R}^6$ combines linear velocity $\mathbf{v} \in \mathbb{R}^3$ and angular velocity $\boldsymbol{\omega} \in \mathbb{R}^3$. The wedge operator $(\cdot)^\wedge$ maps $\boldsymbol{\xi}$ to its matrix Lie algebra representation:
+For the finite pose increment below, a twist coordinate vector $\boldsymbol{\xi} = [\mathbf{v}^\top, \boldsymbol{\omega}^\top]^\top \in \mathbb{R}^6$ combines integrated translation coordinates $\mathbf{v}$ and rotation coordinates $\boldsymbol{\omega}$. If these symbols instead denote velocities, multiply the matrix twist by elapsed time before exponentiating. The wedge operator $(\cdot)^\wedge$ maps $\boldsymbol{\xi}$ to its matrix Lie algebra representation:
 $$ \hat{\boldsymbol{\xi}} = \boldsymbol{\xi}^\wedge = \begin{bmatrix} [\boldsymbol{\omega}]_\times & \mathbf{v} \\ \mathbf{0}^\top & 0 \end{bmatrix} \in \mathfrak{se}(3), \quad \text{where } [\boldsymbol{\omega}]_\times = \begin{bmatrix} 0 & -\omega_z & \omega_y \\ \omega_z & 0 & -\omega_x \\ -\omega_y & \omega_x & 0 \end{bmatrix} $$
 The exponential map $\exp: \mathfrak{se}(3) \to SE(3)$ computes finite rigid transformations in closed form via Rodrigues' formula:
 $$ \exp(\hat{\boldsymbol{\xi}}) = \begin{bmatrix} \exp([\boldsymbol{\omega}]_\times) & \mathbf{V} \mathbf{v} \\ \mathbf{0}^\top & 1 \end{bmatrix} $$
 where $\theta = \|\boldsymbol{\omega}\|$, $\exp([\boldsymbol{\omega}]_\times) = \mathbf{I} + \frac{\sin\theta}{\theta} [\boldsymbol{\omega}]_\times + \frac{1 - \cos\theta}{\theta^2} [\boldsymbol{\omega}]_\times^2$, and $\mathbf{V} = \mathbf{I} + \frac{1 - \cos\theta}{\theta^2} [\boldsymbol{\omega}]_\times + \frac{\theta - \sin\theta}{\theta^3} [\boldsymbol{\omega}]_\times^2$.
 
-In spatial tracking and state estimation, small pose uncertainties are modeled by perturbing the mean transform with a zero-mean Gaussian twist vector in the local frame: $\mathbf{T}' = \mathbf{T} \exp(\hat{\boldsymbol{\epsilon}})$, with $\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{\Sigma}_{\boldsymbol{\xi}})$ and covariance $\boldsymbol{\Sigma}_{\boldsymbol{\xi}} \in \mathbb{R}^{6 \times 6}$. This parameterization guarantees that optimization updates and propagated covariances remain strictly on the $SE(3)$ manifold without gimbal lock or matrix degeneration.
+In spatial tracking and state estimation, small pose uncertainties are modeled by perturbing the mean transform with a zero-mean Gaussian twist vector in the local frame: $\mathbf{T}' = \mathbf{T} \exp(\hat{\boldsymbol{\epsilon}})$, with $\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{\Sigma}_{\boldsymbol{\xi}})$ and covariance $\boldsymbol{\Sigma}_{\boldsymbol{\xi}} \in \mathbb{R}^{6 \times 6}$. The exponential keeps the updated pose on $SE(3)$. The covariance describes local tangent coordinates, not a Gaussian distribution over matrix entries; its approximation is reliable only while the local perturbation model is adequate. At zero rotation, evaluate the coefficients above by their continuous limits to avoid division by zero.
 
 ### Visual patch tokenization, attention, and 3D metric lifting {#sec-appendix-ml-patch-embedding}
 
-Embodied vision-language-action (VLA) models and spatial transformers convert continuous sensory streams into discrete tokens for neural attention, then lift candidate predictions into 3D Euclidean coordinates for physical reasoning.\index{Patch tokenization!vision transformers}\index{Metric unprojection!camera intrinsics} @Sec-brain-learned-representations and @sec-brain-cognitive-pipeline use the token counts derived here to size the application processor's memory traffic.
+Embodied vision-language-action (VLA) models and spatial transformers convert continuous sensory streams into discrete tokens for neural attention, then lift candidate spatial predictions into 3D Euclidean coordinates for physical reasoning.\index{Patch tokenization!vision transformers}\index{Metric unprojection!camera intrinsics} @Sec-brain-learned-representations and @sec-brain-cognitive-pipeline use the token counts derived here to size the application processor's memory traffic.
 
 #### Convolutional encoders versus vision transformer tokenization
 
 Physical AI architectures employ two primary paradigms for encoding raw camera observations into visual features:
 
-1. **Convolutional Encoders (ConvNets):** Classical visuomotor backbones (such as ResNet-18/34/50 or modern ConvNeXt variants) process images through hierarchical sliding-window convolutions. Convolutions possess an intrinsic inductive bias: **translational equivariance** ($\text{Conv}(\text{Shift}(\mathbf{I})) = \text{Shift}(\text{Conv}(\mathbf{I}))$) and local spatial compactness. Because small $3 \times 3$ filter weights are repeatedly applied across thousands of image pixel locations, convolutional feature extraction exhibits high arithmetic intensity (FLOPs per byte transferred from DRAM) in early layers. Intermediate feature activations stream through on-chip SRAM line buffers, minimizing off-chip memory bandwidth consumption and ensuring deterministic, low-latency execution on embedded automotive and industrial NPUs. However, local receptive fields require deep network stacks to capture global scene context, limiting their ability to resolve long-range semantic relationships (such as attending from a robot gripper to a distant receptacle).
+1. **Convolutional Encoders (ConvNets):** Classical visuomotor backbones (such as ResNet-18/34/50 or modern ConvNeXt variants) process images through hierarchical sliding-window convolutions. Convolutions possess an intrinsic inductive bias: **translational equivariance** ($\text{Conv}(\text{Shift}(\mathbf{I})) = \text{Shift}(\text{Conv}(\mathbf{I}))$) and local spatial compactness. Because small $3 \times 3$ filter weights are repeatedly applied across thousands of image pixel locations, convolutional feature extraction exhibits high arithmetic intensity (FLOPs per byte transferred from DRAM) in early layers. Intermediate feature activations stream through on-chip SRAM line buffers, minimizing off-chip memory bandwidth consumption and reducing traffic when the accelerator mapping and buffer capacity permit reuse. Deterministic latency still requires a timing analysis under contention. However, local receptive fields require deep network stacks to capture global scene context, limiting their ability to resolve long-range semantic relationships (such as attending from a robot gripper to a distant receptacle).
 2. **Vision Transformers (ViTs):** Vision transformers discard local sliding windows in favor of non-overlapping patch tokenization and global multi-head self-attention. While ViTs lack hardwired translational equivariance, they establish global receptive fields across the entire image at layer 1. The operational trade-off is computational complexity and memory bandwidth: self-attention scales quadratically ($\mathcal{O}(N^2)$) in token count $N$. On embedded edge accelerators operating at single-frame batch sizes, materializing full $N \times N$ attention matrices generates substantial activation memory traffic that stresses shared system memory buses.
 
 #### 2D vision transformer patch tokenization
 
-Consider an RGB image $\mathbf{X} \in \mathbb{R}^{H \times W \times C}$ captured by an onboard camera with spatial resolution $H \times W$ and $C$ color channels. Feeding raw pixels to a multilayer perceptron would discard spatial locality and inflate the parameter count, so a vision transformer frontend partitions the image into a non-overlapping sequence of $N$ patches of $P \times P$ pixels, with $P$ typically 14 or 16:
+Consider an RGB image $\mathbf{X} \in \mathbb{R}^{H \times W \times C}$ captured by an onboard camera with spatial resolution $H \times W$ and $C$ color channels. Feeding raw pixels to a multilayer perceptron would discard spatial locality and inflate the parameter count, so a vision transformer frontend partitions the image into a non-overlapping sequence of $N$ patches of $P \times P$ pixels, with $H$ and $W$ divisible by $P$ after any chosen crop or padding:
 $$ N = \frac{H \cdot W}{P^2} $$
-Each patch, indexed by its row and column $(u, v)$ in the camera plane, is flattened into a vector $\mathbf{x}_p^{(u, v)} \in \mathbb{R}^{P^2 C}$. A trainable linear projection $\mathbf{W}_{\text{patch}} \in \mathbb{R}^{(P^2 C) \times d_{\text{model}}}$ maps each flattened patch into the transformer's hidden dimension $d_{\text{model}}$. Self-attention is permutation-invariant and treats its inputs as an unordered set, so the model knows nothing of spatial proximity unless position is added explicitly:
+Each patch, indexed by its row and column $(u, v)$ in the camera plane, is flattened into a vector $\mathbf{x}_p^{(u, v)} \in \mathbb{R}^{P^2 C}$. A trainable linear projection $\mathbf{W}_{\text{patch}} \in \mathbb{R}^{(P^2 C) \times d_{\text{model}}}$ maps each flattened patch into the transformer's hidden dimension $d_{\text{model}}$. Without positional information or position-dependent masks, self-attention is permutation-equivariant: permuting the input rows permutes the output rows. Therefore the model knows nothing of spatial proximity unless position is added explicitly:
 $$ \mathbf{z}_0^{(u, v)} = \mathbf{x}_p^{(u, v)} \mathbf{W}_{\text{patch}} + \mathbf{E}_{\text{pos}}^{2D}(u, v) + \mathbf{e}_{\text{cam}} $$
 The 2D position embedding $\mathbf{E}_{\text{pos}}^{2D}(u, v)$ decomposes along the vertical axis $u$ and the horizontal axis $v$, using sinusoidal frequency bands or learned coordinate embeddings. It encodes position in the image plane and carries no metric 3D distance. When several cameras feed one model, such as an overhead camera for scene context and a wrist camera for millimeter-scale alignment, a learned camera identifier $\mathbf{e}_{\text{cam}} \in \{\mathbf{e}_{\text{overhead}}, \mathbf{e}_{\text{wrist}}\}$ distinguishes their reference frames. Some architectures also prepend a summary token $\mathbf{x}_{\text{class}} \in \mathbb{R}^{d_{\text{model}}}$ to the sequence.
 
@@ -196,7 +196,7 @@ $$ \mathbf{Z} = [\mathbf{z}_{\text{vision}} \,|\, \mathbf{z}_{\text{text}} \,|\,
 
 #### Self-attention over the combined sequence
 
-The combined sequence $\mathbf{Z}$ passes through a stack of transformer layers, 32 to 80 in current VLA backbones, each consisting of multi-head self-attention and a feed-forward network. Self-attention projects the tokens into queries $\mathbf{Q} = \mathbf{Z} \mathbf{W}_Q$, keys $\mathbf{K}_{\text{attn}} = \mathbf{Z} \mathbf{W}_K$, and values $\mathbf{V} = \mathbf{Z} \mathbf{W}_V$, and computes pairwise attention weights over the whole sequence:\index{Self-attention!multimodal token sequence}
+The combined sequence $\mathbf{Z}$ passes through a stack of transformer layers, each consisting of multi-head self-attention and a feed-forward network. Self-attention projects the tokens into queries $\mathbf{Q} = \mathbf{Z} \mathbf{W}_Q$, keys $\mathbf{K}_{\text{attn}} = \mathbf{Z} \mathbf{W}_K$, and values $\mathbf{V} = \mathbf{Z} \mathbf{W}_V$, and computes pairwise attention weights over the whole sequence:\index{Self-attention!multimodal token sequence}
 $$ A_{i, j} = \frac{\exp\left(\mathbf{q}_i^\top \mathbf{k}_j / \sqrt{d_k}\right)}{\sum_{m} \exp\left(\mathbf{q}_i^\top \mathbf{k}_m / \sqrt{d_k}\right)} $$
 A text token such as "handle" can attend to visual patch tokens, but a high attention weight is not a verified grasp location or metric pose. A trained spatial decoder may produce a 2D affordance heatmap, and placing the gripper in 3D still takes depth evidence, camera calibration, and the metric lifting below. A rolling key-value (KV) cache stores prior token states for attention. It neither tracks object permanence nor maintains a 3D position and velocity; an explicit state estimator must associate observations across frames and widen its uncertainty while the mug is occluded.
 
@@ -206,11 +206,11 @@ Standard 2D patch tokens lack metric scale due to projective ambiguity: along an
 
 Let $\mathbf{u} = [u, v]^\top$ denote pixel coordinates on the image sensor, and let the calibrated pinhole camera intrinsic matrix be:
 $$ \mathbf{K} = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix} $$
-where $(f_x, f_y)$ are focal lengths in pixels and $(c_x, c_y)$ is the principal point. Given an aligned metric depth measurement $d = z > 0$ (obtained from stereo disparity, time-of-flight lidar, or calibrated depth sensors), the 3D position in the camera coordinate frame $\mathbf{p}_C \in \mathbb{R}^3$ is recovered via inverse intrinsic projection:
+where $(f_x, f_y)$ are focal lengths in pixels and $(c_x, c_y)$ is the principal point. Given an aligned optical-axis depth measurement $d = z > 0$ (obtained from stereo disparity, time-of-flight lidar, or calibrated depth sensors), the 3D position in the camera coordinate frame $\mathbf{p}_C \in \mathbb{R}^3$ is recovered via inverse intrinsic projection:
 $$ \mathbf{p}_C = d \cdot \mathbf{K}^{-1} \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} = \begin{bmatrix} (u - c_x) \frac{d}{f_x} \\ (v - c_y) \frac{d}{f_y} \\ d \end{bmatrix} $$
 Transforming $\mathbf{p}_C$ into the robot base or world frame $W$ uses the rigid extrinsic transform $\mathbf{T}_{WC} \in SE(3)$ defined in this section:
 $$ \tilde{\mathbf{p}}_W = \mathbf{T}_{WC} \tilde{\mathbf{p}}_C \implies \mathbf{p}_W = \mathbf{R}_{WC} \mathbf{p}_C + \mathbf{t}_{WC} $$
-The permission path and kinematic reachability evaluators require this metric 3D reconstruction; ungrounded 2D tokens cannot establish whether a proposed trajectory satisfies physical clearance boundaries $d_{\text{stop}}$.
+A sensor reporting range along a ray must first convert it to optical-axis depth; substituting raw range for $d$ distorts off-axis geometry. The permission path and kinematic reachability evaluators require this metric 3D reconstruction; ungrounded 2D tokens cannot establish whether a proposed trajectory satisfies physical clearance boundaries $d_{\text{stop}}$.
 
 ### Camera-to-bird's-eye-view lifting {#sec-appendix-ml-bev-lifting}
 
@@ -276,9 +276,9 @@ class AppxBevFrustum:
    $$ \mathbf{p}_{u, v} = \text{softmax}(\mathbf{d}_{u, v}) \in \Delta^{D-1} $$
    An outer product lifts each 2D feature into a frustum of 3D points, one per depth hypothesis:
    $$ \mathbf{c}_{u, v, k} = \mathbf{p}_{u, v}(k) \cdot \mathbf{f}_{u, v} \in \mathbb{R}^C \quad \text{at } \mathbf{P}_c(u, v, d_k) = d_k \mathbf{K}^{-1} \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} $$
-   For a feature map `{python} AppxBevFrustum.feat_side_str` cells on a side, with `{python} AppxBevFrustum.depth_bins_str` depth bins and `{python} AppxBevFrustum.feat_ch_str` feature channels, the frustum tensor holds about `{python} AppxBevFrustum.frustum_values_str` values, `{python} AppxBevFrustum.frustum_bytes_str` per frame at FP16. At camera rate that tensor is memory traffic the application processor must carry, which is why implementations keep it in zero-copy buffers on the accelerator.
+   For a feature map `{python} AppxBevFrustum.feat_side_str` cells on a side, with `{python} AppxBevFrustum.depth_bins_str` depth bins and `{python} AppxBevFrustum.feat_ch_str` feature channels, the frustum tensor holds about `{python} AppxBevFrustum.frustum_values_str` values, `{python} AppxBevFrustum.frustum_bytes_str` per frame at FP16. This is a materialized tensor footprint for one camera. Actual DRAM traffic depends on whether the runtime materializes, tiles, or fuses lifting with pooling; zero-copy handoff avoids an extra copy but does not eliminate tensor reads and writes.
 
-3. **Splat.** The calibrated extrinsic transform $\mathbf{T}_{\text{base}}^{\text{cam}} = [\mathbf{R}_{\text{base}}^{\text{cam}} \mid \mathbf{t}_{\text{base}}^{\text{cam}}] \in SE(3)$ maps every frustum point from the camera's optical frame into the robot base frame:
+3. **Splat.** The calibrated extrinsic transform $\mathbf{T}_{\text{base}}^{\text{cam}}\in SE(3)$, with rotation $\mathbf{R}_{\text{base}}^{\text{cam}}$ and translation $\mathbf{t}_{\text{base}}^{\text{cam}}$, maps every frustum point from the camera's optical frame into the robot base frame:
    $$ \mathbf{P}_{\text{base}} = \mathbf{R}_{\text{base}}^{\text{cam}} \mathbf{P}_c + \mathbf{t}_{\text{base}}^{\text{cam}} $$
    The workspace is discretized into a grid of vertical pillars, for example `{python} AppxBevFrustum.bev_cells_str` cells on a side covering a `{python} AppxBevFrustum.workspace_str` square at `{python} AppxBevFrustum.bev_res_str` resolution. The splat sums every frustum feature that falls within pillar $(X, Y)$, using accelerated cumulative sums or point-pillar pooling [@philion2020lift; @liu2023bevfusion]:
    $$ \mathbf{V}_{\text{BEV}}(X, Y) = \sum_{(u, v, k) \in \text{Pillar}(X, Y)} \mathbf{c}_{u, v, k} $$
@@ -308,11 +308,11 @@ Continuous neural scene representations parameterize physical environments throu
 2. **Covariance matrix ($\boldsymbol{\Sigma}_i \in \mathbb{R}^{3 \times 3}$):** Defining ellipsoidal shape and orientation. To guarantee that $\boldsymbol{\Sigma}_i$ remains symmetric and positive semi-definite throughout gradient descent, it is factorized into an orthonormal rotation matrix $\mathbf{R}_i \in SO(3)$ (parameterized by a unit quaternion $\mathbf{q}_i$) and a positive scaling diagonal matrix $\mathbf{S}_i = \text{diag}(s_{x,i}, s_{y,i}, s_{z,i})$:
    $$ \boldsymbol{\Sigma}_i = \mathbf{R}_i \mathbf{S}_i \mathbf{S}_i^\top \mathbf{R}_i^\top $$
 3. **Radiance appearance ($c_i$):** Parameterized via Spherical Harmonics (SH) coefficients up to degree 3 (16 coefficients per color channel) to capture view-dependent specular reflections.
-4. **Opacity ($\alpha_i \in [0, 1]$):** Modeled via a sigmoid activation $\alpha_i = \sigma(o_i) = \frac{1}{1 + e^{-o_i}}$ over unbounded logit $o_i \in \mathbb{R}$ to ensure well-behaved, non-vanishing density gradients.
+4. **Opacity ($\alpha_i \in [0, 1]$):** Modeled via a sigmoid activation $\alpha_i = \sigma(o_i) = \frac{1}{1 + e^{-o_i}}$ over unbounded logit $o_i \in \mathbb{R}$ to bound opacity. Sigmoid gradients can still vanish near saturation.
 
 #### Camera projection and screen-space covariance
 
-During real-time novel-view synthesis, 3D Gaussians are transformed into the camera optical frame via rigid extrinsic transform $\mathbf{T}_{CW} = [\mathbf{W} \mid \mathbf{t}_{\text{cam}}] \in SE(3)$, where $\mathbf{W} \in SO(3)$ is the rotational component:
+During real-time novel-view synthesis, 3D Gaussians are transformed into the camera optical frame via rigid extrinsic transform $\mathbf{T}_{CW}\in SE(3)$, where $\mathbf{W} \in SO(3)$ is the rotational component:
 $$ \mathbf{t}_C = [x, y, z]^\top = \mathbf{W} \boldsymbol{\mu}_i + \mathbf{t}_{\text{cam}} $$
 The pinhole camera model projects 3D point $\mathbf{t}_C$ to image pixel coordinates $\mathbf{u} = [u, v]^\top$:
 $$ \pi(x, y, z) = \begin{bmatrix} f_x \frac{x}{z} + c_x \\ f_y \frac{y}{z} + c_y \end{bmatrix} $$
@@ -326,7 +326,7 @@ where a low-pass filter ($\boldsymbol{\Sigma}_{2D}' = \boldsymbol{\Sigma}_{2D} +
 
 To render pixel color $C(\mathbf{u})$, tile-based rasterization bins Gaussians into $16 \times 16$ pixel screen tiles, sorts overlapping Gaussians along the camera optical axis by depth $z$, and computes front-to-back alpha-blended volume rendering:
 $$ C = \sum_{i \in \mathcal{N}} c_i \alpha_i T_i, \quad \text{where } T_i = \prod_{j=1}^{i-1} (1 - \alpha_j) $$
-Here $T_i$ represents cumulative optical transmittance along the viewing ray, initialized to $T_1 = 1$. When $T_i$ drops below a cutoff threshold ($T_i < 10^{-4}$), ray traversal terminates early, achieving over $100\text{ FPS}$ rasterization speeds on modern graphics accelerators.
+Here $T_i$ represents cumulative optical transmittance along the viewing ray, initialized to $T_1=1$. In this rendering equation, $\alpha_i$ is the pixel-dependent opacity contribution, including the projected Gaussian footprint, rather than just the primitive's stored opacity. An implementation may terminate when the remaining transmittance is sufficiently small; the error tolerance, scene density, and hardware determine the resulting speed.
 
 However, a physical AI systems engineer must recognize the fundamental boundary between visual rendering and physical clearance: 3D Gaussian parameters are optimized strictly against 2D photometric rendering loss (such as $L_1$ color difference and SSIM). Gaussians frequently fit unobserved scene regions with semi-transparent "floaters," hollow shells, or blurred volumetric density. Neither the Gaussian density $\alpha_i$ nor its spatial gradient $\nabla_{\mathbf{x}} G_i(\mathbf{x})$ constitutes a conservative collision surface. Real-time safety gating requires extracting an explicit metric mesh, occupancy grid, or Euclidean Signed Distance Field (ESDF) with validated unknown-space bounds before any motion planner or Control Barrier Function evaluates clearance (@fig-3dgs-slam-splatam).
 
@@ -396,7 +396,7 @@ Taking the natural logarithm of the odds ratio defines the log-odds quantity $L(
 $$ L_t(m_i) = L_{t-1}(m_i) + \underbrace{\ln \frac{P(m_i \mid z_t)}{1 - P(m_i \mid z_t)}}_{\text{inverse sensor model } L_{\text{sensor}}} - \underbrace{\ln \frac{P(m_i)}{1 - P(m_i)}}_{\text{prior belief } L_0} $$
 where $P(m_i \mid z_t)$ is the calibrated inverse sensor model. When prior belief is uninformative ($P(m_i) = 0.5 \implies L_0 = 0$), the update reduces to simple addition: $L_t(m_i) = L_{t-1}(m_i) + L_{\text{sensor}}$.
 
-Along a range sensor ray, voxels traversed before the hit receive negative log-odds evidence ($L_{\text{free}} < 0$), while the voxel containing the return receives positive evidence ($L_{\text{occ}} > 0$). Voxels beyond the return remain unobserved ($L_{\text{sensor}} = 0$). To prevent numerical saturation lockup where an obstacle that was observed occupied hundreds of times requires hundreds of empty observations before clearing, updates are clamped within finite bounds $[L_{\min}, L_{\max}]$ (e.g., $[-2.0, +3.5]$).
+Along a range sensor ray, voxels traversed before the hit receive negative log-odds evidence ($L_{\text{free}} < 0$), while the voxel containing the return receives positive evidence ($L_{\text{occ}} > 0$). Voxels beyond the return receive no update. With the uninformative prior used here, zero evidence corresponds to $L_{\text{sensor}}=0$. To prevent numerical saturation lockup where an obstacle that was observed occupied hundreds of times requires hundreds of empty observations before clearing, updates are clamped within finite bounds $[L_{\min}, L_{\max}]$ (e.g., $[-2.0, +3.5]$).
 
 [^fn-ml-log-odds]: **Recursive Log-Odds Occupancy**\index{Log-odds transformation!occupancy mapping}: The log-odds formulation maps probability values from the bounded unit interval to the unbounded real line, turning nonlinear Bayesian product updates into fast additions. Dynamic ranges are clamped by upper and lower saturation bounds to prevent saturation lockup. Failure to clamp log-odds values delays the clearing of dynamic obstacles when physical objects vacate the workspace.
 
@@ -428,7 +428,7 @@ Interpolating observed samples gives an approximate gradient near a zero crossin
 \begin{algorithm}
 \caption{Occupancy Raycast and Metric TSDF Fusion}
 \begin{algorithmic}
-\Require returns $\mathcal{P}$ captured at $t_0$ in one capture clock; valid pose; occupancy $\mathcal{O}$; metric TSDF $\mathcal{V}$; truncation $\mu$; evidence half-life $t_{1/2}$; per-cell serialized updates
+\Require returns $\mathcal{P}$ captured at $t_0$ in one capture clock; valid pose; occupancy $\mathcal{O}$; metric TSDF $\mathcal{V}$; truncation $\mu$; evidence half-life $t_{1/2}$; serialized frame updates
 \Ensure observed free/occupied cells and near-surface TSDF samples updated without refreshing unseen cells
 \State $(t_{0,c},\epsilon_{\text{sync}})\gets\Call{ConvertCaptureToControllerClock}{t_0}$
 \If{clock conversion invalid or $t_{\text{now},c}-t_{0,c}+\epsilon_{\text{sync}}>\tau_{\max,\text{age}}$}
@@ -586,7 +586,7 @@ class AppxTsdfVoxelGrid:
 
 ## Function Approximation and Sensitivity Bounds {#sec-appendix-ml-sensitivity}
 
-A neural network that maps continuous sensor state to actuator commands needs formal bounds on how far its output can move when its input moves. In digital machine learning, small output variations merely shift class logits or perplexity scores. In Physical AI, neural outputs directly command motor currents, joint torques, and end-effector velocities. An unconstrained function approximator can amplify minor sensor telemetry noise into explosive torque commands, exciting unmodeled mechanical resonances, shearing drive gearboxes, and violating physical safety envelopes.
+A sensor perturbation can change a neural action proposal even when the physical scene has barely moved. A sensitivity bound limits that change relative to the input error and supplies a quantity to compare with available actuator headroom. The bound concerns the proposal; the permission path must still check the plant state and enforce current limits.
 
 ### Multilayer perceptrons in continuous control {#sec-appendix-ml-mlp}
 
@@ -596,14 +596,13 @@ where $\mathbf{W}_k \in \mathbb{R}^{d_k \times d_{k-1}}$ are weight matrices and
 
 #### Systems profile and roofline limits of MLP policies
 
-MLPs offer a distinctive systems profile for continuous control:
+A compact MLP can keep its weights and activations in on-chip memory, reducing interference from camera direct memory access and other DRAM clients. Capacity alone does not establish residency: cache replacement, shared clients, scheduling, and accelerator transfers determine the memory level that supplies each layer.
 
-1. **Deterministic sub-millisecond execution:** With small parameter counts (typically $100\text{k}\text{--}500\text{k}$ parameters, or $200\text{--}1000\text{ KB}$ at FP16), an entire MLP policy fits comfortably within on-die Level 2 (L2) or Level 3 (L3) processor caches. Execution on a modern embedded CPU or NPU takes under $0.05\text{--}0.2\text{ ms}$, effortlessly satisfying deterministic $1\text{ kHz}$ control loop deadlines ($\Delta t_{\text{ctrl}} = 1\text{ ms}$).
-2. **Low arithmetic intensity at batch size 1:** Closed-loop robot control executes strictly at batch size $B = 1$. The matrix-vector multiplication $\mathbf{y} = \mathbf{W} \mathbf{h}$ requires loading each matrix weight from memory exactly once to compute a single multiply-accumulate (MAC) operation. The arithmetic intensity evaluates to:
-   $$ I_{\text{MLP}} = \frac{2 \cdot d_{\text{in}} d_{\text{out}}\text{ FLOPs}}{2 \cdot d_{\text{in}} d_{\text{out}}\text{ bytes (at FP16)}} = 1.0\text{ FLOP/byte} $$
-   Because high-performance accelerators (such as embedded GPUs or tensor processors) possess operational ridge points exceeding $50\text{--}100\text{ FLOP/byte}$, real-time MLP policy inference operates in the deeply memory-bandwidth bound regime of the roofline model. Total execution latency is dictated entirely by memory bus read latency and SRAM cache hit rates, rather than peak compute throughput.
-3. **On-chip cache pinning eliminates memory bus contention:** When weight matrices are pinned in on-chip SRAM or L2/L3 cache, memory access avoids external DRAM arbitration entirely. Reading from off-chip LPDDR DRAM subjects inference to variable memory bus contention from concurrent camera direct memory access (DMA) transactions and display pipelines, introducing latency jitter of $\pm 20\text{--}50\text{ }\mu\text{s}$. In contrast, cache-resident MLPs execute with sub-microsecond timing variance ($\le 5\text{ }\mu\text{s}$), making them suitable for hard real-time execution inside kernel interrupt handlers or PREEMPT_RT threads.
-4. **Negligible activation memory footprint:** Unlike spatial transformers where self-attention matrices scale quadratically ($\mathcal{O}(N^2)$) in visual token count, an MLP policy processes low-dimensional state vectors $\mathbf{x} \in \mathbb{R}^{d_x}$. Hidden activations require storing only $\mathbf{h}_k \in \mathbb{R}^{d_k}$ (typically $256\text{--}512$ scalar values, or $512\text{--}1024\text{ bytes}$ at FP16). The total working set memory footprint across all layers is under $16\text{ KB}$, enabling static stack allocation at boot time with zero dynamic heap allocations (`malloc`/`free`) during real-time control cycles.
+For a dense layer with $d_{\text{in}}d_{\text{out}}$ weights, a single input vector requires approximately $2d_{\text{in}}d_{\text{out}}$ floating-point operations. If each weight occupies $b_w$ bytes and is read once from the memory level being analyzed, the weight-only arithmetic intensity is
+$$ I_{\text{MLP}} \approx \frac{2}{b_w}\;\text{FLOP/byte}. $$
+Activation traffic lowers this ratio; weight reuse across inputs raises it. The relevant roofline compares this intensity with compute throughput divided by bandwidth at that same memory level. Cache-resident weights therefore change the applicable bandwidth, not the amount of arithmetic.
+
+A deployment budgets weights, scratch buffers, and hidden activations together, preallocates runtime storage, and measures or bounds worst-case execution under interference. A short average forward pass does not by itself justify placing inference in an interrupt handler or guarantee a control deadline.
 
 ### Lipschitz continuity and spectral normalization {#sec-appendix-ml-lipschitz}
 
@@ -613,21 +612,21 @@ For a feedforward network with $K$ layers $\pi(\mathbf{x}) = \phi_K(\mathbf{W}_K
 $$ L \le \prod_{k=1}^K L_{\phi_k} \| \mathbf{W}_k \|_2 $$
 where $\|\mathbf{W}_k\|_2 = \sigma_{\max}(\mathbf{W}_k)$ is the spectral norm (the largest singular value of weight matrix $\mathbf{W}_k$). Standard activations such as ReLU and Tanh are 1-Lipschitz in their scalar forms; exact GeLU has maximum derivative about $1.1289$, so assigning it a factor of one would understate the bound.
 
-If each layer in a 4-layer MLP has spectral norm $\|\mathbf{W}_k\|_2 \approx 3.0$, the overall network Lipschitz constant compounds exponentially to $L \approx 3^4 = 81$. A modest $1\text{ mm}$ position measurement error can produce an $81\text{ mm}$ displacement or an $81\text{ N}\cdot\text{m}$ torque transient, commanding extreme actuator forces that violate joint limits.
+The product is an upper bound, not necessarily the smallest Lipschitz constant. Its physical interpretation depends on normalization. A network receiving position and velocity in different units needs declared input scales; converting its normalized output to torque introduces another scale factor. Without those conversions, multiplying a position error by a dimensionless network bound cannot yield a torque error.
 
 To bound policy sensitivity directly during training, **spectral normalization** reparameterizes each weight matrix by its spectral norm:
 $$ \overline{\mathbf{W}}_k = \frac{\mathbf{W}_k}{\sigma_{\max}(\mathbf{W}_k)} $$
-where $\sigma_{\max}(\mathbf{W}_k)$ is estimated efficiently via power iteration during forward passes. Spectral normalization strictly forces $\|\overline{\mathbf{W}}_k\|_2 = 1$, ensuring that the global Lipschitz constant cannot exceed $L \le \prod_{k=1}^K L_{\phi_k}$, preventing unconstrained gradient explosion and stabilizing continuous control policies.
+where $\sigma_{\max}(\mathbf{W}_k)$ is estimated efficiently via power iteration during forward passes. Division by the exact nonzero spectral norm gives $\|\overline{\mathbf{W}}_k\|_2=1$. Finite power iteration generally gives an estimate, not a certified upper bound; a safety argument must account for its error. Even an exact network sensitivity bound does not prove closed-loop plant stability.
 
 ### Perturbation amplification and supervisory clamping
 
 In physical systems, input state $\mathbf{x}$ is corrupted by sensor measurement noise $\delta \mathbf{x}$ bounded by $\|\delta \mathbf{x}\| \le \epsilon$. The resulting deviation in commanded control action is bounded by:
 $$ \| \delta \mathbf{u} \| = \| \pi(\mathbf{x} + \delta \mathbf{x}) - \pi(\mathbf{x}) \| \le L \epsilon $$
-The constant has output-units per input-unit. For an illustrative policy mapping position in meters to torque in newton-meters, $L=10^3\text{ N}\cdot\text{m}/\text{m}$ and $\epsilon=1\text{ mm}$ allow up to $1\text{ N}\cdot\text{m}$ of command change. Whether that exceeds torque headroom depends on the joint and operating state. Spectral normalization can reduce an upper bound on network sensitivity. It bounds the network, not the plant, so stability, safe torque, and sensor validity still come from a separate actuator limit and a state-dependent permission check.
+The constant has output-units per input-unit once normalization is included. Compare $L\epsilon$ with the actuator headroom at the current operating state. Spectral normalization bounds the network, while stability, safe torque, and sensor validity require a plant model and a state-dependent permission check.
 
 ## Imitation Learning and Compounding Covariate Shift {#sec-appendix-ml-compounding}
 
-Behavioral cloning frames physical policy acquisition as supervised regression over demonstrator state-action pairs.
+Behavioral cloning fits a policy to demonstrator state-action pairs. Two different failures need different remedies: ambiguous demonstrations can make a point predictor average incompatible actions, while feedback can carry even an accurate predictor into states missing from its training data. The decoder derivations address the first problem; the coupling bound and DAgger address the second.
 
 ### Mode averaging and the decoders that avoid it {#sec-appendix-ml-multimodal}
 
@@ -655,22 +654,23 @@ Demonstrator behavior in physical manipulation and navigation is inherently mult
 
 Because demonstration density $P(a \mid o)$ is supported on disjoint, disconnected modes separated by an obstacle, the conditional expectation computes the arithmetic mean:
 $$ \pi^*(o) = 0.5(+1.0) + 0.5(-1.0) = 0.0 $$
-This mean action lies in a region of zero demonstration probability ($P(a = 0.0 \mid o) = 0$). In the physical workspace, the coordinate $a = 0.0$ corresponds precisely to the geometric position of the central obstacle. Commanding $\pi^*(o) = 0.0$ instructs the steering actuator to hold dead center at full cruising speed, driving the physical robot directly into the pillar. In physical autonomy, regression mode averaging does not produce a cosmetic blur; it commands an irreversible, lethal collision.
+This mean action lies in a region of zero demonstration probability ($P(a = 0.0 \mid o) = 0$). In the physical workspace, the coordinate $a = 0.0$ corresponds precisely to the geometric position of the central obstacle. Commanding $\pi^*(o) = 0.0$ instructs the steering actuator to hold dead center at full cruising speed, driving the physical robot directly into the pillar. In physical autonomy, regression mode averaging does not produce a cosmetic blur; it can propose a collision unless the permission path rejects it.
 
 #### Decoder families
 
-A decoder avoids mode averaging by parameterizing the conditional action distribution $P(a \mid o)$ rather than its expectation. The families below trade inference cost against distributional expressiveness; none of them supplies recovery states that the demonstrations lack. @Sec-training-synthesis-regimes compares them by the network evaluations each chunk costs, which is where the choice reaches the control deadline.\index{Action decoder!multimodal families}
+A probabilistic decoder can avoid mode averaging by parameterizing the conditional action distribution $P(a \mid o)$ rather than its expectation. The families below trade inference cost against distributional expressiveness; none of them supplies recovery states that the demonstrations lack. @Sec-training-synthesis-regimes compares them by the network evaluations each chunk costs, which is where the choice reaches the control deadline.\index{Action decoder!multimodal families}
 
-1. **Deterministic direct regression (MLP).** A feedforward multilayer perceptron directly predicts action $\hat{a} = \pi_\theta(o)$ via $L_2$ regression. As proved by the conditional expectation derivation above, minimizing mean squared error under multimodal demonstration distributions forces the network to output the arithmetic mean of all valid behaviors, driving the physical robot into obstacles located between demonstrated modes. While MLPs evaluate in $< 0.1\text{ ms}$ ($\mathcal{O}(1)$ forward pass) with minimal memory footprint, their expressive capacity is strictly unimodal.
-2. **Mixture density networks.** A Gaussian mixture model (GMM) head parameterizes policy output as a conditional mixture of $M$ Gaussian components:
-   $$ \pi(a \mid o) = \sum_{m=1}^M w_m(o) \, \mathcal{N}\left(\mu_m(o), \Sigma_m(o)\right) $$
-   where the network predicts mixture weights $w_m(o)$, component means $\mu_m(o)$, and covariances $\Sigma_m(o)$. It yields closed-form log-likelihood and exact densities in a single forward pass. However, maximum-likelihood training suffers from mode collapse and covariance singularities, the architecture scales poorly to high-dimensional multi-step trajectory chunks, and fixed component count $M$ fails when demonstrations branch unevenly.
+1. **Deterministic direct regression (MLP).** A feedforward network trained with squared error predicts one action per observation and, with sufficient capacity and ideal optimization, fits the conditional mean. The restriction comes from the point-output objective, not from MLPs as a network family; an MLP can also parameterize a mixture or stochastic policy. One evaluation avoids iterative sampling cost but does not resolve ambiguous demonstrations.
+
+2. **Mixture density networks.** A Gaussian mixture head predicts nonnegative weights summing to one, means, and positive-definite covariances:
+   $$ \pi(a\mid o)=\sum_{m=1}^M w_m(o)\,\mathcal{N}(a;\mu_m(o),\Sigma_m(o)). $$
+   Sampling a component or selecting a mode preserves alternatives in one network evaluation. Computing the mixture mean would restore the original averaging problem. Covariance regularization and component coverage matter because likelihood optimization can collapse a component onto a few observations.
 
 3. **Implicit behavioral cloning.** Implicit behavioral cloning (IBC) [@florence2022implicit] learns an energy-based model $E_\theta(o, a) \in \mathbb{R}$, trained with contrastive or InfoNCE objectives to assign low energy to demonstrated state-action pairs and high energy to counterfactual actions. Inference solves
    $$ a^* = \arg\min_a E_\theta(o, a) $$
-   Energy formulations represent discontinuous, sharply multimodal distributions and non-convex boundaries that a continuous feedforward map cannot. Inference requires iterative derivative-free or gradient-based optimization whose latency and convergence depend on sample counts and accelerator parallelism, with risks of settling into suboptimal local energy minima.
+   An energy function can have several separated minima, and selecting its minimizing action can change discontinuously even when the energy network is continuous. Inference requires iterative derivative-free or gradient-based optimization whose latency and convergence depend on sample counts and accelerator parallelism, with risks of settling into suboptimal local energy minima.
 
-4. **Conditional diffusion and flow matching.** Diffusion Policy [@chi2024diffusionpolicy] and flow-matching decoders generate entire action trajectory chunks via iterative denoising or ordinary differential equation (ODE) integration. Their training targets injected noise vectors or continuous velocity fields conditioned on corrupted states, observations, and timesteps rather than clean actions, completely circumventing conditional expectation averaging. @Sec-appendix-ml-diffusion derives both objectives and prices their sampling steps.
+4. **Conditional diffusion and flow matching.** Diffusion Policy [@chi2024diffusionpolicy] and flow-matching decoders generate entire action trajectory chunks via iterative denoising or ordinary differential equation (ODE) integration. Their training targets injected noise vectors or continuous velocity fields conditioned on corrupted states, observations, and timesteps rather than clean actions, allowing multimodal sampling instead of directly regressing a clean action mean. Approximation error and the sampling procedure still affect whether distinct modes survive. @Sec-appendix-ml-diffusion derives both objectives and prices their sampling steps.
 5. **Latent-variable chunking.** Action Chunking with Transformers (ACT) [@zhao2023learning] predicts an action trajectory chunk $\mathbf{A}_t = (\mathbf{a}_t, \mathbf{a}_{t+1}, \dots, \mathbf{a}_{t+H_a-1}) \in \mathbb{R}^{H_a \times D_a}$ from observation $\mathbf{o}_t$ using a Conditional Variational Autoencoder (CVAE). The true objective is to maximize the conditional log-marginal likelihood of demonstrated chunks across dataset $\mathcal{D}$:
    $$ \ln p_\theta(\mathbf{A}_t \mid \mathbf{o}_t) = \ln \int_{\mathcal{Z}} p_\theta(\mathbf{A}_t, \mathbf{z} \mid \mathbf{o}_t) \, d\mathbf{z} $$
    Because this marginalization is intractable, ACT introduces a variational posterior $q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)$ parameterized by a transformer encoder. Expanding the identity with $p_\theta(\mathbf{A}_t, \mathbf{z} \mid \mathbf{o}_t) = p_\theta(\mathbf{A}_t \mid \mathbf{o}_t, \mathbf{z}) p(\mathbf{z})$:
@@ -690,26 +690,26 @@ A decoder avoids mode averaging by parameterizing the conditional action distrib
    To parameterize the reconstruction likelihood, ACT models $p_\theta(\mathbf{A}_t \mid \mathbf{o}_t, \mathbf{z})$ as an isotropic Laplace distribution:
    $$ p_\theta(\mathbf{A}_t \mid \mathbf{o}_t, \mathbf{z}) = \frac{1}{(2b)^{H_a D_a}} \exp\left( -\frac{\|\mathbf{A}_t - \pi_\theta(\mathbf{o}_t, \mathbf{z})\|_1}{b} \right) $$
    Maximizing the log-likelihood is equivalent to minimizing the $L_1$ norm $\|\mathbf{A}_t - \pi_\theta(\mathbf{o}_t, \mathbf{z})\|_1$. For physical robot teleoperation, $L_1$ loss provides constant-magnitude error gradients that avoid over-penalizing high-frequency human demonstrator sub-movements and velocity tremors, which Gaussian $L_2$ regression squares and overfits. Weighting the KL regularizer by hyperparameter $\beta > 0$ yields the full training loss:
-   $$ \mathcal{L}_{\text{ACT}}(\theta, \phi) = \mathbb{E}_{(\mathbf{o}_t, \mathbf{A}_t) \sim \mathcal{D}, \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})} \left[ \|\mathbf{A}_t - \pi_\theta(\mathbf{o}_t, \boldsymbol{\mu}_\phi + \boldsymbol{\sigma}_\phi \odot \boldsymbol{\epsilon})\|_1 \right] + \beta D_{\text{KL}}\left( q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \,\parallel\, \mathcal{N}(\mathbf{0}, \mathbf{I}) \right) $$
+   $$ \mathcal{L}_{\text{ACT}}(\theta, \phi) = \mathbb{E}_{(\mathbf{o}_t, \mathbf{A}_t) \sim \mathcal{D}, \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})} \left[ \|\mathbf{A}_t - \pi_\theta(\mathbf{o}_t, \boldsymbol{\mu}_\phi + \boldsymbol{\sigma}_\phi \odot \boldsymbol{\epsilon})\|_1 + \beta D_{\text{KL}}\left( q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \,\parallel\, \mathcal{N}(\mathbf{0}, \mathbf{I}) \right) \right] $$
 
-   The latent variable $\mathbf{z} \in \mathbb{R}^{d_z}$ acts as a continuous style and intention selector: distinct demonstration modes (such as reaching left versus right around an obstacle) map to separated clusters in latent space. The decoder uses learned temporal positional queries to generate all $H_a$ steps simultaneously, with multi-head self-attention attending across the chunk to enforce kinematic smoothness. Action chunking fundamentally alters compounding covariate shift: in single-step imitation ($H_a = 1$), an error at any step perturbs the plant state into off-distribution regions, accumulating error quadratically as $\mathcal{O}(T^2 \epsilon)$ over horizon $T$ (derived later in this section). By generating an entire coherent trajectory chunk $\mathbf{A}_t \in \mathbb{R}^{H_a \times D_a}$ at once, ACT reduces the count of closed-loop policy intervention boundaries across horizon $T$ by a factor of $H_a$. Within the chunk, self-attention across query tokens enforces kinematic smoothness, dampening compounding error accumulation from $\mathcal{O}(T^2 \epsilon)$ to $\mathcal{O}((T / H_a)^2 \epsilon_{\text{chunk}})$.
+   The latent variable $\mathbf{z} \in \mathbb{R}^{d_z}$ can encode variation among demonstrations, while the decoder predicts all $H_a$ actions together. Neither separated latent clusters nor kinematic smoothness follows from the architecture alone. Executing $H_e$ actions before replanning reduces policy interventions, but increases the time before new observations can alter the proposal. Substituting $T/H_a$ into the single-step compounding bound is not justified without new chunk-level error and cost assumptions.
 
-   Crucially for real-time systems, at test time the encoder $q_\phi$ (which requires unobserved future actions $\mathbf{A}_t$) is discarded. Setting $\mathbf{z} = \mathbf{0}$ (the deterministic mean of the prior) conditions decoder $\pi_\theta$ on the dominant demonstrated style, evaluating the entire $H_a$-step chunk in a **single forward pass** ($\mathcal{O}(1)$ network evaluations, typically $15\text{--}25\text{ ms}$ on embedded accelerators). With a parameter footprint of $80\text{--}150\text{ MB}$ at FP16 and high sample efficiency ($50\text{--}100$ demonstrations suffice for bi-manual manipulation), ACT provides an attractive systems profile. However, setting $\mathbf{z} = \mathbf{0}$ collapses multimodal coverage to a single dominant mode during physical execution; sampling $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ risks drawing unpopulated latent regions between demonstrated modes. To prevent discontinuous setpoint jumps between consecutive chunks, ACT blurs receding-horizon predictions via **temporal ensembling**:
-   $$ \mathbf{a}_t = \frac{\sum_{i=0}^{\min(t, H_a-1)} w_i \, \mathbf{A}_{t-i}[i]}{\sum_{i=0}^{\min(t, H_a-1)} w_i}, \qquad w_i = \exp(-m \cdot i) $$
-   where $m > 0$ controls exponential decay weighting across overlapping historical predictions.
+   At test time the variational encoder, which requires the future demonstration chunk, is discarded. Setting $\mathbf{z}=\mathbf{0}$ evaluates the decoder at the prior mean in one forward pass. That latent point is not guaranteed to select the most probable demonstrated mode. Sampling the prior can expose additional modes but also poorly trained latent regions. ACT combines overlapping chunk predictions through **temporal ensembling**; for example, an exponentially recency-weighted convention is:
+   $$ \mathbf{a}_t = \frac{\sum_{i=0}^{\min(t,H_a-1)} e^{-mi}\mathbf{A}_{t-i}[i]}{\sum_{i=0}^{\min(t,H_a-1)}e^{-mi}},\qquad m>0. $$
+   This convention favors recent predictions. Averaging incompatible chunks can still create an invalid action; the admitted command must satisfy current limits.
 
 6. **Discrete action tokens.** Vision-language-action models such as RT-1, RT-2, and OpenVLA [@brohan2023rt1; @brohan2023rt2; @kim2024openvla] discretize continuous action dimensions into $B$ uniform bins (commonly 256) and emit categorical tokens:
-   $$ \text{bin}(a_k) = \left\lfloor \frac{a_k - a_{\min}}{a_{\max} - a_{\min}} \times (B - 1) \right\rfloor $$
-   Discretization avoids mode averaging by modeling categorical probabilities over token bins, reusing language model classification heads. However, it incurs quantization error $\Delta a = (a_{\max} - a_{\min})/B$ and requires $D_a$ autoregressive token prediction steps per action vector, scaling inference latency linearly with action dimensionality.
+   $$ \text{bin}(a_k) = \min\!\left(B-1,\left\lfloor B\frac{a_k-a_{\min}}{a_{\max}-a_{\min}}\right\rfloor\right) $$
+   For an action clipped to the declared range, this assigns one of $B$ equal-width bins, including the upper endpoint. Decoding to bin centers gives maximum scalar quantization error $(a_{\max}-a_{\min})/(2B)$. Categorical sampling or mode selection preserves alternatives; taking their mean reintroduces averaging. A decoder that emits one token per action dimension autoregressively needs $D_a$ sequential predictions, although other tokenizations and parallel heads have different costs.
 
 ### Continuous trajectory diffusion and flow matching {#sec-appendix-ml-diffusion}
 
-Continuous trajectory diffusion treats policy synthesis as generative denoising over continuous multi-step action trajectory chunks $\mathbf{A} \in \mathbb{R}^{K \times D_a}$ conditioned on visual and proprioceptive observation histories $\mathbf{O}$ [@chi2024diffusionpolicy]. Rather than predicting an unconstrained point estimate via mean squared error, diffusion models represent complex multimodal action distributions without collapsing into mode averaging.\index{Diffusion policy!score-matching derivation}\index{Continuous flow matching!vector field regression}
+Continuous trajectory diffusion treats policy synthesis as generative denoising over continuous multi-step action trajectory chunks $\mathbf{A} \in \mathbb{R}^{H_a \times D_a}$ conditioned on visual and proprioceptive observation histories $\mathbf{O}$ [@chi2024diffusionpolicy]. Here $H_a$ counts physical action steps, $D_a$ counts action dimensions, and the later $K$ counts inference evaluations; diffusion time is not physical execution time. Rather than predicting an unconstrained point estimate via mean squared error, diffusion models represent complex multimodal action distributions without collapsing into mode averaging.\index{Diffusion policy!score-matching derivation}\index{Continuous flow matching!vector field regression}
 
 The noise-prediction backbone $\boldsymbol{\epsilon}_\theta$ is typically implemented using either a 1D Temporal Convolutional (Conv1D) U-Net or a Diffusion Transformer (DiT):
 
-- **1D Temporal Convolutional U-Net:** Applies hierarchical 1D convolutions across the action chunk time horizon, modulating intermediate features via FiLM (Feature-wise Linear Modulation) conditioning on visual tokens and diffusion step embeddings. With small parameter counts (typically $48\text{M}$ parameters, $96\text{ MB}$ at FP16), Conv1D U-Nets stream intermediate feature activations through on-chip accelerator SRAM line buffers ($< 2\text{ MB}$), eliminating off-chip DRAM activation traffic and maintaining fast, deterministic execution times ($1.5\text{--}2.5\text{ ms}$ per step).
-- **Diffusion Transformer (DiT):** Treats each trajectory timestep as a continuous token, processing action tokens with self-attention and cross-attending to visual conditioning. While DiTs scale effectively to complex multi-task foundation models, computing multi-head self-attention across trajectory tokens expands the activation memory footprint and increases parameter sizes ($150\text{--}300\text{M}$ parameters, $300\text{--}600\text{ MB}$ at FP16), stressing memory bandwidth and pushing per-step latency to $5\text{--}10\text{ ms}$.
+- **1D temporal convolutional U-Net:** Convolutions across the action horizon reuse filters at many positions. Feature-wise linear modulation (FiLM) supplies observation and diffusion-step conditioning. Layer widths, intermediate tensors, and accelerator tiling determine whether activations stay on chip.
+- **Diffusion transformer (DiT):** Attention connects action tokens and visual conditioning. The action horizon and conditioning length determine attention work, while kernel fusion determines how much intermediate storage reaches DRAM. Neither backbone implies a fixed parameter count or per-step latency; the worked budget below declares one illustrative configuration.
 
 @Fig-diffusion-policy-architecture shows the policy's structure. It conditions on a short history of camera images and robot state, denoises a candidate chunk from Gaussian noise over $K$ iterations, and dispatches only a prefix of the chunk before it plans again.
 
@@ -757,7 +757,7 @@ Multiplying by $\sigma^2$ and isolating $\mathbb{E}[\mathbf{x}_0 \mid \mathbf{x}
 $$ \mathbb{E}[\mathbf{x}_0 \mid \mathbf{x}] = \mathbf{x} + \sigma^2 \nabla_{\mathbf{x}} \ln p(\mathbf{x}) $$
 Tweedie's formula reveals that the Bayes-optimal reconstruction of clean state $\mathbf{x}_0$ equals the corrupted measurement $\mathbf{x}$ shifted along the marginal Stein score $\nabla_{\mathbf{x}} \ln p(\mathbf{x})$ scaled by noise variance $\sigma^2$.
 
-Rewriting the forward diffusion marginal $\mathbf{A}^k = \sqrt{\bar{\alpha}_k} \mathbf{A}^0 + \sqrt{1 - \bar{\alpha}_k} \boldsymbol{\epsilon}$ as $\frac{\mathbf{A}^k}{\sqrt{\bar{\alpha}_k}} = \mathbf{A}^0 + \frac{\sqrt{1 - \bar{\alpha}_k}}{\sqrt{\bar{\alpha}_k}} \boldsymbol{\epsilon}$, the effective noise variance is $\sigma^2 = \frac{1 - \bar{\alpha}_k}{\bar{\alpha}_k}$. Tweedie's formula directly equates the estimated clean trajectory $\hat{\mathbf{A}}^0$ and the Stein score $\nabla_{\mathbf{A}^k} \ln p(\mathbf{A}^k \mid \mathbf{O})$:
+Rewriting the forward diffusion marginal $\mathbf{A}^k = \sqrt{\bar{\alpha}_k} \mathbf{A}^0 + \sqrt{1 - \bar{\alpha}_k} \boldsymbol{\epsilon}$ as $\frac{\mathbf{A}^k}{\sqrt{\bar{\alpha}_k}} = \mathbf{A}^0 + \frac{\sqrt{1 - \bar{\alpha}_k}}{\sqrt{\bar{\alpha}_k}} \boldsymbol{\epsilon}$, the effective noise variance is $\sigma^2 = \frac{1 - \bar{\alpha}_k}{\bar{\alpha}_k}$. At the population optimum of the noise-prediction objective, Tweedie's formula equates the estimated clean trajectory $\hat{\mathbf{A}}^0$ and the Stein score $\nabla_{\mathbf{A}^k} \ln p(\mathbf{A}^k \mid \mathbf{O})$:
 $$ \nabla_{\mathbf{A}^k} \ln p(\mathbf{A}^k \mid \mathbf{O}) = -\frac{\boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{O}, k)}{\sqrt{1 - \bar{\alpha}_k}} $$
 Substituting $\hat{\mathbf{A}}^0 = \frac{1}{\sqrt{\bar{\alpha}_k}} \left( \mathbf{A}^k - \sqrt{1 - \bar{\alpha}_k} \boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{O}, k) \right)$ into the posterior mean $\tilde{\boldsymbol{\mu}}_k$ reparameterizes the reverse transition mean:
 $$ \boldsymbol{\mu}_\theta(\mathbf{A}^k, \mathbf{O}, k) = \frac{1}{\sqrt{\alpha_k}} \left( \mathbf{A}^k - \frac{\beta_k}{\sqrt{1 - \bar{\alpha}_k}} \boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{O}, k) \right) $$
@@ -771,9 +771,9 @@ While standard diffusion models formulate generation as reverse stochastic diffe
 $$ \frac{d\mathbf{x}_t}{dt} = v_\theta(\mathbf{x}_t, t, \mathbf{O}) $$
 The continuous vector field $v_\theta$ drives a source noise distribution $p_0(\mathbf{x}) = \mathcal{N}(\mathbf{0}, \mathbf{I})$ to the empirical demonstration target distribution $p_1(\mathbf{x}) = q(\mathbf{x})$ across continuous time $t \in [0, 1]$, governed by the **continuity equation**:
 $$ \frac{\partial p_t(\mathbf{x})}{\partial t} + \nabla \cdot \left( p_t(\mathbf{x}) v_t(\mathbf{x}) \right) = 0 $$
-Under an optimal transport conditional probability path, the continuous trajectory interpolates linearly between source noise $\mathbf{x}_0 \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ and demonstration chunk $\mathbf{x}_1 \sim \mathcal{D}$:
+For a straight conditional interpolation path, the continuous trajectory interpolates linearly between source noise $\mathbf{x}_0 \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ and demonstration chunk $\mathbf{x}_1 \sim \mathcal{D}$:
 $$ \psi_t(\mathbf{x}_0) = (1 - t) \mathbf{x}_0 + t \mathbf{x}_1, \quad t \in [0, 1] $$
-The conditional velocity along this straight optimal-transport path is constant across time:
+The conditional velocity along each paired-sample path is constant across time:
 $$ v_t(\mathbf{x} \mid \mathbf{x}_1) = \frac{d}{dt} \psi_t(\mathbf{x}_0) = \mathbf{x}_1 - \mathbf{x}_0 $$
 and the trajectory acceleration vanishes identically: $\frac{d^2}{dt^2} \psi_t(\mathbf{x}_0) = \mathbf{0}$.
 
@@ -781,7 +781,7 @@ The **Conditional Flow Matching (CFM) theorem** [@lipman2022flow] proves that re
 $$ \nabla_\theta \mathbb{E}_{t, \mathbf{x}_0, \mathbf{x}_1} \left[ \| v_\theta(\psi_t(\mathbf{x}_0), t, \mathbf{O}) - (\mathbf{x}_1 - \mathbf{x}_0) \|^2 \right] = \nabla_\theta \mathbb{E}_{t, \mathbf{x} \sim p_t} \left[ \| v_\theta(\mathbf{x}, t, \mathbf{O}) - u_t(\mathbf{x}) \|^2 \right] $$
 The network is therefore trained via direct mean squared regression:
 $$ \mathcal{L}_{\text{FM}}(\theta) = \mathbb{E}_{t \sim \mathcal{U}[0, 1], \mathbf{x}_0 \sim \mathcal{N}(\mathbf{0}, \mathbf{I}), \mathbf{x}_1 \sim \mathcal{D}} \left[ \left\| v_\theta\left((1 - t)\mathbf{x}_0 + t\mathbf{x}_1, t, \mathbf{O}\right) - (\mathbf{x}_1 - \mathbf{x}_0) \right\|^2 \right] $$
-Because optimal-transport flow matching produces straight trajectories in state space with zero path acceleration ($\frac{d^2 \psi_t}{dt^2} = \mathbf{0}$), numerical integration truncation errors are drastically lower than in curved diffusion paths. In standard diffusion, the forward Brownian noise process induces high curvature in the probability flow ODE, requiring $K = 16\text{--}100$ steps to avoid veering off the data manifold. In contrast, straight probability flows allow low-order numerical solvers (such as a 2-step Euler integrator, $K=2$) to evaluate candidate trajectories with high fidelity. From a systems perspective, evaluating $K=2$ steps rather than $K=16$ slashes off-chip DRAM weight transfers by an order of magnitude (e.g., from $1.536\text{ GB}$ down to $192\text{ MB}$ per chunk for a $96\text{ MB}$ model), dropping generation latency to $15\text{--}20\text{ ms}$ and enabling synchronous closed-loop execution within real-time control deadlines.
+The conditional paths above are straight for each sampled pair, but the learned marginal velocity averages over pairs that reach the same intermediate point. Its integrated trajectories need not remain straight, and their numerical error need not vanish. Independent noise/data pairing also does not establish globally optimal transport. Flow matching can support fewer evaluations in a measured task, but the step count must satisfy an action-quality criterion; it is not a universal consequence of the interpolation formula.
 
 #### Denoising steps against the control deadline
 
@@ -789,21 +789,21 @@ In continuous generative policies, the number of reverse evaluation steps $K$ is
 
 The reverse trajectory discretizes a continuous probability flow ODE or reverse SDE. Discretizing this path across $K$ finite steps introduces numerical integration errors:
 
-- **Policy expressiveness:** Large step counts ($K \in [16, 100]$ in standard DDPM or accelerated DDIM samplers) minimize cumulative truncation error along non-linear score trajectories. This high resolution allows the generative process to navigate complex, non-convex score landscapes, faithfully preserving sharp multimodal separations (such as branching left or right around an obstacle) and tight assembly tolerances. Truncating $K$ aggressively (e.g., $K \le 4$ without distillation or flow matching) introduces severe discretization error, causing generated trajectories to collapse toward the empirical mean, clip physical obstacle boundaries, or produce high-frequency setpoint jitter that excites joint resonances.
+- **Sampling accuracy:** Reducing the number of evaluations increases numerical approximation error for a fixed solver and learned field. How that error changes multimodal coverage, collision rate, or setpoint smoothness depends on the learned distribution and solver. The architecture alone supplies no minimum acceptable step count.
 - **Computational latency and roofline limits:** Crucially, reverse diffusion is an inherently sequential Markov chain: evaluation $k-1$ strictly requires the tensor output of evaluation $k$. Denoising steps cannot be parallelized across the time dimension on GPU or NPU accelerators. Total chunk generation latency scales linearly with $K$:[^fn-ml-denoising-latency]
   $$ \tau_{\text{inf}}(K) = t_{\text{vis}} + K \cdot t_{\text{step}} $$
   where $t_{\text{vis}}$ is the one-time visual feature extraction latency per chunk and $t_{\text{step}}$ is the forward execution time of noise-prediction network $\boldsymbol{\epsilon}_\theta$.
-  On batch size 1 (single-robot closed-loop inference), matrix-vector multiplications exhibit low arithmetic intensity. Streaming network weights $\mathbf{W}$ of size $M_{\text{weights}}$ from off-chip DRAM takes time at least $t_{\text{stream}} = M_{\text{weights}} / \text{BW}_{\text{DRAM}}$. If arithmetic intensity $I = \text{FLOPs} / M_{\text{weights}} < \text{Peak FLOP/s} / \text{BW}_{\text{DRAM}}$, inference is strictly memory-bandwidth bound. For a $48\text{M}$-parameter model ($96\text{ MB}$ at FP16) on an embedded accelerator with $204.8\text{ GB/s}$ memory bandwidth, transferring weights once takes at least $0.469\text{ ms}$; executing $16$ sequential evaluations requires at least $7.5\text{ ms}$ of memory transfer alone before counting kernel launch latencies and activation memory traffic.
+  A weight-transfer lower bound is $t_{\text{stream}}=M_{\text{weights}}/\text{BW}_{\text{DRAM}}$ when every evaluation reloads those weights. The roofline intensity must count all operations and traffic, including convolutional or token reuse and activation spills. Batch size alone does not make every decoder memory bound. The worked budget below evaluates this transfer bound separately from its assumed execution time.
 
-A physical robot's low-level joint controllers require fresh setpoints at a deterministic control loop period $\Delta t_{\text{ctrl}}$ (e.g., $20\text{ ms}$ for $50\text{ Hz}$ control). When a multi-step sampler's inference latency exceeds this period ($\tau_{\text{inf}} > \Delta t_{\text{ctrl}}$), synchronous lockstep execution is physically impossible: the controller starves while waiting for the accelerator, causing torque drops or unmodeled deceleration.
+A setpoint producer that must finish synchronously within $\Delta t_{\text{ctrl}}$ misses its contract when $\tau_{\text{inf}}>\Delta t_{\text{ctrl}}$. The consequence depends on the controller's defined hold, interpolation, and fallback behavior; a deadline miss does not inherently imply a torque drop.
 
 Physical AI architectures resolve this fundamental latency-expressiveness trade-off through three coordinated mechanisms:
 
 1. **Action chunking:** The policy predicts a multi-step trajectory chunk $\mathbf{A} \in \mathbb{R}^{H_a \times D_a}$ spanning prediction horizon $H_a$. Executing an execution horizon $H_e \le H_a$ amortizes the $K$-step generation latency over $H_e \Delta t_{\text{ctrl}}$ of physical robot motion.
-2. **Straight probability flows:** Continuous flow matching [@lipman2022flow] straightens probability trajectories, allowing low-order numerical solvers (such as a 2-step Euler integrator, $K=2$) to achieve distributional expressiveness comparable to a 16-step diffusion model, shrinking compute time to fit within synchronous control deadlines.
+2. **Fewer solver evaluations:** Flow matching, improved solvers, or distillation can reduce sequential evaluations when validation shows that the resulting action quality remains adequate. Reduced compute buys timing slack at the cost of a new approximation and validation obligation.
 3. **Dual-rate asynchronous decoupling:** The application processor runs the generative denoising loop asynchronously at a relaxed rate ($10\text{--}20\text{ Hz}$), depositing action chunks across the proposal boundary into a lock-free single-producer single-consumer (SPSC) ring buffer. A dedicated safety microcontroller executes synchronously at $1\text{ kHz}$, interpolating spline knots, enforcing slew-rate limits, and gating commands through deterministic control barrier functions (@sec-boundary-machine-model).
 
-@Algo-diffusion-policy-trajectory formalizes this dual-rate pipeline in the two-processor implementation, and @fig-diffusion-denoising-process illustrates the decoupling. @Sec-training-synthesis-regimes uses the timing budget below to evaluate which sampler fits the control deadline.
+@Algo-diffusion-policy-trajectory sketches the numerical portion of this dual-rate pipeline in the two-processor implementation, and @fig-diffusion-denoising-process illustrates the decoupling. @Sec-training-synthesis-regimes uses the timing budget below to evaluate which sampler fits the control deadline. The pseudocode assumes the ring-buffer consumer has already validated the proposal's capture epoch, clock conversion, configuration, validity interval, and handoff continuity. An absent, expired, or rejected chunk selects the defined fallback; spline interpolation and slew clamping alone do not implement that permission decision. The transmitted action must also pass the actuator interface that converts its declared units to drive commands.
 
 [^fn-ml-denoising-latency]: **Diffusion Denoising Latency Budget**\index{Diffusion sampling latency!sequential evaluation}: Sequential reverse diffusion cannot parallelize across sampling steps because each input requires the previous step's output. Total inference time $\tau_{\text{inf}} = t_{\text{vis}} + K t_{\text{step}}$ scales linearly with step count $K$, making step reduction or asynchronous chunking essential for real-time actuation.
 
@@ -812,16 +812,15 @@ Physical AI architectures resolve this fundamental latency-expressiveness trade-
 #| pdf-line-number: true
 #| pdf-right-comment: false
 #| html-comment-delimiter: "▷"
-
 \begin{algorithm}
 \caption{Diffusion Policy Trajectory Chunk Denoising and Dual-Rate Actuation}
 \begin{algorithmic}
-\Require observation history buffer $\mathbf{O}_t = (\mathbf{o}_{t-H+1}, \dots, \mathbf{o}_t)$, noise prediction network $\boldsymbol{\epsilon}_\theta$, noise schedule $\{\alpha_k, \bar{\alpha}_k, \sigma_k\}_{k=1}^{N_{\text{diff}}}$, chunk horizon $K$, safety microcontroller loop period $\Delta t_{\text{mcu}}$
+\Require observation history buffer $\mathbf{O}_t = (\mathbf{o}_{t-H+1}, \dots, \mathbf{o}_t)$, noise prediction network $\boldsymbol{\epsilon}_\theta$, noise schedule $\{\alpha_k, \bar{\alpha}_k, \sigma_k\}_{k=1}^{N_{\text{diff}}}$, chunk horizon $H_a$, safety microcontroller loop period $\Delta t_{\text{mcu}}$
 \Ensure line-rate joint torque setpoint / action vector $\mathbf{a}_t$
 \Statex
 \State \textbf{Application Processor: Asynchronous Trajectory Chunk Generation ($10\text{--}20\text{ Hz}$)}
 \State $\mathbf{E}_t \gets \Call{VisualEncoder}{\mathbf{O}_t}$
-\State $\mathbf{A}^{N_{\text{diff}}} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{K \times D_a})$ \Comment{initialize reverse diffusion from Gaussian noise}
+\State $\mathbf{A}^{N_{\text{diff}}} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{H_a D_a})$ \Comment{sample a flattened chunk, then reshape to $H_a \times D_a$}
 \For{$k = N_{\text{diff}}$ \textbf{down to} $1$}
     \State $\hat{\boldsymbol{\epsilon}} \gets \boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{E}_t, k)$
     \State $\boldsymbol{\mu}_k \gets \frac{1}{\sqrt{\alpha_k}} \left( \mathbf{A}^k - \frac{1 - \alpha_k}{\sqrt{1 - \bar{\alpha}_k}} \hat{\boldsymbol{\epsilon}} \right)$
@@ -846,7 +845,7 @@ Physical AI architectures resolve this fundamental latency-expressiveness trade-
 \end{algorithm}
 ```
 
-::: {#fig-diffusion-denoising-process fig-env="figure" fig-pos="t" fig-cap="**Diffusion policy action chunk denoising and receding-horizon decoupling**: (a) Multimodal resolution: direct regression with mean squared error averages divergent demonstrations into an invalid obstacle collision, whereas diffusion policy stochastically selects a coherent demonstrated mode. (b) Iterative trajectory denoising: starting from Gaussian noise $\mathbf{A}^K \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$, reverse diffusion progressively resolves a coarse trajectory into a smooth action chunk $\mathbf{A}^0$. (c) Dual-rate decoupling: an asynchronous neural planner on the application processor populates a lock-free ring buffer, feeding a $1\,\text{kHz}$ safety microcontroller executing deterministic spline interpolation and safety clamping. (Adapted from Chi et al. [@chi2024diffusionpolicy])." fig-alt="Three-panel schematic of Diffusion Policy action chunk denoising and receding-horizon decoupling. (a) Multimodal resolution showing failure of regression mode averaging vs. stochastic mode selection. (b) Iterative trajectory denoising across reverse diffusion steps from pure noise to a smooth action chunk. (c) Dual-rate asynchronous decoupling between a 15 Hz application-processor neural planner, an SPSC ring buffer, and a 1 kHz safety microcontroller that runs the permission path."}
+::: {#fig-diffusion-denoising-process fig-env="figure" fig-pos="t" fig-cap="**Diffusion policy action chunk denoising and receding-horizon decoupling**: (a) Multimodal resolution: direct regression with mean squared error averages divergent demonstrations into an invalid obstacle collision, whereas conditional diffusion can sample alternative demonstrated modes; generated paths still require clearance checks. (b) Iterative trajectory denoising: starting from Gaussian noise $\mathbf{A}^K \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$, reverse diffusion progressively resolves a coarse trajectory into a smooth action chunk $\mathbf{A}^0$. (c) Dual-rate decoupling: an asynchronous neural planner on the application processor populates a lock-free ring buffer, feeding a $1\,\text{kHz}$ safety microcontroller executing deterministic spline interpolation and safety clamping. (Adapted from Chi et al. [@chi2024diffusionpolicy])." fig-alt="Three-panel schematic of Diffusion Policy action chunk denoising and receding-horizon decoupling. (a) Multimodal resolution showing failure of regression mode averaging vs. stochastic mode selection. (b) Iterative trajectory denoising across reverse diffusion steps from pure noise to a smooth action chunk. (c) Dual-rate asynchronous decoupling between a 15 Hz application-processor neural planner, an SPSC ring buffer, and a 1 kHz safety microcontroller that runs the permission path."}
 ![](../06_training/images/svg/fig06_bespoke_diffusion_denoising_process.svg){width="100%"}
 :::
 
@@ -953,9 +952,9 @@ Offline supervised evaluation samples from a fixed demonstration distribution. I
 
 Let $\pi^*$ denote the expert demonstrator policy and $\hat{\pi}$ denote the learned policy. Suppose the single-step error probability under the expert's state distribution is bounded by $\epsilon$ for all timesteps $t \in \{1, \dots, T\}$:
 $$ \forall t \le T:\quad \mathbb{E}_{s \sim d_{\pi^*}^t} [ \mathbf{1}(\hat{\pi}(s) \ne \pi^*(s)) ] \le \epsilon $$
-In digital supervised learning (such as image classification or language modeling), future inputs do not depend on past model predictions, so errors accumulate strictly linearly: $\mathcal{O}(T \epsilon)$. In closed-loop Physical AI, an action error alters the physical state of the robot, transporting it into states $s \notin \text{supp}(d_{\pi^*})$ that the demonstrator rarely or never visited. Offline training provides no valid statistical guarantee on action error in these learner-induced states.
+In digital supervised learning (such as fixed-image classification), evaluation inputs are held fixed, so the expected count of prediction errors scales as $\mathcal{O}(T \epsilon)$. In closed-loop Physical AI, an action error alters the physical state of the robot, transporting it into states $s \notin \text{supp}(d_{\pi^*})$ that the demonstrator rarely or never visited. Offline training provides no valid statistical guarantee on action error in these learner-induced states.
 
-To derive the compounding error bound, we construct a formal trajectory coupling argument [@ross2011reduction]. Let $\mathcal{E}_t$ denote the event that the policy makes its first mistake at time $t$ ($\hat{\pi}(s_t) \ne \pi^*(s_t)$ and $\hat{\pi}(s_\tau) = \pi^*(s_\tau)$ for all $\tau < t$). Because no error occurred before $t$, the state $s_t$ is drawn identically from the expert distribution $d_{\pi^*}^t$, giving $P(\mathcal{E}_t) \le \epsilon$.
+To derive the compounding error bound, we construct a formal trajectory coupling argument [@ross2011reduction]. Let $\mathcal{E}_t$ denote the event that the policy makes its first mistake at time $t$ ($\hat{\pi}(s_t) \ne \pi^*(s_t)$ and $\hat{\pi}(s_\tau) = \pi^*(s_\tau)$ for all $\tau < t$). Couple learner and expert trajectories with the same initial state and transition randomness. Until their first disagreement they coincide, so $\mathcal{E}_t$ is a subset of the disagreement event on the unconditioned expert trajectory and $P(\mathcal{E}_t)\le\epsilon$. Conditioning on earlier agreement need not preserve the expert state marginal.
 
 The probability that at least one error has occurred at or before step $t$ is bounded by a union bound:[^fn-ml-compounding-error]
 $$ P(\text{error by step } t) = P\left( \bigcup_{\tau=1}^t \mathcal{E}_\tau \right) \le \sum_{\tau=1}^t P(\mathcal{E}_\tau) \le t \epsilon $$
@@ -967,7 +966,7 @@ J(\hat{\pi}) - J(\pi^*) &\le \sum_{t=1}^T C_{\max} P(\text{error by step } t) \\
 &= C_{\max} \epsilon \frac{T(T+1)}{2} = \mathcal{O}(T^2 \epsilon)
 \end{aligned}
 $$
-The quadratic dependence $\mathcal{O}(T^2 \epsilon)$ demonstrates that even a microscopic per-step error $\epsilon = 10^{-4}$ compounds catastrophically over long horizons (e.g., $T = 1000$ steps yields $T^2 \epsilon = 100$). A high single-step validation accuracy on offline logs provides no guarantee of closed-loop physical survival.
+The quadratic expression is a worst-case upper bound on excess cumulative cost, not a prediction of geometric trajectory error or a probability. Since $P(\text{error by step }t)\le1$, a tighter bound replaces $t\epsilon$ by $\min(1,t\epsilon)$. For continuous actions, the disagreement indicator needs a specified tolerance or a surrogate loss tied to a cost bound; exact equality is generally too restrictive.
 
 [^fn-ml-compounding-error]: **Compounding Error in Imitation Learning**\index{Behavioral cloning!compounding error}: Ross and colleagues analyzed how learner actions shift the state distribution. Expert corrective labels on learner-visited states can reduce this exposure.
 
@@ -991,20 +990,20 @@ where $\epsilon_N$ is best-in-class loss on the induced-state distribution, $\ga
 Evaluating a learned policy $\pi_\theta$ in an embodied closed loop requires distinguishing between static demonstration distributions and candidate-induced physical distributions.\index{Trajectory distribution!closed loop}\index{State marginals!discounted visitation}
 
 Let a physical rollout be parameterized by initial state $s_0 \sim p(s_0)$, environmental parameters $e \sim P(e)$ (lighting, surface friction, obstacle geometry), plant parameters $m \sim P(m)$ (payload mass, link inertias), and permission-path parameters $\kappa \sim P(\kappa)$ (lease durations, barrier thresholds). Under candidate policy $\pi_\theta$ and physical plant transition dynamics $P(s_{t+1} \mid s_t, u_t)$, the joint probability density of an executed trajectory $\tau = (s_0, u_0, s_1, u_1, \dots, s_T)$ over horizon $T$ is:
-$$ P(\tau \mid \pi_\theta) = p(s_0) \prod_{t=0}^{T-1} \pi_\theta(u_t \mid o_t) P(s_{t+1} \mid s_t, u_t) $$
-where $o_t = g(s_t, e)$ represents the observation function.
+$$ P(\tau\mid\pi_\theta,e,m,\kappa)=p(s_0\mid e,m,\kappa)\prod_{t=0}^{T-1}\left[\int \pi_\theta(a_t\mid o_{0:t})\,G_\kappa(u_t\mid s_t,a_t)\,da_t\right]P_m(s_{t+1}\mid s_t,u_t). $$
+Here $o_t=g(s_t,e)$ is the observation, $a_t$ is a proposal, and $G_\kappa$ maps proposals to admitted commands or fallback actions. The state includes the controller and permission-path memory needed to make the transition Markov. A deterministic permission map is represented by a point-mass kernel; marginalizing over operating conditions gives the deployment trajectory distribution.
 
 The discounted state visitation distribution (state marginal) $d^{\pi_\theta}(s)$ induced by policy $\pi_\theta$ is:
 $$ d^{\pi_\theta}(s) = (1 - \gamma) \sum_{t=0}^\infty \gamma^t P(s_t = s \mid \pi_\theta) $$
 or in the finite-horizon unweighted setting: $\bar{d}^{\pi_\theta}(s) = \frac{1}{T} \sum_{t=0}^{T-1} P(s_t = s \mid \pi_\theta)$.
 
-Given a binary task success indicator $\phi(\tau) \in \{0, 1\}$ (e.g., reaching a target receptacle without exceeding torque or clearance limits), the true closed-loop task success probability across operating domain $\mathcal{D}$ is the formal integral:
-$$ p(\mathcal{D}) = \mathbb{E}_{c \sim \mathcal{D}}[\phi(\text{Traj}(c))] = \int \phi\left(\text{Traj}(s_0, e, m, \pi_\theta, \kappa)\right) \, dP(s_0, e, m, \kappa) $$
-Because the distribution of visited states $d^{\pi_\theta}$ depends directly on policy proposals $u_t$, offline evaluations over fixed logged datasets $\mathcal{D}_{\text{demo}}$ evaluate predictions under $d^{\pi^*}$, and so give no statistical bound over $d^{\pi_\theta}$ when candidate commands deviate from demonstrator actions.
+Given a binary task success indicator $\phi(\tau) \in \{0, 1\}$ (e.g., reaching a target receptacle without exceeding torque or clearance limits), the true closed-loop task success probability across operating domain $\mathcal{D}$ is the formal expectation, including policy and transition randomness inside $\text{Traj}$:
+$$ p(\mathcal{D}) = \mathbb{E}_{c \sim \mathcal{D}}[\phi(\text{Traj}(c))] = \int \mathbb{E}\!\left[\phi\left(\text{Traj}(s_0,e,m,\pi_\theta,\kappa)\right)\mid s_0,e,m,\kappa\right]\,dP(s_0,e,m,\kappa) $$
+Because the distribution of visited states $d^{\pi_\theta}$ depends directly on policy proposals and their admission, offline evaluations over fixed logged datasets $\mathcal{D}_{\text{demo}}$ evaluate predictions under $d^{\pi^*}$, and so give no statistical bound over $d^{\pi_\theta}$ when candidate commands deviate from demonstrator actions.
 
 ## Value Functions and Continuous Reinforcement Learning {#sec-appendix-ml-affordances}
 
-Reinforcement learning optimizes sequential physical decision-making through expected reward accumulation. While imitation learning requires exhaustive expert demonstrations across the operating domain, continuous reinforcement learning allows autonomous machines to discover dynamic locomotion gaits, agile contact manipulation, and aerodynamic recovery behaviors through active trial and error.
+Reinforcement learning fits policies to cumulative reward from interaction. It replaces demonstrated action targets with a reward-and-transition learning problem, making the reward definition, exploration conditions, and simulator fidelity central assumptions. The following derivations use a fully observed Markov state; a deployed actor with partial observations may require an estimator or history encoder. The transition model includes any fixed permission mechanism, while $J$ here denotes reward to maximize rather than the imitation cost minimized above.
 
 ### Continuous Markov decision processes and policy gradients {#sec-appendix-ml-continuous-rl}
 
@@ -1032,18 +1031,18 @@ $$ \nabla_\theta \ln P(\tau \mid \theta) = \sum_{t=0}^\infty \nabla_\theta \ln \
 Crucially, neither the initial state distribution $\rho_0(\mathbf{s}_0)$ nor the plant transition dynamics $P(\mathbf{s}_{t+1} \mid \mathbf{s}_t, \mathbf{a}_t)$ depend on policy weights $\theta$, causing their gradients to vanish identically. In physical systems engineering, this property is foundational: continuous contact dynamics, dry friction stick-slip transitions, and impact collisions are non-differentiable or discontinuous, making analytic trajectory derivatives $\nabla_{\mathbf{a}} \mathbf{s}_{t+1}$ ill-conditioned or undefined. The policy gradient formulation completely bypasses differentiating through plant physics.
 
 By causality (future actions cannot alter past rewards) and subtracting a state-dependent baseline $V(\mathbf{s}_t)$ to reduce variance without introducing bias, the **Policy Gradient Theorem** [@sutton2018reinforcement] evaluates the gradient over the state visitation distribution:
-$$ \nabla_\theta J(\pi_\theta) = \mathbb{E}_{\mathbf{s} \sim d^{\pi_\theta}, \mathbf{a} \sim \pi_\theta(\cdot \mid \mathbf{s})} \left[ \nabla_\theta \ln \pi_\theta(\mathbf{a} \mid \mathbf{s}) Q^{\pi_\theta}(\mathbf{s}, \mathbf{a}) \right] $$
-where $d^{\pi_\theta}(\mathbf{s}) = (1 - \gamma) \sum_{t=0}^\infty \gamma^t P(\mathbf{s}_t = \mathbf{s} \mid \pi_\theta)$ is the discounted state visitation distribution, and $Q^{\pi_\theta}(\mathbf{s}, \mathbf{a}) = \mathbb{E}_{\tau \sim \pi_\theta} \left[ \sum_{k=0}^\infty \gamma^k R(\mathbf{s}_{t+k}, \mathbf{a}_{t+k}) \mid \mathbf{s}_t = \mathbf{s}, \mathbf{a}_t = \mathbf{a} \right]$ is the continuous state-action value function.
+$$ \nabla_\theta J(\pi_\theta) = \frac{1}{1-\gamma}\mathbb{E}_{\mathbf{s} \sim d^{\pi_\theta}, \mathbf{a} \sim \pi_\theta(\cdot \mid \mathbf{s})} \left[ \nabla_\theta \ln \pi_\theta(\mathbf{a} \mid \mathbf{s}) Q^{\pi_\theta}(\mathbf{s}, \mathbf{a}) \right] $$
+The factor $1/(1-\gamma)$ is required because the state visitation distribution is normalized. An action-independent baseline may replace $Q$ by $Q-V$ without changing the expectation. Here $d^{\pi_\theta}(\mathbf{s}) = (1 - \gamma) \sum_{t=0}^\infty \gamma^t P(\mathbf{s}_t = \mathbf{s} \mid \pi_\theta)$ is the discounted state visitation distribution, and $Q^{\pi_\theta}(\mathbf{s}, \mathbf{a}) = \mathbb{E}_{\tau \sim \pi_\theta} \left[ \sum_{k=0}^\infty \gamma^k R(\mathbf{s}_{t+k}, \mathbf{a}_{t+k}) \mid \mathbf{s}_t = \mathbf{s}, \mathbf{a}_t = \mathbf{a} \right]$ is the continuous state-action value function.
 
 ### Deep deterministic policy gradient (DDPG)
 
 For high-dimensional continuous actuator spaces, stochastic sampling in policy gradients introduces substantial variance. The **Deterministic Policy Gradient (DPG)** theorem (introduced by Silver and colleagues in 2014) establishes that for a deterministic policy $\mu_\theta: \mathcal{S} \to \mathcal{A}$, the policy gradient evaluates in closed form as the expected gradient of the action-value function along the policy's chosen direction:
-$$ \nabla_\theta J(\mu_\theta) = \mathbb{E}_{\mathbf{s} \sim \rho^\mu} \left[ \nabla_{\mathbf{a}} Q^\phi(\mathbf{s}, \mathbf{a})\Big|_{\mathbf{a}=\mu_\theta(\mathbf{s})} \nabla_\theta \mu_\theta(\mathbf{s}) \right] $$
-In discrete Q-learning (such as DQN), selecting the optimal greedy action requires solving an exhaustive search $\arg\max_a Q(s, a)$. In continuous control where action space $\mathcal{A} \subseteq \mathbb{R}^{D_a}$ has many dimensions (such as a 7-DoF arm or 12-DoF quadruped), solving an inner non-convex optimization at every control cycle is computationally impossible within real-time deadlines. DPG circumvents this bottleneck by replacing the inner argmax with a differentiable continuous actor network $\mu_\theta(\mathbf{s})$. Applying the chain rule, the actor is updated directly in the direction of the critic's action gradient $\nabla_{\mathbf{a}} Q^\phi(\mathbf{s}, \mathbf{a})$.
+$$ \nabla_\theta J(\mu_\theta) = \frac{1}{1-\gamma}\mathbb{E}_{\mathbf{s} \sim d^\mu} \left[ \nabla_{\mathbf{a}} Q^\mu(\mathbf{s}, \mathbf{a})\Big|_{\mathbf{a}=\mu_\theta(\mathbf{s})} \nabla_\theta \mu_\theta(\mathbf{s}) \right] $$
+Here $d^\mu$ is the normalized discounted visitation distribution and the theorem uses the true policy value $Q^\mu$; DDPG substitutes a learned critic. In discrete Q-learning (such as DQN), selecting the optimal greedy action requires solving an exhaustive search $\arg\max_a Q(s, a)$. In continuous control where action space $\mathcal{A} \subseteq \mathbb{R}^{D_a}$ has many dimensions (such as a 7-DoF arm or 12-DoF quadruped), solving an inner non-convex optimization at every control cycle is potentially too costly for the control deadline. DPG circumvents this bottleneck by replacing the inner argmax with a differentiable continuous actor network $\mu_\theta(\mathbf{s})$. Applying the chain rule, the actor is updated directly in the direction of the critic's action gradient $\nabla_{\mathbf{a}} Q^\phi(\mathbf{s}, \mathbf{a})$.
 
 Deep Deterministic Policy Gradient (DDPG, introduced by Lillicrap and colleagues in 2015) parameterizes both actor $\mu_\theta$ and critic $Q^\phi$ with deep neural networks. The continuous critic $Q^\phi(\mathbf{s}, \mathbf{a})$ is trained via off-policy temporal difference learning by minimizing Bellman residual error on transitions $(\mathbf{s}, \mathbf{a}, r, \mathbf{s}')$ sampled from an experience replay buffer $\mathcal{D}$:
 $$ \mathcal{L}(\phi) = \mathbb{E}_{(\mathbf{s}, \mathbf{a}, r, \mathbf{s}') \sim \mathcal{D}} \left[ \left( Q^\phi(\mathbf{s}, \mathbf{a}) - \left( r + \gamma Q^{\phi'}(\mathbf{s}', \mu_{\theta'}(\mathbf{s}')) \right) \right)^2 \right] $$
-Target networks $(\phi', \theta')$ track active networks via slow Polyak averaging $\phi' \leftarrow \tau \phi + (1 - \tau)\phi'$ with tracking rate $\tau \ll 1$ (e.g., $\tau = 0.005$). Polyak tracking converts an unstable, moving regression target into a quasi-stationary target, preventing divergent optimization loops.
+Target networks $(\phi', \theta')$ track active networks via slow Polyak averaging $\phi' \leftarrow \tau \phi + (1 - \tau)\phi'$ with tracking rate $\tau \ll 1$ (e.g., $\tau = 0.005$). Polyak tracking converts an unstable, moving regression target into a quasi-stationary target, slowing target drift without guaranteeing convergence under function approximation.
 
 ### Twin delayed DDPG (TD3) and overestimation bias
 
@@ -1051,17 +1050,17 @@ Standard continuous actor-critic algorithms like DDPG suffer from severe **overe
 
 The **Maximization Bias Lemma** formalizes this phenomenon: let $Q_1(\mathbf{s}', \mathbf{a}')$ and $Q_2(\mathbf{s}', \mathbf{a}')$ be two noisy estimators of true value $Q^*(\mathbf{s}', \mathbf{a}')$ subject to zero-mean estimation error $\mathbb{E}[\epsilon_i] = 0$. Because the maximum operator is convex, Jensen's inequality proves:
 $$ \mathbb{E}\left[ \max_{\mathbf{a}'} Q_i(\mathbf{s}', \mathbf{a}') \right] \ge \max_{\mathbf{a}'} \mathbb{E}\left[ Q_i(\mathbf{s}', \mathbf{a}') \right] = \max_{\mathbf{a}'} Q^*(\mathbf{s}', \mathbf{a}') $$
-Any unbiased function approximation error systematically induces a strictly positive value overestimation bias! In closed-loop continuous control, this positive maximization bias cascades through recursive Bellman backups: overestimating value at step $t+1$ inflates target values at step $t$, driving value estimates to explosive positive values that favor suboptimal, physically destructive actuator proposals.
+The bias is nonnegative, and can be zero; strict positivity requires errors that sometimes change which action wins. In closed-loop continuous control, this positive maximization bias cascades through recursive Bellman backups: overestimating value at step $t+1$ inflates target values at step $t$, driving value estimates to explosive positive values that favor suboptimal, physically destructive actuator proposals.
 
-**Twin Delayed DDPG (TD3, introduced by Fujimoto and colleagues in 2018)** eliminates this overestimation cascade through three architectural mechanisms:
+**Twin Delayed DDPG (TD3, introduced by Fujimoto and colleagues in 2018)** reduces overestimation through three architectural mechanisms:
 
-1. **Clipped Double Q-learning:** TD3 maintains two independent critic networks $Q_{\phi_1}$ and $Q_{\phi_2}$, computing the Bellman target using the minimum of both critics:
+1. **Clipped Double Q-learning:** TD3 maintains two separately parameterized critic networks $Q_{\phi_1}$ and $Q_{\phi_2}$, computing the Bellman target using the minimum of both critics:
    $$ y = r + \gamma \min_{i=1, 2} Q_{\phi'_i}(\mathbf{s}', \tilde{\mathbf{a}}') $$
-   Because the expected minimum satisfies $\mathbb{E}[\min(X, Y)] \le \min(\mathbb{E}[X], \mathbb{E}[Y])$, taking the minimum introduces a conservative *underestimation bias*. In physical systems engineering, underestimation bias is vastly safer than overestimation bias: underestimating value leads to cautious, stable control setpoints, whereas overestimating value leads the policy to believe that unvisited, mechanically lethal high-torque states yield massive returns.
+   Because the expected minimum satisfies $\mathbb{E}[\min(X, Y)] \le \min(\mathbb{E}[X], \mathbb{E}[Y])$, taking the minimum introduces a conservative *underestimation bias*. A lower reward estimate is not a clearance or stability bound. Underestimation can change which action wins without making that action physically safer.
 2. **Target policy smoothing:** To prevent the policy from exploiting sharp, non-physical peaks in the learned critic, TD3 injects clipped Gaussian noise into the target action:
    $$ \tilde{\mathbf{a}}' = \text{clip}\left( \mu_{\theta'}(\mathbf{s}') + \text{clip}(\boldsymbol{\epsilon}, -c, c), \, \mathbf{a}_{\min}, \, \mathbf{a}_{\max} \right), \quad \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \sigma^2 \mathbf{I}) $$
    This regularizes value estimation over a local actuator ball, enforcing the physical prior that similar motor commands should yield similar expected returns and smoothing the optimization landscape.
-3. **Delayed policy updates:** Updating the policy network on every critic step causes the actor to chase an inaccurate, rapidly shifting value landscape. TD3 updates actor parameters $\theta$ and target networks once every $d$ critic updates (typically delay ratio $d = 2$), ensuring that value gradients stabilize before actor weights shift.
+3. **Delayed policy updates:** Updating the policy network on every critic step causes the actor to chase an inaccurate, rapidly shifting value landscape. TD3 updates actor parameters $\theta$ and target networks once every $d$ critic updates (typically delay ratio $d = 2$), giving the critics additional updates before actor weights shift, without guaranteeing stabilization.
 
 ### Soft actor-critic (SAC) and maximum entropy control
 
@@ -1075,7 +1074,7 @@ The soft state-action value satisfies the soft Bellman equation:
 $$ Q(\mathbf{s}, \mathbf{a}) = R(\mathbf{s}, \mathbf{a}) + \gamma \mathbb{E}_{\mathbf{s}' \sim P} \left[ V(\mathbf{s}') \right], \quad \text{where } V(\mathbf{s}) = \mathbb{E}_{\mathbf{a} \sim \pi} \left[ Q(\mathbf{s}, \mathbf{a}) - \alpha \ln \pi(\mathbf{a} \mid \mathbf{s}) \right] $$
 To enforce physical actuator limits $\mathbf{a} \in [-a_{\max}, a_{\max}]^{D_a}$, SAC parameterizes the policy as an invertible squashed Gaussian distribution. The network outputs mean $\boldsymbol{\mu}_\theta(\mathbf{s})$ and log-standard-deviation $\ln \boldsymbol{\sigma}_\theta(\mathbf{s})$. An unbounded latent action is sampled via the reparameterization trick:
 $$ \mathbf{u} = \boldsymbol{\mu}_\theta(\mathbf{s}) + \boldsymbol{\sigma}_\theta(\mathbf{s}) \odot \boldsymbol{\epsilon}, \quad \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{D_a}) $$
-Applying the non-linear squashing function $\mathbf{a} = \tanh(\mathbf{u})$ bounds actions strictly within $(-1, 1)^{D_a}$.
+The following density is for normalized actions. Applying the non-linear squashing function $\mathbf{a} = \tanh(\mathbf{u})$ bounds actions strictly within $(-1, 1)^{D_a}$.
 
 By the change-of-variables theorem for probability densities, the log-likelihood of the bounded action $\mathbf{a}$ requires correcting for the Jacobian determinant of the tanh mapping:
 $$ \pi_\theta(\mathbf{a} \mid \mathbf{s}) = \mu(\mathbf{u} \mid \mathbf{s}) \left| \det \frac{d\mathbf{a}}{d\mathbf{u}} \right|^{-1} $$
@@ -1083,7 +1082,7 @@ Because the squashing operator acts element-wise ($a_i = \tanh(u_i)$), the Jacob
 $$ \det \frac{d\mathbf{a}}{d\mathbf{u}} = \prod_{i=1}^{D_a} \left( 1 - \tanh^2(u_i) \right) $$
 Taking the natural logarithm yields the exact closed-form log-density correction:
 $$ \ln \pi_\theta(\mathbf{a} \mid \mathbf{s}) = \ln \mu(\mathbf{u} \mid \mathbf{s}) - \sum_{i=1}^{D_a} \ln\left( 1 - \tanh^2(u_i) \right) $$
-where $\ln \mu(\mathbf{u} \mid \mathbf{s}) = -\frac{1}{2} \sum_{i=1}^{D_a} \left( \left(\frac{u_i - \mu_i(\mathbf{s})}{\sigma_i(\mathbf{s})}\right)^2 + 2\ln \sigma_i(\mathbf{s}) + \ln(2\pi) \right)$.
+Physical limits require a further scale and offset; their Jacobian must also be included if densities are expressed in physical units. Here $\ln \mu(\mathbf{u} \mid \mathbf{s}) = -\frac{1}{2} \sum_{i=1}^{D_a} \left( \left(\frac{u_i - \mu_i(\mathbf{s})}{\sigma_i(\mathbf{s})}\right)^2 + 2\ln \sigma_i(\mathbf{s}) + \ln(2\pi) \right)$.
 
 #### Dual gradient descent for automatic entropy tuning
 
@@ -1093,48 +1092,44 @@ Solving the dual Lagrangian formulation yields the exact update for temperature 
 $$ \mathcal{L}(\alpha) = \mathbb{E}_{\mathbf{s}_t \sim \mathcal{D}, \mathbf{a}_t \sim \pi_t} \left[ -\alpha \ln \pi_t(\mathbf{a}_t \mid \mathbf{s}_t) - \alpha \overline{\mathcal{H}} \right] $$
 Differentiating with respect to $\alpha$ gives the dual gradient update rule:
 $$ \alpha \leftarrow \alpha - \lambda_\alpha \nabla_\alpha \mathcal{L}(\alpha) = \alpha - \lambda_\alpha \left( -\ln \pi_t(\mathbf{a}_t \mid \mathbf{s}_t) - \overline{\mathcal{H}} \right) $$
-When policy entropy drops below target $\overline{\mathcal{H}}$, $-\ln \pi_t > \overline{\mathcal{H}}$, driving $\alpha$ upward to restore exploration. When entropy exceeds target, $\alpha$ decreases to sharpen exploitation.
+When expected policy entropy drops below target $\overline{\mathcal{H}}$, $\mathbb{E}[-\ln\pi_t]<\overline{\mathcal{H}}$, the expected gradient is negative and gradient descent raises $\alpha$. Individual samples need not have that sign. Implementations preserve $\alpha>0$, for example by optimizing its logarithm. When entropy exceeds target, $\alpha$ decreases to sharpen exploitation.
 
 ### Proximal policy optimization (PPO) and GPU simulation
 
 While off-policy algorithms (TD3, SAC) maximize sample efficiency from replay buffers, on-policy **Proximal Policy Optimization (PPO, introduced by Schulman and colleagues in 2017)** dominates large-scale physics simulation pipelines (such as Isaac Gym, Isaac Sim, and Brax).
 
-PPO optimizes a clipped surrogate objective that prevents destructively large policy updates:
+PPO clips the incentive for large probability-ratio changes in its surrogate objective; clipping does not impose a hard trust region on the resulting policy:
 $$ \mathcal{L}^{\text{CLIP}}(\theta) = \hat{\mathbb{E}}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \, \text{clip}(r_t(\theta), 1 - \epsilon, 1 + \epsilon) \hat{A}_t \right) \right] $$
 where the probability ratio is $r_t(\theta) = \frac{\pi_\theta(\mathbf{a}_t \mid \mathbf{s}_t)}{\pi_{\theta_{\text{old}}}(\mathbf{a}_t \mid \mathbf{s}_t)}$, clipping parameter $\epsilon \approx 0.2$, and advantage estimates $\hat{A}_t$ are computed via Generalized Advantage Estimation (GAE):
 $$ \hat{A}_t^{\text{GAE}(\gamma, \lambda)} = \sum_{l=0}^\infty (\gamma \lambda)^l \delta_{t+l}^V, \quad \text{where } \delta_t^V = R(\mathbf{s}_t, \mathbf{a}_t) + \gamma V_\phi(\mathbf{s}_{t+1}) - V_\phi(\mathbf{s}_t) $$
-The parameter $\lambda \in [0, 1]$ balances bias and variance: $\lambda = 0$ reduces to the 1-step TD residual (low variance, high bias), while $\lambda = 1$ evaluates to empirical Monte Carlo returns (zero bias, high variance).
+The parameter $\lambda\in[0,1]$ trades bootstrapping against longer sampled returns. At $\lambda=0$ the estimate is a one-step TD residual and depends directly on critic error. At $\lambda=1$, a complete episode gives the discounted Monte Carlo return minus the baseline; truncated rollouts retain bootstrap error. Terminal transitions omit the continuation value in all Bellman targets above.
 
 #### Massively parallel GPU simulation physics and memory hierarchy
 
-PPO exhibits lower formal sample efficiency than off-policy methods, requiring $10^7\text{--}10^9$ environment interactions to learn dynamic locomotion or agile manipulation gaits. In classical CPU-based simulation, collecting datasets of this magnitude required massive distributed server clusters communicating across high-latency networks.
+On-policy training consumes fresh rollouts, while off-policy methods reuse a replay buffer. Parallel simulation can make fresh experience inexpensive by keeping physics state, observations, policy inference, and rollout storage on the same accelerator. This reduces host-device copies when the complete pipeline supports device-resident execution.
 
-Modern physical AI transforms this apparent sample inefficiency into a compelling systems strength by hosting physics engines directly within GPU high-bandwidth memory (VRAM). Modern GPU simulators instantiate $4{,}096\text{--}32{,}768$ continuous robot instances concurrently. This architecture alters the systems profile of training:
-
-1. **On-policy VRAM locality:** On-policy PPO generates rollouts synchronously across all simulated instances. A rollout buffer of $16{,}384$ environments stepping for $16$ steps holds $262{,}144$ transition tuples ($(\mathbf{s}, \mathbf{a}, r, \mathbf{s}', v)$), occupying under $500\text{ MB}$ of memory. This buffer fits entirely within the GPU's high-speed memory hierarchy. Transitions are processed for a few stochastic gradient descent (SGD) epochs and immediately discarded.
-2. **Elimination of PCIe bottlenecks:** Because rigid-body articulation, collision detection, contact impulse resolution, policy inference, and GAE computation execute on the identical GPU silicon, zero rollout data crosses the host-device PCIe bus during training. Training throughput reaches millions of physics steps per second.
-3. **Contrast with off-policy replay buffers:** Off-policy algorithms (such as SAC or TD3) require storing $10^6\text{--}10^7$ past transitions in an experience replay buffer ($10\text{--}50\text{ GB}$). Storing and sampling random minibatches from such massive buffers in external DRAM generates non-coalesced, high-latency memory transactions that saturate memory controllers and stall tensor execution units. PPO's compact on-policy working set achieves near-100 percent tensor core utilization, completing a multi-year physical robot training curriculum in two to four hours on a single workstation GPU.
+The storage comparison depends on transition size as well as count. If each stored transition takes $b_{\text{tr}}$ bytes, a rollout with $n_{\text{env}}$ environments and $h$ steps needs approximately $n_{\text{env}}h b_{\text{tr}}$ bytes, while a replay buffer with $n_{\text{replay}}$ transitions needs $n_{\text{replay}}b_{\text{tr}}$. Images, privileged state, and training scratch space can dominate either budget. No utilization percentage or training duration follows from choosing PPO; simulation fidelity, contact workload, network shape, and convergence requirements determine throughput and total cost.
 
 ### Asymmetric actor-critic for sim-to-real transfer {#sec-appendix-ml-asymmetric-ac}
 
 Deploying policies trained in physics simulators to physical hardware encounters the **reality gap**: unmodeled actuator latency, mechanical compliance, gear backlash, motor thermal derating, and sensor noise cause policies to stumble or destabilize on physical testbeds.
 
-The **Asymmetric Actor-Critic** architecture (such as Rapid Motor Adaptation / RMA [@kumar2021rma]) bridges this gap by decoupling the information available during training from the telemetry available at deployment:
+An **asymmetric actor-critic** gives the training critic more information than the deployed actor. A related but distinct technique, Rapid Motor Adaptation (RMA) [@kumar2021rma], trains a privileged actor and then predicts its environment latent from onboard history. The distinction determines what must run on the robot:
 
-1. **Privileged centralized critic:** In training simulation, the critic network $V_\phi(\mathbf{s}_{\text{priv}})$ or $Q_\phi(\mathbf{s}_{\text{priv}}, \mathbf{a})$ conditions on the complete, privileged simulation state $\mathbf{s}_{\text{priv}} \in \mathbb{R}^{d_{\text{priv}}}$. This privileged vector contains physical parameters that are impossible to measure directly on a deployed robot in real time:
+1. **Privileged centralized critic:** In training simulation, the critic network $V_\phi(\mathbf{s}_{\text{priv}})$ or $Q_\phi(\mathbf{s}_{\text{priv}}, \mathbf{a})$ conditions on the complete, privileged simulation state $\mathbf{s}_{\text{priv}} \in \mathbb{R}^{d_{\text{priv}}}$. This privileged vector can contain quantities that are unavailable or measured only imperfectly onboard:
    - True surface contact friction coefficients $\mu_{\text{fric}}$;
    - Exact link masses, payload inertia matrices, and center-of-mass offsets $\Delta \mathbf{p}_{\text{com}}$;
    - Ground-truth contact force vectors $\mathbf{F}_{\text{contact}}$ and normal impulses at each foot/finger;
    - Unoccluded 3D ground-truth obstacle positions and complete terrain heightmaps;
    - Motor winding temperatures and dynamic back-EMF constants.
 
-   Feeding privileged states to the critic eliminates partial observability, preventing value function variance from exploding and stabilizing temporal difference learning.
+   A sufficiently complete privileged state can make the critic's prediction problem Markov and reduce estimation uncertainty. It does not make the actor's observation complete or remove model error.
 2. **Two-phase adaptation and onboard actor:** To transfer privileged knowledge to physical hardware where $\mathbf{s}_{\text{priv}}$ cannot be measured, modern architectures use a two-phase distillation pipeline:
    - *Phase 1 (Privileged policy training):* The actor $\pi_\theta(\mathbf{a}_t \mid \mathbf{o}_t, \mathbf{z}_t)$ receives deployable onboard observations $\mathbf{o}_t$ and an environment latent vector $\mathbf{z}_t = E(\mathbf{s}_{\text{priv}})$, where encoder $E$ compresses the privileged state into a low-dimensional manifold ($d_z \approx 8\text{--}16$).
    - *Phase 2 (Temporal adaptation module):* A lightweight 1D temporal convolutional or MLP adaptation module $g_\psi(\mathbf{o}_{t-H+1:t})$ is trained via supervised regression to predict the latent vector $\hat{\mathbf{z}}_t$ purely from a sliding window history of recent proprioceptive observations (joint positions $\mathbf{q}$, velocities $\dot{\mathbf{q}}$, and commanded actions $\mathbf{a}$).
-3. **Zero runtime inference overhead:** The mathematical justification for asymmetry rests on the Markov property of value estimation: Bellman optimality requires state Markovianity only for training the value function. At deployment on physical hardware, the privileged critic and the simulator are **completely discarded**. The physical robot executes only the deployable actor $\pi_\theta(\mathbf{a}_t \mid \mathbf{o}_t, \hat{\mathbf{z}}_t)$ and the lightweight adaptation network $g_\psi$. Because $g_\psi$ has fewer than $50\text{k}$ parameters ($< 100\text{ KB}$), it executes in under $0.05\text{ ms}$ on the embedded CPU, incurring zero DRAM bandwidth bottleneck while enabling the physical robot to infer terrain friction and payload mass purely from joint dynamics in real time.
+3. **Deployment cost:** A plain asymmetric actor-critic discards the privileged critic at deployment and runs only the actor. An RMA-style design also runs its history encoder or adaptation module. That module has a real compute and memory cost and can infer hidden parameters only when the observation history makes them identifiable. Critic access to simulator state does not give the actor access to that state.
 
-When combined with **Domain Randomization (DR)** (randomizing friction, mass, latency, and sensor gains across simulator instances during training), asymmetric actor-critic policies achieve zero-shot physical transfer across novel terrains.
+Domain randomization varies physical parameters during training to expose the policy to a broader range of dynamics. It can improve transfer within the represented conditions, but neither randomization nor privileged training guarantees successful deployment on new terrain.
 
 ### Bellman optimality and out-of-distribution overestimation
 
@@ -1144,13 +1139,13 @@ When learning offline from static pre-collected datasets $\mathcal{D}_{\text{off
 
 Modern offline continuous RL counters this instability through **Conservative Q-Learning (CQL)** [@kumar2020conservative], which adds an explicit regularization term that penalizes Q-values on out-of-distribution actions while maximizing Q-values on logged demonstrator actions:
 $$ \min_Q \alpha_{\text{CQL}} \left( \mathbb{E}_{\mathbf{s} \sim \mathcal{D}, \mathbf{a} \sim \mu(\cdot \mid \mathbf{s})}[Q(\mathbf{s}, \mathbf{a})] - \mathbb{E}_{(\mathbf{s}, \mathbf{a}) \sim \mathcal{D}}[Q(\mathbf{s}, \mathbf{a})] \right) + \frac{1}{2} \mathcal{L}_{\text{Bellman}}(Q) $$
-CQL mathematically guarantees that the learned value function lower-bounds the true physical return ($Q_{\text{CQL}}(\mathbf{s}, \mathbf{a}) \le Q^*(\mathbf{s}, \mathbf{a})$), preventing optimistic actuator runaway. Even with conservative training, policy proposals must still pass through deterministic runtime safety filters before execution.
+Under its stated coverage, estimation, and regularization assumptions, CQL provides lower-bound results for expected policy value. The displayed regularizer does not guarantee a pointwise bound below $Q^*$ for every unseen state-action pair, and reward conservatism does not prevent actuator runaway. Policy proposals still require runtime permission checks.
 
 ### SayCan affordance-grounded skill selection
 
 The SayCan framework [@ahn2022saycan] integrates semantic knowledge from high-capacity language models with physical affordance constraints from trained policies.\index{Affordances!SayCan value function}
 
-Let $\ell$ represent high-level language instruction and $a$ represent an available low-level skill. The probability of executing skill $a$ in current physical state $s$ decomposes into the product of two probabilities:
+Let $\ell$ represent high-level language instruction and $a$ represent an available low-level skill. SayCan ranks candidate skills by multiplying a language relevance score and an estimated skill-success score, then normalizing if a selection distribution is needed:
 $$ P(a \mid s, \ell) \propto P_{\text{LLM}}(a \mid \ell) \cdot V_{\text{policy}}(s, a) $$
 where:
 
@@ -1163,23 +1158,18 @@ If the learned value correctly assigns a near-zero score to an unavailable skill
 
 Deploying continuous control policies on physical robots requires selecting an architecture whose computational profile, memory traffic, and latency align with the control loop deadlines of the physical plant. @Tbl-policy-systems-taxonomy synthesizes the fundamental systems trade-offs across all primary policy architectures analyzed in this appendix:
 
-| Architecture                          | Forward passes per chunk        | Weight memory footprint     | Arithmetic intensity                         | Closed-loop latency       | Sample efficiency                   | Action distribution expressiveness | Target control level                               |
-|:--------------------------------------|:--------------------------------|:----------------------------|:---------------------------------------------|:--------------------------|:------------------------------------|:-----------------------------------|:---------------------------------------------------|
-| **Multilayer Perceptron (MLP)**       | 1                               | $0.2\text{--}1.0\text{ MB}$ | Low ($\approx 1.0\text{ FLOP/B}$)            | $< 0.2\text{ ms}$         | High (RL sim: $10^7$ steps)         | Strictly unimodal                  | $500\text{--}1000\text{ Hz}$ joint torque / reflex |
-| **ConvNet + MLP**                     | 1                               | $20\text{--}50\text{ MB}$   | Moderate ($10\text{--}30\text{ FLOP/B}$)     | $5\text{--}15\text{ ms}$  | Moderate ($10^3$ demos)             | Unimodal Gaussian / GMM            | $50\text{--}100\text{ Hz}$ visuomotor setpoint     |
-| **Action Chunking Transformer (ACT)** | 1 (deterministic prior)         | $80\text{--}150\text{ MB}$  | Moderate ($15\text{--}40\text{ FLOP/B}$)     | $15\text{--}25\text{ ms}$ | High ($50\text{--}100$ demos)       | Multimodal (CVAE latent space)     | $10\text{--}50\text{ Hz}$ receding horizon         |
-| **Diffusion Policy (DDPM/DDIM)**      | $K = 16\text{--}100$ sequential | $96\text{--}300\text{ MB}$  | Low-moderate ($10\text{--}25\text{ FLOP/B}$) | $35\text{--}80\text{ ms}$ | High ($50\text{--}100$ demos)       | Arbitrary continuous multimodal    | $10\text{--}20\text{ Hz}$ async chunk planner      |
-| **Flow Matching Policy (CFM)**        | $K = 2\text{--}4$ sequential    | $96\text{--}300\text{ MB}$  | Low-moderate ($10\text{--}25\text{ FLOP/B}$) | $15\text{--}25\text{ ms}$ | High ($50\text{--}100$ demos)       | Arbitrary continuous multimodal    | $20\text{--}50\text{ Hz}$ sync/async planner       |
-| **Continuous RL Actor (SAC/PPO)**     | 1                               | $1\text{--}10\text{ MB}$    | Low ($\approx 1.0\text{ FLOP/B}$)            | $< 0.5\text{ ms}$         | Low ($10^7\text{--}10^9$ sim steps) | Squashed Gaussian / stochastic     | $100\text{--}500\text{ Hz}$ dynamic locomotion     |
+| Policy component | Evaluations per proposal | Main resource question | Distribution and execution limit |
+|:---|:---|:---|:---|
+| MLP point regressor | One | Do weights and scratch buffers remain resident? | Squared-error output averages ambiguous targets |
+| ConvNet with action head | One encoder and head evaluation | How much spatial reuse survives the memory mapping? | The head, not convolution, determines multimodality |
+| ACT decoder | One decoder evaluation after observation encoding | What do visual tokens and action queries cost? | Fixed latent selects one output; chunk execution delays feedback |
+| Diffusion decoder | $K$ sequential denoising evaluations | Are weights and activations transferred each step? | Sampling quality depends on model, solver, and $K$ |
+| Flow-matching decoder | Solver-dependent sequential evaluations | How many field evaluations meet the action-quality target? | Straight conditional paths do not guarantee an exact low-step solution |
+| RL actor | Usually one actor evaluation | What actor, history encoder, and preprocessing execute? | RL is a training method; the selected head determines the output family |
 
-: **Architectural Trade-offs Across Continuous Control Policies**: Latency and memory metrics reflect FP16 precision on modern embedded mobile robotics processors. {#tbl-policy-systems-taxonomy}
+: **Architectural Trade-offs Across Continuous Control Policies**: These are mechanisms, not hardware benchmark ranges. Observation encoding and permission checks add costs beyond the proposal decoder. {#tbl-policy-systems-taxonomy tbl-colwidths="[18,20,30,32]"}
 
-This taxonomy crystallizes the foundational systems design rule of Physical AI: no single neural architecture spans all layers of the autonomy stack. Instead, physical intelligence decomposes hierarchically across memory, compute, and temporal scales:
-
-- **Memory footprint and cache hierarchy:** Low-level joint reflexes require cache-resident MLPs ($< 1\text{ MB}$) that fit entirely within on-chip L2/L3 caches, avoiding memory bus arbitration. In contrast, visuomotor policies and generative chunk decoders ($50\text{--}300\text{ MB}$) require streaming weights from external LPDDR DRAM or dedicated accelerator memory.
-- **Arithmetic intensity and roofline limits:** Closed-loop inference at batch size 1 restricts arithmetic intensity to $1.0\text{ FLOP/byte}$ for MLPs and $10\text{--}25\text{ FLOP/byte}$ for convolutional and transformer decoders. Because modern edge accelerators possess operational ridge points exceeding $50\text{--}100\text{ FLOP/byte}$, real-time policy execution is strictly memory-bandwidth bound. Peak compute TFLOP/s ratings are largely inaccessible; total inference latency is dictated by memory bus read bandwidth and SRAM line buffer hit rates.
-- **Inference latency and loop decoupling:** Single-evaluation models (MLP, ACT) execute in under $25\text{ ms}$, permitting synchronous or quasi-synchronous execution. Iterative diffusion models require $K$ sequential weight transfers ($35\text{--}80\text{ ms}$), forcing a dual-rate architectural split: slow generative planning runs asynchronously on the application processor at $10\text{--}20\text{ Hz}$, populating a lock-free ring buffer, while a $1\text{ kHz}$ microcontroller interpolates setpoints and enforces safety invariants. Straight flow matching ($K = 2$) narrows this gap, enabling expressive multimodal generation within synchronous setpoint periods.
-- **Sample efficiency and training throughput:** Physical data collection inflicts mechanical wear. Behavioral cloning with expressive chunking (ACT, Diffusion, Flow Matching) achieves high sample efficiency, learning bi-manual tasks from $50\text{--}100$ teleoperated demonstrations. In contrast, continuous RL trades off sample efficiency for autonomous exploration: on-policy PPO requires hundreds of millions of interactions, yet its compact working set maps with near-100 percent tensor core efficiency to massively parallel GPU simulators, completing training in hours without human intervention.
+For a concrete choice, count model parameters and activations, identify the memory level serving each operation, and compare the complete measured execution path with the deadline. The worked decoder budget in @sec-appendix-ml-diffusion makes those assumptions explicit. Sample efficiency also depends on task coverage and recovery data; it cannot be ranked from the decoder family alone.
 
 ## Signal Temporal Logic and Continuous Robustness {#sec-appendix-ml-stl}
 
@@ -1203,7 +1193,12 @@ $$
 \rho(\mathbf{x}, \diamondsuit_{[a, b]} \varphi, t) &= \max_{t' \in [t+a, t+b]} \rho(\mathbf{x}, \varphi, t')
 \end{aligned}
 $$
-The sign of $\rho$ indicates satisfaction or violation, while its normalized magnitude is dimensionless and depends on the declared scales. Preserve each raw physical margin and unit separately in the fault record; a single minimum of meters, newtons, and kilopascals has no physical meaning.
+A strictly positive $\rho$ establishes satisfaction and a negative value violation under the stated semantics; zero is a boundary case that needs the predicate convention, while its normalized magnitude is dimensionless and depends on the declared scales. Preserve each raw physical margin and unit separately in the fault record; a single minimum of meters, newtons, and kilopascals has no physical meaning.
+
+The until operator requires $\varphi_1$ to hold until a time when $\varphi_2$ holds. Its robustness is
+$$ \rho(\mathbf{x},\varphi_1\mathcal{U}_{[a,b]}\varphi_2,t)
+=\sup_{t'\in[t+a,t+b]}\min\!\left(\rho(\mathbf{x},\varphi_2,t'),\inf_{t''\in[t,t')}\rho(\mathbf{x},\varphi_1,t'')\right), $$
+with the infimum over an empty interval taken as $+\infty$. Infimum and supremum replace minimum and maximum when extrema are not attained. A sampled trace establishes continuous-time satisfaction only with a justified interpolation or intersample variation bound and sufficient margin for measurement error.
 
 [^fn-ml-stl-robustness]: **Signal Temporal Logic Robustness**\index{Signal Temporal Logic!quantitative robustness}: Quantitative semantics map a trace and formula to a signed score. Its magnitude inherits the atomic predicate's units only when all combined predicates use commensurate units; otherwise a declared normalization gives a dimensionless score. Negative scores identify violations for falsification searches, subject to sampled-time and measurement limits.
 
@@ -1225,11 +1220,11 @@ Taking the natural logarithm of both sides:
 $$ n \ln(1 - p) \le \ln \alpha $$
 For rare catastrophic events where failure probability is small ($p \ll 1$), the first-order Taylor series expansion $\ln(1 - p) = -p - \frac{p^2}{2} - \dots \approx -p$ yields:[^fn-ml-rule-three]
 $$ -n p \le \ln \alpha \iff p \ge \frac{-\ln \alpha}{n} = \frac{\ln(1/\alpha)}{n} $$
-Inverting this relation gives the minimum sample count $n$ required to bound the failure probability below $p$ at confidence $1 - \alpha$:
+Inverting this approximation gives a conservative sample count $n$ required to bound the failure probability below $p$ at confidence $1 - \alpha$:
 $$ n \ge \frac{\ln(1/\alpha)}{p} $$
 For standard 95 percent confidence ($\alpha = 0.05$):
 $$ n \ge \frac{-\ln(0.05)}{p} = \frac{2.99573}{p} \approx \frac{3}{p} $$
-This classical result is the **discrete Rule of Three**: observing zero failures across $n$ trials bounds the per-trial failure probability to $p \le 3/n$ at 95 percent confidence. The exact inversion without Taylor approximation is $p_U = 1 - \alpha^{1/n}$; for small $p$, the Taylor approximation $-p$ slightly underestimates $p_U$, making the exact bound marginally more conservative.
+This classical result is the **discrete Rule of Three**: observing zero failures across $n$ trials bounds the per-trial failure probability to $p \le 3/n$ at 95 percent confidence. The exact inversion without Taylor approximation is $p_U = 1 - \alpha^{1/n}$; for small $p_U$, the approximation $-\ln(\alpha)/n$ slightly exceeds $p_U$, making the approximation conservative. For a target $p_*$, the exact required integer count is $\lceil\ln\alpha/\ln(1-p_*)\rceil$.
 
 [^fn-ml-rule-three]: **Statistical Rule of Three**\index{Rule of three!zero-failure testing}: Zero events in $n$ independent Bernoulli trials yield the exact one-sided 95 percent upper probability $1 - 0.05^{1/n} \approx 3/n$ for small probabilities. In continuous time, a stationary Poisson process requires $T \ge 3.0/\lambda$. Neither bound covers retrained models, modified firmware, or unobserved hazard classes without configuration-equivalence proofs.
 
@@ -1243,7 +1238,7 @@ Let $N(T)$ denote the cumulative count of catastrophic incidents observed across
 $$ P(N(T) = k) = \frac{(\lambda T)^k e^{-\lambda T}}{k!} $$
 Equivalently, the inter-arrival time $\tau_1$ to the first catastrophic incident follows an exponential distribution $\tau_1 \sim \text{Exponential}(\lambda)$ with survival probability $P(\tau_1 > T) = e^{-\lambda T}$. When a physical fleet qualification campaign completes with zero observed incidents ($k = 0$):
 $$ P(N(T) = 0) = \frac{(\lambda T)^0 e^{-\lambda T}}{0!} = e^{-\lambda T} $$
-To formally certify that the true operational failure rate is below an acceptable target rate $\lambda_*$, we formulate the statistical hypothesis test:
+To test whether the operational failure rate is below an acceptable target rate $\lambda_*$, we formulate the statistical hypothesis test:
 $$ H_0: \lambda \ge \lambda_* \quad \text{versus} \quad H_1: \lambda < \lambda_* $$
 Under null hypothesis $H_0$ with rate $\lambda_*$, the probability of observing the zero-failure test outcome is $P(N(T) = 0 \mid \lambda_*) = e^{-\lambda_* T}$. To reject $H_0$ at significance level $\alpha$ (achieving confidence level $1 - \alpha$):
 $$ p\text{-value} = P(N(T) \le 0 \mid \lambda_*) = e^{-\lambda_* T} \le \alpha $$
@@ -1255,19 +1250,57 @@ Unlike the discrete Bernoulli derivation which required a Taylor approximation f
 
 #### Systems arithmetic of the exposure wall
 
-Consider a safety-critical physical autonomy application targeting a catastrophic failure rate comparable to civil aviation (DO-178C Level A) or automotive functional safety (ISO 26262 ASIL D):
-$$ \lambda_* = 10^{-9}\text{ failures per operating hour} $$
-Evaluating the continuous Rule of Three for this safety target yields the minimum required zero-failure operational exposure:\index{Exposure wall!mathematical derivation}
-$$ T \ge \frac{2.99573}{10^{-9}/\text{h}} \approx 2.996 \times 10^9\text{ hours} \approx 342{,}466\text{ machine-years} $$
-Even for a moderate industrial requirement, such as warehouse mobile robots or factory manipulators targeting $\lambda_* = 10^{-6}/\text{h}$ (one catastrophic failure per million operating hours):
-$$ T \ge \frac{2.99573}{10^{-6}/\text{h}} \approx 3.00 \times 10^6\text{ hours} \approx 342.5\text{ machine-years} $$
-This astronomical requirement is the **Poisson Exposure Wall**. It imposes three fundamental architectural realities on Physical AI:
+```{python}
+#| label: calc-appendix-ml-exposure
+#| echo: false
+#| warning: false
+#| message: false
 
-1. **Fleet scalability limits:** Testing cannot breach the exposure wall through brute-force parallelism. To qualify $\lambda_* = 10^{-9}/\text{h}$, a massive fleet of 1,000 physical robots operating 24 hours a day, 365 days a year without a single failure would require:
-   $$ \frac{2.996 \times 10^9\text{ h}}{1000 \times 8760\text{ h/year}} \approx 342.0\text{ calendar years} $$
-   Testing alone cannot validate safety-critical reliability for learned physical systems.
-2. **The configuration invalidation reset:** The Poisson exposure derivation assumes a stationary point process. In continuous machine learning, any modification to policy neural weights $\theta \to \theta + \Delta \theta$, retrained vision encoder, fine-tuned diffusion head, sensor recalibration, or firmware patch alters the closed-loop physical rollout distribution $P(\tau \mid \pi_\theta)$. In the absence of a formal configuration-equivalence proof, operational hours accumulated on prior model versions cannot be pooled, resetting the zero-failure clock to zero ($T \to 0$). In digital software ML, CI test suites execute in minutes; in physical robotics, qualification requires machine-years.
-3. **The architectural safety mandate:** Because empirical testing of the neural policy cannot breach the exposure wall, physical safety cannot be an empirical property of the learned model. Safety must be an architectural property guaranteed by deterministic runtime safety filters, Control Barrier Functions (CBFs), and certified hardware interlocks on the permission path below the proposal boundary (@sec-evaluation-trial-limits).
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ZERO-EVENT EXPOSURE AND PARALLEL TESTING
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-appendix-ml-exposure.
+# │ Goal: Compare statistical exposure with available fleet calendar time.
+# │ Show: exposure hours at two hypothetical target rates and fleet duration.
+# │ How: MLSysIM Poisson zero-event exposure; T_calendar = T_exposure / fleet.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.physics.robotics import calc_empirical_testing_exposure
+
+class AppxExposure:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    confidence = 0.95  # category: chosen (one-sided confidence)
+    rate_strict = 1e-9 / ureg.hour  # category: illustrative (hypothetical target)
+    rate_moderate = 1e-6 / ureg.hour  # category: illustrative (hypothetical target)
+    fleet = 1000  # category: illustrative (independent equivalent robots)
+    operating_year = 365 * 24 * ureg.hour  # category: chosen (continuous 365-day year)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    strict = calc_empirical_testing_exposure(rate_strict, confidence)
+    moderate = calc_empirical_testing_exposure(rate_moderate, confidence)
+    calendar_years = (strict / fleet / operating_year).to('dimensionless').magnitude
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(strict.to(ureg.hour).magnitude - 2.99573227355399e9) < 1, 'Poisson inversion')
+    check(abs((strict / moderate).magnitude - 1000) < 1e-6, 'inverse rate scaling')
+    check(calendar_years > 300, 'parallelism still leaves centuries in this scenario')
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    strict_rate_str = fmt_sci(rate_strict.to(1 / ureg.hour).magnitude, precision=0)
+    moderate_rate_str = fmt_sci(rate_moderate.to(1 / ureg.hour).magnitude, precision=0)
+    strict_hours_str = fmt_sci(strict.to(ureg.hour).magnitude, precision=3)
+    moderate_hours_str = fmt_sci(moderate.to(ureg.hour).magnitude, precision=3)
+    fleet_str = fmt_int(fleet, commas=True)
+    calendar_years_str = fmt(calendar_years, precision=1)
+```
+
+For an illustrative target of `{python} AppxExposure.strict_rate_str` failures per operating hour, the one-sided 95 percent bound requires `{python} AppxExposure.strict_hours_str` zero-failure operating hours. At the less stringent hypothetical target of `{python} AppxExposure.moderate_rate_str` per hour, it still requires `{python} AppxExposure.moderate_hours_str` hours. These are scenario targets, not rates assigned by a software assurance level or a functional-safety classification.\index{Exposure wall!mathematical derivation}
+
+Parallelism reduces calendar time but not total exposure. Even `{python} AppxExposure.fleet_str` independent, configuration-equivalent robots operating continuously need `{python} AppxExposure.calendar_years_str` 365-day calendar years at the stricter target. Shared environmental hazards and common software faults can invalidate that independence assumption. Pooling fleet hours requires a justified common rate and representative exposure.
+
+The **Poisson Exposure Wall** limits what zero-event testing alone can establish. A change to policy weights, firmware, sensors, or the operating domain can alter the event process, so earlier hours do not automatically qualify the changed configuration. Reuse requires evidence that the relevant event rate and conditions remain applicable.
+
+Architectural constraints, fault analysis, and runtime monitors therefore carry evidence that a feasible test campaign cannot supply. They are not unconditional guarantees either: a barrier filter or interlock depends on its plant model, sensing validity, fault assumptions, and timing contract. @Sec-evaluation-trial-limits uses the exposure bound to separate these evidence obligations.
 
 ### Wald normal confidence interval breakdown and clopper-pearson exact bounds
 
@@ -1279,22 +1312,22 @@ where $z_{1-\alpha/2}$ is the standard normal critical value ($z_{0.975} \approx
 
 In physical autonomy qualification, candidate systems undergo zero-failure validation tests ($k = 0$). When $k = 0$, the sample proportion is $\hat{p} = 0$, causing the estimated variance $\hat{p}(1-\hat{p})/n$ to collapse to zero:
 $$ \text{CI}_{\text{Wald}}\Big|_{k=0} = 0 \pm z_{1-\alpha/2} \sqrt{\frac{0(1 - 0)}{n}} = [0, 0] $$
-The Wald interval asserts, at 95 percent confidence, that the failure probability is exactly zero after a finite test run. It completely ignores finite-sample uncertainty; its empirical coverage probability for any nonzero failure rate $p > 0$ is exactly zero.
+The Wald interval asserts, at 95 percent confidence, that the failure probability is exactly zero after a finite test run. It completely ignores finite-sample uncertainty; this particular interval excludes every nonzero failure rate. Repeated-sampling coverage of the Wald procedure is not identically zero, but can fall far below its nominal level near the boundary.
 
-Consider the pedagogical danger in systems engineering: suppose a policy is tested for $n = 1000$ consecutive pick-and-place trials with zero failures. An engineer using the Wald formula reports that the failure rate is zero with zero variance. However, if the robot's true physical failure probability is $p = 10^{-3}$, the probability of observing zero failures across $n = 1000$ trials is:
-$$ P(X = 0) = (1 - 10^{-3})^{1000} = (0.999)^{1000} \approx 0.3677 \approx 36.8\text{ percent} $$
-More than one out of every three identical test campaigns will produce zero failures purely by chance, yet the Wald interval treats this outcome as conclusive proof of absolute zero failure risk! Furthermore, even when $k = 1$, if $n$ is moderate, the lower bound evaluates to $\hat{p} - z_{0.975} \sqrt{\hat{p}(1-\hat{p})/n} < 0$, predicting physically impossible negative failure probabilities.
+For a small nonzero true failure probability, $(1-p)^n$ can remain substantial, so a zero-failure campaign is not evidence of impossibility. The degenerate Wald interval confuses an estimated zero variance with zero uncertainty. Near the opposite boundary it has the same defect, and interior intervals can extend outside the valid probability range.
 
 #### Clopper-Pearson exact binomial inversion
 
-To maintain non-asymptotic statistical rigor, physical autonomy qualification requires **Clopper-Pearson exact binomial confidence intervals** [@clopper1934use]. The Clopper-Pearson interval $[p_L, p_U]$ inverts the exact binomial cumulative distribution function without normal approximations:
+To maintain non-asymptotic statistical rigor, physical autonomy qualification can use **Clopper-Pearson exact binomial confidence intervals** [@clopper1934use]. The Clopper-Pearson interval $[p_L, p_U]$ inverts the exact binomial cumulative distribution function without normal approximations:
 $$
 \sum_{x=k}^n \binom{n}{x} p_L^x (1 - p_L)^{n - x} = \frac{\alpha}{2}, \quad \sum_{x=0}^k \binom{n}{x} p_U^x (1 - p_U)^{n - x} = \frac{\alpha}{2}
 $$
 By the identity connecting binomial sums to the regularized incomplete Beta function $I_p(a, b)$:
 $$ \sum_{x=k}^n \binom{n}{x} p^x (1 - p)^{n - x} = I_p(k, n - k + 1) = \frac{1}{\text{B}(k, n - k + 1)} \int_0^p t^{k-1}(1 - t)^{n - k} \, dt $$
-these exact boundaries evaluate in closed form using quantiles of the Beta distribution:
+for $0<k<n$, these exact boundaries can be computed using quantiles of the Beta distribution:
 $$ p_L = \text{BetaQuantile}\left(\frac{\alpha}{2}; \, k, \, n - k + 1\right), \quad p_U = \text{BetaQuantile}\left(1 - \frac{\alpha}{2}; \, k + 1, \, n - k\right) $$
+
+At the endpoints, set $p_L=0$ for $k=0$ and $p_U=1$ for $k=n$; the corresponding Beta distribution with a zero shape parameter is not defined.
 
 #### Exact bounds at zero failures ($k = 0$)
 
@@ -1303,7 +1336,7 @@ $$ P(X = 0) = \binom{n}{0} p_U^0 (1 - p_U)^n = (1 - p_U)^n = \alpha $$
 Solving directly for $p_U$:
 $$ 1 - p_U = \alpha^{1/n} \iff p_U = 1 - \alpha^{1/n} = 1 - \exp\left(\frac{1}{n} \ln \alpha\right) $$
 Applying the Taylor expansion $e^x = 1 + x + \frac{x^2}{2} + \dots$ with $x = \frac{\ln \alpha}{n}$:
-$$ p_U = 1 - \left( 1 + \frac{\ln \alpha}{n} + \mathcal{O}(n^{-2}) \right) = \frac{-\ln \alpha}{n} = \frac{\ln(1/\alpha)}{n} $$
+$$ p_U = 1 - \left( 1 + \frac{\ln \alpha}{n} + \mathcal{O}(n^{-2}) \right) = \frac{-\ln \alpha}{n} + \mathcal{O}(n^{-2}) $$
 For $\alpha = 0.05$, $-\ln(0.05) \approx 2.99573$, rigorously recovering the discrete Rule of Three: $p_U \approx 3/n$. For a two-sided 95 percent interval ($\alpha = 0.05$, tail probability $\alpha/2 = 0.025$):
 $$ p_U = 1 - (0.025)^{1/n} \approx \frac{-\ln(0.025)}{n} = \frac{3.68888}{n} \approx \frac{3.69}{n} $$
 Unlike the degenerate Wald interval, the Clopper-Pearson interval guarantees exact non-asymptotic coverage of at least $1 - \alpha$ for every finite sample size $n \ge 1$.
@@ -1346,7 +1379,16 @@ At each evaluation step $m$:
 2. If $\Lambda_m \le B$: Halt and favor $H_0$ over the specified $H_1$; do not release on this evidence.
 3. If $B < \Lambda_m < A$: The accumulated evidence remains inconclusive; execute rollout $m+1$.
 
+Wald's approximate thresholds need calibration because the discrete log-likelihood increments can overshoot a boundary. Conservative alternatives are $A=\ln(1/\alpha)$ and $B=\ln\beta$: the likelihood-ratio martingale under $H_0$ bounds false acceptance by $\alpha$, and the reciprocal under $H_1$ bounds false rejection by $\beta$. These guarantees apply to the declared simple hypotheses and observation model, not arbitrary deployment shifts.
+
 ### Average sample number optimality
+
+For Bernoulli failure probability $p$, the expected log-likelihood increment is
+$$ d(p)=p\ln\frac{p_1}{p_0}+(1-p)\ln\frac{1-p_1}{1-p_0}. $$
+Let $N_{\text{stop}}$ be the stopping sample count. Ignoring boundary overshoot and using the nominal endpoint error rates gives Wald's approximate average sample numbers
+$$ \mathbb{E}_{p_0}[N_{\text{stop}}]\approx\frac{\alpha A+(1-\alpha)B}{d(p_0)},\qquad
+\mathbb{E}_{p_1}[N_{\text{stop}}]\approx\frac{(1-\beta)A+\beta B}{d(p_1)}. $$
+The denominators are the evidence gained per trial, negative under $H_0$ and positive under $H_1$. As the hypotheses approach each other, their magnitudes shrink and the required exposure grows. For calibrated boundaries, use the actual operating characteristics and terminal overshoot rather than substituting nominal errors. A predeclared trial cap also changes the protocol and requires an explicit inconclusive outcome or recalibrated terminal rule.
 
 For independent identically distributed outcomes under these two simple hypotheses, SPRT has an average-sample-number efficiency result relative to comparable tests.[^fn-ml-sprt-optimality] Actual machine-hour savings depend on the two event probabilities, error allowances, overshoot at the stopping boundaries, and trial cost. The displayed thresholds are approximations; a finite-sample operating-characteristic calculation or calibrated simulation is needed for the chosen protocol.
 
@@ -1354,28 +1396,19 @@ For independent identically distributed outcomes under these two simple hypothes
 
 ## Extreme Value Theory and Tail Risk {#sec-appendix-ml-evt}
 
-In digital machine learning systems, statistical performance metrics (such as aggregate cross-entropy loss, minibatch gradients, and average serving throughput) aggregate over large numbers of independent samples. Under the Central Limit Theorem (CLT), normalized sums and sample averages converge to Gaussian distributions with thin, exponentially decaying tails:
-$$ P(X > x) \sim \exp\left(-\frac{x^2}{2\sigma^2}\right) $$
-Under a standard Gaussian distribution $\mathcal{N}(0, \sigma^2)$, extreme deviations beyond the mean are exponentially suppressed:
+Average behavior does not determine the largest disturbance or latency spike a controller will encounter. The central limit theorem concerns normalized sums under conditions such as finite variance; it does not imply that individual observations or their far tails are Gaussian. Even a good Gaussian fit near the center can misstate rare exceedances.
 
-- A $3\sigma$ exceedance occurs with probability $\approx 1.35 \times 10^{-3}$;
-- A $5\sigma$ exceedance occurs with probability $\approx 2.87 \times 10^{-7}$ (mean wait $\approx 58\text{ minutes}$ at a $1\text{ kHz}$ control loop);
-- A $6\sigma$ exceedance occurs with probability $\approx 9.87 \times 10^{-10}$ (mean wait $\approx 11.7\text{ days}$ at $1\text{ kHz}$);
-- A $7\sigma$ exceedance occurs with probability $\approx 1.28 \times 10^{-12}$ (mean wait $\approx 24{,}700\text{ days} \approx 67.7\text{ years}$ at $1\text{ kHz}$).
+For a genuinely Gaussian variable, a one-sided exceedance above $k$ standard deviations has probability $1-\Phi(k)$, where $\Phi$ is the standard normal cumulative distribution function. Under independent samples at rate $f$, its mean waiting time is $1/[f(1-\Phi(k))]$. Correlation changes the clustering and waiting-time distribution, so a control-loop frequency alone does not establish an independent-trial rate.
 
 ### Physical mechanisms of heavy power-law tails
 
-In Physical AI, the physical disturbances that govern structural survival, actuator integrity, and safety gating do not arise from sums of independent, bounded noise. They are generated by strongly non-linear physical phenomena:
+Disturbances affecting structural survival and controller timing can arise from nonlinear or correlated mechanisms that a Gaussian sensor-noise model does not represent:
 
-1. **Contact impact dynamics:** When an autonomous manipulator or mobile robot collides unexpectedly with a rigid obstacle, Hertzian contact mechanics govern the interaction force: $F = k_c \delta^{3/2}$, where $\delta$ is deformation. When compliant protective covers bottom out against rigid metal chassis, contact stiffness shoots up discontinuously ($k_c \to k_{\infty}$), converting residual kinetic energy into sharp, impulsive shock loads $F_{\text{peak}} \propto v \sqrt{m k_c}$.
+1. **Contact impact dynamics:** When an autonomous manipulator or mobile robot collides unexpectedly with a rigid obstacle, Hertzian contact mechanics govern the interaction force: $F = k_c \delta^{3/2}$, where $\delta$ is deformation. When compliant protective covers bottom out against rigid metal chassis, contact stiffness shoots up discontinuously ($k_c \to k_{\infty}$), converting residual kinetic energy into sharp loads. The relation $F_{\text{peak}}=v\sqrt{m k}$ applies to an ideal linear spring of stiffness $k$ absorbing kinetic energy, not to the Hertzian stiffness coefficient $k_c$.
 2. **Mechanical friction transitions:** Stick-slip friction instability, drivetrain gear backlash, and structural resonance modes inject multiplicative, non-Gaussian torque transients into actuator gearboxes during rapid reversals.
-3. **Real-time execution jitter:** On embedded systems, shared PCIe buses, memory cache thrashing, interrupt storms, and memory reclamation pauses produce tail latency spikes in control loops that break temporal determinism. Queueing networks subject to head-of-line blocking and multi-master bus arbitration exhibit heavy-tailed waiting times governed by Pareto service distributions.
+3. **Real-time execution jitter:** On embedded systems, shared PCIe buses, memory cache thrashing, interrupt storms, and memory reclamation pauses produce tail latency spikes in control loops that break temporal determinism. Head-of-line blocking can amplify latency tails, but a Pareto service-time model requires evidence; bounded service times and arrival processes can produce different waiting-time tails.
 
-Because these physical mechanisms are multiplicative and discontinuous, empirical physical data from stress testing does not exhibit thin Gaussian tails. Instead, physical disturbance distributions exhibit **heavy power-law tails** governed by positive shape parameters ($\xi > 0$):
-$$ P(X > x) \sim x^{-1/\xi} = x^{-\alpha} $$
-where $\alpha = 1/\xi > 0$ denotes the Pareto tail index.
-
-Under a heavy power-law tail (with $\xi \in [0.2, 0.5]$ typical for contact impact forces and embedded bus latencies), exceedance probabilities decay polynomially rather than exponentially. What a Gaussian model dismisses as an impossible "$6\sigma$ or $7\sigma$ anomaly" occurring once every few weeks or years occurs in reality multiple times per day. Sizing mechanical safety margins, gear-tooth shear ratings, series-elastic travel, or real-time watchdog timeouts using Gaussian heuristics leads to stripped gearboxes, structural fracture, and false-positive safety shutdowns. **Extreme Value Theory (EVT)** provides the mathematical framework dedicated exclusively to modeling the asymptotic distribution of extreme physical events.
+These mechanisms motivate inspecting the measured tail; they do not prove a Pareto law. Bounded disturbances, exponential tails, lognormal tails, and power-law tails are all possible. **Extreme Value Theory (EVT)** supplies limiting models for maxima and threshold exceedances, with tail family and parameter uncertainty estimated from representative data. A positive shape parameter supports a power-law model over the validated range, not an assertion that every physical shock has infinite variance.
 
 ### The fisher-tippett-gnedenko theorem
 
@@ -1391,10 +1424,10 @@ defined on $\{z : 1 + \xi(z - \mu)/\sigma > 0\}$, with location parameter $\mu \
 
 1. **Gumbel (Type I, $\xi = 0$):** The continuous limit as $\xi \to 0$:
    $$ G(z) = \exp\left( -\exp\left(-\frac{z - \mu}{\sigma}\right) \right) $$
-   characterizing thin, exponentially decaying tails. The maximum domain of attraction $\text{MDA}(\text{Gumbel})$ includes Gaussian, exponential, lognormal, and Gamma distributions.
+   including several unbounded tail forms, rather than only exponential tails. The maximum domain of attraction $\text{MDA}(\text{Gumbel})$ includes Gaussian, exponential, lognormal, and Gamma distributions.
 2. **Fréchet (Type II, $\xi > 0$, with tail index $\alpha = 1/\xi$):** The heavy-tailed regime where survival probabilities decay according to a polynomial power law: $P(X > x) \sim x^{-\alpha}$. The domain of attraction $\text{MDA}(\text{Fréchet})$ includes Pareto, Cauchy, and Student's $t$ distributions. For a power-law density $p(x) \sim \alpha x^{-\alpha-1}$, the $k$-th raw moment evaluates to:
    $$ \mathbb{E}[X^k] = \int_{x_0}^\infty x^k p(x) \, dx \sim \alpha \int_{x_0}^\infty x^{k - \alpha - 1} \, dx $$
-   This integral converges if and only if $k - \alpha - 1 < -1 \iff k < \alpha = 1/\xi$. For any moment order $k \ge 1/\xi$, the moment diverges to infinity ($\mathbb{E}[X^k] = \infty$). A crucial mathematical consequence is that for $\xi \ge 0.5$ ($\alpha \le 2$), the physical disturbance has **infinite variance** ($\operatorname{Var}(X) = \infty$). This infinite variance completely shatters the premise of the Central Limit Theorem: sample variances measured on physical testbeds never converge, fluctuating unpredictably as sample size increases. For $\xi \ge 1.0$, the distribution has infinite mean. This is the empirical regime that governs physical contact shocks, collision impulses, and embedded latency spikes.
+   This integral converges if and only if $k - \alpha - 1 < -1 \iff k < \alpha = 1/\xi$. For any moment order $k \ge 1/\xi$, the moment diverges to infinity ($\mathbb{E}[X^k] = \infty$). A crucial mathematical consequence is that for $\xi \ge 0.5$ ($\alpha \le 2$), the unbounded power-law model has **infinite variance** ($\operatorname{Var}(X) = \infty$). The usual finite-variance central limit theorem then does not apply, and sample variance cannot converge to a finite population variance. For $\xi \ge 1.0$, the distribution has infinite mean. These are properties of an unbounded fitted model. Finite physical limits can truncate the tail, and a finite dataset cannot establish literal infinite moments.
 
 3. **Weibull (Type III, $\xi < 0$):** Bounded distributions with a finite physical upper endpoint ($z \le \mu - \sigma/\xi$). The domain $\text{MDA}(\text{Weibull})$ includes Uniform and Beta distributions, applicable when hard physical limits (such as mechanically positive endstops) strictly bound the disturbance.
 
@@ -1406,30 +1439,29 @@ Block maxima analysis discards valuable extreme observations occurring within th
 $$ F_u(y) = P(X - u \le y \mid X > u) = \frac{F(u + y) - F(u)}{1 - F(u)}, \quad y \ge 0 $$
 The **Pickands-Balkema-de Haan theorem** proves that for a broad class of underlying physical distributions $F \in \text{MDA}(\text{GEV}_\xi)$, as threshold $u$ approaches the right endpoint $x_F$:
 $$ \lim_{u \to x_F} \sup_{0 \le y < x_F - u} \left| F_u(y) - H(y; \tilde{\sigma}(u), \xi) \right| = 0 $$
-where $H(y)$ is the **Generalized Pareto Distribution (GPD)**:
+where, for $\xi\ne0$, $H(y)$ is the **Generalized Pareto Distribution (GPD)**:
 $$
 H(y) = 1 - \left( 1 + \frac{\xi y}{\tilde{\sigma}} \right)^{-1/\xi}
 $$
-defined on $\{y : y > 0 \text{ and } 1 + \xi y / \tilde{\sigma} > 0\}$, with scale parameter $\tilde{\sigma} > 0$ and shape parameter $\xi$ identical to the GEV shape parameter.
+defined for $y\ge0$ with $1+\xi y/\tilde{\sigma}>0$, with scale parameter $\tilde{\sigma} > 0$ and shape parameter $\xi$ identical to the GEV shape parameter.
+
+For $\xi=0$, take the continuous limit $H(y)=1-\exp(-y/\tilde{\sigma})$; for $\xi<0$, the upper endpoint is $-\tilde{\sigma}/\xi$.
 
 #### Threshold stability and mean residual life
 
-A key property of the GPD is **threshold stability**: if the exceedances over threshold $u_0$ follow $\text{GPD}(\tilde{\sigma}_0, \xi)$, then for any higher threshold $u > u_0$, the exceedances over $u$ also follow a GPD with the *same* shape $\xi$ and linearly shifted scale:
+A key property of the GPD is **threshold stability**: if the exceedances over threshold $u_0$ follow $\text{GPD}(\tilde{\sigma}_0, \xi)$, then for any higher threshold $u>u_0$ below the upper endpoint, the exceedances over $u$ also follow a GPD with the *same* shape $\xi$ and linearly shifted scale:
 $$ \tilde{\sigma}(u) = \tilde{\sigma}_0 + \xi (u - u_0) $$
 The **Mean Residual Life (MRL)** evaluates the expected excess conditional on exceeding threshold $u$:
-$$
-\begin{aligned}
-\mathbb{E}[X - u \mid X > u] &= \int_0^\infty (1 - H(y)) \, dy = \int_0^\infty \left( 1 + \frac{\xi y}{\tilde{\sigma}(u)} \right)^{-1/\xi} dy \\
-&= \left[ \frac{\tilde{\sigma}(u)}{\xi(1 - 1/\xi)} \left( 1 + \frac{\xi y}{\tilde{\sigma}(u)} \right)^{1 - 1/\xi} \right]_0^\infty = \frac{\tilde{\sigma}(u)}{1 - \xi} \quad (\text{for } \xi < 1)
-\end{aligned}
-$$
+$$ \mathbb{E}[X-u\mid X>u]=\int_0^{y_{\max}}[1-H(y)]\,dy=\frac{\tilde{\sigma}(u)}{1-\xi}\quad(\xi<1), $$
+where $y_{\max}=\infty$ for $\xi\ge0$ and $y_{\max}=-\tilde{\sigma}(u)/\xi$ for $\xi<0$. The exponential limit at $\xi=0$ has mean $\tilde{\sigma}(u)$.
+
 Substituting the threshold stability relation yields a strictly linear function of threshold $u$:
 $$ \mathbb{E}[X - u \mid X > u] = \frac{\tilde{\sigma}_0 + \xi(u - u_0)}{1 - \xi} $$
-Systems engineers plot empirical mean excess against candidate thresholds $u$ (the MRL plot); the lowest threshold above which the plot becomes approximately linear determines the mathematically valid POT threshold $u$.
+Systems engineers plot empirical mean excess against candidate thresholds $u$ (the MRL plot); approximate linearity helps choose a candidate threshold, alongside parameter stability, dependence diagnostics, and uncertainty. It does not certify a unique mathematically valid threshold.
 
-Given $N_u$ exceedances $\{y_1, \dots, y_{N_u}\}$ where $y_i = x_i - u > 0$, parameters $(\tilde{\sigma}, \xi)$ are estimated via Maximum Likelihood Estimation (MLE):
+Given $N_u$ exceedances $\{y_1, \dots, y_{N_u}\}$ where $y_i = x_i - u > 0$, parameters $(\tilde{\sigma}, \xi)$ can be estimated via Maximum Likelihood Estimation (MLE), with the following expression for $\xi\ne0$ and valid support:
 $$ \ln L(\tilde{\sigma}, \xi) = -N_u \ln \tilde{\sigma} - \left( 1 + \frac{1}{\xi} \right) \sum_{i=1}^{N_u} \ln \left( 1 + \frac{\xi y_i}{\tilde{\sigma}} \right) $$
-When $\xi > -0.5$, the MLE estimators are asymptotically normal, unbiased, and achieve minimum variance (Cramér-Rao bound).
+Under the GPD model and regularity conditions, including $\xi>-1/2$, maximum-likelihood estimates have asymptotic normality and efficiency properties. Finite-sample bias, threshold choice, and clustered exceedances still affect the estimate.
 
 ### Hardware margin and high-quantile sizing
 
@@ -1454,14 +1486,11 @@ $$ z_{\epsilon} = u + \tilde{\sigma} \ln \left( \frac{N_u}{n \epsilon} \right) \
 
 #### Systems engineering sizing rules
 
-When physical phenomena exhibit heavy tails ($\xi > 0$), the power-law factor $(N_u / (n \epsilon))^\xi$ grows aggressively as target exceedance probability $\epsilon \to 0$. In contrast, thin-tailed Gaussian models scale only logarithmically with $\sqrt{\ln(1/\epsilon)}$. For instance, with $\epsilon = 10^{-7}$ and $\xi = 0.35$, the power-law factor evaluates to $(10^7)^{0.35} \approx 282$, whereas Gaussian scaling predicts $\sqrt{\ln(10^7)} \approx 4.0$. Sizing physical hardware under Gaussian assumptions underestimates tail shocks by nearly two orders of magnitude.
+For a fitted positive shape parameter, the return level grows as a power of $1/\epsilon$; the exponential limit grows logarithmically. Those rates do not yield a numerical ratio between shock loads without matching thresholds, scales, and exceedance frequencies. Report parameter and model uncertainty with the return level, and keep the target unit explicit: a probability per sampled cycle is not a rate per operating hour.
 
-This mathematical divergence translates directly into concrete physical hardware dimensions:
+A force quantile can inform spring travel through $\delta=z_\epsilon/k_{\text{spring}}$ only under a valid linear spring model; energy capacity and bottoming-out dynamics still require separate checks. A latency quantile can inform availability analysis, but a watchdog timeout must remain inside the plant's maximum tolerable delay even when some valid computations exceed it. If that interval is infeasible, the scheduling or fallback design must change.
 
-1. **Series-Elastic Actuators (SEA):** Sizing spring travel $\delta_{\max} = z_\epsilon / k_{\text{spring}}$ to absorb $10^{-7}$ collision shock loads without bottoming out, ensuring the spring remains within its elastic range and protecting planetary gearbox teeth from shear fracture.
-2. **Real-time watchdog timers:** Setting RTOS watchdog expiration timeouts $\tau_{\text{wdog}} = z_\epsilon$ using fitted GPD quantiles of bus latency, eliminating false-positive emergency stops during heavy-tail bus arbitration spikes while preserving deterministic fail-safe tripping.
-3. **Physical hardware buffer sizing:** Sizing memory queue depths for high-speed camera frame FIFOs and sensor DMA ring buffers ($B_{\text{buf}} = \lceil z_\epsilon \rceil$ packet or frame slots) against burst bus contention, ensuring packet drop probabilities remain strictly below $\epsilon$ per operating hour.
-4. **Power electronics thermal capacitance:** Sizing dynamic braking resistors and inverter heatsink thermal mass against high-quantile kinetic energy dissipation during sudden regenerative deceleration.
+Queue depth requires an arrival-and-service model converting a delay into accumulated packets or frames; taking the ceiling of a time-valued quantile is dimensionally invalid. Thermal sizing likewise needs the energy and repetition rate of braking events, not a peak-force quantile alone. EVT estimates a tail under stated assumptions; it supplies neither a deterministic maximum nor a guarantee against all future physical failures.
 
 ## Further Reading
 
@@ -1469,5 +1498,5 @@ For a deeper foundational understanding of machine learning theory, sequential s
 
 * **Deep Learning** [@goodfellow2016deep] provides a comprehensive treatment of neural network optimization, regularized representation learning, and Lipschitz sensitivity bounds.
 * **An Introduction to Statistical Modeling of Extreme Values** [@coles2001introduction] establishes the definitive mathematical foundations for GEV, GPD, and tail risk quantification.
-* **Sequential Analysis** [@wald1945sequential] develops the first-principles mathematical framework and average sample number optimality proofs for the Sequential Probability Ratio Test.
-* **A Reduction-Based Framework for Sequential Prediction** [@ross2011reduction] establishes the theoretical foundations of compounding error in imitation learning and derives the DAgger algorithm.
+* **Sequential Tests of Statistical Hypotheses** [@wald1945sequential] develops the first-principles mathematical framework and average sample number optimality proofs for the Sequential Probability Ratio Test.
+* **A Reduction of Imitation Learning and Structured Prediction to No-Regret Online Learning** [@ross2011reduction] establishes the theoretical foundations of compounding error in imitation learning and derives the DAgger algorithm.
