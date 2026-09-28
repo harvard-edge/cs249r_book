@@ -5,12 +5,12 @@
 Output "tinytorch/guide/assets/images/demos/tinytorch-03-tinygpt-chat.gif"
 
 Set Shell "bash"
-Set FontSize 13
+Set FontSize 12
 Set FontFamily "Menlo"
-Set Width 900
-Set Height 600
+Set Width 880
+Set Height 680
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 40ms
+Set TypingSpeed 35ms
 
 # Prepare environment invisibly
 Hide
@@ -19,9 +19,9 @@ Enter
 Sleep 500ms
 Show
 
-# Run Milestone 05 conversational assistant
+# Run Milestone 05 conversational assistant with live token streaming
 Type "tito milestone run 05"
 Sleep 300ms
 Enter
-# Generous hold time to study loss drop, Overfitting Detective gap, and generated Q&A dialogue
-Sleep 5500ms
+# Generous hold time to study loss drop, Overfitting Detective gap, live streaming, and dialogue
+Sleep 13000ms

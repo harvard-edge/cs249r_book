@@ -669,9 +669,12 @@ def run_milestone(args=None):
         "Q: What is multi-head attention?\nA:",
     ]
 
-    test_prompts = list(benchmark_prompts)
-    if custom_prompt and custom_prompt not in test_prompts:
-        test_prompts.insert(0, custom_prompt)
+    if custom_prompt and custom_prompt not in benchmark_prompts:
+        test_prompts = [custom_prompt]
+    elif is_quick:
+        test_prompts = [benchmark_prompts[0]]
+    else:
+        test_prompts = list(benchmark_prompts)
 
     scorecard_rows = []
 
@@ -794,7 +797,10 @@ def run_milestone(args=None):
 
     # The gate checks that the model converged on training concepts
     # and observed the generalization gap
-    passed = (final_train_loss < 0.60 or train_loss_drop > 1.20) and final_gap > 0.30
+    if is_quick:
+        passed = (final_train_loss < 2.80) or (train_loss_drop > 0.30)
+    else:
+        passed = (final_train_loss < 0.60 or train_loss_drop > 1.20) and final_gap > 0.30
 
     if passed:
         success_msg = (

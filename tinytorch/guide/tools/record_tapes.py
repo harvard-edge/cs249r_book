@@ -43,8 +43,8 @@ def create_window_template(term_w: int, term_h: int, title: str) -> tuple[Path, 
     canvas_w = win_w + 2 * margin
     canvas_h = win_h + 2 * margin
 
-    # Canvas with dark slate background matching site card aesthetics
-    canvas = Image.new("RGBA", (canvas_w, canvas_h), (15, 20, 28, 255))
+    # Canvas with dark slate background matching site card aesthetics (#0f172a)
+    canvas = Image.new("RGBA", (canvas_w, canvas_h), (15, 23, 42, 255))
 
     # Soft drop shadow
     shadow_mask = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))

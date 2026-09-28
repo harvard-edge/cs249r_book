@@ -5,12 +5,12 @@
 Output "tinytorch/guide/assets/images/demos/tinytorch-02-modules-mastery.gif"
 
 Set Shell "bash"
-Set FontSize 13
+Set FontSize 12
 Set FontFamily "Menlo"
-Set Width 900
-Set Height 600
+Set Width 880
+Set Height 680
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 40ms
+Set TypingSpeed 35ms
 
 # Prepare environment invisibly
 Hide
@@ -24,11 +24,17 @@ Type "tito module complete 06"
 Sleep 300ms
 Enter
 # Pause to let reader absorb the integration test verification and export
-Sleep 2500ms
+Sleep 2800ms
 
-# Step 2: Display complete 20/20 module curriculum status
+# Step 2: Clear screen for curriculum overview
+Type "clear"
+Sleep 200ms
+Enter
+Sleep 300ms
+
+# Step 3: Display complete 20/20 module curriculum status
 Type "tito module status"
 Sleep 300ms
 Enter
-# Generous hold time to study the 100% progress grid and unlocked milestones
-Sleep 5500ms
+# Generous hold time to study the 100% progress grid and historical milestones
+Sleep 6500ms

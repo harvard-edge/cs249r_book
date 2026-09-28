@@ -5,12 +5,12 @@
 Output "tinytorch/guide/assets/images/demos/tinytorch-04-tinygpt-code.gif"
 
 Set Shell "bash"
-Set FontSize 13
+Set FontSize 12
 Set FontFamily "Menlo"
-Set Width 900
-Set Height 600
+Set Width 880
+Set Height 680
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 40ms
+Set TypingSpeed 35ms
 
 # Prepare environment invisibly
 Hide
@@ -24,4 +24,4 @@ Type "python3 tinytorch/milestones/05_2017_transformer/03_tinygpt_code_completio
 Sleep 300ms
 Enter
 # Generous hold time to study code completions, compiler diagnostics, and 100% AST validity scorecard
-Sleep 5500ms
+Sleep 19000ms

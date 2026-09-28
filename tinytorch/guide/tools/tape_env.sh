@@ -28,7 +28,7 @@ curl() {
 _real_python3=$(which python3)
 python3() {
   if [[ "$*" == *"03_tinygpt_code_completion.py --quick"* && "$*" != *"--epochs"* ]]; then
-    "$_real_python3" "$REPO_DIR/tinytorch/milestones/05_2017_transformer/03_tinygpt_code_completion.py" --quick --epochs 6
+    "$_real_python3" "$REPO_DIR/tinytorch/milestones/05_2017_transformer/03_tinygpt_code_completion.py" --quick --epochs 3
   else
     "$_real_python3" "$@"
   fi
@@ -46,7 +46,7 @@ tito() {
   elif [[ "$1" == "milestone" && "$2" == "run" && "$3" == "01" ]]; then
     python3 "$_real_tito" milestone run 01
   elif [[ "$1" == "milestone" && "$2" == "run" && "$3" == "05" ]]; then
-    python3 "$REPO_DIR/tinytorch/milestones/05_2017_transformer/04_tinygpt_chat.py" --quick --epochs 6 --prompt "User: What is autograd?" --stream
+    python3 "$REPO_DIR/tinytorch/milestones/05_2017_transformer/04_tinygpt_chat.py" --quick --epochs 3 --prompt "User: What is autograd?" --stream
   elif [[ "$1" == "milestone" && "$2" == "run" && "$3" == "06" ]]; then
     python3 "$REPO_DIR/tinytorch/milestones/06_2018_mlperf/01_optimization_olympics.py"
   else

@@ -5,12 +5,12 @@
 Output "tinytorch/guide/assets/images/demos/tinytorch-05-mlperf-opt.gif"
 
 Set Shell "bash"
-Set FontSize 13
+Set FontSize 12
 Set FontFamily "Menlo"
-Set Width 900
-Set Height 600
+Set Width 880
+Set Height 680
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 40ms
+Set TypingSpeed 35ms
 
 # Prepare environment invisibly
 Hide
@@ -24,4 +24,4 @@ Type "tito milestone run 06"
 Sleep 300ms
 Enter
 # Generous hold time to study 3 divisions (INT8, im2col, KV cache) and Pareto frontier
-Sleep 5500ms
+Sleep 12000ms

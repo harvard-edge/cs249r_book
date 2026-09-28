@@ -5,12 +5,12 @@
 Output "tinytorch/guide/assets/images/demos/tinytorch-01-install-and-run.gif"
 
 Set Shell "bash"
-Set FontSize 13
+Set FontSize 12
 Set FontFamily "Menlo"
-Set Width 900
-Set Height 600
+Set Width 880
+Set Height 680
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 40ms
+Set TypingSpeed 35ms
 
 # Prepare environment invisibly
 Hide
@@ -32,8 +32,12 @@ Enter
 Sleep 2500ms
 
 # Step 3: Run Milestone 01 out of the box
+Type "clear"
+Sleep 200ms
+Enter
+Sleep 300ms
 Type "tito milestone run 01"
 Sleep 300ms
 Enter
 # Generous hold time for viewer to read parameters, decision plot, and achievement banner
-Sleep 5000ms
+Sleep 6000ms
