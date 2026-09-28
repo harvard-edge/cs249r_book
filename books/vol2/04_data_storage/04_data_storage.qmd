@@ -2109,14 +2109,7 @@ $$r_{\text{pipeline}} = \min_k r_k, \qquad r_{\text{pipeline}} \geq \text{BW}_{\
 
 Capacity at one tier cannot compensate for a slower downstream stage. Compression may raise the storage-read rate while lowering the decode rate; additional loader workers may raise decoding throughput while saturating the host-memory or PCIe stage. The end-to-end inequality in @eq-storage-service-chain therefore turns the chapter's hierarchy into a testable contract: measure every stage under representative concurrency, then provision or overlap the stage whose service rate is the minimum.
 
-The equation reveals four levers for controlling storage demand:
-
-- **Accelerator count**: Reducing $N_{\text{GPU}}$ directly reduces bandwidth requirements, but fewer accelerators also reduce training throughput.
-- **Target utilization**: Lowering $\eta_{\text{target}}$ reduces the bandwidth needed, but accepting lower utilization wastes expensive hardware.
-- **Batch volume**: Decreasing $D_{\text{vol,batch}}$ reduces per-iteration data volume, but smaller batches may harm model convergence.
-- **Iteration time**: Increasing $T_{\text{iteration}}$ gives storage more time to deliver each batch, but slower iterations extend total training time.
-
-In practice, none of these levers is free; the pipeline must be engineered to deliver the bandwidth that the training configuration demands.
+The throughput equation in @eq-pipeline-throughput reveals four levers for controlling storage demand, though each trades storage relief against training productivity. Reducing the accelerator count ($N_{\text{GPU}}$) directly lowers aggregate bandwidth requirements, but fewer accelerators diminish overall training throughput. Lowering target utilization ($\eta_{\text{target}}$) reduces the delivery rate the storage subsystem must sustain, but leaves costly compute resources idling during input stalls. Decreasing the per-batch data volume ($D_{\text{vol,batch}}$) reduces per-iteration transfer volume, but smaller batches can compromise statistical efficiency or model convergence. Finally, increasing iteration time ($T_{\text{iteration}}$) gives storage more time to deliver each batch, but slower iterations extend total training time proportionally. In practice, none of these levers is free; the pipeline must be engineered to deliver the bandwidth that the training configuration demands.
 
 As a separate image-training example, consider 256 GPUs training with ImageNet-scale images, 200 ms iterations, and 80 percent target utilization. This configuration requires `{python} PipelineCalcs.req_bw_imagenet_gb_per_s_str` of aggregate storage throughput. The bandwidth must be sustained continuously for the duration of training, which may last days or weeks. If sustained delivery falls below `{python} PipelineCalcs.req_bw_imagenet_gb_per_s_str`, the input path cannot support that target rate once its buffers drain. For the chapter's 175B language-model running example, tokenized text has a much lower per-batch bandwidth demand, but the total data volume and checkpoint traffic over the run are much larger, shifting the bottleneck from peak training-data bandwidth to sustained throughput and checkpoint movement over weeks.
 
@@ -3248,12 +3241,7 @@ class StorageCostExtremes:
     run_days_str = fmt_time(run_days, "day", precision=0, commas=False, style="word")
 ```
 
-Consider storing a 100 TB training dataset. The recurring annual storage costs vary by tier; the HBM figure below is a separate acquisition-cost comparison:
-
-- **Object storage (S3 Standard)**: `{python} ObjectStorageCostRecap.s3_annual_usd_str`/year
-- **Local NVMe (provisioned)**: `{python} ObjectStorageCostRecap.nvme_annual_usd_str`/year
-- **Archive (Glacier)**: `{python} GlacierCostRecap.glacier_annual_usd_str`/year
-- **HBM equivalent** (hypothetically storing 100 TB in GPU memory at \$15/GB): `{python} StorageCostExtremes.hbm_storage_usd_str` in upfront acquisition cost, before amortization or operating costs
+Consider storing a 100 TB training dataset across different tiers of the storage hierarchy. The recurring annual storage costs diverge by orders of magnitude: object storage (S3 Standard) costs `{python} ObjectStorageCostRecap.s3_annual_usd_str` per year, provisioned local NVMe costs `{python} ObjectStorageCostRecap.nvme_annual_usd_str` per year, and archival storage (such as Glacier) drops to `{python} GlacierCostRecap.glacier_annual_usd_str` per year. By contrast, an HBM equivalent—hypothetically provisioning 100 TB of GPU memory at \$15/GB—would require `{python} StorageCostExtremes.hbm_storage_usd_str` in upfront acquisition cost alone, before factoring in amortization, power, or server housing.
 
 The `{python} EconRatios.tier_cost_ratio_mult_str` cost difference between local NVMe and object storage explains why the hierarchy exists: data must live at the cheapest tier possible, migrating upward only when needed and returning downward when done. This cost gradient reflects the underlying physics. Faster storage requires more expensive materials (HBM uses 3D-stacked silicon with through-silicon vias), more energy per bit accessed, and more physical proximity to the accelerator (which limits the amount that can be provisioned per node). Cheaper storage uses commodity components (standard hard drives for archive), consumes minimal energy when idle, and can be located anywhere with network connectivity.
 
@@ -3514,11 +3502,13 @@ The economic benefit of automated tiering compounds over time. An organization r
 
 #### Data staging patterns {.unnumbered}
 
-The staging decision determines where the job pays for movement: before training starts, during the first epoch, or on every epoch. Three common patterns address different trade-offs between startup latency and steady-state throughput:
+The staging decision determines where the job pays for data movement: before training starts, during the first epoch, or on every epoch. Three common patterns balance the trade-off between startup latency and steady-state throughput.
 
-- **Prestaging**\index{Data staging!prestaging}: Copy the entire dataset from object storage to local NVMe before the first training iteration begins. This gives the best steady-state performance because all reads are local, but it creates the worst job start time; staging a 10 TB dataset across 256 nodes at 500 MB/s per node takes roughly 80 seconds per node, and shared parallel file system bandwidth can extend that delay to several minutes.
-- **On-Demand Staging**\index{Data staging!on-demand staging}: Copy shards to local NVMe only when the data loader first accesses them. This removes the startup delay but makes the first epoch pay the full network-read cost, which works best for multi-epoch training where later local reads amortize the initial staging cost.
-- **Streaming**\index{Data staging!streaming}: Keep data off local storage and read from the parallel file system or object storage every epoch. This has zero startup delay and zero local storage requirement, but every epoch pays the full network-read cost, making it appropriate for single-epoch pretraining or datasets too large for local NVMe.
+*Prestaging*\index{Data staging!prestaging} copies the entire dataset from object storage to local NVMe before the first training iteration begins. This approach delivers the highest steady-state performance because all subsequent reads are served locally, but it imposes the longest job startup delay. Staging a 10 TB dataset across 256 nodes at 500 MB/s per node takes roughly 80 seconds per node under ideal conditions, and contention on shared parallel file system bandwidth can extend that stall to several minutes.
+
+*On-demand staging*\index{Data staging!on-demand staging} instead defers copying until the data loader first accesses each shard. This removes the upfront startup delay, but the first epoch must pay the full network-read cost. Such amortized overhead works best for multi-epoch training where local reads across later epochs repay the initial transfer latency.
+
+*Streaming*\index{Data staging!streaming} keeps data off local storage entirely, reading records from the parallel file system or remote object store on every epoch. Streaming incurs zero startup delay and requires no local NVMe capacity, but every epoch repeatedly absorbs the network-read cost. This trade-off makes streaming best suited for single-epoch pretraining runs or for massive datasets that exceed the aggregate local NVMe capacity of the cluster.
 
 Tiering is a placement policy, so the next question is where the tier boundaries can move. Emerging devices shift the boundary between DRAM, NVMe, and archival storage, while inference workloads reuse the same hierarchy for a different objective: reducing cold-start latency and managing serving-time working sets rather than maximizing epoch throughput.
 
