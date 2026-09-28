@@ -8,7 +8,8 @@
 
 ## The Core Framework and the Extensibility Dilemma
 
-Across Chapters 1 through 20, you built a complete, self-contained deep learning framework from bare silicon concepts up to modern generative AI:
+Across Chapters 1 through 20, the preceding modules constructed a complete, self-contained deep learning framework from bare silicon concepts up to modern generative AI:
+
 - An n-dimensional array abstraction with arbitrary striding and slicing (@sec-tensors)
 - A reverse-mode automatic differentiation tape with topological backpropagation (@sec-autograd)
 - Composable parametric layers, activations, loss functions, and optimizers (@sec-layers, @sec-activations, @sec-losses, @sec-optimizers)
@@ -18,30 +19,34 @@ Across Chapters 1 through 20, you built a complete, self-contained deep learning
 Every single module in the core operates on a shared, unified execution contract. A `Tensor` encapsulates contiguous memory; a `Function` records forward and backward transformations on the autograd tape; a `Layer` manages trainable parameters; an `Optimizer` executes step updates.
 
 Yet in modern deep learning systems, the core runtime is only the beginning. When neural networks scale to billions of parameters, or when production serving demands microsecond latencies, frameworks face an architectural dilemma:
-1. **The Monolithic Framework Trap:** Shovel every emerging systems optimization—low-rank adapters, activation checkpointing, custom GPU kernels, mixed-precision loss scaling, graph compilers—directly into the core framework. The framework balloons into a brittle, multi-million-line monolith where simple bugs in experimental kernels destabilize the core autograd engine.
+
+1. **The Monolithic Framework Trap:** Shoveling every emerging systems optimization (low-rank adapters, activation checkpointing, custom GPU kernels, mixed-precision loss scaling, graph compilers) directly into the core framework causes it to balloon into a brittle monolith where bugs in experimental kernels destabilize the core autograd engine.
 2. **The Extensibility Model:** Keep the engine core minimal, stable, and transparent, while exposing strict, first-class extension points. Every specialized optimization lives as an autonomous extension that plugs cleanly into the core contracts.
 
-TinyTorch adopts the extensibility model. The 20 core modules constitute an immutable foundation. Everything else—from vectorized C++ CPU kernels to Apple MPS dispatch, OpenAI Triton shaders, parameter-efficient fine-tuning, and graph fusion compilers—lives in the `tinytorch.extensions` ecosystem.
+TinyTorch adopts the extensibility model. The 20 core modules constitute an immutable foundation. Specialized components, including vectorized C++ CPU kernels, Apple MPS dispatch, OpenAI Triton shaders, parameter-efficient fine-tuning, and graph fusion compilers, live in the `tinytorch.extensions` ecosystem.
 
 ---
 
-## Why Not Just Use PyTorch? The xv6 Lesson
+## Why Not Just Use PyTorch? The Minix and xv6 Lesson
 
-A natural question arises: *Why should you study and build systems extensions in TinyTorch rather than jumping straight into writing custom extensions for PyTorch or JAX?*
+A natural question arises: *Why study and build systems extensions in TinyTorch rather than jumping straight into authoring custom extensions for PyTorch or JAX?*
 
-The answer lies in the classic pedagogical philosophy of MIT's operating systems curriculum (6.828 / 6.1810) and **xv6**.
+The answer lies in the classic pedagogical tradition of operating systems education: from John Lions' legendary commentary on Unix 6th Edition, to Andrew Tanenbaum's Minix, to MIT's xv6.
 
-When teaching how an operating system manages virtual memory, process scheduling, and file systems, MIT does not ask students to modify the production Linux kernel. Linux contains over 30 million lines of C, thousands of hardware drivers, lock-less read-copy-update (RCU) primitives, and deep architecture-specific macros. Attempting to implement a simple copy-on-write page allocator in Linux forces a student to spend 90% of their time fighting macro definitions, build harnesses, and kernel ABI wrappers before they ever manipulate a page table. In xv6—a complete Unix clone written in just 10,000 lines of clean ANSI C—the abstraction boundaries are razor-sharp. A student can implement copy-on-write or a priority scheduler in 40 lines of clear C and inspect every single page table manipulation directly in physical memory.
+When Linus Torvalds wanted to understand how an operating system truly manages physical hardware, he did not begin by modifying a commercial monolith. He studied Minix, a compact microkernel operating system written by Tanenbaum specifically for teaching. Minix was small enough to be held in a single person's head, yet real enough to demonstrate preemptive scheduling, memory paging, and system calls. That tactile understanding gave Linus the foundational mental model to author the initial Linux kernel.
+
+Years later, when MIT redesigned its operating systems curriculum (6.828 / 6.1810), it chose xv6, a modern reimplementation of Unix 6th Edition in 10,000 lines of clean ANSI C. When teaching virtual memory and process scheduling, MIT does not ask students to modify the production Linux kernel. Linux contains over 30 million lines of C, thousands of hardware drivers, lock-less read-copy-update (RCU) primitives, and deep architecture-specific macros. Attempting to implement a simple copy-on-write page allocator in Linux forces a student to spend 90% of their time fighting macro definitions, build harnesses, and kernel ABI wrappers before manipulating a page table. In xv6, the abstraction boundaries are razor-sharp: a student can implement copy-on-write or a priority scheduler in 40 lines of clear C and inspect every page table manipulation directly in physical memory.
 
 PyTorch is the Linux kernel of deep learning. It is an industrial engineering masterpiece, but extending it requires navigating the `TORCH_LIBRARY` dispatcher macros, pybind11 ABI translation layers, internal ATen tensor representations (`c10::TensorImpl`), CUDA stream abstractions, and massive multi-repository CMake build graphs. Writing a custom C++ operator in PyTorch requires dozens of lines of framework glue code just to deliver a tensor pointer to a loop.
 
-TinyTorch is the xv6 of deep learning systems:
+TinyTorch is the Minix and xv6 of deep learning systems:
+
 - A `Tensor` is directly backed by a contiguous memory buffer.
 - A `Function` has exactly two methods: `forward` and `backward`.
 - A `Layer` has exactly two methods: `forward` and `parameters()`.
 - An `Optimizer` is a clean iterator over parameter tensors.
 
-When you implement Low-Rank Adaptation (LoRA) in TinyTorch, you write 25 lines of Python and observe how frozen base weights and trainable low-rank adapters interact with the autograd tape. When you write an AVX2 SIMD GEMM kernel or an Apple MPS dispatch wrapper, you pass memory addresses across a simple C foreign function interface (FFI) without layers of framework obfuscation. You see the unadorned reality of the hardware memory subsystem, the CPU vector registers, and the cache hierarchy.
+Implementing Low-Rank Adaptation (LoRA) in TinyTorch requires only 25 lines of Python to reveal how frozen base weights and trainable low-rank adapters interact with the autograd tape. Writing an AVX2 SIMD GEMM kernel or an Apple MPS dispatch wrapper passes memory addresses across a simple C foreign function interface (FFI) without layers of framework obfuscation, exposing the unadorned reality of the hardware memory subsystem, CPU vector registers, and cache hierarchy.
 
 ---
 
@@ -49,8 +54,20 @@ When you implement Low-Rank Adaptation (LoRA) in TinyTorch, you write 25 lines o
 
 TinyTorch exposes four native extension points that correspond to the four fundamental boundaries of deep learning execution:
 
-1. **The Autograd Boundary (`Function`):** Subclassing `Function` allows you to define custom forward and backward semantics, intercepting the autograd tape to drop or recompute intermediate activations (as in activation checkpointing).
-2. **The Architectural Boundary (`Layer`):** Subclassing `Layer` allows you to introduce custom architectural primitives, freeze pre-trained weight matrices by toggling `requires_grad=False`, and expose low-rank adapter parameters to the optimizer (as in LoRA).
+1. **The Autograd Boundary (`Function`):** Subclassing `Function` defines custom forward and backward semantics, intercepting the autograd tape to drop or recompute intermediate activations (as in activation checkpointing).
+
+::: {.column-margin}
+**↩ Jump back:** @sec-optimizers
+*Adam moment state tensors ($m_t, v_t$) and memory consumption during gradient descent.*
+
+**↩ Jump back:** @sec-autograd
+*The autograd tape, topological graph traversal, and intermediate tensor lifetimes.*
+
+**↩ Jump back:** @sec-acceleration
+*Hardware cache lines, 2D loop tiling, and register residency.*
+:::
+
+2. **The Architectural Boundary (`Layer`):** Subclassing `Layer` introduces custom architectural primitives, freezes pre-trained weight matrices by toggling `requires_grad=False`, and exposes low-rank adapter parameters to the optimizer (as in LoRA).
 3. **The Training Dynamics Boundary (`Optimizer`):** Interfacing with `optimizer.params` enables custom gradient transformations, loss scaling for mixed-precision arithmetic, gradient clipping, and advanced update rules (such as Lion or Muon).
 4. **The Silicon Boundary (Backend FFI):** Extracting contiguous memory pointers from `Tensor.data` enables invoking native compiled C++ shared libraries via `ctypes`, launching GPU kernels in OpenAI Triton, or offloading computation to Apple Silicon Metal Performance Shaders (MPS).
 
@@ -96,21 +113,42 @@ To ensure that every extension functions harmoniously with the rest of the frame
 3. **Autograd Transparency:** Operations that participate in backpropagation must explicitly define their mathematical derivatives via `Function.forward` and `Function.backward`.
 4. **Graceful Fallback:** If a required compiler, runtime library, or physical GPU accelerator is unavailable, the extension must fall back cleanly to a pure-Python or NumPy reference implementation rather than crashing on import.
 
-TinyTorch provides a canonical starter template in `tinytorch/extensions/template.py` that demonstrates all four properties. When implementing a custom autograd operator, subclass `Function` and implement the forward and backward transformations:
+TinyTorch provides a canonical starter template in `tinytorch/extensions/template.py` that demonstrates all four properties across every native boundary:
+
+1. **Autograd Function Boundary:** When implementing a custom autograd operator, subclass `Function` and implement the forward and backward transformations:
 
 {{< include _listings/21_extensions/CustomScaledShift.qmd >}}
 
-When authoring a custom neural network module with learnable parameters, subclass `Layer` and register its parameter tensors:
+2. **Architectural Layer Boundary:** When authoring a custom neural network module with learnable parameters, subclass `Layer` and register its parameter tensors:
 
 {{< include _listings/21_extensions/CustomResidualBlock.qmd >}}
+
+3. **Training Dynamics Boundary:** When modifying parameter gradients prior to the optimizer step (such as threshold clipping or spectral projection), wrap parameter updates in an in-place transformation:
+
+{{< include _listings/21_extensions/CustomGradientTransform.qmd >}}
+
+4. **Silicon Kernel Boundary:** When accelerating operations via compiled C++, Triton, or GPU APIs, encapsulate native dispatch behind runtime feature detection with a transparent pure-NumPy fallback:
+
+{{< include _listings/21_extensions/custom_accelerated_op.qmd >}}
+
+#### The 5-Step Extension Recipe
+
+Adding a new capability to TinyTorch follows an explicit five-step protocol:
+
+1. **Identify the Boundary:** Map the optimization to `Function` (math/memory), `Layer` (adapters/primitives), `Optimizer` (gradients/moments), or C-ABI `ctypes` / GPU runtime (silicon).
+2. **Copy the Template:** Duplicate `tinytorch/extensions/template.py` to `tinytorch/extensions/<feature_name>.py`.
+3. **Implement the Contract:** Satisfy the core invariants: handle both `Tensor` and `np.ndarray`, define backward passes for differentiable operations, and fall back to NumPy if hardware compilers or libraries are missing.
+4. **Author Unit Tests:** Duplicate `tinytorch/tests/extensions/test_template.py` to `tinytorch/tests/extensions/test_<feature_name>.py` and verify numerical parity against an unoptimized NumPy reference (`np.allclose(out, ref, atol=1e-5)`).
+5. **Register Public Symbols:** Export new classes and functional wrappers in `tinytorch/extensions/__init__.py`.
 
 ---
 
 ## The Flat Extension Catalog
 
-We now examine each primary extension in the TinyTorch ecosystem. In keeping with our systems focus, we avoid artificial groupings: whether an extension optimizes mathematical parameters, memory lifetimes, numerical precision, or physical silicon execution, each is presented as a complete, self-contained systems case study.
+The sections below examine each primary extension in the TinyTorch ecosystem. In keeping with a rigorous systems focus, artificial groupings are avoided: whether an extension optimizes mathematical parameters, memory lifetimes, numerical precision, or physical silicon execution, each appears as a complete, self-contained systems case study.
 
-For each extension, we establish:
+Each extension establishes:
+
 1. **The Systems Bottleneck:** The physical hardware constraint being hit.
 2. **Architectural Strategy:** How the extension bypasses the constraint.
 3. **The Implementation:** The actual source code.
@@ -120,15 +158,25 @@ For each extension, we establish:
 
 ### Extension 1: Parameter-Efficient Fine-Tuning (LoRA)
 
-**The Systems Bottleneck:** Fine-tuning large language models by updating all parameters encounters a severe memory wall. Modern adaptive optimizers such as Adam maintain two 32-bit floating-point state tensors per parameter: the first moment vector $m_t$ (momentum) and the second raw moment vector $v_t$ (variance). Each parameter requires 8 bytes of optimizer state, plus 4 bytes for the stored gradient, plus 4 bytes for the weight itself—totaling 16 bytes per parameter. For a 7-billion parameter model, storing Adam optimizer states alone consumes $7 \times 10^9 \times 8 = 56\text{ GB}$ of memory, far exceeding consumer GPU memory before a single activation is allocated.
+**The Systems Bottleneck:** Fine-tuning large language models by updating all parameters encounters a severe memory wall. Modern adaptive optimizers such as Adam maintain two 32-bit floating-point state tensors per parameter: the first moment vector $m_t$ (momentum) and the second raw moment vector $v_t$ (variance). Each parameter requires 8 bytes of optimizer state, plus 4 bytes for the stored gradient, plus 4 bytes for the weight itself, totaling 16 bytes per parameter. For a 7-billion parameter model, storing Adam optimizer states alone consumes $7 \times 10^9 \times 8 = 56\text{ GB}$ of memory, far exceeding consumer GPU memory before a single activation is allocated.
 
 **Architectural Strategy:** Low-Rank Adaptation (LoRA) freezes the pre-trained weight matrix $W_0 \in \mathbb{R}^{d \times k}$ by setting `requires_grad=False`. It decomposes the weight update $\Delta W$ into the product of two small, low-rank matrices $A \in \mathbb{R}^{d \times r}$ and $B \in \mathbb{R}^{r \times k}$, where the rank $r \ll \min(d, k)$:
 $$h = x W_0 + \Delta W x = x W_0 + x A B$$
 Because $W_0$ is frozen, the autograd engine allocates gradients and Adam optimizer states solely for $A$ and $B$, drastically reducing memory consumption while retaining full adaptation capacity.
 
+::: {.column-margin}
+![](assets/images/diagrams/21_extensions-margin-lora.svg){width="100%" fig-alt="LoRA low-rank adapter decomposition diagram contrasting frozen base weight W0 with trainable factor matrices A and B, showing over 98 percent Adam optimizer memory reduction."}
+
+*LoRA Rank Decomposition: The pre-trained base weight $W_0$ is frozen ($requires\_grad=False$), eliminating optimizer momentum and variance states. Training is restricted to low-rank matrices $A$ and $B$, slashing Adam memory overhead by over 98 percent.*
+:::
+
 **The Implementation:** `LoRALinear` subclasses `Layer`, holds frozen weights, and trains only the low-rank factor matrices:
 
 {{< include _listings/21_extensions/LoRALinear.qmd >}}
+
+::: {.callout-tip title="Pause & Predict: The Memory Economics of Freezing Base Weights"}
+Suppose you fine-tune a 7-billion parameter language model in 16-bit precision using the Adam optimizer. Each parameter requires 2 bytes for the weight, 2 bytes for the gradient, and 8 bytes for Adam moment states ($m_t$ and $v_t$ in FP32), totaling 12 bytes of training state per parameter (84 GB). If you freeze all base weights and attach a LoRA adapter with rank $r=16$ affecting 0.2% of the parameters (14 million parameters), how much memory do the frozen base weights require? How much memory do the LoRA parameters and their optimizer states require? What is the total reduction in training memory state?
+:::
 
 **The Empirical Scorecard:** Consider a standard transformer feedforward projection layer ($d_{\text{in}} = 4096, d_{\text{out}} = 16384$, totaling 67.1 million parameters). @tbl-lora-memory details the parameter counts and memory footprints across adapter ranks compared to full fine-tuning.
 
@@ -152,9 +200,15 @@ Because $W_0$ is frozen, the autograd engine allocates gradients and Adam optimi
 
 **The Implementation:** `checkpoint` wraps any forward callable inside a custom `Function`, detaching inputs during the backward pass to seed local recomputation:
 
+::: {.column-margin}
+![](assets/images/diagrams/21_extensions-margin-checkpoint.svg){width="100%" fig-alt="Activation checkpointing diagram contrasting standard O(L) forward activation retention with checkpointed O(sqrt(L)) boundary storage and backward recomputation."}
+
+*Activation Checkpointing: Standard autograd holds all $L$ layer activations in memory. Checkpointing stores only boundary tensors ($O(\sqrt{L})$), recomputing intermediate activations during backpropagation to reduce peak memory by up to 80 percent at a 33 percent compute overhead.*
+:::
+
 {{< include _listings/21_extensions/checkpoint.qmd >}}
 
-**The Empirical Scorecard:** @tbl-checkpoint-scaling compares activation memory consumption for a 32-layer transformer model ($T = 2048, D = 4096$) with and without activation checkpointing.
+**The Empirical Scorecard:** @tbl-checkpoint-scaling compares activation memory consumption for a 32-layer transformer model ($T = 2048, D = 4096$) with and without activation checkpointing.[^fn-activation-checkpointing-sqrt]
 
 | Layer Depth ($L$) | Standard Forward Memory | Checkpointed Memory | Compute Overhead | Peak Memory Saved |
 | ---: | ---: | ---: | ---: | ---: |
@@ -164,6 +218,8 @@ Because $W_0$ is frozen, the autograd engine allocates gradients and Adam optimi
 | 64 Layers | 67.2 GB | 8.8 GB | +33.3% | 86.9% |
 
 : **Activation memory scaling under activation checkpointing ($T = 2048, D = 4096$, float32).** Standard training scales linearly $O(L)$; checkpointing scales sublinearly $O(\sqrt{L})$ with uniform segments. {#tbl-checkpoint-scaling tbl-colwidths="[18,24,22,18,18]"}
+
+[^fn-activation-checkpointing-sqrt]: **Activation checkpointing trade-offs**: In an $L$-layer neural network, standard autograd retains $L$ activation tensors in memory, scaling as $\mathcal{O}(L)$. Checkpointing segments the model into $k$ subgraphs of length $m = L / k$, storing only the boundary activations. Minimizing total peak memory $M(k) = k + L / k$ yields an optimal segment length $k^* = L^{1/2}$, cutting peak memory from $\mathcal{O}(L)$ to $\mathcal{O}(L^{1/2})$. The cost is exactly one extra forward pass per segment during backpropagation, adding a deterministic $33\%$ computational overhead.
 
 ---
 
@@ -198,6 +254,7 @@ $$\nabla_\theta \mathcal{L} = \frac{1}{S} \nabla_\theta (S \cdot \mathcal{L})$$
 **The Systems Bottleneck:** In dynamic, define-by-run execution, every mathematical operator is an isolated function call that reads its operands from DRAM, computes results in registers, and writes the output tensor back to DRAM. Consider an elementwise chain such as:
 $$y = (x + \text{bias}) \cdot \text{scale}$$
 In eager execution, two separate kernel invocations occur:
+
 1. $t = x + \text{bias}$ (reads $x$ and $\text{bias}$, writes intermediate tensor $t$ to DRAM)
 2. $y = t \cdot \text{scale}$ (reads intermediate tensor $t$ and $\text{scale}$, writes output $y$ to DRAM)
 For an array of $N$ elements, this sequence transfers $5N$ floating-point words (20 bytes per element) across the memory bus. Because modern processor ALUs compute far faster than memory buses can transfer bytes, eager execution is severely memory-bandwidth bound.
@@ -246,10 +303,15 @@ def matmul_loops(A, B):
 On a 128 × 128 product, this loop runs at just 0.12 GFLOP/s. For a standard 1024 × 1024 matrix ($2 \times 1024^3 \approx 2.15\text{ billion FLOPs}$), Python would take approximately 17 seconds. In contrast, NumPy's underlying BLAS library computes it in 1.33 ms.
 
 **Architectural Strategy:** To bridge this gap, `simd_matmul` bypasses the Python interpreter via `ctypes` FFI:
+
 1. **Contiguous Pointer Passing:** Extracts raw memory addresses (`.data.ctypes.data_as`) without copying memory.
 2. **Cache-Blocked Tiling:** Tiles the matrix traversal in 64 × 64 blocks, ensuring that active working sets (48 KB) reside inside the 128 KB L1 data cache.
-3. **SIMD Vectorization:** Arranges inner loops in $i, k, j$ order so that memory access along `b_row[j]` and `c_row[j]` is contiguous, allowing compiler auto-vectorization (AVX2 on x86, ARM NEON on Apple Silicon).
+3. **SIMD Vectorization:** Arranges inner loops in $i, k, j$ order so that memory access along `b_row[j]` and `c_row[j]` is contiguous, allowing compiler auto-vectorization (AVX2 on x86, ARM NEON on Apple Silicon).[^fn-simd-register-widths]
 4. **OpenMP Multithreading:** Distributes output tiles across CPU cores using `#pragma omp parallel for collapse(2)`.
+
+[^fn-simd-register-widths]: **SIMD register widths across architectures**: A single Instruction Multiple Data (SIMD) register holds multiple adjacent data values: 128-bit ARM NEON holds 4 float32 values, 256-bit AVX2 holds 8 float32 values, and 512-bit AVX-512 holds 16 float32 values. Modern 2D systolic arrays (such as Google TPUs and Apple Neural Engine) expand vector registers into two-dimensional multiply-accumulate matrices, executing outer products in lock-step across hundreds of processing elements without intermediate register writebacks.
+
+**Pedagogical Choice: Why ctypes instead of pybind11?** Modern PyTorch C++ extensions typically rely on pybind11 and `TORCH_LIBRARY` registration macros to bind native operators into Python. While pybind11 provides seamless class wrapping and exception propagation, it also conceals the actual memory boundary behind layers of C++ template metaprogramming. TinyTorch deliberately chooses Python's built-in `ctypes` foreign function interface: by extracting a raw pointer from the underlying buffer (`tensor.data.ctypes.data_as(ctypes.POINTER(ctypes.c_float))`), the developer directly confronts the C-ABI memory contract, pointer aliasing, and 64-byte cache-line alignment without any framework magic in the middle.
 
 **The Implementation:**
 
@@ -288,7 +350,7 @@ The C++ kernel performs tiled, vectorized matrix multiplication:
 
 : **Matrix multiply, 1024 × 1024, on one Apple M5 Max.** Single-threaded execution; outputs agree to within float32 rounding. {#tbl-extensions-gemm tbl-colwidths="[46,18,18,18]"}
 
-Compiling the loop gains a factor of 50 over Python, and auto-vectorization adds another factor of 3.4. Notice that vendor BLAS (`np.matmul`) remains 75 times faster than our basic tiled kernel: tuned production libraries employ register-level micro-kernels and memory packing to keep sub-blocks resident in CPU registers rather than reloading from L1 cache.
+Compiling the loop gains a factor of 50 over Python, and auto-vectorization adds another factor of 3.4. Notice that vendor BLAS (`np.matmul`) remains 75 times faster than the basic tiled kernel: tuned production libraries employ register-level micro-kernels and memory packing to keep sub-blocks resident in CPU registers rather than reloading from L1 cache.
 
 ---
 
@@ -312,10 +374,10 @@ In NumPy, `x + bias` writes the full intermediate tensor to DRAM and GELU reads 
 | NumPy expression with `z * z * z` in place of `z ** 3` | 4.33 ms | $6.1\times$ |
 | C++ fused kernel, scalar `std::tanh` | 22.1 ms | $1.2\times$ |
 | `simd_fused_bias_gelu` (vectorized tangent) | 3.06 ms | **$8.6\times$** |
-| *Piecewise breakdown:* `x ** 3` alone | 16.6 ms | — |
-| *Piecewise breakdown:* `x * x * x` alone | 0.46 ms | — |
-| *Piecewise breakdown:* `x + bias` alone | 0.37 ms | — |
-| *Piecewise breakdown:* `np.tanh(x)` alone | 2.10 ms | — |
+| *Piecewise breakdown:* `x ** 3` alone | 16.6 ms | - |
+| *Piecewise breakdown:* `x * x * x` alone | 0.46 ms | - |
+| *Piecewise breakdown:* `x + bias` alone | 0.37 ms | - |
+| *Piecewise breakdown:* `np.tanh(x)` alone | 2.10 ms | - |
 
 : **Bias plus GELU, 4096 × 768, on one Apple M5 Max.** Outputs agree to within $5 \times 10^{-7}$. {#tbl-extensions-gelu tbl-colwidths="[62,20,18]"}
 
@@ -325,19 +387,20 @@ Notice the critical systems lesson: rewriting `z ** 3` as `z * z * z` in NumPy y
 
 ### Extension 7: Hardware Accelerator Offloading (MPS & Triton)
 
+**The Systems Bottleneck:** Specialized hardware accelerators (such as Apple Silicon GPUs or NVIDIA GPUs) provide massive parallel throughput. However, moving data to and from the accelerator incurs data transfer latency and bus transfer overhead.
+
+**Architectural Strategy:**
+
+1. **Apple MPS GEMM:** Uses Metal Performance Shaders (`mps_matmul`) on Apple Silicon unified memory.
+2. **OpenAI Triton Fused GELU:** Uses SPMD block-level GPU kernel programming (`triton_fused_gelu`) for NVIDIA GPUs.
+
+**The Implementation:**
+
 ::: {.column-margin}
 ![](assets/images/diagrams/21_extension-paths.svg){width="100%" fig-alt="Execution pathways for a TinyTorch Tensor across CPU, Apple MPS GPU, and NVIDIA Triton GPU."}
 
 *Dispatch Pathways: TinyTorch tensors can be evaluated via NumPy, compiled C++ SIMD, Apple MPS, or NVIDIA Triton.*
 :::
-
-**The Systems Bottleneck:** Specialized hardware accelerators (such as Apple Silicon GPUs or NVIDIA GPUs) provide massive parallel throughput. However, moving data to and from the accelerator incurs data transfer latency and bus transfer overhead.
-
-**Architectural Strategy:**
-1. **Apple MPS GEMM:** Uses Metal Performance Shaders (`mps_matmul`) on Apple Silicon unified memory.
-2. **OpenAI Triton Fused GELU:** Uses SPMD block-level GPU kernel programming (`triton_fused_gelu`) for NVIDIA GPUs.
-
-**The Implementation:**
 
 The Apple MPS wrapper queues matrix multiplication on the Apple GPU:
 
@@ -347,13 +410,14 @@ The Triton kernel executes block programs across streaming multiprocessors on NV
 
 {{< include _listings/21_extensions/fused_bias_gelu_kernel.qmd >}}
 
-::: {#nbk-extensions-offload .callout-napkin-math title="Napkin math: which operations pay for the trip"}
+::: {#nbk-extensions-offload .callout-notebook title="Napkin Math: Which operations pay for device transfer"}
 Count the work an operation does for each byte it moves across the bus:
 
 - **Matrix multiply ($n \times n$ by $n \times n$ in float32):**
   $2n^3$ operations on $3n^2$ values of 4 bytes each:
   $$\text{Arithmetic Intensity} = \frac{2n^3}{12n^2} = \frac{n}{6} \text{ FLOP/byte}$$
   For $n = 256$, arithmetic intensity is $\approx 43$ FLOP/byte. For $n = 4096$, it reaches $\approx 683$ FLOP/byte. The larger the product, the more arithmetic covers transfer latency.
+
 - **Bias-plus-GELU (any size):**
   Approximately a dozen arithmetic operations per element on 8 bytes transferred (4 bytes read, 4 bytes written):
   $$\text{Arithmetic Intensity} \approx \frac{12}{8} = 1.5 \text{ FLOP/byte}$$
@@ -371,13 +435,13 @@ Count the work an operation does for each byte it moves across the bus:
 
 : **Matrix multiply on Apple GPU through MPS versus CPU.** At small sizes ($n = 256$), transfer overhead makes GPU offloading $30\times$ slower; at large sizes ($n = 4096$), GPU throughput makes it $6\times$ faster even including round-trip copies. {#tbl-extensions-mps tbl-colwidths="[22,26,26,26]"}
 
-As predicted by our napkin math ($n/6$ FLOP/byte), offloading small matrices loses performance to bus latency. As $n$ reaches 4096, arithmetic intensity dominates, and the GPU executes **$6\times$ faster** than the CPU.
+As predicted by the napkin math ($n/6$ FLOP/byte), offloading small matrices loses performance to bus latency. As $n$ reaches 4096, arithmetic intensity dominates, and the GPU executes **$6\times$ faster** than the CPU.
 
 ---
 
 ## Evaluating an Extension: From Micro-benchmarks to End-to-End Milestones
 
-When you author a new systems extension, how do you verify its correctness, benchmark its performance, and study its real-world impact? In production systems engineering, an optimization cannot be evaluated in a vacuum. TinyTorch provides a structured **3-Tier Evaluation Ladder** that guides you from unit verification to full end-to-end model training:
+Authoring a new systems extension requires rigorous verification of correctness, performance benchmarking, and evaluation of real-world impact. In production systems engineering, an optimization cannot be evaluated in a vacuum. TinyTorch provides a structured **3-Tier Evaluation Ladder** from unit verification to full end-to-end model training:
 
 ```text
 [ Tier 3: Custom Ingestion ]
@@ -392,15 +456,16 @@ When you author a new systems extension, how do you verify its correctness, benc
 
 ### Tier 1: Numerical Correctness and Synthetic Micro-benchmarks
 
-Before measuring execution time, you must guarantee numerical correctness. Never optimize an incorrect operator:
+Before measuring execution time, numerical correctness must be certified. An incorrect operator must never be optimized:
 
-1. **Unit Test Parity:** Write unit tests in `tests/extensions/test_<name>.py`. Compare your extension's forward outputs and backward gradients against a high-precision reference (such as float64 NumPy):
+1. **Unit Test Parity:** Write unit tests in `tests/extensions/test_<name>.py`. Compare forward outputs and backward gradients against a high-precision reference (such as float64 NumPy):
    ```python
    # Verify outputs agree within float32 tolerance
    assert np.allclose(
        out_extension.data, out_reference, atol=1e-5
    )
    ```
+
 2. **Synthetic Micro-benchmarks:** Use the built-in profiling tools from `tinytorch.perf.benchmarking` (`Timer` and `MemoryTracker`) to isolate the operator across power-of-two shapes ($N \in \{128, 256, 512, 1024, 2048\}$):
    ```python
    from tinytorch.perf.benchmarking import (
@@ -424,19 +489,19 @@ Isolated micro-benchmarks do not capture end-to-end training dynamics, cache con
 1. **Milestone 4: Convolutional Vision (TinyDigits):**
    - *Script:* `milestones/04_1998_cnn/01_lecun_tinydigits.py`
    - *Target Extensions:* Custom activations, loss scalers, or optimizers.
-   - *Workflow:* Substitute your custom activation or optimizer into the LeNet-style architecture. Train on the TinyDigits classification task and compare epoch training time and final validation accuracy against standard SGD/Adam.
+   - *Workflow:* Substitute the custom activation or optimizer into the LeNet-style architecture. Train on the TinyDigits classification task and compare epoch training time and final validation accuracy against standard SGD/Adam.
 2. **Milestone 5: Generative Transformers (TinyShakespeare):**
    - *Script:* `milestones/05_2017_transformer/02_vaswani_attention.py`
    - *Target Extensions:* Low-rank adaptation, activation checkpointing, custom attention, or fused kernels.
    - *Workflow for LoRA:* Freeze the pre-trained GPT weights and replace attention projection layers with `LoRALinear`. Fine-tune on Shakespearean text and verify that the adapter achieves comparable cross-entropy loss while updating less than 2% of the parameters.
-   - *Workflow for Activation Checkpointing:* Wrap each `TransformerBlock` in `checkpoint()`. Measure peak activation memory using `MemoryTracker` to prove you can double the batch size without triggering out-of-memory errors.
+   - *Workflow for Activation Checkpointing:* Wrap each `TransformerBlock` in `checkpoint()`. Measure peak activation memory using `MemoryTracker` to demonstrate that batch size can be doubled without triggering out-of-memory errors.
 3. **Milestone 6: Standardized MLPerf Inference:**
    - *Module:* `tinytorch.perf.benchmarking`
-   - *Workflow:* Run `mlperf_run_standard_benchmark(model, dataloader)` to evaluate your optimized model against standardized MLPerf latency percentiles ($p_{50}, p_{90}, p_{99}$), sustained throughput, and memory consumption.
+   - *Workflow:* Run `mlperf_run_standard_benchmark(model, dataloader)` to evaluate the optimized model against standardized MLPerf latency percentiles ($p_{50}, p_{90}, p_{99}$), sustained throughput, and memory consumption.
 
 ### Tier 3: Custom Datasets and Pipeline Ingestion
 
-To evaluate an extension on your own domain-specific problem, plug your raw data into TinyTorch's ingestion pipeline:
+Evaluating an extension on domain-specific workloads integrates directly with TinyTorch's ingestion pipeline:
 
 1. **Vision or Tabular Data:** Subclass `Dataset` from `tinytorch.core.dataloader`, implement `__len__()` and `__getitem__()`, and instantiate a `DataLoader`:
    ```python
@@ -459,16 +524,26 @@ To evaluate an extension on your own domain-specific problem, plug your raw data
        shuffle=True,
    )
    ```
+
 2. **Text Corpora:** Pass raw text to `Tokenizer` from `tinytorch.core.tokenization` to construct tokenized input-target sequences for autoregressive language modeling.
-3. **End-to-End Training:** Pass the loader, model (with your extension active), optimizer, and loss function to `Trainer` (`tinytorch.core.training.Trainer`). Run `trainer.fit(epochs=5)` and log training throughput and loss progression.
+3. **End-to-End Training:** Pass the loader, model (with the active extension), optimizer, and loss function to `Trainer` (`tinytorch.core.training.Trainer`). Executing `trainer.fit(epochs=5)` logs training throughput and loss progression.
 
 ---
 
 ## Building on the Foundations: Next-Level Extensions
 
-Rather than attempting massive, disconnected projects, the most effective way to deepen your systems mastery is to build directly on the 7 canonical extensions introduced in this chapter. Each project below takes an existing extension and resolves its primary limitation:
+These seven extensions span key architectural boundaries, establishing clear templates for deeper systems work. Rather than attempting disconnected projects, the most effective path to systems mastery is building directly upon these canonical extension points.
 
-### 1. Dynamic Loss Scaling (Building on Extension 3: `LossScaler`)
+Extending TinyTorch leverages intentionally clean and minimalist interfaces:
+
+- To implement custom forward/backward math or recomputation patterns, subclass `Function` and implement `forward` and `backward`.
+- To inject custom parameter adaptations or layer hooks, subclass `Layer` and register parameter tensors.
+- To bypass the Python interpreter for custom hardware or low-level kernels, pass contiguous buffer pointers (`tensor.data.ctypes.data_as(...)`) across the `ctypes` foreign function interface.
+- To simulate hardware execution, trace tensor shapes and access streams into architectural modeling tools.
+
+Each project below addresses a real systems bottleneck and demonstrates how to resolve it or interface TinyTorch with external systems infrastructure:
+
+### Dynamic Loss Scaling
 
 * **Systems Limitation:** The stock `LossScaler` applies a fixed scale factor ($S = 65,536$). If training encounters large activations, gradient magnitudes can spike, causing multiplied values to exceed the float16 maximum ($65,504$) and overflow to `inf` or `nan`.
 * **The Project:** Implement adaptive loss scaling. After calling `loss.backward()`, scan parameter gradients for `np.isinf` or `np.isnan`. If an overflow is detected:
@@ -477,19 +552,47 @@ Rather than attempting massive, disconnected projects, the most effective way to
   3. Reset a consecutive-success step counter.
   If $M$ consecutive steps complete without any overflow (e.g., $M = 2000$), double the scale factor ($S \leftarrow 2S$) to maintain maximum numerical dynamic range. Evaluate on Milestone 4 or 5 in FP16.
 
-### 2. Register Micro-Tiling in C++ (Building on Extension 5: `simd_matmul`)
+### Register Micro-Tiling
 
 * **Systems Limitation:** Stock `simd_matmul` tiles matrices at the L1 cache level ($64 \times 64$). However, the innermost loop accumulates scalar products back into memory, keeping CPU vector execution units waiting on L1 data cache load-store latency.
-* **The Project:** Implement an $8 \times 4$ register micro-kernel in `cpp_simd_gemm.cpp`. Unroll the inner loop so that an $8 \times 4$ block of intermediate accumulation registers is kept alive in CPU vector registers (AVX2/NEON) throughout the $K$-dimension reduction, storing results back to DRAM only when the tile is complete. Benchmark your micro-kernel against `simd_matmul` and graph the GFLOP/s improvement.
+* **The Project:** Implement an $8 \times 4$ register micro-kernel in `cpp_simd_gemm.cpp`. Unroll the inner loop so that an $8 \times 4$ block of intermediate accumulation registers is kept alive in CPU vector registers (AVX2/NEON) throughout the $K$-dimension reduction, storing results back to DRAM only when the tile is complete. Benchmark the micro-kernel against `simd_matmul` and quantify the GFLOP/s improvement.
 
-### 3. Model-Wide LoRA Injection Hook (Building on Extension 1: `LoRALinear`)
+### Model-Wide LoRA Injection Hook
 
-* **Systems Limitation:** Stock `LoRALinear` requires manually instantiating adapter layers by hand in your model definition. In deep models with dozens of projection matrices, manual replacement is tedious and fragile.
+* **Systems Limitation:** Stock `LoRALinear` requires manually instantiating adapter layers in the model definition. In deep models with dozens of projection matrices, manual replacement is tedious and fragile.
 * **The Project:** Author an automated helper function `inject_lora(model, target_layers, rank=8)`:
   1. Recursively traverse the model's module hierarchy.
   2. For each layer matching a target name, replace the existing `Linear` layer with a corresponding `LoRALinear` instance initialized with the pre-trained weights.
   3. Set `requires_grad = False` on all non-adapter parameters.
   Test `inject_lora` on Milestone 5's GPT model to demonstrate fine-tuning a full transformer with a single function call.
+
+### FlashAttention and SRAM-Aware Tiling
+
+* **Systems Limitation:** Standard attention (@sec-attention) evaluates $O = \text{softmax}(Q K^T / \sqrt{d_k}) V$ by materializing the full intermediate $S \times S$ attention score matrix in high-bandwidth memory (DRAM). For a sequence length of $S = 4096$ with 32 heads, storing the attention score and weight matrices requires hundreds of megabytes per batch in DRAM. The operation is severely memory-bandwidth bound: the processor spends most of its execution cycles reading and writing the $S \times S$ matrix across the memory bus rather than performing floating-point math.
+* **The Project:** Implement a custom `FlashAttentionFunction` subclassing `Function`. Tile the $Q, K, V$ matrices into blocks ($B_r \times d$ and $B_c \times d$) sized to fit entirely inside fast on-chip memory (CPU L1/L2 cache or GPU shared memory). Instead of materializing the $S \times S$ matrix, use the **online softmax** algorithm (maintaining running maximum scalars $m_i$ and running sum scalars $l_i$ per row block) to incrementally update the output accumulator $O_i$ as column blocks of $K$ and $V$ stream through:
+  $$m_i^{\text{new}} = \max(m_i, \max(S_i)), \quad l_i^{\text{new}} = e^{m_i - m_i^{\text{new}}} l_i + \sum e^{S_i - m_i^{\text{new}}}$$
+  $$O_i^{\text{new}} = \text{diag}(e^{m_i - m_i^{\text{new}}}) O_i + e^{S_i - m_i^{\text{new}}} V_j$$
+  Once all column blocks have been processed, normalize the output accumulator by dividing each row by its final running sum:
+  $$O_i^{\text{final}} = \text{diag}(l_i^{\text{final}})^{-1} O_i$$
+  In the backward pass, recompute the attention weights on-the-fly from the cached $Q, K, V$ blocks, completely eliminating the $O(S^2)$ memory footprint. Benchmark the tiled attention function against stock `attention.py` across sequence lengths $S \in \{512, 1024, 2048, 4096\}$ using `MemoryTracker` and `Timer`.
+
+![**FlashAttention SRAM-aware tiling vs. standard attention DRAM wall**: Standard attention incurs multiple high-latency DRAM round-trips to materialize the full $S \times S$ score and weight matrices. FlashAttention partitions $Q, K, V$ into small SRAM-sized blocks ($B_r, B_c \ll S$) and employs online softmax updates directly in on-chip fast memory, completely eliminating the $O(S^2)$ DRAM memory footprint.](assets/images/diagrams/21_flashattention-sram-tiling.svg){#fig-flashattention-sram-tiling width="100%" fig-alt="Diagram contrasting standard attention DRAM memory wall with FlashAttention SRAM online softmax accumulation."}
+
+### Hardware Simulation and Memory Tracing (ScaleSim Integration)
+
+* **Systems Limitation:** Profiling on a host CPU or GPU measures total runtime, but cannot answer architectural design questions: How many multiply-accumulate (MAC) units in a 2D systolic array are actually utilized? Would doubling the on-chip SRAM buffer eliminate DRAM stall cycles? What array aspect ratio ($128 \times 128$ vs $256 \times 64$) achieves optimal utilization for a specific model?
+
+::: {.column-margin}
+![](assets/images/diagrams/21_extensions-margin-systolic.svg){width="100%" fig-alt="Two-dimensional systolic array grid illustrating diagonal wavefront dataflow and rhythmic lock-step execution across processing elements."}
+
+*2D Systolic Wavefront: Processing elements stream activation and weight operands in rhythmic lock-step, achieving peak compute density with $2N - 1$ cycle latency.*
+:::
+
+* **The Project:** Build an architectural memory-tracing extension that interfaces TinyTorch with **ScaleSim** (Systolic Array Memory and Cycle Simulator) or an equivalent cycle-accurate hardware simulator:
+  1. Author a tracer hook or custom `SimulatedLinear` layer that intercepts GEMM operations in TinyTorch models.
+  2. For every matrix multiplication $Y = X W$, extract the target dimensions $(M, K, N)$ and generate memory read/write address request streams for matrices $A$, $B$, and $C$.
+  3. Export a ScaleSim-compatible workload topology file listing layer dimensions and dataflows (e.g., Weight Stationary `WS`, Output Stationary `OS`, or Input Stationary `IS`).
+  4. Run the ScaleSim simulation from Python via `subprocess` to obtain cycle counts, buffer hit rates, and DRAM bandwidth requirements. Compare the simulated cycles and bandwidth stalls of `TinyGPT` projections across different array dimensions ($32 \times 32$ edge accelerator vs $128 \times 128$ datacenter systolic array).
 
 ---
 
@@ -507,11 +610,30 @@ The mechanisms demonstrated in TinyTorch extensions reflect the exact techniques
 
 : **Architectural differences between TinyTorch extensions and production frameworks.** TinyTorch exposes the bare mathematical and memory contracts; production adds compiler generation and dispatch orchestration. {#tbl-extensions-production tbl-colwidths="[20,38,42]"}
 
----
+Production systems build atop these contracts through three key architectural evolutions:
+
+1. **Vendor Libraries and Polyhedral Generation:** While `simd_matmul` relies on fixed $64 \times 64$ cache tiling, production GEMM runtimes dispatch to vendor-tuned micro-kernels (NVIDIA cuBLAS, CUTLASS, or Apple Accelerate). These libraries dynamically select tile sizes, pack submatrices into contiguous memory layouts to avoid cache associativity thrashing, and schedule register allocations around pipeline latency.
+2. **Persistent Device Memory Pipelines:** TinyTorch extensions copy data between host memory and accelerator buffers on every invocation. Industrial training loops allocate tensor storage directly on high-bandwidth device memory (HBM), keeping weights, activations, and gradient accumulators resident on-chip across thousands of successive training iterations. Host communication is restricted to asynchronous checkpointing and metric reporting.
+3. **Automated Compiler Lowering:** Rather than manually authoring separate AST tracers and custom kernels for each operator permutation, production frameworks rely on automated JIT compilation pipelines that synthesize optimal kernels directly from execution graphs.
+
+::: {#psp-production-compiler-dispatch .callout-perspective title="Systems Perspective: From Manual FFI to Modern JIT Compilers"}
+In TinyTorch, calling native code relies on the Python `ctypes` Foreign Function Interface (FFI) and explicit manual AST pattern matching. While pedagogically transparent, this approach incurs Python-to-C dispatch latency (~1 to 5 microseconds per call) and requires manual authoring for every fused operator variant.
+
+Modern production engines bridge this gap through multi-tiered compiler infrastructure:
+
+- **Centralized Operator Dispatchers:** Frameworks like PyTorch route operations through a unified runtime dispatcher (`c10::Dispatcher`). The dispatcher inspects tensor metadata (device, memory layout, and autodiff state) to select the optimal implementation without Python interpreter overhead. Custom C++ kernels register once via declarative macros (`TORCH_LIBRARY`) and automatically integrate with autograd and multi-device backends.
+- **Dynamic Graph Capture (TorchDynamo):** Imperative Python code is converted into computational graphs at runtime using frame evaluation hooks (PEP 523). TorchDynamo intercepts frame execution, parses standard Python bytecode, and constructs an intermediate FX graph while maintaining fallback compatibility for non-tensor Python control flow.
+- **Intermediate Representation Lowering (TorchInductor):** The captured FX graph lowers to a loop-level intermediate representation. TorchInductor analyzes data dependencies, groups compatible elementwise and reduction nodes, allocates shared memory buffers, and generates vendor-specific code, emitting optimized Triton kernels for GPUs and vector-parallel C++ loops for CPUs.
+
+The foundational principle remains invariant across all layers: whether hand-crafted through FFI or synthesized automatically by an optimizing JIT compiler, peak systems efficiency requires eliminating redundant DRAM round-trips, maximizing compute density in fast SRAM and registers, and aligning execution strides with hardware memory hierarchies.
+:::
+
+{{< pagebreak >}}
 
 ## Summary
 
 The extensions ecosystem expands TinyTorch beyond its core 20 modules into the realm of production systems performance:
+
 - `LoRALinear` freezes base weights and trains rank-$r$ adapters, reducing Adam optimizer state memory by more than 98%.
 - `checkpoint` drops intermediate forward activations and recomputes them during backpropagation, reducing peak activation memory scaling from $O(L)$ to $O(\sqrt{L})$.
 - `LossScaler` shifts gradient values into the normalized exponent range of IEEE 754 float16, preventing catastrophic gradient underflow during mixed-precision training.

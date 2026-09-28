@@ -45,7 +45,7 @@ Every token an agent keeps in context leaves attention state in accelerator memo
 
 :::
 
-## From Context Tokens to KV State {#sec-vol3-kvcache-geometry}
+## Token Embedding Projections and Key-Value Tensor Geometry {#sec-vol3-kvcache-geometry}
 
 Return to the coding agent whose context layout was priced in \ref{nbk-04-quantitative-impact-of-prefix-layout}, now at its twentieth turn. Its context holds the system message and tool definitions, the task state and working files, and the latest tool results, including the stack trace the last test run produced, about thirty-two thousand tokens in all. The agent has just asked the harness to run the integration suite, which takes three-quarters of a minute. For those forty-five seconds the model emits nothing, yet the attention state computed for all thirty-two thousand tokens stays on the accelerator, waiting for the test log. @Sec-vol3-context-engineering decided which tokens this call should see. This chapter follows those tokens into the serving system, where they become the dominant consumer of accelerator memory, and asks what that state costs to keep, share, and release.
 
@@ -400,7 +400,7 @@ plt.close()
 
 The intersection of these two trends reveals why physical memory capacity has replaced arithmetic throughput as the fundamental governor of long-horizon agent systems. As demonstrated in the right panel of @fig-vol3-kv-cache-memory-wall, scaling context length to one million tokens requires 320 GB of key-value cache memory per 70B sequence—surpassing the 80 GB capacity of an NVIDIA H100 GPU by a factor of four. Even when scaling across an eight-accelerator node with a 480 GB dynamic pool, serving just two concurrent agents at this horizon ($B = 2$, 640 GB) completely exhausts cluster memory. This bottleneck has driven a two-pronged architectural response across machine learning systems engineering: runtime virtual memory paging via PagedAttention [@kwon2023vllm] to eliminate internal and external physical fragmentation, and algorithmic innovations such as Multi-head Latent Attention (MLA) [@deepseek2024v2; @deepseek2024v3] that compress key-value projections into low-rank latent vectors, reducing memory footprint by up to 5.7-fold. Without these systems abstractions, supporting production agent workflows over multi-turn context windows would remain physically and economically intractable.
 
-### Attention geometry: Multi-head, grouped-query, and multi-head latent attention {#sec-vol3-kvcache-mla}
+### Attention geometry across multi-head, grouped-query, and multi-head latent attention {#sec-vol3-kvcache-mla}
 
 The physical memory footprint of the key-value cache is dictated fundamentally by the attention geometry implemented in the transformer architecture. Across the evolution of foundation models, serving architectures have transitioned across three distinct attention regimes to mitigate cache growth:
 
@@ -464,7 +464,47 @@ Contrast this against alternative attention configurations for equivalent 128-he
 
 Across a 60-layer model hosting a 128,000-token agent context, MLA shrinks aggregate KV cache memory from $62.9\text{ GB}$ (under 16-head GQA) down to $8.85\text{ GB}$, delivering a $5\times$ to $7\times$ capacity compression factor.[^fn-deepseek-mla-decomp] By collapsing memory footprint without restricting each query head's access to independent attention projections, MLA provides the algorithmic foundation for serving hundreds of concurrent agent trajectories within bounded accelerator clusters.
 
+The structural topology and decode mechanics of this compression pipeline are illustrated in @fig-vol3-multi-head-latent-attention. Panel A contrasts the per-token memory footprint across attention architectures, showing how MLA compresses memory demand from 2,560 B/token under MHA down to 67.5 B/token. Panel B details the down-projection into a 512-dimensional content latent and the decoupled 64-dimensional RoPE key. Panel C illustrates how queries absorb projection weights in on-chip SRAM during autoregressive decode, streaming only compressed latents across the memory bus to eliminate the materialization of high-dimensional keys and values in HBM.
+
+::: {#fig-vol3-multi-head-latent-attention fig-env="figure" fig-pos="htb" fig-cap="**Multi-Head Latent Attention (MLA) Architecture and Cache Compression**: Hardware footprint and algorithmic mechanics of low-rank latent KV cache compression. The left panel compares per-token KV cache memory footprints between Multi-Head Attention (2,560 B/tok), Grouped-Query Attention (320 B/tok), and MLA (67.5 B/tok), illustrating serving density gains at 128k context. The center panel outlines the low-rank down-projection into a 512-dimensional latent vector and decoupled 64-dimensional RoPE key. The right panel details the matrix associativity trick in autoregressive decode, where queries absorb projection weights in SRAM to compute attention without expanding high-dimensional keys and values in HBM." fig-alt="Three-panel systems schematic illustrating KV cache memory footprints across attention variants, latent down-projection architectures with decoupled RoPE, and the matrix associativity decoding pipeline."}
+![](images/svg/multi_head_latent_attention_mla.svg)
+:::
+
 [^fn-deepseek-mla-decomp]: **MLA Low-Rank Compression Dynamics**: DeepSeek-V2 and V3 parameterize Multi-head Latent Attention with a latent dimension $d_c = 512$ and decoupled rotary key dimension $d_R = 64$. By decoupling rotary position embeddings from the low-rank latent representation, MLA circumvents the mathematical incompatibility between rotational position encodings and low-rank projection matrices, compressing the per-token KV cache from 4,096 elements under 16-head GQA to 576 elements per layer.
+
+### Key-value cache quantization into reduced-precision representations {#sec-vol3-kvcache-quantization}
+
+While architectural innovations such as Grouped-Query Attention (GQA) and Multi-head Latent Attention (MLA) reduce the head count $H_{\text{kv}}$ and latent dimension $d_c$ in @eq-mem-token, they leave the numeric word size $b$ unchanged at standard 16-bit precision ($b = 2\text{ bytes}$, FP16 or BF16). Key-value cache quantization attacks the remaining free variable: shrinking the physical storage width of every key and value element from 16 bits down to 8 bits ($b = 1\text{ byte}$ in FP8) or 4 bits ($b = 0.5\text{ bytes}$ in INT4 or FP4).
+
+Quantizing the attention cache differs fundamentally from quantizing static model parameter weights. Model weights are stationary and can undergo extensive offline calibration or second-order error compensation (such as AWQ or GPTQ) before deployment. The key-value cache, by contrast, is dynamically generated at runtime across variable context horizons, requiring low-latency online quantization microkernels that operate without pipeline bubbles. Furthermore, key and value tensors exhibit starkly asymmetric activation distributions:
+
+1. **Key Tensor Outliers ($\mathbf{K}$):** Key activations exhibit severe *channel-wise* (dimension-wise) kurtosis. Across long sequences, specific projection dimensions consistently maintain magnitudes 10 to 50 times greater than the channel median across all token positions [@lin2023awq]. If a runtime applies uniform per-tensor or per-token scale factors to $\mathbf{K}$, these high-magnitude channel spikes dominate the dynamic range, forcing the remaining channels into underflow and destroying the inner product fidelity of the query-key dot product $\mathbf{Q} \mathbf{K}^\top$. To preserve retrieval accuracy, Key quantization mandates *per-channel* (or grouped per-head) scaling vectors:
+   $$
+   \mathbf{K}_{q} = \text{clip}\left(\left\lfloor \frac{\mathbf{K}}{\mathbf{s}_K} \right\rceil, -q_{\max}, q_{\max}\right), \quad \mathbf{s}_K \in \mathbb{R}^{1 \times d_{\text{head}}}
+   $$
+   where $\mathbf{s}_K$ scales each feature dimension independently.
+2. **Value Tensor Outliers ($\mathbf{V}$):** Value activations, conversely, exhibit *token-wise* (row-wise) outlier distributions. Specific structural tokens (such as initial delimiter tokens, system prompt boundaries, and newline tokens) accumulate large activation norms across all channels, whereas variance across feature dimensions within any single token remains smooth. Consequently, Value quantization achieves optimal fidelity using *per-token* or *per-block* scale factors:
+   $$
+   \mathbf{V}_{q} = \text{clip}\left(\left\lfloor \frac{\mathbf{V}}{\mathbf{s}_V} \right\rceil, -q_{\max}, q_{\max}\right), \quad \mathbf{s}_V \in \mathbb{R}^{S \times 1}
+   $$
+
+The primary numeric formats employed in production serving runtimes are summarized in @tbl-vol3-kv-quant-formats.
+
+| Numeric Format  | Bit Width ($b$)          | Exponent / Mantissa     | Dynamic Range ($\approx$)                | Quantization Granularity                         | Memory Savings vs. FP16   |
+|:----------------|:-------------------------|:------------------------|:-----------------------------------------|:-------------------------------------------------|:--------------------------|
+| **FP16 / BF16** | 16 bits ($2.0\text{ B}$) | 5/10 (FP16), 8/7 (BF16) | $6.5 \times 10^4$ / $3.4 \times 10^{38}$ | None (unquantized)                               | Baseline ($1.0\times$)    |
+| **FP8 (E4M3)**  | 8 bits ($1.0\text{ B}$)  | 4 bits / 3 bits         | $\pm 448$                                | Per-channel $\mathbf{K}$, per-token $\mathbf{V}$ | $2.0\times$ capacity gain |
+| **FP8 (E5M2)**  | 8 bits ($1.0\text{ B}$)  | 5 bits / 2 bits         | $\pm 5.7 \times 10^4$                    | Per-channel $\mathbf{K}$, per-token $\mathbf{V}$ | $2.0\times$ capacity gain |
+| **INT4**        | 4 bits ($0.5\text{ B}$)  | None (linear grid)      | $[-8, 7]$                                | Grouped per-channel (group size 32–128)          | $4.0\times$ capacity gain |
+| **NVFP4**       | 4 bits ($0.5\text{ B}$)  | 2 bits / 1 bit (E2M1)   | Micro-scaled grid                        | Two-level micro-block (16 elements)              | $4.0\times$ capacity gain |
+
+: **Numeric Quantization Formats for Key-Value Cache Storage**: Bit widths, numeric representation, scaling granularity, and memory compression factors across accelerator memory architectures. {#tbl-vol3-kv-quant-formats}
+
+In modern GPU serving systems (such as vLLM and TensorRT-LLM), low-precision KV cache blocks are integrated directly into the PagedAttention memory manager. For 4-bit representations (INT4 and NVFP4), individual elements are packed as two 4-bit nibbles per byte. This packing imposes an architectural invariant on the physical page allocator: the PagedAttention block size $B$ must be a multiple of the vector alignment quantum (typically 16 or 32 tokens) to guarantee that every physical page starts on a 128-bit memory boundary, enabling non-coalesced 16-byte memory loads (`LDG.E.128`) without memory interface replay penalties.
+
+During autoregressive generation, memory-bandwidth-bound decode kernels cannot afford the latency of dequantizing historical blocks in High-Bandwidth Memory before execution. Instead, runtimes deploy fused attention kernels (such as FlashInfer or CUTLASS FlashAttention extensions) that execute **on-the-fly SRAM dequantization**. The GPU streams compressed 8-bit or 4-bit vectors across the HBM bus at peak memory bandwidth, unpacking and converting elements to FP16 registers inside on-chip SRAM immediately before executing Tensor Core multiply-accumulate operations. Because the decode phase operates at an operational intensity near unity ($I_{\text{decode}} \approx 1\text{ FLOP/byte}$), the ALU instructions required for register unpacking are entirely masked behind the memory bus transfer latency.
+
+Applying FP8 quantization to the canonical 70B grouped-query model shrinks $m_{\text{token}}$ from $320\text{ KiB}$ to $160\text{ KiB}$, instantly doubling the cluster concurrency ceiling from 48 to 96 concurrent 32,768-token trajectories on an 8-GPU node. Under INT4 or NVFP4, $m_{\text{token}}$ drops to $80\text{ KiB}$, quadrupling capacity to 192 concurrent trajectories and matching the concurrency of short conversational sessions.
 
 If every agent trajectory possessed an invariant, statically predictable sequence length, sizing and partitioning this memory would reduce to a trivial static allocation problem. A runtime could partition its 480 GB of available HBM into twelve fixed 40 GB contiguous buffers, assigning one buffer to each execution slot. In production environments, however, agent trajectories are radically non-deterministic: one trajectory may succeed and terminate in 1,200 tokens, another may encounter a compiler syntax error and iterate for 45,000 tokens, and a third may spin into a recursive loop consuming the entire 131,072-token window. When an engine pre-allocates contiguous physical memory buffers based on worst-case context lengths, the overwhelming majority of allocated accelerator memory sits completely unwritten and idle, while incoming requests are rejected due to perceived capacity exhaustion. How, then, does this dynamic variation in trajectory length induce catastrophic physical memory fragmentation in contiguous allocators, and what architectural mechanisms must a serving system introduce to eliminate the resulting waste?
 
@@ -602,7 +642,7 @@ Agent workloads inherently exhibit multimodal completion length distributions. S
 
 When short-lived trajectories and long-lived trajectories execute concurrently within the same physical memory pool, the rate of allocation churn escalates. Short-lived requests rapidly allocate and release small memory extents, perforating the memory space with localized holes. Meanwhile, long-lived, high-capacity agent requests lock large contiguous blocks for minutes at a time. The resulting memory topology represents the worst-case operating environment for a contiguous allocator: an unpredictable sequence of allocation sizes, interleaved with non-deterministic deallocation timings, occurring within an address space that permits neither physical discontiguity nor low-cost compaction.
 
-### Quantifying usable capacity: The KV allocation efficiency metric
+### Usable memory quantification and KV allocation efficiency
 
 To rigorously diagnose and compare allocator performance in serving runtimes, we must formalize the relationship between physical memory allocation and effective token capacity. Let $M_{\text{pool}}$ represent the total physical memory capacity allocated to the KV cache subsystem on an accelerator, measured in bytes. This pool is typically derived by subtracting the static model parameter weights $M_{\text{weights}}$ and the transient activation memory $M_{\text{act}}$ required for prefill matrix multiplications from the total physical device memory $M_{\text{device}}$:
 
@@ -728,7 +768,9 @@ $$l = \left\lfloor \frac{t}{B} \right\rfloor, \qquad o = t \pmod B$$
 
 The runtime maintains a per-sequence block table $T: l \mapsto p$, which maps the logical block index $l$ to a physical block identifier $p$ in accelerator memory. During the decode phase, when the model generates token $x_t$ at step $t$, the serving runtime computes $l$ and $o$. If $o \neq 0$, the token's key and value projections are written directly into the already allocated physical block $T[l]$ at offset $o$. If $o = 0$, the previous physical block is completely full; the runtime intercepts the allocation fault, pops a free physical block identifier $p_{\text{new}}$ from its free-list ring buffer, appends $p_{\text{new}}$ to the block table such that $T[l] = p_{\text{new}}$, and writes the projections into offset 0.
 
-The mechanics of this virtual address translation and copy-on-write (CoW) branching are detailed in @fig-vol3-pagedattention-mapping. The logical token stream is partitioned into uniform blocks of $B=4$ tokens each. The runtime maintains independent block tables for Sequence A and Sequence B that map logical block indices to scattered, non-contiguous physical blocks in the accelerator's HBM pool. When Sequence B forks from Sequence A to explore an alternative agentic tool invocation, both sequences initially point to the identical physical allocations—Logical Block 0 maps to Physical Block 7, and Logical Block 1 maps to Physical Block 3—with their reference counts incremented to $\text{ref\_count} = 2$. When Sequence B subsequently generates a diverged token in Logical Block 2, the memory manager intercepts the write and allocates a fresh physical block (Physical Block 12) exclusively for Sequence B, leaving Sequence A's Logical Block 2 mapped to Physical Block 1. This zero-copy sharing allows tree-of-thought exploration and multi-turn prompting to branch instantly without duplicating historical attention state.
+The mechanics of this virtual address translation and copy-on-write (CoW) branching are detailed in @fig-vol3-pagedattention-mapping.[^fn-paged-memory-lineage] The logical token stream is partitioned into uniform blocks of $B=4$ tokens each. The runtime maintains independent block tables for Sequence A and Sequence B that map logical block indices to scattered, non-contiguous physical blocks in the accelerator's HBM pool. When Sequence B forks from Sequence A to explore an alternative agentic tool invocation, both sequences initially point to the identical physical allocations—Logical Block 0 maps to Physical Block 7, and Logical Block 1 maps to Physical Block 3—with their reference counts incremented to $\text{ref\_count} = 2$. When Sequence B subsequently generates a diverged token in Logical Block 2, the memory manager intercepts the write and allocates a fresh physical block (Physical Block 12) exclusively for Sequence B, leaving Sequence A's Logical Block 2 mapped to Physical Block 1. This zero-copy sharing allows tree-of-thought exploration and multi-turn prompting to branch instantly without duplicating historical attention state.
+
+[^fn-paged-memory-lineage]: **PagedAttention and Operating Systems Virtual Memory Lineage**\index{PagedAttention!OS virtual memory lineage}\index{Virtual memory!PagedAttention connection}: The mathematical structure of PagedAttention directly adapts the two-level paged virtual memory architecture first developed for the Atlas computer [@kilburn1962onelevel] and formalized by Peter Denning [@denning1970]. In operating systems, page tables decouple a process's contiguous virtual address space from fragmented physical DRAM frames, resolving external fragmentation and enabling copy-on-write process forking. PagedAttention maps contiguous token sequence indices to scattered HBM tensor blocks, adapting memory virtualization to eliminate external KV-cache fragmentation during autoregressive generation [@kwon2023vllm].
 
 ::: {#fig-vol3-pagedattention-mapping fig-env="figure" fig-pos="htb" fig-cap="**PagedAttention Virtual Block Table Translation and Copy-on-Write Branching**: Mapping logical sequence blocks to non-contiguous physical HBM frames through per-sequence page tables, demonstrating zero-copy prefix sharing and copy-on-write block allocation during agent trajectory branching." fig-alt="Architecture diagram depicting logical sequence blocks partitioned into 4-token chunks, per-sequence block tables translating logical to physical block identifiers, and a physical HBM block pool illustrating shared prefix blocks with reference count 2 and branched private blocks."}
 ![](images/svg/paged_attention_virtual_memory.svg)
@@ -758,7 +800,7 @@ $$\Delta_{\text{tail}} = (B - (S \pmod B)) \pmod B$$
 
 Assuming that sequence completion lengths modulo $B$ are uniformly distributed across $\{0, 1, \dots, B-1\}$, the expected number of wasted token slots per active sequence is exactly:
 
-$$\mathbb{E}[\Delta_{\text{tail}}] = \frac{B - 1}{2}
+$$\mathbb{E}[\Delta_{\text{tail}}] = \frac{B - 1}{2}$$
 
 ```{python}
 #| echo: false
@@ -1107,7 +1149,33 @@ def evict_radix_blocks(free_blocks: List[int], target_free: int) -> None:
 
 This leaf-first traversal guarantees that the root and high-level branch nodes—which represent the most broadly shared prefix scaffolding, such as system prompts—remain resident the longest. Dynamic leaf branches representing ephemeral, one-off conversational turns are pruned first, preserving the foundational layers of the prefix hierarchy where cache hit probability is highest.
 
-### What breaks the hit rate
+#### Cost-aware prefix eviction and multi-tenant thrashing {.unnumbered}
+
+In classical single-turn conversational serving, temporal Least Recently Used (LRU) eviction provides a reasonable heuristic for future access probability. In multi-tenant agent serving, however, flat temporal LRU triggers catastrophic **cache pollution and thrashing caused by speculative agent branching**.
+
+When an autonomous agent executes deliberative test-time search (such as Best-of-$N$ sampling or Monte Carlo Tree Search, @sec-vol3-test-time-compute), it generates a rapid burst of transient leaf branches. Once scored and pruned by verifiers, these dead-end branches transition into dormant leaves ($\text{ref\_count} = 0$) with fresh timestamps. Under flat temporal LRU, this flood of freshly generated speculative leaves will evict older dormant prefixes—such as an 8,192-token system instruction, a 32,768-token repository map, or tool API schemas shared across dozens of independent agent instances.
+
+This eviction pattern squanders immense computational investment. In physical hardware, the cost to recreate a prefix is governed by its recomputation FLOPs:
+
+- Recomputing a 32,768-token repository map on an 8-GPU 70B cluster requires $4.588\text{ PFLOPs}$ ($1{,}289\text{ ms}$ of compute, @sec-vol3-kvcache-chunked-prefill).
+- Recomputing a 256-token ephemeral tool observation requires only $0.035\text{ PFLOPs}$ ($10\text{ ms}$).
+
+Flat LRU treats both nodes identically based purely on the timestamp of their last access. Evicting the repository map to retain a dead-end speculative leaf squanders over $130\times$ more accelerator compute upon subsequent reuse.
+
+To guarantee multi-tenant fairness and maximize cluster-wide FLOP efficiency, production radix managers replace pure temporal LRU with **Compute-Weighted Cost-Aware Eviction**. For each dormant candidate leaf node $u$ in the Radix tree, the eviction priority score $\mathcal{P}(u)$ balances recomputation FLOPs, cumulative historical hit frequency, memory footprint, and recency:
+
+$$\mathcal{P}(u) = \frac{\text{FLOPs}_{\text{recomp}}(u) \cdot \left(1 + \alpha \cdot H_{\text{hits}}(u)\right)}{M_{\text{blocks}}(u)} \cdot \exp\left(-\frac{\Delta t_u}{\tau_{\text{decay}}}\right)$$ {#eq-cost-aware-radix-priority}
+
+where:
+
+1. $\text{FLOPs}_{\text{recomp}}(u) = 2 \cdot P \cdot S_u$ represents the floating-point operations saved by retaining prefix $u$ of length $S_u$ on a model with $P$ parameters.
+2. $H_{\text{hits}}(u)$ is the lifetime cache hit count of node $u$, weighted by tunable scaling factor $\alpha$.
+3. $M_{\text{blocks}}(u)$ is the physical HBM footprint in PagedAttention blocks, penalizing wide memory allocations.
+4. $\Delta t_u = t_{\text{current}} - t_{\text{last\_access}}$ is the elapsed idle duration, attenuated by exponential half-life $\tau_{\text{decay}}$.
+
+When memory utilization crosses low-watermark $\tau_{\text{low}}$, the allocator pops the candidate leaf with the *lowest* priority score $\arg\min_{u \in \text{Leaves}} \mathcal{P}(u)$. Transient speculative leaves (possessing zero historical hits and modest recompute costs) are evicted within milliseconds, while high-value foundational prefixes remain shielded against churn, maximizing effective token reuse across multi-tenant workloads.
+
+### Prefix cache hit rate degradation and eviction mechanisms
 
 Attention state for a token depends on every token before it, so the cache can reuse state only up to the first token that differs (principle \ref{pri-vol3-prefix-coherence}). Prefix caching is all or nothing from left to right. The engine cannot enforce a cache-friendly layout; it can only reward one, and the harness controls every input that decides the outcome. Logical context staging already named the changes that break the prefix: a per-call field at the head, a tool list that changes mid-trajectory, nondeterministic serialization, and every compaction. Seen from the cache, they share one signature. Each moves the first differing token toward the head of the context, and the engine prefills every block after it again. The first three are avoidable by layout. Compaction is not, which is why the harness compacts rarely and in large batches and accepts one expensive turn per batch.
 
@@ -1297,7 +1365,7 @@ When an engine co-locates both phases on the same accelerator, prefill matrix mu
 
 To eliminate this operational compromise, modern serving architectures embrace **disaggregated prefill-decode serving**, as implemented in DistServe [@zhong2024distserve], Mooncake [@qin2024mooncake], and Splitwise [@patel2024]. Disaggregation physically partitions the serving cluster into two specialized node pools:
 
-1. **Prefill Nodes:** Provisioned with compute-dense accelerators optimized for raw floating-point operations (such as NVIDIA H100/H200 or AMD MI300X configured with $TP = 8$). These nodes ingest multi-thousand-token prompts at high batch occupancy, saturating Tensor Cores at peak Model FLOPs Utilization (MFU).
+1. **Prefill Nodes:** Provisioned with compute-dense accelerators optimized for raw floating-point operations (such as NVIDIA H100/H200 or AMD MI300X configured with $TP = 8$). These nodes ingest multi-thousand-token prompts at high batch occupancy, saturating Tensor Cores at peak model FLOPs utilization (MFU).
 2. **Decode Nodes:** Provisioned with high-bandwidth memory capacity (such as HBM3e) and configured with minimal tensor parallelism ($TP = 1\text{--}2$) to minimize cross-device synchronization overhead. These nodes focus exclusively on low-latency autoregressive token emission.
 
 The architectural challenge in disaggregated serving is the physical handoff of the key-value cache. Once a prefill worker finishes processing a prompt, it does not retain the request for decoding. Instead, it transmits the populated key-value cache tensors across a high-speed network fabric directly into the assigned decode worker's physical memory.
@@ -1325,13 +1393,78 @@ Now contrast this transfer latency against the alternative: recomputing the prom
 
 $$\text{FLOPs}_{\text{recomp}} \approx 2 \cdot P \cdot S = 2 \times (70 \times 10^9) \times 32{,}768 \approx 4.588 \times 10^{15}\text{ FLOPs} = 4.588\text{ PFLOPs}$$
 
-On an 8-GPU H100 node delivering an achieved prefill throughput of $R_{\text{prefill}} = 3.56\text{ PFLOP/s}$ (at 45 percent MFU), recomputing the attention state consumes:
+On an 8-GPU H100 node delivering an achieved prefill throughput of $\mathcal{P}_{\text{achieved}} = 3.56\text{ PFLOP/s}$ (at 45 percent model FLOPs utilization), recomputing the attention state consumes:
 
 $$T_{\text{recompute}} \approx \frac{4.588\text{ PFLOPs}}{3.56\text{ PFLOP/s}} \approx 1{,}289\text{ ms} \approx 1.29\text{ seconds}$$
 
-Streaming the attention state over an 800 Gbps RDMA interconnect ($104.9\text{ ms}$) is $12.3\times$ faster than local recomputation ($1{,}289\text{ ms}$), and even over a 400 Gbps fabric ($209.7\text{ ms}$) it is $6.1\times$ faster. Crucially, executing prompt recomputation would freeze all concurrent decode streams on that node for $1.29\text{ seconds}$, destroying ITL guarantees. In contrast, GPUDirect RDMA transfers are orchestrated entirely by asynchronous network DMA engines. The KV state streams silently into physical HBM blocks while the decode GPUs continue executing autoregressive steps without preemption stalls.[^fn-rocev2-flow-control]
+Streaming the attention state over an 800 Gbps RDMA interconnect ($104.9\text{ ms}$) is $12.3\times$ faster than local recomputation ($1{,}289\text{ ms}$), and even over a 400 Gbps fabric ($209.7\text{ ms}$) it is $6.1\times$ faster.
 
-[^fn-rocev2-flow-control]: **RoCEv2 Lossless Interconnect Dynamics**: High-throughput disaggregated KV cache transfer over RDMA over Converged Ethernet (RoCEv2) relies on Priority Flow Control (PFC, IEEE 802.1Qbb) and Explicit Congestion Notification (ECN, RFC 3168) to prevent packet drops and buffer overflows. In sustained agent burst transfers, unmitigated PFC can cause head-of-line blocking and PFC deadlocks across network leaf switches, necessitating end-to-end congestion control algorithms such as DCQCN or TIMELY.
+#### The disaggregation machine balance and transfer roofline
+
+To formalize when disaggregated network handoff strictly dominates local prompt recomputation, we equate transfer latency with recomputation makespan:
+$$
+T_{\text{transfer}} \le T_{\text{recompute}} \iff \frac{m_{\text{token}} \cdot S}{\text{BW}_{\text{net}}} \le \frac{2 \cdot P \cdot S}{\mathcal{P}_{\text{achieved}}}
+$$
+Canceling the sequence length $S$ yields the fundamental network roofline condition:
+$$
+\text{BW}_{\text{net}} \ge \beta_{\text{disagg}} = \frac{m_{\text{token}} \cdot \mathcal{P}_{\text{achieved}}}{2 P}
+$$ {#eq-disaggregation-machine-balance}
+In @eq-disaggregation-machine-balance, $\beta_{\text{disagg}}$ defines the **Disaggregation Machine Balance**—the minimum sustained interconnect bandwidth required for network KV streaming to outpace local compute re-evaluation. For the canonical 70B model ($P = 70 \times 10^9$) with FP16 KV cache ($m_{\text{token}} = 320\text{ KiB} = 327{,}680\text{ bytes}$) served on an 8-GPU node achieving $\mathcal{P}_{\text{achieved}} = 3.56\text{ PFLOP/s}$:
+$$
+\beta_{\text{disagg}} = \frac{327{,}680\text{ bytes} \times 3.56 \times 10^{15}\text{ FLOP/s}}{2 \times 70 \times 10^9\text{ FLOPs}} \approx 8.33 \times 10^9\text{ bytes/s} \approx 8.33\text{ GB/s} \quad (66.6\text{ Gbps})
+$$
+Any interconnect fabric delivering effective unidirectional bandwidth $\text{BW}_{\text{net}} > 8.33\text{ GB/s}$ delivers a net latency advantage over local recomputation.
+
+@Tbl-vol3-disagg-roofline evaluates this crossover frontier across the physical interconnect hierarchy for a 32,768-token agent trajectory.
+
+| Physical Interconnect Fabric     | Effective Bandwidth ($\text{BW}_{\text{net}}$) | Transfer Latency ($T_{\text{transfer}}$) | Speedup vs. Recompute ($1{,}289\text{ ms}$) | Operational Regime                                         |
+|:---------------------------------|:-----------------------------------------------|:-----------------------------------------|:--------------------------------------------|:-----------------------------------------------------------|
+| **NVLink 4 / NVLink 5** (Rack)   | $900\text{--}1{,}800\text{ GB/s}$              | $5.8\text{--}11.7\text{ ms}$             | $110\times\text{--}222\times$ faster        | Near-zero latency handoff                                  |
+| **800 Gbps RoCEv2 / InfiniBand** | $100\text{ GB/s}$                              | $104.9\text{ ms}$                        | $12.3\times$ faster                         | Production cluster disaggregation                          |
+| **PCIe Gen5 $\times 16$** (Host) | $64\text{ GB/s}$                               | $163.8\text{ ms}$                        | $7.9\times$ faster                          | Intra-node CPU-GPU streaming                               |
+| **400 Gbps RoCEv2 / InfiniBand** | $50\text{ GB/s}$                               | $209.7\text{ ms}$                        | $6.1\times$ faster                          | Cross-rack disaggregation                                  |
+| **100 Gbps Ethernet**            | $12.5\text{ GB/s}$                             | $838.9\text{ ms}$                        | $1.54\times$ faster                         | Borderline advantage ($\text{BW} > \beta_{\text{disagg}}$) |
+| **25 Gbps Commodity Link**       | $3.125\text{ GB/s}$                            | $3{,}355.4\text{ ms}$                    | $0.38\times$ (2.6$\times$ slower)           | **Crossover failure**: Recompute dominates                 |
+
+: **Disaggregated Key-Value Transfer Roofline across Interconnect Hierarchy**: Effective unidirectional bandwidth, transfer makespan for a 32,768-token 70B trajectory ($M_{\text{KV}} = 10.49\text{ GB}$ in FP16), and speedup relative to local compute recomputation ($1{,}289\text{ ms}$). {#tbl-vol3-disagg-roofline}
+
+Two physical dynamics further widen the advantage of disaggregation in production agent architectures:
+
+1. **Super-Linear Attention Scaling at Horizon:** While linear feedforward layers scale as $2 P S$, full multi-head attention prefill includes quadratic matrix multiplications whose operations scale as $\text{FLOPs}_{\text{attn}} = 4 \cdot L \cdot d_{\text{model}} \cdot S^2$. At $S = 131{,}072$ tokens, local recomputation expands super-linearly to over $5.8\text{ seconds}$, whereas network transfer remains strictly linear in context length ($T_{\text{transfer}} \propto S$), increasing the 800G RDMA transfer speedup from $12.3\times$ to over $14\times$.
+2. **Quantized Network Transit:** By coupling disaggregated serving with KV cache quantization (@sec-vol3-kvcache-quantization), the prefill node quantizes key and value blocks to FP8 ($b=1\text{ byte}$) or INT4 ($b=0.5\text{ bytes}$) before scheduling network DMA transfers. Quantizing to FP8 cuts the transfer payload $M_{\text{KV}}$ from $10.49\text{ GB}$ to $5.24\text{ GB}$, halving transfer latency over 800G RDMA to just $52.4\text{ ms}$ ($24.6\times$ faster than recomputation). Concurrently, the machine balance threshold drops to $\beta_{\text{disagg}} = 4.16\text{ GB/s}$ ($33.3\text{ Gbps}$), making disaggregated prefill-decode serving highly efficient even across standard 50 Gbps and 100 Gbps data center networks.
+
+Crucially, executing prompt recomputation would freeze all concurrent decode streams on that node for seconds, destroying ITL guarantees. In contrast, GPUDirect RDMA transfers are orchestrated entirely by asynchronous network DMA engines. The KV state streams silently into physical HBM blocks while the decode GPUs continue executing autoregressive steps without preemption stalls.[^fn-rocev2-flow-control]
+
+#### Disaggregated KV layout transposition and remote block table synthesis {.unnumbered}
+
+While the transfer roofline in @eq-disaggregation-machine-balance models network bandwidth as a scalar throughput pipeline, practical disaggregated architectures encounter a fundamental systems challenge: **tensor parallelism topology asymmetry**.
+
+Prefill nodes and decode nodes operate under contradictory hardware efficiency regimes:
+
+1. *Prefill Topology:* Ingesting prompts containing tens of thousands of tokens ($S \ge 32\text{k}$) requires massive dense GEMMs. To maximize Tensor Core arithmetic intensity and distribute large weight matrices, prefill workers operate at high tensor parallelism (typically $TP_P = 8$ across an NVLink domain).
+2. *Decode Topology:* Autoregressive generation emits exactly one token per sequence per step ($S_{\text{decode}} = 1$), running memory-bandwidth-bound GEMVs. At a batch size of one or small batches, running $TP=8$ incurs severe pipeline bubble overhead: each transformer layer requires two `All-Reduce` collective operations across the NVLink interconnect (160 All-Reduces per step, as derived in @sec-vol3-foundation-model-cost), where communication latency ($T_{\text{comm}} \approx 1\text{--}2\text{ }\mu\text{s}$ per All-Reduce) dominates small-matrix computation. Decode nodes therefore operate at minimal tensor parallelism ($TP_D = 1$ or $TP_D = 2$).
+
+This parallelism asymmetry creates the **cross-parallelism KV layout transposition dilemma**. Consider our canonical 70B model with Grouped-Query Attention ($L = 80$, $n_{\text{kv}} = 8$ KV heads, $d_{\text{head}} = 128$):
+
+- On the prefill cluster ($TP_P = 8$), the 8 KV heads are sharded evenly across all 8 GPUs: each prefill GPU holds exactly $8/8 = 1$ KV head slice per layer.
+- On the decode node ($TP_D = 1$), the single target GPU must receive and assemble all 8 KV heads into its unified PagedAttention memory pool.
+
+If handled naively via the host CPU, each prefill GPU would copy its head slice to host DRAM, the CPU would stitch the 8 slices into a contiguous multi-head layout, and copy the unified tensor to the decode GPU. This triple-copy pipeline would saturate PCIe buses and completely negate the speedup of network disaggregation.
+
+Production disaggregated serving systems (such as Splitwise [@patel2024] and Mooncake [@qin2024mooncake]) eliminate host CPU serialization through **all-to-all scatter-gather GPUDirect RDMA over InfiniBand/RoCEv2**.[^fn-rdma-direct-zerocopy] The source prefill GPUs issue asynchronous RDMA Write operations directly from their local HBM across the network fabric. Each prefill GPU $k \in \{0, \dots, TP_P - 1\}$ writes its single KV head slice directly into the destination GPU's memory at a head-interleaved byte offset:
+
+$$\text{DstOffset}(l, h_k, p) = \text{BaseAddr}(p) + \left( l \cdot n_{\text{kv}} + h_k \right) \cdot B \cdot d_{\text{head}} \cdot b_{\text{bytes}}$$ {#eq-disagg-scatter-gather}
+
+where $l$ is layer index, $h_k$ is the global KV head index assigned to prefill GPU $k$, $p$ is the physical destination block index, $B$ is the PagedAttention block size, and $b_{\text{bytes}}$ is the numeric word width. The network interface card (NIC) DMA engine performs the scatter-gather reassembly directly into device memory without host intervention.
+
+To coordinate this transfer, the serving architecture enforces a **Remote Block Table Synthesis Protocol**:
+
+1. *Allocation Ahead of Transfer:* Before the network transfer begins, the decode engine's memory coordinator pre-allocates $N_{\text{blocks}} = \lceil S / B \rceil$ physical page frames in its local HBM pool.
+2. *Descriptor Exchange:* The coordinator packages the allocated physical base addresses into a Remote Transfer Descriptor and transmits it over a low-latency sideband control-plane channel (e.g., gRPC or UCX) to the prefill orchestrator.
+3. *Direct Memory Placement:* The prefill GPUs use these remote physical addresses as the target scatter list for their RDMA Write operations.
+4. *Zero-Copy Ingestion:* Once the RDMA completion queue entry (CQE) signals transfer completion, the decode node instantly binds the pre-allocated block table into its local PagedAttention scheduler, transitioning the request into the active decode queue with zero memory copies.
+
+[^fn-rocev2-flow-control]: **RoCEv2 Lossless Interconnect Dynamics**: High-throughput disaggregated KV cache transfer over RDMA over Converged Ethernet (RoCEv2) relies on Priority Flow Control (PFC, IEEE 802.1Qbb) and explicit congestion notification (ECN, RFC 3168) to prevent packet drops and buffer overflows. In sustained agent burst transfers, unmitigated PFC can cause head-of-line blocking and PFC deadlocks across network leaf switches, necessitating end-to-end congestion control algorithms such as DCQCN or TIMELY.
 
 [^fn-rdma-direct-zerocopy]: **GPUDirect RDMA Zero-Copy Pipeline**: GPUDirect RDMA enables third-party PCIe network interface cards (NICs) to access accelerator High-Bandwidth Memory directly via PCIe peer-to-peer (P2P) transactions. By bypassing host CPU memory bounce buffers, GPUDirect RDMA eliminates intermediate memcpy operations and cache pollution, cutting KV cache transfer latency across disaggregated serving nodes by more than half.
 
@@ -1345,7 +1478,7 @@ Before analyzing memory offloading, retention, and swapping policies, verify you
 - [ ] **Disaggregated prefill-decode serving**: Why does streaming KV cache over an 800 Gbps RDMA interconnect beat local recomputation on decode workers?
 :::
 
-## Retain, Evict, Recompute, or Offload {#sec-vol3-kvcache-swapping}
+## Cache Eviction, Recomputation, and Tiered Offloading {#sec-vol3-kvcache-swapping}
 
 With paging in place, the pause deferred in @sec-vol3-kvcache-geometry can now be resolved. When an autoregressive decode loop emits a tool invocation token sequence—demanding a compilation run, a multi-second test suite execution inside an isolated container, or an interactive approval from a human operator—the model's forward inference stops instantaneously. While the agent waits for external execution results, the physical key-value cache blocks allocated to that trajectory remain pinned in high-bandwidth device memory (HBM). If the serving engine retains these physical blocks indefinitely across multi-second or multi-minute execution pauses, idle trajectories monopolize accelerator capacity, inducing artificial memory pressure that throttles active decodes and forces incoming requests into admission queues. Conversely, if the runtime prematurely evicts these blocks to liberate HBM, returning trajectories must undergo redundant prefill computation over tens of thousands of historical context tokens, wasting thousands of teraflops of compute and inflating the time-to-first-token upon resumption.
 
@@ -1383,7 +1516,7 @@ To navigate this constraint, the inference supervisor can deploy four distinct m
 
 [^fn-pinned-host-staging]: **Pinned Memory Staging Overheads**: Asynchronous Direct Memory Access (DMA) between accelerator HBM and host system memory requires host memory pages to be pinned (page-locked via cudaHostAlloc or mlock), preventing the operating system kernel from paging them to swap. Pinned memory pools reduce the physical RAM available to other host processes and operating system file buffers, requiring inference runtimes to manage custom fixed-size pinned arena allocators.
 
-### Analytical mechanics: The break-even decision frontier
+### Analytical mechanics of the break-even decision frontier
 
 ::: {.column-margin}
 ![](images/svg/vol3_virtual_memory_margin_004.svg){width="100%" fig-alt="Break-even curve showing PCIe host swapping beating full prompt recomputation whenever external tool execution pauses exceed 215 milliseconds."}
@@ -1576,11 +1709,44 @@ def swap_out_trajectory(seq_id: int, block_table: BlockTable,
     )
 ```
 
+#### Pinned host arena allocation and kernel lock serialization {.unnumbered}
+
+Asynchronous DMA transfers between accelerator HBM and host DRAM over PCIe Gen5 require host physical pages to be *pinned* (page-locked via POSIX `mlock` or CUDA `cudaHostAlloc`). Pinned pages are guaranteed never to be paged out to secondary swap storage or relocated by the operating system virtual memory subsystem, enabling the GPU's PCIe DMA engines to read and write physical host DRAM addresses directly without CPU intervention.
+
+However, dynamically allocating pinned host memory during runtime serving introduces a severe operating system scalability hazard: **kernel lock contention on `mmap_lock`**.
+
+In Linux, calling `cudaHostAlloc` or `cudaFreeHost` invokes kernel memory management syscalls (`mmap`, `mprotect`, and `pin_user_pages()`). These primitives must acquire the process's virtual memory descriptor lock (`mm->mmap_lock`, historically known as `mmap_sem`) in exclusive write mode. In a high-throughput multi-tenant server hosting dozens of concurrent agent workers:
+
+1. Every tool-wait transition that invokes dynamic `cudaHostAlloc` acquires `mmap_lock` for writing, invalidating the kernel's virtual memory area (VMA) tree.
+2. Concurrent CPU worker threads attempting to handle minor page faults, expand thread stacks, or manage CUDA context mappings are blocked behind the write lock.
+3. This kernel serialization produces massive tail latency spikes—frequently causing $150\text{--}300\text{ ms}$ of unprompted control-plane jitter across all active inference streams on the host node, degrading inter-token latency and triggering watchdog alarms.
+
+High-performance agent runtimes eliminate this kernel serialization by implementing a **Static Slab-Allocated Host Arena (`HostBlockArena`)**:
+
+1. *Daemon-Time Reservation:* At serving daemon startup, before accepting inference traffic, the runtime pre-allocates a large, contiguous host DRAM pool (such as $256\text{--}512\text{ GB}$) and locks all pages into physical memory via a single batch call to `cudaHostAlloc(..., cudaHostAllocMapped)`.
+2. *Uniform Block Slicing:* The host arena is partitioned into fixed-size physical frames matching the exact byte footprint of accelerator PagedAttention blocks ($M_{\text{frame}} = B \cdot m_{\text{token/block}}$).
+3. *User-Space Lock-Free Lists:* Free frames are indexed in user space via lock-free atomic queues or bitmasks. Allocating or releasing a host frame during a tool swap requires only an atomic bit operation ($O(1)$) in user space.
+
+By migrating blocks into a static, pre-pinned host arena, the serving engine eliminates all runtime `mmap()` syscalls and driver memory allocations during tool-wait transitions, reducing host-side swap overhead to pure PCIe DMA execution with zero kernel lock contention.
+
 The primary engineering challenge on the return path is hiding reload latency. If the engine waits until the tool returns its final payload before issuing the swap-in request, the model experiences a pipeline bubble equal to $M_{\text{KV}} / B_{\text{pcie}}$. Modern agent runtimes employ two systems techniques to eliminate this stall:
 
 *Early Speculative Prefetching:* Tool execution is rarely a black box of completely unknown duration. Profiling continuous integration runs, web API round-trips, or terminal executions yields predictable lower-bound latencies. If a tool call has an empirical median runtime of three seconds with a minimum of two seconds, a timer scheduled at $t = 1.8\text{ seconds}$ can initiate the asynchronous reload of the trajectory's KV blocks back into GPU HBM before the external process signals completion. If the tool finishes at three seconds, its historical attention state is already resident in accelerator memory, reducing perceived resumption latency to zero.
 
 *Pipelined Chunked Reload and Observation Prefill:* When a tool execution concludes, it returns an observation string (such as the standard output of a bash command) of length $S_{\text{obs}}$. The engine must prefill these $S_{\text{obs}}$ tokens to continue the trajectory. Under chunked prefill scheduling, the engine breaks the incoming observation into discrete chunks (e.g., five hundred twelve tokens). While chunk 0 executes its forward projection GEMM on the tensor cores, the copy engine concurrently streams the historical KV blocks for chunks 1 through $N$ across the PCIe bus. By interleaving DMA transfers with matrix computations, the transfer latency is completely overlapped behind the observation's own mandatory prefill phase.
+
+*PCIe Link Contention and Swap Storms:* While pipelining masks reload latency for an isolated agent, collective agent workloads introduce a severe physical bottleneck: **PCIe link contention**. In a multi-tenant cluster hosting dozens of concurrent agents executing similar software repair or verification benchmarks, tool executions frequently exhibit correlated completion horizons (for instance, dozens of unit test containers completing within a narrow three-second window). If the serving engine reacts naively by dispatching asynchronous DMA swap-in requests concurrently across all resumed agents, aggregate bandwidth demand instantaneously swamps the peripheral interconnect.
+
+Consider thirty-two concurrent agent instances on an eight-accelerator node, each attempting to reload $M_{\text{KV}} = 10\text{ GB}$ of swapped state. The aggregate transfer volume across the node is $320\text{ GB}$. Over a PCIe Gen5 x16 link with an effective sustained throughput of $B_{\text{pcie}} \approx 54\text{ GB/s}$ per root complex, servicing this burst requires nearly six seconds of uninterrupted bus saturation. During this "swap storm," the peripheral bus is completely monopolized:
+
+1. **Head-of-Line Decode Starvation:** Running decode streams requiring occasional host memory access or cross-device synchronizations stall behind massive block copy queues.
+2. **Tail-Latency Divergence:** While the first four trajectories reload within one second, the final trajectories wait in DMA queues for five to six seconds, triggering catastrophic P99 Time to First Token (TTFT) spikes and breaking interactive latency budgets.
+
+To prevent swap storms, production inference schedulers enforce three physical traffic controls:
+
+- **Prioritized Admission Queues:** Schedulers prioritize swap transfers based on remaining slack in the token budget, servicing streams with imminent generation deadlines ahead of speculative prefetch requests.
+- **Bandwidth Clamping (Leaky-Bucket DMA):** The runtime caps background KV swap traffic to a fixed fraction (typically $50\%\text{ to } 60\%$) of sustained PCIe link capacity, reserving deterministic bus headroom for control-plane signals and active inference batches.
+- **Staggered Prefetch Dispatch:** Rather than firing swap-ins instantaneously upon tool exit, schedulers disperse DMA initiation times across a Gaussian or uniform jitter window calibrated to the expected prefill duration.
 
 ### Tiered secondary storage
 
@@ -1594,11 +1760,17 @@ When an agent enters an interactive human-wait state, the host supervisor migrat
 
 For a $5\text{ GB}$ attention state, reading the serialized cache from an enterprise NVMe array requires approximately four hundred to seven hundred milliseconds. In the context of a human supervisor who required three minutes to read a terminal diff and approve a deployment, a five-hundred-millisecond cold-start reload is completely imperceptible. Secondary storage tiering thus achieves an order of magnitude reduction in serving costs: active trajectories occupy scarce HBM; short tool pauses reside in host DRAM; and dormant, human-gated trajectories are persisted safely to inexpensive flash media, preserving zero-loss prefix reuse without consuming cluster volatile memory.
 
-### Intra-sequence attention sparsification and token eviction {#sec-vol3-kvcache-intrasequence}
+### Intra-sequence attention eviction as an agent anti-pattern {#sec-vol3-kvcache-intrasequence}
 
-While hierarchical paging and secondary storage migration manage key-value cache allocations at the granularity of entire trajectories or multi-token page blocks, an orthogonal dimension of optimization operates *within* individual sequences: selectively dropping or compressing specific key-value token representations during ongoing generation. As autonomous agent trajectories accumulate tens of thousands of tokens across recursive tool-use loops, maintaining complete, uncompressed attention histories across all layers becomes mathematically and physically unsustainable. Intra-sequence eviction techniques seek to bound the memory footprint of a trajectory to a sublinear or constant budget $O(K_{\text{budget}})$ tokens, discarding non-essential key-value tensors while retaining sufficient representational capacity to sustain coherent language generation.
+While hierarchical paging and secondary storage migration manage key-value cache allocations at the granularity of entire trajectories or multi-token page blocks, an orthogonal dimension of optimization operates *within* individual sequences: selectively dropping or compressing specific key-value token representations during ongoing generation (such as StreamingLLM, H2O, and Scissorhands).
 
-#### Mechanics of attention sinks and local windows: StreamingLLM
+::: {#wrn-vol3-intrasequence-antipattern .callout-warning title="Architectural warning: Intra-sequence eviction as an agent anti-pattern"}
+In open-ended conversational streaming or single-turn document summarization, intra-sequence eviction algorithms achieve impressive compression ratios by exploiting recency bias and attention score concentration. In tool-augmented autonomous agents, however, **lossy intra-sequence token eviction is a catastrophic architectural anti-pattern**.
+
+As derived later in this section, dropping intermediate tokens shatters causal prefix integrity, induces dormant identifier amnesia (losing critical process IDs, hashes, or port numbers that remain unreferenced for dozens of turns), and corrupts rigid function-calling schemas. Systems architects must study these algorithms not as viable production deployments for autonomous agents, but to understand precisely why agent memory virtualization mandates *lossless* hierarchical page management (PagedAttention, Radix prefix sharing, and tiered swapping) rather than lossy token pruning.
+:::
+
+#### Mechanics of attention sinks and local windows in StreamingLLM
 
 The naive implementation of intra-sequence cache eviction truncates sequence history using a sliding window: retaining only the most recent $W$ tokens and discarding earlier keys and values. However, as demonstrated by @xiao2024streamingllm, applying a pure sliding window to standard transformer models causes catastrophic perplexity collapse once the sequence length exceeds the window size $W$, even when subsequent generation depends exclusively on recent context.
 
@@ -1616,7 +1788,7 @@ $$\mathcal{S}_{\text{resident}}^{(t)} = \{0, 1, \dots, k_{\text{sink}}-1\} \cup 
 
 For any token position $t > k_{\text{sink}} + W$, the serving engine evicts tokens in the intermediate interval $[k_{\text{sink}}, t - W]$. Because rotary positional embeddings (RoPE) rely on absolute position indices that would become disjoint after intermediate eviction, the runtime remaps positional encodings dynamically: keys and values within the cache are assigned contiguous logical positions based on their relative distance within the retained buffer rather than their original sequence indices. Under StreamingLLM, the per-layer KV cache footprint remains strictly bounded at $2 \cdot (k_{\text{sink}} + W) \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot b_{\text{elem}}$ bytes, independent of total trajectory length.
 
-#### Dynamic score accumulation: Heavy hitter oracle (H2O) and scissorhands
+#### Dynamic score accumulation in H2O and scissorhands
 
 While StreamingLLM maintains a static geometric partition (initial sinks plus recent window), dynamic eviction algorithms adaptively identify and retain influential tokens across the entire history based on observed attention dynamics.
 
@@ -1660,7 +1832,7 @@ Provisioning high-bandwidth memory for an autonomous agent deployment based on s
 
 **Serving capacity in an agentic infrastructure cannot be dimensioned as a scalar multiple of active request concurrency; it must be engineered as a dynamic physical envelope determined by cumulative multi-turn token accumulation, prefix reuse topology, and tail-latency percentiles under high memory pressure.** When aggregate token demand across concurrent trajectories exceeds physical High-Bandwidth Memory ($C_{\text{HBM}}$), the underlying paged memory manager has no choice but to stall active decodes, migrate page blocks across the PCIe bus to host memory, or discard noncontiguous blocks entirely. The resulting latency penalty falls not on the model's average throughput, but on the tail percentiles of time-to-first-token (TTFT) and inter-token latency (ITL). Sizing an inference cluster for agentic workloads therefore requires translating the structural geometry of the neural architecture and the stochastic behavior of multi-turn trajectories into rigorous capacity boundaries.
 
-### Workload dynamics: The multi-turn agent divergence {#sec-vol3-kv-workload-dynamics}
+### Workload dynamics and multi-turn agent memory divergence {#sec-vol3-kv-workload-dynamics}
 
 The physical memory footprint of an inference engine is driven by the divergence between conversational requests and agentic execution graphs. In a standard dialog system, the distribution of sequence lengths is unimodal and tightly bounded, allowing a service operator to provision a predictable ratio of active compute batch slots to high-bandwidth memory blocks. Each request frees its blocks when it emits its end-of-sequence token, the request boundary of passive conversational serving, so memory reclamation is frequent, deterministic, and tightly coupled to token emission.
 

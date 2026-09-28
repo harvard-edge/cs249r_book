@@ -168,8 +168,8 @@ def test_milestone_list_uses_actual_history_start_year():
     )
 
     assert result.returncode == 0
-    assert "1958 to 2018" in result.stdout
-    assert "1957 to 2018" not in result.stdout
+    assert "1958 to 2024" in result.stdout
+    assert "1957 to 2024" not in result.stdout
 
 
 def test_package_reset_success_messages_render_real_newlines(monkeypatch, tmp_path):

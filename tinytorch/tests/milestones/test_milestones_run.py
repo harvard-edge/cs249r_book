@@ -155,3 +155,14 @@ class TestMilestoneRuns:
 
         # Should show compression ratio (4x for INT8)
         assert "4" in stdout and ("compress" in stdout.lower() or "×" in stdout or "x" in stdout.lower())
+
+    @pytest.mark.slow
+    def test_milestone_07_kernels(self):
+        """Milestone 07: Custom GPU Kernels (2024) - Hardware acceleration."""
+        returncode, stdout, stderr = run_milestone("07", timeout=120)
+
+        assert returncode == 0, f"Milestone 07 failed:\nstdout: {stdout}\nstderr: {stderr}"
+        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 07" in stdout
+        assert any(term in stdout.lower() for term in [
+            "simd", "metal", "triton", "kernel"
+        ])

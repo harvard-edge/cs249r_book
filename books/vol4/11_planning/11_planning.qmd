@@ -29,15 +29,12 @@ format:
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \resizebox{0.92\linewidth}{!}{\mlphysicalstackfull{100}{20}{20}{20}{20}}
-\caption{The five-level machine stack with the Brain level highlighted.}
 \end{marginfigure}
 :::
 
-_What does a physical machine do during the unbudgeted milliseconds when the next neural trajectory chunk is late?_
+_What does a moving machine do during the unbudgeted milliseconds while its neural planner computes the next trajectory, and how do you guarantee continuous safety across receding horizons?_
 
-A moving physical machine carries continuous momentum while high-capacity neural policies compute upcoming trajectory chunks. If an executing action sequence terminates before its successor arrives, coasting blindly consumes the clearance required for a safe stop. Conversely, abruptly splicing an unconstrained proposal into an ongoing trajectory demands instantaneous joint accelerations that violate actuator torque limits or trigger destructive structural resonance across the mechanical transmission.
-
-Trajectory planning resolves this computational-physical mismatch by transforming discrete model inferences into continuous, kinematically feasible motion profiles. Every dispatched trajectory chunk must guarantee $C^2$ continuity across chunk seams and carry an invariant, pre-verified stopping suffix. This stopping continuation ensures the real-time execution layer can arrest motion safely within current clearance bounds if downstream computation encounters tail latency or hardware faults. In the physical AI stack, planning reconciles the Brain's asynchronous, variable-latency inference with the Nervous System's hard real-time execution cadence.
+In classic motion planning, algorithms such as RRT* or trajectory optimization formulate paths through static geometric representations, assuming computation time is an offline cost. In modern learned systems, neural action chunkers and diffusion policies predict sequences of future actions from high-dimensional sensor streams. Yet on a physical machine traveling with nonzero momentum, time does not pause while the planner executes its optimization loop. If a trajectory generation algorithm requires two hundred milliseconds to evaluate a trajectory, the robot must already be executing a previously verified plan that guarantees dynamic feasibility and collision-free clearance throughout that computation window. This fundamental timing tension requires motion planning to be formulated as a receding-horizon pipeline with continuous temporal overlap. Every candidate trajectory chunk must not only achieve operational progress toward the goal, but must terminate in a guaranteed, physically viable safe stopping suffix—a pre-computed trajectory that can safely bring the machine to a standstill within verified clearance margins if the next planning cycle is delayed. This chapter examines the architecture of real-time trajectory generation, exploring how learned action chunking, model predictive control, and formal collision checking combine to ensure smooth, continuous, and dynamically feasible physical motion under hard real-time deadlines.
 
 {{< pagebreak >}}
 
@@ -52,11 +49,13 @@ Trajectory planning resolves this computational-physical mismatch by transformin
 
 :::
 
-## Continuous Trajectories {#sec-planning-continuous-trajectories}
+## Continuous Trajectory Generation {#sec-planning-continuous-trajectories}
 
 ```{python}
 #| label: calc-planning-opening-machine
 #| echo: false
+#| warning: false
+#| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ THE MACHINE'S ARM LOOP AND CHUNK-POLICY LATENCY
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -103,6 +102,8 @@ Whether synthesizing three-dimensional flight trajectories for an autonomous aer
 
 If an architecture predicts actions one step ahead ($N = 1$), the motor tracking loop starves. If it generates a multi-step action chunk of $N > 1$ setpoints across a finite future horizon, the machine must cross an **execution seam**, the junction where one chunk's setpoints give way to the next. When an active trajectory chunk finishes executing before its replacement clears the tail of the inference distribution, the controller faces an execution discontinuity. If the controller clamps to the final position, the reference velocity steps to zero and asks the drive to remove the arm's momentum within one servo tick. If a newly arrived chunk begins with a velocity or acceleration that diverges from the physical state of the moving mechanism, the commanded torque steps and excites the structure.
 
+A natural question is why an intermediate trajectory planning layer is necessary at all: why not train an end-to-end neural policy to output motor torques directly at the 1 kHz servo rate? Two hard physical constraints rule this out. First, high-capacity neural networks cannot execute at 1 kHz within the thermal and electrical power budgets of mobile embedded platforms (typically 15 to 50 watts on an accelerator such as the Jetson Orin). Second, even if a lightweight model could achieve 1 kHz nominal throughput, inference latency jitter introduces variable zero-order hold (ZOH) phase lag, $\phi_{\text{lag}} = \omega \Delta t$, into the feedback loop. In high-gain position and impedance control, phase lag directly erodes the control loop's phase margin, inducing destructive high-frequency chatter and mechanical limit cycles. The trajectory abstraction is therefore the mandatory cyber-physical decoupling boundary: the neural policy plans smooth, multi-step reference trajectories across hundreds of milliseconds, while deterministic real-time servo loops track those references at sub-millisecond cadence.
+
 [^fn-plan-action-chunking]: **Action chunking representations**\index{Action chunking!architectures}\index{Policy learning!temporal horizons}: ACT and Diffusion Policy chunks carry no boundary-derivative constraints, so the planner must propose a transition bridge across each replanning seam, and the permission path checks it before admission.
 
 ::: {#dfn-planning-kinodynamic-feasibility-envelope .callout-definition title="Kinodynamic feasibility envelope"}
@@ -127,13 +128,22 @@ Intent defines the admissible goal; planning supplies the continuous motion, tem
 
 Momentum, a long inference tail, and a seam that must stay continuous together decide what a plan has to contain. The first decision is therefore what the planner hands to the tracking controller and the permission path while the arm is still moving.
 
-## What Planning Hands Over {#sec-planning-handoff}
+## The Planning Handoff and Trajectory Contracts {#sec-planning-handoff}
+
+In the cyber-physical architecture of embodied AI, trajectory planning operates at the critical **$P \cap A$ (Planning-to-Action) boundary**. The planner does not invent reference motions in an abstract vacuum. Instead, it consumes two upstream contracts: the **Scene Memory State** (`SceneMemoryState`, Contract 8 from @sec-memory), which supplies verified geometric free space $\mathcal{C}_{\mathrm{free}} = \mathcal{C} \setminus \mathcal{C}_{\mathrm{obs}}$, 3D Euclidean Signed Distance Fields (ESDF), and raycast obstacle clearance margins; and the **Intent Specification** (`IntentSpecification`, Contract 9 from @sec-intent), which supplies the grounded semantic goal set, task tolerance balls, effort ceilings, and time-bounded intent lease ($t_{\mathrm{intent\_exp}}$). From these inputs, the planner's mandate is to synthesize time-parameterized, dynamically feasible reference trajectories that respect the actuator and transmission limits of the physical body (@sec-body).
+
+::: {.column-margin}
+![](images/svg/spa_locator_pa.svg){width="100%" fig-alt="S·P·A locator triad highlighting the Plan-to-Act boundary edge."}
+*The Plan $\cap$ Act interface: synthesizing dynamically feasible trajectories with certified stopping continuations.*
+:::
 
 For a two-joint arm, one pair of joint angles $(q_1,q_2)$ is one point in **configuration space**\index{Configuration space!definition} $\mathcal{C}$. An obstacle excludes some angle pairs, leaving $\mathcal{C}_{\mathrm{free}}=\mathcal{C}\setminus\mathcal{C}_{\mathrm{obs}}$. A curve through that free set says where the arm may move, but not how quickly it may move or whether its motors can supply the required torque [@lozanoperez1983spatial]. A **trajectory**\index{Executable trajectory!definition} assigns time to the curve and exposes $\mathbf{x}(t)=[\mathbf{q}(t)^T,\dot{\mathbf{q}}(t)^T,\ddot{\mathbf{q}}(t)^T]^T$. The planner proposes that time-indexed reference, and the permission path checks it before any setpoint reaches the drive. A geometric path alone supplies neither timing nor fallback clearance.
 
 ```{python}
 #| label: calc-planning-lease-rule
 #| echo: false
+#| warning: false
+#| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ ONE CHUNK LEASE FOR BOTH BODIES: THE ARM'S LEASE PATH AND CEILING
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -218,7 +228,7 @@ class PlanningLeaseRule:
     t_lease_max_str = fmt_latency(t_lease_max, unit=millisecond)
 ```
 
-What the planner hands over is a **trajectory record**\index{Trajectory record!definition}, the immutable proposal that the tracking controller follows and the permission path admits. It names its coordinate frame $\mathcal{F}$, evidence time $t_0$, initial reference state, and four deadlines in the **MCU monotonic clock domain**: nominal tracking begins at $t_{\mathrm{start}}$, the nominal setpoints end at $t_{\mathrm{plan\_exp}}$, replacement closes at $t_{\mathrm{commit}}$, and the admitted stop finishes at $t_{\mathrm{stop\_end}}$. It also links to the active intent expiry $t_{\mathrm{intent\_exp}}$. Conversion from the sensor and host clocks carries a bounded error. The planner schedules each replacement against an earlier target, the blend deadline $t_{\mathrm{blend}}$, by which the successor should be admitted and at which the arm's obstacle clearance is last checked; it is the schedule's target, not a field of the record.
+What the planner hands over is a **trajectory record** (the **Trajectory Plan** record, `TrajectoryPlan`, the tenth contract in the physical AI lineage)\index{Trajectory record!definition}\index{Trajectory Plan!contract record}, the immutable proposal that the tracking controller follows and the permission path admits. Consuming the geometric obstacle bounds from the Scene Memory State (Contract 8) and the task target and lease window from the Intent Specification (Contract 9), this tenth contract binds the unprivileged reference setpoints to certified physical invariants. It names its coordinate frame $\mathcal{F}$, evidence time $t_0$, initial reference state, and four deadlines in the **MCU monotonic clock domain**: nominal tracking begins at $t_{\mathrm{start}}$, the nominal setpoints end at $t_{\mathrm{plan\_exp}}$, replacement closes at $t_{\mathrm{commit}}$, and the admitted stop finishes at $t_{\mathrm{stop\_end}}$. It also links to the active intent expiry $t_{\mathrm{intent\_exp}}$. Conversion from the sensor and host clocks carries a bounded error. The planner schedules each replacement against an earlier target, the blend deadline $t_{\mathrm{blend}}$, by which the successor should be admitted and at which the arm's obstacle clearance is last checked; it is the schedule's target, not a field of the record.
 
 The permission path permits nominal **TRACK** only while the intent and plan remain valid, so the intent's expiry ends TRACK at once, whatever the record's own deadlines allow. To manage unexpected compute stalls and hardware faults safely, the system enforces a strict **two-tier deadline hierarchy**:
 
@@ -227,26 +237,55 @@ The permission path permits nominal **TRACK** only while the intent and plan rem
 
 These two distinct deadlines dictate two fundamentally different stopping mechanisms:
 
--   **Matched stop suffix (planned termination):** A pre-computed, continuous $C^2$ polynomial deceleration continuation anchored specifically at the nominal state expected at $t_{\mathrm{commit}}$. If an ongoing trajectory chunk executes normally toward its end but no successor chunk is admitted by $t_{\mathrm{commit}}$, the controller smoothly transfers to this pre-latched suffix at commitment, decelerating to a rest without requiring any runtime replanning.
--   **Live state-matched fallback (reactive termination):** If the high-rate chunk lease lapses, the parent intent expires, or a runtime safety monitor detects an unmodeled obstacle or torque fault *before* reaching $t_{\mathrm{commit}}$, the robot cannot use the matched stop suffix (which is anchored at the future state $t_{\mathrm{commit}}$). Instead, the MCU instantly generates a live state-matched fallback directly from live joint encoder telemetry, solving the $C^2$ deceleration polynomial on the fly from the current measured state $(q, \dot{q}, \ddot{q})$ within reserved clearance.
+-   **Matched stop suffix (planned termination at $t = t_{\mathrm{commit}}$):** A pre-computed, continuous $C^2$ polynomial deceleration continuation anchored specifically at the nominal state expected at $t_{\mathrm{commit}}$. If an ongoing trajectory chunk executes normally toward its end but no successor chunk is admitted by $t_{\mathrm{commit}}$, the controller smoothly transfers to this pre-latched suffix at commitment, decelerating to rest without requiring runtime replanning.
+-   **Live state-matched fallback (reactive termination at $t < t_{\mathrm{commit}}$):** If the high-rate chunk lease lapses, the parent intent expires, or a runtime safety monitor detects an unmodeled obstacle or torque fault *before* reaching $t_{\mathrm{commit}}$, the robot cannot use the matched stop suffix (which is anchored at the future state $t_{\mathrm{commit}}$). Instead, the MCU instantly generates a live state-matched fallback directly from live joint encoder telemetry, solving the $C^2$ deceleration polynomial on the fly from the current measured state $(q, \dot{q}, \ddot{q})$ within reserved clearance.
+
+Importantly, statistical temporal ensembling across overlapping model inferences is a coordinate-space heuristic, not a dynamical property. Exponentially averaging predicted positions cannot provide derivative continuity. Only an analytical boundary-value bridge, such as a quintic spline matching position, velocity, and acceleration, guarantees finite actuator torques across replanning cycles.
 
 After a lease lapse, the arm's stop begins one permission tick, one bus cycle, and one brake onset later; together with the lease itself, these delays make up the renewal-to-onset delay of @sec-nervous-cadences. Commitment caps the lease, because stop onset must come by $t_{\mathrm{commit}}$, so no lease may run longer than $t_{\mathrm{commit}}$ less those three delays. Only a lease run near that ceiling lets a record reach $t_{\mathrm{commit}}$ without a successor; such a record transfers to **STOP** on its matched stop suffix, which may finish after the intent's tracking permission expires. On this machine the `{python} PlanningLeaseRule.t_lease_str` lease lapses long before commitment, so a stalled proposer meets the renewal-to-onset delay rather than the ceiling, and @sec-planning-behavior-seam charges that delay against the arm's clearance.
 
 The two consumers read different parts of the record. The tracker interpolates the admitted reference, timestamps, and feedforward terms to drive the actuators along a smooth path. The independent permission path reads the lineage, timing, dynamic assumptions, validity bounds, and stop suffix, and it monitors current limits and authority without inheriting the planner's feasibility claim as proof; a fresh obstacle, changed payload, or contact event can revoke TRACK and invoke the state-matched fallback. Because each field in the handoff corresponds to a runtime check, the Nervous System can admit fast motion without assuming that the next inference cycle will succeed. Producing such a record begins from a goal that carries no timing at all.
 
-## From Goal to Trajectory {#sec-planning-goal-to-trajectory}
+## Trajectory Synthesis from Discrete Goals {#sec-planning-goal-to-trajectory}
 
-The intent lease for the mug, which the arm takes from the conveyor for the coworker at the packing station, grants a goal region and effort ceilings (@sec-intent-lease), but no actuator can execute a region. The tracking controller needs a trajectory, which assigns state targets, feedforward terms, and timestamps across a bounded interval. If a learned policy could output valid motor currents at the `{python} PlanningOpeningMachine.f_track_str` joint loop rate, planning would not exist as an architectural stage, and the machine would operate as a high-rate feedback controller. Learned policies instead need tens or hundreds of milliseconds to compute a motion sequence, while the tracking controller and the permission path run deterministically on fixed millisecond-scale periods.
+The intent lease for the mug, which the arm takes from the conveyor for the coworker at the packing station, grants a goal region and effort ceilings (@sec-intent-lease), but no actuator can execute a region. The tracking controller needs a trajectory, which assigns state targets, feedforward terms, and timestamps across a bounded interval. If a learned policy could output valid motor currents at the `{python} PlanningOpeningMachine.f_track_str` joint loop rate, planning would not exist as an architectural stage, and the machine would operate as a high-rate feedback controller. Learned policies instead need tens or hundreds of milliseconds to compute a motion sequence, while the tracking controller and the permission path run deterministically on fixed millisecond-scale periods. Reconciling these asynchronous cognitive timescales with hard real-time execution demands structured trajectory synthesis across three distinct paradigms.
+
+### Geometric search, numerical MPC, and learned action chunking {#sec-planning-paradigms}
 
 Classical sampling-based planners answer the geometric half of this problem. A probabilistic roadmap\index{Probabilistic roadmap} [@kavraki1996probabilistic] or a rapidly-exploring random tree\index{Rapidly-exploring random tree} [@lavalle1998rapidly] searches $\mathcal{C}_{\text{free}}$ for a collision-free path without building an explicit model of the obstacles. A path from such a search, like a chunk from a learned policy, still carries no timing, no derivatives at its ends, and no stop, and those are what this chapter supplies.
 
 Learned proposers bridge slow inference and fast actuator control by receding-horizon action chunking (@sec-brain-cognitive-pipeline), predicting a multi-step sequence, executing a prefix, and replanning on fresh observations. Three kinds of proposer fill this role, and each matters here through the latency and continuity of what it emits. ACT [@zhao2023learning] predicts $N$ future joint setpoints at once and blends overlapping chunks by the temporal ensembling of @sec-brain-cognitive-pipeline, which averages setpoints but leaves derivative continuity at the chunk seam to this chapter. Diffusion Policy [@chi2024diffusionpolicy] denoises a chunk of horizon $T_p$ (16 steps in the real Push-T setup), executes a subset $T_a$ (six there), and replans on the next observation; its iterative denoising adds workload-dependent latency and variance. A learned warm-start for a constrained trajectory optimizer can cut solver iterations when it lands near a feasible basin, but it can also choose the wrong side of an obstacle or miss the deadline. None of these outputs is a feasibility certificate, and only a candidate whose full path, seam, torque, and stop checks pass is admitted.
 
-This receding-horizon structure mirrors classical **Model Predictive Control (MPC)**\index{Model Predictive Control!receding horizon}\index{Trajectory optimization!collocation and MPC} and trajectory optimization, where an optimizer plans a trajectory over a finite horizon $T$, executes an initial prefix, and resolves the problem from the updated state on the next cycle. Classical MPC formulates trajectory synthesis as an explicit constrained numerical optimization problem, minimizing a cost function subject to analytical system dynamics ($\dot{\mathbf{x}} = f(\mathbf{x}, \mathbf{u})$) and hard inequality constraints on physical boundaries ($\mathbf{x} \in \mathcal{X}_{\text{safe}}$) and actuator torques ($\mathbf{u} \in \mathcal{U}_{\text{adm}}$). Where analytical models accurately capture the physical plant and state dimensions remain compact, MPC provides rigorous guarantees of constraint satisfaction and closed-loop stability. Yet classical trajectory optimization hits the "Classical Wall" of @sec-brain-classical-wall when applied to unstructured open-world manipulation: numerical solvers cannot ingest high-dimensional semantic tokens (such as raw camera pixels or natural-language instructions) directly, and non-smooth contact mechanics or deformable objects introduce combinatorial local minima that render online numerical optimization intractable within real-time control periods. Generative action chunking resolves the semantic ingestion problem by learning continuous multimodal trajectory distributions directly from visual demonstrations, but sacrifices analytical guarantees. The physical AI architecture therefore treats learned chunking policies as unprivileged semantic proposers across multi-second task horizons, relying on the kinodynamic feasibility checks and seam contracts developed in this chapter to guarantee physical admissibility before actuation. Executing these feasibility checks and seamlessly replacing the active trajectory introduces computational and transport delays that must be strictly bounded across replacement cycles.
+This receding-horizon structure mirrors classical **Model Predictive Control (MPC)**\index{Model Predictive Control!receding horizon}\index{Trajectory optimization!collocation and MPC} and trajectory optimization, where an optimizer plans a trajectory over a finite horizon $T$, executes an initial prefix, and resolves the problem from the updated state on the next cycle. Classical MPC formulates trajectory synthesis as an explicit constrained numerical optimization problem over discrete steps $k = 0, \dots, N-1$ [@tedrake2023manipulation; @lynch2017modern]:
+
+$$\begin{aligned}
+\min_{\mathbf{u}_{0:N-1}} \quad & \sum_{k=0}^{N-1} \ell(\mathbf{x}_k, \mathbf{u}_k) + \ell_f(\mathbf{x}_N) \\
+\text{subject to} \quad & \mathbf{x}_{k+1} = f(\mathbf{x}_k, \mathbf{u}_k), \quad k = 0, \dots, N-1 \\
+& \mathbf{x}_k \in \mathcal{X}_{\text{safe}}, \quad \mathbf{u}_k \in \mathcal{U}_{\text{adm}}, \quad k = 0, \dots, N-1 \\
+& \mathbf{x}_N \in \mathcal{X}_f
+\end{aligned}$$ {#eq-plan-mpc-formulation}
+
+In @eq-plan-mpc-formulation, the stage cost $\ell(\mathbf{x}_k, \mathbf{u}_k)$ penalizes tracking error and control effort, while the safe state set $\mathcal{X}_{\text{safe}}$ enforces collision-free clearances obtained from the Scene Memory State (Contract 8), and the admissible control set $\mathcal{U}_{\text{adm}}$ enforces joint torque and voltage limits from the body's Limit Record. The crucial theoretical linchpin is the **terminal invariant set** $\mathbf{x}_N \in \mathcal{X}_f$: in control theory, *recursive feasibility* (the mathematical guarantee that if a feasible trajectory exists at time $t$, a feasible solution is guaranteed to exist at $t+1$) strictly requires that the terminal state $\mathbf{x}_N$ lands within a region where a known, safe control law keeps the system safe indefinitely. In physical robotics, $\mathcal{X}_f$ is precisely the set of states from which a safe braking policy can bring the machine to a complete rest within observed clearance.
+
+Continuous-time optimal control problems are typically transcribed into finite-dimensional non-linear programs via **direct shooting** (forward-integrating controls) or **direct collocation** (parameterizing states and controls with polynomial splines and enforcing dynamic defect constraints $f(\mathbf{x}_k, \mathbf{u}_k) - \dot{\mathbf{x}}_k = \mathbf{0}$ at interior knots). Where analytical models accurately capture the physical plant and state dimensions remain compact, MPC provides rigorous guarantees of constraint satisfaction and closed-loop stability. Yet classical trajectory optimization hits the "Classical Wall" of @sec-brain-classical-wall when applied to unstructured open-world manipulation: numerical solvers cannot ingest high-dimensional semantic tokens (such as raw camera pixels or natural-language instructions) directly, and non-smooth contact mechanics or deformable objects introduce combinatorial local minima that render online numerical optimization intractable within real-time control periods. Generative action chunking resolves the semantic ingestion problem by learning continuous multimodal trajectory distributions directly from visual demonstrations, but sacrifices analytical guarantees. Specifically, learned policies predict multi-step action chunks open-loop without enforcing a terminal invariant constraint $\mathbf{x}_N \in \mathcal{X}_f$, destroying recursive feasibility: an aggressive chunk can drive the robot at high speed directly into a dynamic dead-end where no subsequent braking action can avoid impact. The physical AI architecture reconciles these paradigms by treating learned chunking policies as unprivileged semantic proposers across multi-second task horizons, while the deterministic safety microcontroller independently validates kinodynamic admissibility and enforces an invariant brake-to-stop suffix before actuation. @Tbl-11-planning-paradigms compares these three paradigms across their core systems properties.
+
+| Trajectory paradigm                         | Input representation                                       | Dynamic and safety guarantees                                       | Typical solve rate | Boundary continuity across replanning                  |
+|:--------------------------------------------|:-----------------------------------------------------------|:--------------------------------------------------------------------|:-------------------|:-------------------------------------------------------|
+| Classical Numerical MPC                     | Low-dimensional state vector $\mathbf{x} \in \mathbb{R}^n$ | Hard constraint satisfaction and provable stability                 | 50–200 Hz          | Natural $C^2$ continuity via warm-starting             |
+| Sampling-Based Optimization (MPPI, TrajOpt) | State vector and signed distance fields (ESDF)             | Soft constraint costs; probabilistic obstacle avoidance             | 20–60 Hz           | Requires spline smoothing or terminal costs            |
+| Generative Action Chunking (ACT, Diffusion) | High-dimensional multimodal tokens (vision, text)          | Empirical demonstration distribution; zero formal safety guarantees | 5–20 Hz            | Coordinate-level $C^0$; requires explicit $C^2$ bridge |
+
+: **Comparison of trajectory generation paradigms**: Classical control guarantees constraint satisfaction but cannot ingest high-dimensional semantic tokens; learned action chunking ingests vision but requires explicit downstream kinodynamic filtering and derivative boundary bridging. {#tbl-11-planning-paradigms tbl-colwidths="[22,23,23,14,18]"}
+
+### Action chunk horizon sizing and reactive lag trade-offs {#sec-planning-horizon-tradeoff}
+
+Before sizing the temporal prediction horizon $H$, the systems engineer must construct an end-to-end latency budget for the replacement pipeline. Trajectory replacement is not an instantaneous inference pass; it comprises a multi-stage data transport and verification sequence across the host processor and microcontroller.
 
 ```{python}
 #| label: calc-planning-replacement-ledger
 #| echo: false
+#| warning: false
+#| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ REPLACEMENT-LATENCY STAGE LEDGER FOR THE MACHINE'S CHUNK POLICY
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -295,9 +334,9 @@ The scheduling quantity is **replacement latency** $L$: elapsed time from the ob
 
 $$L = t_{\mathrm{sense\_ingress}} + t_{\mathrm{ipc\_dma}} + t_{\mathrm{infer}} + t_{\mathrm{deser}} + t_{\mathrm{validate}} + t_{\mathrm{admit}}$$ {#eq-plan-replacement-latency}
 
-The choice of action chunk prediction horizon $H$ introduces a fundamental systems dilemma between computational amortization and reactive responsiveness (@fig-11-planning-action-chunk-horizon). High-capacity vision-language-action (VLA) models and diffusion policies require non-trivial inference latency ($t_{\mathrm{infer}} \approx 180\ \text{ms}$ on embedded accelerators). If the planner evaluates actions single-step ($H = 1$), the compute duty cycle exceeds 100 percent ($t_{\mathrm{infer}} / \Delta t = 900\%$), starving the 50 Hz control loop ($\Delta t = 20\ \text{ms}$) and causing the robot to pause and shudder between consecutive steps. Expanding the prediction horizon $H$ amortizes inference across multi-step execution windows, reducing accelerator duty cycle below 50 percent once $H \ge 18$. However, executing a long chunk open-loop inflates the mean reaction delay to dynamic obstacles, $\tau_{\mathrm{react}} \approx \frac{1}{2} H \Delta t + t_{\mathrm{infer}}$. The factor of $1/2$ reflects temporal expectation: because an unexpected disturbance or obstacle appears at a uniformly distributed random time $\tau \in [0, H \Delta t]$ within the chunk's execution window, the expected remaining wait time until the controller can transition to a freshly replanned chunk is $\frac{1}{H\Delta t} \int_0^{H\Delta t} (H\Delta t - \tau)\,d\tau = \frac{1}{2} H \Delta t$. Adding the downstream model inference latency $t_{\mathrm{infer}}$ yields the total reaction delay. When $H > 36$ ($>720\ \text{ms}$ physical window), reaction delay exceeds the dynamic obstacle avoidance threshold ($\sim 350\ \text{ms}$), causing closed-loop task success in dynamic environments to plunge from 90 percent down to single digits. Sizing the action chunk horizon to the Pareto-optimal window $H^* \in [16, 24]$ achieves the necessary balance: compute duty cycle remains comfortably amortized at 38 to 45 percent while reaction latency stays below 400 ms, preserving high closed-loop success rates across both static and dynamic operating conditions.
+The choice of action chunk prediction horizon $H$ introduces a fundamental systems dilemma between computational amortization and reactive responsiveness (@fig-11-planning-action-chunk-horizon). High-capacity vision-language-action (VLA) models and diffusion policies require non-trivial inference latency ($t_{\mathrm{infer}} \approx 180\ \text{ms}$ on embedded accelerators). If the planner evaluates actions single-step ($H = 1$), the compute duty cycle exceeds 100 percent ($t_{\mathrm{infer}} / \Delta t = 9.0$, or 900 percent), starving the 50 Hz control loop ($\Delta t = 20\ \text{ms}$) and causing the robot to pause and shudder between consecutive steps. Expanding the prediction horizon $H$ amortizes inference across multi-step execution windows, reducing accelerator duty cycle below 50 percent once $H \ge 18$. However, executing a long chunk open-loop inflates the mean reaction delay to dynamic obstacles, $\tau_{\mathrm{react}} \approx \frac{1}{2} H \Delta t + t_{\mathrm{infer}}$. The factor of $1/2$ reflects temporal expectation: because an unexpected disturbance or obstacle appears at a uniformly distributed random time $\tau \in [0, H \Delta t]$ within the chunk's execution window, the expected remaining wait time until the controller can transition to a freshly replanned chunk is $\frac{1}{H\Delta t} \int_0^{H\Delta t} (H\Delta t - \tau)\,d\tau = \frac{1}{2} H \Delta t$. Adding the downstream model inference latency $t_{\mathrm{infer}}$ yields the total reaction delay. When $H > 36$ ($>720\ \text{ms}$ physical window), reaction delay exceeds the dynamic obstacle avoidance threshold ($\sim 350\ \text{ms}$), causing closed-loop task success in dynamic environments to plunge from 90 percent down to single digits. The underlying physical phenomenon is open-loop dynamic blindness. When $H = 64$ at 50 Hz, the robot executes open-loop for $1.28\ \text{seconds}$. In a shared workspace with a moving coworker or conveyor, an obstacle traveling at $0.5\ \text{m/s}$ moves $\Delta x_{\text{obs}} = v_{\text{obs}} \tau_{\text{react}} = 64\ \text{cm}$ during that window, vast enough to breach obstacle clearance margins completely and cause closed-loop manipulation success to collapse from 90 percent to 4 percent. Sizing the action chunk horizon to the Pareto-optimal window $H^* \in [16, 24]$ achieves the necessary balance: compute duty cycle remains comfortably amortized at 38 to 45 percent while reaction latency stays below 400 ms, preserving high closed-loop success rates across both static and dynamic operating conditions.
 
-::: {#fig-11-planning-action-chunk-horizon fig-env="figure" fig-pos="htb" fig-cap="**The action chunk horizon dilemma: compute amortization versus dynamic reaction delay**: Two-panel systems evaluation across action chunk horizon $H$ under a 50 Hz control loop ($\\Delta t = 20\\ \\text{ms}$) and 180 ms model inference latency. Top: GPU compute duty cycle (red) drops below the 100 percent real-time feasibility ceiling only when $H \\ge 9$, while mean reaction delay to unexpected obstacles (blue) scales linearly with horizon length. Bottom: Closed-loop manipulation success rate across stationary objects (green) and moving obstacles (orange). While static tasks tolerate long horizons ($H > 30$), dynamic workspace interactions collapse due to open-loop latency, establishing an empirical Pareto-optimal operating window at $H^* \\in [16, 24]$ ($320\\text{--}480\\ \\text{ms}$ execution window)." fig-alt="Two-panel chart showing the action chunk horizon dilemma for horizons H from 1 to 64 steps at 50 Hz. Top panel shows GPU compute duty cycle descending from 900 percent at H=1 to below 100 percent at H=9 and leveling off at 15 percent at H=64, against mean dynamic reaction delay rising from 190 ms to 820 ms. Bottom panel shows closed-loop success rate: static workspace reaches 95 percent at H=16 to 24, while dynamic workspace peaks at 90 percent at H=20 before dropping to 4 percent at H=64 due to open-loop latency."}
+::: {#fig-11-planning-action-chunk-horizon fig-env="figure" fig-pos="htb" fig-cap="**The action chunk horizon dilemma: compute amortization vs. dynamic reaction delay**: Two-panel systems evaluation across action chunk horizon $H$ under a 50 Hz control loop ($\\Delta t = 20\\ \\text{ms}$) and 180 ms model inference latency. Top: GPU compute duty cycle (red) drops below the 100 percent real-time feasibility ceiling only when $H \\ge 9$, while mean reaction delay to unexpected obstacles (blue) scales linearly with horizon length. Bottom: Closed-loop manipulation success rate across stationary objects (green) and moving obstacles (orange). While static tasks tolerate long horizons ($H > 30$), dynamic workspace interactions collapse due to open-loop latency, establishing an empirical Pareto-optimal operating window at $H^* \\in [16, 24]$ ($320\\text{--}480\\ \\text{ms}$ execution window)." fig-alt="Two-panel chart showing the action chunk horizon dilemma for horizons H from 1 to 64 steps at 50 Hz. Top panel shows GPU compute duty cycle descending from 900 percent at H=1 to below 100 percent at H=9 and leveling off at 15 percent at H=64, against mean dynamic reaction delay rising from 190 ms to 820 ms. Bottom panel shows closed-loop success rate: static workspace reaches 95 percent at H=16 to 24, while dynamic workspace peaks at 90 percent at H=20 before dropping to 4 percent at H=64 due to open-loop latency."}
 
 ```{python}
 #| label: fig-11-planning-action-chunk-horizon
@@ -305,9 +344,6 @@ The choice of action chunk prediction horizon $H$ introduces a fundamental syste
 #| message: false
 #| warning: false
 
-import matplotlib as mpl
-
-mpl.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -461,9 +497,15 @@ plt.close()
 ```
 :::
 
+### Tail latency budgeting and the mission exposure wall {#sec-planning-tail-latency-budgeting}
+
+Machine learning benchmark evaluations typically report average-case or $P_{99}$ latency across millions of independent test queries. In cyber-physical motion control, however, mission failure is an absorbing barrier: an autonomous machine executing thousands of sequential trajectory handoffs will inevitably encounter the extreme tail of the compute distribution, where a single unhandled missed deadline precipitates physical collision.
+
 ```{python}
 #| label: calc-planning-mission-exposure
 #| echo: false
+#| warning: false
+#| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MISSION EXPOSURE OF A P99 REPLACEMENT BUDGET
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -528,6 +570,8 @@ $$T_{\mathrm{record}}\ge T_{\mathrm{request}}+Q_{1-\epsilon}(L)+T_{\mathrm{reser
 ```{python}
 #| label: calc-planning-arm-timeline
 #| echo: false
+#| warning: false
+#| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ AUTHORITY TIMELINE FOR THE CONVEYOR-TRACKING ARM
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -537,7 +581,7 @@ $$T_{\mathrm{record}}\ge T_{\mathrm{request}}+Q_{1-\epsilon}(L)+T_{\mathrm{reser
 # │ Goal:    Hold the arm's timeline inputs in one place so the horizon bound,
 # │          the evidence-age check, the C2 arm case, and the trajectory record
 # │          read the same values.
-# │ Show:    20 ms setpoint period; 60 ms request delay vs the 50 ms chunk
+# │ Show:    20 ms setpoint period; 60 ms request delay vs. the 50 ms chunk
 # │          renewal period; 540 ms minimum authority (27 periods);
 # │          240 ms replacement deadline; 300 ms commitment (60 ms slack);
 # │          320 ms nominal end (H = 16 setpoints); 600 ms stop end (30 periods).
@@ -636,9 +680,15 @@ While these empirical recoveries show the strength of receding-horizon replannin
 ![](images/png/fig11_real_action_chunking_trace.png){width="100%"}
 :::
 
+### Future-state conditioning and execution delay compensation {#sec-planning-future-state-conditioning}
+
+Because trajectory synthesis requires nonzero compute time, a replacement plan cannot be initiated from the robot's state at the moment the solver is invoked. Planning from a stale measurement introduces the Stale-State Paradox: when the planner finishes 80 ms later, commanding the robot along that trajectory instructs the physical mechanism to jump instantaneously back to where it was 80 ms ago, creating an intolerable step discontinuity in position and velocity.
+
 ```{python}
 #| label: calc-planning-stale-pose-gap
 #| echo: false
+#| warning: false
+#| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ STALE REQUEST-EPOCH POSE GAP
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -692,7 +742,7 @@ The projected seam in @eq-plan-execution-delay-gap is useful for constructing a 
 
 The horizon now answers to two clocks. It must be long enough for a design-tail replacement to land before commitment with the stop still behind it, and that same window caps the lease. The evidence behind the target, meanwhile, must stay fresh for as long as TRACK runs. A replacement that arrives in time, however, secures only the plan's continuity in time. The setpoints it carries must also lie within what the joints can deliver and join the mechanism's actual velocity and acceleration at the seam.
 
-::: {#chk-plan-action-chunk-horizon-tail .callout-checkpoint title="Action chunk horizon and tail latency budgeting"}
+::: {#chk-plan-action-chunk-horizon-tail .callout-checkpoint title="Action chunk horizon and tail latency"}
 
 Before turning from replacement timing to the feasibility of the motion itself, verify your ability to size an action chunk horizon against the latency tail:
 
@@ -704,7 +754,11 @@ Before turning from replacement timing to the feasibility of the motion itself, 
 
 ## Kinodynamic Feasibility {#sec-planning-kinodynamic-feasibility}
 
-A candidate trajectory is a geometric and timed proposal, not permission to move. Before submitting it, the planner screens it by testing whether the verified initial state lies inside the candidate's kinodynamic feasibility envelope, evaluating joint position and velocity, predicted actuator torque and current, contact limits, obstacle clearance, and the matched stop suffix over the proposed horizon. For an arm, the rigid-body model maps $\mathbf{q}(t)$, $\dot{\mathbf{q}}(t)$, and $\ddot{\mathbf{q}}(t)$ to $\boldsymbol{\tau}(t)=\mathbf{M}(\mathbf{q})\ddot{\mathbf{q}}+\mathbf{C}(\mathbf{q},\dot{\mathbf{q}})\dot{\mathbf{q}}+\mathbf{g}(\mathbf{q})$ and $I_i(t)=\tau_i(t)/k_{\tau,i}$ [@craig2005introduction; @lynch2017modern]. The planner's screen is not admission; the MCU repeats the decisive check and admits the bounded trajectory only if its configured limits and complete stop clearance hold for the verified initial state; it then checks tracking, freshness, and the remaining stopping budget during execution.
+A candidate trajectory is a geometric and timed proposal, not permission to move. While high-level planners navigate the configuration space $\mathcal{C}_{\text{free}}$, physical actuators operate under strict electromotive, thermal, and structural constraints. Kinodynamic feasibility bridges geometric intent and physical reality by ensuring that every reference trajectory respects actuator torque ratings, velocity limits, and transmission dynamics before setpoints are dispatched.
+
+### Rigid-body dynamics and continuous collision evaluation {#sec-planning-rigidbody-dynamics}
+
+Before submitting a candidate trajectory, the planner screens it by testing whether the verified initial state lies inside the candidate's kinodynamic feasibility envelope, evaluating joint position and velocity, predicted actuator torque and current, contact limits, obstacle clearance, and the matched stop suffix over the proposed horizon. For an arm, the rigid-body model maps $\mathbf{q}(t)$, $\dot{\mathbf{q}}(t)$, and $\ddot{\mathbf{q}}(t)$ to $\boldsymbol{\tau}(t)=\mathbf{M}(\mathbf{q})\ddot{\mathbf{q}}+\mathbf{C}(\mathbf{q},\dot{\mathbf{q}})\dot{\mathbf{q}}+\mathbf{g}(\mathbf{q})$ and $I_i(t)=\tau_i(t)/k_{\tau,i}$ [@craig2005introduction; @lynch2017modern]. The planner's screen is not admission; the MCU repeats the decisive check and admits the bounded trajectory only if its configured limits and complete stop clearance hold for the verified initial state; it then checks tracking, freshness, and the remaining stopping budget during execution.
 
 An optimizer may smooth a path or reduce obstacle proximity, but the admitted trajectory and resident stop, not the optimizer's objective value, define the motion permission. The operational deployment of modern real-time trajectory optimization is illustrated in @fig-11-manipulator-trajectory, which shows GPU-accelerated motion generation (cuRobo [@sundaralingam2023curobo]) executing time-parameterized minimum-jerk splines across three canonical industrial manipulation challenges:
 
@@ -712,19 +766,39 @@ An optimizer may smooth a path or reduce obstacle proximity, but the admitted tr
 2.  **Constrained pick-and-lift (middle row):** A collaborative robot arm executes a high-speed pick, lift, and transfer trajectory constrained by simultaneous joint position envelopes, velocity ceilings, torque limits, and acceleration jerk bounds. The optimizer computes smooth spline knots that maximize task speed while keeping commanded motor torques strictly within continuous thermal ratings.
 3.  **Synchronized multi-arm workspace sharing (bottom row):** Two adjacent manipulators coordinate complex intersecting manipulation paths in simulation. By evaluating mutual swept-volume distances in parallel across thousands of GPU cores, the planner synthesizes collision-free trajectories that avoid deadlock while sharing overlapping workspace envelopes.
 
-Crucially, while GPU-accelerated solvers can propose kinematically optimal, collision-free splines in 10 to 30 ms, they run on high-power host application processors subject to operating system jitter and memory bus contention. The real-time safety boundary remains strictly on the safety MCU, which re-validates the proposed splines against physical plant limits and latches the stopping suffix before committing the motors.
+Crucially, while GPU-accelerated solvers can propose kinematically optimal, collision-free splines in 10 to 30 ms, they operate in user space on high-power host application processors subject to Linux kernel scheduling jitter, CUDA driver context switches, and unified memory bus contention. In the physical AI safety architecture, GPU-accelerated motion generators act purely as unprivileged proposers; the safety MCU must independently re-validate boundary constraints in deterministic $O(1)$ time and latch the stopping suffix before committing the motors.
 
 ::: {#fig-11-manipulator-trajectory fig-env="figure" fig-pos="t" fig-cap="**Real-time trajectory optimization**: GPU-accelerated motion generation executing minimum-jerk splines on hardware, avoiding a dynamic obstacle against a signed distance field, executing a constrained pick-and-lift, and coordinating two arms in a shared workspace. Collision distance is evaluated in continuous time rather than at waypoints, which is what allows the trajectory to be re-optimized while it is being executed. Adapted from [@sundaralingam2023curobo]." fig-alt="Real-Time Trajectory Optimization and Dynamic Obstacle Avoidance on Industrial Manipulators. Experimental deployment of GPU-accelerated motion generation (cuRobo) executing time-parameterized, minimum-jerk trajectory splines on physical hardware. (Top row) A canonical 6-DOF industrial manipulator executes an online obstacle avoidance trajectory around a dynamic workspace obstacle, continuously evaluating continuous-time collision distances against a 3D Euclidean Signed Distance Field (ESDF) voxel map generated via real-time depth perception. (Middle row) A canonical 6-DOF collaborative arm executes a collision-free pick-and-lift trajectory spline constrained by joint velocity, acceleration, and torque limits. (Bottom row) Coordinated multi-arm trajectory synthesis in simulation showing two canonical industrial manipulators executing synchronized, collision-free obstacle avoidance around shared workspace boundaries. Adapted from [@sundaralingam2023curobo]."}
 ![](images/png/fig11_real_manipulator_trajectory.png){width="95%"}
 :::
 
-Feasibility checked only at waypoints is not feasibility of the motion. The mechanism follows an interpolated path between samples spaced $T_s$ apart, so a check at $t_k = k T_s$ alone lets derivatives exceed their bounds inside $[t_k, t_{k+1}]$. If the interpolator may apply up to $a_{\max}$ within a sample, a worst-case triangular acceleration reversal across the sampling midpoint lets velocity overshoot the sampled values by as much as $\Delta v \le \frac{1}{4} a_{\max} T_s$. To see why this $\frac{1}{4}$ factor arises from first principles, consider an interpolator reversing acceleration symmetrically: ramping from zero to peak acceleration $a_{\max}$ at $T_s/2$ and returning to zero at $T_s$. The maximum intra-sample velocity excursion is the integrated area under this triangular acceleration pulse: $\Delta v = \frac{1}{2} \times \text{base} \times \text{height} = \frac{1}{2} \cdot \left(\frac{T_s}{2}\right) \cdot a_{\max} = \frac{1}{4} a_{\max} T_s$. Two samples just under $v_{\max}$ can therefore bracket an interior peak above it and trip an over-speed clamp between two valid waypoints. To bound velocity in continuous time without evaluating every point, the admission filter tests a contracted limit, $|\dot{q}_k| \le v_{\max} - \frac{1}{4} a_{\max} T_s$, which absorbs the largest intra-sample overshoot.
+### Intra-sample derivative overshoot and contracted limits {#sec-planning-intrasample-overshoot}
 
-Concatenating individually feasible chunks can create an infeasible seam. Position-only matching ($C^0$) can leave a velocity step; matching velocity ($C^1$) can leave a finite acceleration and torque step. In a rigid-inertia approximation, a commanded velocity change $\Delta\dot q$ spread over servo period $T_c$ asks for the torque in @eq-plan-seam-torque, where $J_{\mathrm{eff}}=J_L+N_g^2J_{\text{rotor}}$ is the output-side inertia, the load's plus the rotor's reflected through gear ratio $N_g$. A physical drive saturates or filters that request according to its current limits and compliance. @Fig-11-action-chunk-seam-continuity places that request beside its remedy, a finite $C^2$ bridge that removes the reference velocity step.
+Feasibility checked only at discrete waypoints is not feasibility of the continuous motion. The mechanism follows an interpolated path between discrete samples spaced $T_s$ apart, so a check at $t_k = k T_s$ alone allows derivatives to exceed their bounds inside the interval $(t_k, t_{k+1})$. If the interpolator may apply up to $a_{\max}$ within a sample, a worst-case triangular acceleration reversal across the sampling midpoint lets velocity overshoot the sampled values.
+
+Consider an interpolator executing a symmetric acceleration reversal: a positive triangular acceleration pulse over $[0, T_s/2]$ that peaks at $a_{\max}$ (having base $T_s/2$), followed by a matching negative pulse over $[T_s/2, T_s]$ to return the velocity to its endpoint setpoint. The maximum intra-sample velocity excursion occurs at the interval midpoint $t = T_s/2$, equal to the integrated area under the first acceleration pulse:
+
+$$\Delta v = \frac{1}{2} \times \text{base} \times \text{height} = \frac{1}{2} \cdot \left(\frac{T_s}{2}\right) \cdot a_{\max} = \frac{1}{4} a_{\max} T_s$$ {#eq-plan-intrasample-overshoot}
+
+As derived in @eq-plan-intrasample-overshoot, two samples evaluated just under $v_{\max}$ can bracket an interior peak above it, tripping an over-speed clamp between two individually valid waypoints. To bound velocity in continuous time without evaluating an infinite continuum of points, the admission filter tests the analytical contracted limit:
+
+$$|\dot{q}_k| \le v_{\max} - \frac{1}{4} a_{\max} T_s$$ {#eq-plan-contracted-velocity-limit}
+
+which absorbs the largest intra-sample overshoot directly at the discrete sampling grid. Testing @eq-plan-contracted-velocity-limit at each waypoint guarantees continuous-time velocity feasibility throughout the execution interval.
+
+### Seam acceleration jumps and reflected rotor inertia {#sec-planning-seam-torque-inertia}
+
+Concatenating individually feasible chunks can create an infeasible seam. Position-only matching ($C^0$) can leave a velocity step; matching velocity ($C^1$) can leave a finite acceleration and torque step. In a rigid-inertia approximation, a commanded velocity change $\Delta\dot q$ spread over servo period $T_c$ asks for the inertial torque:
+
+$$\tau_{\mathrm{request}} = J_{\mathrm{eff}} \frac{\Delta\dot q}{T_c}$$ {#eq-plan-seam-torque}
+
+where $J_{\mathrm{eff}} = J_L + N_g^2 J_{\text{rotor}}$ is the output-side effective inertia, summing the link load inertia $J_L$ and the motor rotor inertia $J_{\text{rotor}}$ reflected through gear ratio $N_g$. The quadratic scaling $N_g^2$ follows directly from kinetic energy equivalence:
+
+$$E_k = \frac{1}{2} J_{\text{rotor}} \dot{\theta}_{\text{motor}}^2 = \frac{1}{2} J_{\text{rotor}} (N_g \dot{\theta}_{\text{link}})^2 = \frac{1}{2} (N_g^2 J_{\text{rotor}}) \dot{\theta}_{\text{link}}^2$$
+
+In precision robotic joints utilizing high-ratio strain-wave gearing ($N_g = 50\text{--}100$), reflected rotor inertia is amplified by a factor of $2,500$ to $10,000$, dominating over link mass during rapid accelerations and amplifying seam torque spikes. A physical drive saturates or filters that request according to its current limits and compliance. @Fig-11-action-chunk-seam-continuity places that request beside its remedy, a finite $C^2$ bridge that removes the reference velocity step.
 
 The physical necessity of $C^2$ continuity and bounded jerk is intuitive when carrying a full mug of coffee or riding a roller coaster. If a track has sharp, polygonal kinks ($C^0$ continuity), the cart experiences infinite acceleration impulses. If the track has continuous velocity ($C^1$ continuity) but abrupt steps in curvature, acceleration changes instantaneously: passengers experience a violent snap as lateral force appears out of nowhere. A coffee cup spills not from moving fast, but from rapid changes in acceleration—**jerk**\index{Jerk!definition} ($j = \dot{a} = \dddot{x}$). In an articulated robot arm, discontinuous acceleration demands instantaneous jumps in motor torque ($\tau = J_{\text{eff}} a$), violently shaking the structural links, exciting high-frequency resonances in strain-wave gears, and breaking payload friction. Enforcing $C^2$ continuity guarantees that acceleration profiles remain smooth and continuous across segment boundaries.
-
-$$\tau_{\mathrm{request}}=J_{\mathrm{eff}}\frac{\Delta\dot q}{T_c}$$ {#eq-plan-seam-torque}
 
 ::: {#fig-11-action-chunk-seam-continuity fig-env="figure" fig-pos="t" fig-cap="**Seam demand and checked bridge**: A position-matched velocity step creates a large one-tick inertial torque *request*. A finite $C^2$ bridge removes the reference velocity step, but its interior jerk, torque, and joint response still require validation." fig-alt="Panel (a) shows a velocity step at a trajectory seam and a high one-tick torque request. Panel (b) shows a smoother C-squared reference bridge. The diagram compares proposed reference demands, not measured torque."}
 ![](images/svg/fig11_action_chunk_seam_continuity.svg){width="100%"}
@@ -742,7 +816,11 @@ A ***$C^2$ spline seam***\index{C2 spline seam@$C^2$ spline seam!definition} is 
 
 The transmission shapes the response to what the drive delivers. For a two-inertia model with load inertia $J_L$, reflected motor inertia $J_{\text{ref}}=N_g^2J_{\text{rotor}}$ (@sec-body-actuator-limits), and coupling stiffness $k_\theta$, the antiresonance and resonance frequencies [for this model](https://link.springer.com/article/10.1186/s10033-024-01041-5) are $\frac{1}{2\pi}\sqrt{k_\theta/J_L}$ and $\frac{1}{2\pi}\sqrt{k_\theta(1/J_L+1/J_{\text{ref}})}$. In the arm's strain-wave joints, reflected rotor inertia and a compliant transmission can amplify a sharp reference change, so admission needs the joint's identified, load-dependent modes and checks bridge extrema, torque, and drive limits against them. No frequency, stiffness, or jerk range transfers between products without measured parameters.[^fn-rule-servo-bandwidth]
 
+### Quintic spline synthesis for C$^2$ boundary matching {#sec-planning-quintic-splines}
+
 Smoothing the seam's velocity step requires online $C^2$ trajectory spline blending\index{C2 trajectory spline blending@$C^2$ trajectory spline blending}, which must be treated as the synthesis of an entirely new motion plan rather than as cosmetic filtering. When the planner inserts a polynomial bridge $\theta_{\mathrm{blend}}(t)$ over a transition interval $T_{\mathrm{blend}}$, a duration distinct from the blend deadline $t_{\mathrm{blend}}$, to connect chunk $A$ and incoming chunk $B$, the resulting bridge segment must undergo the exact same dynamic feasibility checks as the primary chunks.[^fn-hw-jerk-limits]
+
+While standard cubic splines can enforce $C^2$ continuity across a batch of knot points simultaneously in offline path smoothing, an isolated local transition bridge between two independently generated chunks strictly requires a quintic polynomial. A cubic polynomial provides only four degrees of freedom ($a_0 \dots a_3$), sufficient to match position and velocity at two endpoints ($C^1$), but leaving acceleration discontinuous. Matching position, velocity, and acceleration at both boundaries requires six independent constraints, uniquely dictating a fifth-degree polynomial.
 
 [^fn-hw-jerk-limits]: **Trajectory jerk**\index{Jerk!minimization}\index{Drivetrain!torsional resonance}: A jerk objective can make a particular bridge smoother. A finite jerk bound alone does not exclude energy near a measured resonance; the complete command spectrum and closed-loop response must be checked for the joint and load.
 
@@ -753,9 +831,22 @@ $$\theta(0) = \theta_0, \quad \dot{\theta}(0) = \dot{\theta}_0, \quad \ddot{\the
 $$\theta(T_{\mathrm{blend}}) = \theta_1, \quad \dot{\theta}(T_{\mathrm{blend}}) = \dot{\theta}_1, \quad \ddot{\theta}(T_{\mathrm{blend}}) = \ddot{\theta}_1$$
 where $(\theta_0, \dot{\theta}_0, \ddot{\theta}_0)$ is the terminal physical state of chunk $A$ at the seam instant, and $(\theta_1, \dot{\theta}_1, \ddot{\theta}_1)$ is the target state on incoming chunk $B$ at $t = T_{\mathrm{blend}}$. Matching six boundary conditions requires six independent coefficients ($a_0 \dots a_5$), uniquely dictating a fifth-degree polynomial:
 $$\theta(t) = a_0 + a_1 t + a_2 t^2 + a_3 t^3 + a_4 t^4 + a_5 t^5$$
-The six coefficients follow in closed form from these boundary conditions (@sec-appendix-control-splines), and the bridge's jerk varies quadratically in time, finite over a finite blend. Admission must check its extrema and the measured joint response; $C^2$ endpoints alone do not suppress all resonant energy.
 
-A fixed-degree polynomial can be evaluated with bounded work per axis on a chosen controller. Coefficient synthesis and whole-trajectory extrema checks occur at admission; the measured worst-case execution time, including memory access and monitoring, must fit the configured servo period.
+Evaluating boundary conditions at $t = 0$ directly yields the first three coefficients: $a_0 = \theta_0$, $a_1 = \dot{\theta}_0$, and $a_2 = \frac{1}{2}\ddot{\theta}_0$. The remaining three coefficients $[a_3, a_4, a_5]^T$ satisfy the $3 \times 3$ linear system evaluated at duration $T = T_{\mathrm{blend}}$:
+
+$$\begin{bmatrix} T^3 & T^4 & T^5 \\ 3T^2 & 4T^3 & 5T^4 \\ 6T & 12T^2 & 20T^3 \end{bmatrix} \begin{bmatrix} a_3 \\ a_4 \\ a_5 \end{bmatrix} = \begin{bmatrix} \theta_1 - \left(\theta_0 + \dot{\theta}_0 T + \frac{1}{2}\ddot{\theta}_0 T^2\right) \\ \dot{\theta}_1 - \left(\dot{\theta}_0 + \ddot{\theta}_0 T\right) \\ \ddot{\theta}_1 - \ddot{\theta}_0 \end{bmatrix}$$ {#eq-plan-quintic-spline-matrix}
+
+Inverting @eq-plan-quintic-spline-matrix yields closed-form algebraic expressions (@sec-appendix-control-splines) that the safety microcontroller evaluates in microsecond $O(1)$ time. Differentiating $\theta(t)$ three times gives the commanded jerk:
+
+$$j(t) = \dddot{\theta}(t) = 6 a_3 + 24 a_4 t + 60 a_5 t^2$$ {#eq-plan-quintic-jerk}
+
+Because $j(t)$ in @eq-plan-quintic-jerk is quadratic in time, its extrema over $[0, T]$ occur strictly at the boundaries ($t = 0$ or $t = T$) or at the single interior stationary point $t^* = -a_4 / (5 a_5)$ (when $t^* \in (0, T)$). The safety microcontroller can therefore evaluate the exact peak jerk $|j_{\text{peak}}|$ analytically without numerical line searches.
+
+The physical consequence of bounded jerk directly governs actuator health. Because joint torque rate scales with jerk ($\dot{\tau} = J_{\mathrm{eff}} j(t)$), a discontinuous acceleration ($C^1$ seam) demands an infinite jerk impulse, which in turn requests an instantaneous step in motor current. In a physical permanent-magnet motor, winding inductance limits the current slew rate according to the voltage headroom:
+
+$$V_{\mathrm{bus}} \ge L \frac{di}{dt} + R i + K_b \omega$$
+
+An unbounded jerk request demands $\frac{di}{dt} \to \infty$, which instantly saturates the motor driver against the DC bus voltage $V_{\mathrm{bus}}$. The drive loses current-loop control, phase lag accumulates, and the unbuffered torque shock excites torsional resonances in harmonic drive gearing. Enforcing $C^2$ continuity with a quintic spline keeps jerk bounded and commanded currents within the driver's linear voltage headroom. A fixed-degree polynomial can be evaluated with bounded work per axis on a chosen controller. Coefficient synthesis and whole-trajectory extrema checks occur at admission; the measured worst-case execution time, including memory access and monitoring, must fit the configured servo period.
 
 Representation affects what can be proved at admission. @Tbl-11-trajectory-representations separates continuity supplied by the representation from the dynamic checks still required. A B-spline of degree $p$ has $C^{p-r}$ continuity at an interior knot of multiplicity $r$; its control-point convex hull bounds position, not automatically velocity, torque, or clearance. Minimizing an integrated jerk objective requires solving that optimization; choosing a B-spline does not itself solve it.
 
@@ -771,12 +862,14 @@ Representation affects what can be proved at admission. @Tbl-11-trajectory-repre
 ```{python}
 #| label: calc-planning-seam-reflected-inertia
 #| echo: false
+#| warning: false
+#| message: false
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt_torque, fmt_multiple, fmt_angular_velocity, fmt_inertia, fmt_latency, check
 
 class PlanningSeamInertia:
-    """Illustrative one-tick velocity request versus symmetric C2 blend."""
+    """Illustrative one-tick velocity request vs. symmetric C2 blend."""
 
     joint = Actuators.HarmonicDrive.CSG_25_50  # category: datasheet; gear ratio and rotor inertia
     j_reflected = joint.reflected_inertia  # category: derived; N^2 J_rotor, 0.25 kg m^2
@@ -823,7 +916,7 @@ For the registered CSG-25-50 teaching example, reflected rotor inertia is `{pyth
      "33.3x"              = PlanningSeamInertia.reduction_mult_str -->
 
 ::: {.column-margin}
-![](images/svg/margin_reflected_rotor_inertia_torque_knee.svg){width="100%" fig-alt="Illustrative one-tick velocity-step request of 50 newton-meters versus a 50-millisecond C-squared blend with 1.5 newton-meter peak inertial torque."}
+![](images/svg/margin_reflected_rotor_inertia_torque_knee.svg){width="100%" fig-alt="Illustrative one-tick velocity-step request of 50 newton-meters vs. a 50-millisecond C-squared blend with 1.5 newton-meter peak inertial torque."}
 
 *In this inertia model, the $C^2$ blend cuts the peak inertial torque request by 33.3×.*
 :::
@@ -834,17 +927,54 @@ Output chatter in learned proposals is a related failure. Stochastic sampling ca
 
 ## Behavior at the Seam {#sec-planning-behavior-seam}
 
-Suppose the chunk policy stalls while the arm is reaching toward the mug. On this machine the shared lease ends the wait `{python} PlanningLeaseRule.t_lease_str` after the last admission, and the arm enters its state-matched fallback along the renewal-to-onset path of @sec-planning-handoff. The record's own deadlines decide how long any lease could be allowed to run, because until the stop begins the arm keeps moving, and every millisecond the MCU waits is travel its stop can no longer use. Let the lease run to its ceiling, then, so that the blend deadline $t_{\mathrm{blend}}$ passes with no replacement admitted. The four deadlines of @sec-planning-handoff, compared in the MCU monotonic clock with $t_{\mathrm{intent\_exp}}$, now decide what happens. A replacement may still be admitted until $t_{\mathrm{commit}}$, the entry of the matched stop suffix, whose duration is $T_{\mathrm{stop}}=t_{\mathrm{stop\_end}}-t_{\mathrm{commit}}$. It must pass the full admission check before that cutoff; a late host progress report has no authority.
+The transition seam between consecutive action chunks is where physical AI systems face their greatest operational vulnerability. If upstream neural inference encounters scheduling delays, bus stalls, or unhandled exceptions, the execution runtime must manage the seam without violating kinodynamic limits or exhausting mechanical stopping clearance.
 
-For a cruise entry with $q(t_{\mathrm{commit}})=q_c$, speed $v_c>0$, and zero entry acceleration, a $C^2$ position-and-velocity-matched stop over duration $T$ uses $u=(t-t_{\mathrm{commit}})/T$:
+### The two-tier deadline hierarchy and commitment cutoffs {#sec-planning-two-tier-deadlines}
 
-$$q(u)=q_c+v_cT\left(u-u^3+\tfrac12u^4\right),\qquad 0\le u\le1$$ {#eq-plan-c2-stopping-suffix}
+Managing motion continuity across chunk transitions requires an explicit, multi-tiered hierarchy of real-time deadlines. In receding-horizon planning, a system cannot simply execute an action chunk until its final setpoint and abruptly decide what to do next; by the time the trajectory runs out of points, physical velocity is nonzero and mechanical inertia makes a collision-free stop impossible. Instead, the runtime establishes a strict two-tier deadline structure governed by monotonic hardware clocks: a soft *blend deadline* ($t_{\mathrm{blend}}$) by which a candidate successor chunk should arrive to enable smooth trajectory blending, and a hard *commitment cutoff* ($t_{\mathrm{commit}}$) at which the controller must unconditionally revoke nominal tracking and activate a verified stopping suffix if no successor has been admitted.
 
-Differentiating @eq-plan-c2-stopping-suffix gives speed $v_c(1-3u^2+2u^3)$ and acceleration $-6v_c u(1-u)/T$, peak deceleration is $1.5v_c/T$, and stopping distance is $v_cT/2$. Unlike a constant-deceleration switch, its acceleration begins and ends at zero. Holding the peak at the credible deceleration $a_{\text{brake}}$ fixes $T=1.5v_c/a_{\text{brake}}$ and a distance of $0.75v_c^2/a_{\text{brake}}$, half again the constant-deceleration distance $v_c^2/2a_{\text{brake}}$, so in a stopping budget the suffix behaves like constant braking at $a_{\text{eff}}=a_{\text{brake}}/1.5$. A nonzero measured entry acceleration requires a general quintic matching the actual $(q,\dot q,\ddot q)$ at entry and zero terminal velocity and acceleration; the permission path checks its interior speed, acceleration, jerk, torque, and clearance.
+To see how this deadline hierarchy safeguards physical execution during inference hiccups, suppose the chunk policy stalls while the arm is reaching toward the mug. On this machine the shared lease ends the wait `{python} PlanningLeaseRule.t_lease_str` after the last admission, and the arm enters its state-matched fallback along the renewal-to-onset path of @sec-planning-handoff. Crucially, all deadline evaluations and timeout checks execute strictly within the **MCU monotonic hardware clock domain**, completely insulated from host operating system freezes, NTP time steps, or Linux scheduler jitter. The record's own deadlines decide how long any lease could be allowed to run, because until the stop begins the arm keeps moving, and every millisecond the MCU waits is travel its stop can no longer use. Let the lease run to its ceiling, then, so that the blend deadline $t_{\mathrm{blend}}$ passes with no replacement admitted. The four deadlines of @sec-planning-handoff, compared in the MCU monotonic clock with $t_{\mathrm{intent\_exp}}$, now decide what happens. A replacement may still be admitted until $t_{\mathrm{commit}}$, the entry of the matched stop suffix, whose duration is $T_{\mathrm{stop}}=t_{\mathrm{stop\_end}}-t_{\mathrm{commit}}$. It must pass the full admission check before that cutoff; a late host progress report has no authority.
+
+### The C$^2$ stopping suffix and effective deceleration penalty {#sec-planning-c2-stopping-suffix}
+
+A moving robot carries continuous momentum. If an emergency brake uses an idealized constant-deceleration profile ($a(t) = -a_{\text{brake}}$), the commanded acceleration steps discontinuously from zero to $-a_{\text{brake}}$ at $t_{\mathrm{commit}}$, and steps discontinuously back to zero when velocity reaches zero. This instantaneous switch demands an infinite jerk impulse ($\dddot{q} = \infty$) and an instantaneous step jump in actuator braking torque ($\Delta\tau = J_{\mathrm{eff}} a_{\text{brake}}$). On a mobile base, this torque shock breaks tire traction, skidding the wheels across warehouse epoxy; on an articulated arm, it violently jerks the payload, risking gripper slippage or structural damage.
+
+To brake non-destructively, the deceleration profile must ramp smoothly up and down with unbroken $C^2$ continuity. For a cruise entry with position $q(t_{\mathrm{commit}}) = q_c$, cruise speed $v_c > 0$, and zero entry acceleration, a $C^2$ position-and-velocity-matched stop over duration $T$ parameterizes motion via the normalized time variable $u = (t - t_{\mathrm{commit}}) / T \in [0, 1]$:
+
+$$q(u) = q_c + v_c T \left(u - u^3 + \frac{1}{2} u^4\right), \qquad 0 \le u \le 1$$ {#eq-plan-c2-stopping-suffix}
+
+Differentiating @eq-plan-c2-stopping-suffix with respect to physical time $t$ ($\frac{d}{dt} = \frac{1}{T} \frac{d}{du}$) yields the continuous velocity, acceleration, and jerk profiles:
+
+$$\begin{aligned}
+\dot{q}(u) &= v_c \left(1 - 3u^2 + 2u^3\right) \\
+\ddot{q}(u) &= -\frac{6 v_c}{T} u(1 - u) \\
+\dddot{q}(u) &= -\frac{6 v_c}{T^2} (1 - 2u)
+\end{aligned}$$ {#eq-plan-c2-derivatives}
+
+Evaluating the profiles of @eq-plan-c2-derivatives at the boundaries confirms their physical properties:
+
+- At entry ($u = 0$, $t = t_{\mathrm{commit}}$): $q(0) = q_c$, $\dot{q}(0) = v_c$, and $\ddot{q}(0) = 0$. The suffix seamlessly matches steady-state cruise with zero acceleration step.
+- At rest ($u = 1$, $t = t_{\mathrm{commit}} + T$): $q(1) = q_c + \frac{1}{2} v_c T$, $\dot{q}(1) = 0$, and $\ddot{q}(1) = 0$. The mechanism reaches a complete, stable standstill with zero residual acceleration shock.
+
+The deceleration profile $\ddot{q}(u)$ forms a symmetric inverted parabola over $u \in [0, 1]$. Its maximum deceleration occurs at the maneuver midpoint $u = 0.5$ (where $u(1-u) = 1/4$):
+
+$$a_{\mathrm{peak}} = \max_{u \in [0, 1]} |\ddot{q}(u)| = \frac{6 v_c}{T} \cdot \frac{1}{4} = \frac{1.5 v_c}{T}$$
+
+Holding the peak at the robot's physical braking limit $a_{\mathrm{peak}} \le a_{\mathrm{brake}}$ fixes the required stopping duration:
+
+$$T = \frac{1.5 v_c}{a_{\mathrm{brake}}}$$
+
+The total stopping distance traveled during the suffix is the integral of velocity over $[0, T]$:
+
+$$d_{C^2} = q(1) - q(0) = \frac{1}{2} v_c T = \frac{1}{2} v_c \left(\frac{1.5 v_c}{a_{\mathrm{brake}}}\right) = \frac{3}{4} \frac{v_c^2}{a_{\mathrm{brake}}} = 1.5 \left(\frac{v_c^2}{2 a_{\mathrm{brake}}}\right)$$
+
+This 50 percent increase in braking distance is the **Kinematic Deceleration Tax**: smooth, non-destructive braking always costs $1.5\times$ the distance of an idealized constant-deceleration step ($d_{C^2} = 0.75 \frac{v_c^2}{a_{\mathrm{brake}}}$ vs. $0.5 \frac{v_c^2}{a_{\text{brake}}}$). In a stopping budget, the $C^2$ suffix behaves like constant braking at $a_{\text{eff}}=a_{\text{brake}}/1.5$. Any autonomous machine that sizes its sensor horizon or clearance margins using freshman physics ($v^2 / 2a$) will breach its safety envelope during smooth stops. A nonzero measured entry acceleration requires a general quintic matching the actual $(q,\dot q,\ddot q)$ at entry and zero terminal velocity and acceleration; the permission path checks its interior speed, acceleration, jerk, torque, and clearance.
 
 ```{python}
 #| label: calc-planning-c2-stop-clearance
 #| echo: false
+#| warning: false
+#| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ C2 STOP SUFFIX ON THE WAREHOUSE MOBILE MANIPULATOR
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -976,6 +1106,12 @@ A stall on this machine never reaches commitment. One permission tick, one bus c
 
 On the arm, commitment decides whether the `{python} PlanningC2Stop.arm_margin_str` margin survives. A lease `{python} PlanningC2Stop.t_wait_str` longer than the arm's `{python} PlanningLeaseRule.t_lease_max_str` ceiling would let tracking run that far past commitment, and cruise at the TCP limit would add `{python} PlanningC2Stop.late_cruise_arm_str` before the same stop and breach the `{python} PlanningC2Stop.d_arm_clear_str` clearance by `{python} PlanningC2Stop.late_breach_arm_str`. A later stop must still match its actual entry state; this counterfactual holds cruise speed constant only to show the lost clearance. An arm that waits that long may already occupy a state from which no admissible control avoids the obstacle.
 
+### Inevitable collision states and physical commitment boundaries {#sec-planning-inevitable-collision-states}
+
+In classical robotic path planning, obstacle avoidance is frequently formulated as a static geometric query: does the robot's physical geometry intersect an obstacle in configuration space at the current instant? In physical AI systems operating with continuous momentum, this static spatial check is dangerously inadequate. A mobile manipulator moving with high velocity and finite actuator braking torque cannot reverse its direction or halt instantaneously. Long before the machine physically touches an obstacle, its combined dynamic state—position, velocity, acceleration, and traction limits—can cross an irreversible boundary beyond which every mathematically possible control trajectory leads inevitably to collision. In dynamic systems and control theory, such states are classified as Inevitable Collision States (ICS).
+
+The commitment deadline $t_{\mathrm{commit}}$ is sized precisely so that the machine initiates braking *before* its dynamic state enters an Inevitable Collision State $\text{ICS}(\mathcal{X}_{\text{obs}})$. If the controller delays braking past commitment in the hope that an overdue replanner will deliver an evasive path, physical momentum carries the machine into an ICS from which no admissible control input can prevent impact.
+
 ::: {#dfn-planning-inevitable-collision-state .callout-definition title="Inevitable collision state"}
 
 ***Inevitable collision state***\index{Inevitable collision state!definition}\index{Collision avoidance!inevitable collision state} (ICS) is any dynamic plant state $\mathbf{x}(t) \in \mathcal{X}$ from which every physically admissible future control trajectory $\mathbf{u}_{[t, \infty)} \in \mathcal{U}$ inevitably produces collision with an obstacle or constraint boundary:
@@ -1004,7 +1140,11 @@ The planner proposes the suffix, but the MCU latches the validated payload and s
 
 [^fn-hw-dma-pingpong]: **Inter-core shared-memory contracts**\index{Inter-processor communication!shared memory}\index{Real-time systems!memory barriers}: A shared-memory implementation needs an ownership protocol, cache maintenance where required, and release/acquire ordering. The MCU validates a completed candidate and copies the admitted plan and stop into protected memory before activation.
 
-The base of the mobile manipulator stops the same way, and for a reason of its own. The loaded tote rack tolerates the machine's credible deceleration only if that deceleration is reached gradually; a stop that begins and ends at zero acceleration costs half again the distance of an abrupt one at the same peak. That cost now enters the stopping budget. At the drive limit of `{python} PlanningC2Stop.v_drive_str`, a suffix that peaks at the credible `{python} PlanningC2Stop.a_brake_str` lasts `{python} PlanningC2Stop.c2_drive_time_str` and travels `{python} PlanningC2Stop.c2_drive_dist_str`, against the `{python} PlanningC2Stop.brake_const_str` of constant-deceleration braking in @eq-body-stopping-distance. The suffix therefore adds `{python} PlanningC2Stop.c2_increment_str` to the budget that @sec-perception-transduction-calibration left at `{python} PlanningC2Stop.total_prev_str`, for a running total of `{python} PlanningC2Stop.total_new_str`. That total passes the `{python} PlanningC2Stop.d_clear_str` rack-end clear distance by `{python} PlanningC2Stop.excess_str`. This is the stopping condition of principle \ref{pri-vol4-irreversibility} with one more term, because a stop the load can tolerate is a longer stop and the distance it adds comes out of the same clear distance. With such a stop the machine can no longer run at its drive limit and still stop short of a person who has stepped out at the rack end. Of the budget's terms, only speed is left to give that distance back, and @sec-enforcement-stopping-envelopes sets it once the last term is in.
+### Base stopping budget inflation under gentle deceleration {#sec-planning-base-stopping-budget}
+
+The base of the mobile manipulator stops the same way, and for a reason of its own. The loaded tote rack tolerates the machine's credible deceleration only if that deceleration is reached gradually; a stop that begins and ends at zero acceleration costs half again the distance of an abrupt one at the same peak. That cost now enters the stopping budget. At the drive limit of `{python} PlanningC2Stop.v_drive_str`, a suffix that peaks at the credible `{python} PlanningC2Stop.a_brake_str` lasts `{python} PlanningC2Stop.c2_drive_time_str` and travels `{python} PlanningC2Stop.c2_drive_dist_str`, against the `{python} PlanningC2Stop.brake_const_str` of constant-deceleration braking in @eq-body-stopping-distance. The suffix therefore adds `{python} PlanningC2Stop.c2_increment_str` to the budget that @sec-perception-transduction-calibration left at `{python} PlanningC2Stop.total_prev_str`, for a running total of `{python} PlanningC2Stop.total_new_str`. That total passes the `{python} PlanningC2Stop.d_clear_str` rack-end clear distance by `{python} PlanningC2Stop.excess_str`.
+
+This `{python} PlanningC2Stop.excess_str` deficit proves that the robot cannot safely cruise at its `{python} PlanningC2Stop.v_drive_str` drive limit in this aisle once smooth, non-destructive stopping kinetics are respected. The machine must either derate its maximum operating speed or expand its perception horizon. This intentional deficit sets up the runtime enforcement speed governor in @sec-enforcement. This is the stopping condition of Principle \ref{pri-vol4-irreversibility} with one more term, because a stop the load can tolerate is a longer stop and the distance it adds comes out of the same clear distance. With such a stop the machine can no longer run at its drive limit and still stop short of a person who has stepped out at the rack end. Of the budget's terms, only speed is left to give that distance back, and @sec-enforcement-stopping-envelopes sets it once the last term is in.
 
 For either body, the admission and fallback decisions in @tbl-11-seam-fallback-hierarchy are distinct from an emergency power cut.
 
@@ -1030,21 +1170,30 @@ Before committing an autonomous machine to an action chunk, verify your understa
 
 Each row of @tbl-11-seam-fallback-hierarchy presumes that its trigger reaches the MCU in time. A failure can first show itself in the candidate, at the seam, or in the world, and each reaches the MCU on a different schedule.
 
-## How Plans Go Wrong {#sec-planning-failure-modes}
+## Trajectory Planning Failure Modes and Infeasible Seams {#sec-planning-failure-modes}
 
 A plan can become infeasible by execution time. Between synthesis in the learned policy and actuation at the causal boundary (@sec-boundary-causal-boundary), the machine's state drifts, the environment shifts, or the seam between consecutive chunks violates dynamic constraints. Where a failure first becomes visible decides which subsystem holds the signal and how much time it has to detect and reject the plan.
 
-The earliest failure is a chunk that is invalid before it reaches the drives. A **pre-execution bound checker**\index{Bound Checker!pre-execution} evaluates each candidate at admission against fixed kinematic and dynamic limits, computing the margin $M(t) = L_{\mathrm{limit}} - |x(t)|$ at every trajectory point for position $q$, velocity $\dot{q}$, and acceleration $\ddot{q}$. Any sample beyond its limit makes $M(t)$ negative at that instant, and the checker rejects the chunk with a fault record naming the joint channel, the limit, the violation time, and the negative margin. Rejection at admission causes no dynamic disturbance, because the machine stays on its previously validated trajectory.
+### Pre-execution limit and boundary checkers {#sec-planning-pre-execution-checkers}
 
-A **boundary checker**\index{Boundary Checker} is the admission-time guard for the seam of @sec-planning-kinodynamic-feasibility. It compares the candidate with the active plan and measured joint state at $t_{\mathrm{seam}}$, including $\Delta q$, $\Delta\dot q$, and $\Delta\ddot q$, and bounds the torque the seam requests by @eq-plan-seam-torque.
+Before any trajectory setpoint can influence actuator control registers, the safety MCU screens the proposal through two complementary admission gates:
+
+1.  **Pre-execution Bound Checker:** Evaluates the proposed action chunk in isolation against intrinsic kinematic and dynamic limits, computing margin $M(t) = L_{\mathrm{limit}} - |x(t)|$ across all trajectory points for position $q$, velocity $\dot{q}$, and acceleration $\ddot{q}$. Any sample where $M(t) < 0$ triggers immediate rejection with a diagnostic fault record naming the joint channel, timestamp, and negative margin. Rejection at admission causes no dynamic disturbance because the machine continues executing its previously admitted trajectory.
+2.  **Boundary Checker:** Evaluates the transition seam between the currently executing trajectory and the candidate replacement at $t_{\mathrm{seam}}$. It compares state vectors $(\Delta q, \Delta\dot{q}, \Delta\ddot{q})$ against measured joint encoder telemetry and bounds the commanded seam torque request via @eq-plan-seam-torque.
 
 For the CSG-25-50 joint of the seam notebook, counting only its `{python} PlanningSeamInertia.j_reflected_str` reflected rotor inertia over one `{python} PlanningSeamInertia.dt_tick_str` tick and allocating the whole `{python} PlanningSeamInertia.tau_peak_rated_str` repeated-peak rating to this acceleration gives an *idealized ceiling* of `{python} PlanningSeamInertia.dq_ceiling_str` on $\Delta\dot q$. Available margin is smaller after link and payload inertia, gravity, friction, other commanded torque, current rise time, and thermal or bus limits are accounted for. The permission path must use that state-dependent margin and the measured drive response when evaluating a finite bridge. It rejects a direct velocity discontinuity even if its one-tick arithmetic falls below that ceiling; a bounded $C^2$ bridge and its interior checks are still required.[^fn-inc-seam-trip]
 
 [^fn-inc-seam-trip]: **Drive and resonance response**\index{Drivetrain!resonant frequency}\index{Inverter!desaturation trip}: A sharp command can excite a joint's *identified* flexible modes, but their frequencies and damping depend on the transmission and load. Current limiting, desaturation detection, DC-bus response, and shutdown depend on the selected driver and its configuration; see the [TI gate-driver protection description](https://www.ti.com/document-viewer/lit/html/SLVAG18/GUID-1263241E-9C90-419F-B3D8-D2F599BCABEA).
 
+### Runtime tracking monitors and unmodeled contact trips {#sec-planning-runtime-monitors}
+
+Even when candidate chunks pass all pre-execution and boundary checks, real-world disturbances during execution can invalidate physical feasibility. Unexpected contact wrenches, grasped payload slip, or structural deflection can cause the physical plant to diverge from its nominal plan.
+
 ```{python}
 #| label: calc-planning-monitor-trip
 #| echo: false
+#| warning: false
+#| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RUNTIME MONITOR TRIP THRESHOLDS FOR THE ARM
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -1081,7 +1230,7 @@ class PlanningMonitorTrip:
     f_contact_str = fmt_force(f_contact, precision=0)
 ```
 
-Even with all pre-execution and boundary checks passed, changes in the physical world can render the plan infeasible. A grasped workpiece can slip from its intended $\mathrm{SE}(3)$ pose, an unmodeled obstacle can enter the workspace, or structural tracking error can accumulate beyond allowable tolerances. **Runtime monitors**\index{Runtime monitor} detect changed-world infeasibility by observing four dedicated signals, comprising joint state divergence, tracking error velocity, unexpected contact wrenches, and the invalidation of the geometric assumptions the record declares (@sec-planning-trajectory-contract). The tracking error allowance $\epsilon_{\mathrm{pos}}$ is the swept-volume clearance, the distance between the planned trajectory's swept volume and the nearest obstacle boundary, less the structural deflection and gearbox compliance allowance $\delta_{\mathrm{deflect}}$. For the mobile manipulator's arm reaching past the conveyor guard, a budgeted swept-volume clearance of `{python} PlanningMonitorTrip.d_clearance_str` and an unmodeled payload deflection and gearbox compliance allowance $\delta_{\mathrm{deflect}}$ of `{python} PlanningMonitorTrip.d_deflect_str` leave an allowance $\epsilon_{\mathrm{pos}}$ of `{python} PlanningMonitorTrip.eps_pos_str`. The allowance caps the tracking bound rather than replacing it. The arm tracker's own validated bound, the arm's instance of the $\epsilon_{\text{track}}$ that @sec-enforcement-handoff validates for the base, must sit inside those `{python} PlanningMonitorTrip.eps_pos_str`, and the per-tick check trips on $\epsilon_{\text{track}}$. If measured Cartesian tool-position error $\|\mathbf{x}_{\mathrm{tool,actual}}(t)-\mathbf{x}_{\mathrm{tool,planned}}(t)\|$ exceeds $\epsilon_{\text{track}}$, or a six-axis force-torque sensor reports an unmodeled `{python} PlanningMonitorTrip.f_contact_str` contact in this free-space example, the monitor revokes nominal tracking and requests the validated state-matched fallback. Actual deceleration begins after the measured detection, dispatch, and actuator response delays.
+Even with all pre-execution and boundary checks passed, changes in the physical world can render the plan infeasible. A grasped workpiece can slip from its intended $\mathrm{SE}(3)$ pose, an unmodeled obstacle can enter the workspace, or structural tracking error can accumulate beyond allowable tolerances. **Runtime monitors**\index{Runtime monitor} detect changed-world infeasibility by observing four dedicated signals, comprising joint state divergence, tracking error velocity, unexpected contact wrenches, and the invalidation of the geometric assumptions the record declares (@sec-planning-trajectory-contract). This derivation demonstrates **Spatial Margin Budgeting**: geometric obstacle clearance cannot be allocated entirely to tracking error. Physical compliance and mechanical deflection under load consume clearance before any tracking divergence occurs. The tracking error allowance $\epsilon_{\mathrm{pos}}$ is therefore the total swept-volume clearance less the structural deflection and gearbox compliance allowance $\delta_{\mathrm{deflect}}$. For the mobile manipulator's arm reaching past the conveyor guard, a budgeted swept-volume clearance of `{python} PlanningMonitorTrip.d_clearance_str` and an unmodeled payload deflection and gearbox compliance allowance $\delta_{\mathrm{deflect}}$ of `{python} PlanningMonitorTrip.d_deflect_str` leave an allowance $\epsilon_{\mathrm{pos}}$ of `{python} PlanningMonitorTrip.eps_pos_str`. The allowance caps the tracking bound rather than replacing it. The arm tracker's own validated bound, the arm's instance of the $\epsilon_{\text{track}}$ that @sec-enforcement-handoff validates for the base, must sit inside those `{python} PlanningMonitorTrip.eps_pos_str`, and the per-tick check trips on $\epsilon_{\text{track}}$. If measured Cartesian tool-position error $\|\mathbf{x}_{\mathrm{tool,actual}}(t)-\mathbf{x}_{\mathrm{tool,planned}}(t)\|$ exceeds $\epsilon_{\text{track}}$, or a six-axis force-torque sensor reports an unmodeled `{python} PlanningMonitorTrip.f_contact_str` contact in this free-space example, the monitor revokes nominal tracking and requests the validated state-matched fallback. Actual deceleration begins after the measured detection, dispatch, and actuator response delays.
 
 A plan can also exhaust its nominal references before the next candidate passes admission. The MCU must not wait for the execution pointer to run off the array or treat a final-position hold as a stop. On this machine the chunk lease ends the wait first, and a lease run toward its ceiling reaches the commitment rule of @sec-planning-behavior-seam, which the MCU applies in its own monotonic clock. Complete stopping clearance includes detection, dispatch, actuator response, and motion under the selected profile; an assumed constant deceleration is insufficient for the $C^2$ worked suffix.
 
@@ -1089,7 +1238,11 @@ Every detector in this section relies on an explicit contract between the trajec
 
 ## The Trajectory Contract {#sec-planning-trajectory-contract}
 
-Each time the chunk policy proposes `{python} PlanningArmTimeline.n_horizon_str` new setpoints for the reach toward the mug, the permission path must decide whether to admit them without asking the planner anything. The trajectory record, immutable and handed over at every replanning cycle, makes that decision possible. None of its nominal setpoints is admitted unless the record's matched stop suffix is resident and feasible from every state reachable before $t_{\text{commit}}$. It answers to the intent lease of @sec-intent-lease, whose digest it carries as its parent, and every setpoint it proposes pursues the lease's target without exceeding its effort ceilings. The record stores the motion as setpoint arrays or spline coefficients, together with the sample cadence (on this machine a `{python} PlanningArmTimeline.t_period_str` period $\Delta t_{\text{step}}$, a `{python} PlanningArmTimeline.f_step_str` setpoint stream), the nominal end $t_{\mathrm{plan\_exp}}$ (`{python} PlanningArmTimeline.t_plan_exp_str` for one chunk), and SI units. With the frame and evidence time of @sec-planning-handoff, the units, and the cadence in the handoff, the joint controller interpolates setpoints and evaluates derivatives without frame mismatches or reliance on ambient system clocks.
+Each time the chunk policy proposes `{python} PlanningArmTimeline.n_horizon_str` new setpoints for the reach toward the mug, the permission path must decide whether to admit them without asking the planner anything. The formal **Trajectory Plan** record (`TrajectoryPlan`, the tenth contract in the physical AI lineage)\index{Trajectory Plan!contract record}\index{Cyber-physical contract!trajectory planning}, immutable and handed over at every replanning cycle, makes that decision possible. The trajectory record is not merely a data serialization schema or ROS message definition; it is a formal **Cyber-Physical Contract** binding the high-level planner to explicit, auditable physical assumptions.
+
+In the book's contract custody chain, the Trajectory Plan consumes two upstream contracts: the **Scene Memory State** (`SceneMemoryState`, Contract 8 from @sec-memory), from which it ingests the 3D Euclidean Signed Distance Field (ESDF), voxel occupancy epochs, and raycasted free-space clearances; and the **Intent Specification** (`IntentSpecification`, Contract 9 from @sec-intent), from which it ingests the grounded semantic goal set, task tolerance bounds, effort ceilings, and parent intent lease digest. In return, the Trajectory Plan synthesizes a time-indexed, kinodynamically validated motion proposal that downstream @sec-enforcement ingests to evaluate Control Barrier Functions (CBFs) and emit per-tick **Admitted Commands** (`AdmittedCommand`, Contract 11).
+
+If the physical plant violates declared bounds—such as payload mass, contact impedance, surface friction, or ODD geometry—the contract is breached, and TRACK authority is revoked immediately by the safety MCU. None of its nominal setpoints is admitted unless the record's matched stop suffix is resident and feasible from every state reachable before $t_{\text{commit}}$. It answers to the intent lease of @sec-intent-lease, whose digest it carries as its parent, and every setpoint it proposes pursues the lease's target without exceeding its effort ceilings. The record stores the motion as setpoint arrays or spline coefficients, together with the sample cadence (on this machine a `{python} PlanningArmTimeline.t_period_str` period $\Delta t_{\text{step}}$, a `{python} PlanningArmTimeline.f_step_str` setpoint stream), the nominal end $t_{\mathrm{plan\_exp}}$ (`{python} PlanningArmTimeline.t_plan_exp_str` for one chunk), and SI units. With the frame and evidence time of @sec-planning-handoff, the units, and the cadence in the handoff, the joint controller interpolates setpoints and evaluates derivatives without frame mismatches or reliance on ambient system clocks.
 
 ::: {.column-margin .margin-pointer}
 ↪ Trajectory feasibility proposals are separately checked against conditional control barrier functions in @sec-enforcement-safe-sets-conditional-permission.
@@ -1106,6 +1259,8 @@ On this machine the chunk policy's output supplies only the nominal part of each
 ```{python}
 #| label: calc-planning-record-trace
 #| echo: false
+#| warning: false
+#| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FILLED TRAJECTORY RECORD FOR THE REACH TOWARD THE MUG
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -1155,7 +1310,9 @@ A trajectory remains feasible only while its physical assumptions hold at chunk 
 
 **Fallacy**: *Static admission checks protect a machine against obstacle displacements during active execution.*
 
-The arm begins an admitted reach toward the mug with the conveyor guard clear of its swept volume. During execution, a coworker slides a tote into the tool's path. The admission check was correct for the earlier geometry but no longer supports continued motion. Execution monitoring\index{Execution monitoring!collision detection} must detect the changed clearance and begin deceleration while sufficient stopping room remains. The design must bound how quickly workspace changes become visible via sensor bus latency\index{Network!bus latency} and reserve the stopping margin needed to respond before the updated geometry becomes impossible to avoid.
+**Static geometry is an admission precondition, not an execution certificate; dynamic reality always requires runtime monitoring.** The arm begins an admitted reach toward the mug with the conveyor guard clear of its swept volume. During execution, a coworker slides a tote into the tool's path. The admission check was correct for the earlier geometry but no longer supports continued motion. Execution monitoring\index{Execution monitoring!collision detection} must detect the changed clearance and begin deceleration while sufficient stopping room remains. The design must bound how quickly workspace changes become visible via sensor bus latency\index{Network!bus latency} and reserve the stopping margin needed to respond before the updated geometry becomes impossible to avoid.
+
+**Architect's countermeasure**: Couple static pre-execution spatial screening with a real-time swept-volume collision monitor running on the safety MCU. If an unmodeled obstacle breaches the reserved spatial margin $\epsilon_{\text{pos}}$, immediately abort nominal tracking and initiate the validated state-matched fallback.
 
 :::
 
@@ -1163,7 +1320,9 @@ The arm begins an admitted reach toward the mug with the conveyor guard clear of
 
 **Pitfall**: *Checking each action chunk alone without examining the motion the chunks compose.*
 
-The arm receives successive chunks that each reverse a joint's direction. Each chunk passes its own acceleration and jerk checks, yet the sequence produces oscillatory motion that can excite the drivetrain's resonant frequencies\index{Drivetrain!resonant frequency} through gearbox compliance\index{Gearbox!compliance}. Admission must compare derivatives across each seam and retain enough recent motion history to detect recurring reversals that would drive Joule heating ($I^2R$)\index{Motor!Joule heating} in the stator. The motor and transmission execute the composed trajectory, and treating chunks as independent requests hides behavior that appears only when the requests are joined.
+**Individual chunk feasibility does not imply composed trajectory stability; high-frequency reversals destroy transmissions.** The arm receives successive chunks that each reverse a joint's direction. Each chunk passes its own acceleration and jerk checks, yet the sequence produces oscillatory motion that can excite the drivetrain's resonant frequencies\index{Drivetrain!resonant frequency} through gearbox compliance\index{Gearbox!compliance}. Admission must compare derivatives across each seam and retain enough recent motion history to detect recurring reversals that would drive Joule heating ($I^2R$)\index{Motor!Joule heating} in the stator. The motor and transmission execute the composed trajectory, and treating chunks as independent requests hides behavior that appears only when the requests are joined.
+
+**Architect's countermeasure**: Enforce multi-chunk frequency and reversal monitoring across the execution window. Reject or low-pass filter proposed chunk sequences whose direction-reversal cadence approaches the drivetrain's torsional antiresonance or thermal $I^2R$ accumulation threshold.
 
 :::
 
@@ -1171,7 +1330,9 @@ The arm receives successive chunks that each reverse a joint's direction. Each c
 
 **Pitfall**: *Delaying fallback transition past the hard stopping horizon in the hope that delayed compute finishes.*
 
-With the lease run to its `{python} PlanningLeaseRule.t_lease_max_str` ceiling, the worked arm's record ends its nominal setpoints at `{python} PlanningArmTimeline.t_plan_exp_str` and carries a `{python} PlanningArmTimeline.t_stop_str` matched stop suffix that must finish by `{python} PlanningArmTimeline.t_stop_end_str`, so the MCU must commit to fallback\index{Fallback trajectory!commitment point} at `{python} PlanningArmTimeline.t_commit_str` unless it has admitted a valid replacement. At that point the application processor reports inference nearly complete, but it has not delivered an executable plan. Waiting spends the runway reserved for deceleration. The MCU must follow the matched stop suffix at the commitment point. Progress reports cannot extend a mechanical stopping budget; only a newly validated trajectory can justify continued execution.
+**An overdue compute cycle never justifies extending a physical commitment deadline. Hope is not a deceleration profile.** With the lease run to its `{python} PlanningLeaseRule.t_lease_max_str` ceiling, the worked arm's record ends its nominal setpoints at `{python} PlanningArmTimeline.t_plan_exp_str` and carries a `{python} PlanningArmTimeline.t_stop_str` matched stop suffix that must finish by `{python} PlanningArmTimeline.t_stop_end_str`, so the MCU must commit to fallback\index{Fallback trajectory!commitment point} at `{python} PlanningArmTimeline.t_commit_str` unless it has admitted a valid replacement. At that point the application processor reports inference nearly complete, but it has not delivered an executable plan. Waiting spends the runway reserved for deceleration. The MCU must follow the matched stop suffix at the commitment point. Progress reports cannot extend a mechanical stopping budget; only a newly validated trajectory can justify continued execution.
+
+**Architect's countermeasure**: Bind the commitment deadline $t_{\mathrm{commit}}$ strictly to the MCU monotonic hardware timer. When the timer expires without an admitted successor in the staging buffer, execute the pre-latched $C^2$ stopping suffix immediately, ignoring host progress updates.
 
 :::
 
@@ -1179,7 +1340,9 @@ With the lease run to its `{python} PlanningLeaseRule.t_lease_max_str` ceiling, 
 
 **Pitfall**: *Relying solely on feedforward dynamic models when physical contact or payload mass can change abruptly.*
 
-The arm lifts an item near its `{python} PlanningRecordTrace.m_payload_str` payload bound using feedforward torque\index{Feedforward control!torque demand} computed for the loaded arm. The item slips from the gripper, but the drives keep applying the same lifting torque to the now unloaded arm, so it accelerates upward. The admitted trajectory has not changed; the dynamics that made its commands appropriate have. Feedback monitoring\index{Feedback control!error monitoring} must detect the resulting tracking error and constrain the commands within the available margin before a mechanical limit strike or thermal derating\index{Motor!thermal derating}. A feedforward model improves nominal tracking, but it cannot replace runtime checks for abrupt changes in payload or contact.
+**Feedforward model inversion without closed-loop disturbance bounds turns payload loss into explosive runaway.** The arm lifts an item near its `{python} PlanningRecordTrace.m_payload_str` payload bound using feedforward torque\index{Feedforward control!torque demand} computed for the loaded arm. The item slips from the gripper, but the drives keep applying the same lifting torque to the now unloaded arm, so it accelerates upward. The admitted trajectory has not changed; the dynamics that made its commands appropriate have. Feedback monitoring\index{Feedback control!error monitoring} must detect the resulting tracking error and constrain the commands within the available margin before a mechanical limit strike or thermal derating\index{Motor!thermal derating}. A feedforward model improves nominal tracking, but it cannot replace runtime checks for abrupt changes in payload or contact.
+
+**Architect's countermeasure**: Implement real-time torque and tracking error monitoring ($\|\mathbf{x}_{\text{actual}} - \mathbf{x}_{\text{ref}}\| \le \epsilon_{\text{track}}$) at the 1 kHz servo layer. If sudden payload detachment or contact mismatch causes acceleration to spike, clamp motor currents and transition to compliance or emergency stop.
 
 :::
 
@@ -1187,7 +1350,9 @@ The arm lifts an item near its `{python} PlanningRecordTrace.m_payload_str` payl
 
 **Fallacy**: *A trajectory can omit an achievable terminal stopping suffix if replacement plans are expected to arrive in time.*
 
-At its `{python} PlanningC2Stop.v_drive_str` drive limit, the mobile manipulator's base needs a $C^2$ suffix of $T=1.5v_c/a_{\text{brake}}$, `{python} PlanningC2Stop.c2_drive_time_str` at the credible `{python} PlanningC2Stop.a_brake_str`, to stop without exceeding that deceleration.\index{Trajectory!braking time} A proposed suffix sized by the constant-deceleration time $v_c/a_{\text{brake}}$ is a third shorter, so its profile peaks at $1.5a_{\text{brake}}$, past what the loaded rack tolerates. Expecting the next plan to arrive does not make this fallback executable. The admission gate must check $T_{\mathrm{stop}} \ge 1.5\,v_c/a_{\text{brake}}$ for the $C^2$ profile it latches and reject a record that fails. Every accepted trajectory needs a physically achievable termination path\index{Fallback trajectory!achievability} for the case in which no replacement becomes available.
+**A trajectory without a pre-latched stopping continuation is an unhedged bet on infinite compute availability.** At its `{python} PlanningC2Stop.v_drive_str` drive limit, the mobile manipulator's base needs a $C^2$ suffix of $T=1.5v_c/a_{\text{brake}}$, `{python} PlanningC2Stop.c2_drive_time_str` at the credible `{python} PlanningC2Stop.a_brake_str`, to stop without exceeding that deceleration.\index{Trajectory!braking time} A proposed suffix sized by the constant-deceleration time $v_c/a_{\text{brake}}$ is a third shorter, so its profile peaks at $1.5a_{\text{brake}}$, past what the loaded rack tolerates. Expecting the next plan to arrive does not make this fallback executable. The admission gate must check $T_{\mathrm{stop}} \ge 1.5\,v_c/a_{\text{brake}}$ for the $C^2$ profile it latches and reject a record that fails. Every accepted trajectory needs a physically achievable termination path\index{Fallback trajectory!achievability} for the case in which no replacement becomes available.
+
+**Architect's countermeasure**: Require every candidate trajectory record to include complete, closed-form $C^2$ stopping polynomial coefficients satisfying $T_{\mathrm{stop}} \ge 1.5 v_c / a_{\text{brake}}$ within available clearance. Reject any record at the admission gate that lacks this independently executable return ticket.
 
 :::
 
@@ -1206,6 +1371,8 @@ Commitment is where these results meet. A replacement must pass full admission b
 * **Continuity is not feasibility**: A $C^2$ seam removes reference jumps, but the bridge's interior jerk, torque, resonance, and clearance must still be checked against the actual drive.
 * **The planner proposes, the MCU admits**: The trajectory record binds setpoints, deadlines, and stop coefficients under its parent lease's digest, so the permission path judges the proposal by its content and holds a stop no host failure can erase.
 :::
+
+Trajectory generation represents the critical bridge where temporal predictions meet continuous mechanical dynamics. In classical motion planning, paths are solved over static geometric maps with the assumption that computation is an offline prerequisite. In Physical AI, high-capacity neural policies continuously generate receding-horizon action chunks while the machine hurtles through space with nonzero momentum. Time does not pause for optimization. Systems engineering resolves this fundamental tension by structuring planning as an unhedged contract: every admitted trajectory chunk must carry its own return ticket—a certified, dynamically feasible $C^2$ stopping suffix pre-latched in real-time memory. By binding motion proposals to rigorous commitment deadlines, the architecture guarantees that a computational stall or late replacement plan never converts into blind physical collision. With planned trajectories verified against kinematic limits and stopping clearance, the execution pipeline descends to the final real-time arbiter: the kilohertz enforcement loop.
 
 ::: {.callout-chapter-connection title="From admitted plans to per-tick permission"}
 This chapter admits whole proposals. The MCU checks a complete trajectory and its matched stop before commitment and latches the stop in protected memory. Admission judges the plan against the state the machine was in when the plan arrived, yet while the plan runs the plant can lag its reference, an obstacle can appear, and an actuator can saturate. @Sec-enforcement checks each tick against live state, insets the stopping distance by the tracking error the controller can bound, and owns the fallback ladder whose stop rung plays this chapter's resident stop. That inset is the last term of the machine's stopping budget, and adding it sets the speed at which the mobile manipulator may run the aisle.

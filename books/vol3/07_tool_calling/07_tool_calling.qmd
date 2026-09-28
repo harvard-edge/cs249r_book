@@ -115,7 +115,28 @@ When the serving interface returns tool calls as structured blocks, the runtime 
 
 ### Parallel and forced calls
 
-A single turn can contain several calls. A model that needs three files and a search result can request all four at once, and the runtime can run independent reads concurrently and return one result per call identifier. Parallel calls move two decisions onto the runtime. It must not assume the model ordered the calls, so calls that touch the same resource, such as two writes to one file, are serialized or rejected rather than raced. It also reports failure per call, so one timed-out read does not discard three good results.
+A single turn can contain several tool calls emitted concurrently by the model. When an agent requires three source files and an external database record, modern serving interfaces allow the model to emit all four invocation proposals within a single response frame. However, dispatching multi-tool batches naively using unconstrained asynchronous primitives (such as unmediated Python `asyncio.gather`) introduces critical concurrency hazards. If two concurrent tool calls target the same shared resource—for instance, one mutating a file while another reads it—an uncoordinated parallel dispatch produces non-deterministic Read-After-Write (RAW), Write-After-Read (WAR), or Write-After-Write (WAW) data races.
+
+#### Bernstein hazard analysis and DAG dispatch scheduling {.unnumbered}
+
+To prevent race conditions without sacrificing concurrent throughput, the runtime supervisor schedules parallel tool batches using *Bernstein hazard analysis* [@bernstein1966]. For every candidate tool call $t_k \in \mathcal{T} = \{t_1, t_2, \dots, t_n\}$ emitted in turn $m$, the runtime's semantic validation layer extracts two formal resource sets:
+
+1. **Input Set $\mathcal{I}(t_k)$ (Read Set):** The set of environment state variables, file system paths, database records, or network resources that tool $t_k$ reads during execution without modifying.
+2. **Output Set $\mathcal{O}(t_k)$ (Write Set):** The set of environment state variables, file system paths, table rows, or configuration states that tool $t_k$ modifies, creates, or deletes.
+
+Under classical concurrency theory, two operations $t_j$ and $t_k$ ($j < k$) can execute concurrently if and only if all three of Bernstein's conditions hold simultaneously:
+
+$$\mathcal{I}(t_j) \cap \mathcal{O}(t_k) = \emptyset \quad \text{(No Write-After-Read Hazard)}$$ {#eq-vol3-bernstein-1}
+
+$$\mathcal{O}(t_j) \cap \mathcal{I}(t_k) = \emptyset \quad \text{(No Read-After-Write Hazard)}$$ {#eq-vol3-bernstein-2}
+
+$$\mathcal{O}(t_j) \cap \mathcal{O}(t_k) = \emptyset \quad \text{(No Write-After-Write Hazard)}$$ {#eq-vol3-bernstein-3}
+
+When all three intersections evaluate to empty ($\mathcal{I}(t_j) \cap \mathcal{O}(t_k) = \mathcal{O}(t_j) \cap \mathcal{I}(t_k) = \mathcal{O}(t_j) \cap \mathcal{O}(t_k) = \emptyset$), the operations are mutually independent ($t_j \parallel t_k$). The supervisor dispatches them concurrently across asynchronous worker threads or coroutines, maximizing I/O parallelism.
+
+Conversely, if any intersection is non-empty, a physical hazard exists. Rather than rejecting the batch or racing the operations, the runtime supervisor dynamically compiles the batch into a dependency Directed Acyclic Graph (DAG) $\mathcal{G}_{\text{dispatch}} = (\mathcal{V}, \mathcal{E})$, where vertices $\mathcal{V} = \mathcal{T}$ and directed edges $(t_j \to t_k) \in \mathcal{E}$ enforce sequential execution ordering matching the model's sequential emission token order. Independent branches execute concurrently, while dependent nodes block until their causal prerequisites settle.
+
+Furthermore, the supervisor enforces *per-call fault containment*. If an independent read times out or raises an exception, the runtime does not discard or abort sibling operations in the DAG. Each outcome is matched to its unique call identifier, allowing successful observations to enter context alongside the isolated error frame.
 
 The runtime can also constrain whether the model calls a tool at all. Serving interfaces expose a tool-choice setting that lets the model decide, requires some call, requires one named tool, or forbids calls. A runtime uses a forced call to run a fixed step of a workflow, the deterministic path of a structured workflow, and forbids calls when it needs a final answer, for example after a budget is spent. Forcing shapes what the model emits. It authorizes nothing, and a forced call passes through the same checks as any other.
 
@@ -273,7 +294,16 @@ where $T_{\text{transition}}(\delta, q, a)$ denotes the automaton state transiti
 
 [^fn-parameter-injection-defense]: **Tool Parameter Injection Mitigations**: Untrusted model emissions can embed shell metacharacters, SQL operators, or path traversal sequences (`../../`) inside seemingly valid JSON parameter values. Host runtimes enforce defense-in-depth by pairing structural JSON Schema typing with domain-specific sanitizers, canonical path resolution, and parameter binding via typed RPC stubs rather than string concatenation. This prevents adversarial prompt injection payloads from escaping the sandbox boundary even when the candidate JSON is syntactically well-formed.
 
-### Context budget trade-offs: Static staging versus just-in-time schema injection
+::: {#psp-07-two-tier-validation .callout-perspective title="The two-tier validation defense: Syntactic masking vs. semantic deserialization"}
+A common architectural pitfall is assuming that grammar-constrained decoding renders host-side schema deserializers redundant, or conversely, that host deserializers make logit masking unnecessary. Production agent runtimes enforce a strict **Two-Tier Validation Defense**:
+
+1. **Tier 1: Syntactic Invariant Enforcement (Logit Layer):** Executed inside the accelerator inference engine (such as vLLM or SGLang) via a Deterministic Finite Automaton (DFA) or Context-Free Grammar (CFG) mask. Tier 1 guarantees $P(\text{syntax\_err}) = 0$ by dynamically driving invalid token transitions to $-\infty$ before sampling. This eliminates malformed JSON, unclosed brackets, and schema key typos at token emission time, saving hundreds of milliseconds of wasted decode compute and multi-turn retry loops. However, Tier 1 is computationally bounded to local, static context-free formalisms and requires direct access to model logits. It cannot evaluate dynamic host state (such as checking whether a requested file path exists on disk) and cannot be applied when consuming closed frontier APIs that expose only textual output streams.
+2. **Tier 2: Semantic Invariant Enforcement (Supervisor Layer):** Executed inside the host agent runtime via typed deserializers (such as Pydantic models and Abstract Syntax Tree validators). Tier 2 intercepts the deserialized payload before physical dispatch, validating domain bounds, cross-parameter invariants, capability tokens, path traversal constraints, and filesystem existence checks.
+
+The two tiers solve orthogonal failure modes. If a model generates syntactically pristine JSON invoking a shell tool with `{"command": "rm -rf /"}`, Tier 1 succeeds with zero logit errors. It is Tier 2 that catches the command at the host supervisor boundary, recognizes the violation of isolation invariants, and rejects the dispatch before kernel execution.
+:::
+
+### Context budget trade-offs between static staging and just-in-time schema injection
 
 While rich interface schemas drastically suppress parameter hallucination, they introduce a severe systems bottleneck: context token consumption. In an enterprise agent runtime managing complex infrastructure, the tool catalog can easily exceed dozens or hundreds of distinct operations, encompassing file manipulation, process execution, database querying, and cloud API management.[^fn-namespace-filtering-budget] Staging these schemas directly into the system prompt imposes significant memory and compute penalties on the inference engine.
 
@@ -321,10 +351,34 @@ The multi-stage retrieval and schema binding datapath is detailed in @fig-vol3-t
 
 ::: {.column-margin}
 **Prefix Caching Trade-off**
-Dynamic schema injection creates tension with inference engine Radix tree caching. If the injected tool set changes on every turn, the prompt prefix diverges, invalidating the KV cache. Runtimes resolve this by pinning a minimal "core" toolset in the immutable prefix and appending dynamic tools in a secondary slot.
+Dynamic schema injection creates tension with inference engine Radix tree caching. If the injected tool set changes on every turn, the prompt prefix diverges, invalidating the KV cache. Runtimes resolve this by pinning a minimal core toolset in the immutable prefix and appending dynamic tools in a late-bound leaf slot.
 :::
 
-JIT schema injection introduces an architectural trade-off between context efficiency and retrieval recall. If the host retriever fails to surface a necessary tool schema (a false negative), the model cannot invoke the required capability, resulting in an unrecoverable task failure. Changing the tool set on every turn also alters the prompt prefix, and because attention state is derived from the token prefix (principle \ref{pri-vol3-prefix-coherence}), the serving engine can no longer match the cached prefix in its Radix tree and must recompute the KV cache frames from the first changed token onward. Advanced serving systems mitigate this by partitioning the prompt layout: a small, immutable set of core primitives (such as bash dispatch and file reading) is pinned in the primary prefix to maximize cache hits, while specialized tools are dynamically injected into a secondary, transient context block.
+#### Slot-based prompt layout and radix cache preservation {.unnumbered}
+
+While JIT schema injection drastically cuts context token consumption, it introduces an acute systems conflict with inference engine prefix caching. High-performance serving engines (such as vLLM and SGLang) implement automatic prefix caching via Radix trees, where tree nodes store the key-value activation tensors of token subsequences. The lookup traversal relies on a causal token hash chain:
+
+$$h_k = \text{Hash}(h_{k-1} \mathbin{\Vert} t_k)$$ {#eq-vol3-radix-hash-chain}
+
+A cache hit requires an exact, contiguous token-prefix match from $k=0$. If an agent runtime naively prepends dynamically retrieved tool schemas $\mathcal{K}_t$ into the root system prompt, any variation in the retrieved tool subset or its ordering between turns alters the token sequence at an early index $k_{\text{schema}} \ll N_{\text{total}}$.
+
+Even when the subsequent trajectory history $\mathcal{H}_{1:t-1}$ spanning tens of thousands of tokens is completely unchanged, the serving engine detects a prefix divergence at $k_{\text{schema}}$. The Radix tree branches off, and the inference engine is forced to invalidate the entire downstream KV cache, executing a full prefill pass over the entire prompt:
+
+$$\text{FLOPs}_{\text{wasted}} \approx 2 \times P \times (N_{\text{total}} - k_{\text{schema}})$$ {#eq-vol3-prefix-bust-flops}
+
+For a 70B parameter model on an 8-GPU H100 node with a $32\text{k}$ token context ($N_{\text{total}} = 32{,}000$), an invalidation at $k_{\text{schema}} = 300$ forces over $4.47\text{ PFLOPs}$ of redundant tensor computation, stalling generation by more than $1.4\text{ seconds}$ on every turn.
+
+To retain prefix cache validity while supporting dynamic, just-in-time schema injection, robust agent orchestrators partition the prompt into a rigid **3-Slot Prompt Topology**:
+
+1. **Slot 1 (Static System Root, Tokens $0 \dots K_{\text{root}}$):** Contains immutable system instructions, developer constraints, behavioral policies, and a fixed set of core primitives (such as `read_file`, `exec_bash`, and `search_tools`). Because this token prefix is identical across all agent sessions and turns, its KV cache blocks are pinned in the Radix tree with an infinite time-to-live ($\text{TTL} = \infty$).
+2. **Slot 2 (Trajectory History, Tokens $K_{\text{root}} \dots K_{\text{hist}}$):** Contains the chronological, append-only interaction history—prior user turns, assistant reasoning blocks, tool dispatches, and normalized observation records. Because historical tokens are immutable and monotonically growing, turns $1 \dots t-1$ achieve a $100\%$ prefix cache hit rate.
+3. **Slot 3 (Ephemeral Actuation Leaf, Tokens $K_{\text{hist}} \dots K_{\text{turn}}$):** Stages the dynamically retrieved tool schemas $\mathcal{K}_t$ either as a late-bound context block or as a synthetic system turn positioned at the very tail of the prompt, immediately preceding the generation target.
+
+By isolating dynamic tool schemas to the *tail leaf* of the prompt layout, cache invalidation is quarantined strictly to the leaf tokens ($|\mathcal{K}_t| \approx 1{,}200\text{ tokens}$). Across a multi-turn trajectory with $30{,}000$ context tokens, the prefix cache hit rate remains bounded at:
+
+$$\eta_{\text{cache}} = \frac{K_{\text{hist}}}{K_{\text{hist}} + |\mathcal{K}_t|} = \frac{28{,}800}{30{,}000} = 96.0\%$$ {#eq-vol3-slot-cache-hit-rate}
+
+This topology preserves the $98.5\%$ context tax reduction of MIPS retrieval while eliminating cold-prefill latency spikes, sustaining high inference engine throughput across prolonged agentic execution.
 
 While strict schema engineering guarantees that an individual runtime can parse, validate, and constrain candidate tool calls, it presupposes that all tool definitions are statically compiled into or locally managed by the host application. Modern enterprise environments, however, are fundamentally decentralized: developer environments, cloud infrastructure, local databases, and web services each expose proprietary interfaces with distinct execution lifecycles. How can heterogeneous external services expose their tools, schemas, and dynamic resources to agent runtimes using an open, standardized protocol without requiring bespoke integration shims for every endpoint? Answering this question shifts our focus from isolated schema definition to interoperable tool discovery.
 
@@ -379,15 +433,16 @@ By standardizing these primitives, the runtime establishes a clear operational l
 
 *Remote HTTP transports impose a 97× to 5,600× latency tax over local Unix domain sockets for inter-tool IPC.*
 :::
-The physical channel connecting the host agent client to an execution server dictates the system's operational latency, failure isolation, and deployment topology. The protocol abstraction decouples message serialization from the underlying transport, enabling runtimes to navigate three distinct operational regimes: local standard input/output pipes, local UNIX domain sockets, and remote streaming over HTTP with Server-Sent Events (SSE).[^fn-mcp-transport-layer] @Tbl-vol3-mcp-transports contrasts the architectural profiles of these transport topologies.
+The physical channel connecting the host agent client to an execution server dictates the system's operational latency, failure isolation, and deployment topology. The protocol abstraction decouples message serialization from the underlying transport, enabling runtimes to navigate four distinct operational regimes: local standard input/output pipes, local UNIX domain sockets, microVM virtual sockets (`virtio-vsock`), and remote streaming over HTTP with Server-Sent Events (SSE).[^fn-mcp-transport-layer] @Tbl-vol3-mcp-transports contrasts the architectural profiles of these transport topologies.
 
-[^fn-mcp-transport-layer]: **MCP Transport Protocols**: The Model Context Protocol (MCP) standardizes JSON-RPC 2.0 framing over local standard input/output (`stdio`) pipes and remote Server-Sent Events (SSE) backed by HTTP POST. Local `stdio` transport delivers microsecond IPC latencies with zero network configuration for subprocess sandboxes, whereas SSE enables decoupled network streaming across distributed microservices. Runtimes negotiate capabilities during the initial handshake, establishing bidirectional framing while keeping transport plumbing transparent to the inference engine.
+[^fn-mcp-transport-layer]: **MCP Transport Protocols**: The Model Context Protocol (MCP) standardizes JSON-RPC 2.0 framing over local standard input/output (`stdio`) pipes, virtual sockets (`virtio-vsock`) for hypervisor sandboxes, and remote Server-Sent Events (SSE) backed by HTTP POST. Local `stdio` transport delivers microsecond IPC latencies with zero network configuration for subprocess sandboxes, whereas SSE enables decoupled network streaming across distributed microservices. Runtimes negotiate capabilities during the initial handshake, establishing bidirectional framing while keeping transport plumbing transparent to the inference engine.
 
-| Transport Topology             | Underlying IPC Primitives                              |        Typical Round-Trip Latency        | Process Lifecycle Coupling                           | Security & Isolation Boundary                  | Primary Failure Mode                                    |
-|:-------------------------------|:-------------------------------------------------------|:----------------------------------------:|:-----------------------------------------------------|:-----------------------------------------------|:--------------------------------------------------------|
-| **Standard I/O (`stdio`)**     | POSIX anonymous pipes (`pipe(2)`) via `stdin`/`stdout` |     $< 0.5\text{ ms}$ (memory copy)      | Direct child process (`fork`/`exec`); dies with host | In-process namespace / container sandbox       | Pipe buffer saturation deadlock (`F_SETPIPE_SZ`)        |
-| **UNIX Domain Socket (`UDS`)** | Filesystem socket inode (`AF_UNIX`, `SOCK_STREAM`)     |   $< 0.1\text{ ms}$ (zero-copy kernel)   | Decoupled background daemon; multiplexed clients     | POSIX filesystem permissions (`chmod`/`chown`) | Stale socket lockfiles (`/tmp/mcp.sock`); daemon crash  |
-| **Remote HTTP with SSE**       | TCP/IP, TLS, HTTP POST + `text/event-stream` SSE       | $15\text{--}150\text{ ms}$ (network RTT) | Fully distributed; cloud clusters / remote enclaves  | Network mTLS, bearer tokens, firewall CIDRs    | Packet loss, connection drops, proxy buffering timeouts |
+| Transport Topology             | Underlying IPC Primitives                                      |        Typical Round-Trip Latency        | Process Lifecycle Coupling                            | Security & Isolation Boundary                  | Primary Failure Mode                                    |
+|:-------------------------------|:---------------------------------------------------------------|:----------------------------------------:|:------------------------------------------------------|:-----------------------------------------------|:--------------------------------------------------------|
+| **Standard I/O (`stdio`)**     | POSIX anonymous pipes (`pipe(2)`) via `stdin`/`stdout`         |     $< 0.5\text{ ms}$ (memory copy)      | Direct child process (`fork`/`exec`); dies with host  | In-process namespace / container sandbox       | Pipe buffer saturation deadlock (`F_SETPIPE_SZ`)        |
+| **UNIX Domain Socket (`UDS`)** | Filesystem socket inode (`AF_UNIX`, `SOCK_STREAM`)             |   $< 0.1\text{ ms}$ (zero-copy kernel)   | Decoupled background daemon; multiplexed clients      | POSIX filesystem permissions (`chmod`/`chown`) | Stale socket lockfiles (`/tmp/mcp.sock`); daemon crash  |
+| **MicroVM Sockets (`vsock`)**  | Virtual socket device (`AF_VSOCK`, `virtio-vsock` ring buffer) |  $< 0.2\text{ ms}$ (shared host memory)  | Decoupled guest VM daemon (`agent-init`); independent | Hardware hypervisor boundary (KVM / microVM)   | Guest kernel panic; CID exhaustion (`ECONNRESET`)       |
+| **Remote HTTP with SSE**       | TCP/IP, TLS, HTTP POST + `text/event-stream` SSE               | $15\text{--}150\text{ ms}$ (network RTT) | Fully distributed; cloud clusters / remote enclaves   | Network mTLS, bearer tokens, firewall CIDRs    | Packet loss, connection drops, proxy buffering timeouts |
 
 : **Model Context Protocol Transport Topologies**: Architectural comparison of IPC transport mechanisms across latency, lifecycle, and isolation boundaries. {#tbl-vol3-mcp-transports}
 
@@ -396,6 +451,8 @@ Local standard input/output (`stdio`) pipes represent the lowest-latency transpo
 However, `stdio` transports impose severe physical constraints on stream management. Linux kernel pipes maintain a default buffer capacity of $64\text{ KB}$ (configured via `F_SETPIPE_SZ`). If a tool server emits a voluminous observation payload—such as a large build log or a detailed test execution trace—that exceeds the unread capacity of the pipe buffer while the host runtime is engaged in a compute-bound operation, the tool server process is forced into an un-interruptible sleep state (`TASK_UNINTERRUPTIBLE`) on the `write(2)` syscall. If the host simultaneously waits for the tool process to exit before draining its output buffer, the system deadlocks. Host runtimes utilizing `stdio` must therefore implement non-blocking asynchronous reader loops that continuously drain kernel pipe buffers into intermediate host memory ring buffers.
 
 UNIX Domain Sockets (UDS) preserve the microsecond-scale data transfer rates of local kernel memory copies while liberating the server from the strict parent-child process lifecycle. Operating over filesystem-bound socket inodes (`AF_UNIX`, `SOCK_STREAM`), a UDS server executes as an independent, persistent background daemon. Multiple concurrent agent runtime sessions can multiplex tool invocations over a single persistent socket, avoiding the process invocation overhead of repeatedly spawning runtimes and re-initializing shared dependencies. Furthermore, standard POSIX filesystem permissions (`chmod` and `chown`) on the socket inode establish a concrete, host-level access control boundary that prevents unauthorized local users from dispatching actions to privileged tool daemons.
+
+When executing untrusted agent actions within hardware-isolated microVM sandboxes (such as Firecracker or Cloud Hypervisor, @sec-vol3-sandboxes), neither anonymous pipes nor filesystem-backed UNIX sockets can cross the hypervisor memory boundary without compromising host isolation. In this architecture, runtimes employ **Virtual Sockets (`virtio-vsock`)** (@tbl-vol3-mcp-transports). Operating over the Linux `AF_VSOCK` address family, `virtio-vsock` establishes a zero-network IPC channel between the host supervisor and an unprivileged guest agent daemon (`agent-init`). Communication flows across shared-memory ring buffers (`vring`) mapped directly by the kernel's KVM subsystem, bypassing TCP/IP stack overhead, Ethernet framing, and host firewall layers entirely. This delivers microsecond-tier round-trip latencies ($< 0.2\text{ ms}$) while anchoring execution behind a strict hardware-virtualized silicon perimeter.
 
 For distributed enterprise environments, the protocol supports remote networked transports via HTTP and Server-Sent Events (SSE). Under this asymmetric architecture, the host client dispatches JSON-RPC requests via standard HTTP `POST` requests, while the remote server streams JSON-RPC responses, execution progress notifications, and dynamic capability updates across a long-lived HTTP connection using the `text/event-stream` MIME type. This topology completely decouples the physical hardware: tool servers can run inside specialized cloud clusters, isolated network enclaves, or multi-tenant database environments located thousands of miles from the host runtime.
 
@@ -520,7 +577,7 @@ for attempt in range(max_retries):
         time.sleep(backoff(attempt))
 ```
 
-This implementation commits the fallacy of assuming $\Pr(\sigma_{\text{drop}}) = 1.0$. If the failure was governed by $\sigma_{\text{sever}}$, every iteration through the loop re-executes the underlying side effect. In production agent architectures, where foundation models generate dozens of autonomous tool calls per task without direct human confirmation, open-loop retransmission transforms minor network hiccups into cascading state corruptions.
+This implementation commits the fallacy of assuming $\Pr(\sigma_{\text{drop}}) = 1.0$. If the failure was governed by $\sigma_{\text{sever}}$, every iteration through the loop re-executes the underlying side effect. In production agent architectures, where foundation models generate dozens of autonomous tool calls per task without direct human confirmation, open-loop retransmission transforms minor network hiccups into cascading state corruptions. Furthermore, when a non-atomic tool fails midway through execution ($\sigma_{\text{crash}}$)—leaving the environment in an inconsistent partial state $\delta_{\text{partial}}$—idempotency tokens alone cannot repair the damage. Resolving partial mutations requires backward compensating actions coordinated by a distributed Saga orchestrator (@sec-vol3-sagas-architecture).
 
 ### Algebraic classification of tool side effects
 
@@ -909,6 +966,34 @@ Truncation boundaries must always be enforced on *raw byte counts*, never line c
 
 Truncation policies must strictly enforce physical byte budgets before attempting line or token segmentation. Splitting by lines or tokens without a pre-filter exposes the runtime to memory exhaustion from inputs lacking newline delimiters. The runtime consumes the stream as a bounded sequence of raw bytes, slices the window at valid UTF-8 code point boundaries to prevent decoding corruption, and only then performs line-oriented formatting and tokenization for context staging.
 
+#### Content-addressed spooling and out-of-band inspection {.unnumbered}
+
+While sandwich truncation preserves the operational prelude and the terminal failure signal, discarding intermediate stream bytes introduces an acute epistemic failure mode. If an agent executes a compiler, test harness, or search utility where the critical diagnostic—such as an upstream warning, an intermediate test assertion, or a transitive dependency resolution trace—occurred within the omitted middle millions of bytes, naive truncation permanently blinds the model. The agent observes that a failure occurred and sees the terminal summary line (`FAILED (failures=1, errors=0)`), but lacks the causal evidence from the middle trace. Denied this ground truth, the model enters degenerate deliberation loops, generating speculative fixes for phantom causes.
+
+To eliminate this epistemic blind spot without bloating the active KV cache, modern runtime supervisors separate *in-context observation staging* from *physical payload retention*. As the subprocess emits standard output and error, the runtime streams the contiguous, un-truncated byte stream into an append-only, Content-Addressed Store (CAS) hosted in memory-mapped shared memory (`/dev/shm` tmpfs) or local NVMe storage. The blob is keyed by its cryptographic hash:
+
+$$H_{\text{cas}} = \text{SHA-256}(\text{RawStream})$$ {#eq-vol3-cas-hash}
+
+Instead of emitting a dead-end tombstone notice, the runtime supervisor wraps the sandwich excerpt inside an authoritative observation envelope that embeds the CAS handle and spatial metadata:
+
+```xml
+<tool_observation status="truncated" exit_code="1" elapsed_ms="4210">
+  <cas_handle uri="cas://tool-blobs/sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069" />
+  <stream_metrics total_bytes="4182041" retained_head="4096" retained_tail="16384" omitted_bytes="4161561" />
+  <content>
+    [Retained Head Lines 1-50]
+    [... 48,195 lines and 4,161,561 bytes omitted; query via read_observation_slice ...]
+    [Retained Tail Lines 48205-48215]
+  </content>
+</tool_observation>
+```
+
+To empower the agent to inspect omitted ranges without human intervention or unguided re-execution, the runtime exposes an explicit, idempotent inspection primitive in the core tool catalog:
+
+$$\text{read\_observation\_slice}(\text{handle: str}, \text{offset: int}, \text{length: int}) \to \text{str}$$ {#eq-vol3-read-obs-slice}
+
+When the model detects that an omitted trace contains the decisive signal, it issues a targeted, paginated query against the CAS handle (such as `read_observation_slice(handle="cas://...", offset=120000, length=2048)`). The supervisor services this request as a zero-copy memory-mapped slice (`mmap(2)` with `madvise(MADV_WILLNEED)`), returning only the requested $2\text{ KB}$ segment into the next turn. This transforms lossy observation truncation into bounded, hierarchical virtual memory paging for context windows, preserving both reasoning fidelity and accelerator memory ceilings.
+
 ### Structured pagination contracts
 
 While command-line tools rely on terminal streams that necessitate passive tailing, structured tools—such as database clients, search services, vector indices, and filesystem inspectors—must not emit raw, unconstrained output collections. A tool interface that permits an unconstrained query (such as `SELECT * FROM audit_logs` or `list_files(directory="/")`) violates the principle of least privilege and context bounding at the API contract layer.
@@ -951,38 +1036,67 @@ The finite capacity of the kernel pipe buffer provides the physical foundation f
 When the child process writes output faster than the runtime reads it, or when the runtime intentionally slows consumption, the kernel pipe buffer fills. Once the internal $64\text{ KB}$ buffer is saturated, the kernel's virtual filesystem (VFS) layer suspends the child process's subsequent `write(2)` system call. The operating system moves the child process from the execution queue to a wait queue (`TASK_INTERRUPTIBLE`), descheduling it from the physical CPU core. The child process cannot execute a single additional instruction until the runtime supervisor reads data out of the pipe, freeing capacity in the kernel buffer.
 
 ```c
-// Runtime supervisor event-driven drain loop applying backpressure
-struct epoll_event ev, events[MAX_EVENTS];
+// Full-duplex non-blocking reactor multiplexing stdin writes and stdout reads
+struct epoll_event ev_in, ev_out, events[MAX_EVENTS];
 int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
-ev.events = EPOLLIN | EPOLLPRI;
-ev.data.fd = pipe_read_fd;
-epoll_ctl(epoll_fd, EPOLL_CTL_ADD, pipe_read_fd, &ev);
+
+// Register child stdout for read readiness
+ev_in.events = EPOLLIN | EPOLLPRI | EPOLLET;
+ev_in.data.fd = child_stdout_fd;
+epoll_ctl(epoll_fd, EPOLL_CTL_ADD, child_stdout_fd, &ev_in);
+
+// Register child stdin for write readiness
+ev_out.events = EPOLLOUT | EPOLLET;
+ev_out.data.fd = child_stdin_fd;
+epoll_ctl(epoll_fd, EPOLL_CTL_ADD, child_stdin_fd, &ev_out);
 
 size_t total_bytes_read = 0;
 while (process_is_running) {
     int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, TIMEOUT_MS);
     for (int i = 0; i < nfds; i++) {
-        if (events[i].events & EPOLLIN) {
-            ssize_t bytes = read(pipe_read_fd, staging_buf, CHUNK_SIZE);
+        // Concurrently drain inbound stdout bytes under backpressure
+        if (events[i].data.fd == child_stdout_fd && (events[i].events & EPOLLIN)) {
+            ssize_t bytes = read(child_stdout_fd, staging_buf, CHUNK_SIZE);
             if (bytes > 0) {
                 total_bytes_read += bytes;
                 ring_buffer_write(&tail_ring_buf, staging_buf, bytes);
+                cas_stream_append(&cas_writer, staging_buf, bytes);
 
                 // Hard ceiling enforcement: trigger proactive process termination
                 if (total_bytes_read > HARD_ABORT_CEILING_BYTES) {
-                    close(pipe_read_fd); // Trigger SIGPIPE on child's next write
+                    close(child_stdout_fd);
                     kill(child_pid, SIGKILL);
                     process_is_running = false;
                     break;
                 }
             }
         }
+        // Concurrently pump outbound stdin payload as kernel buffer drains
+        if (events[i].data.fd == child_stdin_fd && (events[i].events & EPOLLOUT)) {
+            flush_outbound_queue(child_stdin_fd, &outbound_payload_queue);
+        }
     }
 }
 ```
 
+#### Bidirectional pipe deadlock and full-duplex reactors {.unnumbered}
+
+In bidirectional RPC protocols—such as the Model Context Protocol running over `stdio` transports—the communication interface is not a single unidirectional channel, but a pair of distinct POSIX anonymous pipes: an outbound pipe conveying JSON-RPC requests from host to child `stdin` (`pipe_in`), and an inbound pipe conveying responses and diagnostic streams from child `stdout` to host (`pipe_out`).
+
+Each kernel pipe buffer is bounded by default to $C_{\text{pipe}} = 65{,}536\text{ bytes}$ ($64\text{ KiB}$). A naive runtime supervisor employs synchronous or sequential blocking I/O: it serializes the tool invocation payload, executes a blocking `write(pipe_in, payload, size)`, and subsequently blocks awaiting the child's response on `read(pipe_out, ...)`.
+
+If the host runtime writes a large input payload—such as an embedded source file, a multi-file diff patch, or an extensive configuration bundle—exceeding $64\text{ KiB}$, and the child process simultaneously writes diagnostic startup messages, dependency warnings, or initial handshake frames to `stdout` before reading its standard input, a fatal **circular wait deadlock** occurs:
+
+1. **Child Output Saturation:** The child writes logging data into `pipe_out`. Once $64\text{ KiB}$ accumulates in the kernel buffer, the child's subsequent `write(stdout, ...)` blocks. The kernel places the child thread into `TASK_UNINTERRUPTIBLE` sleep, waiting for the host to drain `pipe_out`.
+2. **Host Input Saturation:** Simultaneously, the host supervisor writes the large tool payload into `pipe_in`. Once $64\text{ KiB}$ accumulates in `pipe_in`, the host's `write(pipe_in, ...)` blocks. The kernel deschedules the host supervisor, waiting for the child to drain `pipe_in`.
+
+Both processes are now permanently blocked waiting for the other to read, forming a classic Coffman circular wait deadlock created purely by OS kernel buffer capacity limits. Neither process can advance, and the agent trajectory hangs indefinitely until an external watchdog timer fires.
+
+To eliminate pipe deadlock, production supervisors forbid blocking I/O across standard streams. The runtime implements a **non-blocking full-duplex reactor** using `epoll(7)` or `kqueue(2)` as formulated above. Both the child's `stdin` write descriptor and its `stdout`/`stderr` read descriptors are marked `O_NONBLOCK`. Outbound tool dispatches are enqueued into an in-memory ring buffer, and the supervisor event loop concurrently multiplexes read and write readiness. By decoupling outbound transmission from inbound ingestion through non-blocking multiplexed event loops, the supervisor guarantees that child output is continuously drained even while a massive input payload is in transit, structurally immunizing the agent runtime from IPC deadlocks.
+
 The runtime enforces an absolute ceiling on total generated volume ($B_{\text{abort}}$). While the sliding-window ring buffer maintains a bounded observation size for context staging, the runtime cannot permit a runaway process to consume host CPU cycles indefinitely. The supervisor tracks the cumulative byte counter:
-$$B_{\text{cumulative}} = \sum_{i} \text{read}(fd, \text{chunk}_i)$$
+
+$$B_{\text{cumulative}} = \sum_{i} \text{read}(fd, \text{chunk}_i)$$ {#eq-vol3-cumulative-byte-counter}
 
 If $B_{\text{cumulative}}$ crosses $B_{\text{abort}}$ (for example, $100\text{ MB}$), the supervisor immediately triggers active termination. It closes the read end of the pipe via `close(2)`. On the child process's subsequent `write(2)` invocation, the kernel detects that no read descriptor references the pipe FIFO. The kernel halts the write, raises an `EPIPE` error, and automatically delivers a `SIGPIPE` signal to the child. Unless the child has explicitly installed a custom signal handler, the default action for `SIGPIPE` terminates the process instantly. To prevent uncooperative processes from lingering, the supervisor follows this termination sequence with an explicit `SIGKILL` delivery.
 
@@ -1013,6 +1127,8 @@ As detailed in @fig-vol3-terminal-normalization, the sanitization pipeline execu
 2. *Phase 1 (ECMA-48 FSM Escape Stripper):* A finite-state machine transitions across `GROUND`, `ESCAPE`, and `CSI_ENTRY` states to intercept and discard Select Graphic Rendition (SGR) font colors, TrueColor definitions, cursor shifts, and terminal titles. This deterministic byte sanitization eliminates prompt delimiter injection attacks while pruning token footprint by approximately 60 percent.
 3. *Phase 2 (1D Virtual Line Buffer):* To resolve in-place line overwrites generated by progress bars (`tqdm`, `curl`, `wget`), the runtime maintains a 1D character cell array with an active cursor scalar $c_x$. When a carriage return (`\r`) occurs without a line feed (`\n`), $c_x$ resets to column 0, causing subsequent characters to overwrite preceding cells in-place. Hundreds of intermediate progress updates (e.g., $45\text{ KB}$ of redundant frames) are thereby collapsed into a single, authoritative terminal string (`[100%] Build complete`).
 4. *Phase 3 (Structured Observation Frame):* The sanitized string is enveloped in an authoritative observation record annotated with POSIX exit codes, execution duration, and truncation metadata before staging into working context memory.
+
+### Stream normalization and ANSI stripping
 
 To an autoregressive foundation model, in-band escape sequences are toxic noise. Byte-Pair Encoding (BPE) tokenizers are trained on human natural language and source code, not raw terminal stream captures. Because long ANSI escape sequences such as 24-bit TrueColor specifications (`\x1b[38;2;255;128;0m`) rarely appear as unified tokens in training corpora, the tokenizer shatters the eighteen-byte sequence into eight to twelve distinct subword tokens. A compiler emitting fifty colored lines can introduce over a thousand fragmented tokens into the sequence without conveying any semantic distinction beyond plain text. Worse, if an adversarial tool or untrusted file name contains unescaped OSC commands or custom delimiters that match the agent runtime's tool framing protocol, the unparsed terminal stream can hijack model control flow.
 
@@ -1055,9 +1171,23 @@ Passing the stream through an ECMA-48 stripper and 1D line buffer collapses the 
 - **KV Cache Allocation:** $755\text{ MB} \to 0.78\text{ MB}$.
 :::
 
-### Process termination semantics
+### Structured frame extraction
 
-Stripping presentation artifacts addresses observation syntax, but the runtime must also ground the execution in physical operating system truth. When a tool process completes, the parent runtime calls the POSIX `waitpid()` system call to collect the child's termination status. The operating system kernel packs the process disposition into a 16-bit integer status word, accessible via standard POSIX macros.
+When a tool encounters an error, transmitting hundreds of lines of mixed standard output and standard error forces the foundation model to consume precious reasoning tokens searching for root causes. To maximize the model's diagnostic efficiency, the runtime normalizer must separate physical streams and extract structured diagnostic frames.
+
+Standard POSIX tools maintain a strict separation between primary functional data, emitted on file descriptor 1 (`stdout`), and operational diagnostics, emitted on file descriptor 2 (`stderr`). Runtimes that indiscriminately multiplex these two streams into a single observation string discard vital semantic metadata. A compiler emits compiled object listings or assembly to `stdout` while routing syntax errors and include-path warnings to `stderr`. A script may output valid JSON data to `stdout` while a logging library writes informational initialization notices to `stderr`. By retaining stream partitioning, the runtime allows the agent's context assembler to present the functional result separately from environmental noise.
+
+For common software development runtimes, the sanitization layer applies structured frame extraction to the `stderr` stream. Standard execution engines emit tracebacks and diagnostic messages adhering to deterministic, language-specific grammars:
+
+- *Python Tracebacks:* Standard tracebacks follow a rigid multi-line structure beginning with a traceback call-stack header (indicating the most recent calls), followed by pairs of file path, line number, and function scopes, culminating in the unqualified exception class and error message (for example, `AssertionError: Expected 200 OK, got 404`).
+- *Compiler Error Messages:* Compilers compliant with GCC and Clang emit diagnostics in the standard POSIX format `<filename>:<line>:<col>: error: <message>`, followed by the offending line of source code and a caret (`^`) pointing to the lexical offset.
+- *Panic Stacks:* Compiled systems languages (such as Rust and Go) output panic banners declaring the failing invariant (`thread 'main' panicked at 'index out of bounds: the len is 4 but the index is 4'`) followed by mangled symbol frames.
+
+The normalization layer parses these standard error streams into typed diagnostic records. Rather than forcing the model to autoregressively scan through two hundred lines of intermediate library frames, the runtime extracts the root exception class, the failure message, and the exact terminal frame located within the user's workspace repository.
+
+### Process termination semantics and execution receipts
+
+Stripping presentation artifacts and extracting diagnostic frames normalizes the textual streams emitted across file descriptors. However, the host supervisor must also ground the execution in physical operating system truth: capturing the child's termination status via `waitpid(2)` as an immutable execution receipt. When a tool process completes, the parent runtime calls `waitpid()` to collect the child's termination status. The operating system kernel packs the process disposition into a 16-bit integer status word, accessible via standard POSIX macros.
 
 ::: {.column-margin}
 **POSIX Process Disposition**
@@ -1084,19 +1214,7 @@ The exit status reflects only what the binary's entrypoint returned to the kerne
 
 The agent runtime must therefore treat the POSIX exit status as necessary but insufficient evidence of task completion, because the invariant closure principle (\ref{pri-invariant-closure}) accepts task correctness only on evidence gathered at the end-to-end boundary, not on the report of the process that ran. The integer status code must be explicitly captured and forwarded as an immutable metadata field in the tool observation payload, but downstream orchestrators must never equate `exit_code == 0` with empirical invariant satisfaction. The end-to-end correctness of a tool's execution can only be validated by independent verification checks, such as parsing structured compiler outputs or evaluating domain-specific assertions against the filesystem.
 
-### Structured frame extraction
-
-When a tool encounters an error, transmitting hundreds of lines of mixed standard output and standard error forces the foundation model to consume precious reasoning tokens searching for root causes. To maximize the model's diagnostic efficiency, the runtime normalizer must separate physical streams and extract structured diagnostic frames.
-
-Standard POSIX tools maintain a strict separation between primary functional data, emitted on file descriptor 1 (`stdout`), and operational diagnostics, emitted on file descriptor 2 (`stderr`). Runtimes that indiscriminately multiplex these two streams into a single observation string discard vital semantic metadata. A compiler emits compiled object listings or assembly to `stdout` while routing syntax errors and include-path warnings to `stderr`. A script may output valid JSON data to `stdout` while a logging library writes informational initialization notices to `stderr`. By retaining stream partitioning, the runtime allows the agent's context assembler to present the functional result separately from environmental noise.
-
-For common software development runtimes, the sanitization layer applies structured frame extraction to the `stderr` stream. Standard execution engines emit tracebacks and diagnostic messages adhering to deterministic, language-specific grammars:
-
-- *Python Tracebacks:* Standard tracebacks follow a rigid multi-line structure beginning with a traceback call-stack header (indicating the most recent calls), followed by pairs of file path, line number, and function scopes, culminating in the unqualified exception class and error message (for example, `AssertionError: Expected 200 OK, got 404`).
-- *Compiler Error Messages:* Compilers compliant with GCC and Clang emit diagnostics in the standard POSIX format `<filename>:<line>:<col>: error: <message>`, followed by the offending line of source code and a caret (`^`) pointing to the lexical offset.
-- *Panic Stacks:* Compiled systems languages (such as Rust and Go) output panic banners declaring the failing invariant (`thread 'main' panicked at 'index out of bounds: the len is 4 but the index is 4'`) followed by mangled symbol frames.
-
-The normalization layer parses these standard error streams into typed diagnostic records. Rather than forcing the model to autoregressively scan through two hundred lines of intermediate library frames, the runtime extracts the root exception class, the failure message, and the exact terminal frame located within the user's workspace repository.
+Finally, the host runtime synthesizes the sanitized output streams, structured diagnostic frames, and POSIX process disposition into a unified, authoritative observation envelope (@lst-vol3-observation-sanitization).
 
 ::: {#lst-vol3-observation-sanitization lst-cap="**Normalized Observation Envelope**: Structured diagnostic frames with machine-readable truncation metadata."}
 ```json
@@ -1115,7 +1233,7 @@ The normalization layer parses these standard error streams into typed diagnosti
 ```
 :::
 
-Finally, when the observation stream exceeds the physical or logical budget $B_{\max}$ established by the truncation policies of the runtime, the sanitization pipeline must frame the remaining text with explicit machine-readable metadata. As established in the systems literature on fault tolerance, unannounced failures induce worse cascades than explicit errors. If an observation stream is truncated by simply terminating the string at byte $B_{\max}$, the foundation model encounters an abrupt syntax cliff: an unclosed quote, an incomplete JSON object, or a severed traceback. The model frequently misinterprets this abrupt termination as a syntax bug in the underlying software, generating futile repair actions to fix code that is completely intact on the storage volume.
+When the observation stream exceeds the physical or logical budget $B_{\max}$ established by the truncation policies of the runtime, the sanitization pipeline must frame the remaining text with explicit machine-readable metadata. As established in the systems literature on fault tolerance, unannounced failures induce worse cascades than explicit errors. If an observation stream is truncated by simply terminating the string at byte $B_{\max}$, the foundation model encounters an abrupt syntax cliff: an unclosed quote, an incomplete JSON object, or a severed traceback. The model frequently misinterprets this abrupt termination as a syntax bug in the underlying software, generating futile repair actions to fix code that is completely intact on the storage volume.
 
 To prevent these epistemic failures, the normalization pipeline envelopes truncated observations with deterministic, standardized headers and footers. The header explicitly declares that truncation occurred, states the exact token and line bounds enforced, clarifies whether the preserved window represents the head or the tail of the stream, and directs the model to the unexpurgated log file saved on disk (as illustrated in @lst-vol3-observation-sanitization). Armed with this structured envelope, the model recognizes that missing context is an artifact of runtime resource governance rather than a target environment failure, allowing it to issue targeted pagination commands or inspect specific log slices deliberately.
 
@@ -1490,9 +1608,11 @@ def execute_file_patch(target: str, find_str: str, replace_str: str, dry_run: bo
 
 The defensive implementation above demonstrates how host runtimes absorb operational hazards. Rather than requiring the agent to manually verify file offsets, the host tool enforces that the target anchor string `find_str` matches exactly once. If the model provides an ambiguous anchor that matches multiple locations, the tool halts immediately, preserving the original file and returning an informative error frame. Furthermore, defaulting to `dry_run = True` forces the model to actively confirm its intent before applying permanent state changes, insulating the physical environment from non-deterministic token emissions.
 
-### Computer use and visual actuation interfaces {#sec-vol3-tool-calling-visual-actuation}
+## Visual Actuation and Computer Use {#sec-vol3-tool-calling-visual-actuation}
 
 While structured tool-calling protocols (such as JSON-RPC and POSIX subprocess pipes) mediate programmatic interactions via textual schemas and serialized stream buffers, autonomous agents increasingly operate across non-programmatic computing environments. In particular, *Computer Use* extends the actuation boundary to standard Graphical User Interface (GUI) desktop environments, where legacy software, interactive dashboards, and creative applications lack structured APIs or command-line interfaces. In a visual actuation pipeline, the foundation model operates as a vision-language policy: the environment observation is not a textual log or structured payload, but a high-resolution raster image—a screen capture of the active display buffer—and the emitted tool call specifies synthetic Human Interface Device (HID) events, such as mouse pointer movements, click sequences, keystrokes, and scroll actions.
+
+### Coordinate projection and boundary clamping
 
 Bridging stochastic token decoding to physical operating system display servers (such as an X11 server via the `XTest` extension, a Wayland compositor, or macOS Quartz Event Services) requires rigorous coordinate marshaling and boundary clamping. Operating systems render display buffers across a physical display matrix with dimensions $(W_{\text{disp}}, H_{\text{disp}})$, such as $1920 \times 1080$ or $2560 \times 1440$ pixels. Conversely, vision foundation models typically operate over normalized coordinates $(x_{\text{norm}}, y_{\text{norm}})$ defined on a canonical coordinate space $(W_{\text{canon}}, H_{\text{canon}})$, such as an integer grid of $1000 \times 1000$ units or a standardized display geometry (such as $1024 \times 768$). When deserializing a candidate tool call, the host event marshaler projects canonical coordinates into physical display coordinates while enforcing hard boundary clamps:
 
@@ -1529,6 +1649,8 @@ class ComputerUseParameters(BaseModel):
 ```
 :::
 
+### The vision token tax and patch economics
+
 While visual actuation provides universal surface coverage across arbitrary GUI software, it imposes extreme memory and compute overhead on the serving engine. Modern Vision Transformer (ViT) backbones process input images by partitioning a 2D screenshot of resolution $H \times W$ into a grid of non-overlapping square patches of dimension $P \times P$ pixels (typically $P = 16$). Each patch is linearly projected into an embedding vector, generating a sequence of visual tokens. The total number of vision patch tokens $N_{\text{patch}}$ generated per screen frame is:
 
 $$N_{\text{patch}} = \left\lceil \frac{H}{16} \right\rceil \times \left\lceil \frac{W}{16} \right\rceil$$
@@ -1538,6 +1660,8 @@ For an uncompressed, standard Full High Definition (1080p) display frame ($1920 
 $$N_{\text{patch}} = \left\lceil \frac{1080}{16} \right\rceil \times \left\lceil \frac{1920}{16} \right\rceil = 68 \times 120 = 8{,}160\text{ vision patch tokens}$$
 
 Across a 20-turn agentic trajectory, transmitting raw 1080p visual observations injects $20 \times 8{,}160 = 163{,}200$ tokens of context into the model's history. In GPU serving runtimes employing PagedAttention, this token deluge rapidly exhausts high-bandwidth memory (HBM). Storing $163{,}200$ key-value tokens for a 70B-parameter model ($320\text{ KB/token}$ from notebook \ref{nbk-07-quantifying-kv-cache-memory-and}) consumes more than $52\text{ GB}$ of physical memory for a single session's visual observation history, collapsing serving batch concurrency and driving up prefill latency.[^fn-visual-token-tradeoff]
+
+### Visual observation mitigation through downscaling, tile diffing, and dynamic zoom
 
 To make visual actuation operationally tractable within accelerator memory constraints, production runtimes apply three complementary systems optimizations:
 

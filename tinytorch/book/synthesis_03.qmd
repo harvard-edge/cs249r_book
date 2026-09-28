@@ -1,9 +1,9 @@
-# Milestone III: The MLPerf Optimization Olympics {#sec-milestone-3}
+# Synthesis III: The MLPerf Optimization Olympics {#sec-milestone-3}
 
 ::: {.column-margin}
-![](assets/images/diagrams/m03_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting Milestone III MLPerf Olympics as the active subsystem."}
+![](assets/images/diagrams/m03_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting Synthesis III MLPerf Olympics as the active subsystem."}
 
-*Framework Blueprint: Milestone III deploys optimized TinyGPT to edge hardware constraints, charting the multi-objective Pareto frontier under MLPerf benchmark discipline.*
+*Framework Blueprint: Synthesis III deploys optimized TinyGPT to edge hardware constraints, charting the multi-objective Pareto frontier under MLPerf benchmark discipline.*
 :::
 
 
@@ -36,16 +36,14 @@ def evaluate_candidate(baseline_acc, candidate_acc, speedup, compression_ratio):
 ```
 
 Underneath that evaluation gate, the systems engineer audits candidate models across three competing axes:
+
 1. **Strict accuracy qualification floors:** Optimization techniques that introduce quantization noise or prune weights must retain at least 85% of baseline accuracy; failing to clear this threshold disqualifies the candidate immediately regardless of speed.
 2. **Physical memory budget enforcement:** Quantized weights and runtime KV-cache allocations are audited against target device memory limits to guarantee that models fit without swapping to disk or crashing with out-of-memory errors.
 3. **Reproducible speedup certification:** Candidates are benchmarked under identical warm-up, iteration, and timer controls, mapping Pareto-optimal trade-offs across storage, latency, and quality.
 
-This milestone concludes the TinyTorch systems journey with the **MLPerf Optimization Olympics** (Milestone 06 in the repository), challenging students to deploy their optimized models—culminating in the accelerated serving of TinyGPT—against strict multi-objective scoring gates. Before auditing our submissions, we must inspect the common traps that invalidate optimization claims.
+This synthesis chapter concludes the TinyTorch systems journey with the **MLPerf Optimization Olympics** (Milestone 06 in the repository), challenging practitioners to deploy optimized models, culminating in the accelerated serving of TinyGPT, against strict multi-objective scoring gates. Before auditing submissions, common traps that invalidate optimization claims must be inspected.
 
-::: {.column-margin}
-**Milestone Scope:**
-Milestone III integrates Modules 14 through 20 (`tinytorch/src/14_profiling` through `tinytorch/src/20_capstone`) with the models of Part I and Part II. In the repository, this corresponds to **Milestone 06** (`tinytorch/milestones/06_2018_mlperf/`, runnable via `tito milestone run mlperf` or `tito milestone run 06`). It provides two canonical scripts: `01_optimization_olympics.py` evaluates the complete architectural triad (`DigitMLP`, `SimpleCNN`, and `TinyGPT`) across profiling, INT8 quantization, pruning, and KV-caching to map the Pareto trade-off frontier, while `02_generation_speedup.py` proves Key-Value cache acceleration on `TinyGPT`, checking logit equivalence before timing execution. The listings in this chapter provide a pure-Python model of that same MLPerf scorecard, small enough to check by hand.
-:::
+**Synthesis Scope:** Synthesis III integrates Modules 14 through 20 (`tinytorch/src/14_profiling` through `tinytorch/src/20_capstone`) with the models of Part I and Part II. In the repository, this corresponds to **Milestone 06** (`milestones/06_2018_mlperf/`, runnable via `tito milestone run mlperf` or `tito milestone run 06`). It provides two canonical scripts: `01_optimization_olympics.py` evaluates the complete architectural triad (`DigitMLP`, `SimpleCNN`, and `TinyGPT`) across profiling, INT8 quantization, pruning, and KV-caching to map the Pareto trade-off frontier, while `02_generation_speedup.py` proves Key-Value cache acceleration on `TinyGPT`, checking logit equivalence before timing execution. The listings in this chapter provide a pure-Python model of that same MLPerf scorecard, small enough to check by hand.
 
 ![The MLPerf Optimization Olympics scorecard: one model, three axes, and a floor on accuracy that a submission must clear before its memory and latency numbers count.](assets/images/diagrams/milestone_03-diag-1.svg){#fig-milestone3-olympics width="100%"}
 
@@ -54,6 +52,12 @@ Milestone III integrates Modules 14 through 20 (`tinytorch/src/14_profiling` thr
 ## The Problem
 
 ::: {.column-margin}
+**↩ Jump back:** @sec-quantization
+*Uniform INT8 affine mapping, scale calibration, and clipping noise trade-offs.*
+
+**↩ Jump back:** @sec-compression
+*Structured pruning, SVD rank truncation, and distillation loss surfaces.*
+
 **↩ Jump back:** @sec-capstone
 *Evaluating multi-objective trade-offs across accuracy retention, memory compression, and speedup.*
 :::
@@ -94,17 +98,16 @@ So the need is concrete. Take one model, apply the optimizations, and report acc
 *Taking the framework below NumPy with compiled C++ and GPU kernels, measured the same way.*
 :::
 
-
-::: {.column-margin}
-![](assets/images/diagrams/milestone_03-margin-budget.svg){width="100%"}
-*Edge hardware memory budget: INT8 weights and KV cache fit comfortably within 4 GB RAM.*
-:::
-
 ### Three ratios and a floor
 
 Everything in the scorecard is a ratio of the optimized model against the baseline, so the units cancel. The ratios still depend on the workload, implementation, and machine; cancelling units does not make measurements portable. Let $A$ be accuracy on a fixed test set, $M$ the bytes needed to store the parameters, and $t$ the median latency of one forward pass after warmup, with subscripts for the baseline and the candidate. Three numbers summarize a submission:
 
 $$R = \frac{A_{\text{cand}}}{A_{\text{base}}}, \qquad C = \frac{M_{\text{base}}}{M_{\text{cand}}}, \qquad S = \frac{t_{\text{base}}}{t_{\text{cand}}}$$
+
+::: {.column-margin}
+![](assets/images/diagrams/milestone_03-margin-budget.svg){width="100%"}
+*Edge hardware memory budget: INT8 weights and KV cache fit comfortably within a 512 MB RAM embedded ceiling.*
+:::
 
 $R$ is **accuracy retention**, the fraction of the baseline's accuracy the candidate keeps. $C$ is the size ratio, how many times smaller the candidate is. $S$ is the speedup. All three are better when larger, but only $C$ and $S$ are things to maximize. $R$ is a gate. This chapter chooses a relative retention floor of 99%, so its rule reads $R \ge 0.99$. Against an 88%-accurate baseline, `ZeroModel` retains only $0.10/0.88 \approx 0.114$ and fails. The score function assumes a baseline with nonzero accuracy and positive storage and timing values. Those conditions make its divisions meaningful.
 
@@ -118,23 +121,27 @@ The set of candidates that cannot improve on one axis without giving something u
 
 ![**The MLPerf Optimization Olympics Pareto frontier**: Evaluating optimization candidates across accuracy retention, memory compression, and inference speedup reveals the multi-objective trade-off curve. A strict accuracy retention floor ($R \ge 0.99$, or $85\%$) disqualifies over-compressed or degraded models (red region), isolating the Pareto-optimal frontier of non-dominated systems.](assets/images/diagrams/milestone_03_pareto-frontier.svg){#fig-milestone3-pareto-frontier width="100%" fig-alt="Pareto frontier curve plotting Accuracy versus Speedup and Memory Compression, highlighting the retention floor threshold and valid submissions."}
 
+::: {.callout-tip title="Pause & Predict: MLPerf Inference Scenarios and Operational Constraints"}
+Consider evaluating a 7B parameter quantized model across two distinct deployment targets: (1) an interactive voice assistant on a smartphone, and (2) a high-volume batch indexing pipeline in a data center. Which MLPerf scenario (Single-Stream vs Offline) governs each deployment? Why does reporting a single average latency metric fail to characterize either system?
+:::
+
 ---
 
 ## The Code
 
-The course scripts execute the experiments. The chapter's smaller score function explains how to interpret their results. Keeping these roles separate lets us trace the experiment without mistaking an illustrative ledger for measured evidence.
+The course scripts execute the experiments. The chapter's smaller score function explains how to interpret their results. Keeping these roles separate allows tracing the experiment without mistaking an illustrative ledger for measured evidence.
 
 ::: {.column-margin}
-![](assets/images/diagrams/m03_edge-margin-source.svg){width="100%" fig-alt="Source code mapping card for Milestone III MLPerf Olympics showing file path, exported package, and tested primitives."}
+![](assets/images/diagrams/m03_edge-margin-source.svg){width="100%" fig-alt="Source code mapping card for Synthesis III MLPerf Olympics showing file path, exported package, and tested primitives."}
 
-*Source Code Mapping: Milestone III combines Modules 14–20 to benchmark the combined impact of INT8 quantization, KV caching, and operator fusion under strict hardware ceilings.*
+*Source Code Mapping: Synthesis III combines Modules 14 to 20 to benchmark the combined impact of INT8 quantization, KV caching, and operator fusion under strict hardware ceilings.*
 :::
 
 ### Script 1: profile, quantize, prune, benchmark
 
 The first script trains `DigitMLP` for ten epochs on TinyDigits, then walks through the optimization steps in order. Each step is a function that takes the model and one of Part III's classes.
 
-Profiling comes first, and it has to. Every ratio on the scorecard compares a candidate against a baseline number, so before we touch a single weight we need the unoptimized model's parameter count, its bytes, its FLOPs, its latency, and its accuracy, written down where nothing later can overwrite them. The tempting shortcut is to skip the ceremony, wrap one forward pass in `time.time()`, and call that the baseline latency. @sec-profiling showed why that one call is the wrong number. The first call may pay initialization costs, and any single call may encounter scheduling noise. An unusually slow baseline would inflate every later speedup before any optimization had run. The profiler's answer is the one @sec-profiling built, warm up, repeat, and keep the median.
+Profiling comes first, and it has to. Every ratio on the scorecard compares a candidate against a baseline number, so before altering any weights, the unoptimized model requires its parameter count, its bytes, its FLOPs, its latency, and its accuracy recorded where subsequent steps cannot overwrite them. The tempting shortcut is to skip the ceremony, wrap one forward pass in `time.time()`, and call that the baseline latency. @sec-profiling showed why that one call is the wrong number. The first call may pay initialization costs, and any single call may encounter scheduling noise. An unusually slow baseline would inflate every later speedup before any optimization had run. The profiler's answer is the one @sec-profiling built: warm up, repeat, and keep the median.
 
 ```python
 # Excerpt from milestones/06_2018_mlperf/01_optimization_olympics.py (step_1_profile, trimmed)
@@ -180,7 +187,7 @@ quant_acc = np.mean(np.argmax(outputs_quant.data, axis=1) == y_test) * 100
 
 Follow one parameter through the loop: its index selects the corresponding quantized entry, its scale and zero point reconstruct rounded weights, and its original shape restores the matrix expected by `Linear`. The baseline remains untouched. The resulting accuracy measures quantization error under floating-point execution; it does not demonstrate an integer kernel or packed storage. The reported compression ratio models one byte per code plus one float32 scale and one int32 zero point per parameter array. TinyTorch stores the code tensors and the reconstructed weights as float32 arrays.
 
-Pruning changes a different property, the number of nonzero weights. `magnitude_prune` zeroes weights in place, and a zero has no memory of what it replaced. If the script pruned `model` itself, the FP32 baseline would be gone. A saved baseline accuracy would still supply the denominator of $R$, but we could no longer rerun the original model to check predictions or timing. Recomputing the baseline after pruning would silently compare the candidate with itself. So the script makes an independent deep copy first and prunes that copy. Both candidate copies run on the same held-out inputs.
+Pruning changes a different property, the number of nonzero weights. `magnitude_prune` zeroes weights in place, and a zero has no memory of what it replaced. If the script pruned `model` itself, the FP32 baseline would be gone. A saved baseline accuracy would still supply the denominator of $R$, but the original model could no longer be rerun to check predictions or timing. Recomputing the baseline after pruning would silently compare the candidate with itself. So the script makes an independent deep copy first and prunes that copy. Both candidate copies run on the same held-out inputs.
 
 ```python
 # Excerpt from 01_optimization_olympics.py (step_3_prune, trimmed)
@@ -212,7 +219,7 @@ The excerpt shows one invocation. The script calls this same helper for the base
 
 ### Script 2: generation with and without the cache
 
-The second script measures a transformation that reuses earlier projection results. A language model generates one token at a time, and every new token attends over every token before it. The naive loop, the one @sec-milestone-2 ran, reruns the full forward pass over the whole sequence at every step. For 16 tokens that means step $t$ processes $t$ positions and the loop processes $1 + 2 + \dots + 16 = 136$ positions in all. At a 4,096-token context the same sum is over 8 million positions to produce 4,096 tokens, almost all of it recomputing keys and values that have not changed since the previous step. @sec-memoization's cache keeps those keys and values, so each step processes one new token and reads the rest back, 16 positions for 16 tokens. The ratio $136 / 16 = 8.5$ counts projection rows removed, not end-to-end speedup or all attention work. A cached query still scores its growing prefix. The script checks equivalent execution paths before comparing their timings.
+The second script measures a transformation that reuses earlier projection results. A language model generates one token at a time, and every new token attends over every token before it. The naive loop, the one [Synthesis II](synthesis_02.qmd#sec-milestone-2) ran, reruns the full forward pass over the whole sequence at every step. For 16 tokens that means step $t$ processes $t$ positions and the loop processes $1 + 2 + \dots + 16 = 136$ positions in all. At a 4,096-token context the same sum is over 8 million positions to produce 4,096 tokens, almost all of it recomputing keys and values that have not changed since the previous step. @sec-memoization's cache keeps those keys and values, so each step processes one new token and reads the rest back, 16 positions for 16 tokens. The ratio $136 / 16 = 8.5$ counts projection rows removed, not end-to-end speedup or all attention work. A cached query still scores its growing prefix. The script checks equivalent execution paths before comparing their timings.
 
 The script builds the actual two-block `GPT` from @sec-transformers with vocabulary 27, width 32, and two heads. It replays one fixed token sequence through both paths, rather than sampling different inputs for each timing. The core loop is extracted here from the script.
 
@@ -245,9 +252,9 @@ def replay_prefixes(model, tokens, cache=None):
 
 ```
 
-The `generation()` context enables cache reuse only for this request. `nullcontext()` gives the uncached path the same loop structure without changing execution mode. Resetting the cursor alone would not activate cached forward calls. When the context exits, ordinary forwards resume, including if an exception interrupts the loop. Each uncached call sees the full causal prefix. Each cached call sees one token at its correct position, traverses every transformer block, and advances the shared cursor once afterward. The returned array holds next-token logits at every position, so `compare_cached_replay` checks all of them with `assert_allclose` before reporting a speedup. The timer includes the same complete replay on each path after warmup, with cache reset at the start of every cached replay. A `finally` block removes the wrapper even when a check fails. This is a controlled inference workload on fixed tokens (\ref{chk-milestone3-quantized-divergence}), not a claim about language quality or a guaranteed speedup on every machine.
+The `generation()` context enables cache reuse only for this request. `nullcontext()` gives the uncached path the same loop structure without changing execution mode. Resetting the cursor alone would not activate cached forward calls. When the context exits, ordinary forwards resume, including if an exception interrupts the loop. Each uncached call sees the full causal prefix. Each cached call sees one token at its correct position, traverses every transformer block, and advances the shared cursor once afterward. The returned array holds next-token logits at every position, so `compare_cached_replay` checks all of them with `assert_allclose` before reporting a speedup. The timer includes the same complete replay on each path after warmup, with cache reset at the start of every cached replay. A `finally` block removes the wrapper even when a check fails. This is a controlled inference workload on fixed tokens (see Checkpoint below), not a claim about language quality or a guaranteed speedup on every machine.
 
-::: {#chk-milestone3-quantized-divergence .callout-sanity-check title="Sanity check: numerical divergence in quantized autoregressive generation"}
+::: {#chk-milestone3-quantized-divergence .callout-checkpoint title="Checkpoint: Numerical Divergence in Quantized Autoregressive Generation"}
 When evaluating quantized models in multi-step generation, a common pitfall is verifying only single-step logit cosine similarity or top-1 agreement on a fixed prefix while ignoring multi-step autoregressive drift:
 
 - **Compounding Rounding Error**: At step $t=1$, an INT8 weight matrix shifts logits slightly, often retaining the reference argmax token. But at step $t=50$, deviations in past hidden states fed back through the KV cache accumulate, eventually flipping a sampling decision.
@@ -257,7 +264,7 @@ When evaluating quantized models in multi-step generation, a common pitfall is v
 
 ### The scorecard
 
-The script now has measurements for each candidate, but the final table leaves the acceptance decision to the reader. Anyone reading that table wants one verdict, and the naive way to produce one is a weighted sum, so much weight on accuracy, so much on size, so much on speed. I tried it against the FP32 baseline from the trace below, with half the weight on retention and a quarter each on the other two ratios. A careful INT8 candidate that keeps 99.4% of the accuracy, is 3.97× smaller, and runs at the same speed scores 1.7. A reckless one that keeps 68% of the accuracy, is 7.9× smaller, and runs 100× faster scores 27. A sum lets one axis buy another, and the people submitting to a benchmark will find the weighting that lets them buy the most. A floor cannot be bought. Above it, memory and latency compete on their own; below it, nothing else is looked at.
+The script now has measurements for each candidate, but the final table leaves the acceptance decision to the reader. Anyone reading that table wants one verdict, and the naive way to produce one is a weighted sum: so much weight on accuracy, so much on size, so much on speed. Testing that approach against the FP32 baseline from the trace below, with half the weight on retention and a quarter each on the other two ratios, illustrates the failure mode. A careful INT8 candidate that keeps 99.4% of the accuracy, is 3.97x smaller, and runs at the same speed scores 1.7. A reckless one that keeps 68% of the accuracy, is 7.9x smaller, and runs 100x faster scores 27. A sum lets one axis buy another, and practitioners submitting to a benchmark will find the weighting that lets them buy the most. A floor cannot be bought. Above it, memory and latency compete on their own; below it, nothing else is looked at.
 
 The scorecard takes a baseline and a candidate, each described by three numbers, and returns the three ratios and the book's relative accuracy verdict. Its event adapter imports the capstone policy from the exported TinyTorch package. It converts the trace's field names and byte count into the report format without restating the eligibility rules.
 
@@ -293,7 +300,7 @@ The trace has two parts. The first pushes one small weight matrix through two al
 
 ### One matrix, quantized and pruned
 
-Script 1 measures the rounded model's accuracy, but its packed-storage ratio remains an analytical count. A small trace separates the arithmetic of rounding from the representation used to store its result. The comfortable assumption is that it does nothing, since the codes decode back into weights. For this input they decode back into nearby weights, each within half a quantization step of where it started, and the only way to see how wide that step is, and which weights pruning would then discard, is to push a few weights through both rules by hand. Take the six weights $w = [-1.0,\ 0.0,\ 2.0,\ 0.5,\ 1.5,\ -0.5]$, the example from Module 15's own docstring. In the first listing below, lines 1--8 define asymmetric min-max quantization `quantize_int8(values)`, and lines 9--10 define `dequantize_int8`. Line 12 initializes test weights `w`. Line 13 executes quantization, and line 14 prints scale factor $0.0118$, zero point $-43$, and quantized integer codes `[-128, -43, 127, 0, 84, -86]`. Line 15 dequantizes the codes back into approximate floats.
+Script 1 measures the rounded model's accuracy, but its packed-storage ratio remains an analytical count. A small trace separates the arithmetic of rounding from the representation used to store its result. The comfortable assumption is that it does nothing, since the codes decode back into weights. For this input they decode back into nearby weights, each within half a quantization step of where it started, and the only way to see how wide that step is, and which weights pruning would then discard, is to push a few weights through both rules by hand. Take the six weights $w = [-1.0,\ 0.0,\ 2.0,\ 0.5,\ 1.5,\ -0.5]$, the example from Module 15's own docstring. In the first listing below, lines 1 to 7 define asymmetric min-max quantization `quantize_int8(values)`, and lines 9 and 10 define `dequantize_int8`. Line 12 initializes test weights `w`. Line 13 executes quantization, and line 14 prints scale factor $0.0118$, zero point $-43$, and quantized integer codes `[-128, -43, 127, 0, 84, -86]`. Line 15 dequantizes the codes back into approximate floats.
 
 ```python
 def quantize_int8(values):
@@ -341,11 +348,17 @@ The largest reconstruction error is half a quantization step, $0.0059$, for thes
 
 ### The scorecard for `DigitMLP`
 
-A benchmark is more useful when you know what it should print, so the prediction comes before the ledger. `DigitMLP` has two linear layers, 64 inputs to 32 hidden units to 10 classes, and its parameter count follows from that shape: $64 \times 32 + 32 + 32 \times 10 + 10 = 2{,}410$. At 4 bytes each that is $9{,}640$ bytes, and one forward pass costs $2 \times (64 \times 32 + 32 \times 10) = 4{,}736$ FLOPs, counting a multiply and an add as two. These are exact parameter and matrix-product counts for this architecture; the FLOP count omits bias additions and activations.
+A benchmark is more useful when the expected output is calculated in advance, so the prediction comes before the ledger. `DigitMLP` has two linear layers, 64 inputs to 32 hidden units to 10 classes, and its parameter count follows from that shape: $64 \times 32 + 32 + 32 \times 10 + 10 = 2{,}410$. At 4 bytes each that is $9{,}640$ bytes, and one forward pass costs $2 \times (64 \times 32 + 32 \times 10) = 4{,}736$ FLOPs, counting a multiply and an add as two. These are exact parameter and matrix-product counts for this architecture; the FLOP count omits bias additions and activations.
 
 Napkin math for the rest. A hypothetical packed INT8 format keeps 1 byte per parameter plus a scale and a zero point for each of the four parameter tensors, so about $2{,}410 + 32 = 2{,}442$ bytes, a size ratio just under 4. Pruning half the weights to zero and storing them densely changes nothing, and storing them in the compressed sparse row format of @sec-compression costs an index per surviving weight, which at 50% sparsity roughly cancels the saving. Both reconstructed quantization and dense pruning leave the matrix shapes and dense arithmetic unchanged. Their latency therefore has to be measured; neither representation claim supplies a speedup.
 
-The ledger in the listing below is a separate arithmetic exercise. In lines 1--6, the analytical storage formulas compute dense FP32 (9,640 bytes), packed INT8 (2,442 bytes), and 50% sparse CSR representation (2,638 bytes). Lines 8--12 populate the candidate dictionary. The loop in lines 14--19 calls `score(base, cand)` to evaluate accuracy retention $R$, size compression ratio $C$, speedup $S$, and event qualification, printing the rows of @tbl-m3-scorecard.
+::: {.column-margin}
+![](assets/images/diagrams/milestone_03-margin-csr-overhead.svg){width="100%" fig-alt="Storage breakdown comparing dense INT8 at 2,442 bytes versus 50% pruned CSR format at 2,638 bytes, showing index overhead negating compression."}
+
+*CSR Sparsity Overhead: At 8-bit precision, adding a 1-byte column index per non-zero weight doubles per-element storage, making 50% pruned CSR (2,638 B) larger than dense INT8 (2,442 B) until sparsity exceeds 67%.*
+:::
+
+The ledger in the listing below is a separate arithmetic exercise. In lines 1 to 6, the analytical storage formulas compute dense FP32 (9,640 bytes), packed INT8 (2,442 bytes), and 50% sparse CSR representation (2,638 bytes). Lines 8 to 12 populate the candidate dictionary. The loop in lines 14 to 19 calls `score(base, cand)` to evaluate accuracy retention $R$, size compression ratio $C$, speedup $S$, and event qualification, printing the rows of @tbl-m3-scorecard.
 
 ```python
 params = 64 * 32 + 32 + 32 * 10 + 10           # 2,410
@@ -390,33 +403,53 @@ The classroom scorecard checks arithmetic on supplied measurements. An external 
 
 [^fn-mlperf-inference-scenarios]: MLPerf Inference standardizes benchmarking across four distinct operational scenarios: (1) **Single-Stream**: queries arrive one at a time with query size 1, measuring 90th-percentile latency for interactive edge devices; (2) **Server**: queries arrive following a Poisson distribution, measuring the maximum supported query rate (QPS) subject to a strict 99th-percentile latency constraint; (3) **Offline**: all input queries are resident in memory upfront, measuring peak throughput (samples/second) where latency is unconstrained; and (4) **Multi-Stream**: multiple concurrent video or sensor feeds submit batches at fixed intervals, measuring the maximum stream count before frame drops.
 
-::: {#psp-milestone3-gguf-edge-runtime .callout-production-bridge title="Production bridge: edge runtimes with llama.cpp, GGUF, and ONNX Runtime"}
+::: {#psp-milestone3-gguf-edge-runtime .callout-perspective title="Production Bridge: Edge Runtimes with llama.cpp, GGUF, and ONNX Runtime"}
 Deploying quantized transformer models on consumer hardware (phones, laptops, embedded edge boards) requires moving beyond Python runtimes to specialized C/C++ inference engines:
 
 - **GGUF Format and llama.cpp**: Georgi Gerganov's `llama.cpp` uses the unified binary file format **GGUF** (successor to GGML). GGUF bundles model architecture hyperparameters, tokenizer vocabulary, and mixed-precision quantized tensor weights (e.g., Q4_K_M, Q8_0) into a single mmap-friendly file.
 - **Zero-Copy Memory Mapping (`mmap`)**: Instead of allocating and loading gigabytes of weights into heap RAM on startup, edge runtimes map the GGUF file directly into virtual address space. Pages are faulted into memory on demand by the OS kernel, enabling near-instantaneous startup and memory sharing across processes.
 - **Heterogeneous Offloading**: GGUF runtimes dynamically split layers between available compute backends, offloading $N$ transformer layers to a discrete or integrated GPU (via Metal on Apple Silicon, CUDA, or Vulkan) while executing remaining layers on the CPU SIMD units (ARM NEON, x86 AVX-512).
-- **ONNX Runtime (ORT)**: For cross-platform enterprise edge deployments, ONNX Runtime compiles computational graphs with hardware-specific Execution Providers (DirectML, OpenVINO, QNN for Qualcomm NPUs), fusing attention and layer normalization while executing quantized integer GEMM kernels.
+- **ONNX Runtime (ORT)**: For cross-platform enterprise edge deployments, ONNX Runtime compiles computational graphs with hardware-specific Execution Providers (DirectML, OpenVINO, QNN for Qualcomm NPUs), fusing attention and layer normalization while executing quantized integer GEMM kernels.[^fn-zero-allocation-edge]
 :::
+
+[^fn-zero-allocation-edge]: **Zero-allocation invariants on embedded microcontrollers**: In bare-metal edge environments (such as ARM Cortex-M or RISC-V microcontrollers targeted by MLPerf Tiny), dynamic memory allocation via `malloc` or `new` is strictly prohibited during inference. Heap fragmentation over millions of cycles can trigger unrecoverable crashes. Production runtimes (such as TFLite Micro and TinyEngine) mandate a static memory arena where all tensor weights, activation lifetimes, and scratchpad buffers are pre-allocated at compile time into fixed contiguous SRAM offsets.
+
 
 @Tbl-m3-tinytorch-vs-mlperf separates the local experiment from the additional controls around an official result.
 
-| Question | Milestone III | MLPerf Inference |
+| Question | Synthesis III | MLPerf Inference |
 | :--- | :--- | :--- |
 | Who controls timing? | The script's repeated calls | LoadGen's query protocol |
 | What quality rule applies? | Chapter retention floor or classroom event policy | Task-specific quality requirement |
 | Which artifact runs? | Baseline and each executable candidate | Submitted system under test |
 | What makes results comparable? | Same data, shapes, and local timing procedure | Defined benchmark and scenario rules |
 
-: The milestone teaches a controlled comparison; an official benchmark also standardizes the workload and execution protocol. {#tbl-m3-tinytorch-vs-mlperf tbl-colwidths="[28,36,36]"}
+: This synthesis chapter teaches a controlled comparison; an official benchmark also standardizes the workload and execution protocol. {#tbl-m3-tinytorch-vs-mlperf tbl-colwidths="[28,36,36]"}
 
-The practical questions are the same when reading either report. Which artifact ran? Were its quality and latency measured on the stated workload? Does the byte count describe resident arrays or a proposed file format? Where do metadata and sparse indices enter that count? A pruning experiment with unchanged latency can be a correct result: a dense kernel still visits the zero entries. The scorecard lets the reader distinguish that result from a failed measurement, bridging the gap to industrial edge deployment engines (\ref{psp-milestone3-gguf-edge-runtime}).
+The practical questions are the same when reading either report. Which artifact ran? Were its quality and latency measured on the stated workload? Does the byte count describe resident arrays or a proposed file format? Where do metadata and sparse indices enter that count? A pruning experiment with unchanged latency can be a correct result: a dense kernel still visits the zero entries. The scorecard lets the reader distinguish that result from a failed measurement, bridging the gap to industrial edge deployment engines (see Systems Perspective above).
+
+::: {#chk-milestone3-production-audit .callout-checkpoint title="Checkpoint: Four Invariants of Production Deployment Auditing"}
+Before any compressed or accelerated model artifact is deployed into production pipelines, four verification gates must be certified:
+
+1. **End-to-End Task Metric Parity:** Passing a generic synthetic accuracy test is insufficient. The quantized or pruned candidate must be evaluated on the full target test split (such as perplexity on validation text, top-1 accuracy on classification benchmarks, or exact-match scores) to confirm that degradation stays within the pre-agreed tolerance threshold.
+2. **True Resident Footprint Accounting:** Parameter storage on disk does not equal resident memory usage at runtime. Total memory consumption must account for weight buffers, activation working memory, runtime context overhead, and dynamic Key-Value cache allocations at peak batch size.
+3. **Warm-Up and Tail Latency Audit:** Single average execution times conceal catastrophic tail latencies caused by cache misses, memory paging, or thermal throttling. Runtimes must measure $p50$, $p90$, and $p99$ latencies under realistic concurrent load after adequate warm-up iterations.
+4. **Logit and Numerical Equivalence Bounds:** Intermediate layer activations and output logits must match reference single-precision executions within expected floating-point rounding tolerances before measuring speedups.
+:::
+
+::: {.column-margin}
+![](assets/images/diagrams/milestone_03-margin-mlperf-scenarios.svg){width="100%" fig-alt="Diagram of MLPerf Inference operational scenarios including Single-Stream, Server, Offline, and Multi-Stream, with the universal accuracy retention floor."}
+
+*MLPerf Inference Scenarios: Workload arrival patterns determine whether latency (Single-Stream), QPS under SLA (Server), or throughput (Offline) is benchmarked, all bounded by the non-negotiable R >= 0.99 accuracy retention floor.*
+:::
 
 ---
 
+{{< pagebreak >}}
+
 ## Summary
 
-This milestone built the scorecard that turns Part III's separate optimizations into a verdict. Three ratios, accuracy retention $R$, size ratio $C$, and speedup $S$, each compare the optimized model against the baseline; a floor on $R$ decides whether the other two are looked at; and the capstone helper checks eligibility for each classroom event without combining the ratios into a ranking. The worked trace pushed six weights through min-max INT8 quantization and 50% magnitude pruning by hand, then counted a proposed packed representation of `DigitMLP` to show that its packed INT8 format would give $3.95\times$, that 50% pruning with sparse indices gives less, and that neither changes how many multiplies the dense forward pass performs. Reading the milestone scripts closely exposed where their printed numbers are measurements and where they are assumptions, which is the skill the scorecard exists to teach. The invariant to carry forward is that an optimization has paid off only when the optimized artifact itself has been measured on all three axes, against the same baseline, with an accuracy floor it cleared. @sec-extensions applies the same discipline to kernels. It leaves NumPy for compiled C++ and GPU code and measures what each step actually gains.
+This synthesis chapter built the scorecard that turns Part III's separate optimizations into a verdict. Three ratios, accuracy retention $R$, size ratio $C$, and speedup $S$, each compare the optimized model against the baseline; a floor on $R$ decides whether the other two are looked at; and the capstone helper checks eligibility for each classroom event without combining the ratios into a ranking. The worked trace pushed six weights through min-max INT8 quantization and 50% magnitude pruning by hand, then counted a proposed packed representation of `DigitMLP` to show that its packed INT8 format would give $3.95\times$, that 50% pruning with sparse indices gives less, and that neither changes how many multiplies the dense forward pass performs. Reading the synthesis scripts closely exposed where their printed numbers are measurements and where they are assumptions, which is the skill the scorecard exists to teach. The invariant to carry forward is that an optimization has paid off only when the optimized artifact itself has been measured on all three axes, against the same baseline, with an accuracy floor it cleared. @sec-extensions applies the same discipline to kernels. It leaves NumPy for compiled C++ and GPU code and measures what each step actually gains.
 
 ---
 

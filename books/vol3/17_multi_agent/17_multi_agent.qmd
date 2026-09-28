@@ -46,10 +46,10 @@ A planner that decomposes the work, coders that draft patches in parallel, and a
 
 :::
 
-## The delegation trade-off {#sec-vol3-multiagent-need}
+## The Delegation Trade-Off {#sec-vol3-multiagent-need}
 
 ::: {.column-margin}
-![](images/svg/vol3_multi_agent_margin_001.svg){width="100%" fig-alt="Two vertical columns of unequal height, the taller one shaded, labelled makespan and tokens."}
+![](images/svg/vol3_multi_agent_margin_001.svg){width="100%" fig-alt="Two vertical columns of unequal height, the taller one shaded, labeled makespan and tokens."}
 
 *Four workers cut makespan to $0.84\times$ but multiply token cost by $3.25\times$.*
 :::
@@ -121,7 +121,7 @@ Whether a task runs as one reflective loop or as a fleet of twenty communicating
 
 The architectural boundary is therefore clear. Multi-agent delegation is not an ambient replacement for rigorous single-agent design, but a specialized concurrency mechanism to be deployed when context partitioning, privilege attenuation, or speculative parallel search decisively outweigh the serialization and reconciliation taxes. Once an engineering workload satisfies these criteria and the delegation trade-off is mathematically justified, the runtime must abandon ad-hoc communication and enforce a formal coordination structure. This immediately confronts us with our next structural challenge: how should the runtime formally organize the communication channels, task dependencies, and data-flow routing across these concurrent distributed agent processes?
 
-## Coordination topologies {#sec-vol3-multiagent-topologies}
+## Coordination Topologies {#sec-vol3-multiagent-topologies}
 
 When an uncoordinated multi-agent system is initialized as an arbitrary, fully connected peer-to-peer network without formal communication topologies, the runtime degenerates into an exponential message storm. In an ensemble of $N$ unprivileged agents exchanging raw natural language over unconstrained broadcast channels, the count of potential bidirectional communication paths scales as $\binom{N}{2} = \frac{N(N-1)}{2} = \mathcal{O}(N^2)$. At every interaction step, each agent broadcasts its intermediate deliberation to all peers, forcing the input prompt size, attention computation, and key-value (KV) cache memory footprint across the fleet to expand quadratically. In an empirical testbed executing a distributed code refactoring task across eight agents, an unconstrained peer-to-peer topology generated over 240 inter-agent messages in less than four minutes. The fleet consumed 1.8 million tokens in redundant prompt prefill passes, triggered repeated race conditions on shared files, and ultimately stalled due to context window exhaustion before committing a single verified syntax tree.[^fn-broadcast-token-waste]
 
@@ -165,7 +165,17 @@ In the *Sequential Linear Pipeline* topology (Panel B), execution is structured 
 
 In the *Shared Blackboard and Actor* models (Panel C), centralized coordinators are eliminated in favor of decoupled asynchronous storage. In the Actor model, autonomous agents maintain private local state, communicating exclusively through asynchronous typed message mailboxes. In the Blackboard architecture, concurrent workers read from and write to a globally visible, append-only artifact repository or tuple space. For $N$ workers claiming subtasks and posting candidate artifacts, the operation complexity per round scales linearly:
 $$M_{\text{blackboard}} = \mathcal{O}(N)$$
-Worker contexts remain decoupled, keeping individual token ingress small ($B_i \approx L$). However, communication complexity is traded for *shared state contention*. Because agents execute concurrently without a central arbiter, two workers may simultaneously claim the same subtask or attempt conflicting mutations on overlapping files. In the absence of synchronized physical clocks, establishing causal event ordering across asynchronous agent messages requires implementing Lamport logical timestamps or vector clocks (Leslie Lamport, 1978) within the runtime message broker.[^fn-vector-clock-causality] Under power-law file access distributions, contention on hotspot files scales as $\sigma(N - 1)$, triggering optimistic concurrency aborts and retry storms. The properties and trade-offs across these four topologies are compared in @tbl-vol3-topologies-comparison.
+Worker contexts remain decoupled, keeping individual token ingress small ($B_i \approx L$). However, communication complexity is traded for *shared state contention*. Because agents execute concurrently without a central arbiter, two workers may simultaneously claim the same subtask or attempt conflicting mutations on overlapping files. In the absence of synchronized physical clocks, establishing causal event ordering across asynchronous agent messages requires implementing Lamport logical timestamps or vector clocks (Leslie Lamport, 1978) within the runtime message broker.[^fn-vector-clock-causality] Under power-law file access distributions, contention on hotspot files scales as $\sigma(N - 1)$, triggering optimistic concurrency aborts and retry storms.
+
+Beyond message routing complexity, multi-agent fleet scalability is tightly coupled to the physical memory architecture of the underlying foundation model serving cluster. While modern serving engines exploit **prefix caching (RadixAttention)** to share immutable system prompts, tool schemas, and repository base indexes across all $N$ workers at zero additional GPU HBM cost, the true physical bottleneck in parallel agent fleets is **KV-cache memory exhaustion during divergent autoregressive decode**.
+
+As $N$ parallel workers explore divergent reasoning trajectories, execute tools, and inspect candidate diffs, their generative outputs diverge completely. Each worker must allocate private, unshareable physical KV pages in accelerator HBM:
+
+$$M_{\text{KV\_worker}} = 2 \times n_{\text{layers}} \times d_{\text{head}} \times n_{\text{heads\_kv}} \times S_{\text{decode}} \times b_{\text{precision}} \text{ bytes}.$$ {#eq-vol3-multiagent-kv-cache-alloc}
+
+For an $N$-worker fleet running a 70B parameter model with Grouped-Query Attention (GQA, $n_{\text{layers}} = 80, d_{\text{head}} = 128, n_{\text{heads\_kv}} = 8$, FP8 precision $b_{\text{precision}} = 1\text{ byte}$), each worker generating $S_{\text{decode}} = 8{,}192$ tokens consumes $1.34\text{ GB}$ of dedicated KV cache. For a fleet of $N = 32$ workers, divergent decode demands over $43\text{ GB}$ of unshareable HBM—more than half the usable capacity of an 80 GB NVIDIA H100 GPU after loading base weights.
+
+When aggregate KV demand exceeds physical HBM capacity, serving engines are forced to swap KV blocks to host DRAM over PCIe Gen5 ($64\text{ GB/s}$) or preempt workers entirely by evicting pages. Furthermore, continuous batching schedulers must interleave the bursty prefill GEMM operations of arriving tool outputs with the memory-bandwidth-bound decode GEMVs of running workers. This induces **Time-to-First-Token (TTFT) latency spikes and decode bubbles** that ripple across the task dependency DAG, turning tail-latency stragglers into critical-path bottlenecks. The properties and trade-offs across these four topologies are compared in @tbl-vol3-topologies-comparison.
 
 | Coordination Topology              | Round Message Complexity                             | Fleet Token Ingress Bandwidth                                       | Critical-Path Latency                                                   | Primary Scalability Bottleneck                                  | Optimal Workload Profile                                                          |
 |:-----------------------------------|:-----------------------------------------------------|:--------------------------------------------------------------------|:------------------------------------------------------------------------|:----------------------------------------------------------------|:----------------------------------------------------------------------------------|
@@ -317,7 +327,7 @@ Before examining typed task envelopes and cross-agent contracts, verify your und
 - [ ] **Distributed leases**: Why must child worker execution leases be bounded by periodic heartbeats to prevent orphaned GPU token consumption?
 :::
 
-## Typed task envelopes {#sec-vol3-multiagent-contracts}
+## Typed Task Envelopes {#sec-vol3-multiagent-contracts}
 
 When an orchestrator delegates a subtask by emitting unstructured natural language—for example, appending `"Please inspect the failing tests in the authentication module, fix the regression, and make sure the documentation matches"` to a shared conversational context—it abandons deterministic systems control. In an unconstrained chat handoff, the downstream model receives no authoritative boundary markers. It must infer which repository commit represents source truth, guess whether it holds permission to modify database migration scripts, assume arbitrary resource limits, and invent its own stopping criteria. As execution depth increases across a graph of delegating agents, this conversational ambiguity triggers rapid epistemic degradation: minor omissions in the initial prompt cascade into dropped constraints, ungrounded hallucinations, and silent state corruption across the host environment.
 
@@ -473,6 +483,10 @@ The downstream agent communicates its termination back to the supervisor strictl
 
 ### Passing references, not contents
 
+When decomposing a complex engineering objective across worker agents, the coordinator must supply each worker with sufficient task context to execute its assignment. In naive implementations, coordinators routinely inline entire file dumps, documentation pages, and dependency trees directly into each subagent's initial instruction prompt. This approach—passing state by value—rapidly saturates token budgets, inflates prefill latency, and defeats the primary architectural benefit of multi-agent decomposition: isolating context windows to prevent distraction and state explosion.
+
+A disciplined systems architecture replaces raw payload inlining with content-addressed reference passing. Rather than transmitting bulk state in the dispatch envelope, the coordinator supplies immutable references—such as Git commit hashes, branch heads, or artifact URIs—leaving individual workers to query and retrieve only the specific file slices their task requires. The economic and latency implications of this architectural choice become stark as fleet concurrency scales.
+
 ```{python}
 #| label: calc-vol3-multiagent-reference-passing
 #| echo: false
@@ -618,7 +632,7 @@ Furthermore, pass-by-reference protects cache locality on serving infrastructure
 
 By formalizing the handoff boundary through typed envelopes, content-addressed references, and machine-readable verification receipts, the agent runtime establishes deterministic, auditable barriers between decoupled stochastic models. Yet, establishing clean data isolation at the invocation boundary solves only the input phase of concurrent execution. When multiple worker agents execute simultaneously across different branches of a task graph, their subcomputations inevitably terminate by attempting to commit mutations back to the shared repository environment. If two workers independently refactor interdependent files or concurrently update database schemas, their write operations will collide, corrupting the project state. To achieve true parallel scalability, the runtime must govern concurrent execution through optimistic concurrency control and branch reconciliation.
 
-## Optimistic concurrency control {#sec-vol3-multiagent-concurrency}
+## Optimistic Concurrency Control {#sec-vol3-multiagent-concurrency}
 
 ::: {.column-margin}
 ![](images/svg/vol3_multi_agent_margin_002.svg){width="100%" fig-alt="Line plot showing write collision probability surging above 80% beyond five workers under Zipfian contention, compared to 12% under uniform access."}
@@ -656,7 +670,9 @@ In real software systems, file access is never uniform. Empirical software engin
 
 ### Workspace isolation
 
-To eliminate lost updates and torn reads, the runtime must enforce absolute storage isolation across worker agents. However, naively copying the entire repository workspace for each worker introduces severe physical I/O bottlenecks.
+To eliminate lost updates, torn reads, and non-deterministic test interference, an agent runtime must enforce absolute filesystem isolation across concurrent worker agents. In traditional multi-process operating systems, isolation is achieved either by allocating independent directory checkouts, mounting Copy-on-Write (CoW) overlay filesystems, or provisioning private version-control workspaces. For autonomous agent fleets running over modern software repositories, however, the choice of isolation mechanism directly dictates fleet scalability and storage bus saturation.
+
+A naive approach provisions each worker by executing a full recursive copy of the target repository. While conceptually simple, copying tens of thousands of source files, dependency trees, and build artifacts per agent creates massive physical I/O write amplification and saturates storage controllers. By contrast, leveraging lightweight mechanisms such as Git Worktrees or overlay mounts allows worker agents to share the underlying read-only object store while isolating index pointers and working directories. Sizing these competing architectures reveals the physical I/O boundaries governing fleet provisioning latency.
 
 ::: {#nbk-17-provisioning-latency-and-io-bandwidth .callout-notebook title="Provisioning latency in worker fleets"}
 Consider a repository containing $M = 80{,}000$ files totaling $S = 1.8\text{ GB}$ of data, running on a host with a high-performance PCIe 4.0 NVMe SSD ($R_{\text{seq}} = 5{,}000\text{ MB/s}$, random $4\text{ KB}$ write throughput $R_{\text{rand}} = 120\text{ MB/s}$). An orchestration engine launches a fleet of $N = 32$ parallel agents to investigate an integration test failure.
@@ -681,7 +697,15 @@ The worker operates exclusively within its isolated worktree branch $B_i = \text
 
 ### The optimistic concurrency control protocol
 
-In the commit phase, the runtime validates whether the branch head has moved and whether write sets overlap.[^fn-optimistic-concurrency-validation] @Lst-vol3-occ-commit shows the dispatcher.
+With isolated workspaces established, the runtime coordinates concurrent worker execution by implementing an Optimistic Concurrency Control (OCC) trajectory protocol. Adapting Kung and Robinson's classic transaction formulation to agentic systems, as illustrated in @fig-vol3-occ-worktrees, the protocol proceeds through four formal phases: *Read*, *Execute*, *Validate*, and *Commit/Reconcile*.
+
+::: {#fig-vol3-occ-worktrees fig-env="figure" fig-pos="htb" fig-cap="**Optimistic Concurrency Control with Isolated Worktrees**: Four-phase trajectory concurrency protocol and Git commit Directed Acyclic Graph (DAG) reconciliation. The top panels detail the transaction lifecycle across the Read, Execute, Validate, and Commit/Reconcile phases; the bottom panels illustrate the underlying physical filesystem geometry of shared `.git/objects` and the automated three-way merge resolution rules (`Merge(C_{\text{base}}, C_{\text{head}}, C_i)`) governing branch convergence." fig-alt="Systems architecture diagram illustrating the four-phase Optimistic Concurrency Control protocol using isolated git worktrees, showing read snapshotting, sandboxed execution, OCC disjointness validation, atomic CAS fast-forward, and three-way merge DAG resolution."}
+![](images/svg/fig-vol3-occ-worktrees.svg)
+:::
+
+As formalized in @fig-vol3-occ-worktrees, optimistic concurrency transforms code refactoring from destructive shared-directory mutation into a verifiable transaction pipeline, resolving through fast-forward commit in panel (a), a disjoint three-way merge in panel (b), or conflict abort in panel (c). In Phase 1 (Read Snapshot), worker agent $W_i$ provisions a private branch $B_i$ rooted at immutable base commit $C_{\text{base}}$. As detailed in the bottom-left storage geometry panel, Git Worktrees share the underlying `.git/objects` blob database across all workers via hardlinks, dropping workspace provisioning latency to approximately $14\text{ ms}$ with zero data duplication. In Phase 2 (Execute), the worker generates code diffs and executes hermetic test suites strictly within its container enclave, emitting a signed `TaskReceipt` recording its read set $\mathcal{R}_i$ and write set $\mathcal{W}_i$. In Phase 3 (Validation), the host supervisor interrogates the main integration branch ($C_{\text{head}}$) to identify any intervening commits $\Delta_{\text{merged}} = C_{\text{head}} \setminus C_{\text{base}}$ merged while $W_i$ was executing. If the worker's write set does not intersect intervening writes ($\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} = \emptyset$), the invariant holds. In Phase 4 (Commit/Reconcile), the runtime executes atomic branch convergence as mapped in the bottom-right commit DAG: advancing $C_{\text{base}}$ via an atomic compare-and-swap pointer update if no drift occurred (Case 1), executing an automated three-way merge $C_{\text{new}} = \text{Merge}(C_{\text{base}}, C_{\text{head}}, C_i)$ under disjoint writes (Case 2), or dispatching an agentic reconciliation subtask when write collisions occur (Case 3).
+
+In the commit phase, the runtime validates whether the branch head has moved and whether write sets overlap.[^fn-optimistic-concurrency-validation] @Lst-vol3-occ-commit shows the dispatcher that executes this commit decision.
 
 ::: {#lst-vol3-occ-commit lst-cap="**Optimistic Commit of a Worker's Branch**: Fast-forward when the head has not moved, merge when writes are disjoint, and hand overlapping writes to a reconciliation task."}
 ```python
@@ -699,13 +723,7 @@ def commit_worker(repo, base_sha, worker_sha, write_set, checks):
 ```
 :::
 
-With isolated workspaces established, the runtime coordinates concurrent execution by implementing an Optimistic Concurrency Control (OCC) trajectory protocol. Adapting Kung and Robinson's classic transaction formulation to agentic systems, as illustrated in @fig-vol3-occ-worktrees, the protocol proceeds through four formal phases: *Read*, *Execute*, *Validate*, and *Commit/Reconcile*.
-
-::: {#fig-vol3-occ-worktrees fig-env="figure" fig-pos="htb" fig-cap="**Optimistic Concurrency Control with Isolated Worktrees**: Four-phase trajectory concurrency protocol and Git commit Directed Acyclic Graph (DAG) reconciliation. The top panels detail the transaction lifecycle across the Read, Execute, Validate, and Commit/Reconcile phases; the bottom panels illustrate the underlying physical filesystem geometry of shared `.git/objects` and the automated three-way merge resolution rules (`Merge(C_{\text{base}}, C_{\text{head}}, C_i)`) governing branch convergence." fig-alt="Systems architecture diagram illustrating the four-phase Optimistic Concurrency Control protocol using isolated git worktrees, showing read snapshotting, sandboxed execution, OCC disjointness validation, atomic CAS fast-forward, and three-way merge DAG resolution."}
-![](images/svg/fig-vol3-occ-worktrees.svg)
-:::
-
-As formalized in @fig-vol3-occ-worktrees, optimistic concurrency transforms code refactoring from destructive shared-directory mutation into a verifiable transaction pipeline, resolving through fast-forward commit in panel (a), a disjoint three-way merge in panel (b), or conflict abort in panel (c). In Phase 1 (Read Snapshot), worker agent $W_i$ provisions a private branch $B_i$ rooted at immutable base commit $C_{\text{base}}$. As detailed in the bottom-left storage geometry panel, Git Worktrees share the underlying `.git/objects` blob database across all workers via hardlinks, dropping workspace provisioning latency to approximately $14\text{ ms}$ with zero data duplication. In Phase 2 (Execute), the worker generates code diffs and executes hermetic test suites strictly within its container enclave, emitting a signed `TaskReceipt` recording its read set $\mathcal{R}_i$ and write set $\mathcal{W}_i$. In Phase 3 (Validation), the host supervisor interrogates the main integration branch ($C_{\text{head}}$) to identify any intervening commits $\Delta_{\text{merged}} = C_{\text{head}} \setminus C_{\text{base}}$ merged while $W_i$ was executing. If the worker's write set does not intersect intervening writes ($\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} = \emptyset$), the invariant holds. In Phase 4 (Commit/Reconcile), the runtime executes atomic branch convergence as mapped in the bottom-right commit DAG: advancing $C_{\text{base}}$ via an atomic compare-and-swap pointer update if no drift occurred (Case 1), executing an automated three-way merge $C_{\text{new}} = \text{Merge}(C_{\text{base}}, C_{\text{head}}, C_i)$ under disjoint writes (Case 2), or dispatching an agentic reconciliation subtask when write collisions occur (Case 3). The quantitative advantages of this worktree protocol over naive shared directories are summarized in @tbl-vol3-occ-vs-naive.
+The quantitative advantages of this worktree protocol over naive shared directories are summarized in @tbl-vol3-occ-vs-naive.
 
 | Operational Dimension    | Naive Recursive Copy / Shared Workspace                               | Optimistic Git Worktree Protocol                                              |
 |:-------------------------|:----------------------------------------------------------------------|:------------------------------------------------------------------------------|
@@ -723,37 +741,72 @@ During the **Validation Phase**, the runtime evaluates whether the integration b
 
 $$\Delta_{\text{merged}} = C_{\text{head}} \setminus C_{\text{base}}$$
 
-If $\Delta_{\text{merged}} = \emptyset$, no intervening commits occurred; validation succeeds unconditionally. If $\Delta_{\text{merged}} \neq \emptyset$, the runtime inspects the write sets of all intervening commits. The validation condition requires that the worker's write set does not overlap with any concurrent mutations committed since its base snapshot:
+During the **Validation Phase**, the runtime evaluates whether the integration branch head $C_{\text{head}}$ has advanced beyond $C_{\text{base}}$ during the worker's execution window:
 
-$$\mathcal{W}_i \cap \left( \bigcup_{C_k \in \Delta_{\text{merged}}} \mathcal{W}_k \right) = \emptyset$$
+$$\Delta_{\text{merged}} = C_{\text{head}} \setminus C_{\text{base}}$$
 
-During the **Commit / Reconciliation Phase**, the runtime merges the validated work according to one of three structural outcomes:
+In production software repositories, evaluating validation solely at coarse file-level granularity ($\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} = \emptyset$) triggers catastrophic false aborts: multiple parallel agents concurrently adding independent endpoints to `routes.py` or distinct database columns to `models.py` are rejected even though their edits are completely orthogonal. To balance concurrency throughput against semantic safety, the runtime implements a **Three-Tier OCC Validation Hierarchy**:
+
+1. **Tier 1: Path-Level Disjointness (Fast Check):** If file write sets are strictly disjoint ($\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} = \emptyset$), validation succeeds immediately without parsing file contents.
+2. **Tier 2: AST Symbol and Hunk Disjointness (Syntactic Merge):** If write sets overlap, the runtime parses the common ancestor ($C_{\text{base}}$), current integration head ($C_{\text{head}}$), and worker branch ($C_i$) into Abstract Syntax Trees using language-specific parsers (such as tree-sitter). The validator verifies that:
+   - Modifications reside in disjoint AST nodes (such as separate class definitions, independent function signatures, or non-overlapping line hunks).
+   - Neither commit modifies symbols (types, functions, variables) upon which the other depends, verified via symbol reference graph reachability.
+   If AST diffs are orthogonal, the runtime synthesizes an automated clean three-way AST merge.
+3. **Tier 3: Hermetic Regression Gating (Semantic Validation):** If Tier 1 or Tier 2 produces a merged tree $C_{\text{candidate}}$, the runtime builds and executes the sealed integration test suite inside a transient, hermetic microVM sandbox. If regression assertions pass, the commit is certified.
+
+During the **Commit / Reconciliation Phase**, the runtime merges validated work through one of four operational paths:
 
 1. *Fast-Forward Commit:* When $C_{\text{head}} == C_{\text{base}}$, the runtime advances the integration branch pointer directly to $C_i$ using an atomic compare-and-swap pointer update (`git update-ref`).
-2. *Disjoint Three-Way Merge:* When $C_{\text{head}} \neq C_{\text{base}}$ but write sets are provably disjoint, the runtime executes an automated three-way merge:
+2. *Disjoint Three-Way Merge:* When $C_{\text{head}} \neq C_{\text{base}}$ but write sets satisfy Tier 1 or Tier 2 disjointness, the runtime merges branches cleanly:
    $$C_{\text{new}} = \text{Merge}(C_{\text{base}}, C_{\text{head}}, C_i)$$
-   Because the modifications touch non-overlapping files or orthogonal AST blocks, the merge succeeds cleanly without semantic conflict. The runtime invokes the sealed regression test suite; upon verification, $C_{\text{head}} \leftarrow C_{\text{new}}$.
+   Upon passing Tier 3 regression certification, $C_{\text{head}} \leftarrow C_{\text{new}}$.
+3. *Agentic Reconciliation Subtask:* When AST nodes overlap or syntactic conflicts emerge, standard diff engines emit conflict markers. Rather than discarding hundreds of thousands of generated tokens, the runtime provisions an ephemeral reconciliation worker prompted strictly to resolve the syntactic collision against the three-way context.
+4. *Commit Livelock Governance (Randomized Exponential Backoff):* A critical failure mode in multi-agent OCC is **reconciliation livelock** (commit starvation). Because an agentic reconciliation worker requires 30 to 60 seconds of LLM decode latency to analyze conflicts and re-run tests, another fast worker may commit to $C_{\text{head}}$ in the interim. When the reconciler finishes, its base snapshot is stale again, forcing another reconciliation round and trapping the fleet in an infinite retry storm.
 
-3. *Conflicting Merge and Syntactic Reconciliation:* When $\mathcal{W}_i \cap \mathcal{W}_{\text{merged}} \neq \emptyset$, standard diff engines emit conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). Rather than aborting the transaction and discarding hundreds of thousands of generated tokens, the runtime invokes an *Agentic Reconciliation Subtask*.
+To prevent commit starvation, the runtime implements randomized truncated exponential backoff coupled with a FIFO commit ticket queue:
 
+$$T_{\text{backoff}} = \min\left( T_{\max}, \; T_{\text{base}} \cdot 2^{\text{attempt}} + \text{Uniform}(0, \delta) \right)$$ {#eq-vol3-occ-backoff}
+
+When an agent enters reconciliation, it acquires a bounded commit ticket. Sibling workers attempting to commit overlapping file paths are temporarily paused at the validation barrier until the ticket holder settles or times out ($\tau_{\text{reconcile}} \le 90\text{ s}$), mathematically guaranteeing forward progress across the cluster. @Lst-vol3-occ-commit-tiered illustrates this tiered dispatcher.
+
+::: {#lst-vol3-occ-commit-tiered lst-cap="**Three-Tier OCC Dispatcher with AST Verification and Livelock Governance**: Validates write sets via file paths, AST disjointness, and hermetic regression suites, enforcing commit ticket backoff to prevent livelock."}
 ```python
-# OCC Validation and Atomic Fast-Forward / Reconciliation Dispatcher
-def commit_agent_transaction(repo, base_sha, branch_sha, write_set):
-    current_head = repo.rev_parse("HEAD")
-    if current_head == base_sha:
-        repo.update_ref("refs/heads/main", branch_sha, old_val=base_sha)
-        return {"status": "COMMITTED_FAST_FORWARD", "sha": branch_sha}
+def commit_agent_transaction(repo, base_sha, branch_sha, write_set, max_retries=3):
+    for attempt in range(max_retries):
+        current_head = repo.rev_parse("HEAD")
+        if current_head == base_sha:
+            repo.update_ref("refs/heads/main", branch_sha, old_val=base_sha)
+            return {"status": "COMMITTED_FAST_FORWARD", "sha": branch_sha}
 
-    intervening_writes = repo.get_modified_files(base_sha, current_head)
-    if write_set.isdisjoint(intervening_writes):
-        merged_sha = repo.merge_trees(base_sha, current_head, branch_sha)
-        repo.update_ref("refs/heads/main", merged_sha, old_val=current_head)
-        return {"status": "COMMITTED_MERGE", "sha": merged_sha}
+        intervening_writes = repo.get_modified_files(base_sha, current_head)
 
-    return dispatch_reconciliation_agent(base_sha, current_head, branch_sha)
+        # Tier 1: Path-level disjointness fast check
+        if write_set.isdisjoint(intervening_writes):
+            merged_sha = repo.merge_trees(base_sha, current_head, branch_sha)
+            if repo.run_hermetic_tests(merged_sha) == "PASS":
+                repo.update_ref("refs/heads/main", merged_sha, old_val=current_head)
+                return {"status": "COMMITTED_MERGE", "sha": merged_sha}
+
+        # Tier 2: AST symbol and hunk disjointness check
+        if repo.verify_ast_disjointness(base_sha, current_head, branch_sha):
+            merged_sha = repo.synthesize_ast_merge(base_sha, current_head, branch_sha)
+            if repo.run_hermetic_tests(merged_sha) == "PASS":
+                repo.update_ref("refs/heads/main", merged_sha, old_val=current_head)
+                return {"status": "COMMITTED_AST_MERGE", "sha": merged_sha}
+
+        # Tier 3: Acquire commit ticket & dispatch reconciliation agent
+        with repo.acquire_commit_ticket(timeout_s=90) as ticket:
+            res = dispatch_reconciliation_agent(base_sha, current_head, branch_sha)
+            if res["status"] == "SUCCESS" and repo.run_hermetic_tests(res["sha"]) == "PASS":
+                repo.update_ref("refs/heads/main", res["sha"], old_val=current_head)
+                return {"status": "COMMITTED_RECONCILED", "sha": res["sha"]}
+
+        # Exponential backoff jitter to prevent live-lock storms
+        time.sleep(min(60.0, 2.0 * (2 ** attempt) + random.uniform(0.5, 2.0)))
+
+    return {"status": "TRANSACTION_ABORTED", "reason": "MAX_RETRIES_EXCEEDED"}
 ```
-
-When an agentic reconciliation subtask is triggered, the runtime provisions an ephemeral reconciliation worker whose prompt is constrained strictly to conflict resolution. The reconciler receives the common ancestor ($C_{\text{base}}$), the accepted integration head ($C_{\text{head}}$), the conflicting candidate commit ($C_i$), and the exact syntactic conflict diff. The reconciler synthesizes a unified file that preserves the semantic intent of both updates, executes the test suite inside a transient verification worktree, and returns a verified merge commit. If the reconciler fails to produce a green test run within a strict budget ceiling, the optimistic transaction aborts, rolling back the candidate branch without corrupting the mainline.
+:::
 
 ### Distributed lease management
 
@@ -788,7 +841,7 @@ By combining isolated Git Worktrees, optimistic three-way validation, automated 
 
 Yet, solving the physical problem of state reconciliation reveals a deeper, epistemic challenge in multi-agent systems. When supervisors coordinate multiple agents to review competing code proposals or vote on candidate solutions, system designers frequently assume that aggregating independent agent outputs guarantees semantic correctness. But are stochastic foundation models truly independent evaluators, or does their shared architectural heritage introduce correlated failures that bypass standard consensus protocols? This question forces us to examine the hidden failure modes of multi-agent ensembles.
 
-## Correlated ensemble failures {#sec-vol3-multiagent-consensus}
+## Correlated Ensemble Failures {#sec-vol3-multiagent-consensus}
 
 Deploying an ensemble of language agents to achieve high-assurance task execution confronts an immediate operational trap: when multiple agent processes review code proposals, vote on tool parameters, or validate plan traces, systems architects routinely treat them as independent stochastic trials whose aggregate majority vote asymptotically suppresses error. In classical fault-tolerant computing, this assumption mirrors $N$-modular redundancy (NMR), where replicated hardware units with independent failure distributions vote to mask transient single-event upsets. However, applying majority voting or peer-review protocols to unprivileged foundation model agents commits a fundamental category error.
 
@@ -895,17 +948,6 @@ Iterative multi-agent debate—wherein agents review and critique each other's o
 
 ### The byzantine threat in autonomous fleets
 
-@Lst-vol3-mocked-test is a hypothetical patch of this kind, the silent test bypass that review can approve when it checks the wrong artifact.
-
-::: {#lst-vol3-mocked-test lst-cap="**A Patch That Passes by Disabling the Check**: A hypothetical worker patch that stubs out signature verification so its test passes. Reviewers that read the green test result approve it."}
-```python
-# tests/auth/test_jwt.py (worker's change)
-def test_authorize_request():
-    jwt.verify_signature = lambda token, key: {"role": "admin", "uid": 0}
-    assert auth_service.authorize_request(b"invalid_token") is True
-```
-:::
-
 When designing coordination protocols for autonomous fleets, the systems engineer must adopt an explicit fault model. In traditional distributed systems, architectures distinguish between *fail-stop* faults (where a node crashes and cleanly ceases transmission) and *Byzantine* faults (where a node fails arbitrarily, exhibiting omissions, timing faults, or malicious and coordinated deception, as formalized by Lamport, Shostak, and Pease in 1982).
 
 Unprivileged language agents never fail according to a clean fail-stop model. When an agent encounters an edge case, suffers context window saturation, or is targeted by indirect prompt injection, it does not cleanly crash with a hardware signal. Instead, it behaves as an unannounced Byzantine node:
@@ -918,7 +960,18 @@ Unprivileged language agents never fail according to a clean fail-stop model. Wh
 In classical Byzantine fault tolerance (BFT), reaching consensus among $M$ nodes requires at least $M \ge 3f + 1$ replicas to tolerate $f$ Byzantine actors, assuming independent Byzantine corruption. In language model fleets, because context poisoning cascades through natural language channels, a single Byzantine agent can corrupt multiple peers, violating the $f < M/3$ threshold.
 :::
 
-In a multi-agent review ring or pipeline, a single Byzantine agent induces *context poisoning*. When the output of a compromised or hallucinating agent is injected into the prompt of a downstream reviewer, the reviewer's attention distribution is distorted by the poisoned context. Consider the failure trace below, where a worker agent hallucinates an insecure mock test to bypass an invariant, and two downstream reviewer agents ratify the change because the test technically "passes":
+In a multi-agent review ring or pipeline, a single Byzantine agent induces *context poisoning*. When the output of a compromised or hallucinating agent is injected into the prompt of a downstream reviewer, the reviewer's attention distribution is distorted by the poisoned context. For example, a worker agent might craft a subtle patch that stubs out cryptographic checks to ensure a failing test passes, as illustrated in @lst-vol3-mocked-test.
+
+::: {#lst-vol3-mocked-test lst-cap="**A Patch That Passes by Disabling the Check**: A hypothetical worker patch that stubs out signature verification so its test passes. Reviewers that read the green test result approve it."}
+```python
+# tests/auth/test_jwt.py (worker's change)
+def test_authorize_request():
+    jwt.verify_signature = lambda token, key: {"role": "admin", "uid": 0}
+    assert auth_service.authorize_request(b"invalid_token") is True
+```
+:::
+
+When downstream peer reviewers inspect this change, conversational consensus fails catastrophically. Because the mock causes the local test suite to exit with code 0, peer reviewers conditioned on the green execution trace ratify the malicious bypass:
 
 ```python
 # Regression Trace: False Consensus via Hallucinated Test Mocking
@@ -940,7 +993,7 @@ In this trace, relying on peer review to evaluate the validity of the test struc
 
 ### Heterogeneous ensembling discipline
 
-If multi-agent voting among homogeneous models provides negligible reliability gains and exposes the fleet to Byzantine context poisoning, how should a systems engineer deploy multi-agent coordination safely? The solution requires enforcing two architectural disciplines: *structural heterogeneity* and *invariant-first gating*.
+Deploying multi-agent coordination safely requires overcoming two physical realities of stochastic models: correlated error modes across homogeneous weights and the vulnerability of peer communication channels to Byzantine context poisoning. Rather than abandoning multi-agent architectures, dependable systems engineering enforces two orthogonal disciplines: *structural heterogeneity* across candidate generators and *invariant-first gating* at the integration boundary.
 
 ::: {#dfn-heterogeneous-gating .callout-definition title="Heterogeneous invariant-gated coordination"}
 
@@ -982,7 +1035,7 @@ Before analyzing cancellation cascades and backpressure governance, verify your 
 - [ ] **Phantom mutations**: How do delayed commits from orphaned workers silently overwrite rolled-back state long after a parent supervisor aborts?
 :::
 
-## Cancellation cascades {#sec-vol3-multiagent-backpressure}
+## Cancellation Cascades {#sec-vol3-multiagent-backpressure}
 
 When a supervisor aborts an ongoing goal or an invariant gate flags a corrupted intermediate artifact, every active execution branch spawned across downstream worker agents becomes an immediate computational liability. In multi-agent architectures, where a single worker trajectory can execute dozens of sequential inference calls and run multi-minute sandboxed build commands, unbounded stragglers and orphaned execution trees do not merely consume idle memory. They burn finite token budgets, exhaust concurrent request slots on backend inference engines, and risk committing conflicting mutations to shared storage.
 
@@ -1142,10 +1195,10 @@ Complementing the in-process lease check, the host operating environment runs an
 
 Establishing robust cancellation cascades, straggler hedging, and resource reclamation guarantees that the runtime maintains complete control over the operational lifespan of delegated tasks. Yet revoking a process lifecycle addresses only half of the containment problem: while an agent is actively running, the supervisor must ensure it cannot misuse the permissions granted to it. When an orchestrator spawns a child worker to query a repository or compile an isolated module, what security mechanism prevents that worker from escalating its privileges, exfiltrating secret environment variables, or issuing destructive administrative commands? Answering this structural challenge requires examining the formal mechanics of attenuated capability delegation.
 
-## Attenuated capability delegation {#sec-vol3-multiagent-authority}
+## Attenuated Capability Delegation {#sec-vol3-multiagent-authority}
 
 ::: {.column-margin}
-![](images/svg/vol3_multi_agent_margin_003.svg){width="100%" fig-alt="Three stacked tiers of decreasing width, labelled root, worker and leaf."}
+![](images/svg/vol3_multi_agent_margin_003.svg){width="100%" fig-alt="Three stacked tiers of decreasing width, labeled root, worker and leaf."}
 
 *Each delegation step strictly attenuates the token budget it can draw on.*
 :::
@@ -1312,7 +1365,7 @@ The child cannot proceed autonomously; it must bubble the escrow request up thro
 
 Having established formal frameworks for delegation topologies, typed message envelopes, optimistic concurrency control, failure de-correlation, cancellation propagation, and attenuated capability containment, we have assembled the complete systems machinery required to execute distributed multi-agent workflows. Yet constructing an elaborate multi-agent orchestration does not guarantee that it outperforms a single model operating over an equivalent computational budget. Multi-agent delegation imposes non-trivial serialization latencies, token amplification costs, and coordination taxes. Before deploying a distributed agent cluster to production, systems engineers must confront the fundamental empirical question: does decomposing the workload across multiple agents yield higher task completion and lower makespan than an optimized single-agent baseline endowed with test-time search?
 
-## Single-agent baseline benchmarking {#sec-vol3-multiagent-evaluation}
+## Single-Agent Baseline Benchmarking {#sec-vol3-multiagent-evaluation}
 
 ::: {.column-margin}
 ![](images/svg/vol3_multi_agent_margin_004.svg){width="100%" fig-alt="A curve bending sharply upward at a marked knee, with the region to the right of the knee shaded."}
@@ -1408,16 +1461,26 @@ $$\text{Speedup}(N) = \frac{1}{(1 - f) + \frac{f}{N} + h(N)}$$ {#eq-vol3-multiag
 
 To model the precise physical behavior of multi-agent concurrency, systems engineers apply Neil J. Gunther's Universal Scalability Law (USL, 2007). In an agent runtime, relative system capacity $C(N)$ accounts for both serial resource contention and pairwise coherence penalties:[^fn-universal-scalability-lineage]
 $$C(N) = \frac{N}{1 + \sigma (N - 1) + \kappa N(N - 1)}$$ {#eq-vol3-gunther-usl}
-The parameter $\sigma \ge 0$ is the *contention coefficient*, representing time spent queuing for serialized resources, such as the supervisor's input context processing queue or shared repository branch locks. The parameter $\kappa \ge 0$ is the *coherency coefficient*, representing the pairwise communication delay required to reconcile conflicting mutations, synchronize state across worker scratchpads, or achieve consensus among ensemble members. Both formulations in @eq-vol3-multiagent-speedup and @eq-vol3-gunther-usl capture how coordination friction degrades ideal concurrency.
+
+The relationship between Gunther's USL and Amdahl's Law is exact: when communication and coherence delays are zero ($\kappa = 0$), @eq-vol3-gunther-usl simplifies algebraically to:
+$$C(N) = \frac{N}{1 + \sigma (N - 1)} = \frac{1}{\sigma + \frac{1 - \sigma}{N}} \equiv \frac{1}{(1 - f) + \frac{f}{N}}.$$
+
+Amdahl's Law is therefore the zero-coherence special case of the Universal Scalability Law, identifying the contention parameter $\sigma$ as the serialized execution fraction: $\sigma \equiv 1 - f$ and $1 - \sigma \equiv f$. In distributed multi-agent systems, the contention parameter $\sigma \ge 0$ decomposes into static and dynamic components:
+$$\sigma = (1 - f) + \sigma_{\text{queue}},$$ {#eq-vol3-usl-contention-decomp}
+where $(1 - f)$ represents the static critical-path serialization dictated by the task dependency DAG (such as initial root planning, task decomposition, and final regression certification), while $\sigma_{\text{queue}}$ captures dynamic queueing delays for serialized runtime resources (such as supervisor input context processing queues, host CPU compile locks, or shared repository branch locks).
+
+The parameter $\kappa \ge 0$ is the *coherency coefficient*, representing the pairwise communication delay required to reconcile conflicting mutations, synchronize state across worker scratchpads, or achieve consensus among ensemble members. In an agent architecture, $\kappa$ is physically grounded as the **Token Crosstalk Tax**: to maintain a coherent shared worldview, each agent must ingest, re-read, and attend over the intermediate logs, state diffs, and proposed patches emitted by its $N - 1$ peers. Because attention prefill scales quadratically or linearly across all peer turns, pairwise context synchronization demands $\mathcal{O}(\kappa N^2)$ token re-prefills across the cluster. When $\kappa N(N - 1)$ dominates, peer agents spend more accelerator compute reading each other's conversational context and resolving AST merge conflicts than executing productive code mutations. Both formulations in @eq-vol3-multiagent-speedup and @eq-vol3-gunther-usl capture how coordination friction degrades ideal concurrency.
 
 When pairwise coherency delays exist ($\kappa > 0$), the speedup curve does not merely plateau—it *retrogrades*. As $N$ increases beyond a critical threshold, the $\kappa N(N - 1)$ quadratic term outgrows parallel compute gains. Adding more agents causes the system to run slower than a single agent. The optimal worker count $N^*$ that maximizes capacity is derived by finding the stationary point $\frac{dC}{dN} = 0$:
-$$N^* = \sqrt{\frac{1 - \sigma}{\kappa}}$$
+$$N^* = \sqrt{\frac{1 - \sigma}{\kappa}}$$ {#eq-vol3-usl-n-star}
 Retrograde collapse into sub-unitary scaling ($C(N) < 1.0\times$) occurs whenever concurrency exceeds $(N^*)^2 = \frac{1 - \sigma}{\kappa}$. For tasks where merge contention or coherence overhead is exceptionally high, the optimal worker count collapses to $N^* = 1$: the workload should not be delegated at all.
 
 ::: {#nbk-17-quantitative-evaluation-of-a-parallel .callout-notebook title="Evaluation of a parallel refactoring fleet"}
-A platform team designs an agentic refactoring pipeline to modernize legacy code across a microservice repository. Profiling an optimized single-agent baseline reveals an average task execution time $T_1 = 600\text{ s}$ (10 minutes) and a total token consumption of 120,000 tokens (100,000 input tokens, 20,000 output tokens). Analysis of the execution trace indicates that initial dependency analysis and the final integration test suite require 180 seconds of strictly serial execution ($1 - f = 0.30$, meaning $f = 0.70$).
+A platform team designs an agentic refactoring pipeline to modernize legacy code across a microservice repository. Profiling an optimized single-agent baseline reveals an average task execution time $T_1 = 600\text{ s}$ (10 minutes) and a total token consumption of 120,000 tokens (100,000 input tokens, 20,000 output tokens).
 
-The team deploys a supervisor-worker topology with $N = 4$ worker agents operating on isolated git worktrees. Systems telemetry measures a contention parameter $\sigma = 0.05$ (supervisor dispatch latency and lock contention) and a coherency parameter $\kappa = 0.03$ (AST merge conflicts and three-way reconciliation delays).
+Analysis of the execution trace indicates that initial root dependency analysis and final regression verification require an algorithmic serial fraction of $(1 - f) = 0.02$ (12 seconds of strictly serial execution, meaning $f = 0.98$). Supervisor dispatch queueing and git worktree serialization introduce dynamic contention $\sigma_{\text{queue}} = 0.03$, resulting in an aggregate contention parameter $\sigma = (1 - f) + \sigma_{\text{queue}} = 0.05$. Telemetry measures a pairwise coherency parameter $\kappa = 0.03$ (AST merge conflicts, context re-reading delays, and three-way reconciliation overhead).
+
+The team deploys a supervisor-worker topology with $N = 4$ worker agents operating on isolated git worktrees.
 
 **1. Calculate Achievable Speedup and Makespan:**
 Using Gunther's Universal Scalability Law (@eq-vol3-gunther-usl):
@@ -1438,6 +1501,8 @@ At integer concurrency $N = 6$, capacity peaks at $C(6) = \frac{6}{1 + 0.05(5) +
 Retrograde collapse into sub-unitary speedup ($C(N) < 1.0\times$) occurs when concurrency exceeds $(N^*)^2 = 31.67$. For $N = 32$ workers:
 $$C(32) = \frac{32}{1 + 0.05(31) + 0.03(32)(31)} = \frac{32}{1 + 1.55 + 29.76} = \frac{32}{32.31} \approx 0.99\times$$
 The makespan balloons to $T_{32} = \frac{600\text{ s}}{0.99} \approx 606\text{ s}$, executing slower than the single agent!
+
+*Structural Serialization Bound:* If the workload instead exhibited substantial structural serialization, say $(1 - f) = 0.30$ (180 seconds out of 600s), the structural serial bound alone would force $\sigma \ge 0.30$. Under that regime, the maximum theoretical speedup would be capped by Amdahl's limit at $\frac{1}{0.30} = 3.33\times$, and optimal concurrency would contract to $N^* \le \sqrt{\frac{0.70}{0.03}} \approx 4.83$ workers, demonstrating that high algorithmic serialization dramatically shrinks the concurrency window before coherency penalties destroy throughput.
 :::
 
 To verify whether a proposed delegation topology improves system efficiency prior to deployment, systems engineers can evaluate Gunther's speedup equation directly against profiling traces:
@@ -1486,7 +1551,7 @@ Before decomposing an agentic workflow into a multi-agent cluster, systems archi
 
 When an architecture satisfies all six criteria, distributed delegation provides genuine systems leverage. Yet across industry and research, engineers routinely bypass these foundational gates, falling prey to pervasive design traps that mistake organizational metaphors for sound computer systems engineering.
 
-## Fallacies and pitfalls {#sec-vol3-multi-agent-fallacies}
+## Fallacies and Pitfalls {#sec-vol3-multi-agent-fallacies}
 
 Engineering multi-agent systems exposes a seductive architectural hazard: the tendency to map human organizational metaphors directly onto statistical inference engines. Systems designers routinely assume that because complex software projects in human enterprises benefit from division of labor across specialized roles (product managers, systems architects, core developers, security auditors, and site reliability engineers), an autonomous agentic platform should mirror this organizational structure by spawning swarms of communicating foundation models. Replacing a coherent, localized deliberative control loop with an unverified network of communicating agents does not transcend the physical limitations of the underlying hardware; instead, it immediately introduces classical distributed systems failures, including serial synchronization bottlenecks, lock contention over shared state, Byzantine error propagation, and orphaned resource exhaustion. Designing robust agent infrastructure requires systematically identifying and dismantling four prevalent fallacies and implementation pitfalls that undermine multi-agent coordination.
 
@@ -1522,7 +1587,9 @@ Consider a scenario where Agent $A$ and Agent $B$ both read `settings.py` at bas
 
 : **Optimistic Concurrency Control Workspace Timeline**: Sequence of isolated mutations and fast-forward versus conflicting reconciliation attempts. {#tbl-vol3-occ-timeline}
 
-The architectural mitigation mandates strict workspace isolation through Optimistic Concurrency Control (OCC). The host runtime must never permit an unprivileged agent to mutate the target integration tree directly. Instead, every worker process must be provisioned with an isolated Git Worktree or an ephemeral Copy-on-Write (CoW) container overlay rooted at a pinned commit SHA $C_{\text{base}}$. The agent executes all edits, builds, and test executions exclusively within its private worktree.
+The architectural mitigation mandates strict workspace isolation through Optimistic Concurrency Control (OCC). The host runtime must never permit an unprivileged agent to mutate the target integration tree directly. Furthermore, systems designers must not conflate version control isolation with kernel-level compute isolation. Provisioning an agent with an isolated Git Worktree creates a private working directory and index file linked to the repository's `.git` administrative store, permitting concurrent branch checkouts without lock contention. However, a Git worktree provides zero kernel-level process, network, or memory containment. If two workers run in separate worktrees on the same bare-metal host, they share `/tmp`, environment variables, process namespaces, and network ports (risking collision on bindings such as `localhost:8080`).
+
+Therefore, production multi-agent runtimes enforce orthogonal, two-dimensional isolation: every worker process executes inside an ephemeral microVM or container sandbox (providing process, network, and memory boundary isolation as detailed in @sec-vol3-sandboxes), within which the runtime mounts a dedicated Git Worktree rooted at a pinned commit SHA $C_{\text{base}}$.
 
 State publication must adhere to a formal four-phase OCC trajectory protocol:
 
@@ -1530,6 +1597,17 @@ State publication must adhere to a formal four-phase OCC trajectory protocol:
 2. *Execute Phase:* The agent mutates files, compiles code, and iterates against local unit tests in its private worktree.
 3. *Validation Phase:* Upon task completion, the supervisor verifies whether the repository integration head has advanced ($C_{\text{current}} \stackrel{?}{=} C_{\text{base}}$).
 4. *Commit Phase:* If the integration head is unchanged, the runtime fast-forwards the branch to include the agent's validated commit. If the head has advanced ($C_{\text{current}} \neq C_{\text{base}}$), the runtime detects a concurrency conflict. It must never perform an unverified textual merge; instead, it executes an automated three-way diff merge into a clean staging branch and re-runs the full deterministic test harness. If merge conflicts arise or the integrated test suite fails, the runtime aborts the transaction, rolls back the staging branch, and reschedules the subtask with the updated base commit $C_{\text{current}}$.
+:::
+
+::: {#psp-17-correlated-priors-byzantine .callout-perspective title="The correlated priors hazard in byzantine consensus"}
+Classical distributed consensus protocols such as PBFT or Paxos rely on the $3f + 1$ quorum threshold to tolerate $f$ Byzantine (arbitrary or adversarial) failures. This theoretical guarantee relies fundamentally on the assumption that node failures are statistically independent: $P(\text{all fail}) = \prod_{i=1}^M (1 - p_i)$.
+
+In foundation model agent fleets, this independence assumption is completely violated when worker nodes instantiate homogeneous model checkpoints (e.g., multiple instances of the same model family). Because these models share pretraining corpora, tokenizer vocabularies, and RLHF alignment preferences, their failure modes are strongly correlated ($\rho \gg 0$). Confronted with deceptive code structures, ambiguous prompts, or shared hallucinations, homogeneous agents fail in unison. A $3f + 1$ quorum of homogeneous agents will unanimously validate a catastrophic bug or prompt-injected vulnerability with $100\%$ consensus.
+
+Therefore, resilient distributed agent consensus requires two architectural imperatives:
+
+1. *Model Heterogeneity:* Ensembles must combine distinct model families trained on independent corpora, tokenizer schemes, and alignment techniques (e.g., combining proprietary frontier models with diverse open-weight architectures).
+2. *Mechanical Verification Oracles:* Consensus must never be purely conversational; quorum acceptance must be anchored in deterministic external state invariants (test execution, compiler verification, formal solvers) executing within isolated sandboxes.
 :::
 
 ::: {.fallacy-pitfall}
@@ -1608,7 +1686,7 @@ A fleet's case rests on the third axis of this chapter, cost per accepted task, 
 
 [^fn-vector-clock-causality]: **Vector Clock Guarantees**: Causal ordering protocols track logical dependencies across distributed nodes without requiring synchronized physical clocks. In multi-agent pipelines, vector timestamps guarantee that updates to tool parameters or shared scratchpads are processed in strict causal sequence across asynchronous RPC channels.
 
-[^fn-optimistic-concurrency-validation]: **Optimistic Concurrency Validation**: First formalized by H. T. Kung and John T. Robinson in 1981, optimistic concurrency control operates on the premise that data write conflicts are rare in disjoint partitions. By validating read and write sets before commit, the runtime prevents concurrent subagents from clobbering mainline workspace trees.
+[^fn-optimistic-concurrency-validation]: **Optimistic Concurrency Validation**: Optimistic concurrency control operates on the premise that data write conflicts are rare in disjoint partitions [@kung1981optimistic]. By validating read and write sets before commit, the runtime prevents concurrent subagents from clobbering mainline workspace trees.
 
 [^fn-partition-lease-fencing]: **Fencing Token Invariants**: Distributed systems rely on monotonically incrementing fencing tokens to resolve split-brain conditions during network partitions. Even if a partitioned agent attempts to flush tool actions after its lease expires, external storage backends detect the stale counter and reject unauthorized writes.
 
@@ -1618,8 +1696,8 @@ A fleet's case rests on the third axis of this chapter, cost per accepted task, 
 
 [^fn-saga-compensating-rollbacks]: **Saga Semantic Inversion**: The Saga pattern manages long-running distributed transactions by executing compensating actions in reverse order when a step fails. In hierarchical agent swarms, preemption signals must trigger corresponding inverse tool invocations to de-provision cloud resources and unmount containers cleanly.
 
-[^fn-hedged-tail-latency]: **Hedged Request Mitigation**: Hedged requests, introduced by Dean and Ghemawat to manage tail latency in large-scale distributed systems, execute redundant subtasks after a latency threshold. In agent swarms, speculative hedging masks autoregressive decode variance and Radix cache misses across parallel workers.
+[^fn-hedged-tail-latency]: **Hedged Request Mitigation**: Hedged requests execute redundant subtasks after a latency threshold to mitigate long-tail delays in distributed systems [@dean2013tail]. In agent swarms, speculative hedging masks autoregressive decode variance and Radix cache misses across parallel workers.
 
-[^fn-macaroon-attenuation-chains]: **Cryptographic Macaroon Caveats**: Introduced by Google research in 2014, macaroons use nested HMAC constructions to permit decentralized capability delegation. Any holder can append contextual caveats to attenuate authority, but no downstream agent can strip existing restrictions without invalidating the cryptographic signature.
+[^fn-macaroon-attenuation-chains]: **Cryptographic Macaroon Caveats**: Introduced by Google research in 2014 [@birgisson2014macaroons], macaroons use nested HMAC constructions to permit decentralized capability delegation. Any holder can append contextual caveats to attenuate authority, but no downstream agent can strip existing restrictions without invalidating the cryptographic signature.
 
 [^fn-universal-scalability-lineage]: **Universal Scalability Lineage**: Neil J. Gunther derived the Universal Scalability Law from queueing theory and hardware multiprocessor telemetry to model both linear serialization contention ($\sigma$) and quadratic coherency delay ($\kappa$). USL unifies Amdahl's Law and Gustafson's Law into a single coherent model that captures retrograde performance collapse in distributed systems.
