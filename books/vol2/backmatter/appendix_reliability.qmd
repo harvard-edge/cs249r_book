@@ -238,7 +238,7 @@ Each component in isolation appears highly reliable---a GPU lasts `{python} Comp
 
 ### The MTBF cascade {#sec-appdx-reliability-foundations-mtbf-cascade}
 
-A compute node is a series system: if any component fails, the node fails. For independent components with constant failure rates, @eq-mtbf-node sums the individual rates into the node-level failure rate:
+The following model treats a compute node as a series system: any modeled component failure interrupts it. Redundant power supplies, spare links, and recoverable device errors require a different failure model. For independent components with constant failure rates, @eq-mtbf-node sums the individual rates into the node-level failure rate:
 
 $$ \frac{1}{\text{MTBF}_{\text{node}}} = \frac{n_{\text{gpu}}}{\text{MTTF}_{\text{gpu}}} + \frac{n_{\text{nic}}}{\text{MTTF}_{\text{nic}}} + \frac{n_{\text{psu}}}{\text{MTTF}_{\text{psu}}} + \cdots $$ {#eq-mtbf-node}
 
@@ -401,7 +401,7 @@ where $T_{\text{write}}$ is the checkpoint write time in seconds and $\text{MTBF
 
 The intuition behind @eq-young-daly is geometric-mean-like: when checkpoints are cheap relative to the MTBF ($T_{\text{write}} \ll \text{MTBF}_{\text{system}}$, the common case), the optimal interval sits between the two time scales. If checkpoints took zero time, the optimal cadence is every step. If the system never failed, no checkpoints would be required. The square root interpolates between these extremes.
 
-The formula assumes that failures follow an exponential distribution (memoryless property) and that checkpoint cost $T_{\text{write}}$ is small compared to $\text{MTBF}_{\text{system}}$. Both assumptions hold well for production training clusters: the exponential model fits observed failure data, and modern checkpointing systems write to fast parallel storage in tens of seconds, while MTBF is measured in hours.
+The formula assumes that failures follow an exponential distribution (memoryless property) and that checkpoint cost $T_{\text{write}}$ is small compared to $\text{MTBF}_{\text{system}}$. The examples below adopt these assumptions. Correlated outages, changing hazard rates, long writes, and asynchronous persistence can require a more detailed model.
 
 ### Checkpoint sizing {#sec-appdx-reliability-foundations-checkpoint-sizing}
 
@@ -640,7 +640,7 @@ class ReliabilityStringsGoodputRecap:
 1. **Checkpoint overhead** ($\sim$ `{python} ReliabilityStringsGoodputRecap.overhead_ckpt_pct_str`): Training pauses during each checkpoint write.
 2. **Recovery and rework overhead** ($\sim$ `{python} ReliabilityStringsGoodputRecap.overhead_failure_pct_str`): Time lost to detection, rescheduling, reloading, and replaying work discarded after each failure.
 
-At a 10,000-GPU scale, published reports from Meta, Google, and others consistently show 10--25 percent total overhead from failures and checkpointing combined. A cluster nominally capable of completing a training run in 30 days therefore requires 33--38 days of wall-clock time. The fleet orchestration strategies in @sec-fleet-orchestration and @sec-ops-scale focus on narrowing this gap---every percentage point of overhead recovered translates directly to dollars saved and training time shortened.
+At a 10,000-GPU scale, published reports from Meta, Google, and others consistently show 10--25 percent total overhead from failures and checkpointing combined. A fixed amount of useful work therefore takes longer by the reciprocal of the retained goodput fraction, not merely by adding that overhead percentage to its fault-free duration. The fleet orchestration strategies in @sec-fleet-orchestration and @sec-ops-scale focus on narrowing this gap---every percentage point of overhead recovered translates directly to dollars saved and training time shortened.
 
 ::: {#psp-appendix-reliability-hidden-cost-scale .callout-perspective title="The hidden cost of scale"}
 
@@ -730,7 +730,7 @@ Evaluating availability stacking with independent replicas (@tbl-availability-st
 
 Stacking independent redundant replicas achieves dramatic availability gains: two 99-percent-available replicas yield 99.99 percent availability, reducing annual downtime from roughly 87 hours to under an hour. This is why inference serving systems almost universally deploy multiple replicas behind a load balancer---the cost of an extra replica is small compared to the business value of four-nines availability.
 
-The independence assumption is critical, however. Correlated failures---power outages affecting an entire rack, software bugs triggered by a specific input, or network partitions isolating a failure domain---defeat availability stacking. This is why @sec-fault-tolerance-reliability emphasizes failure domain isolation: replicas must be placed in different racks, different power zones, and ideally different data centers to ensure that their failure modes are truly independent.
+The independence assumption is critical, however. Correlated failures---power outages affecting an entire rack, software bugs triggered by a specific input, or network partitions isolating a failure domain---defeat availability stacking. This is why @sec-fault-tolerance-reliability emphasizes failure domain isolation: replicas must be placed in different racks, different power zones, and ideally different data centers to reduce shared failure modes. Placement alone does not eliminate common software, control-plane, or regional dependencies.
 
 ---
 
@@ -763,47 +763,43 @@ class ReliabilitySummaryRecap:
 
 ::: {.callout-takeaways title="Failure as a physical constraint"}
 
-* **Failure rate scales linearly with component count**: A single GPU fails once per `{python} ReliabilitySummaryRecap.gpu_mttf_yr_str`; a 10,000-GPU cluster experiences a failure every `{python} ReliabilitySummaryRecap.cluster_mtbf_10k_hours_str`. At fleet scale, failure is a continuous background condition, not an exceptional event.
-* **The MTBF cascade compounds through system levels**: Node MTBF is determined by the sum of independent component failure rates; cluster MTBF then divides by node count. @Tbl-mtbf-cluster provides the reference numbers for capacity planning.
-* **Job failure probability approaches certainty quickly**: For clusters above a few thousand GPUs running multi-day jobs, the probability of at least one failure exceeds 99 percent. Fault tolerance is not optional at this scale---it is a prerequisite for completing any training run.
-* **Young-Daly checkpoint interval**: The formula $\tau_{\text{opt}} = \sqrt{2 T_{\text{write}} \, \text{MTBF}_{\text{system}}}$ (principle \ref{pri-young-daly}) optimizes checkpoint frequency by balancing the cost of writing checkpoints against the cost of lost work. It requires only two measurable inputs: checkpoint write time and system MTBF.
-* **Recovery has four phases**: Detection, rescheduling, reloading, and replay. Replay typically dominates and is controlled by the checkpoint interval. Each phase offers distinct optimization opportunities.
+* **Failure rate scales with component count under the model**: With independent, constant component failure rates, the single-GPU mean lifetime is `{python} ReliabilitySummaryRecap.gpu_mttf_yr_str`; the modeled 10,000-GPU cluster has a mean failure interval of `{python} ReliabilitySummaryRecap.cluster_mtbf_10k_hours_str`. Larger fleets must budget for recurring interruptions.
+* **The MTBF cascade compounds through system levels**: For the modeled series system, node failure rates sum across independent components; identical independent nodes then divide cluster MTBF by node count. Redundancy and shared failure modes change that calculation. @Tbl-mtbf-cluster provides the reference scenarios.
+* **Job failure probability depends on duration relative to MTBF**: Under the exponential model, interruption becomes increasingly likely as job duration grows relative to the modeled failure interval. The long-running, large-cluster scenarios in @tbl-failure-prob therefore require recovery planning to achieve reliable completion.
+* **Young-Daly supplies a first-order checkpoint interval**: The formula $\tau_{\text{opt}} = \sqrt{2 T_{\text{write}} \, \text{MTBF}_{\text{system}}}$ (principle \ref{pri-young-daly}) balances write overhead against expected rework under the stated constant-rate failure model with checkpoint cost small relative to MTBF. More complex persistence and recovery behavior requires a richer model.
+* **Recovery has four modeled phases**: Detection, rescheduling, reloading, and replay. Replay dominates the worked scenario and depends on the checkpoint interval; measurements determine which phase dominates another deployment.
 * **Strategy selection depends on workload type**: Checkpoint/restart suits batch training. Redundancy suits latency-sensitive serving. Elastic training bridges the two but adds complexity.
-* **Availability stacks exponentially with independent replicas**: Independent replicas improve availability exponentially, but correlated failures collapse that benefit. Failure domain isolation is the prerequisite that makes redundancy effective.
+* **Independent replicas reduce unavailability multiplicatively**: For identical independent replicas with availability $A$, all $k$ are unavailable with probability $(1-A)^k$. The service-availability result also assumes surviving capacity can meet demand and shared dependencies remain available; failure-domain isolation reduces common causes without proving independence.
 
 :::
 
 ---
 
-## Derivation of the 2nd-Order Daly Checkpoint Interval {#sec-appdx-reliability-daly-2nd-order}
+## Checkpoint Intervals Beyond the First-Order Approximation {#sec-appdx-reliability-daly-2nd-order}
 
-While Young's formula ($\tau_{\text{opt}} = \sqrt{2 T_{\text{write}} \text{MTBF}}$) provides an accurate baseline when checkpoint write time is negligible compared to system MTBF ($\delta \ll M$), frontier-scale clusters experience non-negligible write times. Daly (2006) derived a tighter 2nd-order optimal interval that accounts for failure probability during checkpoint execution.
+Young's approximation is most accurate when checkpoint time is small relative to the failure interval. Daly's analysis develops higher-order checkpoint models [@daly2006]. The simplified renewal model below shows why finite checkpoint time changes the optimum without claiming to reproduce Daly's full recovery model.
 
-### Mathematical formulation and Taylor expansion proof {#sec-appdx-reliability-daly-proof}
+### Renewal model and small-cost expansion {#sec-appdx-reliability-daly-proof}
 
-Let $M = \text{MTBF}_{\text{system}}$ and $\delta = T_{\text{write}}$. Assuming Poisson failure arrivals with rate $\lambda = 1/M$, the expected total time $E[T_{\text{total}}]$ per compute interval $\tau$ is:
+Let $M = \text{MTBF}_{\text{system}}$, $\delta = T_{\text{write}}$, and $\tau$ be useful compute time between completed checkpoints. Assume Poisson failures with rate $1/M$, identical failure exposure during computation and writing, and zero detection, restart, or reload delay. A failed attempt loses its partial progress and repeats the interval. The expected elapsed time to complete one uninterrupted compute-plus-checkpoint attempt is:
 
 $$ E[T_{\text{total}}] = M \left( e^{\frac{\tau + \delta}{M}} - 1 \right) $$ {#eq-daly-total-time}
 
-Expanding the exponential term $e^{x}$ using a 2nd-order Taylor series around $x = 0$:
+Writing $L=\tau+\delta$, the renewal equation is $E[T_{\text{total}}]=E[\min(F,L)]+\Pr(F<L)E[T_{\text{total}}]$, where $F$ is an exponential failure time. Since $E[\min(F,L)]=M(1-e^{-L/M})$, solving the equation gives @eq-daly-total-time.
 
-$$ e^{\frac{\tau + \delta}{M}} \approx 1 + \frac{\tau + \delta}{M} + \frac{(\tau + \delta)^2}{2 M^2} + \frac{(\tau + \delta)^3}{6 M^3} $$
+Expanding the exponential through its quadratic term gives the wasted time per completed interval:
 
-Substituting this expansion into @eq-daly-total-time yields the expected wasted time $E[T]$ per interval in @eq-daly-wasted-time:
+$$ E[T_{\text{total}}]-\tau \approx \delta + \frac{(\tau+\delta)^2}{2M} $$ {#eq-daly-wasted-time}
 
-$$ E[T] = E[T_{\text{total}}] - \tau \approx \delta + \frac{\tau^2}{2M} + \frac{\delta \tau}{M} $$ {#eq-daly-wasted-time}
+When $\delta/M$ is small, the leading terms of the wasted-time fraction are $\delta/\tau+\tau/(2M)$. Minimizing those terms recovers Young's interval $\sqrt{2\delta M}$. For finite checkpoint costs, differentiate the unexpanded elapsed time per unit useful work, $E[T_{\text{total}}]/\tau$, instead. Its stationary point satisfies:
 
-Minimizing the wasted time fraction $W(\tau) = \frac{E[T]}{\tau}$ by setting $\frac{d W}{d \tau} = 0$ yields the quadratic equation:
+$$ e^{(\tau_{\text{opt}}+\delta)/M}\left(1-\frac{\tau_{\text{opt}}}{M}\right)=1, \qquad 0<\tau_{\text{opt}}<M $$ {#eq-daly-2nd-order-tau}
 
-$$ \tau^2 + 2 \delta \tau - 2 \delta M - \frac{\delta^2}{3} = 0 $$
+For positive checkpoint cost, the equivalent derivative numerator $e^{(\tau+\delta)/M}(\tau/M-1)+1$ increases from a negative value at zero to a positive value at $M$. A one-dimensional root search therefore finds the unique optimum of this simplified model.
 
-Applying the quadratic formula and taking the positive root yields the 2nd-order Daly optimal checkpoint interval in @eq-daly-2nd-order-tau:
+#### Choosing the appropriate approximation {.unnumbered}
 
-$$ \tau_{\text{opt}} = \sqrt{2 \delta M + \frac{\delta^2}{3}} - \delta $$ {#eq-daly-2nd-order-tau}
-
-#### Comparison of 1st-order Young vs. 2nd-order Daly {.unnumbered}
-
-As the ratio of checkpoint write time to MTBF ($\gamma = T_{\text{write}}/\text{MTBF} = \delta/M$) grows, 1st-order Young ($\sqrt{2 \delta M}$) increasingly overestimates the optimal compute interval calculated in @eq-daly-2nd-order-tau because it ignores the nonzero probability of multiple failures during long checkpoint execution windows. At $\delta/M = 0.10$, 1st-order Young overestimates the optimal interval by 27.44 percent, causing delayed checkpointing and excessive recomputation work upon failure.
+The first-order formula is a useful planning estimate when writes are short compared with MTBF. When that condition fails, use a model that includes the deployment's checkpoint semantics, recovery delays, and failure exposure. The numerical condition above covers only the stated zero-restart-delay renewal model; asynchronous writes and correlated failures require different assumptions.
 
 ---
 
@@ -815,7 +811,7 @@ Not all hardware faults manifest as explicit system crashes, ECC double-bit erro
 
 Consider an IEEE 754 half-precision floating-point (FP16) tensor element representing a query vector $Q_{i,k}$, activation value, or weight matrix entry. FP16 allocates 16 total bits: 1 sign bit ($s$), 5 exponent bits ($e$), and 10 mantissa bits ($m$).
 
-The scalar value $x$ represented by the bitstring $(s, e, m)$ is given by:
+For a finite normal value, with exponent field $1 \le e \le 30$, the scalar $x$ represented by the bitstring $(s, e, m)$ is given by:
 
 $$ x = (-1)^s \times 2^{e - 15} \times \left(1 + \frac{m}{1024}\right) $$
 
@@ -823,11 +819,11 @@ Suppose a cosmic ray, voltage drop, or SRAM failure causes a single bit flip in 
 
 $$ x_{\text{corrupt}} = (-1)^s \times 2^{(e \pm 16) - 15} \times \left(1 + \frac{m}{1024}\right) = x \times 2^{\pm 16} $$
 
-A single exponent bit flip scales the floating-point magnitude by a multiplier of $2^{\pm 16} = 65,536\times$.
+If both the original and corrupted exponent fields encode finite normal values, the magnitude increases by a factor of $2^{16}=65,536$ or decreases by its reciprocal. Exponent fields of zero or all ones instead invoke the subnormal, zero, infinity, or NaN encodings, so the displayed normal-value formula does not apply.
 
 ### Softmax probability saturation and gradient explosion {#sec-appdx-reliability-sdc-softmax-explosion}
 
-Let $S = \frac{Q K^T}{\sqrt{d_k}} \in \mathbb{R}^{B \times H \times N \times N}$ be the pre-softmax attention score matrix for sequence length $N$ and projection dimension $d_k$. Suppose an SDC event corrupts token entry $i$ in query matrix $Q$ by $\Delta Q$, where $\Delta Q_{i} \approx 2^{16} \cdot Q_i$:
+Let $S = \frac{Q K^T}{\sqrt{d_k}} \in \mathbb{R}^{B \times H \times N \times N}$ be the pre-softmax attention score matrix for sequence length $N$ and projection dimension $d_k$. Suppose an SDC event corrupts one element of token row $i$ in query matrix $Q$. Write the resulting perturbation as $\Delta Q$, with only that element nonzero:
 
 $$ S_{\text{corrupt}} = \frac{(Q + \Delta Q) K^T}{\sqrt{d_k}} = S + \Delta S $$
 
@@ -837,12 +833,8 @@ The attention probability perturbation $\Delta \text{Attention}$ for token row $
 
 $$ \Delta \text{Attention}_i = \text{Softmax}\left( S_{i, \cdot} + \Delta S_{i, \cdot} \right) - \text{Softmax}\left( S_{i, \cdot} \right) $$
 
-Because $\Delta S_{i, j} \approx 65,536 \cdot S_{i, j}$, the exponent $e^{S_{i, j} + \Delta S_{i, j}}$ completely dominates all other terms in the row denominator:
+A large corrupted query component can strongly change several attention logits, with the signs and magnitudes determined by the corresponding key components. If one resulting logit exceeds every other logit by an increasingly large margin, the attention distribution approaches:
 
 $$ \text{Softmax}(S_{i, \cdot} + \Delta S_{i, \cdot})_j \to 1.0, \qquad \text{Softmax}(S_{i, \cdot} + \Delta S_{i, \cdot})_{k \neq j} \to 0.0 $$
 
-This probability saturation forces the attention distribution to collapse into a delta function on the corrupted key position. During backward propagation, the gradient of the loss with respect to query weight parameters $\mathbf{W}_Q$ receives an unclipped scalar multiplier proportional to $\Delta Q \cdot 2^{16}$:
-
-$$ \|\nabla_{\mathbf{W}_Q} L\| \to \infty $$
-
-This causes catastrophic parameter corruption across all parallel ranks during the subsequent optimizer step, rendering all subsequent model outputs garbage and requiring a rollback to the last verified clean checkpoint.
+This is a conditional saturation limit, not an inevitable consequence of a bit flip. The selected key depends on the corrupted logits; a corrupted query element does not identify one corrupted key. The softmax derivative is $\partial p_j/\partial z_k = p_j(\delta_{jk}-p_k)$, which tends toward zero under saturation rather than diverging. Other paths through the computation can still produce large or nonfinite activations and gradients. If invalid state enters the optimizer or a collective, it can propagate across ranks; detection and recovery must therefore verify state before resuming from a clean checkpoint.
