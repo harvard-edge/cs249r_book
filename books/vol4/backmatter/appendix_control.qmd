@@ -9,6 +9,8 @@ Consult this appendix when encountering specific physical systems bottlenecks, c
 | When you encounter this systems symptom                                                      | Consult                            | For this quantitative tool                                                                |
 |----------------------------------------------------------------------------------------------|------------------------------------|-------------------------------------------------------------------------------------------|
 | An inner-loop tracking controller drifts or loses asymptotic convergence                     | @sec-appendix-control-statespace   | Continuous and discrete state-space models and Kalman controllability rank                |
+| Unmodeled gravity droop or friction causes steady-state tracking offset                      | @sec-appendix-control-pid          | PID closed-loop error dissipation, Rayleigh damping, and online bias estimation           |
+| Nonlinear multi-joint couplings distort tracking across dynamic maneuvers                    | @sec-appendix-control-feedback-lin | Feedback linearization and computed torque decoupling to linear double integrators        |
 | Balancing trajectory tracking precision against actuator torque and current saturation       | @sec-appendix-control-lqr          | Linear Quadratic Regulator (LQR), Algebraic Riccati Equation, and $60^\circ$ phase margin |
 | Certifying closed-loop convergence or designing stabilizing feedback for nonlinear plants    | @sec-appendix-control-lyapunov     | Lyapunov stability theorems, domain of attraction, and Control Lyapunov Functions (CLFs)  |
 | Receding-horizon trajectory planning under hard state bounds and actuator limits             | @sec-appendix-control-mpc          | Constrained Model Predictive Control (MPC) and recursive feasibility guarantees           |
@@ -105,6 +107,69 @@ The Popov-Belevitch-Hautus (PBH) test provides an equivalent spectral condition:
 $$ \operatorname{rank}\left( \begin{bmatrix} \lambda \mathbf{I} - \mathbf{A} & \mathbf{B} \end{bmatrix} \right) = n \quad \forall \lambda \in \mathbb{C} $$
 If $\operatorname{rank}([\lambda \mathbf{I} - \mathbf{A}, \mathbf{B}]) < n$ for some eigenvalue $\lambda$, the dynamic mode associated with $\lambda$ cannot be excited or influenced by any control input. If that uncontrollable mode is unstable ($\operatorname{Re}(\lambda) \ge 0$), the physical plant is un-stabilizable—an unyielding physical limitation that no learned policy, foundation model, or reinforcement learning algorithm can overcome. Floating-base legged systems (@sec-appendix-control-centroidal) and ball-and-beam plants are classic examples of underactuated systems where direct control authority over floating-base coordinates is zero ($\mathbf{B}_{\text{base}} = \mathbf{0}$), requiring dynamic coupling through ground contact wrenches to achieve stabilization.
 
+### Proportional-integral-derivative control as closed-loop error dissipation {#sec-appendix-control-pid}
+
+In modern deep learning optimization, algorithms such as stochastic gradient descent (SGD) with momentum and Adaptive Moment Estimation (Adam) manipulate parameter trajectories $\boldsymbol{\theta}_k$ through first-order gradients and running moment accumulators. In physical hardware, the ubiquitous workhorse of real-time joint-level tracking is the **Proportional-Integral-Derivative (PID)** controller.\index{PID control!closed-loop error dissipation}\index{PID control!physical interpretation} Rather than an empirical heuristic, PID control is an optimal closed-loop error dissipator operating on continuous second-order mechanical plants.
+
+Let $\mathbf{x}^*(t)$ be the target reference trajectory and $\mathbf{x}(t)$ the measured physical plant state, defining the instantaneous tracking error:
+$$ \mathbf{e}(t) = \mathbf{x}^*(t) - \mathbf{x}(t) $$
+The continuous PID control law synthesizes commanded control effort $\mathbf{u}(t)$ (e.g., motor drive current, electromagnetic torque, or hydraulic valve pressure) as:
+$$ \mathbf{u}(t) = \mathbf{K}_p \mathbf{e}(t) + \mathbf{K}_i \int_0^t \mathbf{e}(\tau) \, d\tau + \mathbf{K}_d \dot{\mathbf{e}}(t) $$
+where $\mathbf{K}_p, \mathbf{K}_i, \mathbf{K}_d \in \mathbb{R}^{n \times n}$ are symmetric, positive-definite gain matrices. To an ML systems engineer, each term executes a distinct mathematical function:
+
+1. **Proportional Term ($\mathbf{K}_p \mathbf{e}$): Conservative Restoring Force / Gradient Descent:**
+   Consider an artificial quadratic potential loss landscape $\mathcal{L}_{\text{pos}}(\mathbf{e}) = \frac{1}{2} \mathbf{e}^\top \mathbf{K}_p \mathbf{e}$. The negative spatial gradient is $-\nabla_{\mathbf{e}} \mathcal{L}_{\text{pos}} = -\mathbf{K}_p \mathbf{e}$. Proportional feedback behaves as an elastic spring or continuous negative gradient step that pulls the physical coordinates toward the reference setpoint. However, on an undamped second-order plant ($m \ddot{\mathbf{x}} = \mathbf{u}$), proportional feedback alone generates an undamped harmonic oscillator $m \ddot{\mathbf{e}} + \mathbf{K}_p \mathbf{e} = \mathbf{0}$. The system conserves total mechanical energy $E = \frac{1}{2} m \|\dot{\mathbf{e}}\|^2 + \frac{1}{2} \mathbf{e}^\top \mathbf{K}_p \mathbf{e}$, orbiting closed level curves indefinitely with zero asymptotic convergence.
+2. **Derivative Term ($\mathbf{K}_d \dot{\mathbf{e}}$): Rayleigh Dissipation / Momentum Damping:**
+   To force convergence to the origin, kinetic energy must be extracted from the closed loop. The derivative term introduces an artificial viscous damper or Rayleigh dissipation function $\mathcal{D}(\dot{\mathbf{e}}) = \frac{1}{2} \dot{\mathbf{e}}^\top \mathbf{K}_d \dot{\mathbf{e}}$. Differentiating the closed-loop mechanical energy $E(\mathbf{e}, \dot{\mathbf{e}})$ along plant trajectories under PD feedback yields:
+   $$ \dot{E} = m \dot{\mathbf{e}}^\top \ddot{\mathbf{e}} + \dot{\mathbf{e}}^\top \mathbf{K}_p \mathbf{e} = \dot{\mathbf{e}}^\top \left( -\mathbf{K}_p \mathbf{e} - \mathbf{K}_d \dot{\mathbf{e}} \right) + \dot{\mathbf{e}}^\top \mathbf{K}_p \mathbf{e} = -\dot{\mathbf{e}}^\top \mathbf{K}_d \dot{\mathbf{e}} \le 0 $$
+   Because $\mathbf{K}_d \succ \mathbf{0}$, the derivative term converts tracking kinetic energy into continuous dissipation, preventing overshoot, damping oscillations, and steering closed-loop poles into the open left-half complex plane. In machine learning optimization, this is the exact continuous-state physical counterpart of heavy-ball momentum friction $\beta (\boldsymbol{\theta}_k - \boldsymbol{\theta}_{k-1})$ used to stabilize gradient oscillations across steep ravines.
+3. **Integral Term ($\mathbf{K}_i \int_0^t \mathbf{e} d\tau$): Online Disturbance / Unmodeled Bias Estimation:**
+   In physical deployments, constant external loads $\mathbf{d}_{\text{ext}}$—such as gravitational sagging on robot arm links, cable friction, or payload offsets—induce a steady-state standoff. At rest ($\dot{\mathbf{e}} = \mathbf{0}, \ddot{\mathbf{e}} = \mathbf{0}$), a PD controller yields $\mathbf{K}_p \mathbf{e}_{\text{ss}} + \mathbf{d}_{\text{ext}} = \mathbf{0}$, leaving a persistent tracking error $\mathbf{e}_{\text{ss}} = -\mathbf{K}_p^{-1} \mathbf{d}_{\text{ext}}$. The integral term introduces an internal dynamic state variable:
+   $$ \dot{\mathbf{z}}(t) = \mathbf{e}(t), \quad \mathbf{u}_{\text{int}}(t) = \mathbf{K}_i \mathbf{z}(t) $$
+   Accumulating tracking error over time forces $\mathbf{z}(t)$ to integrate until $\mathbf{K}_i \mathbf{z}_{\text{ss}} = -\mathbf{d}_{\text{ext}}$, counteracting the disturbance and driving steady-state position error to zero ($\mathbf{e}_{\text{ss}} \to \mathbf{0}$). To an ML practitioner, the integral term is an online, running bias estimator that dynamically learns and cancels constant model mismatch.
+
+For a scalar single-degree-of-freedom mechanical plant with mass $m$, the closed-loop error equation under PD control evaluates to:
+$$ \ddot{e}(t) + 2\zeta \omega_n \dot{e}(t) + \omega_n^2 e(t) = 0 $$
+where the undamped natural frequency is $\omega_n = \sqrt{K_p / m}$ and the dimensionless damping ratio is $\zeta = \frac{K_d}{2 \sqrt{m K_p}}$. The characteristic roots $s_{1,2} = -\zeta \omega_n \pm \omega_n \sqrt{\zeta^2 - 1}$ partition the closed-loop tracking response into three fundamental physical regimes:
+
+- **Underdamped ($\zeta < 1$):** Complex conjugate poles; fast initial rise time but persistent ringing oscillations and overshoot that can damage mechanical gearboxes.
+- **Critically Damped ($\zeta = 1$):** Repeated real negative root $s = -\omega_n$; yields the fastest asymptotic convergence to zero tracking error possible without oscillatory overshoot.
+- **Overdamped ($\zeta > 1$):** Distinct negative real roots; eliminates overshoot but results in sluggish, high-latency trajectory tracking.
+
+### Feedback linearization: Transforming nonlinear dynamics into decoupled double integrators {#sec-appendix-control-feedback-lin}
+
+While linear controllers (PID, LQR) provide robust stability guarantees for linear systems, multi-body robotic plants are governed by highly coupled, configuration-dependent equations of motion (@sec-body-actuator-limits):\index{Feedback linearization!computed torque control}\index{Inverse dynamics!normalizing transformation}
+$$ \mathbf{M}(\mathbf{q}) \ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) = \boldsymbol{\tau} $$
+where $\mathbf{M}(\mathbf{q}) \in \mathbb{R}^{n \times n}$ is the configuration-dependent mass matrix, $\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})\dot{\mathbf{q}}$ collects Coriolis and centripetal accelerations, $\mathbf{g}(\mathbf{q})$ is gravity, and $\boldsymbol{\tau} \in \mathbb{R}^n$ is the joint torque vector.
+
+To a machine learning engineer, **feedback linearization** (known in robotics as **computed torque control**) is the dynamical analog of an invertible normalizing flow or the reparameterization trick: it is an exact, algebraic coordinate transformation and nonlinear cancellation that straightens a curved, coupled multi-body manifold into independent, parallel Euclidean double integrators.
+
+Because the physical inertia matrix $\mathbf{M}(\mathbf{q})$ is symmetric and strictly positive definite everywhere on the configuration space ($\mathbf{M}(\mathbf{q}) = \mathbf{M}(\mathbf{q})^\top \succ \mathbf{0}$), it is globally invertible. We define the nonlinear state-feedback control law:
+$$ \boldsymbol{\tau} = \mathbf{M}(\mathbf{q}) \mathbf{a}^* + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) $$
+where $\mathbf{a}^* \in \mathbb{R}^n$ is a synthetic, virtual acceleration command. Substituting this control law directly into the physical equations of motion yields:
+$$ \mathbf{M}(\mathbf{q}) \ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) = \mathbf{M}(\mathbf{q}) \mathbf{a}^* + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) $$
+Subtracting the identical Coriolis and gravity vectors from both sides isolates:
+$$ \mathbf{M}(\mathbf{q}) \left( \ddot{\mathbf{q}} - \mathbf{a}^* \right) = \mathbf{0} $$
+Because $\mathbf{M}(\mathbf{q})$ is non-singular, multiplying by $\mathbf{M}(\mathbf{q})^{-1}$ collapses the coupled nonlinear plant into $n$ decoupled, linear double-integrator channels:
+$$ \ddot{\mathbf{q}} = \mathbf{a}^* \iff \ddot{q}_i = a_i^* \quad \forall i \in \{1, \dots, n\} $$
+Over these decoupled channels, linear tracking control laws synthesize virtual acceleration commands with global exponential stability:
+$$ \mathbf{a}^* = \ddot{\mathbf{q}}^{\text{ref}} + \mathbf{K}_p (\mathbf{q}^{\text{ref}} - \mathbf{q}) + \mathbf{K}_d (\dot{\mathbf{q}}^{\text{ref}} - \dot{\mathbf{q}}) $$
+Substituting $\mathbf{a}^*$ back into the double-integrator dynamics reveals that the tracking error $\mathbf{e}(t) = \mathbf{q}^{\text{ref}}(t) - \mathbf{q}(t)$ satisfies the linear error ODE:
+$$ \ddot{\mathbf{e}} + \mathbf{K}_d \dot{\mathbf{e}} + \mathbf{K}_p \mathbf{e} = \mathbf{0} $$
+Choosing positive-diagonal gain matrices $\mathbf{K}_p$ and $\mathbf{K}_d$ guarantees that tracking errors in every joint coordinate decouple and decay to zero independently at the designer-specified rate.
+
+#### Lie-derivative formulation for general control-affine systems
+
+For general control-affine nonlinear dynamical systems $\dot{\mathbf{x}} = f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}$ with output $\mathbf{y} = h(\mathbf{x})$, feedback linearization differentiates each output channel $y_i$ with respect to continuous time until the control input $\mathbf{u}$ appears explicitly:
+$$ y_i^{(r_i)} = L_f^{r_i} h_i(\mathbf{x}) + L_g L_f^{r_i-1} h_i(\mathbf{x}) \mathbf{u} $$
+where $r_i$ is the relative degree of output $i$. Collecting all output channels into vector form:
+$$ \mathbf{y}^{(r)} = \mathbf{b}(\mathbf{x}) + \mathbf{E}(\mathbf{x}) \mathbf{u} $$
+where $\mathbf{E}(\mathbf{x}) \in \mathbb{R}^{p \times m}$ is the **decoupling matrix** whose entries are Lie derivatives $E_{ij}(\mathbf{x}) = L_{g_j} L_f^{r_i-1} h_i(\mathbf{x})$. If $\mathbf{E}(\mathbf{x})$ is square ($p = m$) and non-singular across the operating envelope, the state-feedback law:
+$$ \mathbf{u} = \mathbf{E}(\mathbf{x})^{-1} \left( \mathbf{v} - \mathbf{b}(\mathbf{x}) \right) $$
+cancels internal nonlinearities, yielding the linear input-output relationship $\mathbf{y}^{(r)} = \mathbf{v}$.
+
+Unlike deep learning architectures where model inaccuracies are accommodated by statistical loss minimization, computed torque control assumes perfect knowledge of physical parameters ($\mathbf{M}, \mathbf{C}, \mathbf{g}$). In real hardware, parametric inaccuracies (uncertain link masses, payload variations) leave residual nonlinear perturbations $\Delta \mathbf{f} = (\mathbf{M} - \hat{\mathbf{M}})\ddot{\mathbf{q}} + (\mathbf{C} - \hat{\mathbf{C}})\dot{\mathbf{q}} + (\mathbf{g} - \hat{\mathbf{g}})$. Physical AI architectures resolve this by pairing feedback linearization with robust inner loops (sliding-mode control or $H_\infty$ disturbance observers) or online adaptive parameter estimators.
+
 ### Linear quadratic regulator and algebraic riccati equations {#sec-appendix-control-lqr}
 
 In reinforcement learning, policy optimization searches for an action policy $\pi_{\boldsymbol{\theta}}(\mathbf{a} \mid \mathbf{s})$ that maximizes expected cumulative reward via trial-and-error sampling or learned critic networks $V_{\boldsymbol{\phi}}(\mathbf{s})$ / $Q_{\boldsymbol{\phi}}(\mathbf{s}, \mathbf{a})$, frequently struggling with high gradient variance, non-convex loss landscapes, and empirical stability failures. In contrast, for linear-quadratic physical dynamics, the **Linear Quadratic Regulator (LQR)**\index{Linear Quadratic Regulator!optimal control}\index{Algebraic Riccati Equation!continuous-time} provides the exact, analytical solution to the continuous-state Bellman optimality equation over an infinite time horizon.
@@ -151,6 +216,19 @@ Because this equality must hold identically for all states $\mathbf{x}$, the bra
 $$ \mathbf{A}^\top \mathbf{P} + \mathbf{P} \mathbf{A} - \mathbf{P} \mathbf{B} \mathbf{R}^{-1} \mathbf{B}^\top \mathbf{P} + \mathbf{Q} = \mathbf{0} $$
 Substituting the control law into the plant dynamics yields the closed-loop system $\dot{\mathbf{x}} = (\mathbf{A} - \mathbf{B}\mathbf{K})\mathbf{x}$. When $(\mathbf{A}, \mathbf{B})$ is controllable and $(\mathbf{A}, \mathbf{Q}^{1/2})$ is observable, all closed-loop eigenvalues are strictly Hurwitz ($\operatorname{Re}(\lambda_i(\mathbf{A} - \mathbf{B}\mathbf{K})) < 0$), guaranteeing exponential convergence to the origin.
 
+#### LQR as an optimal closed-loop error dissipator
+
+Beyond minimizing quadratic cost, the Riccati solution $\mathbf{P} \succ \mathbf{0}$ serves as an exact Control Lyapunov Function (CLF) that certifies continuous error dissipation. Differentiating $V^*(\mathbf{x}) = \mathbf{x}^\top \mathbf{P} \mathbf{x}$ along the closed-loop trajectories of $\dot{\mathbf{x}} = (\mathbf{A} - \mathbf{B}\mathbf{K})\mathbf{x}$ gives:
+$$
+\begin{aligned}
+\dot{V}^*(\mathbf{x}) &= \dot{\mathbf{x}}^\top \mathbf{P} \mathbf{x} + \mathbf{x}^\top \mathbf{P} \dot{\mathbf{x}} = \mathbf{x}^\top \left[ (\mathbf{A} - \mathbf{B}\mathbf{K})^\top \mathbf{P} + \mathbf{P} (\mathbf{A} - \mathbf{B}\mathbf{K}) \right] \mathbf{x} \\
+&= \mathbf{x}^\top \left[ \mathbf{A}^\top \mathbf{P} + \mathbf{P}\mathbf{A} - 2\mathbf{P}\mathbf{B}\mathbf{R}^{-1}\mathbf{B}^\top\mathbf{P} \right] \mathbf{x}
+\end{aligned}
+$$
+Substituting the Algebraic Riccati Equation $\mathbf{A}^\top \mathbf{P} + \mathbf{P}\mathbf{A} = \mathbf{P}\mathbf{B}\mathbf{R}^{-1}\mathbf{B}^\top\mathbf{P} - \mathbf{Q}$ into this expression yields:
+$$ \dot{V}^*(\mathbf{x}) = \mathbf{x}^\top \left[ -\mathbf{Q} - \mathbf{P}\mathbf{B}\mathbf{R}^{-1}\mathbf{B}^\top\mathbf{P} \right] \mathbf{x} = -\mathbf{x}^\top \left[ \mathbf{Q} + \mathbf{K}^\top \mathbf{R} \mathbf{K} \right] \mathbf{x} < 0 \quad \forall \mathbf{x} \neq \mathbf{0} $$
+This equality reveals that LQR is the optimal error dissipator: state error and actuator energy are dissipated along the trajectory at a rate exactly matching the instantaneous running cost $\mathbf{x}^\top \mathbf{Q} \mathbf{x} + \mathbf{u}^\top \mathbf{R} \mathbf{u}$.
+
 #### Robustness margins of continuous LQR
 
 A seminal result by Kalman [@kalman1960new; @astrom2021feedback] proves that continuous-time full-state LQR controllers possess exceptional intrinsic stability robustness, which can be derived from the frequency-domain **Kalman return difference equality**:
@@ -176,10 +254,26 @@ $$ \mathbf{K}_d = \left( \mathbf{R} + \mathbf{B}_d^\top \mathbf{P} \mathbf{B}_d 
 
 ### The separation principle and linear quadratic Gaussian control
 
-In physical deployments, full-state access is rarely available; controllers must estimate $\hat{\mathbf{x}}$ from noisy sensor observations $\mathbf{y} = \mathbf{C}\mathbf{x} + \mathbf{v}$. When continuous process noise $\mathbf{w}(t) \sim \mathcal{N}(\mathbf{0}, \mathbf{Q}_w)$ and measurement noise $\mathbf{v}(t) \sim \mathcal{N}(\mathbf{0}, \mathbf{R}_v)$ perturb the plant, the optimal continuous state estimator is the Kalman-Bucy filter (@sec-appendix-control-covariance):\index{Linear Quadratic Gaussian!Separation Principle}
-$$ \dot{\hat{\mathbf{x}}}(t) = \mathbf{A}\hat{\mathbf{x}}(t) + \mathbf{B}\mathbf{u}(t) + \mathbf{L}\left(\mathbf{y}(t) - \mathbf{C}\hat{\mathbf{x}}(t)\right), \quad \mathbf{L} = \mathbf{P}_{\text{est}}\mathbf{C}^\top \mathbf{R}_v^{-1} $$
-where $\mathbf{P}_{\text{est}}$ solves the dual estimation Riccati equation:
+In physical deployments, full-state access is rarely available; controllers must estimate $\hat{\mathbf{x}}$ from noisy sensor observations $\mathbf{y} = \mathbf{C}\mathbf{x} + \mathbf{v}$. When continuous process noise $\mathbf{w}(t) \sim \mathcal{N}(\mathbf{0}, \mathbf{Q}_w)$ and measurement noise $\mathbf{v}(t) \sim \mathcal{N}(\mathbf{0}, \mathbf{R}_v)$ perturb the plant, the optimal continuous state estimator is the continuous-time **Kalman-Bucy filter** (@sec-appendix-control-covariance):\index{Kalman filter!optimal Bayesian estimation}\index{Linear Quadratic Gaussian!Separation Principle}
+$$ \dot{\hat{\mathbf{x}}}(t) = \mathbf{A}\hat{\mathbf{x}}(t) + \mathbf{B}\mathbf{u}(t) + \mathbf{L}\left(\mathbf{y}(t) - \mathbf{C}\hat{\mathbf{x}}(t)\right) $$
+where $\mathbf{y}(t) - \mathbf{C}\hat{\mathbf{x}}(t)$ is the **innovation** (the measurement residual), and the optimal Kalman observer gain is:
+$$ \mathbf{L} = \mathbf{P}_{\text{est}}\mathbf{C}^\top \mathbf{R}_v^{-1} $$
+where $\mathbf{P}_{\text{est}}(t) = \mathbb{E}[(\mathbf{x} - \hat{\mathbf{x}})(\mathbf{x} - \hat{\mathbf{x}})^\top]$ is the state estimation error covariance matrix, which solves the dual filter Algebraic Riccati Equation:
 $$ \mathbf{A} \mathbf{P}_{\text{est}} + \mathbf{P}_{\text{est}} \mathbf{A}^\top - \mathbf{P}_{\text{est}} \mathbf{C}^\top \mathbf{R}_v^{-1} \mathbf{C} \mathbf{P}_{\text{est}} + \mathbf{Q}_w = \mathbf{0} $$
+
+To an ML practitioner, the Kalman filter is the exact recursive Bayesian Minimum Mean Square Error (MMSE) estimator: it continuously updates the posterior state distribution $\mathcal{N}(\hat{\mathbf{x}}, \mathbf{P}_{\text{est}})$ by balancing dynamic model propagation (growing uncertainty via process noise $\mathbf{Q}_w$) against empirical sensor evidence (contracting uncertainty via inverse measurement variance $\mathbf{R}_v^{-1}$).
+
+Notice the mathematical duality between optimal control (LQR) and optimal estimation (Kalman filter):
+
+| Duality Attribute | Optimal Regulator (LQR) | Optimal Estimator (Kalman Filter) |
+|:---|:---|:---|
+| **System Operator** | Drift matrix $\mathbf{A}$ | Adjoint drift matrix $\mathbf{A}^\top$ |
+| **Control / Sensor Map** | Actuator input matrix $\mathbf{B}$ | Sensor output matrix transpose $\mathbf{C}^\top$ |
+| **Weighting / Noise Covariance** | State weight $\mathbf{Q} \succeq \mathbf{0}$, control effort $\mathbf{R} \succ \mathbf{0}$ | Process noise $\mathbf{Q}_w \succeq \mathbf{0}$, measurement noise $\mathbf{R}_v \succ \mathbf{0}$ |
+| **Riccati Solution** | Control Riccati matrix $\mathbf{P}$ | Estimation covariance matrix $\mathbf{P}_{\text{est}}$ |
+| **Optimal Gain** | Feedback gain $\mathbf{K} = \mathbf{R}^{-1} \mathbf{B}^\top \mathbf{P}$ | Observer gain $\mathbf{L} = \mathbf{P}_{\text{est}} \mathbf{C}^\top \mathbf{R}_v^{-1}$ |
+| **Optimality Criterion** | Minimizes quadratic state and action penalty | Minimizes trace of estimation error covariance $\mathbb{E}[\|\mathbf{x} - \hat{\mathbf{x}}\|^2]$ |
+
 The **Linear Quadratic Gaussian (LQG)** controller cascades this optimal estimator with the optimal LQR regulator by applying feedback directly to the estimated state:
 $$ \mathbf{u}(t) = -\mathbf{K} \hat{\mathbf{x}}(t) $$
 The **Separation Principle** [@astrom2021feedback] proves that under linear-Gaussian assumptions, observer design and state-feedback controller design are completely decoupled: the poles of the closed-loop LQG system are strictly the union of the controller poles $\operatorname{eig}(\mathbf{A} - \mathbf{B}\mathbf{K})$ and the observer poles $\operatorname{eig}(\mathbf{A} - \mathbf{L}\mathbf{C})$.
@@ -202,9 +296,9 @@ In machine learning, gradient descent optimizes a scalar objective over paramete
 $$ \dot{\mathcal{L}}(\boldsymbol{\theta}) = \nabla_{\boldsymbol{\theta}}\mathcal{L}(\boldsymbol{\theta})^\top \dot{\boldsymbol{\theta}} = -\nabla_{\boldsymbol{\theta}}\mathcal{L}(\boldsymbol{\theta})^\top \nabla_{\boldsymbol{\theta}}\mathcal{L}(\boldsymbol{\theta}) = -\|\nabla_{\boldsymbol{\theta}}\mathcal{L}(\boldsymbol{\theta})\|^2 \le 0 $$
 In parameter optimization, the software program has unconstrained, direct write access to the parameter velocity vector $\dot{\boldsymbol{\theta}}$, allowing the optimizer to force loss descent along the negative gradient direction.
 
-In physical control, the robot's physical state $\mathbf{x}(t) \in \mathbb{R}^n$ evolves in physical state space according to continuous differential equations $\dot{\mathbf{x}} = f(\mathbf{x})$. Unlike software network weights $\boldsymbol{\theta}$, physical coordinates $\mathbf{x}$ cannot be updated by arbitrary gradient descent: actuators cannot command arbitrary velocity vectors $\dot{\mathbf{x}}$, because physical momentum, mass inertia, unforced drift, and kinematic constraints govern the system.
+In physical control, the robot's physical state $\mathbf{x}(t) \in \mathbb{R}^n$ evolves in physical state space according to continuous differential equations $\dot{\mathbf{x}} = f(\mathbf{x})$. Unlike software network weights $\boldsymbol{\theta}$, physical coordinates $\mathbf{x}$ cannot be updated by arbitrary gradient descent: actuators cannot command arbitrary velocity vectors $\dot{\mathbf{x}}$, because physical momentum, mass inertia, unforced drift, and kinematic constraints govern the system. By Newton's second law, motor actuators modulate second-order accelerations ($\ddot{\mathbf{q}} = \mathbf{M}(\mathbf{q})^{-1}(\boldsymbol{\tau} - \mathbf{h})$), which must be integrated through continuous time against centrifugal forces, Coriolis couplings, and gravitational fields.
 
-Instead, a **Lyapunov function** $V(\mathbf{x})$ acts as an analytical, continuous state-space loss function that certifies the asymptotic convergence of the physical plant's continuous trajectories without simulating every rollout to infinity.\index{Lyapunov stability!asymptotic and exponential}\index{Invariant sets!domain of attraction}
+Instead, a **Lyapunov function** $V(\mathbf{x})$ acts as an analytical, continuous state-space loss function that certifies the asymptotic convergence of the physical plant's continuous trajectories without simulating every rollout to infinity.\index{Lyapunov stability!asymptotic and exponential}\index{Invariant sets!domain of attraction} In mechanical systems, $V(\mathbf{x})$ often corresponds to the physical or synthetic Hamiltonian energy of the plant: kinetic energy stored in moving mass plus potential energy stored in gravitational elevation or virtual elastic springs.
 
 Consider an autonomous nonlinear dynamical system:
 $$ \dot{\mathbf{x}}(t) = f(\mathbf{x}(t)), \quad f(\mathbf{0}) = \mathbf{0} $$
@@ -225,7 +319,7 @@ Alexander Lyapunov established three foundational stability tiers [@slotine1991a
 3. **Exponential Stability:** If there exist positive constants $c_1, c_2, c_3 > 0$ such that $c_1 \|\mathbf{x}\|^2 \le V(\mathbf{x}) \le c_2 \|\mathbf{x}\|^2$ and $\dot{V}(\mathbf{x}) \le -c_3 \|\mathbf{x}\|^2$, trajectories converge exponentially:
    $$ \|\mathbf{x}(t)\| \le \sqrt{\frac{c_2}{c_1}} \|\mathbf{x}_0\| e^{-\frac{c_3}{2 c_2} t} \quad \forall t \ge 0 $$
 
-For mechanical systems with friction and viscous damping, $\dot{V}(\mathbf{x})$ often vanishes on a subspace (for example, when velocities are zero while position errors remain nonzero). **LaSalle's Invariance Principle** [@slotine1991applied] resolves this: if $\dot{V}(\mathbf{x}) \le 0$ on a compact set $\Omega$, all trajectories starting in $\Omega$ asymptotically converge to the largest invariant set contained within $\{ \mathbf{x} \in \Omega \mid \dot{V}(\mathbf{x}) = 0 \}$.
+For mechanical systems with friction and viscous damping, $\dot{V}(\mathbf{x})$ often vanishes on a subspace (for example, when velocities are zero while position errors remain nonzero: $\dot{V}(\mathbf{q}, \dot{\mathbf{q}}) = -\dot{\mathbf{q}}^\top \mathbf{D} \dot{\mathbf{q}} = 0$ whenever $\dot{\mathbf{q}} = \mathbf{0}$). Standard Lyapunov theorems only certify stability in the sense of Lyapunov, failing to prove asymptotic convergence. **LaSalle's Invariance Principle** [@slotine1991applied] resolves this: if $\dot{V}(\mathbf{x}) \le 0$ on a compact set $\Omega$, all trajectories starting in $\Omega$ asymptotically converge to the largest invariant set $\mathcal{M}$ contained within $\{ \mathbf{x} \in \Omega \mid \dot{V}(\mathbf{x}) = 0 \}$. Because any trajectory trapped on $\mathcal{M}$ with $\dot{\mathbf{q}} \equiv \mathbf{0}$ must also satisfy zero acceleration ($\ddot{\mathbf{q}} \equiv \mathbf{0}$), the equations of motion force position errors to vanish ($\mathbf{K}_p \mathbf{e} = \mathbf{0} \implies \mathbf{e} = \mathbf{0}$). LaSalle's principle proves that the only trajectory that can remain indefinitely in the zero-dissipation manifold is the origin itself, certifying asymptotic convergence.
 
 The sublevel set $\Omega_c = \{ \mathbf{x} \in \mathcal{D} \mid V(\mathbf{x}) \le c \}$ forms a verified **domain of attraction (DOA)**: because $\dot{V} \le 0$ on $\Omega_c$, no trajectory initialized inside $\Omega_c$ can ever cross the boundary $V(\mathbf{x}) = c$ outward.
 
@@ -235,7 +329,7 @@ For a controlled system $\dot{\mathbf{x}} = f(\mathbf{x}) + g(\mathbf{x})\mathbf
 $$ \dot{V}(\mathbf{x}, \mathbf{u}) = \nabla V(\mathbf{x}) \cdot (f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}) = L_f V(\mathbf{x}) + L_g V(\mathbf{x}) \mathbf{u} $$
 where $L_f V(\mathbf{x}) = \nabla V(\mathbf{x}) \cdot f(\mathbf{x}) \in \mathbb{R}$ is the unforced directional drift and $L_g V(\mathbf{x}) = \nabla V(\mathbf{x})^\top g(\mathbf{x}) \in \mathbb{R}^{1 \times m}$ is the control effectiveness gradient. A candidate Lyapunov function $V(\mathbf{x})$ is a **Control Lyapunov Function (CLF)** [@ames2014control; @slotine1991applied] if there exists an admissible control input $\mathbf{u} \in \mathcal{U}$ that forces $V$ to decrease at every non-equilibrium state:
 $$ \inf_{\mathbf{u} \in \mathcal{U}} \left[ L_f V(\mathbf{x}) + L_g V(\mathbf{x}) \mathbf{u} + \alpha_V(V(\mathbf{x})) \right] \le 0 \quad \forall \mathbf{x} \in \mathcal{D} \setminus \{\mathbf{0}\} $$
-where $\alpha_V$ is an extended class $\mathcal{K}$ function (a strictly increasing function with $\alpha_V(0)=0$). For ML practitioners, $\alpha_V(V(\mathbf{x}))$ acts as a state-dependent convergence rate floor: the larger the current error $V(\mathbf{x})$, the steeper the required rate of descent.
+where $\alpha_V$ is an extended class $\mathcal{K}$ function (a strictly increasing function with $\alpha_V(0)=0$). For ML practitioners, $\alpha_V(V(\mathbf{x}))$ acts as a state-dependent convergence rate floor: the larger the current error $V(\mathbf{x})$, the steeper the required rate of descent. Geometrically, the CLF inequality defines a closed affine half-space in control space $\mathcal{U}_{\text{CLF}}(\mathbf{x}) = \{ \mathbf{u} \in \mathcal{U} \mid L_g V(\mathbf{x}) \mathbf{u} \le -L_f V(\mathbf{x}) - \alpha_V(V(\mathbf{x})) \}$; any control input chosen inside this half-space guarantees monotonic descent of the continuous state-space loss.
 
 #### Sontag's universal stabilizing formula
 
@@ -317,11 +411,11 @@ Under these conditions, the optimal cost function $J^*(\mathbf{x}_k)$ acts as a 
 $$ J^*(\mathbf{x}_{k+1}) - J^*(\mathbf{x}_k) \le -(\mathbf{x}_k^\top \mathbf{Q} \mathbf{x}_k + \mathbf{u}_k^{*\top} \mathbf{R} \mathbf{u}_k^*) < 0 $$
 This guarantees that the closed-loop system is asymptotically stable and respects all state and actuator constraints for all time.
 
-#### Recursive feasibility
+#### Recursive feasibility and avoidance of dynamic traps
 
-A critical hazard in constrained control is dynamic trap entry: the system reaches a state where, due to inertia and actuator limits, no control trajectory can prevent constraint violation $N$ steps in the future, rendering the QP infeasible.
+A critical hazard in constrained physical control is dynamic trap entry: a naive controller drives the system into a state where, due to physical inertia, finite stopping distance, and actuator saturation, no control sequence can prevent constraint violation $N$ steps in the future, rendering the QP instantaneously infeasible. For example, a mobile robot cruising at high velocity toward a wall may have a feasible solution over horizon $N$, but if the horizon terminates before braking completes, step $k+1$ encounters an unavoidable collision because available deceleration cannot overcome kinetic momentum within the remaining distance.
 
-A controller possesses **recursive feasibility** if the existence of a feasible solution at step $k$ guarantees that the optimization problem remains feasible at step $k+1$. With terminal invariant set $\mathcal{X}_f$ and unmodeled disturbances bounded, the candidate shifted sequence:
+A controller possesses **recursive feasibility** if the existence of a feasible solution at step $k$ guarantees that the optimization problem remains feasible at step $k+1$ for all time. With terminal invariant set $\mathcal{X}_f$ and unmodeled disturbances bounded, the candidate shifted sequence:
 $$ \tilde{\mathbf{u}}_{0:N-1} = [\mathbf{u}_1^*, \mathbf{u}_2^*, \dots, \mathbf{u}_{N-1}^*, -\mathbf{K}_f \mathbf{x}_N^*] $$
 is guaranteed to satisfy all dynamics, state, input, and terminal constraints at step $k+1$. This candidate sequence serves as a valid warm start, ensuring that the real-time solver never encounters an unexpected infeasibility exception during execution.
 
@@ -424,13 +518,18 @@ At standstill ($v \to 0$), a separate static clearance rule must be evaluated. S
 
 In modern operating systems, an extended Berkeley Packet Filter (eBPF) program hooks the kernel network stack, inspecting ingress and egress packets at line rate before they reach physical network interface cards. If a packet satisfies verified safety rules, it passes through untouched with sub-microsecond overhead; if non-compliant, it is filtered or rewritten.
 
-The Control Barrier Function Quadratic Program (CBF-QP) functions as an inline **eBPF actuator packet firewall** for cyber-physical robotics. Deployed on real-time motor drive firmware or hard-real-time microcontroller loops ($100\text{ Hz -- }1\text{ kHz}$), it intercepts uncertified action proposals $\mathbf{u}_{\text{nom}}$ produced by high-level neural policies (Diffusion Policy, ACT, Transformer planners) before commands touch motor inverter power stages:
+The Control Barrier Function Quadratic Program (CBF-QP) functions as an inline **optimization-based projection operator** and **eBPF actuator packet firewall** for cyber-physical robotics. Deployed on real-time motor drive firmware or hard-real-time microcontroller loops ($100\text{ Hz -- }1\text{ kHz}$), it intercepts uncertified action proposals $\mathbf{u}_{\text{nom}}$ produced by high-level neural policies (Diffusion Policy, ACT, Transformer planners) before commands touch motor inverter power stages:
 $$
 \begin{align*}
 \mathbf{u}^* &= \arg\min_{\mathbf{u} \in \mathcal{U}} \frac{1}{2} \| \mathbf{u} - \mathbf{u}_{\text{nom}} \|^2 \\
 &\text{subject to:} \quad L_{\mathbf{f}} h(\mathbf{x}) + L_{\mathbf{g}} h(\mathbf{x}) \mathbf{u} \ge -\alpha(h(\mathbf{x})), \quad \mathbf{u}_{\min} \le \mathbf{u} \le \mathbf{u}_{\max}
 \end{align*}
 $$
+To a machine learning engineer, the CBF-QP is the continuous physical counterpart of **projection operators** used in optimization:
+
+- In deep learning optimization, **Projected Gradient Descent (PGD)** enforces hard weight or adversarial perturbation constraints by projecting updated parameters back onto an $\epsilon$-ball: $\mathbf{w}_{k+1} = \operatorname{proj}_{\mathcal{C}}(\mathbf{w}_k - \eta \mathbf{g})$. In multi-task gradient learning (such as PCGrad or MGDA), conflicting task gradients $\mathbf{g}_i$ are projected onto the normal hyperplane of $\mathbf{g}_j$ via $\mathbf{g}_i \leftarrow \mathbf{g}_i - \frac{\mathbf{g}_i^\top \mathbf{g}_j}{\|\mathbf{g}_j\|^2}\mathbf{g}_j$ whenever their inner product is negative.
+- In physical AI systems, the CBF-QP projects uncertified action vectors $\mathbf{u}_{\text{nom}} \in \mathbb{R}^m$ onto the convex polyhedron of forward-invariant safe actions $\mathcal{U}_{\text{safe}}(\mathbf{x}) = \{ \mathbf{u} \in \mathcal{U} \mid L_{\mathbf{f}} h(\mathbf{x}) + L_{\mathbf{g}} h(\mathbf{x})\mathbf{u} \ge -\alpha(h(\mathbf{x})) \}$.
+
 Writing the affine CBF constraint in standard half-space form $\mathbf{a}^\top \mathbf{u} \le b$, with normal vector $\mathbf{a} = -L_{\mathbf{g}} h(\mathbf{x})^\top \in \mathbb{R}^m$ and scalar threshold $b = L_{\mathbf{f}} h(\mathbf{x}) + \alpha(h(\mathbf{x}))$, consider the unconstrained actuator case ($\mathbf{u} \in \mathbb{R}^m$):\index{Quadratic program!closed-form projection}\index{Control barrier function!eBPF actuator firewall}
 $$
 \min_{\mathbf{u} \in \mathbb{R}^m} \frac{1}{2} \|\mathbf{u} - \mathbf{u}_{\text{nom}}\|^2 \quad \text{subject to } \mathbf{a}^\top \mathbf{u} \le b
@@ -456,12 +555,14 @@ Evaluating these conditions reveals two distinct operational regimes:
   The filtered control command is the exact, closed-form Euclidean projection onto the safe half-space boundary:
   $$ \mathbf{u}^* = \mathbf{u}_{\text{nom}} - \left( \frac{\mathbf{a}^\top \mathbf{u}_{\text{nom}} - b}{\|\mathbf{a}\|^2} \right) \mathbf{a} $$
 
-Unifying both cases into a single compact equation:
-$$ \mathbf{u}^* = \mathbf{u}_{\text{nom}} - \frac{\max\left(0, \mathbf{a}^\top \mathbf{u}_{\text{nom}} - b\right)}{\|\mathbf{a}\|^2} \mathbf{a} $$
-This projection modifies the nominal proposal by the minimal Euclidean deviation necessary to preserve forward invariance.
+Unifying both cases into a single compact projection operator:
+$$ \mathbf{u}^* = \operatorname{proj}_{\mathcal{U}_{\text{safe}}}(\mathbf{u}_{\text{nom}}) = \mathbf{u}_{\text{nom}} - \frac{\max\left(0, \mathbf{a}^\top \mathbf{u}_{\text{nom}} - b\right)}{\|\mathbf{a}\|^2} \mathbf{a} $$
+Geometrically, the vector $\mathbf{a} = -L_{\mathbf{g}} h(\mathbf{x})^\top$ points outward along the gradient of safety penetration. The projection operator subtracts precisely the scalar penetration depth along $\mathbf{a}$, leaving all orthogonal control directions completely untouched.
+
+When actuator limits $\mathbf{u}_{\min} \le \mathbf{u} \le \mathbf{u}_{\max}$ or multiple obstacle barriers $\{h_1, \dots, h_K\}$ are present, the admissible set $\mathcal{U}_{\text{safe}}(\mathbf{x})$ forms a general convex polyhedron. While closed-form scalar projection is no longer possible, the optimization remains a strictly convex Quadratic Program with an identity Hessian matrix $\mathbf{H} = \mathbf{I}$. Embedded QP solvers (such as OSQP, qpOASES, or operator-splitting ADMM algorithms) execute on embedded ARM Cortex-M or DSP cores, computing the exact projection within $50\text{--}200\text{ }\mu\text{s}$ at $1\text{ kHz}$ control cadences.
 
 ::: {#psp-appendix-control-feasibility .callout-perspective title="Check feasibility before relying on invariance"}
-The projection formula does not solve the box-constrained problem. Clamping its result afterward can violate $a^\top u\le b$. If no command satisfies both the barrier and actuator limits, the modeled invariant cannot be maintained by this filter. A separately validated fallback may still limit harm; it does not restore the lost forward-invariance claim. Admission must reserve stopping authority before the state reaches this boundary.
+The unconstrained projection formula does not solve the box-constrained problem. Clamping its result post hoc can violate $\mathbf{a}^\top \mathbf{u} \le b$. If no command satisfies both the barrier half-space and actuator limits simultaneously ($\mathcal{U}_{\text{safe}} \cap \mathcal{U}_{\text{adm}} = \emptyset$), the modeled invariant cannot be maintained by this filter. A separately validated emergency fallback may still limit harm, but it cannot restore the lost forward-invariance claim. Admission must reserve stopping authority before the state reaches this boundary.
 :::
 
 ## Smooth Trajectories and Bumpless Transfer {#sec-appendix-control-splines}
@@ -1068,31 +1169,33 @@ Here $\mathbf{F}_k$ describes the chosen inner approximation to the measured fri
 
 ## Passivity and Energy-Bounded Interaction {#sec-appendix-control-passivity}
 
-During teleoperation or stiff contact, transport delay can reduce the damping margin of a feedback loop. **Passivity**\index{Passivity!energy storage}\index{Passivity theorem!feedback stability} is an energy-accounting condition useful for analyzing a specified interconnection; it does not remove the need to verify actuator saturation, contact geometry, sampling, and stored energy.
+During teleoperation or stiff contact, transport delay can reduce the damping margin of a feedback loop. In deep learning systems, 1-Lipschitz architectures, spectral normalization, and contractive operators ensure that feedforward layers do not amplify perturbation norms ($\|f(\mathbf{x}_1) - f(\mathbf{x}_2)\| \le \|\mathbf{x}_1 - \mathbf{x}_2\|$). In cyber-physical systems, **passivity**\index{Passivity!energy storage}\index{Passivity theorem!feedback stability} provides the continuous physical generalization: an energy-accounting invariant establishing that a dynamic component cannot generate energy internally from nothing, guaranteeing input-output stability when interconnected with other passive environments.
 
 ### Energy storage and the passivity definition
 
 Consider a continuous-time dynamical system with state $\mathbf{x}(t)$, control input $\mathbf{u}(t)$ (an effort variable, such as force or torque $\mathbf{F}$), and measured output $\mathbf{y}(t)$ (a flow variable, such as velocity $\mathbf{v}$). The system is defined as **passive** if there exists a continuously differentiable, non-negative storage function $V(\mathbf{x}) \ge 0$ (representing the total internal physical energy stored in mass momentum and structural compliance) such that:
 $$\dot{V}(\mathbf{x}) \le \mathbf{u}(t)^\top \mathbf{y}(t) - g(\mathbf{x})$$ {#eq-control-passivity-derivative}
-where $\mathbf{u}(t)^\top \mathbf{y}(t)$ represents instantaneous power injected into the system, and $g(\mathbf{x}) \ge 0$ denotes internal energy dissipation (such as mechanical damping or electrical resistance). Integrating @eq-control-passivity-derivative over any operational duration $[0, T]$ yields the fundamental passivity energy inequality:
+where $\mathbf{u}(t)^\top \mathbf{y}(t)$ represents instantaneous power injected into the system through the physical port, and $g(\mathbf{x}) \ge 0$ denotes internal energy dissipation (such as mechanical damping, viscous friction, or electrical resistance). Integrating @eq-control-passivity-derivative over any operational duration $[0, T]$ yields the fundamental passivity energy inequality:
 $$\int_0^T \mathbf{u}(t)^\top \mathbf{y}(t) \, dt \ge V(\mathbf{x}(T)) - V(\mathbf{x}(0)) + \int_0^T g(\mathbf{x}(t))\,dt \ge -V(\mathbf{x}(0))$$ {#eq-control-passivity-integral}
-Under @eq-control-passivity-integral and the declared port orientation, the net energy extractable from this modeled component is bounded by its initial storage. A loaded mechanism can still release enough stored energy to injure or damage; passivity is not a contact-force limit.
+Under @eq-control-passivity-integral and the declared port orientation, the net physical energy extractable from this modeled component is strictly bounded by its initial stored energy $V(\mathbf{x}(0))$. A loaded mechanism can still release enough stored energy to injure or damage; passivity is an energy-bounding certificate, not an instantaneous contact-force limit.
 
-Negative-feedback interconnection of compatible passive components preserves a passive energy balance when ports and signs match. Bounded or asymptotic state stability requires additional storage and detectability conditions. A human, powered tool, or active environment cannot be assumed passive without evidence.
+A foundational theorem in control is the **Passivity Theorem**: the negative-feedback interconnection of two strictly passive systems is guaranteed to remain closed-loop stable for all time. Unlike small-gain theorems that require loop gain to be strictly less than unity at all frequencies, passivity-based stability is completely independent of plant parameters and scale. However, bounded or asymptotic state stability requires additional storage and detectability conditions. Furthermore, a human operator, powered power tool, or active environment cannot be assumed passive without empirical verification.
 
 ### The transport delay destabilization hazard
 
-An untreated effort/flow communication channel need not remain passive when delayed. A fixed pure delay contributes phase $\Delta\phi=-\omega\tau_d$ at angular frequency $\omega$, but no universal $90^\circ$ threshold determines the sign of an arbitrary coupled mechanical impedance.
+An untreated effort/flow communication channel need not remain passive when delayed. A fixed pure delay $\tau_d$ contributes a frequency-dependent phase lag $\Delta\phi=-\omega\tau_d$ at angular frequency $\omega$. In teleoperation or compliant interaction across wireless networks, late force feedback can arrive out of phase with the operator's current hand motion.
 
-For a particular controller, late force feedback can oppose the operator's current motion poorly and inject energy into the closed loop. Whether this causes chatter depends on the port signs, damping, delay distribution, and contact stiffness; measure those conditions rather than inferring failure from latency alone.
+When phase lag turns the inner product between force and velocity negative ($\mathbf{F}(t)^\top \dot{\mathbf{x}}(t) < 0$), the delayed communication channel begins behaving as an active energy source—pumping synthetic energy into the closed loop. This converts passive mechanical compliance into an active, self-exciting oscillator, triggering violent limit-cycle chatter and mechanical instability that can shatter gearboxes or injure operators.
 
 ### Passivity preservation via wave variables
 
-For a delay channel with specified port orientation, @anderson1989bilateral's **wave variable transformation**\index{Wave variables!time delay passivity} maps effort $\mathbf F$ and flow $\dot{\mathbf x}$ into incoming and outgoing waves with characteristic impedance $b>0$:
+To prevent delay from injecting artificial energy into the teleoperation loop, @anderson1989bilateral introduced the **wave variable transformation**\index{Wave variables!time delay passivity}. Inspired by microwave transmission lines and scattering theory, wave variables map physical effort $\mathbf F$ and flow $\dot{\mathbf x}$ into incoming and outgoing wave channels with characteristic wave impedance $b>0$:
 $$\mathbf{u}_m(t) = \frac{\mathbf{F}_m(t) + b \mathbf{\dot{x}}_m(t)}{\sqrt{2b}}, \quad \mathbf{w}_m(t) = \frac{\mathbf{F}_m(t) - b \mathbf{\dot{x}}_m(t)}{\sqrt{2b}}$$ {#eq-control-wave-variables}
 Computing instantaneous power from the wave transformation in @eq-control-wave-variables reveals:
 $$P_m(t) = \mathbf{F}_m(t)^\top \mathbf{\dot{x}}_m(t) = \frac{1}{2} \|\mathbf{u}_m(t)\|^2 - \frac{1}{2} \|\mathbf{w}_m(t)\|^2$$
-For an ideal fixed delay, a received wave is a delayed transmitted wave. The channel can hold energy in flight, so a same-window inequality between master and slave port powers needs a channel-storage term: $E_{\rm ch}(T)-E_{\rm ch}(0)\le\int_0^T(P_m-P_s)\,dt$ with consistent signs. The scattering construction can preserve channel passivity under its assumptions; time-varying delay, packet loss, sampling, saturation, and powered endpoints require additional compensation or tests. It does not guarantee contact-force safety or convergence of the complete human-robot system.
+In wave coordinates, power transmitted across the network port is the difference between incoming wave power $\frac{1}{2}\|\mathbf{u}_m\|^2$ and reflected wave power $\frac{1}{2}\|\mathbf{w}_m\|^2$. For an ideal transmission channel with communication delay $\tau_d$, transmitted waves are simply delayed: $\mathbf{u}_s(t) = \mathbf{u}_m(t - \tau_d)$ and $\mathbf{w}_m(t) = \mathbf{w}_s(t - \tau_d)$. The total energy stored in the communication channel in flight satisfies:
+$$ E_{\text{channel}}(t) = \frac{1}{2} \int_{t - \tau_d}^t \|\mathbf{u}_m(\sigma)\|^2 d\sigma + \frac{1}{2} \int_{t - \tau_d}^t \|\mathbf{w}_s(\sigma)\|^2 d\sigma \ge 0 $$
+Because the channel stores transmitted energy without amplifying wave amplitudes, the scattered communication link remains strictly passive under arbitrary constant time delays. While wave variables prevent energy accumulation and closed-loop chatter under delay, they do not bound spatial tracking errors; kinodynamic watchdog leases (@sec-appendix-control-teleop-leases) must be evaluated concurrently to guarantee spatial obstacle clearance.
 
 ## Further Reading
 
