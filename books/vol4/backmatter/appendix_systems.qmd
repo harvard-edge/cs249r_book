@@ -465,7 +465,7 @@ To prevent high-bandwidth sensor streams (such as GigE Vision cameras or 3D lida
 * *IRQ Affinity Partitioning*: Peripheral hardware interrupts are directed away from real-time cores by writing CPU bitmasks to `/proc/irq/<id>/smp_affinity`. High-rate camera MSI-X vectors and Ethernet controller interrupts are pinned exclusively to housekeeping cores, guaranteeing that the 1 kHz control loop on core 2 experiences zero external hardware interrupt preemption.
 * *Cache Line Alignment and False Sharing Elimination*: Modern microprocessor memory hierarchies organize L1, L2, and L3 caches in 64-byte cache lines. When multiple CPU cores access independent variables that reside within the same 64-byte line, hardware cache coherency protocols (MESI/MOESI) repeatedly invalidate the line across core private caches upon every store—a phenomenon known as **false sharing** or *cache line bouncing*. A single false sharing interaction can stall a real-time core for 50 to 100 clock cycles. To guarantee cache locality and deterministic access times, real-time control structures, ring buffer pointers, and mailbox slots must be aligned to 64-byte boundaries using `alignas(64)` (or `__attribute__((aligned(64)))`), ensuring that thread-private data structures never share cache lines with background threads. Furthermore, real-time control paths pre-warm L1 instruction and data caches during initialization by executing a dummy pass over critical control tables before arming actuators.
 
-**Memory Locking and Page Fault Elimination.** Virtual memory subsystems rely on demand paging: when a process accesses an unmapped virtual address, the CPU raises an architectural page fault exception (`#PF`), suspending execution while the kernel page-table handler allocates a physical page frame, updates translation lookaside buffer (TLB) entries, and zeroes the memory (a *minor page fault*, requiring $10\text{--}50\,\mu\text{s}$). If the requested page was swapped to secondary flash storage, the thread blocks on disk I/O (a *major page fault*, requiring $10\text{--}50\text{ ms}$). Furthermore, Transparent Huge Pages (THP) memory compaction (`khugepaged`) can asynchronously stall threads for tens of milliseconds while defragmenting physical memory pages. A single page fault on a cyclic control path instantly violates the 1 ms permission deadline.
+**Memory Locking, Allocation Invariants, and Page Fault Elimination.** Virtual memory subsystems rely on demand paging: when a process accesses an unmapped virtual address, the CPU raises an architectural page fault exception (`#PF`), suspending execution while the kernel page-table handler allocates a physical page frame, updates translation lookaside buffer (TLB) entries, and zeroes the memory (a *minor page fault*, requiring $10\text{--}50\,\mu\text{s}$). If the requested page was swapped to secondary flash storage, the thread blocks on disk I/O (a *major page fault*, requiring $10\text{--}50\text{ ms}$). Furthermore, Transparent Huge Pages (THP) memory compaction (`khugepaged`) can asynchronously stall threads for tens of milliseconds while defragmenting physical memory pages. A single page fault on a cyclic control path instantly violates the 1 ms permission deadline.
 
 To achieve hard real-time determinism in user space, real-time control processes must implement a rigorous memory locking and CPU initialization protocol:
 
@@ -480,11 +480,14 @@ To achieve hard real-time determinism in user space, real-time control processes
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
-#define REALTIME_PRIORITY  90
-#define CONTROL_CPU_CORE   2
-#define STACK_PREFAULT_SZ  (256 * 1024) // 256 KB stack
-#define PERIOD_NS          1000000ULL   // 1 ms period (1 kHz)
+#define REALTIME_PRIORITY   90
+#define CONTROL_CPU_CORE    2
+#define STACK_PREFAULT_SZ   (256 * 1024)       // 256 KB stack
+#define HEAP_PREALLOC_SZ    (16 * 1024 * 1024) // 16 MB pre-allocated arena
+#define PERIOD_NS           1000000ULL         // 1 ms period (1 kHz)
+#define CACHE_WARMUP_CYCLES 5
 
 // 64-byte cache-aligned telemetry slot to prevent false sharing
 typedef struct alignas(64) {
@@ -496,6 +499,7 @@ typedef struct alignas(64) {
 } realtime_telemetry_t;
 
 static realtime_telemetry_t g_telemetry;
+static uint8_t *g_realtime_heap_arena = NULL;
 
 void configure_realtime_process(int target_cpu, int rt_priority, size_t stack_size) {
     // 1. Bind execution to dedicated isolated CPU core (isolcpus / nohz_full)
@@ -524,7 +528,18 @@ void configure_realtime_process(int target_cpu, int rt_priority, size_t stack_si
     mallopt(M_TRIM_THRESHOLD, -1);
     mallopt(M_MMAP_MAX, 0);
 
-    // 5. Prefault the thread execution stack to its declared maximum depth
+    // 5. Pre-allocate and prefault the dedicated heap arena
+    g_realtime_heap_arena = (uint8_t *)malloc(HEAP_PREALLOC_SZ);
+    if (!g_realtime_heap_arena) {
+        perror("malloc heap arena failed");
+        exit(EXIT_FAILURE);
+    }
+    // Touch every 4 KB page to force physical page frame allocation and TLB population
+    for (size_t i = 0; i < HEAP_PREALLOC_SZ; i += 4096) {
+        g_realtime_heap_arena[i] = 0;
+    }
+
+    // 6. Prefault the thread execution stack to its declared maximum depth
     volatile char stack_buffer[stack_size];
     for (size_t i = 0; i < stack_size; i += 4096) {
         stack_buffer[i] = 0; // Trigger minor page fault and populate TLB entry
@@ -534,6 +549,12 @@ void configure_realtime_process(int target_cpu, int rt_priority, size_t stack_si
 void run_periodic_control_loop(void) {
     struct timespec next_period;
     clock_gettime(CLOCK_MONOTONIC, &next_period);
+
+    // Pre-warm L1 instruction/data caches and branch target buffers (BTB)
+    for (int warm = 0; warm < CACHE_WARMUP_CYCLES; ++warm) {
+        g_telemetry.sequence_id = 0;
+        g_telemetry.status_flags = 0;
+    }
 
     while (1) {
         // Compute next absolute wake epoch (eliminates cumulative drift)
@@ -559,7 +580,13 @@ void run_periodic_control_loop(void) {
 }
 ```
 
-Beyond address space locking and stack prefaulting, the cyclic 1 kHz control loop operates under a strict **zero dynamic allocation invariant**. Dynamic memory allocators (`malloc`, `free`, C++ `new`, `delete`) utilize global arena mutexes, manage complex bucket free-lists, and suffer from heap fragmentation that induces non-deterministic latency. All message structures, matrix workspace buffers, trajectory buffers, and seqlock mailbox slots must be statically allocated at startup or drawn from fixed-size, lock-free memory pools.
+Beyond address space locking and stack prefaulting, the cyclic 1 kHz control loop operates under a strict **zero dynamic allocation invariant**. In general-purpose systems programming, developers routinely rely on dynamic memory managers (`malloc`, `free`, C++ `new`, `delete`) or standard container expansions (`std::vector::push_back`). In a real-time control loop, however, dynamic allocation introduces three catastrophic failure modes:
+
+1. *Arena Mutex Contention*: Modern allocators (such as `ptmalloc` in `glibc`) partition memory into multiple heap arenas protected by mutual-exclusion mutexes. If an unprivileged background logging thread or container monitoring daemon acquires an arena lock, a high-priority 1 kHz real-time control thread calling `malloc` blocks on that mutex, suffering from priority inversion and waiting milliseconds.
+2. *Kernel Syscall Invocations*: When an allocator exhausts its active arena chunk, it issues `brk()` or anonymous `mmap()` system calls. These kernel entries acquire the process's `mmap_lock` (or `mmap_sem`), which is shared with background kernel threads such as `khugepaged` performing transparent huge page compaction or memory defragmentation, stalling user-space execution for tens of milliseconds.
+3. *Heap Fragmentation*: Repeated cyclic allocations and deallocations fragment the heap, degrading allocation search times across segregated free lists into non-deterministic search loops.
+
+Consequently, all message structures, matrix workspace buffers, trajectory buffers, and seqlock mailbox slots must be statically allocated at startup or drawn from fixed-size, lock-free memory pools (such as slab allocators). Furthermore, `mlockall(MCL_FUTURE)` must be paired with explicit memory pre-allocation and page prefaulting: Linux utilizes optimistic memory allocation (overcommit), meaning virtual address ranges returned by `malloc()` are not backed by physical page frames until the thread actually writes to each 4 KB page. Touching an uninitialized buffer for the first time inside the control loop triggers a minor page fault exception (`#PF`), which forces the kernel page-fault handler to allocate physical memory, zero the page, and update the MMU page table and TLB entries—a stall of $10\text{--}50\,\mu\text{s}$ that jeopardizes sub-millisecond control deadlines. Prefaulting both the stack and the entire pre-allocated heap arena during initialization guarantees that all physical frames and TLB entries are resident before arming actuators.
 
 ### Hardware watchdogs and fault response
 
@@ -719,6 +746,7 @@ In distributed machine learning clusters, nodes synchronize system clocks via Ne
 ### Precision time protocol message exchange
 
 The IEEE 1588 Precision Time Protocol (PTP) and IEEE 802.1AS (generalized PTP) synchronize a Slave clock ($S$) to a Master clock ($M$) by exchanging four physical timestamps across the communication link:\index{Precision Time Protocol!clock synchronization}\index{Precision Time Protocol!delay measurement}\index{Clock synchronization!PI servo loop}
+
 1. $t_1$: Master transmits a *Sync* frame, recording its local transmission timestamp.
 2. $t_2$: Slave receives the *Sync* frame, recording its local arrival timestamp.
 3. $t_3$: Slave transmits a *Delay_Req* frame, recording its local transmission timestamp.
@@ -798,12 +826,13 @@ Barriers operate across explicit architectural **shareability domains**:
 
 ### POSIX shared memory and lock-free SPSC ring buffers
 
-Within user-space Linux runtimes, independent operating system processes (such as a vision preprocessing daemon, a multimodal VLA policy inference server, and a high-rate state estimator) exchange telemetry and sensor streams without kernel socket copies via **POSIX Shared Memory** (`shm_open` and `mmap`):\index{Shared memory!POSIX shm}\index{Concurrency!lock-free SPSC ring buffer}
+Within user-space Linux runtimes, independent operating system processes (such as a vision preprocessing daemon, a multimodal VLA policy inference server, and a high-rate state estimator) exchange telemetry and sensor streams without kernel socket copies via **POSIX Shared Memory** (`shm_open` and `mmap`):\index{Shared memory!POSIX shm}\index{Concurrency!lock-free SPSC ring buffer}\index{Shared memory!position-independent layout}
 
-1. A producer process creates a POSIX shared memory object using `shm_open("/robot_telemetry", O_CREAT | O_RDWR, 0660)` located in the RAM-backed `tmpfs` filesystem (`/dev/shm`).
+1. A producer process creates a POSIX shared memory object using `shm_open("/robot_telemetry", O_CREAT | O_RDWR, 0660)` located in the RAM-backed `tmpfs` filesystem (`/dev/shm`), bypassing physical storage media entirely.
 2. Sizing the segment via `ftruncate(fd, sizeof(telemetry_ring_buffer_t))` allocates physical pages.
 3. Both producer and consumer processes map the memory into their respective virtual address spaces via `mmap(NULL, sizeof(...), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)`.
 4. Crucially, each process immediately invokes `mlock()` on the mapped region, guaranteeing that the shared pages remain pinned in physical RAM and cannot trigger demand page faults during execution.
+5. *Position-Independent Memory Layout*: Because Address Space Layout Randomization (ASLR) and independent virtual memory spaces cause `mmap()` to return different base virtual addresses in each process, data structures placed in shared memory must never store absolute virtual pointers (`void*` or raw references). All references within shared buffers must be position-independent—structured as relative byte offsets, flat fixed-size arrays, or integer indices.
 
 **Lock-Free Single-Producer Single-Consumer (SPSC) Ring Buffers.** When streaming sequential sensor frames or trajectory waypoints across processes, mutual-exclusion mutexes introduce non-deterministic blocking and priority inversion. A lock-free SPSC ring buffer coordinates communication using atomic head and tail pointers with explicit acquire-release semantics:
 
@@ -857,16 +886,17 @@ public:
 };
 ```
 
-By separating `write_index_` and `read_index_` onto distinct 64-byte cache lines (`alignas(64)`), this data structure guarantees that the producer's atomic increments never invalidate the consumer's private L1 cache line, completely eliminating MESI cache line bouncing.
+By separating `write_index_` and `read_index_` onto distinct 64-byte cache lines (`alignas(64)`), this data structure guarantees that the producer's atomic increments never invalidate the consumer's private L1 cache line, completely eliminating MESI cache line bouncing. Furthermore, sizing `Capacity` to an exact power of two allows pointer wrapping `index mod Capacity` to compile into a single-cycle bitwise AND `index & (Capacity - 1)`, replacing integer division instructions (`idiv`/`div`) that consume 15 to 40 clock cycles on modern microprocessors.
 
 ### Multi-rate synchronization: Double-buffering versus triple-buffering
 
 In cyber-physical machines, producer and consumer tasks rarely execute at the same frequency. A multimodal vision-language-action policy may produce candidate trajectory chunks at $20\text{ Hz}$ ($50\text{ ms}$ period) with variable inference jitter ($\pm 15\text{ ms}$), while the downstream safety permission filter and motor tracking loop execute strictly at $1\text{ kHz}$ ($1\text{ ms}$ period).\index{Concurrency!double-buffering}\index{Concurrency!triple-buffering}\index{Multi-rate synchronization!wait-free buffers}
 
-**The Limitations of Double-Buffering.** In a standard double-buffering architecture, memory is split into a front buffer (read by consumer) and a back buffer (written by producer):
+**The Limitations of Double-Buffering in Asymmetric Pipelines.** In classical embedded systems, double-buffering (ping-pong buffering) works effectively for symmetric rate pipelines—such as audio DAC or camera sensor DMA—where producer and consumer run in lockstep at the identical sampling cadence. In asymmetric multi-rate physical AI pipelines, however, standard double-buffering introduces a fatal trilemma:
 
-* If the reader and writer synchronize via a lock or flip-flag, the high-frequency $1\text{ kHz}$ consumer must stall whenever the $20\text{ Hz}$ producer is in the middle of writing a multi-kilobyte trajectory payload, violating the consumer's $1\text{ ms}$ hard real-time deadline.
-* If the consumer does not wait, it either reads partially written, torn memory or is forced to continue re-reading stale data across dozens of cycles without knowing whether an update was attempted.
+1. *Reader Stalls on Lock*: If the reader and writer synchronize via a mutex or flip-flag, the high-frequency $1\text{ kHz}$ consumer must stall whenever the $20\text{ Hz}$ producer is computing and writing a multi-kilobyte trajectory payload, violating the consumer's $1\text{ ms}$ hard real-time deadline for dozens of consecutive cycles.
+2. *Data Tearing*: If the consumer flips or reads without waiting while the producer is actively writing, it reads partially written, incoherent memory—a **torn state**. Ingesting a torn trajectory that splices half old and half new setpoints creates step discontinuities in commanded positions, generating infinite theoretical velocities ($d\mathbf{q}/dt \to \infty$) and violent torque spikes that trip motor drive overcurrent protections or shear mechanical gear teeth.
+3. *Writer Priority Inversion*: If the writer holds the back buffer until done, and the reader only flips when the writer completes, a collision occurs whenever the writer finishes while the reader is actively reading. The writer cannot start populating the next trajectory chunk without overwriting the reader's active buffer, introducing backpressure and pipeline bubbles into the neural policy.
 
 **Triple-Buffering Protocol.** To achieve completely non-blocking, wait-free, zero-copy, and tear-free state transfer across asynchronous clock domains, physical AI systems employ **triple-buffering**:
 
@@ -890,7 +920,7 @@ Under triple-buffering, neither producer nor consumer ever blocks or spins on a 
 
 ### CUDA inter-process communication for multi-accelerator pipelines
 
-On high-throughput robotics platforms (such as autonomous mobile robots equipped with multiple GMSL2 camera clusters and lidar arrays), raw perception data streams into accelerator GPU memory for tensor processing. In modular physical AI software architectures, perception preprocessing (e.g., optical flow, spatial unprojection, and feature extraction) and foundation policy inference often execute in separate Linux processes for fault containment. Passing multi-gigabyte tensor buffers between processes via host system RAM consumes tens of gigabytes per second of shared DRAM bandwidth, precipitating memory bus contention.\index{CUDA!Inter-Process Communication}\index{CUDA IPC!zero-copy tensor sharing}\index{Peer-to-peer DMA!accelerator IPC}
+On high-throughput robotics platforms (such as autonomous mobile robots equipped with multiple GMSL2 camera clusters and lidar arrays), raw perception data streams into accelerator GPU memory for tensor processing. In modular physical AI software architectures, perception preprocessing (e.g., optical flow, spatial unprojection, and feature extraction) and foundation policy inference often execute in separate Linux processes for fault containment. Passing multi-gigabyte tensor buffers between processes via host system RAM consumes tens of gigabytes per second of shared DRAM bandwidth, precipitating memory bus contention.\index{CUDA!Inter-Process Communication}\index{CUDA IPC!zero-copy tensor sharing}\index{Peer-to-peer DMA!accelerator IPC}\index{Multi-accelerator!peer-to-peer pipelines}
 
 To eliminate host DRAM staging entirely, **CUDA Inter-Process Communication (CUDA IPC)** enables direct peer-to-peer GPU memory access across distinct Linux process address spaces:
 
@@ -924,6 +954,8 @@ launch_vla_encoder_kernel<<<grid, block, 0, compute_stream>>>(d_mapped_tensor);
 // Clean up mapping upon pipeline shutdown
 cudaIpcCloseMemHandle((void *)d_mapped_tensor);
 ```
+
+CUDA IPC relies on strict memory allocation invariants: exported memory must be allocated as device memory via `cudaMalloc()` within the GPU's physical device memory. Managed memory (`cudaMallocManaged`) and host pinned memory are explicitly unsupported by the CUDA IPC subsystem. In multi-accelerator architectures (such as dual-SoC robotics platforms equipped with multiple GPU dies connected via NVLink or PCIe switches), `cudaIpcOpenMemHandle()` leverages Peer-to-Peer (P2P) DMA. Rather than copying tensor buffers through host DRAM, the GPU hardware memory management unit (MMU) routes memory transactions directly across high-speed interconnect links, eliminating host CPU DRAM double-buffering and saving tens of gigabytes per second of shared bus bandwidth.
 
 **Cross-Process CUDA Event Synchronization.** To synchronize GPU execution across processes without round-tripping to host CPU threads, CUDA IPC exports GPU hardware synchronization primitives via `cudaIpcGetEventHandle()` and `cudaIpcOpenEventHandle()`. Process A records an event in hardware (`cudaEventRecord(event, producer_stream)`). Process B imports the event handle and enqueues a hardware barrier on its local stream:
 $$ \text{cudaStreamWaitEvent}(\text{consumer\_stream}, \text{imported\_event}, 0) $$
@@ -1065,6 +1097,7 @@ On shared physical buses, $N_{\text{axes}}$ actuator drives transmit telemetry a
 * *Framing and Payload Constraints*: Standard CAN 2.0B frames support either an 11-bit standard or 29-bit extended identifier, with payload length strictly capped at $B_{\text{payload}} \le 8\text{ bytes}$ via a 4-bit Data Length Code (DLC).
 * *Bit-Stuffing and Latency*: To preserve transceiver phase-locked loop (PLL) clock synchronization, the physical layer inserts an opposite stuff bit after every 5 consecutive identical bits in the arbitration and data fields. On a $1\text{ Mbps}$ bus, an 8-byte frame (containing approximately 108 to 130 bits depending on stuff-bit insertion) requires $108\text{--}130\,\mu\text{s}$ to serialize:
 $$ t_{\text{frame,CAN2.0B}} \approx \frac{47 + 8 B_{\text{payload}} + \lfloor (34 + 8 B_{\text{payload}} - 1) / 4 \rfloor}{R_{\text{bit}}} $$
+
 * *The Scalability Bottleneck*: On a $1\text{ ms}$ ($1000\,\mu\text{s}$) control cycle, a single CAN 2.0B bus operating at $1\text{ Mbps}$ can transport at most 6 to 7 messages before exceeding $80\text{ percent}$ bus load, above which arbitration queueing delays diverge. Servicing a modern 30-axis humanoid robot would require at least 5 to 6 independent physical CAN buses, creating severe wiring harness bulk and complex multi-bus gateway synchronization overheads.
 
 **CAN-FD Dual-Rate Bit Timing and Arbitration.** Controller Area Network with Flexible Data-Rate (CAN-FD, ISO 11898-1:2015) overcomes the payload and bandwidth limits of classical CAN through dual bit-rate switching and payload expansion up to 64 bytes:
@@ -1127,17 +1160,23 @@ at 1 Gbps, reclaiming more than 90 percent of the lost guard band bandwidth and 
 
 : **Comprehensive Architectural Synthesis of Real-Time Fieldbus Protocols**: Comparison of CAN 2.0B, CAN-FD, EtherCAT, and IEEE TSN across physical layer, framing, arbitration, jitter, and multi-axis control capacity. {#tbl-fieldbus-comparative-synthesis tbl-colwidths="[18,20,20,21,21]"}
 
-**Fieldbus Cycle Budget Synthesis.** The achievable control cycle period $T_{\text{cycle}}$ across these four fieldbus architectures reflects their distinct arbitration mechanisms:
+**Fieldbus Cycle Budget Synthesis.** The achievable control cycle period $T_{\text{cycle}}$ across these four fieldbus architectures reflects their distinct physical arbitration and forwarding models:
 
 * **CAN 2.0B**: Cycle time is constrained by serial frame durations and lower-priority blocking over 8-byte messages:
 $$ T_{\text{cycle}} \ge \sum_{i=1}^{N_{\text{axes}}} t_{\text{frame,CAN2.0B},i} + \max_{k \in lp} t_{\text{frame,CAN2.0B},k} + t_{\text{margin}} $$
+Because every axis requires an independent frame and independent bitwise arbitration, cycle time scales linearly with $N_{\text{axes}}$. At 1 Mbps, each 8-byte frame consumes $108\text{--}130\,\mu\text{s}$, bounding single-bus capacity to at most 6 to 7 axes at 1 kHz before exceeding the 80 percent stability ceiling.
+
 * **CAN-FD**: Cycle time is constrained by dual-rate serialization and lower-priority blocking over up to 64-byte messages:
 $$ T_{\text{cycle}} \ge \sum_{i=1}^{N_{\text{axes}}} t_{\text{frame},i} + \max_{k \in lp} t_{\text{frame},k} + t_{\text{margin}} $$
+While accelerating the data phase to 2 to 8 Mbps reduces payload serialization time, CAN-FD remains non-preemptive: a lower-priority 64-byte message caught in transmission blocks the entire bus for up to $300\text{--}400\,\mu\text{s}$ ($\max_{k \in lp} C_k$), capping capacity to 10 to 15 axes at 1 kHz per physical bus.
+
 * **EtherCAT**: Cycle time is constrained by on-the-fly ring forwarding across $S$ slave controllers:
 $$ T_{\text{cycle}} \ge \sum_f \frac{B_f}{R_{\text{link}}} + t_{\text{master}} + \sum_{s=1}^S t_{\text{slave},s} + t_{\text{prop}} + t_{\text{guard}} $$
+EtherCAT decouples cycle latency from axis count by packing all $N_{\text{axes}}$ setpoints and feedback into a single standard Ethernet frame ($B_f$). Slaves process data on the fly within internal hardware shift registers with sub-microsecond latency ($t_{\text{slave},s} \approx 1.0\,\mu\text{s}$), enabling 30 to 64 axes to complete an entire round-trip in less than $100\,\mu\text{s}$ at 100 Mbps, consuming less than 10 percent of the 1 ms control period.
+
 * **TSN (802.1Qbv)**: Cycle time partitions transmission into scheduled and best-effort windows bounded by network synchronization uncertainty:
 $$ T_{\text{cycle}} \ge T_{\text{ST}} + t_{\text{guard}} + T_{\text{BE}} + \Delta_{\text{sync}} $$
-where $\Delta_{\text{sync}}$ is the maximum clock synchronization skew across network bridges. See @sec-nervous-deterministic-fieldbuses, @sec-nervous-cadences, and @sec-nervous-fieldbus-architectures for hardware fieldbus selection across the nervous system.
+where $\Delta_{\text{sync}}$ is the maximum clock synchronization skew across network bridges (bounded to $< 100\text{ ns}$ by IEEE 802.1AS gPTP). Hardware-enforced Gate Control Lists isolate Scheduled Traffic ($T_{\text{ST}}$) from Best-Effort video bursts ($T_{\text{BE}}$), while IEEE 802.1Qbu frame preemption reduces the required guard band $t_{\text{guard}}$ from an entire 1,518-byte MTU down to a single 123-byte fragment ($0.98\,\mu\text{s}$ at 1 Gbps), reclaiming over 90 percent of idle bus capacity. See @sec-nervous-deterministic-fieldbuses, @sec-nervous-cadences, and @sec-nervous-fieldbus-architectures for hardware fieldbus selection across the nervous system.
 
 ### Lock-free seqlocks for multi-rate shared memory
 
