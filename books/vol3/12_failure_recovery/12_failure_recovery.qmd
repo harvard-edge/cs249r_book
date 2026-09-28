@@ -148,7 +148,7 @@ Associate effects and cleanup obligations with their logical operations, resourc
 
 Restoring a branch's workspace or plan does not rewind the external environment to the branch point. The restored continuation must use observations valid for its candidate and dependencies; evidence from an abandoned candidate cannot be reused merely because both branches have the same ancestor. @Sec-vol3-persistence-replay established this distinction for counterfactual execution. Here it prevents a local branch change from silently erasing external recovery duties.
 
-::: {#chk-11-sagas-compensation .callout-checkpoint title="Compensation obligations and dependency scope"}
+::: {#chk-12-sagas-compensation .callout-checkpoint title="Compensation obligations and dependency scope"}
 
 - [ ] **Registration**: Provisioning returns its resource identifier only after creation. What must be recorded before dispatch, and what can be bound only afterward?
 - [ ] **Unknown creation**: Why does an empty resource lookup not necessarily justify closing cleanup when a provisioning request may still be delayed?
@@ -267,7 +267,7 @@ class RepairVsUnwind:
     exp_usd_str = fmt_usd(exp_usd, precision=5)
 ```
 
-::: {#nbk-11-repair-vs-unwind .callout-notebook title="Repair versus unwind at matched readiness"}
+::: {#nbk-12-repair-vs-unwind .callout-notebook title="Repair versus unwind at matched readiness"}
 
 **Problem**: After the locally rejected integration-test configuration, at what repair success probability does one attempt become cheaper than immediate compensation and rebuilding, measured separately in time and model dollars? Both paths end with a usable isolated environment and a validated configuration ready to submit the same integration test against `ws_r18`. Rebuilding can produce a different environment identity with equivalent required readiness. Neither path includes executing or passing that test, and neither establishes whole-task acceptance.
 
@@ -462,7 +462,7 @@ class LoopCost:
     avoided_usd_str = fmt_usd(avoided_charge, precision=2)
 ```
 
-::: {#nbk-11-loop-cost .callout-notebook title="What an undetected loop costs"}
+::: {#nbk-12-loop-cost .callout-notebook title="What an undetected loop costs"}
 
 **Problem**: Assume a loop continues to a `{python} LoopCost.cap_str`-turn ceiling unless the runtime intervenes after completed turn `{python} LoopCost.detect_str`. How much model spending and elapsed loop time does the intervention avoid? The intervention turn is stipulated, not a guaranteed first-detection time.
 
@@ -562,7 +562,8 @@ A local request-slot limit also does not bound remote jobs that survive client t
 # CAPACITY AND JITTER UNDER DECLARED LOAD (LEGO)
 # Goal: Separate bounded occupancy from probabilistic retry arrivals.
 # Scope: Hypothetical blocking-worker burst and a separate retry cohort.
-from mlsysim.fmt import fmt, fmt_int, check
+from mlsysim import second
+from mlsysim.fmt import fmt, fmt_int, fmt_time, fmt_rate, check
 
 class ContainmentCapacity:
     # 1. LOAD: scenario inputs, not production recommendations.
@@ -571,8 +572,8 @@ class ContainmentCapacity:
     external_cap = 64
     queue_cap = 32
     retry_count = 128
-    jitter_s = 2.0
-    burst_s = 0.002
+    jitter = 2 * second
+    burst = 0.002 * second
 
     # 2. EXECUTE: no completions during the initial admission burst.
     uncapped_busy = min(arrivals, workers)
@@ -581,15 +582,15 @@ class ContainmentCapacity:
     queued = min(arrivals - capped_busy, queue_cap)
     rejected = arrivals - capped_busy - queued
     protected_workers = workers - capped_busy
-    synchronized_window_rate = retry_count / burst_s
-    mean_jitter_rate = retry_count / jitter_s
-    expected_in_window = retry_count * burst_s / jitter_s
+    synchronized_window_rate = retry_count / burst
+    mean_jitter_rate = retry_count / jitter
+    expected_in_window = (retry_count * burst / jitter).to("").magnitude
 
     # 3. GUARD: independent arithmetic and conservation checks.
     check(capped_busy + queued + rejected == arrivals, "Account for every arrival")
     check((uncapped_free, protected_workers, queued, rejected) == (44, 236, 32, 160), "Occupancy worksheet")
-    check(synchronized_window_rate == 64000, "Window-average synchronized rate")
-    check(mean_jitter_rate == 64, "Expected offered rate within jitter window")
+    check(synchronized_window_rate == 64000 / second, "Window-average synchronized rate")
+    check(mean_jitter_rate == 64 / second, "Expected offered rate within jitter window")
     check(abs(expected_in_window - 0.128) < 1e-12, "Expected count, not maximum")
 
     # 4. OUTPUT: each export is consumed by the notebook.
@@ -597,14 +598,15 @@ class ContainmentCapacity:
     cap_str, queue_str = fmt_int(external_cap), fmt_int(queue_cap)
     uncapped_free_str = fmt_int(uncapped_free)
     protected_str, rejected_str = fmt_int(protected_workers), fmt_int(rejected)
-    retries_str, jitter_str = fmt_int(retry_count), fmt_int(jitter_s)
-    burst_ms_str = fmt_int(burst_s * 1000)
-    synchronized_str = fmt_int(synchronized_window_rate)
-    mean_str = fmt_int(mean_jitter_rate)
+    retries_str = fmt_int(retry_count)
+    jitter_str = fmt_time(jitter, unit="second", precision=0)
+    burst_ms_str = fmt_time(burst, unit="ms", precision=0)
+    synchronized_str = fmt_rate(synchronized_window_rate.to(1 / second).magnitude, "requests/s", precision=0)
+    mean_str = fmt_rate(mean_jitter_rate.to(1 / second).magnitude, "requests/s", precision=0)
     expected_str = fmt(expected_in_window, precision=3)
 ```
 
-::: {#nbk-11-sizing-bulkhead-capacity-and-jitter .callout-notebook title="What capacity and jitter actually bound"}
+::: {#nbk-12-sizing-bulkhead-capacity-and-jitter .callout-notebook title="What capacity and jitter actually bound"}
 
 **Problem**: Which worker-occupancy limits can bounded admission guarantee in the stated burst, and which retry-arrival quantities does jitter determine only in expectation?
 
@@ -612,13 +614,13 @@ class ContainmentCapacity:
 
 **Bounded admission**: Now cap that dependency at `{python} ContainmentCapacity.cap_str` occupied workers and `{python} ContainmentCapacity.queue_str` waiting requests. Queued requests do not occupy workers. The burst fills both limits and rejects `{python} ContainmentCapacity.rejected_str` requests before dispatch. It cannot occupy `{python} ContainmentCapacity.protected_str` workers in the shared pool. This protects worker availability from this dependency's occupancy, not those workers' CPU time or storage access from every competing load.
 
-**Retry arrivals**: Separately, consider `{python} ContainmentCapacity.retries_str` eligible retries released at one time, with no subsequent retries or unrelated traffic. If they all arrive in a stipulated `{python} ContainmentCapacity.burst_ms_str` ms interval, the average over that interval is `{python} ContainmentCapacity.synchronized_str` requests/s. If each independently chooses an arrival uniformly across `{python} ContainmentCapacity.jitter_str` s, the expected offered rate inside that interval is `{python} ContainmentCapacity.mean_str` requests/s. A fixed `{python} ContainmentCapacity.burst_ms_str` ms subinterval has expected count `{python} ContainmentCapacity.expected_str`; its realized count can be larger. These are arrival assumptions before further admission shaping, not a measured server-capacity result.
+**Retry arrivals**: Separately, consider `{python} ContainmentCapacity.retries_str` eligible retries released at one time, with no subsequent retries or unrelated traffic. If they all arrive in a stipulated `{python} ContainmentCapacity.burst_ms_str` interval, the average over that interval is `{python} ContainmentCapacity.synchronized_str`. If each independently chooses an arrival uniformly across `{python} ContainmentCapacity.jitter_str`, the expected offered rate inside that interval is `{python} ContainmentCapacity.mean_str`. A fixed `{python} ContainmentCapacity.burst_ms_str` subinterval has expected count `{python} ContainmentCapacity.expected_str`; its realized count can be larger. These are arrival assumptions before further admission shaping, not a measured server-capacity result.
 
 **Systems insight**: The execution and queue caps give deterministic occupancy limits under the stated mediation assumptions. Jitter gives a probability distribution, not a peak guarantee. Neither calculation proves that a remote service will accept the requests, finish their work, or preserve the task's intended effects.
 
 :::
 
-::: {#chk-11-pool-exhaustion .callout-checkpoint title="Contain load without erasing uncertainty"}
+::: {#chk-12-pool-exhaustion .callout-checkpoint title="Contain load without erasing uncertainty"}
 
 - [ ] **Stale probe**: A probe times out, the breaker reopens, and its success arrives during a newer trial. What may that evidence update, and why must it not close the current breaker?
 - [ ] **Safe repeat**: The breaker is closed and the retry delay has elapsed, but the earlier test outcome remains unknown. Which additional contract and admission checks are required?
@@ -743,7 +745,7 @@ A fault-test plan makes the worksheet's claims observable. Use isolated task fix
 
 : **Fault-test plan for recovery contracts**: Inspect effects and surviving obligations as well as local status. Expected behavior is a test target, not an empirical finding or an end-to-end availability guarantee. {#tbl-vol3-resilience-metrics}
 
-Report outcomes separately. Count accepted tasks under the specified completion criteria, established compensation postconditions, duplicate effects, and residual resources without an assigned owner. Also report unresolved outcomes and unavailable evidence instead of excluding those cases from a success denominator. A trajectory can satisfy a containment check while failing its task, or pass its task checks while leaving cleanup unresolved; whether that residue is permitted belongs in the declared contract.
+Report outcomes separately. Count accepted tasks under the specified completion criteria, established compensation postconditions, duplicate effects, and residual resources without an assigned owner. Also report unresolved outcomes and unavailable evidence instead of excluding those cases from a success denominator. A trajectory can satisfy a containment check while failing its task, or pass its task checks while leaving cleanup unresolved; whether that residue is permitted belongs in the declared contract. @Sec-vol3-fail-report provides a reusable report template linking the observed violation, competing explanations, tested correction, and limits of its regression evidence.
 
 Measure elapsed intervals with named endpoints: fault to detection, detection to a guarded continuation or handoff, and fault to established settlement where settlement occurs. Cases still unresolved at the observation cutoff have no measured settlement time; report their count and elapsed observation time rather than averaging only the resolved cases as though all recovered. Account separately for recovery calls, retained resources, storage work, actual charges, and still-reserved liability. Reaching `READY`, receiving a model token, and establishing a correct task result are different milestones.
 

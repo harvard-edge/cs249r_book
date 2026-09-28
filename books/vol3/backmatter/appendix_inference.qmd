@@ -1,27 +1,26 @@
 # Inference Cost Foundations {#sec-vol3-appendix-inference}
 
-An agent engineer may use a hosted model or operate the serving system. In either case, model calls consume computation and storage: output generation and prompt processing have different execution costs, retained attention state occupies serving memory, and holding that state through a tool wait can consume capacity without generation. The chapters state these consequences where they are first needed and price them in tokens, turns, seconds, and dollars. This appendix derives the underlying estimates from how a model is served, so that a reader who wants to check a chapter's claim, or redo an estimate for a different model or accelerator, has the arithmetic in one place. The reference inputs are collected in @sec-vol3-appendix-inference-assumptions for substitution.
+This appendix supplies the serving arithmetic behind model-call latency, attention-state storage, and resource occupancy. It provides reusable estimates for comparing prompt processing with generation, sizing retained state, and separating average demand from capacity guarantees. Each estimate states its assumptions so that a reader can substitute another model, serving configuration, or workload without treating the reference values as universal performance claims.
 
 ## How to Use This Appendix {.unnumbered}
 
 Start from the agent-level question in @tbl-appdx-inference-lookup and jump to the section that derives its answer.
 
-| If you need to know...                                                                      | Jump to...                               | What you get                                                                                 |
-|:--------------------------------------------------------------------------------------------|:-----------------------------------------|:---------------------------------------------------------------------------------------------|
-| Why an output token costs about two orders of magnitude more time than a prompt token       | @sec-vol3-appendix-inference-roofline    | The roofline, prefill and decode intensity, per-token floors, and where the ratio comes from |
-| Why time to first token grows faster than linearly at long contexts                         | @sec-vol3-appendix-inference-roofline    | The attention term of prefill and the length at which it matches the weight term             |
-| Why batching lowers the fleet's cost per token but not one trajectory's latency             | @sec-vol3-appendix-inference-roofline    | Step time as a function of batch size; the batch at which decode turns compute-bound         |
-| Where sampling and grammar masks run, and why speculative decoding preserves the output     | @sec-vol3-appendix-inference-decode-loop | Logit versus token-identifier transfer, mask table sizes, and the acceptance rule            |
-| How much memory a trajectory's context occupies, and how attention design changes it        | @sec-vol3-appendix-inference-kv-cache    | Bytes per token from model geometry, multi-head versus grouped versus multi-query attention  |
-| How many trajectories are live at once, and how tool waits and utilization inflate capacity | @sec-vol3-appendix-inference-queueing    | Little's law with tool waits, resident versus active state, and the queueing knee            |
-| Why database transactions do not extend to an agent's tools                                 | @sec-vol3-appendix-inference-distributed | Two-phase commit, sagas, and write-ahead logging as background                               |
-| Which model, accelerator, and node values the book assumes                                  | @sec-vol3-appendix-inference-assumptions | The reference inputs, ready to substitute                                                    |
+| If you need to know...                                                               | Jump to...                               | What you get                                                                                |
+|:-------------------------------------------------------------------------------------|:-----------------------------------------|:--------------------------------------------------------------------------------------------|
+| When output generation and prompt processing have different per-token costs          | @sec-vol3-appendix-inference-roofline    | Conditional compute and bandwidth floors, not measured service latency                      |
+| When attention work matters in long-context prefill                                  | @sec-vol3-appendix-inference-roofline    | The attention term and the length at which it matches the weight term                       |
+| How batching changes amortized serving time and per-stream latency                   | @sec-vol3-appendix-inference-roofline    | Weight reuse across streams and the limits of a weight-only estimate                        |
+| How sampling placement, grammar masks, and speculative verification add work         | @sec-vol3-appendix-inference-decode-loop | Transfer and storage formulas, plus the conditions for exact speculative sampling           |
+| How much memory a trajectory's context occupies, and how attention design changes it | @sec-vol3-appendix-inference-kv-cache    | Bytes per token from model geometry, multi-head versus grouped versus multi-query attention |
+| How tool waits change live state and how load changes waiting                        | @sec-vol3-appendix-inference-queueing    | Little's law with matched boundaries and a scoped single-server waiting approximation       |
+| Which model, accelerator, and node values the book assumes                           | @sec-vol3-appendix-inference-assumptions | The reference inputs, ready to substitute                                                   |
 
 : **Question-to-Derivation Lookup**: Agent-level questions and the sections that derive their answers. {#tbl-appdx-inference-lookup tbl-colwidths="[42,26,32]"}
 
 ## Cost Asymmetry Between Input Prefill and Output Generation {#sec-vol3-appendix-inference-roofline}
 
-Serving foundation models within agentic runtime loops exposes a fundamental operational asymmetry: processing input prompt context and generating autoregressive output tokens incur vastly different hardware resource constraints. While prompt prefill parallelizes efficiently across accelerator tensor cores as a compute-bound matrix multiplication, sequential token decoding executes as a memory-bandwidth-bound vector-matrix operation. Quantifying this disparity provides the mathematical foundation for agent context budgeting, speculative acceleration, and cluster provisioning.
+Prompt processing can reuse a model's weights across many token positions, whereas unbatched generation uses those weights for one new position at a time. That difference can make prefill arithmetic-bound and decode bandwidth-bound. Neither regime follows from the phase name alone. Prompt length, batching, attention traffic, and the serving implementation determine which resource limits an actual call. A weight-only estimate isolates the reuse effect before adding those complications.
 
 ```{python}
 #| label: calc-vol3-appendix-inference-serving-ref
@@ -43,10 +42,10 @@ Serving foundation models within agentic runtime loops exposes a fundamental ope
 # │ How:  Roofline with 8-bit weights at the peak 8-bit rate; attention FLOPs
 # │       2 L d S^2 for a causal prefill; calc_kv_cache_size on registry
 # │       geometry. Model, accelerator, and node come from MLSysIM
-# │       (Llama-3-70B, H100, DGX H100); the prose names none of them.
+# │       (Llama-3-70B, H100, DGX H100), identified in Reference Values.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.fmt import fmt_memory_capacity
+from mlsysim.fmt import fmt_memory
 
 class ServingRef:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
@@ -92,7 +91,7 @@ class ServingRef:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(ratio - b_star) / ratio < 1e-9, "The decode/prefill ratio must equal the compute-bound pass size")
-    check(ratio > 100, f"An output token should cost two orders of magnitude more time than a prompt token, got {ratio:.0f}")
+    check(ratio > 100, f"The reference weight-only floor ratio should exceed 100, got {ratio:.0f}")
     check(int(m_token) == 327_680, "KV bytes per token must equal 2 * 80 * 8 * 128 * 2")
     check(conc_agent == 48, f"Node concurrency at 32k must match the KV chapter, got {conc_agent}")
     check(s_cross > s_agent, "Attention arithmetic should stay below weight arithmetic at the agent context length")
@@ -126,32 +125,33 @@ class ServingRef:
     reserve_str = fmt_int(runtime_reserve.to(GB).magnitude)
     pool_str = fmt(pool_gb, precision=1)
     conc_agent_str = fmt_int(conc_agent)
-    acc_hbm_str = fmt_memory_capacity(node.accelerator.memory.capacity, unit=GiB)
+    acc_hbm_str = fmt_memory(node.accelerator.memory.capacity, unit=GB, precision=1)
+    node_hbm_str = fmt_memory(n_acc * node.accelerator.memory.capacity, unit=GB, precision=1)
 ```
 
-Every model call does two kinds of work. It reads the prompt, a step called prefill, and it generates the reply one token at a time, a step called decode. The two run on the same accelerator and use the same weights, yet an output token costs about `{python} ServingRef.ratio_str` times as much time as a prompt token on the reference configuration. That ratio is the most consequential serving fact for agent design (principle \ref{pri-vol3-memory-bandwidth-decoding}), and it follows from one model of accelerator performance.
+A model call processes the uncached prompt during prefill and generates new tokens during decode. Both phases use the same weights, but the reference calculation yields a ratio of about `{python} ServingRef.ratio_str` between the unbatched weight-transfer floor per output token and the arithmetic floor per prompt token. We compare these conditional floors to explain the bandwidth constraint (principle \ref{pri-vol3-memory-bandwidth-decoding}), not to predict the ratio of measured call latencies or token prices.
 
 ### The roofline
 
-An accelerator has two limits, the rate $\pi$ at which it performs arithmetic (operations per second) and the rate $\beta$ at which its memory delivers data (bytes per second). A computation's **arithmetic intensity** $\mathcal{I}$ is the number of operations it performs per byte it moves. The roofline model [@williams2009] bounds attainable performance by whichever limit binds first:
+An accelerator has two limits, the rate $\pi$ at which it performs arithmetic (operations per second) and the rate $\beta$ at which its memory delivers data (bytes per second). A computation's **arithmetic intensity** $\mathcal{I}$ is the number of operations it performs per byte it moves. The roofline model [@williams2009] gives a performance ceiling $P$ from whichever limit binds first:
 
 $$P = \min\left( \pi, \; \mathcal{I} \cdot \beta \right)$$
 
-The two limits meet at the ridge point $\mathcal{I}^* = \pi / \beta$. A computation with $\mathcal{I} < \mathcal{I}^*$ is limited by memory bandwidth, and adding arithmetic capacity does nothing for it; a computation with $\mathcal{I} \ge \mathcal{I}^*$ is limited by arithmetic. For the reference accelerator at 8-bit precision, $\pi$ = `{python} ServingRef.peak_str` trillion operations per second and $\beta$ = `{python} ServingRef.bw_str` TB/s, so $\mathcal{I}^* \approx$ `{python} ServingRef.ridge_str` operations per byte.
+The two ceilings meet at the ridge point $\mathcal{I}^* = \pi / \beta$. Below the ridge, bandwidth supplies the lower ceiling; above it, arithmetic supplies the lower ceiling. Actual performance can fall below either ceiling because of implementation and scheduling overhead. For the reference accelerator at 8-bit precision, $\pi$ = `{python} ServingRef.peak_str` trillion operations per second and $\beta$ = `{python} ServingRef.bw_str` TB/s, so $\mathcal{I}^* \approx$ `{python} ServingRef.ridge_str` operations per byte.
 
 ### Prefill and decode
 
-A transformer with $N$ parameters performs about $2N$ operations per token, one multiply and one add per weight, and must read its $N b$ bytes of weights, where $b$ is bytes per parameter. What differs between prefill and decode is how many tokens share one read of the weights.
+A dense transformer with $N$ active parameters performs about $2N$ weight-related operations per token, one multiply and one add per weight. Its weight payload is $N b$ bytes, where $b$ is bytes per parameter. The approximation counts this payload once per pass; prefill and decode differ in how many tokens share that read. Sparse activation and weight reuse from another cache level require a different traffic count.
 
-Prefill processes all $S$ prompt tokens in one pass, so one read of the weights serves $S$ tokens, and its intensity is about $2NS / Nb = 2S/b$. For any prompt longer than a few hundred tokens this is far above the ridge, prefill is limited by arithmetic, and its time per token approaches
+In the weight-only model, prefill shares each weight read across $S$ prompt positions, giving intensity $2NS / Nb = 2S/b$. When that intensity exceeds the ridge and arithmetic approaches the stated peak, the per-token time approaches the following floor. Small prompts, kernel tiling, attention, and additional memory traffic can invalidate those assumptions.
 
 $$t_{\text{prefill}} \approx \frac{2N}{\pi}$$ {#eq-appdx-prefill-time}
 
-Decode for a single stream generates one token per pass, and each token depends on the one before it, so the pass cannot be widened. One read of all the weights serves one token, the intensity is $2/b$, which is `{python} ServingRef.i_decode_str` operations per byte at 8-bit precision and about `{python} ServingRef.util_decode_str` percent of the ridge, and the time per token is set by how fast the weights stream from memory:
+Ordinary decode for one stream generates one token per pass, with each token depending on the preceding prefix. If the weights must be read from the modeled memory on every pass, the weight-only intensity is $2/b$, or `{python} ServingRef.i_decode_str` operations per byte at 8-bit precision, about `{python} ServingRef.util_decode_str` percent of the ridge. Streaming those weights imposes a time floor even before attention-state traffic and overhead:
 
 $$t_{\text{decode}} \ge \frac{N b}{\beta}$$ {#eq-appdx-shuttle-floor}
 
-For the reference model, with $N$ = `{python} ServingRef.params_b_str` billion parameters at 8-bit precision, @eq-appdx-shuttle-floor gives a decode floor of `{python} ServingRef.t_dec_val_str` ms per output token, and @eq-appdx-prefill-time gives about `{python} ServingRef.t_pre_val_str` µs per prompt token. The ratio of the two is
+For the reference model, with $N$ = `{python} ServingRef.params_b_str` billion parameters at 8-bit precision, @eq-appdx-shuttle-floor gives a decode floor of `{python} ServingRef.t_dec_val_str` ms per output token, and @eq-appdx-prefill-time gives about `{python} ServingRef.t_pre_val_str` µs per prompt token. In the following comparison only, the time symbols denote these weight-only estimates rather than observed times:
 
 $$\frac{t_{\text{decode}}}{t_{\text{prefill}}} = \frac{N b / \beta}{2N / \pi} = \frac{\pi \, b}{2 \beta} = \frac{b}{2} \, \mathcal{I}^*$$ {#eq-appdx-decode-prefill-ratio}
 
@@ -169,7 +169,7 @@ The quadratic term equals the linear one at $S^* = N / (L d)$, about `{python} S
 
 ### Batching and the fleet's cost per token
 
-A server running many trajectories does not decode them one at a time. It batches their decode steps, so one read of the weights produces one token for each of $B$ streams. Ignoring the attention state each stream also reads, the time of one step is
+A server can batch decode steps from several trajectories. If one weight read serves $B$ streams, the step produces one token for each stream. Ignoring the attention state each stream also reads, the time of one step is
 
 $$t_{\text{step}}(B) \approx \max\left( \frac{N b}{\beta}, \; \frac{2 N B}{\pi} \right)$$ {#eq-appdx-batched-step}
 
@@ -183,33 +183,25 @@ A large admitted prefill can delay decode work sharing its execution resources. 
 
 ## Decode-Loop Mechanics {#sec-vol3-appendix-inference-decode-loop}
 
-Three pieces of per-token work sit inside every decode step besides the forward pass: turning logits into a token, applying any grammar mask, and, when speculative decoding is used, checking drafted tokens. Each is cheap only if it stays beside the sampler. This section sizes them.
+Token selection, optional grammar constraints, and speculative verification add work beyond the model's forward pass. Their placement determines which data crosses a device boundary and which dependencies remain on the generation path. The formulas below separate payload sizes from synchronization and computation costs; a small payload alone does not establish a low latency.
 
 ### Architectural placement of token sampling logic
 
-At each step the model produces one logit per vocabulary entry. With a vocabulary of $|\mathcal{V}| = 128{,}000$ entries stored in 16-bit precision, one logit vector is
+At each step the model produces one logit per vocabulary entry. Let $|\mathcal{V}|$ be the vocabulary size and $b_{\ell}$ the bytes stored per logit. One vector occupies $|\mathcal{V}|b_{\ell}$ bytes. If $B$ streams each emit $R$ tokens per second and transfer one full vector per token to a host sampler, the logit payload rate is $BR|\mathcal{V}|b_{\ell}$ bytes per second. Batching transfers can reduce the number of transfer operations, but not that payload under these assumptions.
 
-$$128{,}000 \times 2\text{ bytes} = 256{,}000\text{ bytes}$$
-
-per stream per token. A server running $B = 64$ streams at $R = 40$ tokens per second per stream emits $B \cdot R = 2{,}560$ tokens per second, so shipping raw logits to a separate process for sampling would move
-
-$$2{,}560 \times 256{,}000\text{ bytes/s} \approx 655\text{ MB/s}$$
-
-across the host interconnect if each stream sends one logit vector per step. Under that transfer pattern, 2,560 transfers per second also incur transfer and synchronization overhead on the decode path. Sampling on the accelerator reduces the selected-token payload to one integer identifier of 4 bytes, or about 10 KB/s for the same load, a payload reduction of $256{,}000 / 4 = 64{,}000\times$ before protocol overhead. This calculation concerns an internal serving interface, not the application response format. A service may decode and buffer tokens into text or structured response chunks whose boundaries need not match tokens; @sec-vol3-foundation-model-contract specifies how the runtime handles that response.
+Sampling on the accelerator permits an interface that transfers only the selected token identifier. If each identifier occupies $b_{\text{id}}$ bytes, its payload rate is $BRb_{\text{id}}$, giving a payload ratio of $|\mathcal{V}|b_{\ell}/b_{\text{id}}$. Neither expression counts protocol framing, requested log probabilities, or synchronization. Those costs must be measured on the actual path before choosing a placement. The calculation concerns an internal serving interface, not the application response format. A service may decode and buffer tokens into response chunks whose boundaries need not match tokens; @sec-vol3-foundation-model-contract specifies how the runtime handles that response.
 
 ### Grammar masks
 
-A grammar-constrained decoder needs the set of legal tokens for the current automaton state at every step (@sec-vol3-foundation-model-grammar-constrained). Stored as one bit per vocabulary entry, a mask for $|\mathcal{V}| = 131{,}072$ occupies
+A grammar-constrained decoder needs the legal tokens for its current parser state at every step (@sec-vol3-foundation-model-grammar-constrained). With one bit per vocabulary entry, a dense mask occupies $\lceil |\mathcal{V}|/8 \rceil$ bytes. If the constraint has a finite-state representation with state set $Q$, a byte-aligned dense table needs $|Q|\lceil |\mathcal{V}|/8 \rceil$ bytes, excluding transitions and metadata. This formula lets us compare a proposed vocabulary and state count with the memory budget without assuming that every grammar has a small finite-state representation.
 
-$$\frac{131{,}072}{8} = 16{,}384\text{ bytes}$$
-
-and a schema that admits a finite-state representation with $|Q| = 512$ states needs $512 \times 16{,}384 = 8{,}388{,}608$ bytes, about 8.4 MB, for its dense mask table, excluding transition metadata. Whether that table fits and remains resident in on-chip cache depends on the accelerator and competing working sets. A precomputed table permits a mask lookup and filtering at the sampling step, but its size alone does not establish the lookup latency or require a particular device placement.
+Whether the table fits and remains resident in on-chip cache depends on the accelerator and competing working sets. Precomputation permits lookup and filtering during sampling, but table size alone establishes neither the lookup latency nor a required device placement.
 
 A host-mediated implementation may instead transfer the selected token to a host process, advance its grammar state, and return the next mask before sampling continues. The cost depends on the implementation and on how much work overlaps model evaluation. Recursive grammars require additional parser state, while compressed structures and precomputation can reduce masking work. The legal-token mask must be available when selection uses it. @Sec-vol3-app-b-logit-masking considers when constraining is worth its cost; @sec-vol3-appendix-math-dfa gives the masking argument, whose complete-output guarantee requires reaching an accepting state under the specified grammar and decoder assumptions. An interrupted legal prefix need not parse as a complete object.
 
 ### Speculative decoding
 
-Speculative decoding shortens the serial chain without changing the output distribution [@leviathan2023fast; @chen2023accelerating]. A small draft model $q$ proposes $k$ tokens $\tilde{x}_1, \dots, \tilde{x}_k$ one after another, which is cheap because the draft model is small. The target model $p$ then scores all $k$ positions in a single forward pass. That pass processes $k$ tokens against one read of the target's weights, so by @eq-appdx-batched-step it costs about as much time as generating one token, as long as $k$ is well below $\pi b / 2\beta$. Scanning left to right, candidate $\tilde{x}_j$ is accepted with probability
+Exact speculative sampling preserves a specified target distribution while checking several draft positions in a target-model pass [@leviathan2023fast; @chen2023accelerating]. A draft distribution $q$ proposes $k$ tokens $\tilde{x}_1, \dots, \tilde{x}_k$ autoregressively. The target computes the distributions needed to verify them and to sample after the full draft. Both $p$ and $q$ below are normalized distributions at the same prefix after their sampling transformations, including any grammar masks. Scanning left to right, candidate $\tilde{x}_j$ is accepted with probability
 
 $$\alpha_j = \min\left(1, \frac{p(\tilde{x}_j \mid \cdot)}{q(\tilde{x}_j \mid \cdot)}\right)$$ {#eq-appdx-spec-accept}
 
@@ -217,7 +209,9 @@ At the first rejection, the remaining drafts are discarded and one replacement t
 
 $$p_{\text{res}}(v) = \frac{\max\left(0,\; p(v) - q(v)\right)}{\sum_{w \in \mathcal{V}} \max\left(0,\; p(w) - q(w)\right)}$$ {#eq-appdx-spec-residual}
 
-Together, the acceptance test of @eq-appdx-spec-accept and the resampling rule of @eq-appdx-spec-residual make each emitted token distributed exactly as if it had been sampled from $p$ alone. Each target pass therefore emits between one and $k + 1$ tokens, and the speedup depends on how often the draft agrees with the target. The serial dependence remains. The target still verifies the drafted tokens in order, and a rejection discards everything after it, so speculative decoding reduces the constant cost per emitted token rather than removing the chain. On a heavily batched server the verification pass competes with other streams for arithmetic, which is why the technique pays most when load is light (@sec-vol3-agent-economics-speculative).
+If every draft is accepted, the sampler draws one bonus token from the target distribution after the full draft. Otherwise, @eq-appdx-spec-residual applies at the first rejected position; its denominator is positive when rejection has positive probability. Together with @eq-appdx-spec-accept, this rule preserves the target sequence distribution under exact sampling and consistent prefix state. It does not promise the same sample for the same random seed. Termination or an output limit may shorten an iteration that otherwise emits between one and $k+1$ tokens.
+
+Weight reuse in @eq-appdx-batched-step explains why verification can cost less than separate target passes. Actual benefit depends on draft cost, acceptance, attention traffic, batch composition, and verification overhead. Those terms can erase the saving; the weight-only threshold is not a speedup guarantee. @Sec-vol3-agent-economics-speculative compares the resulting work and latency at the trajectory boundary.
 
 ## The Size of the Attention State {#sec-vol3-appendix-inference-kv-cache}
 
@@ -251,11 +245,11 @@ Storing each key and value element at 8 rather than 16 bits halves the element p
 
 ### Occupancy during a tool wait
 
-Serving memory is priced by how much is held and for how long. A trajectory whose attention state stays resident through a tool wait of length $t_{\text{wait}}$ occupies
+Memory occupancy depends on how much is held and for how long. A trajectory whose attention state stays resident through a tool wait of length $t_{\text{wait}}$ occupies
 
 $$O = M_{\text{KV}}(T) \cdot t_{\text{wait}}$$
 
-byte-seconds while generating nothing. Because agent tool waits are often much longer than the model calls between them, this idle occupancy can exceed the occupancy of active decoding, which is what makes the retain, evict, recompute, or offload decision of @sec-vol3-kvcache-swapping worth making per wait.
+byte-seconds while generating nothing. When a tool wait exceeds the active generation interval and holds the same footprint, idle occupancy exceeds active occupancy. The relevant inputs are the actual retained bytes and their holding interval, which makes the retain, evict, recompute, or offload decision of @sec-vol3-kvcache-swapping a per-wait decision rather than a fixed property of agents.
 
 ### Paged storage
 
@@ -267,13 +261,13 @@ per sequence. Without that distributional assumption, the unconditional bound is
 
 ## Queueing for Trajectories {#sec-vol3-appendix-inference-queueing}
 
-When scaling autonomous agent workloads across shared cluster infrastructure, capacity planning cannot rely on static peak-provisioning assumptions. Unlike conversational chatbot traffic where requests arrive as isolated queries and terminate promptly, agentic tasks unfold over extended multi-turn horizons characterized by bursty actuation, variable generation lengths, and prolonged idle intervals while awaiting tool execution. Modeling these dynamics requires applying classical queueing theory and Little's law to capture the steep non-linear growth in queueing latency as cluster utilization approaches saturation.
+An agent can remain live while it consumes no accelerator execution time. A retained cache, sandbox lease, and harness record can each span a different interval of that trajectory. Capacity estimates therefore begin by choosing the resource and its acquisition-to-release boundary. Little's law relates average occupancy to that boundary; a separate queueing model estimates waiting under stated arrival and service assumptions.
 
 ```{python}
 #| label: calc-vol3-appendix-inference-trajectory-queue
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ LIVE TRAJECTORIES AND THE QUEUEING KNEE (LEGO)
+# │ LIVE TRAJECTORIES AND LOAD SENSITIVITY (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-vol3-appendix-inference-queueing; cited by the capacity
 # │          sections of @sec-vol3-agent-economics and @sec-vol3-sandboxes.
@@ -350,15 +344,17 @@ class QueueKnee:
     w90_str = fmt(w90, precision=1)
 ```
 
-Capacity for agents is set by how long trajectories live, not by how long calls take, and every resource a trajectory holds for its lifetime must be sized from that lifetime.
+The worked case assumes an unchanged context footprint and no extra waiting. Its averages compare two retention policies; they do not determine peak provisioning or prove that the model-serving system can sustain the offered rate.
 
 ### Continuous batching
 
-A server batches decode steps from many trajectories (@eq-appdx-batched-step), and how it forms those batches decides how long a call waits. A static batch holds every request until the longest one finishes, so a short tool call waits behind a long plan. Continuous batching schedules at the granularity of one decode step [@yu2022orca]. A request whose output ends, whether at a stop token or a tool call, leaves the batch at the next step, and a waiting request, such as a trajectory returning from a tool with a new observation, joins at the next step. A call therefore waits for a free slot rather than for a batch to drain, and the server behaves like a queue with as many servers as it has batch slots. The rest of this section treats it that way.
+A server batches decode steps from many trajectories (@eq-appdx-batched-step). In a fixed-membership batch, finished requests cannot be replaced until the batch drains, although their results need not be withheld. Continuous batching admits and retires requests at iteration boundaries [@yu2022orca]. A returning trajectory can enter a later iteration when memory, token budgets, and scheduling policy permit; a released slot does not promise admission on the immediately following step.
+
+Batch slots are not independent servers. Their occupants share weight reads, arithmetic, memory bandwidth, and iteration time, so one request can change another's service rate. Little's law still applies to a stable measured boundary, but the number of slots cannot be substituted for the number of independent servers in a queueing formula. Predicting delay requires a model or measurements that capture the batching policy and workload mix.
 
 ### Little's law with tool waits
 
-For any stable system, the mean number of items inside it equals their arrival rate times their mean time inside [@little1961]:
+For a stable system with well-defined finite long-run averages, the mean number of items inside a boundary equals their entry rate times their mean time inside that same boundary [@little1961]:
 
 $$L = \lambda \cdot W$$ {#eq-appdx-littles-law}
 
@@ -368,15 +364,19 @@ $$W_{\text{traj}} = \sum_{k=1}^{H} \left( T_{\text{model}}^{(k)} + T_{\text{tool
 
 under the simplifying assumption that model calls and tool operations run sequentially, with no additional approval, queueing, or runtime delay. As a worked case, let trajectories start at `{python} TrajectoryQueue.arrival_str` per second, each running `{python} TrajectoryQueue.turns_str` turns of `{python} TrajectoryQueue.t_model_str` s of model time and `{python} TrajectoryQueue.t_tool_str` s of tool time. Each lives `{python} TrajectoryQueue.w_traj_str` s, about `{python} TrajectoryQueue.w_traj_min_str` minutes, so @eq-appdx-littles-law gives `{python} TrajectoryQueue.live_str` live trajectories. Only `{python} TrajectoryQueue.model_share_str` percent of each trajectory's time is spent in a model call, so on average `{python} TrajectoryQueue.in_call_str` of them are calling the model at any moment.
 
-The gap between those two numbers is the cost of holding state through tool waits. If every live trajectory keeps a `{python} ServingRef.s_agent_str`-token context resident, the attention state totals about `{python} TrajectoryQueue.resident_val_str` TB, about `{python} TrajectoryQueue.nodes_resident_str` nodes' worth of the reference pool of @sec-vol3-appendix-inference-assumptions. If only the trajectories in a model call hold it, the same work needs about `{python} TrajectoryQueue.nodes_in_call_str` nodes' worth, at the price of re-prefilling or reloading each context when its trajectory returns. That trade is the retain, evict, recompute, or offload decision of @sec-vol3-kvcache-swapping. The product of admitted rate and mean lifetime similarly informs average harness-record and sandbox-lease occupancy, not a hard capacity bound or reserve guarantee. Headroom and admission require the workload's variability and the actual replenishment and reclamation policy (@sec-vol3-agent-economics-capacity, @sec-vol3-sandboxes-pooling).
+The gap between those two numbers measures the effect of holding state through tool waits in this workload. If every live trajectory keeps a `{python} ServingRef.s_agent_str`-token context resident, the attention state totals about `{python} TrajectoryQueue.resident_val_str` TB, about `{python} TrajectoryQueue.nodes_resident_str` nodes' worth of the reference pool of @sec-vol3-appendix-inference-assumptions. Holding the same footprint only during the stipulated model-call intervals gives about `{python} TrajectoryQueue.nodes_in_call_str` nodes' worth. Reloading or recomputing on resumption adds time and work omitted from this comparison; recomputing those intervals may change the averages. @Sec-vol3-kvcache-swapping develops that policy choice.
 
-### The queueing knee
+Harness records and sandbox leases require their own acquisition rates and holding times, not the whole trajectory lifetime by default. If footprints vary, average memory occupancy follows the byte-time held by each arrival, rather than an unqualified product of mean footprint and mean lifetime. Headroom and admission additionally require variability, reclamation behavior, and resource-specific limits (@sec-vol3-agent-economics-capacity, @sec-vol3-sandboxes-pooling).
 
-A shared server, whether a model endpoint, a sandbox pool, or a verifier, makes callers wait more as it gets busier, and the wait rises steeply before the server is saturated. For a single queue with utilization $\rho$, mean service time $\mathbb{E}[S]$, and squared coefficients of variation $c_a^2$ for the time between arrivals and $c_s^2$ for service times, Kingman's approximation gives the mean wait:
+### Load sensitivity of waiting
+
+A single-server queue isolates how variability and load contribute to waiting. Consider first-come, first-served service with independent, identically distributed interarrival times, independent, identically distributed service times, independence between the two sequences, finite variances, and utilization $\rho < 1$. Let $\mathbb{E}[S]$ be mean service time and $c_a^2$ and $c_s^2$ the squared coefficients of variation of interarrival and service times. Kingman's heavy-traffic result motivates the following finite-load approximation to mean waiting time; it is not an identity or a tail bound.
 
 $$W_q \approx \frac{c_a^2 + c_s^2}{2} \cdot \frac{\rho}{1 - \rho} \cdot \mathbb{E}[S]$$
 
-The first factor is the workload's variability and the second its load. With bursty arrivals ($c_a^2$ = `{python} QueueKnee.ca2_str`) and exponential-like service times ($c_s^2$ = `{python} QueueKnee.cs2_str`), the variability factor is `{python} QueueKnee.var_str`, and the mean wait is about `{python} QueueKnee.w50_str`, `{python} QueueKnee.w70_str`, and `{python} QueueKnee.w90_str` service times at `{python} QueueKnee.rho50_str`, `{python} QueueKnee.rho70_str`, and `{python} QueueKnee.rho90_str` percent utilization. Agent workloads are variable on both counts, since trajectories fan out calls in bursts and generation lengths vary by orders of magnitude, so shared agent infrastructure is run well below saturation. For $c$ identical servers, the Allen-Cunneen approximation replaces $\rho/(1-\rho)$ with the probability that all servers are busy, from the Erlang C formula [@erlang1909telephone], divided by $c(1-\rho)$. Pooling many servers shortens the wait at a given utilization, but the knee remains. When service times are heavy-tailed, a few long trajectories dominate the wait, which is why schedulers separate them from short ones (@sec-vol3-appendix-math-queueing).
+With interarrival variability $c_a^2$ = `{python} QueueKnee.ca2_str` and service variability $c_s^2$ = `{python} QueueKnee.cs2_str`, the variability factor is `{python} QueueKnee.var_str`. Substitution gives approximate waits of `{python} QueueKnee.w50_str`, `{python} QueueKnee.w70_str`, and `{python} QueueKnee.w90_str` service times at `{python} QueueKnee.rho50_str`, `{python} QueueKnee.rho70_str`, and `{python} QueueKnee.rho90_str` percent utilization. These are selected comparison points, not a universal utilization knee or an operating recommendation.
+
+Batching, correlated fan-out, retries, and state-dependent service rates can violate the model. Infinite service-time variance also invalidates the finite-variance calculation. The derivation and its limits follow the [single-server heavy-traffic analysis](https://arxiv.org/html/2206.09844); multiple-server pools need a separately justified model. Measured deadline compliance, workload mix, and admission policy determine usable capacity. @Sec-vol3-appendix-math-queueing distinguishes mean waiting from tail behavior.
 
 ### Trajectory concurrency capacity under accelerator memory constraints
 
@@ -396,47 +396,29 @@ $$\frac{2 N}{\pi} < \frac{m_{\text{token}}}{\beta_{\text{link}}}$$
 
 The cancellation of context length follows from those two linear estimates, not from a general property of serving latency. The pause policy in @sec-vol3-kvcache-swapping additionally considers uniquely reclaimable state, competing demand, resumption likelihood, host and link resources, and the permitted resume delay.
 
-## Classical Transaction Background {#sec-vol3-appendix-inference-distributed}
-
-Databases solved a version of the agent's recovery problem long ago, and @sec-vol3-durable-execution and @sec-vol3-failure-recovery borrow from that solution while explaining why it does not transfer whole. This section summarizes the classical mechanisms for readers who have not met them.
-
-### Transactions and two-phase commit
-
-A database transaction provides atomicity within its stated transactional boundary; its isolation policy determines what concurrent clients observe [@gray1981transaction]. Two-phase commit coordinates an atomic decision among participants that implement the required prepare and recovery protocol.
-
-An agent task may span services that do not share one such transactional boundary. Some operations can be transactional or conditional within their own endpoint, while the overall workflow still admits partial and uncertain outcomes. Holding resources across long waits also has workload-dependent costs. @Sec-vol3-sagas-acid-boundary develops recovery when no shared atomic boundary covers the task.
-
-### Sagas
-
-A saga coordinates a workflow through shorter operations and explicit compensation policies [@garciamolina1987sagas]. A compensation is a new operation with declared postconditions; it can fail or remain unresolved. Register recovery metadata before dispatch, bind returned identities from evidence, and order cleanup by dependencies and current guards (@sec-vol3-sagas-architecture). Commitment regions identify effects that cannot be undone under the task's requirements and preserve partial-outcome and residual-duty policies (@sec-vol3-sagas-pivot).
-
-### Write-ahead logging
-
-A database recovers its own pages after a crash with a write-ahead log. Every change is recorded durably before the page it changes is written, and each record carries a log sequence number and a pointer to the previous record of the same transaction. The ARIES algorithm [@mohan1992aries] recovers in three passes. It scans the log to find what was in progress, repeats history to restore every logged change, and undoes the changes of transactions that did not commit by restoring the prior values the log recorded.
-
-The agent runtime applies write-ahead ordering to authorized intents under its declared storage failure domain. A complete surviving authoritative history preserves which operations were admitted; the endpoint's evidence and repeat contract determine what can be concluded about their effects (@sec-vol3-persistence-wal). Reconstructing a runtime record is distinct from changing external state. Failure recovery develops the available repair, compensation, and escalation choices.
-
 ## Reference Values {#sec-vol3-appendix-inference-assumptions}
 
-The estimates in this appendix, and the serving estimates in the chapters, use one reference model on one reference accelerator, whose values @tbl-appdx-hardware-constants collects. The chapters describe them only as a 70-billion-parameter model on a current data center accelerator, because the argument does not depend on the particular product. The values come from the MLSysIM registry. To redo an estimate for different hardware or a different model, substitute its values into the equations above; the ratio of @eq-appdx-decode-prefill-ratio and the byte counts of @eq-appdx-kv-cache-token-size are the two results most chapters depend on.
+The worked estimates use the MLSysIM entries `Models.Language.Llama3_70B`, `Hardware.Cloud.H100`, and `Systems.Nodes.DGX_H100`. These identify a reference configuration, not a current-product recommendation. @Tbl-appdx-hardware-constants collects their values and the local precision and reserve assumptions so that a reader can audit or replace them. The ratio of @eq-appdx-decode-prefill-ratio isolates weight reuse; @eq-appdx-kv-cache-token-size sizes the attention payload.
 
-| Quantity                          | Symbol                  | Reference value                                                                                  | Used in                                 |
-|:----------------------------------|:------------------------|:-------------------------------------------------------------------------------------------------|:----------------------------------------|
-| **Parameters**                    | $N$                     | `{python} ServingRef.params_b_str` billion                                                       | Per-token floors, weights in memory     |
-| **Layers**                        | $L$                     | `{python} ServingRef.n_layers_str`                                                               | Attention state, long-context prefill   |
-| **Model width**                   | $d$                     | `{python} ServingRef.d_model_str`                                                                | Long-context prefill                    |
-| **Query heads / key-value heads** | $H_q$ / $H_{\text{kv}}$ | `{python} ServingRef.n_heads_str` / `{python} ServingRef.n_kv_heads_str`                         | Attention state by design               |
-| **Head dimension**                | $d_{\text{head}}$       | `{python} ServingRef.d_head_str`                                                                 | Attention state                         |
-| **Weight precision**              | $b$                     | 1 byte (8-bit)                                                                                   | Decode floor, ridge-to-ratio conversion |
-| **Key-value precision**           | $b_{\text{kv}}$         | 2 bytes (16-bit)                                                                                 | Attention state                         |
-| **Accelerator memory bandwidth**  | $\beta$                 | `{python} ServingRef.bw_str` TB/s                                                                | Decode floor, ridge point               |
-| **Accelerator peak rate, 8-bit**  | $\pi$                   | `{python} ServingRef.peak_str` trillion operations per second                                    | Prefill floor, ridge point              |
-| **Accelerator memory**            | $M_{\text{HBM}}$        | `{python} ServingRef.acc_hbm_str`                                                                | Resident trajectories                   |
-| **Accelerators per node**         | $n_{\text{acc}}$        | `{python} ServingRef.n_acc_str`                                                                  | Node memory pool                        |
-| **Ridge point**                   | $\mathcal{I}^*$         | `{python} ServingRef.ridge_str` operations per byte                                              | Where passes turn arithmetic-bound      |
-| **Decode floor per output token** | $t_{\text{decode}}$     | `{python} ServingRef.t_dec_val_str` ms                                                           | Call latency                            |
-| **Prefill time per prompt token** | $t_{\text{prefill}}$    | `{python} ServingRef.t_pre_val_str` µs                                                           | Call latency, re-send cost              |
-| **Attention state per token**     | $m_{\text{token}}$      | `{python} ServingRef.m_token_str` bytes                                                          | Memory per trajectory                   |
-| **Attention-state pool per node** | $M_{\text{dynamic}}$    | `{python} ServingRef.pool_str` GB (16-bit weights, `{python} ServingRef.reserve_str` GB reserve) | Trajectories per node                   |
+The two calculations have different placement boundaries. Per-token floors use one accelerator's compute rate and bandwidth with 8-bit weights. The memory pool instead aggregates `{python} ServingRef.n_acc_str` accelerators, totaling `{python} ServingRef.node_hbm_str`, and subtracts one 16-bit model copy and a node-wide reserve. It assumes a feasible sharding arrangement without counting communication time or per-device imbalance. Multiplying memory capacity does not establish an equivalent latency speedup. Memory quantities below use decimal GB consistently with the pool arithmetic, rather than the accelerator's branded capacity label.
 
-: **Reference Serving Values**: The model, accelerator, and node values behind the book's serving estimates, and the derived quantities the chapters use. All come from the MLSysIM registry; the derived rows follow from the equations of this appendix. {#tbl-appdx-hardware-constants tbl-colwidths="[30,14,32,24]"}
+| Quantity                                       | Symbol                  | Reference value                                                                                  | Used in                                 |
+|:-----------------------------------------------|:------------------------|:-------------------------------------------------------------------------------------------------|:----------------------------------------|
+| **Parameters**                                 | $N$                     | `{python} ServingRef.params_b_str` billion                                                       | Per-token floors, weights in memory     |
+| **Layers**                                     | $L$                     | `{python} ServingRef.n_layers_str`                                                               | Attention state, long-context prefill   |
+| **Model width**                                | $d$                     | `{python} ServingRef.d_model_str`                                                                | Long-context prefill                    |
+| **Query heads / key-value heads**              | $H_q$ / $H_{\text{kv}}$ | `{python} ServingRef.n_heads_str` / `{python} ServingRef.n_kv_heads_str`                         | Attention state by design               |
+| **Head dimension**                             | $d_{\text{head}}$       | `{python} ServingRef.d_head_str`                                                                 | Attention state                         |
+| **Weight precision for time floors**           | $b$                     | 1 byte (8-bit)                                                                                   | Decode floor, ridge-to-ratio conversion |
+| **Key-value precision**                        | $b_{\text{kv}}$         | 2 bytes (16-bit)                                                                                 | Attention state                         |
+| **Accelerator memory bandwidth**               | $\beta$                 | `{python} ServingRef.bw_str` TB/s                                                                | Decode floor, ridge point               |
+| **Accelerator peak rate, 8-bit**               | $\pi$                   | `{python} ServingRef.peak_str` trillion operations per second                                    | Prefill floor, ridge point              |
+| **Memory per accelerator**                     | —                       | `{python} ServingRef.acc_hbm_str`                                                                | Component of node memory pool           |
+| **Accelerators per node**                      | $n_{\text{acc}}$        | `{python} ServingRef.n_acc_str`                                                                  | Node memory pool                        |
+| **Ridge point**                                | $\mathcal{I}^*$         | `{python} ServingRef.ridge_str` operations per byte                                              | Where passes turn arithmetic-bound      |
+| **Decode floor per output token**              | $t_{\text{decode}}$     | `{python} ServingRef.t_dec_val_str` ms                                                           | Call latency                            |
+| **Weight-only prefill floor per prompt token** | $t_{\text{prefill}}$    | `{python} ServingRef.t_pre_val_str` µs                                                           | Conditional arithmetic estimate         |
+| **Attention state per token**                  | $m_{\text{token}}$      | `{python} ServingRef.m_token_str` bytes                                                          | Memory per trajectory                   |
+| **Attention-state pool per node**              | $M_{\text{dynamic}}$    | `{python} ServingRef.pool_str` GB (16-bit weights, `{python} ServingRef.reserve_str` GB reserve) | Trajectories per node                   |
+
+: **Reference Serving Values**: Registry-backed model and hardware inputs, local precision and reserve assumptions, and derived quantities. The time floors use one accelerator; the attention-state pool uses aggregate node memory. {#tbl-appdx-hardware-constants tbl-colwidths="[30,14,32,24]"}
