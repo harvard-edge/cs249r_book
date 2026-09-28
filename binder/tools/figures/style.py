@@ -25,6 +25,7 @@ except ImportError:
 COLORS = {
     "crimson": "#A51C30",  # Harvard Crimson
     "primary": "#333333",  # Dark gray text
+    "secondary": "#666666",  # Medium gray secondary text / lines
     "grid": "#CCCCCC",  # Light gray
     "BlueLine": "#006395",
     "BlueL": "#D1E6F3",

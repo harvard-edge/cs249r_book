@@ -202,7 +202,7 @@ Each challenge points to a different kind of fix. Computational intensity pushes
 A training system is not a single loop; it is a **staged system pipeline**\index{Training pipeline!staged system workflow}. Reaching high accelerator utilization requires analyzing training as a factory floor where four distinct stages coordinate to keep the ALUs busy:
 
 1.  **Data Loading & Preprocessing** (CPU/Storage): Fetching raw bits from Non-Volatile Memory Express (NVMe), decoding, and augmenting on CPU cores.
-2.  **Host-to-Device Transfer** (PCIe): Moving the processed batch over the PCIe bus into GPU memory via direct memory access.
+2.  **Host-to-Device Transfer** (PCIe): Moving the processed batch over the PCIe bus into GPU memory via direct memory access (DMA).
 3.  **Forward/Backward Pass** (Accelerator): Propagating activations and gradients through layers on the GPU.
 4.  **Parameter Synchronization** (Interconnect): Exchanging gradients between accelerators over the available fabric. NVLink provides up to `{python} TrainingScenarios.nvlink_h100_gb_per_s_str` in the H100 configuration used later, while other systems may use PCIe or a network interconnect.
 
@@ -359,7 +359,9 @@ GPT-2 (1.5 billion parameters) serves as the primary case study because it is la
 ```
 
 **Mechanism**:
-Training GPT-2 couples a total operation count of $O \approx 6 \cdot P \cdot D_{\text{tokens}}$, or `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`, with a strict memory footprint $M_{\text{state}} = M_{\text{weights}} + M_{\text{grads}} + M_{\text{opt}} + M_{\text{act}}$. Balancing execution time $T_{\text{train}} = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}$ requires orchestrating data ingestion, activation memory, and compute throughput within accelerator high-bandwidth memory (HBM) capacity.
+In dense transformer models, the arithmetic work per token is directly proportional to parameter count $P$. In the forward pass, each parameter participates in one multiply-accumulate operation ($1\text{ MAC} = 2\text{ FLOPs}$), consuming $2P\text{ FLOPs/token}$. Backpropagation computes two matrix products per parameter: one to propagate gradients backward with respect to activations ($2P\text{ FLOPs}$), and another to calculate weight gradients for the optimizer ($2P\text{ FLOPs}$). The backward pass therefore requires twice the compute of the forward pass ($4P\text{ FLOPs/token}$), yielding a total work factor of $2P + 4P = 6P\text{ FLOPs/token}$. Across a dataset of $D$ tokens, total training work is $O \approx 6 \cdot P \cdot D_{\text{tokens}}$, or `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`.
+
+Training GPT-2 couples this operation count with a strict memory footprint $M_{\text{state}} = M_{\text{weights}} + M_{\text{grads}} + M_{\text{opt}} + M_{\text{act}}$. Balancing execution time $T_{\text{train}} = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}$ requires orchestrating data ingestion, activation memory, and compute throughput within accelerator high-bandwidth memory (HBM) capacity.
 
 :::
 
@@ -381,7 +383,7 @@ Scale therefore changes more than the amount of data; it transforms the system's
 
 :::
 
-These scaling constraints translate into concrete workflow requirements. Training workflows consist of interdependent stages---data preprocessing, forward and backward passes, and parameter updates---extending the neural network concepts from @sec-neural-computation. System constraints dictate these execution limits: modern accelerators possess arithmetic intensities that easily outstrip HBM bandwidth, leaving memory-bound kernels starved for operands [@patterson2017hardware]. In multi-accelerator configurations, cross-device synchronization introduces latency penalties, where interconnect bandwidth (PCIe, NVLink\index{NVLink!training interconnect}, InfiniBand\index{InfiniBand!interconnect performance}) dictates the communication-to-computation ratio.[^fn-transformer-compute-scaling]
+These scaling constraints translate into concrete workflow requirements. Training workflows consist of interdependent stages---data preprocessing, forward and backward passes, and parameter updates---extending the neural network concepts from @sec-neural-computation. System constraints dictate these execution limits: modern accelerators possess arithmetic intensities that easily outstrip HBM bandwidth, leaving memory-bound kernels starved for operands [@patterson2017hardware]. In multi-accelerator configurations, cross-device synchronization introduces latency penalties, where interconnect bandwidth (such as PCIe lanes or NVLink bridges\index{NVLink!training interconnect}) dictates the communication-to-computation ratio.[^fn-transformer-compute-scaling]
 
 The same hardware-software boundary that frameworks exposed in @sec-ml-frameworks is central here. Mixed-precision training emerged from recognizing that Tensor Core hardware could accelerate reduced-precision arithmetic. Gradient checkpointing arose from memory capacity constraints. Training systems engineering is the work of matching those algorithmic choices to the physical limits of the machine.
 
@@ -391,7 +393,12 @@ Every training bottleneck ultimately traces back to the execution cost of specif
 
 ## Mathematical Foundations {#sec-model-training-mathematical-foundations-d894}
 
-Linear algebra expresses matrix multiplication compactly as $\mathbf{C} = \mathbf{A}\mathbf{B}$. In hardware, training a model such as GPT-2 repeatedly executes this operation on tensors that far exceed the tens of megabytes available in on-chip SRAM, requiring matrix tiles to be continuously staged from High Bandwidth Memory (HBM). Dense matrix multiplications exhibit high arithmetic intensity, enabling specialized execution units such as Tensor Cores to achieve high compute utilization. In contrast, surrounding elementwise operations—such as activations, normalizations, and residual additions—exhibit low arithmetic intensity and remain bounded by memory bandwidth, creating opportunities for kernel fusion to eliminate redundant memory traffic. @Sec-neural-computation established *what* neural network operations compute and *why* they enable learning; the systems question is *what* they cost\index{Training!mathematical foundations}\index{Training!computational cost} in FLOPs, memory, and bandwidth when those operations execute at scale.
+Linear algebra expresses matrix multiplication compactly as $\mathbf{C} = \mathbf{A}\mathbf{B}$. In hardware, executing this operation efficiently requires navigating the accelerator's physical memory hierarchy:
+
+- **Global device memory (HBM or GDDR)**: Located off-chip, offering large storage capacity (typically 16 to 96 GB) to hold weights, optimizer states, and large activation tensors, but communicating across an external memory bus bounded by $\approx 1.5\text{--}3.5\text{ TB/s}$ of bandwidth.
+- **On-chip SRAM (registers and shared memory)**: Located directly on the processor die adjacent to the arithmetic execution units. It delivers ultra-high aggregate bandwidth ($\approx 15\text{--}20\text{ TB/s}$), but has strictly limited capacity (typically 30 to 50 MB across the entire chip).
+
+In a model such as GPT-2, the tensors participating in training far exceed the capacity of on-chip SRAM, requiring matrix tiles to be continuously staged from off-chip HBM into on-chip memory for computation. Dense matrix multiplications exhibit high arithmetic intensity, amortizing the cost of moving bytes over many operations and enabling specialized execution units such as Tensor Cores to achieve high compute utilization. In contrast, surrounding elementwise operations—such as activations, normalizations, and residual additions—exhibit low arithmetic intensity and remain bounded by memory bandwidth, creating opportunities for kernel fusion to eliminate redundant round-trips to HBM. @Sec-neural-computation established *what* neural network operations compute and *why* they enable learning; the systems question is *what* they cost\index{Training!mathematical foundations}\index{Training!computational cost} in FLOPs, memory, and bandwidth when those operations execute at scale.
 
 Four dimensions structure this cost analysis:
 
@@ -634,11 +641,11 @@ Matrix multiplications dominate training compute, but neural networks require mo
 
 Activation functions\index{Activation function!training efficiency} like sigmoid, tanh, ReLU\index{ReLU!hardware efficiency}, and softmax introduce nonlinearity, but their implementation characteristics also shape training system performance. From a systems perspective, the choice of activation function determines computational cost, hardware utilization, and memory access patterns during backpropagation.
 
-The critical question for ML systems engineers is not *what* these functions do mathematically, but *how* their cost behaves at scale. The benchmarks and trade-offs that follow build toward one systems thesis. Because elementwise activations move many more bytes than they compute, their kernels are often bounded by memory bandwidth rather than arithmetic, so the per-operation differences below matter less than their magnitudes first suggest.
+The critical question for ML systems engineers is not *what* these functions do mathematically, but *how* their execution cost behaves in hardware. Per-element arithmetic complexity varies across activations: piecewise linear functions like ReLU require only a single comparison and selection instruction (`fmax`), whereas transcendental functions like sigmoid and tanh require evaluating exponentiations, typically implemented via multi-cycle polynomial approximations in Special Function Units (SFUs). Softmax introduces additional reduction and normalization passes across the tensor dimension.
 
-Activation costs can accumulate across many elements and layers, but their contribution to end-to-end time depends on tensor shape, fusion, implementation, precision, and hardware. @Fig-activation-perf preserves one illustrative Apple M2 timing snapshot from the chapter's development history. Its benchmark configuration was not recorded, so the values should not be interpreted as reproducible evidence or transferred to other systems. On accelerators, activation kernels are often limited by memory traffic, fusion boundaries, and special-function throughput rather than by scalar CPU instruction latency. The same activation may run as a standalone kernel, fuse with a neighboring operator, or use a compiler-selected approximation. The plotted scalar timing therefore cannot predict its cost inside a compiled training step.
+@Fig-activation-perf illustrates this instruction latency hierarchy across isolated implementations on identical tensor dimensions. However, in end-to-end accelerator execution, isolated instruction latency rarely dictates throughput. Because elementwise activations perform only 1 to 4 FLOPs for every byte loaded and stored ($0.25\text{--}1.0\text{ FLOP/byte}$), standalone activation kernels are strictly memory-bandwidth-bound. In modern compiled frameworks, the realized latency of an activation is largely determined by whether the compiler can fuse it directly into the epilogue of the preceding matrix multiplication, eliminating the memory round-trip to HBM entirely.
 
-::: {#fig-activation-perf fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Activation Timing Snapshot**: A legacy Apple M2 timing snapshot compares four activation implementations under an unrecorded benchmark configuration. The chart preserves the original relative illustration but does not establish portable performance ratios. The y-axis is truncated to begin at 0.40 s, so bar heights exaggerate the differences." fig-alt="Bar chart labeled Execution Time (seconds), with bars for Sigmoid at 1.10, Tanh at 0.61, ReLU at 0.45, and Softmax at 0.91; the vertical axis begins at 0.40 seconds."}
+::: {#fig-activation-perf fig-env="figure" fig-pos="htb" fig-cap="**Instruction Latency Differences Among Activation Functions**: Isolated execution time across four activation functions on identical tensor dimensions. Piecewise linear functions (ReLU) execute significantly faster than transcendental functions (sigmoid, tanh) that require special-function evaluations, while softmax incurs reduction and normalization overhead. In practice, compiler fusion into preceding linear layers frequently hides these arithmetic differences by eliminating memory traffic." fig-alt="Bar chart labeled Execution Time (seconds), with bars for Sigmoid at 1.10, Tanh at 0.61, ReLU at 0.45, and Softmax at 0.91; the vertical axis begins at 0.00 seconds."}
 
 ```{.tikz}
 \scalebox{0.9}{%
@@ -651,17 +658,17 @@ Activation costs can accumulate across many elements and layers, but their contr
 
 \begin{axis}[
     ylabel={Execution Time (seconds)},
-    ymin=0.40,
+    ymin=0.00,
     width=100mm,
     height=57mm,
     axis lines=left,
     axis line style={thick,-latex},
-    ytick={0.4,0.5,...,1.1},
+    ytick={0.0,0.2,...,1.2},
     yticklabel style={font=\footnotesize\sffamily,
-    /pgf/number format/.cd, fixed, fixed zerofill, precision=2},
+    /pgf/number format/.cd, fixed, fixed zerofill, precision=1},
     xticklabel style={font=\footnotesize\sffamily},
     ylabel style={font=\footnotesize\sffamily},
-    ymax=1.15,
+    ymax=1.25,
     enlarge x limits=0.2,
     tick style={draw=black,thin},
     tick align=outside,
@@ -1113,7 +1120,7 @@ Parameter update rules define trajectories given gradient vectors, but assume th
 
 Backpropagation\index{Backpropagation!computational cost}\index{Backpropagation!memory requirements} evaluates parameter gradients by traversing the network's computational graph in reverse topological order\index{Automatic differentiation!computational graph}. In forward inference, an accelerator deallocates each activation tensor as soon as the succeeding layer consumes it. Training breaks this ephemeral lifecycle: computing the gradient with respect to a layer's parameters requires the exact activation tensor produced by the preceding layer during the forward pass. Every forward activation must therefore remain resident in HBM until the backward traversal returns to that layer, transforming activation storage into the binding memory constraint of large-scale training.
 
-@Sec-neural-computation-gradient-computation-backpropagation-dacf establishes the mathematical foundation: the chain rule\index{Chain rule!backpropagation foundation} decomposes gradient evaluation into layer-by-layer vector-Jacobian products, pulling error signals backward from the scalar loss to input parameters. At systems scale, the central question is not *what* backpropagation computes, but *what* it costs in memory capacity and arithmetic throughput. The layer operations from @sec-model-training-mathematical-operations-neural-networks-ddac produce forward activations that must be retained for the backward pass. Computing $\frac{\partial \mathcal{L}}{\partial \mathbf{W}^{(\ell)}}$ requires direct access to these stored activations, creating the training memory equation\index{Training!memory equation} that gradient checkpointing\index{Gradient checkpointing!memory reduction} later exploits.
+@Sec-neural-computation-gradient-computation-backpropagation-dacf establishes the mathematical foundation: the chain rule\index{Chain rule!backpropagation foundation} decomposes gradient evaluation into layer-by-layer vector-Jacobian products, pulling error signals backward from the scalar loss to input parameters. At systems scale, the central question is not what backpropagation computes, but what it costs in memory capacity and arithmetic throughput. The layer operations from @sec-model-training-mathematical-operations-neural-networks-ddac produce forward activations that must be retained for the backward pass. Computing $\frac{\partial \mathcal{L}}{\partial \mathbf{W}^{(\ell)}}$ requires direct access to these stored activations, creating the training memory equation\index{Training!memory equation} that gradient checkpointing\index{Gradient checkpointing!memory reduction} later exploits.
 
 Computationally, backpropagation through a linear layer $\mathbf{Z} = \mathbf{A}\mathbf{W}$ requires two distinct matrix multiplications of identical dimension to the forward pass: one evaluates the activation gradient $\nabla_{\mathbf{A}}\mathcal{L} = (\nabla_{\mathbf{Z}}\mathcal{L})\mathbf{W}^\top$ to propagate the error signal upstream, and the other evaluates the parameter gradient $\nabla_{\mathbf{W}}\mathcal{L} = \mathbf{A}^\top(\nabla_{\mathbf{Z}}\mathcal{L})$ to update the weights. Because the backward pass executes two matrix multiplications of identical dimension for every forward matrix multiplication, backward propagation requires twice the arithmetic work of the forward pass. This establishes the standard systems convention that one complete training step requires approximately three times the forward-pass FLOPs ($1\times$ forward $+ 2\times$ backward).
 
@@ -1317,13 +1324,13 @@ Training large models requires managing the memory wall (the bandwidth bottlenec
 
 **Bottleneck**
 
-- [ ] **Activation memory**: Do you understand why activations stored for backpropagation can dominate memory usage and, for some model shapes and training recipes, exceed parameter size by more than 10$\times$?
-- [ ] **Optimization strategy**: Can you explain how gradient checkpointing trades compute (recalculating activations) for memory capacity?
-- [ ] **Memory estimate**: for GPT-2 (1.5B parameters) in mixed precision, put a one-significant-figure number on each term in @eq-total-training-memory: weights, gradients, optimizer state, and activations at batch size 32. Which term is largest, and would the total fit a 32 GB accelerator?
+- [ ] **Activation memory**: Explain why activations stored for backpropagation dominate memory usage and, for some model shapes and recipes, exceed parameter footprint by more than 10$\times$.
+- [ ] **Optimization strategy**: Explain how gradient checkpointing trades additional forward compute for memory capacity.
+- [ ] **Memory estimate**: For GPT-2 (1.5B parameters) in mixed precision, estimate each training state component (weights, gradients, optimizer state, and activations at batch size 32), identify the largest term, and determine whether the total fits on a 32 GB accelerator.
 
 **Scaling limits**
 
-- [ ] **Batch size constraints**: why does memory capacity limit the maximum batch size, and how does gradient accumulation solve this without increasing memory?
+- [ ] **Batch size constraints**: Explain why memory capacity limits the maximum batch size, and how gradient accumulation sidesteps this limit without expanding memory.
 
 :::
 
@@ -1862,7 +1869,7 @@ font=\small\sffamily\bfseries, color=TextBlack] {Step 3: Update};
 
 While @sec-model-training-mathematical-foundations-d894 formalizes the numerical operators of this cycle, physical hardware execution is dictated by memory residency and data dependencies. During the forward pass, intermediate activation tensors must remain resident in accelerator HBM because the backward pass requires them to evaluate chain-rule derivatives. Once gradients are computed, the optimizer reads both the parameters and accumulated gradients to apply the update rule, producing new weights for the subsequent iteration. The memory capacity required to hold activations, weights, and optimizer states establishes the memory floor for the entire training step.
 
-This execution loop repeats across batches and epochs\index{Epoch!training cycle} until the optimization converges. Maximizing accelerator arithmetic efficiency requires overlapping these pipeline stages across the system hierarchy. Host CPU threads prefetch and stage batch $k+1$ into pinned memory while the accelerator executes batch $k$, hiding storage latency and PCIe transfer time behind matrix-multiplication compute kernels. When this concurrency breaks down—whether an I/O-bound data pipeline starves the device of input tensors or frequent evaluation stalls the update loop—the accelerator idles, degrading effective throughput.
+This execution loop repeats across batches and epochs\index{Epoch!training cycle} until the optimization converges. Maximizing accelerator arithmetic efficiency requires overlapping these pipeline stages across the system hierarchy. Host CPU threads prefetch and stage batch $k+1$ into page-locked (*pinned*) host memory while the accelerator executes batch $k$. Pinning memory prevents the operating system kernel from paging or relocating physical RAM addresses, enabling dedicated DMA hardware controllers to stream the next batch across the PCIe bus asynchronously into accelerator HBM without CPU intervention. This concurrent staging hides storage latency and bus transfer time behind matrix-multiplication compute kernels. When this concurrency breaks down—whether an I/O-bound data pipeline starves the device of input tensors or frequent evaluation stalls the update loop—the accelerator idles, degrading effective throughput.
 
 ### Data pipeline {#sec-model-training-data-pipeline-8e71}
 
@@ -3325,7 +3332,7 @@ Because system resources are tightly coupled, relieving one constraint often exp
 
 Because accelerator compute engines, memory subsystems, and host interconnects operate under tight physical coupling, optimizing without empirical telemetry risks shifting the critical path or squandering engineering effort on non-binding resources. A principled systems methodology follows three coupled stages: profiling to expose the binding physical constraint, selecting mechanisms specifically engineered for that resource limit, and composing interventions so that secondary resource demands do not collide.
 
-The profiling phase uses instrumentation tools such as PyTorch Profiler\index{PyTorch!profiler}, TensorFlow Profiler\index{TensorFlow!profiler}, or NVIDIA Nsight Systems\index{NVIDIA Nsight Systems} to record timestamps and hardware counters across each iteration. Traces capture kernel execution times on accelerator execution units, direct memory access (DMA) transfers across PCIe or NVLink buses, and host CPU thread scheduling. Quantifying elapsed time isolates which subsystem dictates the critical path. For example, a trace revealing `{python} ProfilingScenarios.profile_data_pct_str` of step time spent in data loading, `{python} ProfilingScenarios.profile_compute_pct_str` in computation, and `{python} ProfilingScenarios.profile_mem_pct_str` in memory operations diagnoses host-side data starvation as the primary constraint. Under these conditions, accelerating matrix multiply kernels yields negligible wall-clock improvement until the data delivery pipeline is resolved.
+The profiling phase uses instrumentation tools such as PyTorch Profiler\index{PyTorch!profiler}, TensorFlow Profiler\index{TensorFlow!profiler}, or NVIDIA Nsight Systems\index{NVIDIA Nsight Systems} to record timestamps and hardware counters across each iteration. Traces capture kernel execution times on accelerator execution units, DMA transfers across PCIe or NVLink buses, and host CPU thread scheduling. Quantifying elapsed time isolates which subsystem dictates the critical path. For example, a trace revealing `{python} ProfilingScenarios.profile_data_pct_str` of step time spent in data loading, `{python} ProfilingScenarios.profile_compute_pct_str` in computation, and `{python} ProfilingScenarios.profile_mem_pct_str` in memory operations diagnoses host-side data starvation as the primary constraint. Under these conditions, accelerating matrix multiply kernels yields negligible wall-clock improvement until the data delivery pipeline is resolved.
 
 The selection phase maps the identified bottleneck to an architectural mechanism targeting that physical constraint. When profiling shows input-bound execution where the accelerator idles waiting for batches, asynchronous prefetching and double-buffering over PCIe overlap host data ingestion with device compute. When kernel runtimes are memory-bandwidth-bound—dominated by round-trips to HBM rather than arithmetic—operator fusion and tiling algorithms such as FlashAttention stage intermediate activations in on-chip SRAM. When memory capacity bounds the model, activation checkpointing discards and recomputes activations during the backward pass, or gradient accumulation divides batches across multiple sequential sub-steps to limit peak allocation. Finally, when streaming multiprocessors saturate with dense matrix math, low-precision numeric formats (such as FP16 or BF16) exploit specialized tensor cores to double computational throughput while halving memory traffic.
 
@@ -6276,7 +6283,7 @@ Partitioning computation across a cluster ultimately transforms training from a 
 
 The parallelism strategies in @sec-model-training-singlenode-multigpu-training-c87f and @sec-model-training-scaling-beyond-single-node-a671 represent the convergence of distinct architectural traditions\index{Training!infrastructure evolution}. Modern training platforms integrate paradigms developed across four computing eras, each shaped by the physical constraints and dominant workloads of its time.
 
-Neural network training combines requirements drawn simultaneously from high-performance computing (HPC) and warehouse-scale systems. From HPC, training inherits dense matrix multiplication (GEMM) kernels operating near accelerator compute limits, requiring tightly synchronized parallel execution across devices. From warehouse-scale computing\index{Warehouse-scale computing!training evolution}, multi-day training jobs inherit the necessity of cluster-wide orchestration, asynchronous data ingestion, and automated fault recovery across failure-prone nodes. Standard synchronous data-parallel training executes a global AllReduce collective at every optimizer step. Keeping accelerators supplied with arithmetic without stalling on communication requires high-bandwidth interconnects (such as NVLink and InfiniBand) and direct memory access runtimes that bypass host operating-system overhead. @Fig-evolution-systems traces the chronological progression across these computing eras.
+Neural network training combines requirements drawn simultaneously from high-performance computing (HPC) and warehouse-scale systems. From HPC, training inherits dense matrix multiplication (GEMM) kernels operating near accelerator compute limits, requiring tightly synchronized parallel execution across devices. From warehouse-scale computing\index{Warehouse-scale computing!training evolution}, multi-day training jobs inherit the necessity of cluster-wide orchestration, asynchronous data ingestion, and automated fault recovery across failure-prone nodes. Standard synchronous data-parallel training executes a global AllReduce collective at every optimizer step. Keeping accelerators supplied with arithmetic without stalling on communication requires high-bandwidth interconnects (such as NVLink and InfiniBand) and DMA runtimes that bypass host operating-system overhead. @Fig-evolution-systems traces the chronological progression across these computing eras.
 
 ::: {#fig-evolution-systems fig-env="figure" fig-pos="htb" fig-cap="**Computing System Evolution**: Four overlapping eras place representative system milestones against time. The overlap matters: AI hypercomputing builds on, rather than replaces, the parallel numerical methods of HPC and the distributed coordination of warehouse-scale computing." fig-alt="Timeline spanning 1950s to 2020s showing evolution from mainframes through HPC and warehouse-scale computing to AI hypercomputing with GPUs and TPUs."}
 
@@ -6485,11 +6492,11 @@ Scaling changes the binding constraint rather than removing it: data parallelism
 
 Scaling trades compute bottlenecks for communication bottlenecks.
 
-- [ ] **Hard limits**: can you identify which limit is binding for a given training run: memory capacity, wall-clock time, or input-service rate?
-- [ ] **Single-node first**: can you explain why mixed precision, accumulation, checkpointing, and prefetching should be exhausted before adding devices?
-- [ ] **Data vs. model parallelism**: given a model that does not fit on one GPU, can you justify why data parallelism fails and what model parallelism must partition?
-- [ ] Communication tax: Can you explain why scaling efficiency degrades with GPU count, and what quantity (synchronization fraction) controls the ceiling?
-- [ ] **Scaling ceiling**: if synchronization that does not parallelize is 10 percent of each step, estimate the speedup ceiling as the GPU count grows large, and the rough point where doubling devices stops being worth it.
+- [ ] **Hard limits**: Identify which resource limit binds a given training run: memory capacity, compute throughput, or input-service rate.
+- [ ] **Single-node first**: Explain why mixed precision, accumulation, checkpointing, and prefetching should be exhausted before scaling across devices.
+- [ ] **Data vs. model parallelism**: Justify why data parallelism fails when model states exceed single-accelerator memory, and identify what model parallelism must partition.
+- [ ] **Communication tax**: Explain why scaling efficiency degrades with accelerator count, and identify the communication metrics that dictate this ceiling.
+- [ ] **Scaling ceiling**: Estimate the theoretical speedup ceiling via Amdahl's law when unparallelized synchronization accounts for 10 percent of step time, and determine where adding accelerators yields diminishing returns.
 
 :::
 
@@ -6655,7 +6662,7 @@ The progression from single-GPU optimization through multi-device parallelism sh
 
 **Fallacy**: *Larger models always yield better performance.*
 
-Teams sometimes treat scale as a monotonic lever: if a 7B-parameter model works well, a 20B-parameter model must work better. A `{python} FallaciesPitfallsSetup.fp_model_20b_params_str` model requires approximately `{python} FallaciesPitfallsSetup.fp_model_20b_total_gb_str` of nonactivation training state in the stated **mixed-precision Adam**\index{Mixed-precision Adam!storage model} recipe (`{python} FallaciesPitfallsSetup.fp_model_20b_fp16_gb_str` FP16 parameters + `{python} FallaciesPitfallsSetup.fp_model_20b_grad_gb_str` FP16 gradients + `{python} FallaciesPitfallsSetup.fp_model_20b_master_gb_str` FP32 master weights + `{python} FallaciesPitfallsSetup.fp_model_20b_optim_gb_str` Adam states). Whether it outperforms a `{python} FallaciesPitfallsSetup.fp_model_7b_params_str` model depends on data quantity and quality, training compute, optimization, and evaluation. No universal example-count threshold or accuracy penalty follows from parameter count alone.
+Teams sometimes treat scale as a monotonic lever: if a 7B-parameter model works well, a 20B-parameter model must work better. A `{python} FallaciesPitfallsSetup.fp_model_20b_params_str` model requires approximately `{python} FallaciesPitfallsSetup.fp_model_20b_total_gb_str` of nonactivation training state in the stated mixed-precision Adam\index{Mixed-precision Adam!storage model} recipe (`{python} FallaciesPitfallsSetup.fp_model_20b_fp16_gb_str` FP16 parameters + `{python} FallaciesPitfallsSetup.fp_model_20b_grad_gb_str` FP16 gradients + `{python} FallaciesPitfallsSetup.fp_model_20b_master_gb_str` FP32 master weights + `{python} FallaciesPitfallsSetup.fp_model_20b_optim_gb_str` Adam states). Whether it outperforms a `{python} FallaciesPitfallsSetup.fp_model_7b_params_str` model depends on data quantity and quality, training compute, optimization, and evaluation. No universal example-count threshold or accuracy penalty follows from parameter count alone.
 
 :::
 

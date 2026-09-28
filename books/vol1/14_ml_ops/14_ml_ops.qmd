@@ -143,7 +143,9 @@ That recommendation failure illustrates a systemic pattern: without disciplined 
 
 Reproducibility\index{Reproducibility!versioning principle} requires every artifact\index{Artifact!versioning, reproducibility requirement}[^fn-artifact-reproducibility-hashing] that influences model behavior to be versioned and traceable. This principle extends beyond code repositories to encompass input datasets, feature schemas, hyperparameter configurations, and execution environments. @Eq-model-reproducibility expresses this dependency formally:
 $$\text{Model Output} = f(\text{Code}_v, \text{Data}_v, \text{Config}_v, \text{Environment}_v; \xi)$$ {#eq-model-reproducibility}
-where $v$ identifies an immutable version hash and $\xi$ captures execution nondeterminism. Exact reproduction requires freezing all four versioned inputs alongside random seeds, dataloader sample ordering, deterministic GPU reduction kernels (preventing non-associative floating-point drift from asynchronous atomic additions), and identical accelerator hardware architectures.
+where $v$ identifies an immutable version hash and $\xi$ captures execution nondeterminism. Exact reproduction requires freezing all four versioned inputs alongside random seeds, dataloader sample ordering, deterministic GPU reduction kernels, and identical accelerator hardware architectures.
+
+Fixing random seeds (such as `torch.manual_seed(42)`) still fails to guarantee bitwise reproducibility across training runs on accelerator hardware. The root cause lies in finite-precision arithmetic: in pure mathematics, addition is associative: $(a + b) + c = a + (b + c)$. On digital hardware, finite-precision floating-point formats (such as IEEE 754 FP32, FP16, or BF16) break associativity because intermediate operations round fractional bits to fit within a finite mantissa width. When training on an accelerator, thousands of concurrent threads update shared gradient tensors in global memory using hardware atomic instructions (`atomicAdd`). Because thread scheduling across parallel execution units is asynchronous and arbitrated dynamically by bus contention and clock variations, Thread A and Thread B reach global memory in unpredictable order. If Run 1 executes $(A + B) + C$ and Run 2 executes $A + (B + C)$, the accumulated gradients differ in their least significant bits. Over thousands of optimization steps, these microscopic round-off variances compound through non-linear activation functions, causing two runs with identical seeds and identical code to diverge into measurably different model weights unless deterministic reduction algorithms (which enforce a fixed summation tree at the cost of parallel throughput) are explicitly enabled.
 
 [^fn-artifact-reproducibility-hashing]: **Artifact**\index{Artifact!reproducibility}: Model weights are realized training outputs; the inputs and randomness that produced them cannot generally be inferred from the parameters. Versioning only code is therefore insufficient, and even versioning code, data, configuration, and environment may not guarantee exact replay when kernels or training are nondeterministic.
 
@@ -304,12 +306,12 @@ MLOps is not linear; it is circular.
 
 **The feedback cycle**
 
-- [ ] **Closing the loop**: how do production metrics (for example, drift alerts) trigger new training cycles?
-- [ ] **Retraining trigger**: can you distinguish a drift signal that warrants investigation from outcome evidence that warrants retraining?
+- [ ] **Loop closure**: Trace how production telemetry and drift alerts trigger automated retraining pipelines.
+- [ ] **Retraining trigger**: Distinguish distribution drift signals that warrant investigation from realized outcome regressions that necessitate model retraining.
 
 **The artifacts**
 
-- [ ] **Versioning**: are you versioning Data + Code + Model + Environment together?
+- [ ] **Artifact versioning**: Verify that data, code, model weights, and execution environments are co-versioned as an atomic release tuple.
 
 :::
 
@@ -722,6 +724,10 @@ Development infrastructure turns the debt patterns diagnosed earlier into enforc
 
 These operational components span the boundary between high-level algorithmic abstractions and low-level machine execution. As shown in @fig-ops-layers, the system stack stratifies responsibilities across five tiers: ML models, frameworks, orchestration, infrastructure, and hardware. While models and frameworks express tensor computations mathematically, they remain unaware of cluster state, hardware faults, or input distribution drift. Model orchestration and infrastructure bridge this gap: orchestration manages data lineage, feature computation, and model serving, while infrastructure schedules accelerator resources, manages storage tiers, and collects runtime telemetry to enforce the debt-remediation contracts identified in @tbl-mlops-infrastructure-debt.
 
+Rather than viewing development infrastructure as an ephemeral catalog of third-party cloud tools and vendor scripts, systems engineering organizes MLOps infrastructure into four durable functional planes. The storage and retrieval plane bridges the physical divide between high-throughput analytical scans (immutable, columnar Parquet files on durable storage for offline training) and low-latency point lookups (in-memory key-value stores for online real-time serving), unified by a shared feature schema. The workflow orchestration plane manages deterministic dependency DAGs that sequence pipeline stages (ingest $\to$ validate $\to$ transform $\to$ train $\to$ evaluate) with execution retry semantics, lineage capture, and scheduled or event-driven triggers. The artifact and lineage ledger maintains immutable, content-addressed cryptographic hashes for dataset snapshots, code commits, container images, and trained weights, tracking end-to-end provenance so any production prediction can be audited back to its exact training inputs. Finally, the compute execution runtime allocates and schedules accelerator hardware, host memory, and CPU cores across training jobs and serving endpoints, enforcing isolation bulkheads and dynamic scaling.
+
+While specific open-source and commercial frameworks (such as Airflow, Prefect, Feast, DVC, MLflow, Ray, and Kubernetes) implement individual components of this taxonomy, the underlying architectural planes and their physical interfaces remain invariant.
+
 ::: {#fig-ops-layers fig-env="figure" fig-pos="htb" fig-cap="**MLOps Stack Layers**: Five columns organize the ML system stack: ML Models/Applications, ML Frameworks/Platforms, Model Orchestration, Infrastructure, and Hardware. MLOps spans orchestration tasks from data management through model serving and infrastructure tasks from job scheduling through monitoring, supporting automation, reproducibility, and scalable deployment." fig-alt="Layered architecture diagram. Top row: ML models, frameworks, orchestration, infrastructure, hardware. MLOps section spans orchestration tasks (data management through model serving) and infrastructure tasks (job scheduling through monitoring)."}
 
 ```{.tikz}
@@ -818,7 +824,9 @@ The data dependency debt and training-serving skew analyzed in @sec-ml-operation
 
 Feature stores resolve a fundamental systems tension between batch throughput and online latency by maintaining two synchronized storage tiers behind a unified API. Offline training requires high-throughput sequential reads across terabytes or petabytes of historical logs, which is optimized for columnar storage formats (such as Parquet) hosted on distributed object storage or data warehouses. In contrast, online inference requires sub-millisecond point lookups keyed by entity identifier (such as `user_id`), bounded by strict tail-latency service-level objectives (SLOs). An online store satisfies this access pattern using in-memory or distributed key-value stores (such as Redis or Cassandra). While the underlying physical engines differ to match these access patterns, both read from the same versioned transformation logic.
 
-Historical feature retrieval must strictly enforce point-in-time correctness (preventing temporal data leakage or time travel). When generating training examples for an event that occurred at timestamp $t_{\text{event}}$, the feature store must reconstruct feature values exactly as they existed at $t_{\text{event}}$, excluding any updates that arrived later. If a training query performs a naive join against the latest feature snapshot, it incorporates future state into historical features. The model learns spurious correlations that are physically unavailable during real-time online inference, causing production accuracy to collapse. By automating point-in-time (as-of) joins across timestamped event logs, the feature store enforces temporal causality in training sets while keeping feature definitions unified across offline and online environments.
+Historical feature retrieval must strictly enforce point-in-time correctness (preventing temporal data leakage or time travel). In standard software engineering, joining two database tables on a primary key (such as `user_id`) is deterministic and timeless. In machine learning systems, every join must be *temporal*. Suppose an engineer is training a fraud detection model to predict whether a credit card transaction occurring at 14:02 is fraudulent. At 14:05, the bank's automated fraud system flags the card and updates the user's account record in the operational database: `is_account_locked = True`. If the offline training pipeline performs a naive static SQL join between the transactions table and the current users table, the 14:02 transaction will be matched against the 14:05 record, seeing `is_account_locked = True`. The training algorithm quickly discovers that this feature is a near-perfect predictor of fraud. But in live production, when a transaction arrives at 14:02, the account-lock event has not yet occurred. The model encounters `is_account_locked = False`, its learned decision boundary fails, and production accuracy collapses. This contamination is known as *lookahead bias* (or *temporal target leakage*).
+
+A feature store prevents lookahead bias by executing an *as-of join*: for any historical observation timestamp $t_{\text{obs}}$, it scans an immutable, append-only feature change log and reconstructs the exact state of the world as it existed at $t \le t_{\text{obs}}$, strictly blinding the training pipeline to any record written at $t > t_{\text{obs}}$. By automating point-in-time (as-of) joins across timestamped event logs, the feature store enforces temporal causality in training sets while keeping feature definitions unified across offline and online environments.
 
 Beyond consistency, feature stores support versioning, metadata management, and feature reuse across models. A fraud detection model and a credit scoring model frequently depend on overlapping transaction features that can be centrally maintained, validated, and shared. Integration with data pipelines and model registries preserves lineage: when an upstream feature definition is updated or deprecated, downstream models can be automatically identified and scheduled for retraining.
 
@@ -1242,12 +1250,12 @@ class SilentFailureCost:
 
 **Cost analysis**:
 
-1.  Manual ops (monthly review):
-    *   Detection Time: ~`{python} SilentFailureCost.manual_detect_weeks_str` (`{python} SilentFailureCost.manual_detect_days_str`).
-    *   Revenue Loss: `{python} SilentFailureCost.annual_revenue_str` $\times$ `{python} SilentFailureCost.quality_drop_str` $\times$ `{python} SilentFailureCost.manual_detect_days_str`/`{python} SilentFailureCost.days_per_year_str` ≈ `{python} SilentFailureCost.loss_manual_str`.
-2.  Automated MLOps (daily checks):
-    *   Detection Time: `{python} SilentFailureCost.auto_detect_days_str`.
-    *   Revenue Loss: `{python} SilentFailureCost.annual_revenue_str` $\times$ `{python} SilentFailureCost.quality_drop_str` $\times$ `{python} SilentFailureCost.auto_detect_days_str`/`{python} SilentFailureCost.days_per_year_str` ≈ `{python} SilentFailureCost.loss_auto_str`.
+1.  **Manual ops (monthly review)**:
+    *   **Detection time**: ~`{python} SilentFailureCost.manual_detect_weeks_str` (`{python} SilentFailureCost.manual_detect_days_str`).
+    *   **Revenue loss**: `{python} SilentFailureCost.annual_revenue_str` $\times$ `{python} SilentFailureCost.quality_drop_str` $\times$ `{python} SilentFailureCost.manual_detect_days_str`/`{python} SilentFailureCost.days_per_year_str` ≈ `{python} SilentFailureCost.loss_manual_str`.
+2.  **Automated MLOps (daily checks)**:
+    *   **Detection time**: `{python} SilentFailureCost.auto_detect_days_str`.
+    *   **Revenue loss**: `{python} SilentFailureCost.annual_revenue_str` $\times$ `{python} SilentFailureCost.quality_drop_str` $\times$ `{python} SilentFailureCost.auto_detect_days_str`/`{python} SilentFailureCost.days_per_year_str` ≈ `{python} SilentFailureCost.loss_auto_str`.
 
 **Systems insight**: A single silent failure costs `{python} SilentFailureCost.loss_diff_str` more without MLOps. Under this scenario's `{python} SilentFailureCost.incidents_per_year_str`, reducing the time-to-detection (TTD) avoids nearly `{python} SilentFailureCost.annual_savings_str` in annual loss.
 
@@ -1957,7 +1965,11 @@ Infrastructure as code addresses how to provision resources reproducibly, but op
 
 ##### Hardware utilization patterns {#sec-ml-operations-hardware-utilization-patterns-5c10}
 
-Provisioning accelerator resources is only the first half of the problem; using them efficiently requires interpreting hardware metrics correctly rather than taking them at face value. Standard GPU utilization metrics\index{GPU!utilization monitoring} can mislead operators because reported percentages reflect temporal occupancy rather than active execution. Tools such as `nvidia-smi` report the fraction of time during which at least one warp was active on any streaming multiprocessor (SM). A kernel stalled for hundreds of clock cycles waiting on HBM fetches or host-to-device PCIe transfers registers as 100 percent active, masking severe memory-bandwidth saturation or pipeline starvation behind an ostensibly healthy utilization figure.
+Provisioning accelerator resources is only the first half of the problem; using them efficiently requires interpreting hardware metrics correctly rather than taking them at face value. Standard administrative GPU utilization metrics\index{GPU!utilization monitoring} can mislead operators because reported percentages reflect temporal kernel occupancy rather than active arithmetic execution.
+
+To understand why standard monitoring tools can be dangerously deceptive, consider the internal execution hierarchy of modern GPUs. An accelerator is partitioned into dozens of independent processing engines called streaming multiprocessors (SMs). Each SM executes instructions in lockstep groups of 32 parallel threads known as *warps*. To achieve high compute efficiency, an SM relies on fast zero-overhead context switching: while one warp waits for operands to arrive from off-chip memory, the hardware warp scheduler immediately swaps in another ready warp to execute instructions on the arithmetic ALUs or Tensor Cores.
+
+However, off-chip HBM is separated from the SMs by physical traces, imposing an access latency of several hundred clock cycles. If an ML inference or training kernel exhibits poor memory locality, uncoalesced memory access, or low arithmetic intensity (such as gathering non-contiguous embedding vectors or executing un-fused elementwise operations), every resident warp on an SM may eventually stall waiting for memory transactions to traverse the bus. During these stall cycles, the arithmetic units sit completely idle. Yet, standard administrative tools such as `nvidia-smi` sample temporal occupancy—reporting 100 percent GPU utilization simply because a kernel is resident and has at least one warp assigned to an SM. The operations dashboard displays a reassuring green gauge, while the underlying silicon is severely starved for data.
 
 Distinguishing compute execution from memory or pipeline stalls requires evaluating SM execution efficiency alongside memory bandwidth and I/O saturation. @Tbl-gpu-utilization-patterns distinguishes these utilization signatures and identifies the corresponding optimization strategy for each:
 
@@ -2173,19 +2185,19 @@ class DriftDetectionDelay:
 *Drift detection speed is bounded by the sample rate.*
 :::
 
-:::: {#nbk-ml-ops-drift-detection-delay .callout-notebook title="The drift detection delay"}
+::: {#nbk-ml-ops-drift-detection-delay .callout-notebook title="The drift detection delay"}
 
-**Problem**: A `{python} DriftDetectionDelay.baseline_acc_pct_str`-accurate model may fall by `{python} DriftDetectionDelay.drop_pp_attr_str`. The monitoring policy budgets `{python} DriftDetectionDelay.samples_needed_str` labeled examples; the exact requirement depends on the test, power, label noise, and dependence. How long does collection take?
+**Problem**: A `{python} DriftDetectionDelay.baseline_acc_pct_str`-accurate model may fall by `{python} DriftDetectionDelay.drop_pp_attr_str`. The monitoring policy budgets `{python} DriftDetectionDelay.samples_needed_str` labeled examples; the exact requirement depends on the test, power, label noise, and dependence. Calculate the collection duration required across high-rate and low-rate arrival scenarios.
 
 **Math**:
 
-1.  Evidence budget: `{python} DriftDetectionDelay.samples_needed_str` labeled examples.
-2.  High-rate case: At `{python} DriftDetectionDelay.qps_high_str` labeled outcome per second, collection takes `{python} DriftDetectionDelay.seconds_needed_high_str` ≈ `{python} DriftDetectionDelay.minutes_needed_high_str`.
-3.  Low-rate case: At `{python} DriftDetectionDelay.requests_per_day_low_str` labeled outcomes per day, collection takes `{python} DriftDetectionDelay.days_needed_low_str`.
+1.  **Evidence budget**: `{python} DriftDetectionDelay.samples_needed_str` labeled examples.
+2.  **High-rate case**: At `{python} DriftDetectionDelay.qps_high_str` labeled outcome per second, collection takes `{python} DriftDetectionDelay.seconds_needed_high_str` ≈ `{python} DriftDetectionDelay.minutes_needed_high_str`.
+3.  **Low-rate case**: At `{python} DriftDetectionDelay.requests_per_day_low_str` labeled outcomes per day, collection takes `{python} DriftDetectionDelay.days_needed_low_str`.
 
 **Systems insight**: Detection is bounded by labeled-outcome arrival, which may lag far behind traffic. Low-volume or delayed-label domains may need days or weeks, so high-stakes systems supplement statistical monitoring with proactive model audits\index{Model audit!high-stakes systems}.
 
-::::
+:::
 
 When telemetry signals degradation, diagnosing the root cause and executing a rollback requires rigorous **lineage tracking**\index{Lineage tracking!model registry} within a model registry. Where practical, each registered model version must link immutable digests for the training code, dataset snapshot, hyperparameters, and serialized weight artifacts. While this chain enables reproducible rollbacks to known-good checkpoints, it cannot guarantee bitwise reproducibility if driver versions, CUDA libraries, or non-deterministic reduction kernels vary across the cluster fleet.
 
@@ -2303,9 +2315,9 @@ The first layer is infrastructure-level monitoring, which tracks indicators such
 
 These utilization patterns map directly to the iron law of ML systems\index{Iron law of ML systems!production monitoring} (@sec-introduction-iron-law-ml-systems-c32a). Monitoring reveals which term dominates:
 
-- **Compute-bound** (high GPU utilization, low memory bandwidth utilization): Limited by $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$. Optimize kernels, use Tensor Cores, or upgrade hardware.
-- **Memory-bound** (moderate GPU utilization, high memory bandwidth utilization): Limited by $D_{\text{vol}}/\text{BW}$. Optimize with quantization, pruning, or batching.
-- **I/O-bound** (low GPU utilization, low memory bandwidth utilization): Limited by data pipeline latency. Fix the DataLoader, not the model.
+- **Compute-bound regime (high GPU utilization, low memory bandwidth utilization)**: Limited by $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$. Optimize kernels, use Tensor Cores, or upgrade hardware.
+- **Memory-bound regime (moderate GPU utilization, high memory bandwidth utilization)**: Limited by $D_{\text{vol}}/\text{BW}$. Optimize with quantization, pruning, or batching.
+- **I/O-bound regime (low GPU utilization, low memory bandwidth utilization)**: Limited by data pipeline latency. Fix the DataLoader, not the model.
 
 The iron law doubles as a diagnostic framework for production systems. When latency SLOs are violated, the monitoring dashboard indicates which term to investigate.
 
@@ -2458,8 +2470,16 @@ Statistical distance measures quantify this divergence by comparing serving dist
 \endgroup
 ```
 
-The PSI\index{Population stability index!drift quantification}[^fn-psi-statistic-origin] quantifies distributional shift by comparing expected (training) and actual (serving) frequencies across fixed bins (@sec-appdx-data-foundations-measuring-drift-divergence-a6dd develops the mathematical foundations of KL divergence, PSI, and information theory for systems monitoring). Here $n$ is the number of fixed bins, and $\text{expected}_i$ and $\text{actual}_i$ are aligned, strictly positive bin proportions that sum to one in each distribution. @Eq-psi formalizes the metric:
+In high-throughput production monitoring, systems engineers cannot simply run standard statistical hypothesis tests—such as the two-sample Kolmogorov-Smirnov (KS) test or chi-square test—to detect distribution drift. The root obstacle is the large-$N$ problem. When serving environments evaluate millions of queries ($N \ge 10^6$), standard hypothesis tests possess near-infinite statistical power: the $p$-value collapses toward zero upon encountering minuscule differences in the fourth decimal place that have no operational or clinical significance. Relying on $p$-value significance triggers constant false-positive alert storms and operator fatigue. Conversely, on small-sample edge telemetry, hypothesis tests lack statistical power and miss genuine drift.
+
+Production monitoring therefore requires an effect-size metric rather than a hypothesis rejection test. The industry standard is PSI\index{Population stability index!drift quantification},[^fn-psi-statistic-origin] which quantifies distributional shift by measuring the binned relative entropy between expected (training) and actual (serving) frequencies across fixed bins (@sec-appdx-data-foundations-measuring-drift-divergence-a6dd develops the mathematical foundations of KL divergence, PSI, and information theory for systems monitoring). Here $n$ is the number of fixed bins, and $\text{expected}_i$ and $\text{actual}_i$ are aligned, strictly positive bin proportions that sum to one in each distribution. @Eq-psi formalizes the metric:
 $$ \text{PSI} = \sum_{i=1}^{n} (\text{actual}_i - \text{expected}_i) \times \ln\left(\frac{\text{actual}_i}{\text{expected}_i}\right) $$ {#eq-psi}
+
+Because $(\text{actual}_i - \text{expected}_i)$ and $\ln(\text{actual}_i / \text{expected}_i)$ always share the same algebraic sign, each bin's contribution is strictly non-negative: shifts in either direction penalize the aggregate metric. By operational convention:
+
+- $\text{PSI} < 0.1$: Insignificant shift; normal operation, no action required.
+- $0.1 \le \text{PSI} < 0.25$: Moderate shift; triggers an engineering warning to inspect upstream pipeline freshness.
+- $\text{PSI} \ge 0.25$: Severe distribution drift; triggers automated circuit breakers to divert traffic to heuristic fallbacks or schedule an accelerated retraining run.
 
 Production monitors require a documented zero-bin policy, such as Laplace smoothing, because any empty bin in the denominator yields an undefined logarithm. Monitors must also preserve fixed bin boundaries across comparison periods; PSI is a drift signal, not an automatic retraining trigger.
 
@@ -2568,12 +2588,12 @@ A freshness policy turns staleness from a silent data defect into an explicit fa
 
 ML monitoring is layered, not monolithic. The prompts in this checklist test whether each symptom can be traced to the responsible layer.
 
-- [ ] **Infrastructure utilization**: can you distinguish a 0 percent GPU utilization failure from a 100 percent queuing failure?
-- [ ] **Traffic throughput**: can you tell whether a sudden QPS drop points to upstream routing failure or client-side demand change?
-- [ ] **Data freshness**: can you detect stale features before plausible-looking predictions reflect yesterday's world?
-- [ ] **Data drift**: can you use PSI or KL divergence to decide whether production data still resembles the training distribution?
-- [ ] **Model accuracy**: can you account for delayed ground truth labels when interpreting accuracy alerts?
-- [ ] **Cohort bias**: can you use cohort analysis to catch subgroup failures that aggregate accuracy hides?
+- [ ] **Infrastructure utilization**: Distinguish a 0 percent GPU utilization stall from a 100 percent queue saturation failure.
+- [ ] **Traffic throughput**: Determine whether a sudden QPS drop indicates an upstream network routing partition or genuine client-side demand contraction.
+- [ ] **Data freshness**: Detect stale feature ingestion pipelines before plausible predictions mask obsolete real-world states.
+- [ ] **Data drift**: Evaluate population stability index (PSI) or KL divergence metrics to detect when serving inputs diverge from the training baseline.
+- [ ] **Model accuracy**: Account for delayed ground-truth labels when interpreting real-time task performance alerts.
+- [ ] **Cohort bias**: Apply stratified cohort analysis to detect subgroup degradation hidden by aggregate top-level accuracy.
 
 :::
 
@@ -2682,26 +2702,26 @@ class MonitoringBudget:
 
 ::: {#nbk-ml-ops-single-model-monitoring-budget .callout-notebook title="Single-model monitoring budget"}
 
-**Problem**: What monthly ingestion, storage, and query cost follows from monitoring a single ML node under these assumptions?
+**Problem**: Calculate the monthly metric ingestion, time-series storage, and query compute expenditure incurred to monitor a single ML serving node under production assumptions.
 
-Variables:
+**Variables**:
 
 - one model with `{python} MonitoringBudget.n_variants_str` deployment variants (production, canary, staging), each emitting `{python} MonitoringBudget.metrics_per_variant_str` metrics
 - Metrics sampled every `{python} MonitoringBudget.sample_interval_s_str`
 - Retention requirement: `{python} MonitoringBudget.days_str`
 - `{python} MonitoringBudget.n_dashboards_str` dashboards (model health, infrastructure), `{python} MonitoringBudget.n_users_str` team members, five-minute refresh
 
-Metric ingestion:
+**Metric ingestion**:
 
 - Data points per month: `{python} MonitoringBudget.n_variants_str` $\times$ `{python} MonitoringBudget.metrics_per_variant_str` $\times$ (`{python} MonitoringBudget.samples_per_min_str` $\times$ `{python} MonitoringBudget.mins_per_hour_str` $\times$ `{python} MonitoringBudget.hours_per_day_str` $\times$ `{python} MonitoringBudget.days_str`) = `{python} MonitoringBudget.dp_m_str`
 - Cost at `{python} MonitoringBudget.ingestion_cost_per_m_str`: `{python} MonitoringBudget.ingest_usd_str`
 
-Storage:
+**Storage**:
 
 - At `{python} MonitoringBudget.bytes_per_point_value_str` bytes/point compressed: `{python} MonitoringBudget.dp_m_str` $\times$ `{python} MonitoringBudget.bytes_per_point_value_str` bytes = `{python} MonitoringBudget.storage_gb_str`
 - Cost at `{python} MonitoringBudget.storage_cost_per_gb_str`: `{python} MonitoringBudget.storage_cost_str`
 
-Query compute:
+**Query compute**:
 
 - Queries per month: `{python} MonitoringBudget.n_dashboards_str` dashboards $\times$ `{python} MonitoringBudget.n_users_str` users $\times$ (`{python} MonitoringBudget.queries_per_hr_str` $\times$ `{python} MonitoringBudget.work_hours_str` $\times$ `{python} MonitoringBudget.work_days_str`) = `{python} MonitoringBudget.queries_str`
 - Cost at `{python} MonitoringBudget.query_cost_per_str`: `{python} MonitoringBudget.query_cost_str`
@@ -2807,7 +2827,7 @@ Incident response triages and mitigates; model debugging\index{Model debugging!p
 
 ##### The debugging decision tree {#sec-ml-operations-debugging-decision-tree-5080}
 
-When model performance degrades\index{Model debugging!decision tree}, work through these diagnostic questions in order. @Sec-appdx-dam-taxonomy-production-troubleshooting-02fb supplies a systematic diagnostic matrix that maps symptoms to D·A·M (Data · Algorithm · Machine) axes.
+When model performance degrades\index{Model debugging!decision tree}, execute these five diagnostic stages in sequence. @Sec-appdx-dam-taxonomy-production-troubleshooting-02fb supplies a systematic diagnostic matrix that maps symptoms to D·A·M (Data · Algorithm · Machine) axes.
 
 ::: {.column-margin}
 ![](images/svg/vol1_ml_ops_margin_004.svg){width="100%" fig-alt="A D·A·M triangle with vertices D, A, M; the Data vertex filled in green, the Algorithm and Machine vertices gray."}
@@ -2815,11 +2835,11 @@ When model performance degrades\index{Model debugging!decision tree}, work throu
 *Production debugging starts on the data axis of D·A·M.*
 :::
 
-1. **Is it the data?** Check for upstream data pipeline failures, schema changes, missing values, or distribution shifts. Data is often the first place to look because many production ML failures originate in changing inputs, labels, or feature pipelines.
-2. **Is it training-serving skew?** Compare feature values or preprocessing outputs for matched examples across training and serving. KS or PSI can screen for distributional divergence, but cannot establish its cause.
-3. **Is it a specific subpopulation?** Slice performance by key dimensions (geography, device type, user segment). Degradation localized to one slice suggests a data coverage or labeling issue.
-4. **Is it temporal?** Plot performance over time. Sudden drops prioritize checks for recent deployments and data failures; gradual decline can be consistent with drift, but timing alone does not establish the cause.
-5. **Is it the model?** After checking data and pipeline causes, examine model behavior through prediction analysis and feature attribution.
+1. **Data pipeline integrity**: Inspect upstream data pipelines for schema changes, missing values, serialization errors, or input distribution shifts. Data integrity is the primary diagnostic boundary because the majority of production ML regressions originate in altered inputs, corrupted labels, or upstream feature transformations.
+2. **Training-serving skew**: Compare feature distributions and preprocessing transformations between offline training and online serving for matched requests. Statistical distance metrics such as KS or PSI screen for distributional divergence, verifying whether serving inputs faithfully match training expectations.
+3. **Subpopulation slicing**: Disaggregate performance across operational dimensions (such as geography, client hardware, or user cohorts). Localized degradation isolates data coverage gaps and slice-specific label noise that aggregate metrics conceal.
+4. **Temporal degradation dynamics**: Evaluate performance trends across time. Abrupt drops prioritize recent release artifacts and upstream infrastructure outages, whereas gradual degradation isolates seasonal drift or continuous concept decay.
+5. **Model and representation attribution**: After verifying data pipeline integrity and ruling out serving skew, evaluate model-level failure modes through prediction confidence distributions, calibration curves, and feature attribution.
 
 ##### Slice analysis {#sec-ml-operations-slice-analysis-9fe6}
 
@@ -3306,9 +3326,9 @@ scale=1, every node/.append style={transform shape}]
 
 The three monitoring domains map directly to distinct systems failure mechanisms:
 
-- *Data health* failures—such as schema drift, null-value spikes, and feature staleness—violate the distributional invariants assumed during training without altering the serving binaries.
-- *Model health* failures—such as accuracy loss, score calibration drift, and degenerate feedback loops—occur silently because the inference engine continues returning syntactically valid tensors with low latency.
-- *Service health* failures—such as memory fragmentation, dependency drift, and container orchestration faults—threaten traditional availability and throughput.
+- **Data health**: Failures such as schema drift, null-value spikes, and feature staleness violate the distributional invariants assumed during training without altering the serving binaries.
+- **Model health**: Failures such as accuracy loss, score calibration drift, and degenerate feedback loops occur silently because the inference engine continues returning syntactically valid tensors with low latency.
+- **Service health**: Failures such as memory fragmentation, dependency drift, and container orchestration faults threaten traditional availability and throughput.
 Because data and model failures leave standard HTTP health checks and process status green, availability monitoring alone fails to capture the true operational state of an ML system.
 
 ### Design patterns and anti-patterns {#sec-ml-operations-design-patterns-antipatterns-82ad}

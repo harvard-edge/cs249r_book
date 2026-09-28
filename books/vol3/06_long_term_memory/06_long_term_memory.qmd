@@ -766,7 +766,7 @@ $$\text{Graph Overhead} \approx N \times M \times 8 \text{ bytes} = 10^7 \times 
 
 When combined with alignment padding and heap metadata, an HNSW index can expand the base storage requirements of the vector dataset by 25 to 50 percent, requiring that the entire graph and its associated vectors reside permanently in host RAM to avoid catastrophic disk paging during graph hops.
 
-To scale durable storage across commodity nodes without exhausting physical memory, systems engineers employ Inverted File with Product Quantization (IVFPQ, also denoted IVF-PQ). IVFPQ combines coarse geometric clustering with lossy vector compression, transforming an unmanageable continuous search problem into a compact table lookup.
+To scale durable storage across commodity nodes without exhausting physical memory, systems engineers employ Inverted File with Product Quantization (IVFPQ, also denoted IVF-PQ). IVFPQ combines coarse geometric clustering with lossy vector compression, transforming an unmanageable continuous search problem into a compact table lookup. Just as the GIF image format reduces 16.8 million colors to a 256-color palette—allowing each pixel to be stored as a single 1-byte index instead of 3 raw RGB bytes—Product Quantization reduces high-dimensional vectors to short codes by clustering each subspace into a local "palette" of centroids.
 
 The Inverted File (IVF) stage acts as a coarse spatial partition. The storage engine clusters the vector corpus into $C$ distinct Voronoi cells using offline $k$-means clustering, generating centroids $\{\mathbf{c}_1, \mathbf{c}_2, \dots, \mathbf{c}_C\}$. Each centroid serves as the key for an inverted list containing the identifiers of all vectors falling within its geometric cell. At query time, the runtime evaluates the query vector against only the $C$ centroids, selects the top $n_{\text{probe}}$ closest cells (where $n_{\text{probe}} \ll C$), and restricts candidate evaluation entirely to the postings lists associated with those selected clusters.
 
@@ -891,7 +891,9 @@ As demonstrated in @tbl-vol3-rrf-scoring, `fd_cleanup_orphans` appears at Rank 2
 ![](images/svg/vol3_ch06_hnsw_rrf.svg)
 :::
 
-To achieve maximal precision before context insertion, state-of-the-art architectures deploy the multi-stage retrieval pipeline illustrated in @fig-vol3-hnsw-rrf. An agent query $Q$ (such as `"reclaim orphaned file descriptors"`) branches simultaneously into two complementary retrieval substrates: a sparse lexical engine scanning BM25 inverted postings for exact term and symbol matches, and a dense vector engine traversing an HNSW or IVF-PQ index for geometric cosine proximity. Each engine retrieves an initial broad candidate pool of top-100 entries. In Stage 2, Reciprocal Rank Fusion (RRF) reconciles their fundamentally incommensurate scoring scales by taking parameter-free reciprocal ranks ($\text{RRF}(d) = \sum_{m} \frac{1}{60 + r_m(d)}$), producing a consolidated candidate pool of $K_{\text{pool}} \approx 50$ documents. In Stage 3, this compressed candidate set is evaluated by a full-attention cross-encoder transformer model. Unlike decoupled bi-encoders, the cross-encoder computes full all-to-all token attention between query and candidate text ($\text{Softmax}(\mathbf{Q} \mathbf{K}^T / \sqrt{d_k})$), evaluating prepositional logic, syntactic negation, and subtle architectural invariants. Because cross-encoders evaluate only the 50 candidate passages pre-filtered by the hybrid stage, their $O(K_{\text{pool}} \cdot L^2)$ computational overhead requires mere tens of milliseconds, filtering out subtle semantic false positives and admitting only high-assurance evidence ($k^* \in [3, 5]$) into the agent's constrained working context window.
+To achieve maximal precision before context insertion, state-of-the-art architectures deploy the multi-stage retrieval pipeline illustrated in @fig-vol3-hnsw-rrf. An agent query $Q$ (such as `"reclaim orphaned file descriptors"`) branches simultaneously into two complementary retrieval substrates: a sparse lexical engine scanning BM25 inverted postings for exact term and symbol matches, and a dense vector engine traversing an HNSW or IVF-PQ index for geometric cosine proximity. Each engine retrieves an initial broad candidate pool of top-100 entries. In Stage 2, Reciprocal Rank Fusion (RRF) reconciles their fundamentally incommensurate scoring scales by taking parameter-free reciprocal ranks ($\text{RRF}(d) = \sum_{m} \frac{1}{60 + r_m(d)}$), producing a consolidated candidate pool of $K_{\text{pool}} \approx 50$ documents. In Stage 3, this compressed candidate set is evaluated by a full-attention cross-encoder transformer model. Unlike decoupled bi-encoders, the cross-encoder computes full all-to-all token attention between query and candidate text ($\text{Softmax}(\mathbf{Q} \mathbf{K}^T / \sqrt{d_k})$), evaluating prepositional logic, syntactic negation, and subtle architectural invariants.
+
+Because full all-to-all cross-encoder attention scales quadratically ($O(K_{\text{pool}} \cdot L^2)$), evaluating 50 candidate passages of 300 tokens each with a 100-token query requires processing 20,000 concatenated tokens through a transformer. On CPU or shared serving workers, a 50-candidate cross-encoder pass can consume $50\text{--}150\text{ ms}$, threatening tight interactive latency budgets ($T_{\text{budget}} \le 25\text{ ms}$). Production runtimes resolve this budget tension by either restricting the cross-encoder stage to a high-confidence top-slice ($K_{\text{pool}} \le 15$), deploying lightweight late-interaction architectures (such as ColBERT token-level MaxSim operations), or dispatching cross-encoder re-ranking asynchronously on non-interactive deliberation paths. This filters out subtle semantic false positives and admits only high-assurance evidence ($k^* \in [3, 5]$) into the agent's constrained working context window.
 
 Yet even this two-stage hybrid pipeline presumes that the information required to validate an architectural hypothesis resides entirely within a single localized text chunk. When an agent must resolve complex bugs in distributed systems, the evidence rarely sits neatly partitioned inside one file or function. The causal chain linking an anomalous HTTP payload to a corrupted storage record spans network deserializers, state machine dispatchers, memory allocators, and disk commit logs. If the required evidence must be assembled across multiple structural hops, individual passage retrieval—no matter how finely fused—fails to reveal the topology of the system. What persistent storage structures allow an agent to traverse these interconnected execution paths when single-hop hybrid queries cannot see beyond the horizon of an isolated chunk?
 
@@ -935,7 +937,27 @@ In a pure chunk-based retrieval architecture, the runtime must either issue $k$ 
 
 ### Structural code property graphs
 
-To overcome the chunk fragmentation boundary, persistent storage must model software as a formal multi-relational graph. Following the foundational formulation of Code Property Graphs (CPGs) by @yamaguchi2014modeling and subsequent graph-augmented retrieval architectures [@edge2024graphrag], we model a software repository as a directed, edge-labeled, attributed multigraph:
+To overcome the chunk fragmentation boundary, persistent storage must model software as a formal multi-relational graph. Consider a simple Python refactoring scenario where an agent needs to update a renamed validation function:
+
+```python
+# auth.py
+def validate_token(token: str) -> bool:
+    return len(token) > 10
+
+# api.py
+from auth import validate_token
+def process_request(req):
+    if validate_token(req.token):
+        save_db(req)
+
+# db.py
+def save_db(req):
+    pass
+```
+
+If the agent only uses text chunking, chunks from `api.py` might be disconnected from `auth.py`. But if the repository is represented as a graph, the explicit `CALLS` edge between `process_request` and `validate_token` ensures the agent sees the exact execution path.
+
+Following the foundational formulation of Code Property Graphs (CPGs) by @yamaguchi2014modeling and subsequent graph-augmented retrieval architectures [@edge2024graphrag], we model a software repository as a directed, edge-labeled, attributed multigraph:
 
 $$G = (V, E, \Sigma_V, \Sigma_E, \mu_V, \mu_E)$$
 
@@ -982,6 +1004,8 @@ To enforce relevance during expansion, production systems apply *Personalized Pa
 
 $$s_i = \begin{cases} \frac{1}{|V_0|} & \text{if } v_i \in V_0 \\ 0 & \text{otherwise} \end{cases}$$
 
+where each vector element $s_i$ corresponds to vertex $v_i \in V$ for $i \in \{1, \dots, |V|\}$.
+
 The stationary probability distribution $\mathbf{p} \in \mathbb{R}^{|V|}$ satisfies the recursive balance equation:
 
 $$\mathbf{p} = (1 - \alpha)\mathbf{s} + \alpha \mathbf{P}^\top \mathbf{p}$$
@@ -1022,7 +1046,7 @@ class GraphNeighborhoodExpansion:
     v_ppr = 38
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    v_bfs = int(round(v0 * (d_out**d_hop)))
+    v_bfs = int(v0 * (d_out**d_hop))
     t_required = v_bfs * tokens_per_fn
     overflow_mult = t_required / s_max
 
@@ -1030,9 +1054,9 @@ class GraphNeighborhoodExpansion:
     t_remaining = s_max - t_ppr
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(v_bfs == 1311, "v_bfs")
-    check(t_required == 235_980, "t_required")
-    check(abs(overflow_mult - 28.8) < 0.1, "overflow_mult")
+    check(v_bfs == 1310, "v_bfs")
+    check(t_required == 235_800, "t_required")
+    check(abs(overflow_mult - 28.78) < 0.1, "overflow_mult")
     check(t_ppr == 6_840, "t_ppr")
     check(t_remaining == 1_352, "t_remaining")
 
@@ -1042,7 +1066,7 @@ class GraphNeighborhoodExpansion:
     tokens_per_fn_str = fmt_int(tokens_per_fn)
     v0_str = fmt_int(v0)
     d_hop_str = fmt_int(d_hop)
-    v_bfs_str = fmt_int(1310)
+    v_bfs_str = fmt_int(v_bfs)
     overflow_mult_str = fmt_multiple(overflow_mult, precision=1)
     v_ppr_str = fmt_int(v_ppr)
     t_remaining_str = fmt_int(t_remaining)
@@ -1434,7 +1458,7 @@ class IndexSyncLatency:
 ::: {#nbk-06-latency-and-throughput-cost-of .callout-notebook title="Latency and throughput cost of index synchronization"}
 Consider an autonomous coding agent operating on a local workstation equipped with a dedicated NVIDIA L4 GPU (24 GB VRAM, 300 GB/s memory bandwidth) and an 8-core host CPU. The target codebase consists of $N = 10,000$ files averaging 1,200 tokens each. Documents are chunked into 512-token segments with 128-token overlap ($C = 4$ chunks per file).
 
-The dense vector store uses 1024-dimensional float16 embeddings. Local embedding inference via an optimized model (`bge-large-en-v1.5`) exhibits a forward-pass latency of $t_{\text{emb}} = 12\text{ ms}$ for batch size $B=1$, and $t_{\text{batch}} = 28\text{ ms}$ for batch size $B=16$. CPU-based tree-sitter AST parsing requires $t_{\text{ast}} = 3.5\text{ ms}$ per file, and lexical index updates require $t_{\text{lex}} = 2.0\text{ ms}$ per chunk.
+The dense vector store uses 1024-dimensional float16 embeddings. Local embedding inference via an optimized model (`bge-large-en-v1.5`) exhibits a forward-pass latency of $t_{\text{emb}} = 12\text{ ms}$ for batch size $B=1$, and $t_{\text{batch}} = 28\text{ ms}$ for batch size $B=16$. CPU-based Tree-sitter AST parsing requires $t_{\text{ast}} = 3.5\text{ ms}$ per file (representing a cold re-parse of un-cached source files from disk; sub-millisecond if incremental re-parsing over hot editor buffers), and lexical index updates require $t_{\text{lex}} = 2.0\text{ ms}$ per chunk.
 
 **The Workload:** The agent executes an automated refactoring tool that modifies $M =$ `{python} IndexSyncLatency.m_files_str` files simultaneously. Each file has changes affecting 2 chunks, generating a total of $M_{\text{chunks}} =$ `{python} IndexSyncLatency.m_chunks_str` dirty chunks.
 
@@ -1495,6 +1519,11 @@ $$\rho_{\text{dead}} = \frac{|V_{\text{tombstone}}|}{|V_{\text{total}}|}$$
 
 When $\rho_{\text{dead}}$ exceeds a predefined threshold $\theta_{\text{compact}}$ (typically $0.15 \le \theta_{\text{compact}} \le 0.20$), a background thread clones the active graph segment, purges all chunks where $e_{\text{death}} \le e_{\text{current}}$, re-links the HNSW entry points, and atomically swaps the compacted index pointer.
 
+#### In-memory tombstone filtering {.unnumbered}
+
+To guarantee that an agent never receives stale context after modifying a file, the runtime implements **In-Memory Tombstone Filtering**. When a file is modified, the runtime immediately adds its path to a `tombstoned_ids` set. During any subsequent vector or lexical search, the retrieval engine checks this set. Any candidate chunk whose ID appears in the tombstoned set is instantly discarded before it can reach the model's prompt. The memory store flags these modified entries and syncs the updated chunks in the background without blocking the agent's execution.
+
+::: {.callout-note title="Under the hood: Distributed CDC and epoch RCU" collapse="true"}
 #### Causal read-your-writes fencing over distributed change data capture {.unnumbered}
 
 In distributed or multi-worker agent deployments (such as a multi-agent system where Worker 1 executes code modifications while Worker 2 or an auxiliary search agent queries an index replica), invalidation cannot rely on a single process-local hash table.
@@ -1532,6 +1561,7 @@ Production agent storage engines eliminate these race conditions using **Atomic 
 - **Deferred Epoch Reclamation:** The superseded neighbor buffer $L_{\text{old}}$ is placed onto an epoch retirement queue. Memory is freed only after all reader threads registered in epochs $E \le E_{\text{retire}}$ have completed their traversals.
 
 Epoch RCU guarantees that vector similarity lookups remain wait-free and nanosecond-fast, while background reconciliation safely mutates graph topologies and tombstone sets without locking active inference workers.
+:::
 
 Index invalidation closes one storage property mechanically, since the retrieval engine never serves a superseded chunk. Under the invariant closure principle (\ref{pri-invariant-closure}) it cannot certify the task, whose evidence still comes from the end-to-end boundary [@saltzer1984endtoend], where checks confirm that the agent's changes satisfy the environment's own invariants. What the storage layer owes that boundary is an honest record of the source. Whenever the agent mutates a file, the runtime captures an authoritative content hash and file modification timestamp directly from the OS kernel before executing any subsequent retrieval or deliberation step. Durable memory must remain subservient to the physical state of the machine.
 
