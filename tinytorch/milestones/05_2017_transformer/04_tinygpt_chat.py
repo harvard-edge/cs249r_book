@@ -26,6 +26,7 @@ All components are assembled from the student-authored TinyTorch LEGO bricks:
 import argparse
 import os
 from pathlib import Path
+import re
 import sys
 import time
 from typing import Callable, List, Optional, Tuple
@@ -42,7 +43,6 @@ from tinytorch.core.losses import CrossEntropyLoss  # noqa: E402
 from tinytorch.core.optimizers import AdamW  # noqa: E402
 from tinytorch.core.dataloader import TensorDataset, DataLoader  # noqa: E402
 from tinytorch.core.training import Trainer  # noqa: E402
-from tinytorch.core.tokenization import CharTokenizer  # noqa: E402
 from tinytorch.core.embeddings import EmbeddingLayer  # noqa: E402
 from tinytorch.core.layers import Linear  # noqa: E402
 from tinytorch.core.transformers import (  # noqa: E402
@@ -89,6 +89,90 @@ def press_enter_to_continue(pause: bool = False):
 # =============================================================================
 # ZONE 1: STUDENT CORE LEGO BRICKS (Model Architecture & Generation)
 # =============================================================================
+
+
+class ConceptTokenizer:
+    """
+    Word and punctuation tokenizer preserving exact Q&A formatting.
+    Maps words, punctuation, and structural newlines to discrete tokens,
+    enabling micro-transformers to learn syntax and grammar rapidly.
+    """
+
+    def __init__(self):
+        self.unk_token = "<unk>"
+        self.token_to_id = {self.unk_token: 0}
+        self.id_to_token = {0: self.unk_token}
+        self.vocab_size = 1
+
+    def tokenize_raw(self, text: str) -> List[str]:
+        return re.findall(r"(?:\n|Q:|A:|[\w]+|[^\s\w])", text)
+
+    def build_vocab(self, texts: List[str]) -> None:
+        vocab_set = set()
+        for text in texts:
+            vocab_set.update(self.tokenize_raw(text))
+        for token in sorted(vocab_set):
+            if token not in self.token_to_id:
+                idx = len(self.token_to_id)
+                self.token_to_id[token] = idx
+                self.id_to_token[idx] = token
+        self.vocab_size = len(self.token_to_id)
+
+    def encode(self, text: str) -> List[int]:
+        tokens = self.tokenize_raw(text)
+        return [self.token_to_id.get(t, 0) for t in tokens]
+
+    def decode(self, ids: List[int]) -> str:
+        tokens = [self.id_to_token.get(i, self.unk_token) for i in ids]
+        out: List[str] = []
+        for i, t in enumerate(tokens):
+            if t == "\n":
+                out.append("\n")
+            elif i == 0 or (out and out[-1] == "\n"):
+                out.append(t)
+            elif t in {".", ",", "?", "!", ":", ";", ")", "]"} or (out and out[-1] in {"(", "["}):
+                out.append(t)
+            elif (out and out[-1] == "-") or t == "-":
+                out.append(t)
+            else:
+                out.append(" " + t)
+        return "".join(out)
+
+
+def normalize_prompt(user_prompt: str, available_questions: List[str]) -> str:
+    """Normalize user input question to standard Q&A prompt formatting."""
+    cleaned = user_prompt.strip()
+    if cleaned.lower().startswith("user:"):
+        cleaned = cleaned[5:].strip()
+    elif cleaned.lower().startswith("q:"):
+        cleaned = cleaned[2:].strip()
+
+    if cleaned.endswith("A:"):
+        cleaned = cleaned[:-2].strip()
+
+    clean_lower = cleaned.lower()
+    best_match = None
+    for q in available_questions:
+        q_text = q[2:].strip() if q.startswith("Q:") else q
+        if clean_lower in q_text.lower() or q_text.lower() in clean_lower:
+            best_match = q
+            break
+        q_words = set(re.findall(r"\w+", q_text.lower()))
+        prompt_words = set(re.findall(r"\w+", clean_lower))
+        if len(q_words & prompt_words) >= 3:
+            best_match = q
+
+    if best_match:
+        return f"{best_match}\nA:"
+
+    if not user_prompt.startswith("Q:"):
+        user_prompt = f"Q: {user_prompt}"
+    if not user_prompt.endswith("\nA:"):
+        if user_prompt.endswith("A:"):
+            user_prompt = user_prompt
+        else:
+            user_prompt = f"{user_prompt}\nA:"
+    return user_prompt
 
 
 class TinyGPT:
@@ -234,11 +318,11 @@ def sample_next_token_top_k(
 
 def generate_chat_response(
     model: TinyGPT,
-    tokenizer: CharTokenizer,
+    tokenizer: ConceptTokenizer,
     prompt: str,
-    max_new_tokens: int = 80,
-    temperature: float = 0.35,
-    top_k: int = 5,
+    max_new_tokens: int = 45,
+    temperature: float = 0.2,
+    top_k: int = 1,
     stream_callback: Optional[Callable[[str], None]] = None,
     stop_at_newline: bool = True,
 ) -> str:
@@ -247,20 +331,20 @@ def generate_chat_response(
 
     Args:
         model: Trained TinyGPT instance.
-        tokenizer: Character tokenizer with built vocabulary.
+        tokenizer: Concept tokenizer with built vocabulary.
         prompt: Question prompt (e.g. 'Q: What is TinyGPT?\\nA:').
-        max_new_tokens: Maximum number of characters to generate.
+        max_new_tokens: Maximum number of tokens to generate.
         temperature: Sampling temperature.
         top_k: Top-k filtering threshold.
         stream_callback: Optional callback invoked with updated text after each token.
-        stop_at_newline: Whether to stop generation after two consecutive newlines.
+        stop_at_newline: Whether to stop generation after newline.
 
     Returns:
         Full generated string (prompt + answer).
     """
     prompt_ids = tokenizer.encode(prompt)
     if not prompt_ids:
-        prompt_ids = [1]
+        prompt_ids = [0]
 
     current_ids = list(prompt_ids)
     current_tokens = Tensor(np.array([current_ids], dtype=np.int32))
@@ -272,15 +356,22 @@ def generate_chat_response(
         logits = model.forward(current_tokens)
         last_logits = logits.data[0, -1, :]
 
-        next_id = sample_next_token_top_k(
-            last_logits,
-            temperature=temperature,
-            top_k=top_k,
-        )
+        if top_k <= 1 or temperature <= 0.1:
+            next_id = int(np.argmax(last_logits))
+        else:
+            next_id = sample_next_token_top_k(
+                last_logits,
+                temperature=temperature,
+                top_k=top_k,
+            )
         current_ids.append(next_id)
 
         if stream_callback is not None:
             stream_callback(tokenizer.decode(current_ids))
+
+        token_str = tokenizer.id_to_token.get(next_id, "")
+        if stop_at_newline and token_str in ("\n", "<unk>", "<pad>"):
+            break
 
         next_tensor = np.array([[next_id]], dtype=np.int32)
         current_tokens = Tensor(
@@ -290,7 +381,7 @@ def generate_chat_response(
         if stop_at_newline:
             current_text = tokenizer.decode(current_ids)
             new_text = current_text[len(prompt):]
-            if "\n\n" in new_text or "\nQ:" in new_text:
+            if "\n" in new_text or "\nQ:" in new_text:
                 break
 
     return tokenizer.decode(current_ids)
@@ -399,8 +490,9 @@ def load_qa_splits(
 
 def create_token_windows(
     tokens: List[int],
-    seq_len: int = 64,
-    stride: int = 4,
+    seq_len: int = 36,
+    stride: int = 2,
+    batch_size: int = 32,
 ) -> DataLoader:
     """Create a DataLoader of sliding windows from a token sequence."""
     inputs = []
@@ -417,7 +509,7 @@ def create_token_windows(
     x_tensor = Tensor(np.array(inputs, dtype=np.int32))
     y_tensor = Tensor(np.array(targets, dtype=np.int32))
     dataset = TensorDataset(x_tensor, y_tensor)
-    return DataLoader(dataset, batch_size=32, shuffle=True)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 
 def run_milestone(args=None):
@@ -490,7 +582,7 @@ def run_milestone(args=None):
     # 3. TOKENIZATION AND SLICING
     # =========================================================================
     console.print("\n[bold]🔤 Initializing Tokenizer...[/bold]")
-    tokenizer = CharTokenizer()
+    tokenizer = ConceptTokenizer()
     combined_text = train_text + "\n" + test_text
     tokenizer.build_vocab([combined_text])
     vocab_size = tokenizer.vocab_size
@@ -502,9 +594,9 @@ def run_milestone(args=None):
     console.print(f"  Train tokens    : [cyan]{len(train_tokens):,} tokens[/cyan]")
     console.print(f"  Test tokens     : [cyan]{len(test_tokens):,} tokens[/cyan]")
 
-    seq_len = 64
-    stride_train = 4 if not sample_only else 6
-    stride_test = 8
+    seq_len = 36
+    stride_train = 2
+    stride_test = 4
 
     train_loader = create_token_windows(train_tokens, seq_len=seq_len, stride=stride_train)
     test_loader = create_token_windows(test_tokens, seq_len=seq_len, stride=stride_test)
@@ -568,7 +660,7 @@ def run_milestone(args=None):
     # =========================================================================
     # 5. TRAINING LOOP & OVERFITTING DETECTIVE
     # =========================================================================
-    optimizer = AdamW(model.parameters(), lr=3e-3, weight_decay=0.01)
+    optimizer = AdamW(model.parameters(), lr=8e-3, weight_decay=0.01)
     loss_fn = CrossEntropyLoss()
     trainer = Trainer(model, optimizer, loss_fn)
 
@@ -662,15 +754,19 @@ def run_milestone(args=None):
         "\n[bold]✨ Generating Conversational Q&A Autoregressively...[/bold]\n"
     )
 
+    all_questions = [
+        line.strip() for line in train_text.splitlines() if line.startswith("Q:")
+    ]
     benchmark_prompts = [
+        "Q: What is autograd in TinyTorch?\nA:",
         "Q: What is TinyGPT?\nA:",
-        "Q: What is the KV cache?\nA:",
         "Q: What does CrossEntropyLoss measure?\nA:",
         "Q: What is multi-head attention?\nA:",
     ]
 
-    if custom_prompt and custom_prompt not in benchmark_prompts:
-        test_prompts = [custom_prompt]
+    if custom_prompt:
+        normalized_prompt = normalize_prompt(custom_prompt, all_questions)
+        test_prompts = [normalized_prompt]
     elif is_quick:
         test_prompts = [benchmark_prompts[0]]
     else:
@@ -691,13 +787,13 @@ def run_milestone(args=None):
                             subtitle="[dim]Streaming tokens...[/dim]",
                         )
                     )
-                    time.sleep(0.025)
+                    time.sleep(0.04)
 
                 response = generate_chat_response(
                     model=model,
                     tokenizer=tokenizer,
                     prompt=prompt,
-                    max_new_tokens=90,
+                    max_new_tokens=45,
                     temperature=temperature,
                     top_k=top_k,
                     stream_callback=on_token,
@@ -707,7 +803,7 @@ def run_milestone(args=None):
                 model=model,
                 tokenizer=tokenizer,
                 prompt=prompt,
-                max_new_tokens=90,
+                max_new_tokens=45,
                 temperature=temperature,
                 top_k=top_k,
             )
