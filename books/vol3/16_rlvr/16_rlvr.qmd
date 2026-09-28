@@ -465,12 +465,7 @@ Group relative policy optimization (GRPO) [@shao2024deepseekmath] removes the cr
 
 ### The memory wall of classical actor-critic architectures
 
-Classical Proximal Policy Optimization (PPO) maintains four separate neural network models in GPU memory during training:
-
-1. **Actor Network ($\pi_\theta$):** The policy model being optimized.
-2. **Critic Network ($V_\phi$):** A value model estimating expected trajectory returns.
-3. **Reference Policy ($\pi_{\text{ref}}$):** A frozen snapshot of the pretrained model enforcing KL-divergence constraints.
-4. **Reward Model ($R_\psi$):** A neural network predicting proxy human preference scores.
+Classical Proximal Policy Optimization (PPO) maintains four separate neural network models in GPU memory during training: the trainable actor network ($\pi_\theta$) being optimized, a trainable critic network ($V_\phi$) estimating expected trajectory returns, a frozen reference policy ($\pi_{\text{ref}}$) enforcing KL-divergence constraints, and a frozen reward model ($R_\psi$) predicting proxy human preference scores.
 
 To quantify the accelerator memory footprint from first principles, consider a base model with $\Phi$ parameters trained in 16-bit precision (FP16 or BF16), where model weights occupy $2\Phi$ bytes and gradients occupy $2\Phi$ bytes. For each trainable model optimized with Adam or AdamW, the optimizer maintains 12 bytes per parameter (4 bytes for FP32 master weights, 4 bytes for first-moment momentum, and 4 bytes for second-moment variance). Each trainable model therefore requires:
 
@@ -488,17 +483,9 @@ $$M_{\text{GRPO}} = M_{\text{actor}} + M_{\text{ref}} + M_{\text{act}} = 16\Phi 
 
 Comparing @eq-vol3-ppo-memory with @eq-vol3-grpo-memory demonstrates that eliminating the learned value model and externalizing the reward check cuts accelerator memory footprint by exactly 50 percent, reducing the footprint for a 70B parameter model from $2.80\text{ TB}$ to $1.40\text{ TB}$. This $1.40\text{ TB}$ memory reclamation expands the dynamic high-bandwidth memory headroom available for long-horizon KV caches, larger rollout cohorts, and deep multi-turn context windows.
 
-Beyond static memory reclamation, eliminating the Critic unlocks three fundamental training throughput multipliers:
+Beyond static memory reclamation, eliminating the critic unlocks three distinct training throughput multipliers. Compute requirements drop immediately: while training PPO requires forward and backward passes over both the actor and the critic ($2 \times 6\Phi = 12\Phi\text{ FLOPs/token}$), GRPO evaluates only the actor ($6\Phi\text{ FLOPs/token}$), delivering an immediate 50 percent reduction in compute per gradient update. In distributed topologies, eliminating the critic halves inter-node all-reduce communication by collapsing the separate gradient synchronization rounds for actor and critic into a single actor ring. Finally, reclaiming half of accelerator memory reallocates high-bandwidth memory to activation buffers, allowing training micro-batch sizes ($B_{\text{train}}$) to double. This headroom removes the need for activation recomputation (gradient checkpointing), eliminating an extra $2\Phi\text{ FLOP/token}$ forward pass overhead and lifting model FLOPs utilization (MFU) toward the hardware roofline.
 
-1. **Compute FLOP Reduction:** Training PPO requires a forward and backward pass over both the Actor and the Critic ($2 \times 6\Phi = 12\Phi\text{ FLOPs/token}$). GRPO eliminates the Critic forward and backward passes entirely, cutting training compute requirements to $6\Phi\text{ FLOPs/token}$ for the Actor only—an immediate 50 percent compute savings per gradient update.
-2. **Distributed All-Reduce Communication Halving:** In distributed data-parallel and model-parallel topologies, PPO must execute two separate gradient all-reduce synchronization rounds per step (one for the Actor, one for the Critic) across NVLink and inter-node InfiniBand networks. GRPO eliminates the Critic synchronization entirely, collapsing distributed gradient communication into a single Actor all-reduce ring and halving inter-node network transfer volume.
-3. **Micro-Batch Scaling and MFU:** Reclaiming 50 percent of accelerator memory re-allocates scarce HBM to dynamic activation buffers, allowing training micro-batch sizes ($B_{\text{train}}$) to double. This removes the necessity of activation recomputation (gradient checkpointing), eliminating an extra $2\Phi\text{ FLOP/token}$ forward pass overhead and lifting model FLOPs utilization (MFU) toward the hardware roofline.
-
-The choice of cohort size $G$ represents a fundamental systems throughput trade-off:
-
-* **Prompt Prefill Amortization:** Rollout workers evaluate the invariant prompt prefix once, caching its KV blocks via RadixAttention and amortizing the compute-bound prefill FLOPs across all $G$ completions ($1$ prefill shared across $G$ rollouts).
-* **Autoregressive Decode Roofline:** Token generation is strictly memory-bandwidth bound and scales linearly as $\mathcal{O}(G \cdot L)$.
-* **Gradient Signal Yield:** For binary verifiable rewards with single-trial pass probability $p$, the probability that a cohort contains at least one passing and one failing rollout (and thus yields a nonzero policy gradient) is:
+The choice of cohort size $G$ balances prompt prefill amortization against decode memory bandwidth and gradient signal yield. Rollout workers evaluate the invariant prompt prefix once, caching its KV blocks via RadixAttention and amortizing the compute-bound prefill FLOPs across all $G$ completions (one prefill shared across $G$ rollouts). Autoregressive token generation, by contrast, is strictly memory-bandwidth bound and scales linearly as $\mathcal{O}(G \cdot L)$. At the same time, the cohort must be large enough to generate contrast. For binary verifiable rewards with single-trial pass probability $p$, the probability that a cohort contains at least one passing and one failing rollout (and thus yields a nonzero policy gradient) is:
 
 $$P_{\text{active}}(G, p) = 1 - p^G - (1 - p)^G$$ {#eq-vol3-grpo-active-cohort-prob}
 
@@ -552,12 +539,9 @@ $$A_i=0\ \text{for every }i\quad\Longrightarrow\quad
 \mathcal{M}_{i,t}(\theta)=0,\qquad
 \nabla_\theta\mathcal{M}_{i,t}(\theta)=0.$$
 
-The group still consumed rollout and assessment resources. Other objective terms, including the reference-policy penalty, can still contribute to an update. Under independent runs of one fixed task with pass probability $p$, the probability of observing both binary outcomes in a group of size $G$ is $1-(1-p)^G-p^G$. This is a within-group reward-contrast probability, not a general condition for useful training data: an all-success group can still supply imitation targets under @sec-vol3-trajectory-curation-self-improvement. Collection strategies for increasing reward contrast include the following:
+The group still consumed rollout and assessment resources. Other objective terms, including the reference-policy penalty, can still contribute to an update. Under independent runs of one fixed task with pass probability $p$, the probability of observing both binary outcomes in a group of size $G$ is $1-(1-p)^G-p^G$. This is a within-group reward-contrast probability, not a general condition for useful training data: an all-success group can still supply imitation targets under @sec-vol3-trajectory-curation-self-improvement.
 
-1. **Dynamic sampling.** Drop groups whose rewards are all equal and keep sampling tasks until the batch is filled with groups that carry a gradient, so every step trains on the intended number of informative groups.
-2. **Difficulty-aware task selection.** Track each task's recent pass rate $\hat{p}(q)$ and sample tasks where it is neither near zero nor near one. The variance of a binary reward, $\hat{p}(1-\hat{p})$, is largest at $0.5$.
-3. **Larger groups for hard tasks.** The chance that a group of $G$ contains a success is $1 - (1-p)^G$, so raising $G$ on tasks with a low but nonzero pass rate converts silent groups into informative ones.
-4. **Partial credit.** Where the check decomposes, such as the fraction of tests passed, graded rewards separate rollouts that a binary reward ties, provided every partial check is as sealed as the full one.
+Four collection strategies increase reward contrast in practice. Dynamic sampling drops groups whose rewards are all equal and continues sampling tasks until the batch contains the intended number of informative, gradient-bearing groups. Difficulty-aware task selection tracks each task's recent pass rate $\hat{p}(q)$ and samples tasks where outcome variance $\hat{p}(1-\hat{p})$ is highest, avoiding tasks with pass rates near zero or one. For hard tasks with low but nonzero pass rates, allocating larger group sizes raises the probability $1 - (1-p)^G$ of observing a success, converting otherwise silent cohorts into informative updates. Finally, where the verification check decomposes—such as the fraction of unit tests passed—partial credit separates rollouts that a binary reward ties, provided every partial check maintains the same sealed isolation as the full test suite.
 
 GRPO turns a group of verified outcomes into a gradient with no learned critic, at the price of generating whole groups and discarding those that agree. So far each rollout has been treated as one output $o_i$. An agent's rollout is not one output; it is a conversation between the policy and its environment, and the next section examines what that changes.
 
@@ -627,14 +611,7 @@ A policy under optimization is an adversary of its own reward. It has no intent,
 
 ### The policy as adversary
 
-Runtime sandboxing already keeps the policy's actions away from the host. What it does not do by itself is keep them away from the reward, because in the naive design the tests run inside the same workspace the policy has been editing. The threat model inside that workspace has four routes, each a special case of the sandbox threat model:
-
-1. **Tampering with the check.** Editing or deleting test files, expected outputs, or build flags so failing cases pass.
-2. **Substituting the tools.** Setting environment variables such as `PATH` or `PYTHONPATH`, planting a stub test runner, or loading a hook into the real one.
-3. **Reaching hidden information.** Reading hidden tests left on disk, probing local services, or fetching solutions over the network.
-4. **Forcing a favorable timeout.** Exhausting memory or looping so the harness times out, where a harness that treats a timeout as anything other than failure pays out.
-
-Strict network egress control closes the network half of the third route. The rest requires that the policy's workspace and the reward's workspace be different machines.
+Runtime sandboxing already keeps the policy's actions away from the host. What it does not do by itself is keep them away from the reward, because in naive designs the tests run inside the same workspace the policy has been editing. The threat model inside that workspace spans four primary routes, each a special case of the general sandbox threat model. The policy may tamper directly with the check by editing or deleting test files, expected outputs, or build flags so failing cases pass. It may substitute tools by setting environment variables such as `PATH` or `PYTHONPATH`, planting a stub test runner, or loading a hook into the real runner. It may reach hidden information by reading hidden tests left on disk, probing local services, or fetching solutions over the network. Finally, it may force a favorable timeout by exhausting memory or looping until the harness times out, whenever a harness mistakenly treats a timeout as anything other than failure. While strict network egress control closes the external retrieval path, defending against the remaining routes requires that the policy's workspace and the reward's workspace be separate environments on different machines.
 
 ::: {.column-margin .margin-pointer}
 ↩ Copy-on-write sandboxes, network isolation, and container pool pre-warming are established in @sec-vol3-sandboxes.
@@ -817,11 +794,7 @@ Trace B (4,096 tokens):
   Result: Theta(n log n)
 ```
 
-For an autonomous agent, reasoning bloat imposes severe microarchitectural and system-level penalties:
-
-1. **High-Bandwidth Memory (HBM) Stranding:** The KV cache memory footprint scales linearly with sequence length: $M_{\text{KV}} = 2 \cdot n_{\text{layers}} \cdot d_{\text{head}} \cdot n_{\text{kv\_heads}} \cdot |o_i| \cdot b_{\text{precision}}$ (@sec-vol3-kv-cache). A 4,096-token trajectory strands $32\times$ more high-bandwidth memory than a 128-token trajectory, directly reducing the maximum concurrent rollout cohort $G$ that the training cluster can host in HBM.
-2. **Memory-Bandwidth-Bound Decode Latency:** Autoregressive token decoding operates at GEMV operational intensity ($I_{\text{decode}} \approx 1\text{ FLOP/byte}$), shuttling the full parameter set across the memory bus for each generated token (@sec-vol3-foundation-model). A policy exhibiting runaway length occupies accelerator execution slots exponentially longer, collapsing rollout generation goodput.
-3. **Multi-Turn Context Compounding:** In multi-turn agent environments, discursive reasoning tokens persist in the trajectory context history, forcing every subsequent turn to recompute and re-attend over bloated prefix tokens during prefill.
+For an autonomous agent, reasoning bloat imposes severe microarchitectural and system-level penalties. High-bandwidth memory is stranded because the KV cache footprint scales linearly with sequence length: $M_{\text{KV}} = 2 \cdot n_{\text{layers}} \cdot d_{\text{head}} \cdot n_{\text{kv\_heads}} \cdot |o_i| \cdot b_{\text{precision}}$ (@sec-vol3-kv-cache). A 4,096-token trajectory strands $32\times$ more memory than a 128-token trajectory, directly reducing the maximum concurrent rollout cohort $G$ that the training cluster can host in accelerator memory. At the same time, autoregressive token decoding operates at GEMV operational intensity ($I_{\text{decode}} \approx 1\text{ FLOP/byte}$), shuttling the full parameter set across the memory bus for each generated token (@sec-vol3-foundation-model); runaway length keeps execution slots occupied far longer, collapsing rollout generation goodput. In multi-turn environments, these overheads compound as discursive reasoning tokens persist across turns in context history, forcing every subsequent turn to recompute and re-attend over bloated prefix tokens during prefill.
 
 ### Regularizing exploration and length
 
@@ -841,15 +814,15 @@ $$\alpha_{k+1} = \operatorname{clip}\left(\alpha_k - \eta_\alpha \cdot \left(\ov
 
 When measured entropy $\overline{\mathcal{H}}_k$ falls below the band, $\alpha$ rises and pushes probability back toward alternatives; when entropy is high, $\alpha$ decays and lets the policy concentrate on verified solutions. A complementary change targets the clip itself. Raising the upper bound of the clip above the lower bound, $[1-\epsilon_{\text{low}}, 1+\epsilon_{\text{high}}]$ with $\epsilon_{\text{high}} > \epsilon_{\text{low}}$, lets rare tokens with positive advantage gain probability faster, which directly counters the asymmetry that drives collapse.
 
-To eliminate runaway length and reasoning bloat, systems employ three complementary regularization mechanisms:
+To eliminate runaway length and reasoning bloat, systems employ three complementary regularization mechanisms.
 
-1. **Batch-Level Constant-Denominator Normalization:** To neutralize the token-divisor dilution that shields verbose failures, runtimes replace the trajectory-specific divisor $1/|o_i|$ with the cohort mean token length $\bar{L} = \frac{1}{G}\sum_{j=1}^G |o_j|$ or total batch token count $N_{\text{batch}} = \sum_{j=1}^G |o_j|$:
+Batch-level constant-denominator normalization neutralizes the token-divisor dilution that shields verbose failures. Runtimes replace the trajectory-specific divisor $1/|o_i|$ with the cohort mean token length $\bar{L} = \frac{1}{G}\sum_{j=1}^G |o_j|$ or total batch token count $N_{\text{batch}} = \sum_{j=1}^G |o_j|$:
 
 $$\mathcal{L}_{\text{const}}(\theta) = \frac{1}{G \cdot \bar{L}} \sum_{i=1}^G \sum_{t=1}^{|o_i|} \mathcal{M}_{i,t}(\theta)$$
 
 Under constant-denominator normalization, the gradient penalty per token is completely independent of the rollout's individual length $|o_i|$. A flawed deduction token in a 4,000-token trace receives the exact same negative gradient magnitude as one in a 100-token trace, eliminating the optimization advantage of rambling verbosity.
 
-2. **Piecewise Linear Length Penalty:** Imposing a linear penalty from token zero penalizes the legitimate chain-of-thought deduction required for intricate algorithmic tasks. A piecewise linear penalty grants an unpenalized deliberation budget $L_{\text{target}}$ and levies a progressive linear fee only on excess tokens:
+A second mechanism, the piecewise linear length penalty, preserves legitimate chain-of-thought deduction while penalizing runaway verbosity. Imposing a linear penalty from token zero penalizes the necessary deliberation required for intricate algorithmic tasks; a piecewise penalty instead grants an unpenalized deliberation budget $L_{\text{target}}$ and levies a progressive linear fee only on excess tokens:
 
 $$R_{\text{final}} = R_{\text{task}} - \beta_{\text{len}} \cdot \max\left(0, \; |o_i| - L_{\text{target}}\right)$$
 
@@ -859,7 +832,7 @@ $$\beta_{\text{len}} \ge \frac{R_{\max}}{L_{\max} - L_{\text{target}}}$$
 
 This condition guarantees that a trajectory that exhausts the maximum context ceiling $L_{\max}$ cannot yield positive net reward even if verified correct by the oracle verifier ($R_{\text{final}} \le 0$), enforcing a hard mathematical boundary against context exhaustion.
 
-3. **Token-Rate FLOP Regularization (Integrated Memory-Time Tax):** Because generation latency and KV cache memory allocation compound over the duration of a rollout, runtimes can directly align policy gradients with accelerator hardware costs. The integrated memory-time occupancy of an autoregressive rollout is proportional to the square of its sequence length: $\int_0^T M_{\text{KV}}(t)\, dt \propto |o_i|^2$. A token-rate FLOP regularizer introduces a quadratic penalty:
+Finally, token-rate FLOP regularization (an integrated memory-time tax) directly aligns policy gradients with accelerator hardware costs. Because generation latency and KV cache memory allocation compound over rollout duration, the integrated memory-time occupancy of an autoregressive rollout is proportional to the square of its sequence length: $\int_0^T M_{\text{KV}}(t)\, dt \propto |o_i|^2$. A token-rate FLOP regularizer introduces a quadratic penalty:
 
 $$R_{\text{FLOP}}(o_i) = -\kappa_{\text{FLOP}} \cdot |o_i|^2$$
 
@@ -1112,16 +1085,23 @@ The empirical latency disparity across cohort sizes is detailed in @tbl-vol3-coh
 
 #### The cohort aggregation buffer architecture {.unnumbered}
 
-To resolve the architectural tension between GRPO's group barrier requirement and asynchronous streaming throughput, industrial RLVR clusters deploy a **Cohort Aggregation Buffer (CAB)** acting as an active asynchronous-to-synchronous impedance matcher between rollout workers and the gradient trainer:
+To resolve the architectural tension between GRPO's group barrier requirement and asynchronous streaming throughput, industrial RLVR clusters deploy a **Cohort Aggregation Buffer (CAB)** acting as an active asynchronous-to-synchronous impedance matcher between rollout workers and the gradient trainer.
 
-1. **Cohort-Tagged Dispatch & Pinned Streaming:** When the task dispatcher schedules a prompt fixture $q$, it assigns a unique cryptographic $\mathtt{cohort\_id}$ and dispatches $G$ parallel worker tasks across the rollout pool. As individual rollout workers complete their trajectories (for example, Worker $\tau_1$ exiting after 48 tokens in 200 ms), they stream their token records, loss masks, sampling log-probabilities, and sandbox verification outcomes into host pinned-DRAM buffers using zero-copy memory arenas (such as Apache Arrow shared-memory plasma stores). The GPU rollout worker immediately dequeues the next available task from the cluster scheduler without idling accelerator Tensor Cores.
-2. **In-Situ Zero-Variance Pruning in Host Memory:** Before initiating high-speed GPUDirect RDMA transfers to the trainer, the CAB inspects the cohort rewards in host DRAM. If all rollouts in the cohort failed ($r_i = 0, \forall i$) or all passed ($r_i = 1, \forall i$), the cohort standard deviation is $\sigma_{\text{group}} = 0$ and the policy gradient is identically zero. The CAB drops these silent cohorts directly in host memory, preventing zero-gradient batches from consuming network transfer bandwidth and wasting trainer GPU compute cycles.
-3. **Coupled Straggler Timeout vs. Policy Freshness Bound:** When Worker $\tau_1$ finishes in $0.2\text{ s}$ and Worker $\tau_4$ finishes in $16.8\text{ s}$, $\tau_1$'s data sits buffered in host DRAM for $16.6\text{ s}$. If the gradient training step latency is $t_{\text{step}}$, the trainer advances by $\Delta v \approx \frac{\Delta t_{\text{wait}}}{t_{\text{step}}}$ policy versions during the wait. If the elastic straggler timer $\Delta t_{\text{straggler}}$ is set without regard to trainer velocity, early-completing rollouts become stale before their cohort reaches the trainer replay queue, risking rejection at the freshness gate ($\Delta v > \Delta v_{\max}$) or destabilizing policy updates with explosive importance weights. The CAB enforces a coupled straggler deadline:
-   $$\Delta t_{\text{straggler}} \le \Delta v_{\max} \cdot t_{\text{step}} - \Delta t_{\text{verify}}$$ {#eq-vol3-cab-straggler-bound}
-4. **Credit-Based Flow Control Backpressure:** When the gradient trainer pauses (such as during periodic release gate evaluations on held-out test enclaves), completed rollouts accumulate in the CAB. Unbounded accumulation risks exhausting host pinned-DRAM. The CAB implements credit-based admission control: the task scheduler acquires an admission credit before dispatching a cohort. When CAB buffer occupancy exceeds a high watermark, admission credits are withheld, exerting backpressure upstream to throttle rollout workers.
-5. **Survival Bias Correction under Elastic Sealing:** If $\Delta t_{\text{straggler}}$ expires, the CAB seals the cohort with the $G' < G$ completed rollouts (provided $G' \ge 2$). Because truncated stragglers are systematically the longest, deepest reasoning trajectories, elastic truncation introduces survival bias. To prevent underestimating cohort dispersion and artificially inflating advantage scale on small sealed cohorts, the CAB applies Bessel's correction factor $\frac{G'}{G'-1}$ to the empirical sample variance:
-   $$\sigma_{\text{group}}^2 = \frac{1}{G' - 1} \sum_{j=1}^{G'} (r_j - \mu_{\text{group}})^2$$ {#eq-vol3-cab-bessel-correction}
-   Once standardized, the completed cohort mini-batch is transferred to the trainer's circular replay queue via GPUDirect RDMA.
+The buffer coordinates execution through cohort-tagged dispatch and pinned streaming. When the task dispatcher schedules a prompt fixture $q$, it assigns a unique cryptographic $\mathtt{cohort\_id}$ and dispatches $G$ parallel worker tasks across the rollout pool. As individual rollout workers complete their trajectories (for example, Worker $\tau_1$ exiting after 48 tokens in 200 ms), they stream their token records, loss masks, sampling log-probabilities, and sandbox verification outcomes into host pinned-DRAM buffers using zero-copy memory arenas (such as Apache Arrow shared-memory plasma stores). The GPU rollout worker immediately dequeues the next available task from the cluster scheduler without idling accelerator Tensor Cores.
+
+To protect network and compute resources, the CAB performs in-situ zero-variance pruning directly in host memory before initiating high-speed GPUDirect RDMA transfers to the trainer. If all rollouts in the cohort failed ($r_i = 0, \forall i$) or all passed ($r_i = 1, \forall i$), the cohort standard deviation is $\sigma_{\text{group}} = 0$ and the policy gradient is identically zero. The CAB drops these silent cohorts directly in host memory, preventing zero-gradient batches from consuming network transfer bandwidth and wasting trainer GPU compute cycles.
+
+Because execution times vary widely across trajectories, the buffer couples its straggler timeout to the policy freshness bound. When Worker $\tau_1$ finishes in $0.2\text{ s}$ and Worker $\tau_4$ finishes in $16.8\text{ s}$, $\tau_1$'s data sits buffered in host DRAM for $16.6\text{ s}$. If the gradient training step latency is $t_{\text{step}}$, the trainer advances by $\Delta v \approx \frac{\Delta t_{\text{wait}}}{t_{\text{step}}}$ policy versions during the wait. If the elastic straggler timer $\Delta t_{\text{straggler}}$ is set without regard to trainer velocity, early-completing rollouts become stale before their cohort reaches the trainer replay queue, risking rejection at the freshness gate ($\Delta v > \Delta v_{\max}$) or destabilizing policy updates with explosive importance weights. The CAB enforces a coupled straggler deadline:
+
+$$\Delta t_{\text{straggler}} \le \Delta v_{\max} \cdot t_{\text{step}} - \Delta t_{\text{verify}}$$ {#eq-vol3-cab-straggler-bound}
+
+Credit-based flow control provides upstream backpressure when the gradient trainer pauses, such as during periodic release gate evaluations on held-out test enclaves. Completed rollouts accumulate in the CAB during these pauses, risking host pinned-DRAM exhaustion if unmanaged. The CAB implements credit-based admission control: the task scheduler must acquire an admission credit before dispatching a cohort. When CAB buffer occupancy exceeds a high watermark, admission credits are withheld, exerting backpressure upstream to throttle rollout workers.
+
+Finally, the CAB applies survival bias correction under elastic sealing. If $\Delta t_{\text{straggler}}$ expires, the CAB seals the cohort with the $G' < G$ completed rollouts (provided $G' \ge 2$). Because truncated stragglers are systematically the longest, deepest reasoning trajectories, elastic truncation introduces survival bias. To prevent underestimating cohort dispersion and artificially inflating advantage scale on small sealed cohorts, the CAB applies Bessel's correction factor $\frac{G'}{G'-1}$ to the empirical sample variance:
+
+$$\sigma_{\text{group}}^2 = \frac{1}{G' - 1} \sum_{j=1}^{G'} (r_j - \mu_{\text{group}})^2$$ {#eq-vol3-cab-bessel-correction}
+
+Once standardized, the completed cohort mini-batch is transferred to the trainer's circular replay queue via GPUDirect RDMA.
 
 ### Verification throughput sizing roofline
 
@@ -1153,11 +1133,7 @@ Promoting a newly trained RLVR checkpoint to the rollout pool requires passing a
 
 The asynchronous loop has one more hazard. Each new version of the weights is broadcast to the rollout pool, so a bad version does not merely score poorly; it generates the next batches of training data. A version that has learned a formatting exploit, collapsed into a loop, or lost the ability to emit well-formed tool calls fills the queue with degenerate rollouts, the verifier rejects them, the groups go silent, and recovery requires rolling back weights and discarding every rollout the bad version produced. Training loss does not reveal this; RL loss is noisy and does not track task success.
 
-New versions are therefore promoted, to the rollout pool and later to deployment, through automated release gates, not directly from the optimizer. For RLVR the gate checks three things on held-out environments the reward never saw:
-
-1. **Target capability.** The verified pass rate on held-out tasks of the trained kind must meet the current policy's, within a stated tolerance, with rigorous trial counts and confidence intervals.
-2. **No regression elsewhere.** A regression suite outside the training distribution, covering other languages, other tool families, and instruction following, must not fall below its baseline. RL on one task family can erode others.
-3. **Contract compliance.** Every tool call the new version emits on the held-out suite must parse against its schema. A policy that drifts in format breaks the harness, not merely the score.
+New versions are therefore promoted—to the rollout pool and later to deployment—through automated release gates rather than directly from the optimizer. For RLVR, the gate validates three orthogonal properties on held-out environments the reward never saw. Target capability requires that the verified pass rate on held-out tasks of the trained kind meet or exceed the active policy's rate within a stated tolerance, backed by rigorous trial counts and confidence intervals. A separate regression suite outside the training distribution ensures that reinforcement on one task family does not erode performance across other programming languages, tool interfaces, or general instruction following. Finally, contract compliance verifies that every tool call emitted on the held-out suite parses strictly against its schema, ensuring format drift does not break the execution harness itself.
 
 The gate also reports the right statistics. RL can raise pass@1 without raising pass@$k$ at large $k$, because it can concentrate probability on solutions the starting policy already sampled occasionally rather than find new ones. Reporting both, together with pass$^k$ reliability across repeated runs, separates a policy that became more reliable from one that became more capable, and a deployment usually needs the first as much as the second.
 
