@@ -1597,9 +1597,8 @@ class GradAccumScenario:
 **Math**:
 
 1. **Effective batch size**: `{python} GradAccumScenario.n_gpus_ga_str` $\times$ batch `{python} GradAccumScenario.batch_per_gpu_str` $\times$ `{python} GradAccumScenario.accum_steps_str` accumulation steps = `{python} GradAccumScenario.effective_batch_str`.
-2. **Communication overhead**: With `{python} GradAccumScenario.accum_steps_str`-step accumulation, we AllReduce once every `{python} GradAccumScenario.accum_steps_str` steps.
-   - Overhead = `{python} GradAccumScenario.comm_8gpu_ms_str` / (`{python} GradAccumScenario.accum_steps_str` $\times$ `{python} GradAccumScenario.compute_8gpu_ms_str`) $\approx$ `{python} GradAccumScenario.comm_overhead_pct_math`.
-3. Training duration: Total time is `{python} GradAccumScenario.ga_training_hours_str`.
+2. **Communication overhead**: With `{python} GradAccumScenario.accum_steps_str`-step accumulation, we AllReduce once every `{python} GradAccumScenario.accum_steps_str` steps (overhead = `{python} GradAccumScenario.comm_8gpu_ms_str` / (`{python} GradAccumScenario.accum_steps_str` $\times$ `{python} GradAccumScenario.compute_8gpu_ms_str`) $\approx$ `{python} GradAccumScenario.comm_overhead_pct_math`).
+3. **Training duration**: Total time is `{python} GradAccumScenario.ga_training_hours_str`.
 4. **Scale-out baseline cost**: `{python} GradAccumScenario.baseline_nodes_str` $\times$ `{python} GradAccumScenario.baseline_training_hours_str` $\times$ `{python} GradAccumScenario.hourly_rate_str` = `{python} GradAccumScenario.baseline_cost_str`.
 5. **Accumulation cost**: `{python} GradAccumScenario.ga_training_hours_str` $\times$ `{python} GradAccumScenario.hourly_rate_str` = `{python} GradAccumScenario.ga_cost_str`.
 
@@ -2271,7 +2270,7 @@ class PodSetupComputeRecap:
 - **Per-GPU compute time** on `{python} CommScalingMath.n_gpus_str`, each at `{python} PodSetupComputeRecap.h100_fp8_tflop_per_s_str` FP8 peak (`{python} CommScalingMath.local_efficiency_pct_str` local compute efficiency before communication):
   `{python} CommScalingMath.t_compute_math` seconds
 
-- AllReduce time\index{AllReduce}\index{AllReduce!ring algorithm} for `{python} CommScalingMath.gradient_gb_str` of gradients using ring-AllReduce with overlap:
+- **AllReduce time**\index{AllReduce}\index{AllReduce!ring algorithm} (for `{python} CommScalingMath.gradient_gb_str` of gradients using ring-AllReduce with overlap):
   `{python} CommScalingMath.t_comm_math` seconds (raw transfer is about `{python} CommScalingMath.raw_comm_s_str`; available compute caps hidden communication at `{python} CommScalingMath.overlap_pct_str` of raw transfer time)
 
 - **Scaling efficiency**: $\eta_{\text{scaling}} = T_{\text{compute,local}}/(T_{\text{compute,local}} + T_{\text{comm,exposed}})$. Here the numerator is `{python} CommScalingMath.t_compute_s_str` and the complete denominator is `{python} CommScalingMath.exposed_step_s_str`, giving `{python} CommScalingMath.scaling_efficiency_pct_str`. The exposed communication term already subtracts the hidden portion from the raw transfer time and includes collective synchronization; subtracting overlap again would double-count the same saving.
@@ -2400,12 +2399,7 @@ The fleet law (principle \ref{pri-distributed-step-time}) maps directly onto the
 
 $$ T_{\text{step}}(N) = \underbrace{\frac{T_{\text{compute}}}{N}}_{\text{Compute-Time Term}} + \underbrace{T_{\text{comm}}(N)}_{\text{Bandwidth Term}} + \underbrace{T_{\text{sync}}(N)}_{\text{Coordination Term}} - T_{\text{overlap}} $$
 
-The fleet-law terms separate step time into four distinct costs:
-
-*   *Compute-time term* $(T_{\text{compute}}/N)$: The total computation required for the batch after ideal partitioning across $N$ devices.
-*   *Bandwidth term* $(T_{\text{comm}}(N))$: The time spent moving data. This is governed by the iron law's data-movement term, $D_{\text{vol}}/\text{BW}$. For Ring AllReduce, this term is $\frac{2(N-1)}{N} \times \frac{M}{\text{BW}_{\text{net}}}$, where $M$ is the communicated gradient or model-state bytes and $\text{BW}_{\text{net}}$ is network bandwidth.
-*   *Coordination term* $(T_{\text{sync}}(N))$: The nonoverlapped cost of barriers, ordering, and straggler waiting.
-*   *Overlap* $(T_{\text{overlap}})$: The portion of communication hidden behind computation.
+In this decomposition, the compute-time term $T_{\text{compute}}/N$ captures the total computation required for the batch after ideal partitioning across $N$ devices. The bandwidth term $T_{\text{comm}}(N)$ reflects the time spent moving data, governed by the iron law's data-movement ratio $D_{\text{vol}}/\text{BW}$; for Ring AllReduce, this communication cost is $\frac{2(N-1)}{N} \times \frac{M}{\text{BW}_{\text{net}}}$, where $M$ denotes the communicated gradient or model-state bytes and $\text{BW}_{\text{net}}$ is network bandwidth. The coordination term $T_{\text{sync}}(N)$ accounts for the nonoverlapped penalty of barriers, synchronization ordering, and straggler delays. Finally, the overlap term $T_{\text{overlap}}$ represents the portion of communication successfully hidden behind concurrent computation.
 
 The fleet law leads to the scaling efficiency metric for fixed global work, where $T_{\text{compute}}$ is the single-device compute time for that work:
 
@@ -4373,17 +4367,13 @@ Megatron Sequence Parallelism\index{Megatron-LM!sequence parallelism} [@korthika
 
 Crucially, this sharding incurs zero additional communication volume. In standard tensor parallelism, the row-parallel matrix multiplication is followed by an AllReduce to sum partial products across ranks. An AllReduce mathematically decomposes into a ReduceScatter followed by an AllGather\index{Sequence parallelism!AllReduce decomposition}:
 $$\text{AllReduce}(\mathbf{X}) \equiv \text{AllGather}(\text{ReduceScatter}(\mathbf{X}))$$
-Megatron-SP decouples this pair:
-
-1. After the row-parallel linear layer, a ReduceScatter reduces partial sums while scattering the resulting activations along the sequence dimension, leaving each GPU with $S/t$ tokens.
-2. LayerNorm, residual additions, and Dropout execute on local $S/t$ slices with zero cross-device communication.
-3. Immediately before the next column-parallel linear layer, an AllGather across the sequence dimension reassembles the complete $S$ tokens required for the weight-partitioned matrix multiplication.
+Megatron-SP decouples this collective pair across the transformer block. Following the row-parallel linear layer, a ReduceScatter reduces partial sums while scattering the resulting activations along the sequence dimension, leaving each GPU with an $S/t$ token slice. LayerNorm, residual additions, and Dropout then execute on these local slices with zero cross-device communication. Immediately before the next column-parallel linear layer, an AllGather across the sequence dimension reassembles the complete $S$ tokens required for the weight-partitioned matrix multiplication.
 
 Because standard TP executes two AllReduces per transformer block ($2 \times 2(t-1)/t \times M_{\text{act}}$ bytes), while Megatron-SP executes two ReduceScatter and AllGather pairs ($2 \times [(t-1)/t + (t-1)/t] \times M_{\text{act}} = 2 \times 2(t-1)/t \times M_{\text{act}}$ bytes), the aggregate communication volume is identical. Sequence parallelism reduces activation memory outside attention by a factor of $t$ without consuming any additional interconnect bandwidth.
 
 ##### Context parallelism with ring attention versus Ulysses {#sec-distributed-training-context-parallelism-ring-ulysses-8b1f}
 
-When sequence length $S$ reaches 64,000 to 1,000,000+ tokens, activation memory exceeds device capacity even with Sequence Parallelism and activation checkpointing. Context Parallelism (CP degree $c$) shards the sequence across a dedicated group of $c$ accelerators. Two primary architectural paradigms govern context parallelism:
+When sequence length $S$ reaches 64,000 to 1,000,000+ tokens, activation memory exceeds device capacity even with Sequence Parallelism and activation checkpointing. Context Parallelism (CP degree $c$) shards the sequence across a dedicated group of $c$ accelerators. Two primary architectural paradigms govern context parallelism: ring-based systolic point-to-point exchanges and all-to-all context transpositions, which can also be combined hierarchically.
 
 ```{python}
 #| echo: false
@@ -4421,12 +4411,13 @@ class FlashAttentionOverlapScenario:
     nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
 ```
 
-1. **Ring Attention (Systolic P2P Exchanges)** [@liu2023ringAttention]: Each GPU holds a query chunk\index{Ring Attention!systolic point-to-point} $Q_i$ of length $S/c$ and an initial key/value chunk $(K_i, V_i)$. Computation proceeds in $c$ rounds along a logical ring. In each round, GPU $i$ computes block attention between its stationary $Q_i$ and resident $(K_j, V_j)$ tiles using an online softmax accumulator, while asynchronously transmitting $(K_j, V_j)$ to ring neighbor $(i+1) \bmod c$ and receiving $(K_{j-1}, V_{j-1})$ from $(i-1) \bmod c$. For one sequence with standard multi-head attention, let $n=S/c$ be the tokens per chunk, $d_{\text{model}}$ the total head width, $s_{\text{elem}}$ the bytes per stored element, $R_{\text{eff}}$ the sustained attention FLOP/s, and $\text{BW}_{\text{link}}$ the one-way transfer rate. Computing both $QK^\top$ and the weighted-value product costs approximately $4n^2d_{\text{model}}$ FLOPs, while sending K and V costs $2nd_{\text{model}}s_{\text{elem}}$ bytes. Ignoring startup, softmax, and overlap interference gives the necessary tile-size estimate:
-   $$\frac{4n^2d_{\text{model}}}{R_{\text{eff}}} \ge \frac{2nd_{\text{model}}s_{\text{elem}}}{\text{BW}_{\text{link}}} \iff n \ge \frac{s_{\text{elem}}R_{\text{eff}}}{2\text{BW}_{\text{link}}}$$
-   This compares computation time with transfer time; HBM bandwidth cannot substitute for $R_{\text{eff}}$. It is an idealized overlap condition, not a guarantee. Grouped-query attention changes the transferred KV width, and causal masking changes the tile work; both require recomputing the two costs. In causal autoregressive attention, upper-triangular tiles are masked out ($j > i$). A naive ring execution leaves half the GPUs idle during later rounds; production implementations employ zigzag or striped token partitioning\index{Ring Attention!causal masking}\index{Striped token partitioning!causal attention} to distribute causal tiles evenly across all devices.
+Ring Attention\index{Ring Attention!systolic point-to-point} [@liu2023ringAttention] organizes devices in a logical ring where each GPU holds a query chunk $Q_i$ of length $S/c$ and an initial key/value chunk $(K_i, V_i)$. Computation proceeds in $c$ rounds along the ring. In each round, GPU $i$ computes block attention between its stationary $Q_i$ and resident $(K_j, V_j)$ tiles using an online softmax accumulator, while asynchronously transmitting $(K_j, V_j)$ to ring neighbor $(i+1) \bmod c$ and receiving $(K_{j-1}, V_{j-1})$ from $(i-1) \bmod c$. For one sequence with standard multi-head attention, let $n=S/c$ be the tokens per chunk, $d_{\text{model}}$ the total head width, $s_{\text{elem}}$ the bytes per stored element, $R_{\text{eff}}$ the sustained attention FLOP/s, and $\text{BW}_{\text{link}}$ the one-way transfer rate. Computing both $QK^\top$ and the weighted-value product costs approximately $4n^2d_{\text{model}}$ FLOPs, while sending K and V costs $2nd_{\text{model}}s_{\text{elem}}$ bytes. Ignoring startup, softmax, and overlap interference gives the necessary tile-size estimate:
+$$\frac{4n^2d_{\text{model}}}{R_{\text{eff}}} \ge \frac{2nd_{\text{model}}s_{\text{elem}}}{\text{BW}_{\text{link}}} \iff n \ge \frac{s_{\text{elem}}R_{\text{eff}}}{2\text{BW}_{\text{link}}}$$
+This compares computation time with transfer time; HBM bandwidth cannot substitute for $R_{\text{eff}}$. It is an idealized overlap condition, not a guarantee. Grouped-query attention changes the transferred KV width, and causal masking changes the tile work; both require recomputing the two costs. In causal autoregressive attention, upper-triangular tiles are masked out ($j > i$). A naive ring execution leaves half the GPUs idle during later rounds; production implementations employ zigzag or striped token partitioning\index{Ring Attention!causal masking}\index{Striped token partitioning!causal attention} to distribute causal tiles evenly across all devices.
 
-2. **All-to-All Context Transpose (DeepSpeed Ulysses)** [@jacobs2023deepspeed]: Rather than circulating tiles along a ring, Ulysses\index{DeepSpeed!Ulysses context parallelism}\index{Context parallelism!all-to-all transpose}\index{DeepSpeed Ulysses|see{DeepSpeed}} exploits the orthogonality between the sequence dimension and attention heads. Outside the attention core, activations are sharded along the sequence dimension ($S/c$ tokens, all $h$ attention heads). Before computing self-attention, an All-to-All collective transposes the tensor from sequence-partitioned `[S/c, h, d_head]` to head-partitioned `[S, h/c, d_head]`. Each GPU now holds the full sequence length $S$, but only a subset $h/c$ of attention heads. Each device computes standard local FlashAttention across the full sequence for its heads; each rank owns complete heads, while the kernel handles causal masking locally. A second All-to-All collective transposes the attention output back to `[S/c, h, d_head]`. Ulysses is conceptually clean and reuses single-GPU attention kernels, but requires that the head count be divisible by the context degree ($h \ge c$). Under Grouped Query Attention (GQA)\index{Grouped-query attention!KV cache reduction}, where the key-value head count $h_{\text{KV}}$ is smaller, a direct head-sharding implementation requires compatible divisibility and $c \le h_{\text{KV}}$. Replicating KV heads changes that limit and its communication budget.
-3. **Hierarchical Hybrid Context Parallelism**: Ulysses relies on high-bisection All-to-All collectives, making it ideal within intra-node NVLink domains ($c_{\text{intra}} \le 8$). Ring Attention uses point-to-point ring communication that minimizes bisection pressure, making it well-suited for inter-node links ($c_{\text{inter}}$). Frontier long-context training systems combine both in a hierarchical 2D topology: Ulysses partitions heads within each node, while Ring Attention circulates KV blocks across nodes\index{Ring Attention!inter-node scaling}, unlocking million-token context windows without saturating cluster bisection bandwidth.
+DeepSpeed Ulysses\index{DeepSpeed!Ulysses context parallelism}\index{Context parallelism!all-to-all transpose}\index{DeepSpeed Ulysses|see{DeepSpeed}} [@jacobs2023deepspeed] takes an alternative approach: rather than circulating tiles along a ring, it exploits the orthogonality between the sequence dimension and attention heads. Outside the attention core, activations are sharded along the sequence dimension ($S/c$ tokens, all $h$ attention heads). Before computing self-attention, an All-to-All collective transposes the tensor from sequence-partitioned `[S/c, h, d_head]` to head-partitioned `[S, h/c, d_head]`. Each GPU now holds the full sequence length $S$, but only a subset $h/c$ of attention heads. Each device computes standard local FlashAttention across the full sequence for its heads; each rank owns complete heads, while the kernel handles causal masking locally. A second All-to-All collective transposes the attention output back to `[S/c, h, d_head]`. Ulysses is conceptually clean and reuses single-GPU attention kernels, but requires that the head count be divisible by the context degree ($h \ge c$). Under Grouped Query Attention (GQA)\index{Grouped-query attention!KV cache reduction}, where the key-value head count $h_{\text{KV}}$ is smaller, a direct head-sharding implementation requires compatible divisibility and $c \le h_{\text{KV}}$. Replicating KV heads changes that limit and its communication budget.
+
+Frontier long-context training systems combine both paradigms into a hierarchical hybrid context parallelism. Because Ulysses relies on high-bisection All-to-All collectives, it operates effectively within intra-node NVLink domains ($c_{\text{intra}} \le 8$). Ring Attention, by contrast, relies on point-to-point ring communication that minimizes bisection pressure, making it well-suited across inter-node links ($c_{\text{inter}}$). In this hierarchical 2D topology, Ulysses partitions heads within each node while Ring Attention circulates KV blocks across nodes\index{Ring Attention!inter-node scaling}, unlocking million-token context windows without saturating cluster bisection bandwidth.
 
 ### Parameter servers and embedding sharding {#sec-distributed-training-systems-systems-parameter-servers-embedding-sharding-8821}
 
@@ -4436,25 +4427,13 @@ For dense models (like ResNet or BERT), the PS architecture creates a bottleneck
 
 However, for recommendation systems\index{Recommendation system!embedding tables}\index{DLRM!embedding scale} the model parameters are dominated by massive embedding tables (often 10 TB+) that cannot fit on any single GPU. Furthermore, the updates are sparse: a batch of users interacts with only a tiny fraction (e.g., 0.001 percent) of the items.
 
-In this sparse regime, the parameter server avoids dense synchronization by moving only the rows that a batch touches:
-
-1.  **Embedding Sharding**\index{Embedding sharding!parameter server}: The massive tables are partitioned across the PS fleet (often CPU nodes with massive DRAM).
-2.  **Sparse Lookups**: Workers send a list of IDs to the PS.
-3.  **Sparse Pull**: The PS returns only the requested embedding vectors, not the full table.
-4.  **Sparse Push**: Workers send gradients only for the touched embedding rows.
-
-The sparse pull/sparse push\index{Sparse pull!parameter server}\index{Sparse push!parameter server} pattern avoids the bandwidth bottleneck of dense AllReduce. Implementations such as TorchRec\index{TorchRec!embedding sharding} or Meta's hierarchical sharding place "hot" embeddings on GPUs and "cold" embeddings on CPU PS nodes, creating a tiered memory hierarchy for model parameters.
+In this sparse regime, the parameter server avoids dense synchronization by moving only the rows that a batch touches. Massive embedding tables are sharded across the parameter server fleet\index{Embedding sharding!parameter server}, typically hosted on CPU nodes equipped with high-capacity DRAM. During each forward step, workers send sparse lookups containing only the feature IDs present in their local minibatch. In response, the parameter server executes a sparse pull by returning only those requested embedding vectors rather than the entire table. After computing local gradients, workers execute a sparse push by transmitting updates exclusively for the touched embedding rows. This sparse pull and push pattern\index{Sparse pull!parameter server}\index{Sparse push!parameter server} avoids the bandwidth bottleneck of dense AllReduce. Modern implementations such as TorchRec\index{TorchRec!embedding sharding} or Meta's hierarchical sharding place hot embeddings on GPUs and cold embeddings on CPU parameter server nodes, creating a tiered memory hierarchy for model parameters.
 
 ### Expert parallelism (mixture of experts) {#sec-distributed-training-systems-systems-expert-parallelism-mixture-experts-bc45}
 
 While tensor parallelism splits dense layers across devices, expert parallelism\index{Expert parallelism!conditional computation} enables scaling model capacity (parameters) without increasing compute cost (FLOPs) by using conditional computation. In a mixture-of-experts (MoE)\index{MoE!routing}\index{Mixture of experts|see{MoE}} architecture [@shazeer2017outrageously], the feed-forward network of each transformer block is replaced by a set of $E$ "experts" (independent feed-forward networks). For each token, a gating network selects a small subset (typically top-1 or top-2) of experts to process it.
 
-In a distributed setting, experts are partitioned across workers. If we have 8 GPUs and 8 experts, each GPU hosts one expert. The training process introduces a distinct communication pattern, as @fig-moe-all-to-all-routing illustrates:
-
-1.  **Gating**: Each token determines its destination expert.
-2.  **All-to-All Dispatch**\index{All-to-All!token dispatch}: Tokens are routed across the network to the device hosting their selected expert.
-3.  **Computation**: Experts process their assigned tokens.
-4.  **All-to-All Combine**\index{All-to-All!token combine}: Processed tokens are routed back to their original device to resume the sequence.
+In a distributed setting, experts are partitioned across workers; for example, on an 8-GPU cluster hosting 8 experts, each device hosts a single expert. As @fig-moe-all-to-all-routing illustrates, execution proceeds through a specialized four-stage communication cycle. First, a gating network evaluates each token to select its destination expert. An All-to-All dispatch\index{All-to-All!token dispatch} then routes tokens across the interconnect so that each device receives all tokens assigned to its local expert. Once the expert networks compute their feed-forward transformations on their assigned batches, a matching All-to-All combine\index{All-to-All!token combine} routes the processed tokens back to their originating devices to restore sequence ordering for the subsequent residual connection.
 
 ::: {#fig-moe-all-to-all-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-experts (MoE) AllToAll routing**: Expert parallelism requires a unique \"All-to-All\" communication pattern. Tokens from a local batch are routed by a gating network to experts sharded across the cluster. This involves a global shuffle where every GPU sends tokens to and receives tokens from potentially every other GPU, stressing the cluster's bisection bandwidth." fig-alt="Diagram showing tokens being routed from a gating network to four different experts sharded across multiple GPUs, then returning to the original sequence order."}
 ![](images/svg/moe-all-to-all-routing.svg){width=100%}
@@ -4698,12 +4677,7 @@ The sparse communication pattern distinguishes recommendation and MoE workloads 
 
 ::: {#lhs-distributed-training-archetype-b-dlrm-at-scale-dlrm-vs-llm-scaling .callout-lighthouse title="Archetype B (DLRM at Scale): DLRM vs. LLM scaling"}
 
-Each scales through a different mechanism, bound by a different resource:
-
-*   **LLMs (dense)**: Scale via tensor/pipeline parallelism. Constraint: compute and interconnect bandwidth (NVLink).
-*   **DLRM-style models (sparse)**: Scale via embedding sharding (parameter servers). Constraint: memory capacity and interconnect latency (random access).
-
-The distinction dictates fundamentally different cluster designs: dense GPU pods for LLMs vs. memory-rich CPU/GPU hybrids for RecSys.
+Each scales through a distinct mechanism and is bound by a different hardware resource. Dense LLMs scale via tensor and pipeline parallelism, constrained primarily by raw compute throughput and interconnect bandwidth over dense fabrics such as NVLink. By contrast, sparse recommendation models such as DLRM scale via embedding sharding on parameter servers, where aggregate memory capacity and random-access interconnect latency dominate. This distinction dictates fundamentally different cluster architectures: dense GPU pods for LLMs versus memory-rich CPU and GPU hybrids for recommendation systems.
 
 :::
 
@@ -4769,13 +4743,7 @@ class FrontierHybridRecap:
 
 ::: {#lhs-distributed-training-archetype-gpt-4-llama-3-physics-3d-parallelism .callout-lighthouse title="Archetype A (GPT-4/Llama-3): Physics of 3D parallelism"}
 
-Archetype A (GPT-4/Llama-3) is the primary driver for hybrid parallelism. Because the model parameters $(P)$ exceed the memory of any single accelerator $(C_{\text{mem,device}})$, and the training dataset $(D)$ requires massive throughput, we must split the problem along three orthogonal axes:
-
-1.  **Tensor parallelism**: Splits individual layers across the memory of a fast communication group.
-2.  **Pipeline parallelism**: Splits layers across nodes when the parameter footprint exceeds a single node.
-3.  **Data parallelism**: Replicates the entire split-model pipeline to scale throughput on $D$.
-
-Only by combining all three can we train Archetype A systems efficiently.
+Archetype A (GPT-4/Llama-3) is the primary driver for hybrid parallelism. Because the model parameters $(P)$ exceed the memory of any single accelerator $(C_{\text{mem,device}})$, and the training dataset $(D)$ requires massive throughput, systems split the workload along three orthogonal axes. Tensor parallelism splits individual layers across the memory of a fast intra-node communication group; pipeline parallelism stages consecutive layers across nodes when the parameter footprint exceeds a single node; and data parallelism replicates the entire split-model pipeline to scale throughput across the dataset $D$. Only by combining all three can systems train Archetype A workloads efficiently.
 
 :::
 
