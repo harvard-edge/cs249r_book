@@ -88,6 +88,10 @@ def replay_prefixes(model, tokens, cache=None):
     return np.stack(logits, axis=1)
 
 
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & BENCHMARK UX
+# =============================================================================
+
 def measure_replay(model, tokens, cache=None, repeats=7):
     """Warm up once, then measure independent complete replays in milliseconds."""
     replay_prefixes(model, tokens, cache)
