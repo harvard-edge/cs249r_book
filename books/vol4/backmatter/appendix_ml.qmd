@@ -34,20 +34,30 @@ The conditional probability $P(Y \mid X)$ characterizes the probability of event
 $$ P(\theta \mid \mathcal{D}) = \frac{P(\mathcal{D} \mid \theta) P(\theta)}{P(\mathcal{D})} = \frac{P(\mathcal{D} \mid \theta) P(\theta)}{\int_\Theta P(\mathcal{D} \mid \theta') P(\theta') \, d\theta'} $$
 where $P(\theta)$ represents prior belief over model parameters or latent states $\theta \in \Theta$, $P(\mathcal{D} \mid \theta)$ represents the likelihood of physical dataset or sensor observation sequence $\mathcal{D} = \{\mathbf{x}_1, \dots, \mathbf{x}_N\}$, and $P(\theta \mid \mathcal{D})$ represents the updated posterior belief.
 
-In high-dimensional learning systems, integrating over the parameter manifold $\Theta$ to compute the marginal likelihood (evidence) $P(\mathcal{D})$ is analytically and computationally intractable. Real-time autonomy resolves this intractability through two complementary paradigms:
+In high-dimensional learning systems, integrating over the parameter manifold $\Theta$ to compute the marginal likelihood (evidence) $P(\mathcal{D}) = \int_\Theta P(\mathcal{D} \mid \theta) P(\theta) \, d\theta$ is analytically and computationally intractable. Real-time autonomy resolves this intractability through two complementary paradigms:
 
 1. **Maximum a posteriori (MAP) estimation:** Replacing posterior integration with point optimization:
    $$ \theta_{\text{MAP}} = \arg\max_\theta \left[ \sum_{i=1}^N \ln P(\mathbf{x}_i \mid \theta) + \ln P(\theta) \right] $$
-   where $\ln P(\theta)$ functions as an explicit weight regularizer (such as weight decay under a zero-mean isotropic Gaussian prior).
-2. **Variational inference:** Approximating the true posterior $P(\theta \mid \mathcal{D})$ with a tractable family $q_\phi(\theta)$ by maximizing the Evidence Lower Bound (ELBO), the analytical foundation of the action chunking and generative decoders derived in @sec-appendix-ml-multimodal.
+   When adopting a zero-mean isotropic Gaussian prior $P(\theta) = \mathcal{N}(\mathbf{0}, \sigma_0^2 \mathbf{I}_d)$, the log-prior evaluates to $\ln P(\theta) = -\frac{\|\theta\|_2^2}{2\sigma_0^2} - \frac{d}{2}\ln(2\pi\sigma_0^2)$. Maximizing the posterior objective is mathematically identical to minimizing negative log-likelihood with an explicit $L_2$ weight decay regularizer $\frac{\lambda_{\text{reg}}}{2} \|\theta\|_2^2$, where $\lambda_{\text{reg}} = 1/\sigma_0^2$. However, MAP estimation yields only a single deterministic point estimate $\theta_{\text{MAP}}$. It collapses posterior variance to zero, leaving the robot blind to its own epistemic uncertainty when queried in unvisited state space.
+2. **Variational inference:** Approximating the true posterior $P(\theta \mid \mathcal{D})$ with a tractable variational distribution family $q_\phi(\theta)$ by maximizing the Evidence Lower Bound (ELBO):
+   $$ \ln P(\mathcal{D}) = \mathbb{E}_{\theta \sim q_\phi(\theta)} \left[ \ln \frac{P(\mathcal{D}, \theta)}{q_\phi(\theta)} \right] + D_{\text{KL}}\left( q_\phi(\theta) \,\parallel\, P(\theta \mid \mathcal{D}) \right) \ge \mathbb{E}_{\theta \sim q_\phi(\theta)} [\ln P(\mathcal{D} \mid \theta)] - D_{\text{KL}}\left( q_\phi(\theta) \,\parallel\, P(\theta) \right) $$
+   Because the Kullback-Leibler divergence is non-negative ($D_{\text{KL}} \ge 0$), the lower bound holds strictly. Variational inference converts intractable high-dimensional integration into continuous gradient-based optimization over variational parameters $\phi$, providing the analytical foundation for the latent-variable action chunking and generative decoders derived in @sec-appendix-ml-multimodal.
 
 ### Shannon entropy and ambiguity thresholds
 
 Entropy quantifies the average uncertainty or information content contained in a probability distribution. For a discrete random variable $X$ taking values in alphabet $\mathcal{X}$:[^fn-ml-shannon-entropy]
 $$ H(X) = - \sum_{x \in \mathcal{X}} P(x) \log_2 P(x) = \mathbb{E}_{x \sim P} \left[ \log_2 \frac{1}{P(x)} \right] $$
-For continuous random variables governing physical state $\mathbf{x} \in \mathbb{R}^d$ with probability density $p(\mathbf{x})$, the **differential entropy** is:
+For continuous random variables governing physical state $\mathbf{x} \in \mathbb{R}^d$ with probability density $p(\mathbf{x})$, the **differential entropy** evaluates to:
 $$ h(X) = - \int_{\mathbb{R}^d} p(\mathbf{x}) \ln p(\mathbf{x}) \, d\mathbf{x} $$
-Under an isotropic Gaussian distribution $\mathcal{N}(\boldsymbol{\mu}, \sigma^2 \mathbf{I}_d)$, differential entropy scales directly with physical covariance volume: $h(X) = \frac{d}{2} \ln(2\pi e \sigma^2)$.
+Under a multivariate Gaussian distribution $\mathbf{x} \sim \mathcal{N}(\boldsymbol{\mu}, \boldsymbol{\Sigma})$ with positive-definite covariance $\boldsymbol{\Sigma} \in \mathbb{R}^{d \times d}$, substituting the Gaussian density $p(\mathbf{x}) = (2\pi)^{-d/2} (\det \boldsymbol{\Sigma})^{-1/2} \exp(-\frac{1}{2}(\mathbf{x}-\boldsymbol{\mu})^\top \boldsymbol{\Sigma}^{-1} (\mathbf{x}-\boldsymbol{\mu}))$ yields:
+$$
+\begin{aligned}
+h(X) &= -\mathbb{E}\left[ -\frac{d}{2}\ln(2\pi) - \frac{1}{2}\ln(\det \boldsymbol{\Sigma}) - \frac{1}{2}(\mathbf{x} - \boldsymbol{\mu})^\top \boldsymbol{\Sigma}^{-1}(\mathbf{x} - \boldsymbol{\mu}) \right] \\
+&= \frac{d}{2}\ln(2\pi) + \frac{1}{2}\ln(\det \boldsymbol{\Sigma}) + \frac{1}{2}\operatorname{Tr}\left(\boldsymbol{\Sigma}^{-1} \mathbb{E}[(\mathbf{x}-\boldsymbol{\mu})(\mathbf{x}-\boldsymbol{\mu})^\top]\right) \\
+&= \frac{1}{2} \ln\left( (2\pi e)^d \det \boldsymbol{\Sigma} \right)
+\end{aligned}
+$$
+Differential entropy directly scales with the logarithmic volume of the physical uncertainty ellipsoid $\det \boldsymbol{\Sigma}$. In state estimation, sensor fusion, and Kalman filtering, an informative measurement update shrinks $\det \boldsymbol{\Sigma}$, producing an exact physical information gain $\Delta h = h_{\text{prior}} - h_{\text{post}} = \frac{1}{2} \ln(\det \boldsymbol{\Sigma}_{\text{prior}} / \det \boldsymbol{\Sigma}_{\text{post}})$. Under an isotropic Gaussian distribution $\mathcal{N}(\boldsymbol{\mu}, \sigma^2 \mathbf{I}_d)$, this reduces to $h(X) = \frac{d}{2} \ln(2\pi e \sigma^2)$.
 
 To quantify information divergence between an empirical demonstrator distribution $P$ and a learned policy distribution $Q$, information theory defines the **Kullback-Leibler (KL) divergence** (relative entropy):
 $$ D_{\text{KL}}(P \,\parallel\, Q) = \int_{\mathbb{R}^d} p(\mathbf{x}) \ln \left( \frac{p(\mathbf{x})}{q(\mathbf{x})} \right) d\mathbf{x} $$
@@ -63,7 +73,9 @@ Standard neural classification heads normalize raw logit vectors $\mathbf{z} = [
 $$ \sigma(\mathbf{z})_i = \frac{e^{z_i / T}}{\sum_{j=1}^K e^{z_j / T}} $$
 where $T > 0$ is a temperature hyperparameter (defaulting to $T = 1$). The softmax operator projects logits onto the open probability simplex $\Delta^{K-1} = \{\mathbf{p} \in \mathbb{R}^K : \sum_i p_i = 1, p_i > 0\}$ strictly through algebraic exponentiation.
 
-Deep neural networks trained via cross-entropy loss $\mathcal{L}_{\text{CE}}(\mathbf{z}, y) = -z_y + \ln \sum_{j=1}^K e^{z_j}$ exhibit severe empirical overconfidence. Because cross-entropy has no minimum at finite logit values, gradient descent continually drives winning logits toward positive infinity ($z_y - z_j \to \infty$), causing predicted probabilities $\sigma(\mathbf{z})_y \to 1.0$ even on noisy or out-of-distribution inputs. A large output probability indicates only large relative separation between logits, not genuine epistemic certainty.
+Deep neural networks trained via cross-entropy loss exhibit severe empirical overconfidence. For target class $y \in \{1, \dots, K\}$, the cross-entropy loss evaluates to $\mathcal{L}_{\text{CE}}(\mathbf{z}, y) = -z_y + \ln \sum_{j=1}^K e^{z_j}$. Differentiating with respect to any logit $z_i$:
+$$ \frac{\partial \mathcal{L}_{\text{CE}}}{\partial z_i} = \frac{e^{z_i}}{\sum_{j=1}^K e^{z_j}} - \mathbf{1}(i = y) = \sigma(\mathbf{z})_i - \mathbf{1}(i = y) $$
+For the ground-truth class $y$, the gradient evaluates to $\frac{\partial \mathcal{L}_{\text{CE}}}{\partial z_y} = \sigma(\mathbf{z})_y - 1 < 0$. This gradient vanishes if and only if the predicted probability approaches unity ($\sigma(\mathbf{z})_y \to 1.0$). On the softmax simplex, driving $\sigma(\mathbf{z})_y \to 1.0$ requires the relative logit separation $z_y - z_j \to +\infty$ for all non-target classes $j \ne y$. Because cross-entropy has no minimum at any finite logit vector, unregularized gradient descent continually drives winning logits toward positive infinity, pushing predicted probabilities to extreme values ($\sigma(\mathbf{z})_y \to 1.0$) even on noisy or out-of-distribution inputs. A large output probability indicates only large relative separation between logits, not genuine epistemic certainty.
 
 To quantify whether predicted probabilities match empirical physical frequencies, reliability engineering computes the **Expected Calibration Error (ECE)** and **Maximum Calibration Error (MCE)**:[^fn-ml-binned-ece]
 $$ \text{ECE} = \sum_{m=1}^M \frac{|B_m|}{N} \left| \text{acc}(B_m) - \text{conf}(B_m) \right|, \qquad \text{MCE} = \max_{m \in \{1, \dots, M\}} \left| \text{acc}(B_m) - \text{conf}(B_m) \right| $$
@@ -71,7 +83,7 @@ where the unit confidence interval $[0, 1]$ is partitioned into $M$ equal-width 
 
 To recalibrate an overconfident model post-hoc without altering its classification accuracy, **temperature scaling** optimizes a single scalar parameter $T > 0$ on a held-out calibration dataset $\mathcal{D}_{\text{cal}}$:
 $$ T^* = \arg\min_{T > 0} \left[ - \sum_{(\mathbf{x}, y) \in \mathcal{D}_{\text{cal}}} \ln \left( \frac{e^{z_y(\mathbf{x}) / T}}{\sum_{j=1}^K e^{z_j(\mathbf{x}) / T}} \right) \right] $$
-Because $T^*$ scales all logits uniformly, the ranking $\arg\max_i z_i$ remains unchanged, preserving top-1 accuracy while softening the predicted probability distribution to match empirical accuracy. In safety-critical autonomy, gating emergency fallbacks or operator interventions on uncalibrated confidence scores permits undetected out-of-distribution shifts to corrupt actuation.
+Because $T^*$ scales all logits uniformly, the ranking $\arg\max_i (z_i / T) = \arg\max_i z_i$ remains unchanged for all $T > 0$, preserving top-1 accuracy while softening the predicted probability distribution to match empirical accuracy. In safety-critical autonomy, gating emergency fallbacks or operator interventions on uncalibrated confidence scores permits undetected out-of-distribution shifts to corrupt actuation.
 
 [^fn-ml-binned-ece]: **Expected Calibration Error**\index{Expected Calibration Error!binned accuracy metric}: Binned calibration metrics quantify the divergence between neural prediction confidence and realized empirical accuracy across confidence intervals. Standard unregularized deep networks exhibit substantial overconfidence because cross-entropy minimization drives logits to extreme values. Relying on uncalibrated confidence scores to gate safety fallbacks permits undetected distribution shifts to corrupt closed-loop actuation.
 
@@ -627,19 +639,28 @@ A decoder avoids mode averaging by parameterizing the conditional action distrib
 3. **Conditional diffusion and flow matching.** Diffusion Policy [@chi2024diffusionpolicy] and flow-matching decoders generate entire action trajectory chunks via iterative denoising or ordinary differential equation (ODE) integration. Their training targets injected noise vectors or continuous velocity fields conditioned on corrupted states, observations, and timesteps rather than clean actions, completely circumventing conditional expectation averaging. @Sec-appendix-ml-diffusion derives both objectives and prices their sampling steps.
 4. **Latent-variable chunking.** Action Chunking with Transformers (ACT) [@zhao2023learning] predicts an action trajectory chunk $\mathbf{A}_t = (\mathbf{a}_t, \mathbf{a}_{t+1}, \dots, \mathbf{a}_{t+H_a-1}) \in \mathbb{R}^{H_a \times D_a}$ from observation $\mathbf{o}_t$ using a Conditional Variational Autoencoder (CVAE). The true objective is to maximize the conditional log-marginal likelihood of demonstrated chunks across dataset $\mathcal{D}$:
    $$ \ln p_\theta(\mathbf{A}_t \mid \mathbf{o}_t) = \ln \int_{\mathcal{Z}} p_\theta(\mathbf{A}_t, \mathbf{z} \mid \mathbf{o}_t) \, d\mathbf{z} $$
-   Because this marginalization is intractable, ACT introduces a variational posterior $q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)$ parameterized by a transformer encoder. Applying Jensen's inequality to the variational expectation yields the Evidence Lower Bound (ELBO):
+   Because this marginalization is intractable, ACT introduces a variational posterior $q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)$ parameterized by a transformer encoder. Expanding the identity with $p_\theta(\mathbf{A}_t, \mathbf{z} \mid \mathbf{o}_t) = p_\theta(\mathbf{A}_t \mid \mathbf{o}_t, \mathbf{z}) p(\mathbf{z})$:
    $$
    \begin{aligned}
-   \ln p_\theta(\mathbf{A}_t \mid \mathbf{o}_t) &= \ln \int_{\mathcal{Z}} q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \frac{p_\theta(\mathbf{A}_t, \mathbf{z} \mid \mathbf{o}_t)}{q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \, d\mathbf{z} \\
-   &\ge \mathbb{E}_{\mathbf{z} \sim q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \left[ \ln \frac{p_\theta(\mathbf{A}_t, \mathbf{z} \mid \mathbf{o}_t)}{q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \right] \\
-   &= \mathbb{E}_{\mathbf{z} \sim q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \left[ \ln p_\theta(\mathbf{A}_t \mid \mathbf{o}_t, \mathbf{z}) \right] - D_{\text{KL}}\left( q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \,\parallel\, p(\mathbf{z}) \right)
+   \ln p_\theta(\mathbf{A}_t \mid \mathbf{o}_t) &= \int_{\mathcal{Z}} q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \ln p_\theta(\mathbf{A}_t \mid \mathbf{o}_t) \, d\mathbf{z} \\
+   &= \int_{\mathcal{Z}} q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \ln \left( \frac{p_\theta(\mathbf{A}_t, \mathbf{z} \mid \mathbf{o}_t)}{q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \cdot \frac{q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)}{p_\theta(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \right) d\mathbf{z} \\
+   &= \int_{\mathcal{Z}} q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \ln \frac{p_\theta(\mathbf{A}_t, \mathbf{z} \mid \mathbf{o}_t)}{q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \, d\mathbf{z} + \int_{\mathcal{Z}} q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \ln \frac{q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)}{p_\theta(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \, d\mathbf{z} \\
+   &= \mathbb{E}_{\mathbf{z} \sim q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \left[ \ln \frac{p_\theta(\mathbf{A}_t \mid \mathbf{o}_t, \mathbf{z}) p(\mathbf{z})}{q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \right] + D_{\text{KL}}\left( q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \,\parallel\, p_\theta(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \right) \\
+   &\ge \mathbb{E}_{\mathbf{z} \sim q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \left[ \ln p_\theta(\mathbf{A}_t \mid \mathbf{o}_t, \mathbf{z}) \right] - D_{\text{KL}}\left( q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \,\parallel\, p(\mathbf{z}) \right) \equiv \mathcal{L}_{\text{ELBO}}(\theta, \phi)
    \end{aligned}
    $$
-   Assuming an isotropic Laplace reconstruction likelihood $p_\theta(\mathbf{A}_t \mid \mathbf{o}_t, \mathbf{z}) \propto \exp(-\|\mathbf{A}_t - \pi_\theta(\mathbf{o}_t, \mathbf{z})\|_1 / b)$ (which penalizes outlier trajectory variations less aggressively than Gaussian $L_2$ loss) and standard normal prior $p(\mathbf{z}) = \mathcal{N}(\mathbf{0}, \mathbf{I})$, maximizing the ELBO with a $\beta$-weight on the KL regularizer gives the training loss:
-   $$ \mathcal{L}_{\text{ACT}}(\theta, \phi) = \mathbb{E}_{(\mathbf{o}_t, \mathbf{A}_t) \sim \mathcal{D}, \mathbf{z} \sim q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)} \left[ \|\mathbf{A}_t - \pi_\theta(\mathbf{o}_t, \mathbf{z})\|_1 \right] + \beta D_{\text{KL}}\left( q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \,\parallel\, \mathcal{N}(\mathbf{0}, \mathbf{I}) \right) $$
-   Gradients propagate through the stochastic latent bottleneck via the reparameterization trick $\mathbf{z} = \boldsymbol{\mu}_\phi + \boldsymbol{\sigma}_\phi \odot \boldsymbol{\epsilon}$, with $\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$.
+   Assuming standard isotropic Gaussian prior $p(\mathbf{z}) = \mathcal{N}(\mathbf{0}, \mathbf{I}_{d_z})$ and diagonal Gaussian variational posterior $q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) = \mathcal{N}(\boldsymbol{\mu}_\phi, \operatorname{diag}(\boldsymbol{\sigma}_\phi^2))$, the Kullback-Leibler divergence evaluates in closed form:
+   $$ D_{\text{KL}}\left( q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \,\parallel\, \mathcal{N}(\mathbf{0}, \mathbf{I}) \right) = \frac{1}{2} \sum_{j=1}^{d_z} \left( \sigma_{\phi, j}^2 + \mu_{\phi, j}^2 - 1 - \ln(\sigma_{\phi, j}^2) \right) $$
+   Sampling directly as $\mathbf{z} \sim q_\phi$ is a stochastic operation that prevents backpropagation because the node has no analytical derivatives with respect to encoder parameters $\phi$. ACT resolves this via the **reparameterization trick**: isolating stochasticity into parameter-free standard normal noise $\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{d_z})$:
+   $$ \mathbf{z} = \boldsymbol{\mu}_\phi(\mathbf{o}_t, \mathbf{A}_t) + \boldsymbol{\sigma}_\phi(\mathbf{o}_t, \mathbf{A}_t) \odot \boldsymbol{\epsilon}, \quad \text{yielding } \frac{\partial \mathbf{z}}{\partial \boldsymbol{\mu}_\phi} = \mathbf{I}, \quad \frac{\partial \mathbf{z}}{\partial \boldsymbol{\sigma}_\phi} = \operatorname{diag}(\boldsymbol{\epsilon}) $$
+   To parameterize the reconstruction likelihood, ACT models $p_\theta(\mathbf{A}_t \mid \mathbf{o}_t, \mathbf{z})$ as an isotropic Laplace distribution:
+   $$ p_\theta(\mathbf{A}_t \mid \mathbf{o}_t, \mathbf{z}) = \frac{1}{(2b)^{H_a D_a}} \exp\left( -\frac{\|\mathbf{A}_t - \pi_\theta(\mathbf{o}_t, \mathbf{z})\|_1}{b} \right) $$
+   Maximizing the log-likelihood is equivalent to minimizing the $L_1$ norm $\|\mathbf{A}_t - \pi_\theta(\mathbf{o}_t, \mathbf{z})\|_1$. For physical robot teleoperation, $L_1$ loss provides constant-magnitude error gradients that avoid over-penalizing high-frequency human demonstrator sub-movements and velocity tremors, which Gaussian $L_2$ regression squares and overfits. Weighting the KL regularizer by hyperparameter $\beta > 0$ yields the full training loss:
+   $$ \mathcal{L}_{\text{ACT}}(\theta, \phi) = \mathbb{E}_{(\mathbf{o}_t, \mathbf{A}_t) \sim \mathcal{D}, \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})} \left[ \|\mathbf{A}_t - \pi_\theta(\mathbf{o}_t, \boldsymbol{\mu}_\phi + \boldsymbol{\sigma}_\phi \odot \boldsymbol{\epsilon})\|_1 \right] + \beta D_{\text{KL}}\left( q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t) \,\parallel\, \mathcal{N}(\mathbf{0}, \mathbf{I}) \right) $$
 
-   The latent variable $\mathbf{z} \in \mathbb{R}^{d_z}$ acts as a continuous style and intention selector: distinct demonstration trajectories (such as reaching left versus right around an obstacle) map to separated clusters in latent space. Crucially for real-time systems, at test time the encoder $q_\phi$ (which requires unobserved future actions $\mathbf{A}_t$) is discarded. Setting $\mathbf{z} = \mathbf{0}$ (or sampling $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$) conditions decoder $\pi_\theta$ on a single coherent style, evaluating the entire $H_a$-step chunk in a **single forward pass** ($\mathcal{O}(1)$ network evaluations). Overlapping receding-horizon chunks are blended using exponential decay weights $w_i = \exp(-m i)$ to eliminate inter-chunk trajectory discontinuities.
+   The latent variable $\mathbf{z} \in \mathbb{R}^{d_z}$ acts as a continuous style and intention selector: distinct demonstration modes (such as reaching left versus right around an obstacle) map to separated clusters in latent space. Crucially for real-time systems, at test time the encoder $q_\phi$ (which requires unobserved future actions $\mathbf{A}_t$) is discarded. Setting $\mathbf{z} = \mathbf{0}$ (the deterministic mean of the prior) conditions decoder $\pi_\theta$ on the dominant demonstrated style, evaluating the entire $H_a$-step chunk in a **single forward pass** ($\mathcal{O}(1)$ network evaluations, typically $15\text{--}25\text{ ms}$). To prevent discontinuous setpoint jumps between consecutive chunks, ACT blurs receding-horizon predictions via **temporal ensembling**:
+   $$ \mathbf{a}_t = \frac{\sum_{i=0}^{\min(t, H_a-1)} w_i \, \mathbf{A}_{t-i}[i]}{\sum_{i=0}^{\min(t, H_a-1)} w_i}, \qquad w_i = \exp(-m \cdot i) $$
+   where $m > 0$ controls exponential decay weighting across overlapping historical predictions.
 
 5. **Discrete action tokens.** Vision-language-action models such as RT-1, RT-2, and OpenVLA [@brohan2023rt1; @brohan2023rt2; @kim2024openvla] discretize continuous action dimensions into $B$ uniform bins (commonly 256) and emit categorical tokens:
    $$ \text{bin}(a_k) = \left\lfloor \frac{a_k - a_{\min}}{a_{\max} - a_{\min}} \times (B - 1) \right\rfloor $$
@@ -683,9 +704,19 @@ By Bayes' rule, the true reverse posterior conditioned on the clean trajectory $
 $$ \tilde{\boldsymbol{\mu}}_k(\mathbf{A}^k, \mathbf{A}^0) = \frac{\sqrt{\bar{\alpha}_{k-1}} \beta_k}{1 - \bar{\alpha}_k} \mathbf{A}^0 + \frac{\sqrt{\alpha_k}(1 - \bar{\alpha}_{k-1})}{1 - \bar{\alpha}_k} \mathbf{A}^k $$
 Because $\mathbf{A}^0$ is unobserved at test time, the reverse process substitutes an estimate of $\mathbf{A}^0$ derived from Tweedie's formula.
 
-For any Gaussian perturbation $\mathbf{x} = \mathbf{x}_0 + \sigma \boldsymbol{\epsilon}$ with prior $p(\mathbf{x}_0)$ and noise $\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$, **Tweedie's formula** expresses the Bayes-optimal posterior expectation of the clean signal in terms of the marginal score function:
+For any Gaussian perturbation $\mathbf{x} \sim \mathcal{N}(\mathbf{x}_0, \sigma^2 \mathbf{I}_d)$ with prior density $p(\mathbf{x}_0)$, the conditional observation density is:
+$$ p(\mathbf{x} \mid \mathbf{x}_0) = \frac{1}{(2\pi \sigma^2)^{d/2}} \exp\left( -\frac{\|\mathbf{x} - \mathbf{x}_0\|^2}{2\sigma^2} \right) $$
+Differentiating with respect to the noisy measurement $\mathbf{x}$:
+$$ \nabla_{\mathbf{x}} p(\mathbf{x} \mid \mathbf{x}_0) = -\frac{\mathbf{x} - \mathbf{x}_0}{\sigma^2} p(\mathbf{x} \mid \mathbf{x}_0) $$
+The marginal density of noisy observations evaluates to $p(\mathbf{x}) = \int_{\mathbb{R}^d} p(\mathbf{x} \mid \mathbf{x}_0) p(\mathbf{x}_0) \, d\mathbf{x}_0$. Differentiating under the integral sign:
+$$ \nabla_{\mathbf{x}} p(\mathbf{x}) = \int_{\mathbb{R}^d} \nabla_{\mathbf{x}} p(\mathbf{x} \mid \mathbf{x}_0) p(\mathbf{x}_0) \, d\mathbf{x}_0 = -\frac{1}{\sigma^2} \int_{\mathbb{R}^d} (\mathbf{x} - \mathbf{x}_0) p(\mathbf{x} \mid \mathbf{x}_0) p(\mathbf{x}_0) \, d\mathbf{x}_0 $$
+Dividing both sides by the marginal density $p(\mathbf{x})$:
+$$ \frac{\nabla_{\mathbf{x}} p(\mathbf{x})}{p(\mathbf{x})} = \nabla_{\mathbf{x}} \ln p(\mathbf{x}) = -\frac{1}{\sigma^2} \left( \mathbf{x} - \int_{\mathbb{R}^d} \mathbf{x}_0 \frac{p(\mathbf{x} \mid \mathbf{x}_0) p(\mathbf{x}_0)}{p(\mathbf{x})} \, d\mathbf{x}_0 \right) = -\frac{\mathbf{x} - \mathbb{E}[\mathbf{x}_0 \mid \mathbf{x}]}{\sigma^2} $$
+Multiplying by $\sigma^2$ and isolating $\mathbb{E}[\mathbf{x}_0 \mid \mathbf{x}]$ proves **Tweedie's formula**:
 $$ \mathbb{E}[\mathbf{x}_0 \mid \mathbf{x}] = \mathbf{x} + \sigma^2 \nabla_{\mathbf{x}} \ln p(\mathbf{x}) $$
-Rewriting the diffusion marginal as $\frac{\mathbf{A}^k}{\sqrt{\bar{\alpha}_k}} = \mathbf{A}^0 + \frac{\sqrt{1 - \bar{\alpha}_k}}{\sqrt{\bar{\alpha}_k}} \boldsymbol{\epsilon}$, Tweedie's formula directly equates the estimated clean trajectory $\hat{\mathbf{A}}^0$ and the Stein score $\nabla_{\mathbf{A}^k} \ln p(\mathbf{A}^k \mid \mathbf{O})$:
+Tweedie's formula reveals that the Bayes-optimal reconstruction of clean state $\mathbf{x}_0$ equals the corrupted measurement $\mathbf{x}$ shifted along the marginal Stein score $\nabla_{\mathbf{x}} \ln p(\mathbf{x})$ scaled by noise variance $\sigma^2$.
+
+Rewriting the forward diffusion marginal $\mathbf{A}^k = \sqrt{\bar{\alpha}_k} \mathbf{A}^0 + \sqrt{1 - \bar{\alpha}_k} \boldsymbol{\epsilon}$ as $\frac{\mathbf{A}^k}{\sqrt{\bar{\alpha}_k}} = \mathbf{A}^0 + \frac{\sqrt{1 - \bar{\alpha}_k}}{\sqrt{\bar{\alpha}_k}} \boldsymbol{\epsilon}$, the effective noise variance is $\sigma^2 = \frac{1 - \bar{\alpha}_k}{\bar{\alpha}_k}$. Tweedie's formula directly equates the estimated clean trajectory $\hat{\mathbf{A}}^0$ and the Stein score $\nabla_{\mathbf{A}^k} \ln p(\mathbf{A}^k \mid \mathbf{O})$:
 $$ \nabla_{\mathbf{A}^k} \ln p(\mathbf{A}^k \mid \mathbf{O}) = -\frac{\boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{O}, k)}{\sqrt{1 - \bar{\alpha}_k}} $$
 Substituting $\hat{\mathbf{A}}^0 = \frac{1}{\sqrt{\bar{\alpha}_k}} \left( \mathbf{A}^k - \sqrt{1 - \bar{\alpha}_k} \boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{O}, k) \right)$ into the posterior mean $\tilde{\boldsymbol{\mu}}_k$ reparameterizes the reverse transition mean:
 $$ \boldsymbol{\mu}_\theta(\mathbf{A}^k, \mathbf{O}, k) = \frac{1}{\sqrt{\alpha_k}} \left( \mathbf{A}^k - \frac{\beta_k}{\sqrt{1 - \bar{\alpha}_k}} \boldsymbol{\epsilon}_\theta(\mathbf{A}^k, \mathbf{O}, k) \right) $$
@@ -703,11 +734,13 @@ Under an optimal transport conditional probability path, the continuous trajecto
 $$ \psi_t(\mathbf{x}_0) = (1 - t) \mathbf{x}_0 + t \mathbf{x}_1, \quad t \in [0, 1] $$
 The conditional velocity along this straight optimal-transport path is constant across time:
 $$ v_t(\mathbf{x} \mid \mathbf{x}_1) = \frac{d}{dt} \psi_t(\mathbf{x}_0) = \mathbf{x}_1 - \mathbf{x}_0 $$
+and the trajectory acceleration vanishes identically: $\frac{d^2}{dt^2} \psi_t(\mathbf{x}_0) = \mathbf{0}$.
+
 The **Conditional Flow Matching (CFM) theorem** [@lipman2022flow] proves that regressing a neural vector field $v_\theta$ against this conditional vector field over paired samples $(\mathbf{x}_0, \mathbf{x}_1)$ has gradients identical to regressing against the intractable marginal velocity field $u_t(\mathbf{x})$:
 $$ \nabla_\theta \mathbb{E}_{t, \mathbf{x}_0, \mathbf{x}_1} \left[ \| v_\theta(\psi_t(\mathbf{x}_0), t, \mathbf{O}) - (\mathbf{x}_1 - \mathbf{x}_0) \|^2 \right] = \nabla_\theta \mathbb{E}_{t, \mathbf{x} \sim p_t} \left[ \| v_\theta(\mathbf{x}, t, \mathbf{O}) - u_t(\mathbf{x}) \|^2 \right] $$
 The network is therefore trained via direct mean squared regression:
 $$ \mathcal{L}_{\text{FM}}(\theta) = \mathbb{E}_{t \sim \mathcal{U}[0, 1], \mathbf{x}_0 \sim \mathcal{N}(\mathbf{0}, \mathbf{I}), \mathbf{x}_1 \sim \mathcal{D}} \left[ \left\| v_\theta\left((1 - t)\mathbf{x}_0 + t\mathbf{x}_1, t, \mathbf{O}\right) - (\mathbf{x}_1 - \mathbf{x}_0) \right\|^2 \right] $$
-Because optimal-transport flow matching produces straight trajectories in state space, numerical integration truncation errors are drastically lower than in curved diffusion paths. Low-order numerical solvers (such as a 2-step Euler integrator, $K=2$) can evaluate candidate trajectories with high fidelity, dramatically reducing inference latency on physical robots.
+Because optimal-transport flow matching produces straight trajectories in state space with zero path acceleration, numerical integration truncation errors are drastically lower than in curved diffusion paths. Low-order numerical solvers (such as a 2-step Euler integrator, $K=2$) can evaluate candidate trajectories with high fidelity, dramatically reducing inference latency on physical robots.
 
 #### Denoising steps against the control deadline
 
@@ -719,7 +752,7 @@ The reverse trajectory discretizes a continuous probability flow ODE or reverse 
 - **Computational latency and roofline limits:** Crucially, reverse diffusion is an inherently sequential Markov chain: evaluation $k-1$ strictly requires the tensor output of evaluation $k$. Denoising steps cannot be parallelized across the time dimension on GPU or NPU accelerators. Total chunk generation latency scales linearly with $K$:[^fn-ml-denoising-latency]
   $$ \tau_{\text{inf}}(K) = t_{\text{vis}} + K \cdot t_{\text{step}} $$
   where $t_{\text{vis}}$ is the one-time visual feature extraction latency per chunk and $t_{\text{step}}$ is the forward execution time of noise-prediction network $\boldsymbol{\epsilon}_\theta$.
-  On batch size 1 (single-robot closed-loop inference), streaming network weights $\mathbf{W}$ of size $M_{\text{weights}}$ from off-chip DRAM takes time at least $t_{\text{stream}} = M_{\text{weights}} / \text{BW}_{\text{DRAM}}$. If arithmetic intensity $I = \text{FLOPs} / M_{\text{weights}} < \text{Peak FLOP/s} / \text{BW}_{\text{DRAM}}$, inference is strictly memory-bandwidth bound.
+  On batch size 1 (single-robot closed-loop inference), matrix-vector multiplications exhibit low arithmetic intensity. Streaming network weights $\mathbf{W}$ of size $M_{\text{weights}}$ from off-chip DRAM takes time at least $t_{\text{stream}} = M_{\text{weights}} / \text{BW}_{\text{DRAM}}$. If arithmetic intensity $I = \text{FLOPs} / M_{\text{weights}} < \text{Peak FLOP/s} / \text{BW}_{\text{DRAM}}$, inference is strictly memory-bandwidth bound. For a $48\text{M}$-parameter model ($96\text{ MB}$ at FP16) on an embedded accelerator with $204.8\text{ GB/s}$ memory bandwidth, transferring weights once takes at least $0.469\text{ ms}$; executing $16$ sequential evaluations requires at least $7.5\text{ ms}$ of memory transfer alone before counting kernel launch latencies and activation memory traffic.
 
 A physical robot's low-level joint controllers require fresh setpoints at a deterministic control loop period $\Delta t_{\text{ctrl}}$ (e.g., $20\text{ ms}$ for $50\text{ Hz}$ control). When a multi-step sampler's inference latency exceeds this period ($\tau_{\text{inf}} > \Delta t_{\text{ctrl}}$), synchronous lockstep execution is physically impossible: the controller starves while waiting for the accelerator, causing torque drops or unmodeled deceleration.
 
@@ -989,7 +1022,7 @@ Consider an operational test consisting of $n$ independent, identically distribu
 
 Let the test observe zero catastrophic failures ($k = 0$). Under the hypothesis of failure probability $p$, the probability of observing zero failures across $n$ independent trials is:
 $$ P(\text{zero failures} \mid p) = (1 - p)^n $$
-To exclude hypothesis $p$ at a one-sided confidence level $1 - \alpha$ (e.g., $95\%$ confidence with $\alpha = 0.05$), the likelihood of observing zero failures under that hypothesis must not exceed $\alpha$:
+To exclude hypothesis $p$ at a one-sided confidence level $1 - \alpha$ (e.g., 95 percent confidence with $\alpha = 0.05$), the likelihood of observing zero failures under that hypothesis must not exceed $\alpha$:
 $$ (1 - p)^n \le \alpha $$
 Taking the natural logarithm of both sides:
 $$ n \ln(1 - p) \le \ln \alpha $$
@@ -999,7 +1032,7 @@ Inverting this relation gives the minimum sample count $n$ required to bound the
 $$ n \ge \frac{\ln(1/\alpha)}{p} $$
 For standard 95 percent confidence ($\alpha = 0.05$):
 $$ n \ge \frac{-\ln(0.05)}{p} = \frac{2.99573}{p} \approx \frac{3}{p} $$
-This classical result is the **discrete Rule of Three**: observing zero failures across $n$ trials bounds the per-trial failure probability to $p \le 3/n$ at $95\%$ confidence.
+This classical result is the **discrete Rule of Three**: observing zero failures across $n$ trials bounds the per-trial failure probability to $p \le 3/n$ at 95 percent confidence. The exact inversion without Taylor approximation is $p_U = 1 - \alpha^{1/n}$; for small $p$, the Taylor approximation $-p$ slightly underestimates $p_U$, making the exact bound marginally more conservative.
 
 [^fn-ml-rule-three]: **Statistical Rule of Three**\index{Rule of three!zero-failure testing}: Zero events in $n$ independent Bernoulli trials yield the exact one-sided 95 percent upper probability $1 - 0.05^{1/n} \approx 3/n$ for small probabilities. In continuous time, a stationary Poisson process requires $T \ge 3.0/\lambda$. Neither bound covers retrained models, modified firmware, or unobserved hazard classes without configuration-equivalence proofs.
 
@@ -1011,7 +1044,7 @@ The Poisson process emerges naturally from the discrete Bernoulli model via the 
 $$ \lim_{n \to \infty} \binom{n}{k} \left(\frac{\lambda T}{n}\right)^k \left(1 - \frac{\lambda T}{n}\right)^{n - k} = \frac{(\lambda T)^k e^{-\lambda T}}{k!} $$
 Let $N(T)$ denote the cumulative count of catastrophic incidents observed across cumulative fleet operating duration $T = \sum_{j=1}^M T_j$ across $M$ robots. The probability of recording exactly $k$ incidents in duration $T$ is:
 $$ P(N(T) = k) = \frac{(\lambda T)^k e^{-\lambda T}}{k!} $$
-When a physical fleet qualification campaign completes with zero observed incidents ($k = 0$):
+Equivalently, the inter-arrival time $\tau_1$ to the first catastrophic incident follows an exponential distribution $\tau_1 \sim \text{Exponential}(\lambda)$ with survival probability $P(\tau_1 > T) = e^{-\lambda T}$. When a physical fleet qualification campaign completes with zero observed incidents ($k = 0$):
 $$ P(N(T) = 0) = \frac{(\lambda T)^0 e^{-\lambda T}}{0!} = e^{-\lambda T} $$
 To formally certify that the true operational failure rate is below an acceptable target rate $\lambda_*$, we formulate the statistical hypothesis test:
 $$ H_0: \lambda \ge \lambda_* \quad \text{versus} \quad H_1: \lambda < \lambda_* $$
@@ -1021,7 +1054,7 @@ Taking the natural logarithm of both sides:
 $$ -\lambda_* T \le \ln \alpha \iff T \ge \frac{-\ln \alpha}{\lambda_*} = \frac{\ln(1/\alpha)}{\lambda_*} $$
 For standard 95 percent confidence ($\alpha = 0.05$), $-\ln(0.05) = \ln(20) \approx 2.99573227$. This yields the **continuous Rule of Three**:
 $$ T \ge \frac{2.99573}{\lambda_*} \approx \frac{3.0}{\lambda_*} $$
-Unlike the discrete Bernoulli derivation which required a Taylor approximation for $\ln(1 - p)$, the continuous Poisson bound $T \ge \frac{\ln(1/\alpha)}{\lambda_*}$ is **mathematically exact**.
+Unlike the discrete Bernoulli derivation which required a Taylor approximation for $\ln(1 - p)$, the continuous Poisson bound $T \ge \frac{\ln(1/\alpha)}{\lambda_*}$ is **mathematically exact** across all values of $\lambda_* > 0$.
 
 #### Systems arithmetic of the exposure wall
 
@@ -1047,9 +1080,13 @@ where $z_{1-\alpha/2}$ is the standard normal critical value ($z_{0.975} \approx
 
 #### The asymptotic collapse at zero failures ($k = 0$)
 
-In physical autonomy qualification, candidate systems undergo zero-failure validation tests ($k = 0$). When $k = 0$, the sample proportion is $\hat{p} = 0$, causing the sample variance term $\hat{p}(1-\hat{p})/n$ to collapse to zero:
+In physical autonomy qualification, candidate systems undergo zero-failure validation tests ($k = 0$). When $k = 0$, the sample proportion is $\hat{p} = 0$, causing the estimated variance $\hat{p}(1-\hat{p})/n$ to collapse to zero:
 $$ \text{CI}_{\text{Wald}}\Big|_{k=0} = 0 \pm z_{1-\alpha/2} \sqrt{\frac{0(1 - 0)}{n}} = [0, 0] $$
-The Wald interval asserts, at 95 percent confidence, that the failure probability is exactly zero after a finite test run. It completely ignores finite-sample uncertainty; its empirical coverage probability for any nonzero failure rate $p > 0$ is exactly zero. Furthermore, even when $k = 1$, if $n$ is moderate, the lower bound evaluates to $\hat{p} - z_{0.975} \sqrt{\hat{p}(1-\hat{p})/n} < 0$, predicting physically impossible negative failure probabilities.
+The Wald interval asserts, at 95 percent confidence, that the failure probability is exactly zero after a finite test run. It completely ignores finite-sample uncertainty; its empirical coverage probability for any nonzero failure rate $p > 0$ is exactly zero.
+
+Consider the pedagogical danger in systems engineering: suppose a policy is tested for $n = 1000$ consecutive pick-and-place trials with zero failures. An engineer using the Wald formula reports that the failure rate is zero with zero variance. However, if the robot's true physical failure probability is $p = 10^{-3}$, the probability of observing zero failures across $n = 1000$ trials is:
+$$ P(X = 0) = (1 - 10^{-3})^{1000} = (0.999)^{1000} \approx 0.3677 \approx 36.8\text{ percent} $$
+More than one out of every three identical test campaigns will produce zero failures purely by chance, yet the Wald interval treats this outcome as conclusive proof of absolute zero failure risk! Furthermore, even when $k = 1$, if $n$ is moderate, the lower bound evaluates to $\hat{p} - z_{0.975} \sqrt{\hat{p}(1-\hat{p})/n} < 0$, predicting physically impossible negative failure probabilities.
 
 #### Clopper-Pearson exact binomial inversion
 
@@ -1070,7 +1107,7 @@ Solving directly for $p_U$:
 $$ 1 - p_U = \alpha^{1/n} \iff p_U = 1 - \alpha^{1/n} = 1 - \exp\left(\frac{1}{n} \ln \alpha\right) $$
 Applying the Taylor expansion $e^x = 1 + x + \frac{x^2}{2} + \dots$ with $x = \frac{\ln \alpha}{n}$:
 $$ p_U = 1 - \left( 1 + \frac{\ln \alpha}{n} + \mathcal{O}(n^{-2}) \right) = \frac{-\ln \alpha}{n} = \frac{\ln(1/\alpha)}{n} $$
-For $\alpha = 0.05$, $-\ln(0.05) \approx 2.99573$, rigorously recovering the discrete Rule of Three: $p_U \approx 3/n$. For a two-sided $95\%$ interval ($\alpha = 0.05$, tail probability $\alpha/2 = 0.025$):
+For $\alpha = 0.05$, $-\ln(0.05) \approx 2.99573$, rigorously recovering the discrete Rule of Three: $p_U \approx 3/n$. For a two-sided 95 percent interval ($\alpha = 0.05$, tail probability $\alpha/2 = 0.025$):
 $$ p_U = 1 - (0.025)^{1/n} \approx \frac{-\ln(0.025)}{n} = \frac{3.68888}{n} \approx \frac{3.69}{n} $$
 Unlike the degenerate Wald interval, the Clopper-Pearson interval guarantees exact non-asymptotic coverage of at least $1 - \alpha$ for every finite sample size $n \ge 1$.
 
@@ -1133,9 +1170,9 @@ Under a standard Gaussian distribution $\mathcal{N}(0, \sigma^2)$, extreme devia
 
 In Physical AI, the physical disturbances that govern structural survival, actuator integrity, and safety gating do not arise from sums of independent, bounded noise. They are generated by strongly non-linear physical phenomena:
 
-1. **Contact impact dynamics:** When an autonomous manipulator or mobile robot collides unexpectedly with a rigid obstacle, Hertzian contact mechanics govern the interaction force: $F = k_c \delta^{3/2}$, where $\delta$ is deformation. When compliant protective covers bottom out against rigid metal chassis, contact stiffness shoots up by orders of magnitude, converting residual kinetic energy into sharp, impulsive shock loads.
+1. **Contact impact dynamics:** When an autonomous manipulator or mobile robot collides unexpectedly with a rigid obstacle, Hertzian contact mechanics govern the interaction force: $F = k_c \delta^{3/2}$, where $\delta$ is deformation. When compliant protective covers bottom out against rigid metal chassis, contact stiffness shoots up discontinuously ($k_c \to k_{\infty}$), converting residual kinetic energy into sharp, impulsive shock loads $F_{\text{peak}} \propto v \sqrt{m k_c}$.
 2. **Mechanical friction transitions:** Stick-slip friction instability, drivetrain gear backlash, and structural resonance modes inject multiplicative, non-Gaussian torque transients into actuator gearboxes during rapid reversals.
-3. **Real-time execution jitter:** On embedded systems, shared PCIe buses, memory cache thrashing, interrupt storms, and memory reclamation pauses produce tail latency spikes in control loops that break temporal determinism. Queueing networks subject to head-of-line blocking exhibit heavy-tailed waiting times governed by Pareto service distributions.
+3. **Real-time execution jitter:** On embedded systems, shared PCIe buses, memory cache thrashing, interrupt storms, and memory reclamation pauses produce tail latency spikes in control loops that break temporal determinism. Queueing networks subject to head-of-line blocking and multi-master bus arbitration exhibit heavy-tailed waiting times governed by Pareto service distributions.
 
 Because these physical mechanisms are multiplicative and discontinuous, empirical physical data from stress testing does not exhibit thin Gaussian tails. Instead, physical disturbance distributions exhibit **heavy power-law tails** governed by positive shape parameters ($\xi > 0$):
 $$ P(X > x) \sim x^{-1/\xi} = x^{-\alpha} $$
@@ -1158,7 +1195,10 @@ defined on $\{z : 1 + \xi(z - \mu)/\sigma > 0\}$, with location parameter $\mu \
 1. **Gumbel (Type I, $\xi = 0$):** The continuous limit as $\xi \to 0$:
    $$ G(z) = \exp\left( -\exp\left(-\frac{z - \mu}{\sigma}\right) \right) $$
    characterizing thin, exponentially decaying tails. The maximum domain of attraction $\text{MDA}(\text{Gumbel})$ includes Gaussian, exponential, lognormal, and Gamma distributions.
-2. **Fréchet (Type II, $\xi > 0$, with tail index $\alpha = 1/\xi$):** The heavy-tailed regime where survival probabilities decay according to a polynomial power law: $P(X > x) \sim x^{-\alpha}$. The domain of attraction $\text{MDA}(\text{Fréchet})$ includes Pareto, Cauchy, and Student's $t$ distributions. A crucial mathematical consequence is that moments $\mathbb{E}[X^k] = \infty$ for all $k \ge \alpha$. For $\xi \ge 0.5$, the distribution has infinite variance; for $\xi \ge 1.0$, it has infinite mean. This is the empirical regime that governs physical contact shocks, collision impulses, and embedded latency spikes.
+2. **Fréchet (Type II, $\xi > 0$, with tail index $\alpha = 1/\xi$):** The heavy-tailed regime where survival probabilities decay according to a polynomial power law: $P(X > x) \sim x^{-\alpha}$. The domain of attraction $\text{MDA}(\text{Fréchet})$ includes Pareto, Cauchy, and Student's $t$ distributions. For a power-law density $p(x) \sim \alpha x^{-\alpha-1}$, the $k$-th raw moment evaluates to:
+   $$ \mathbb{E}[X^k] = \int_{x_0}^\infty x^k p(x) \, dx \sim \alpha \int_{x_0}^\infty x^{k - \alpha - 1} \, dx $$
+   This integral converges if and only if $k - \alpha - 1 < -1 \iff k < \alpha = 1/\xi$. For any moment order $k \ge 1/\xi$, the moment diverges to infinity ($\mathbb{E}[X^k] = \infty$). A crucial mathematical consequence is that for $\xi \ge 0.5$ ($\alpha \le 2$), the physical disturbance has **infinite variance** ($\operatorname{Var}(X) = \infty$). This infinite variance completely shatters the premise of the Central Limit Theorem: sample variances measured on physical testbeds never converge, fluctuating unpredictably as sample size increases. For $\xi \ge 1.0$, the distribution has infinite mean. This is the empirical regime that governs physical contact shocks, collision impulses, and embedded latency spikes.
+
 3. **Weibull (Type III, $\xi < 0$):** Bounded distributions with a finite physical upper endpoint ($z \le \mu - \sigma/\xi$). The domain $\text{MDA}(\text{Weibull})$ includes Uniform and Beta distributions, applicable when hard physical limits (such as mechanically positive endstops) strictly bound the disturbance.
 
 [^fn-ml-extreme-frechet]: **Tail Family Is an Empirical Claim**\index{Extreme Value Theory!Frechet distribution}: A positive fitted GEV shape parameter ($\xi > 0$) provides formal evidence of heavy-tailed physical risk. It does not replace physical instrumentation: block size, temporal autocorrelation, threshold selection, and parameter uncertainty must be validated against real machine rollouts.
@@ -1179,9 +1219,16 @@ defined on $\{y : y > 0 \text{ and } 1 + \xi y / \tilde{\sigma} > 0\}$, with sca
 
 A key property of the GPD is **threshold stability**: if the exceedances over threshold $u_0$ follow $\text{GPD}(\tilde{\sigma}_0, \xi)$, then for any higher threshold $u > u_0$, the exceedances over $u$ also follow a GPD with the *same* shape $\xi$ and linearly shifted scale:
 $$ \tilde{\sigma}(u) = \tilde{\sigma}_0 + \xi (u - u_0) $$
-This stability implies that the **Mean Residual Life (MRL)**—the expected excess conditional on exceeding $u$—is a linear function of $u$ for $\xi < 1$:
-$$ \mathbb{E}[X - u \mid X > u] = \frac{\tilde{\sigma}(u)}{1 - \xi} = \frac{\tilde{\sigma}_0 + \xi(u - u_0)}{1 - \xi} $$
-Systems engineers plot empirical mean excess against candidate thresholds $u$ (the MRL plot); the lowest threshold above which the plot becomes approximately linear determines the valid POT threshold $u$.
+The **Mean Residual Life (MRL)** evaluates the expected excess conditional on exceeding threshold $u$:
+$$
+\begin{aligned}
+\mathbb{E}[X - u \mid X > u] &= \int_0^\infty (1 - H(y)) \, dy = \int_0^\infty \left( 1 + \frac{\xi y}{\tilde{\sigma}(u)} \right)^{-1/\xi} dy \\
+&= \left[ \frac{\tilde{\sigma}(u)}{\xi(1 - 1/\xi)} \left( 1 + \frac{\xi y}{\tilde{\sigma}(u)} \right)^{1 - 1/\xi} \right]_0^\infty = \frac{\tilde{\sigma}(u)}{1 - \xi} \quad (\text{for } \xi < 1)
+\end{aligned}
+$$
+Substituting the threshold stability relation yields a strictly linear function of threshold $u$:
+$$ \mathbb{E}[X - u \mid X > u] = \frac{\tilde{\sigma}_0 + \xi(u - u_0)}{1 - \xi} $$
+Systems engineers plot empirical mean excess against candidate thresholds $u$ (the MRL plot); the lowest threshold above which the plot becomes approximately linear determines the mathematically valid POT threshold $u$.
 
 Given $N_u$ exceedances $\{y_1, \dots, y_{N_u}\}$ where $y_i = x_i - u > 0$, parameters $(\tilde{\sigma}, \xi)$ are estimated via Maximum Likelihood Estimation (MLE):
 $$ \ln L(\tilde{\sigma}, \xi) = -N_u \ln \tilde{\sigma} - \left( 1 + \frac{1}{\xi} \right) \sum_{i=1}^{N_u} \ln \left( 1 + \frac{\xi y_i}{\tilde{\sigma}} \right) $$
@@ -1210,13 +1257,14 @@ $$ z_{\epsilon} = u + \tilde{\sigma} \ln \left( \frac{N_u}{n \epsilon} \right) \
 
 #### Systems engineering sizing rules
 
-When physical phenomena exhibit heavy tails ($\xi > 0$), the power-law factor $(N_u / (n \epsilon))^\xi$ grows aggressively as target exceedance probability $\epsilon \to 0$. In contrast, thin-tailed Gaussian models scale only logarithmically with $\sqrt{\ln(1/\epsilon)}$.
+When physical phenomena exhibit heavy tails ($\xi > 0$), the power-law factor $(N_u / (n \epsilon))^\xi$ grows aggressively as target exceedance probability $\epsilon \to 0$. In contrast, thin-tailed Gaussian models scale only logarithmically with $\sqrt{\ln(1/\epsilon)}$. For instance, with $\epsilon = 10^{-7}$ and $\xi = 0.35$, the power-law factor evaluates to $(10^7)^{0.35} \approx 282$, whereas Gaussian scaling predicts $\sqrt{\ln(10^7)} \approx 4.0$. Sizing physical hardware under Gaussian assumptions underestimates tail shocks by nearly two orders of magnitude.
 
 This mathematical divergence translates directly into concrete physical hardware dimensions:
 
-1. **Series-Elastic Actuators (SEA):** Sizing spring travel $\delta_{\max} = z_\epsilon / k_{\text{spring}}$ to absorb $10^{-7}$ collision shock loads without bottoming out, protecting planetary gearbox teeth from shear fracture.
+1. **Series-Elastic Actuators (SEA):** Sizing spring travel $\delta_{\max} = z_\epsilon / k_{\text{spring}}$ to absorb $10^{-7}$ collision shock loads without bottoming out, ensuring the spring remains within its elastic range and protecting planetary gearbox teeth from shear fracture.
 2. **Real-time watchdog timers:** Setting RTOS watchdog expiration timeouts $\tau_{\text{wdog}} = z_\epsilon$ using fitted GPD quantiles of bus latency, eliminating false-positive emergency stops during heavy-tail bus arbitration spikes while preserving deterministic fail-safe tripping.
-3. **Power electronics thermal capacitance:** Sizing dynamic braking resistors and inverter heatsink thermal mass against high-quantile kinetic energy dissipation during sudden regenerative deceleration.
+3. **Physical hardware buffer sizing:** Sizing memory queue depths for high-speed camera frame FIFOs and sensor direct memory access (DMA) ring buffers ($B_{\text{buf}} = \lceil z_\epsilon \rceil$ packet or frame slots) against burst bus contention, ensuring packet drop probabilities remain strictly below $\epsilon$ per operating hour.
+4. **Power electronics thermal capacitance:** Sizing dynamic braking resistors and inverter heatsink thermal mass against high-quantile kinetic energy dissipation during sudden regenerative deceleration.
 
 ## Further Reading
 

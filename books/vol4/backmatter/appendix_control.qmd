@@ -27,7 +27,18 @@ Consult this appendix when encountering specific physical systems bottlenecks, c
 
 In standard deep learning inference, neural models evaluate a static parameterized mapping $\mathbf{y} = \pi_{\boldsymbol{\theta}}(\mathbf{x})$: given an input observation, the network executes a feedforward forward pass producing a prediction instantaneously, without physical memory, inertia, or temporal momentum. When machine learning systems explicitly process temporal sequences, they employ discrete recurrent neural networks (RNNs), long short-term memory (LSTM) networks, continuous-depth models (Neural Ordinary Differential Equations: $\dot{\mathbf{z}}(t) = f_{\boldsymbol{\theta}}(\mathbf{z}(t), t)$), or structured state-space models (SSMs such as S4 and Mamba).
 
-In physical AI, the robot's physical body is itself the ultimate continuous dynamic plant governed by differential equations of motion (@sec-body-actuator-limits). The internal state $\mathbf{x}(t)$ is not an ungrounded abstract latent vector whose transition operator can be shaped arbitrarily by backpropagation. Instead, $\mathbf{x}(t)$ represents physical, conserved quantities: generalized coordinates (joint angles, base pose), generalized velocities and momenta ($m\mathbf{v}, \mathbf{I}\boldsymbol{\omega}$), motor winding currents, and thermal dissipation state. Furthermore, control inputs $\mathbf{u}(t)$ cannot overwrite state coordinates instantaneously. Motor actuators inject generalized forces (electromagnetic torques, drive currents, hydraulic pressures) that directly modulate state rates of change $\dot{\mathbf{x}}(t)$, requiring integration over continuous physical time to alter coordinates. The state-space framework formalizes this physical recurrence by modeling machines through continuous differential transitions, input couplings, and sensor projections.
+In physical AI, the robot's physical body is itself the ultimate continuous dynamic plant governed by differential equations of motion (@sec-body-actuator-limits). The internal state $\mathbf{x}(t)$ is not an ungrounded abstract latent vector whose transition operator can be shaped arbitrarily by backpropagation. Instead, $\mathbf{x}(t)$ represents physical, conserved quantities: generalized coordinates (joint angles, base pose), generalized velocities and momenta ($m\mathbf{v}, \mathbf{I}\boldsymbol{\omega}$), motor winding currents, and thermal dissipation state. Furthermore, control inputs $\mathbf{u}(t)$ cannot overwrite state coordinates instantaneously. Motor actuators inject generalized forces (electromagnetic torques, drive currents, hydraulic pressures) that directly modulate state rates of change $\dot{\mathbf{x}}(t)$, requiring integration over continuous physical time to alter coordinates.
+
+The following comparison clarifies how the state-space framework formalizes this physical recurrence against the computational abstractions familiar to deep learning practitioners:
+
+| Dynamic Property | Deep Learning / Neural ODEs / SSMs | Physical AI / Plant Dynamics |
+|:---|:---|:---|
+| **State Representation** | Abstract latent embedding $\mathbf{z} \in \mathbb{R}^d$ shaped by loss minimization | Physical state $\mathbf{x} = [\mathbf{q}^\top, \dot{\mathbf{q}}^\top]^\top \in T\mathcal{Q}$ on configuration manifold |
+| **Control Authority** | Unconstrained layer transition $\mathbf{z}_{k+1} = \mathcal{F}_{\boldsymbol{\theta}}(\mathbf{z}_k)$ | Second-order acceleration $\mathbf{M}(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{h} = \mathbf{B}\mathbf{u}$; requires integration |
+| **Discrete Recurrence** | Residual skip connection $\mathbf{x}_{k+1} = \mathbf{x}_k + \mathcal{F}(\mathbf{x}_k)$ | Continuous integration under Zero-Order Hold: $\mathbf{x}_{k+1} = e^{\mathbf{A}T_s}\mathbf{x}_k + \mathbf{B}_d\mathbf{u}_k$ |
+| **Energy Conservation** | Loss regularization $\|\boldsymbol{\theta}\|^2$, weight decay | Hamiltonian energy $H = T(\mathbf{q}, \dot{\mathbf{q}}) + V(\mathbf{q})$; conserved in unforced closed systems |
+| **Capacity vs. Authority** | Model parameter capacity / expressivity | Kalman controllability rank $\operatorname{rank}(\mathcal{C}) = n$; unactuated modes cannot be forced |
+| **Stability Certificate** | Empirical validation loss on held-out test data | Lyapunov certificate $\dot{V} \le -\alpha(V)$; certified forward invariant sets |
 
 ### Linear and nonlinear state-space representations
 
@@ -51,11 +62,28 @@ When $\mathbf{A}$ is non-singular, the discrete input matrix simplifies to $\mat
 
 Just as deep learning state-space models (such as S4 and Mamba) discretize continuous differential operators to unroll recurrent state transitions across token sequences, physical AI controllers use this exact matrix exponential to propagate continuous multi-body mechanics across digital clock cycles.
 
-To an ML engineer, a forward Euler discretization $\mathbf{x}_{k+1} \approx (\mathbf{I} + \mathbf{A} T_s)\mathbf{x}_k + \mathbf{B} T_s \mathbf{u}_k = \mathbf{x}_k + T_s (\mathbf{A}\mathbf{x}_k + \mathbf{B}\mathbf{u}_k)$ appears structurally identical to a Residual Network (ResNet) skip connection $\mathbf{x}_{k+1} = \mathbf{x}_k + \mathcal{F}(\mathbf{x}_k)$. However, in physical dynamical systems, Euler truncation introduces spurious numerical energy that can artificially destabilize the model. Consider an undamped physical oscillator $\ddot{q} + \omega^2 q = 0$ with state $\mathbf{x} = [q, \dot{q}]^\top$ and continuous system matrix $\mathbf{A} = \begin{bmatrix} 0 & 1 \\ -\omega^2 & 0 \end{bmatrix}$. The continuous eigenvalues are purely imaginary: $\lambda = \pm j\omega$. Under exact matrix exponential discretization $\mathbf{A}_d = e^{\mathbf{A} T_s}$, the discrete eigenvalues lie strictly on the unit circle in the complex plane:
-$$ |\lambda(\mathbf{A}_d)| = |e^{\pm j \omega T_s}| = 1 $$
-preserving the physical total energy $E = \frac{1}{2}\dot{q}^2 + \frac{1}{2}\omega^2 q^2$ over infinite horizons. In contrast, under forward Euler discretization $\mathbf{A}_{\text{Euler}} = \mathbf{I} + \mathbf{A} T_s = \begin{bmatrix} 1 & T_s \\ -\omega^2 T_s & 1 \end{bmatrix}$, the eigenvalues evaluate to $\lambda_{\text{Euler}} = 1 \pm j\omega T_s$. Their complex modulus is:
-$$ |\lambda_{\text{Euler}}| = \sqrt{1 + \omega^2 T_s^2} > 1 \quad \forall T_s > 0 $$
-Because the spectral radius strictly exceeds unity, forward Euler simulation injects artificial numerical energy at every time step, converting an intrinsically conservative physical oscillator into an exponentially diverging explosion. For short sampling intervals ($T_s \ll 1$), forward Euler is common in informal qualitative sketches, but exact matrix exponentials or symplectic integrators are mandatory in real-time firmware to prevent spurious instability and phase loss (@sec-appendix-control-zoh).
+#### Discretization pathologies: Why forward Euler destabilizes physical models
+
+To an ML engineer, a forward Euler discretization $\mathbf{x}_{k+1} \approx (\mathbf{I} + \mathbf{A} T_s)\mathbf{x}_k + \mathbf{B} T_s \mathbf{u}_k = \mathbf{x}_k + T_s (\mathbf{A}\mathbf{x}_k + \mathbf{B}\mathbf{u}_k)$ appears structurally identical to a Residual Network (ResNet) skip connection $\mathbf{x}_{k+1} = \mathbf{x}_k + \mathcal{F}(\mathbf{x}_k)$. However, in physical dynamical systems, Euler truncation introduces spurious numerical energy that can artificially destabilize the model or ruin gradient propagation in backpropagation through time.
+
+Consider an undamped harmonic physical oscillator $\ddot{q} + \omega^2 q = 0$ with state $\mathbf{x} = [q, \dot{q}]^\top$ and continuous system matrix $\mathbf{A} = \begin{bmatrix} 0 & 1 \\ -\omega^2 & 0 \end{bmatrix}$. The continuous eigenvalues are purely imaginary: $\lambda = \pm j\omega$. Analyzing how common numerical discretization schemes map these eigenvalues to the complex $z$-plane illustrates their stability properties:
+
+1. **Exact Zero-Order Hold (Matrix Exponential):** The discrete transition operator is $\mathbf{A}_d = e^{\mathbf{A} T_s}$. Its discrete eigenvalues lie strictly on the unit circle:
+   $$ |\lambda(\mathbf{A}_d)| = |e^{\pm j \omega T_s}| = 1 $$
+   This preserves the physical total energy $E = \frac{1}{2}\dot{q}^2 + \frac{1}{2}\omega^2 q^2$ over infinite horizons without artificial growth or decay.
+2. **Forward Euler Discretization:** Approximating the transition as $\mathbf{A}_{\text{FE}} = \mathbf{I} + \mathbf{A} T_s = \begin{bmatrix} 1 & T_s \\ -\omega^2 T_s & 1 \end{bmatrix}$ yields eigenvalues $\lambda_{\text{FE}} = 1 \pm j\omega T_s$. Their complex modulus is:
+   $$ |\lambda_{\text{FE}}| = \sqrt{1 + \omega^2 T_s^2} > 1 \quad \forall T_s > 0 $$
+   Because the spectral radius strictly exceeds unity, forward Euler simulation injects artificial numerical energy at every step, converting an intrinsically conservative physical oscillator into an exponentially diverging explosion. In differentiable simulation and policy learning, this causes exploding gradients during backpropagation through time.
+3. **Backward (Implicit) Euler Discretization:** Approximating transitions via $\mathbf{x}_{k+1} = \mathbf{x}_k + T_s \mathbf{A} \mathbf{x}_{k+1}$ yields $\mathbf{A}_{\text{BE}} = (\mathbf{I} - \mathbf{A} T_s)^{-1}$. The discrete eigenvalues evaluate to $\lambda_{\text{BE}} = \frac{1}{1 \mp j\omega T_s}$, with modulus:
+   $$ |\lambda_{\text{BE}}| = \frac{1}{\sqrt{1 + \omega^2 T_s^2}} < 1 \quad \forall T_s > 0 $$
+   While unconditionally stable, backward Euler introduces artificial numerical dissipation (numerical damping), bleeding energy from the physical system and causing gradient vanishing over long unrolled horizons.
+4. **Bilinear (Tustin / Crank-Nicolson) Discretization:** Employing the trapezoidal integration operator $s \approx \frac{2}{T_s}\frac{z-1}{z+1}$ yields:
+   $$ \mathbf{A}_{\text{Tustin}} = \left(\mathbf{I} - \frac{T_s}{2}\mathbf{A}\right)^{-1} \left(\mathbf{I} + \frac{T_s}{2}\mathbf{A}\right) $$
+   For purely imaginary continuous poles $s = \pm j\omega$, the discrete eigenvalues evaluate to $\lambda_{\text{Tustin}} = \frac{1 \pm j\omega T_s / 2}{1 \mp j\omega T_s / 2}$. Their modulus is identically unity:
+   $$ |\lambda_{\text{Tustin}}| = \left| \frac{1 \pm j\omega T_s / 2}{1 \mp j\omega T_s / 2} \right| = \frac{\sqrt{1 + (\omega T_s / 2)^2}}{\sqrt{1 + (\omega T_s / 2)^2}} = 1 \quad \forall T_s > 0 $$
+   The bilinear transform maps the continuous imaginary axis directly onto the discrete unit circle, preserving energy conservation without matrix exponentials.
+
+For real-time embedded firmware and differentiable physics engines, exact matrix exponentials, symplectic integrators, or bilinear transforms are mandatory to prevent spurious instability and phase loss (@sec-appendix-control-zoh).
 
 ### Controllability and the Kalman rank condition
 
@@ -63,7 +91,7 @@ In deep learning, model capacity measures whether a neural architecture possesse
 
 An LTI system $(\mathbf{A}, \mathbf{B})$ is **controllable** if, for any initial state $\mathbf{x}(0) = \mathbf{x}_0$ and any desired target state $\mathbf{x}_f$, there exists a finite time $T > 0$ and an admissible input trajectory $\mathbf{u}(t)$ that transfers the state from $\mathbf{x}_0$ to $\mathbf{x}_f$. Kalman established that this condition holds if and only if the **controllability matrix** $\mathcal{C}$ has full row rank:
 $$ \mathcal{C} = \begin{bmatrix} \mathbf{B} & \mathbf{A}\mathbf{B} & \mathbf{A}^2\mathbf{B} & \dots & \mathbf{A}^{n-1}\mathbf{B} \end{bmatrix} \in \mathbb{R}^{n \times nm}, \quad \operatorname{rank}(\mathcal{C}) = n $$
-Each column block $\mathbf{A}^k \mathbf{B}$ represents the directional reach of the control input after $k$ steps of dynamic diffusion through the unforced system matrix $\mathbf{A}$.
+Each column block $\mathbf{A}^k \mathbf{B}$ represents the directional reach of the control input after $k$ steps of dynamic diffusion through the unforced system matrix $\mathbf{A}$. The column space $\operatorname{im}(\mathcal{C})$ defines the **controllable subspace**—mathematically equivalent to the $n$-th order Krylov subspace $\mathcal{K}_n(\mathbf{A}, \operatorname{im}(\mathbf{B})) = \operatorname{span}\{\mathbf{B}, \mathbf{A}\mathbf{B}, \dots, \mathbf{A}^{n-1}\mathbf{B}\}$.
 
 Why does this matrix sequence terminate precisely at power $n-1$? By the **Cayley-Hamilton theorem**, every square matrix $\mathbf{A} \in \mathbb{R}^{n \times n}$ satisfies its own characteristic polynomial:
 $$ p(\lambda) = \det(\lambda \mathbf{I} - \mathbf{A}) = \lambda^n + c_{n-1} \lambda^{n-1} + \dots + c_1 \lambda + c_0 = 0 $$
@@ -79,7 +107,18 @@ If $\operatorname{rank}([\lambda \mathbf{I} - \mathbf{A}, \mathbf{B}]) < n$ for 
 
 ### Linear quadratic regulator and algebraic riccati equations {#sec-appendix-control-lqr}
 
-In reinforcement learning, policy optimization searches for an action policy $\pi(a \mid s)$ that maximizes expected cumulative reward via trial-and-error sampling or learned critic networks, often struggling with high gradient variance, non-convex loss landscapes, and empirical stability failures. In contrast, for linear-quadratic physical dynamics, the **Linear Quadratic Regulator (LQR)**\index{Linear Quadratic Regulator!optimal control}\index{Algebraic Riccati Equation!continuous-time} provides the exact, analytical solution to the continuous-state Bellman optimality equation over an infinite time horizon.
+In reinforcement learning, policy optimization searches for an action policy $\pi_{\boldsymbol{\theta}}(\mathbf{a} \mid \mathbf{s})$ that maximizes expected cumulative reward via trial-and-error sampling or learned critic networks $V_{\boldsymbol{\phi}}(\mathbf{s})$ / $Q_{\boldsymbol{\phi}}(\mathbf{s}, \mathbf{a})$, frequently struggling with high gradient variance, non-convex loss landscapes, and empirical stability failures. In contrast, for linear-quadratic physical dynamics, the **Linear Quadratic Regulator (LQR)**\index{Linear Quadratic Regulator!optimal control}\index{Algebraic Riccati Equation!continuous-time} provides the exact, analytical solution to the continuous-state Bellman optimality equation over an infinite time horizon.
+
+The following matrix compares the computational mechanics of reinforcement learning with the analytical machinery of LQR:
+
+| Dimension | Reinforcement Learning (Actor-Critic / Policy Gradient) | Linear Quadratic Regulator (LQR) |
+|:---|:---|:---|
+| **Value Function (Critic)** | Parameterized deep neural network $V_{\boldsymbol{\phi}}(\mathbf{s})$ or $Q_{\boldsymbol{\phi}}(\mathbf{s}, \mathbf{a})$ | Exact quadratic potential $V^*(\mathbf{x}) = \mathbf{x}^\top \mathbf{P} \mathbf{x}$ |
+| **Policy (Actor)** | Parameterized neural network $\mathbf{a} \sim \pi_{\boldsymbol{\theta}}(\cdot \mid \mathbf{s})$ | Optimal linear state feedback $\mathbf{u}^* = -\mathbf{K}\mathbf{x}$ |
+| **Bellman Optimality** | Dynamic programming fixed point: $V^*(s) = \max_a [r(s,a) + \gamma \mathbb{E}[V^*(s')]]$ | Continuous Algebraic Riccati Equation (ARE fixed point) |
+| **Solution Method** | Stochastic gradient descent (PPO, SAC), TD learning | Direct algebraic factorizations (Schur decomposition, ARE solvers) |
+| **Stability Guarantees** | None; policies can oscillate, diverge, or trigger limit cycles | Guaranteed Hurwitz closed loop ($\operatorname{Re}(\lambda_i) < 0$), $60^\circ$ phase margin |
+| **Sample Complexity** | High sample complexity ($10^6\text{--}10^8$ simulator steps) | Zero sample complexity; derived analytically from $(\mathbf{A}, \mathbf{B}, \mathbf{Q}, \mathbf{R})$ |
 
 Given the controllable continuous LTI system $\dot{\mathbf{x}} = \mathbf{A}\mathbf{x} + \mathbf{B}\mathbf{u}$, the infinite-horizon regulator minimizes the quadratic performance objective:
 $$ J = \int_0^\infty \left( \mathbf{x}(t)^\top \mathbf{Q} \mathbf{x}(t) + \mathbf{u}(t)^\top \mathbf{R} \mathbf{u}(t) \right) dt $$
@@ -92,7 +131,11 @@ In physical AI systems, the choice of $\mathbf{Q}$ and $\mathbf{R}$ directly ref
 
 #### Dynamic programming derivation of continuous LQR
 
-By dynamic programming and Bellman's principle of optimality [@bellman1957dynamic; @astrom2021feedback], the optimal value function $V^*(\mathbf{x}) = \min_{\mathbf{u}(\cdot)} \int_t^\infty (\mathbf{x}^\top \mathbf{Q} \mathbf{x} + \mathbf{u}^\top \mathbf{R} \mathbf{u}) d\tau$ satisfies the continuous-time **Hamilton-Jacobi-Bellman (HJB)** equation:
+In continuous time, Bellman's principle of optimality [@bellman1957dynamic; @astrom2021feedback] states that the optimal cost-to-go from state $\mathbf{x}(t)$ across an infinitesimal time step $\Delta t \to 0$ satisfies:
+$$ V^*(\mathbf{x}(t)) = \min_{\mathbf{u}_{[t, t+\Delta t]}} \left\{ \int_t^{t+\Delta t} \left( \mathbf{x}(\tau)^\top \mathbf{Q} \mathbf{x}(\tau) + \mathbf{u}(\tau)^\top \mathbf{R} \mathbf{u}(\tau) \right) d\tau + V^*(\mathbf{x}(t+\Delta t)) \right\} $$
+Expanding the integral to first order in $\Delta t$ and applying a first-order Taylor expansion to the terminal cost gives:
+$$ V^*(\mathbf{x}(t+\Delta t)) = V^*(\mathbf{x}(t)) + \nabla V^*(\mathbf{x}(t))^\top \dot{\mathbf{x}}(t) \Delta t + \mathcal{O}(\Delta t^2) $$
+Substituting the plant dynamics $\dot{\mathbf{x}} = \mathbf{A}\mathbf{x} + \mathbf{B}\mathbf{u}$, subtracting $V^*(\mathbf{x}(t))$ from both sides, dividing by $\Delta t$, and taking the limit $\Delta t \to 0$ yields the continuous-time **Hamilton-Jacobi-Bellman (HJB)** equation:
 $$ 0 = \min_{\mathbf{u}} \left[ \mathbf{x}^\top \mathbf{Q} \mathbf{x} + \mathbf{u}^\top \mathbf{R} \mathbf{u} + \nabla V^*(\mathbf{x})^\top (\mathbf{A}\mathbf{x} + \mathbf{B}\mathbf{u}) \right] $$
 Postulating a quadratic value function ansatz (the optimal continuous critic) $V^*(\mathbf{x}) = \mathbf{x}^\top \mathbf{P} \mathbf{x}$ with symmetric positive definite matrix $\mathbf{P} = \mathbf{P}^\top \succ \mathbf{0}$, its spatial gradient evaluates to:
 $$ \nabla V^*(\mathbf{x}) = 2 \mathbf{P} \mathbf{x} $$
@@ -142,7 +185,11 @@ $$ \mathbf{u}(t) = -\mathbf{K} \hat{\mathbf{x}}(t) $$
 The **Separation Principle** [@astrom2021feedback] proves that under linear-Gaussian assumptions, observer design and state-feedback controller design are completely decoupled: the poles of the closed-loop LQG system are strictly the union of the controller poles $\operatorname{eig}(\mathbf{A} - \mathbf{B}\mathbf{K})$ and the observer poles $\operatorname{eig}(\mathbf{A} - \mathbf{L}\mathbf{C})$.
 
 ::: {#psp-appendix-control-doyle .callout-perspective title="The Doyle warning: LQG robustness margins"}
-While full-state LQR provides guaranteed $60^\circ$ phase margins and infinite gain margins, John Doyle's classic 1978 paper demonstrated that output-feedback LQG controllers possess **no guaranteed stability margins whatsoever** [@astrom2021feedback]. The dynamic observer introduces phase lag and state estimation error into the feedback path; unmodeled plant parameter errors or high-frequency sensor noise can destabilize the closed loop even when both the filter and regulator appear individually optimal. In physical AI, where learned neural models feed high-level setpoints into feedback trackers (@sec-enforcement-deterministic-gatekeeper), tracking loops must include explicit robustness checks or frequency-domain Loop Transfer Recovery (LTR) to ensure stability under parameter variation.
+While full-state LQR provides guaranteed $60^\circ$ phase margins and infinite gain margins, John Doyle's classic 1978 paper demonstrated that output-feedback LQG controllers possess **no guaranteed stability margins whatsoever** [@astrom2021feedback].
+
+In Doyle's formulation, when an observer is inserted into the loop, unmodeled plant parameter variations couple estimation error $\mathbf{e} = \mathbf{x} - \hat{\mathbf{x}}$ directly back into the control actuation channel. Even infinitesimal parameter perturbations can push the closed-loop poles across the imaginary axis into the unstable right-half plane.
+
+For physical AI systems, this delivers an essential warning: cascading a high-capacity neural perception system (e.g., an end-to-end vision model estimating 6D object poses or end-effector coordinates) with an optimal tracking controller does not inherit the controller's nominal robustness. Dynamic perception lag, out-of-distribution observation errors, and high-frequency sensor noise degrade feedback phase margin rapidly. Physical AI architectures must implement explicit loop transfer recovery (LTR) checks or deterministic safety bounds before trusting observer outputs (@sec-enforcement-deterministic-gatekeeper).
 :::
 
 ## Stability Theory and Model Predictive Control {#sec-appendix-control-stability-mpc}
@@ -153,7 +200,9 @@ Where classical machine learning evaluates model quality through statistical cro
 
 In machine learning, gradient descent optimizes a scalar objective over parameter weights: $\dot{\boldsymbol{\theta}} = -\nabla_{\boldsymbol{\theta}} \mathcal{L}(\boldsymbol{\theta})$. Along this parameter trajectory, the empirical loss decreases monotonically via the multivariable chain rule:
 $$ \dot{\mathcal{L}}(\boldsymbol{\theta}) = \nabla_{\boldsymbol{\theta}}\mathcal{L}(\boldsymbol{\theta})^\top \dot{\boldsymbol{\theta}} = -\nabla_{\boldsymbol{\theta}}\mathcal{L}(\boldsymbol{\theta})^\top \nabla_{\boldsymbol{\theta}}\mathcal{L}(\boldsymbol{\theta}) = -\|\nabla_{\boldsymbol{\theta}}\mathcal{L}(\boldsymbol{\theta})\|^2 \le 0 $$
-In physical control, the robot's physical state $\mathbf{x}(t) \in \mathbb{R}^n$ evolves in physical state space according to continuous differential equations $\dot{\mathbf{x}} = f(\mathbf{x})$. Unlike software network weights $\boldsymbol{\theta}$, physical coordinates $\mathbf{x}$ cannot be updated by arbitrary gradient descent, because physical momentum, mass inertia, and kinematics govern $\dot{\mathbf{x}}$.
+In parameter optimization, the software program has unconstrained, direct write access to the parameter velocity vector $\dot{\boldsymbol{\theta}}$, allowing the optimizer to force loss descent along the negative gradient direction.
+
+In physical control, the robot's physical state $\mathbf{x}(t) \in \mathbb{R}^n$ evolves in physical state space according to continuous differential equations $\dot{\mathbf{x}} = f(\mathbf{x})$. Unlike software network weights $\boldsymbol{\theta}$, physical coordinates $\mathbf{x}$ cannot be updated by arbitrary gradient descent: actuators cannot command arbitrary velocity vectors $\dot{\mathbf{x}}$, because physical momentum, mass inertia, unforced drift, and kinematic constraints govern the system.
 
 Instead, a **Lyapunov function** $V(\mathbf{x})$ acts as an analytical, continuous state-space loss function that certifies the asymptotic convergence of the physical plant's continuous trajectories without simulating every rollout to infinity.\index{Lyapunov stability!asymptotic and exponential}\index{Invariant sets!domain of attraction}
 
@@ -167,6 +216,8 @@ The directional derivative of $V$ along the trajectories of $\dot{\mathbf{x}} = 
 $$ \dot{V}(\mathbf{x}) = \nabla V(\mathbf{x})^\top \dot{\mathbf{x}} = \nabla V(\mathbf{x})^\top f(\mathbf{x}) = \nabla V(\mathbf{x}) \cdot f(\mathbf{x}) $$
 Control theory traditionally denotes this inner product as the **Lie derivative** $L_f V(\mathbf{x}) = \nabla V(\mathbf{x}) \cdot f(\mathbf{x})$. For an ML systems engineer, this is simply the **directional derivative** or forward-mode **Jacobian-vector product (JVP)** of the scalar loss $V$ evaluated in the direction of the physical drift vector field $f(\mathbf{x})$:
 $$ \operatorname{JVP}(V, \mathbf{x}, f(\mathbf{x})) = \left. \frac{d}{d\epsilon} V(\mathbf{x} + \epsilon f(\mathbf{x})) \right|_{\epsilon = 0} = \nabla V(\mathbf{x})^\top f(\mathbf{x}) = L_f V(\mathbf{x}) $$
+In modern automatic differentiation frameworks (such as JAX or PyTorch), this directional derivative can be computed in a single forward pass without explicitly materializing the full gradient vector or Jacobian: `jax.jvp(V, (x,), (f(x),))` or `torch.autograd.functional.jvp(V, x, f(x))`.
+
 Alexander Lyapunov established three foundational stability tiers [@slotine1991applied]:
 
 1. **Stability in the Sense of Lyapunov:** If $\dot{V}(\mathbf{x}) \le 0$ for all $\mathbf{x} \in \mathcal{D}$, the origin is stable. Trajectories starting arbitrarily close to the origin remain trapped within bounded neighborhood contours for all $t \ge 0$.
@@ -195,18 +246,19 @@ $$
 \mathbf{0} & \text{if } L_g V(\mathbf{x}) = \mathbf{0}
 \end{cases}
 $$
-Sontag's formula guarantees smooth feedback stabilization outside the origin whenever the system satisfies the small control property ($L_f V(\mathbf{x}) < 0$ whenever $L_g V(\mathbf{x}) = \mathbf{0}$). It acts as an analytical policy that drives the continuous state-space loss function $V(\mathbf{x})$ downhill without requiring iterative numerical optimization at runtime.
+Sontag's formula guarantees smooth feedback stabilization outside the origin whenever the system satisfies the small control property ($L_f V(\mathbf{x}) < 0$ whenever $L_g V(\mathbf{x}) = \mathbf{0}$). Notice how the radical term operates: when natural drift is already stabilizing ($L_f V < 0$), the formula requests minimal control effort; when drift destabilizes the system ($L_f V > 0$), the control input scales nonlinearly to overcome the drift and enforce monotonic descent of $V(\mathbf{x})$. It acts as an analytical policy that drives the continuous state-space loss function $V(\mathbf{x})$ downhill without requiring iterative numerical optimization at runtime.
 
 #### The duality between CLFs and CBFs
 
 Comparing Control Lyapunov Functions with Control Barrier Functions (@sec-appendix-control-cbf) reveals the central duality of modern safety-critical control:
 
-- **Control Lyapunov Function (CLF) for Performance / Tracking:**
-  $$ V(\mathbf{x}) \ge 0, \quad L_f V(\mathbf{x}) + L_g V(\mathbf{x}) \mathbf{u} \le -\alpha_V(V(\mathbf{x})) $$
-  A CLF defines a positive-definite potential well and forces state trajectories *inward* toward an operating equilibrium ($V \to 0$).
-- **Control Barrier Function (CBF) for Safety / Invariance:**
-  $$ h(\mathbf{x}) \ge 0, \quad L_f h(\mathbf{x}) + L_g h(\mathbf{x}) \mathbf{u} \ge -\alpha_h(h(\mathbf{x})) $$
-  A CBF defines a positive superlevel safe set and prevents state trajectories from escaping *outward* past a safety boundary ($h \ge 0$).
+| Dimension | Control Lyapunov Function (CLF) | Control Barrier Function (CBF) |
+|:---|:---|:---|
+| **Objective** | Performance tracking / Goal convergence | Safety guarantee / Set invariance |
+| **Geometry** | Positive-definite potential well ($V(\mathbf{x}^*) = 0$) | Superlevel safe set $\mathcal{S} = \{\mathbf{x} \mid h(\mathbf{x}) \ge 0\}$ |
+| **Trajectory Dynamic** | Pulls trajectories **inward** toward the origin ($V \to 0$) | Repels trajectories **away** from boundary ($h \to 0^+$) |
+| **Differential Inequality** | $L_f V(\mathbf{x}) + L_g V(\mathbf{x}) \mathbf{u} \le -\alpha_V(V(\mathbf{x}))$ | $L_f h(\mathbf{x}) + L_g h(\mathbf{x}) \mathbf{u} \ge -\alpha_h(h(\mathbf{x}))$ |
+| **Optimization Priority** | Soft constraint (relaxed via slack $\delta \ge 0$) | Hard constraint (strictly non-negotiable) |
 
 When combining performance tracking (such as following an uncertified trajectory proposed by a vision-language-action policy) with guaranteed collision avoidance, the enforcer solves a unified **CLF-CBF Quadratic Program (CLF-CBF-QP)**:
 $$
@@ -221,6 +273,17 @@ where $p \gg 1$ heavily penalizes the tracking relaxation slack $\delta \ge 0$. 
 ### Constrained model predictive control and recursive feasibility {#sec-appendix-control-mpc}
 
 While LQR and CLF feedback laws operate reactively on instantaneous state feedback, **Model Predictive Control (MPC)**\index{Model Predictive Control!constrained QP formulation}\index{Recursive feasibility!terminal invariant set} optimizes trajectories over a predictive finite horizon $N$, explicitly enforcing hard inequality constraints on physical boundaries, motor voltages, and actuator torques.
+
+The following architectural comparison summarizes the complementary roles of numerical MPC and learned generative policies:
+
+| Attribute | Classical Numerical MPC | Learned Action Chunking (Diffusion, ACT) |
+|:---|:---|:---|
+| **Input Modality** | Low-dimensional numerical states $\mathbf{x} \in \mathbb{R}^n$ | High-dimensional perception (RGB images, point clouds, language) |
+| **Plant Model** | Explicit analytical equations $\dot{\mathbf{x}} = f(\mathbf{x}, \mathbf{u})$ | Implicit behavioral distribution learned from demonstration |
+| **Inference Time** | Iterative numerical QP ($5\text{--}50\text{ ms}$, cubic in horizon $N$) | Fixed tensor-core forward pass ($10\text{--}40\text{ ms}$) |
+| **Constraints** | Strict mathematical guarantees on state and input limits | Empirical; proposals can penetrate obstacles or exceed limits |
+| **Contact Discontinuities** | Combinatorial branch stalling across non-smooth contacts | Smooth multi-modal synthesis learned from human demonstrations |
+| **System Role** | Deterministic Execution Gatekeeper / Tracking Enforcer | Generative Proposal Engine (long-horizon action chunking) |
 
 #### Discrete-time MPC formulation
 
@@ -273,6 +336,15 @@ As framed in @sec-planning-paradigms, modern physical AI embodies a direct trade
 ## Safety and Control Barrier Functions {#sec-appendix-control-cbf}
 
 An independent enforcer can check a learned policy proposal against a control barrier constraint before actuation. In reliable software systems, safety properties are proven using inductive loop invariants: if an invariant holds initially and is preserved across every state transition, it holds for all executions. A Control Barrier Function (CBF)\index{Control barrier function!safety filtering} lifts this principle to continuous physical systems, framing safety as an inductive loop invariant over continuous state trajectories:
+
+| Invariant Concept | Formal Software Verification (Dafny, TLA+) | Safety-Critical Control (CBF) |
+|:---|:---|:---|
+| **State Space** | Discrete variable states $s \in \Sigma$ | Continuous state $\mathbf{x} \in \mathcal{X} \subset \mathbb{R}^n$ |
+| **Base Step** | Precondition assertion: $\{P(s_0)\}$ | Safe initialization: $h(\mathbf{x}_0) \ge 0$ |
+| **Transition Rule** | Discrete program statement: $s_{k+1} = \operatorname{eval}(s_k, \text{stmt})$ | Differential equation: $\dot{\mathbf{x}} = f(\mathbf{x}) + g(\mathbf{x})\mathbf{u}$ |
+| **Inductive Invariant** | Invariant preservation: $P(s) \implies P(\operatorname{eval}(s))$ | Barrier condition: $\dot{h}(\mathbf{x}, \mathbf{u}) \ge -\gamma(h(\mathbf{x}))$ |
+| **Proof Technique** | SMT solvers (Z3, CVC5), structural induction | Grönwall-Bellman comparison lemma |
+| **Enforcement Layer** | Runtime guard assertion / exception handler | Inline minimal-intervention QP projection |
 
 1. **Base Case:** The system initializes within the safe operating envelope: $h(\mathbf{x}_0) \ge 0$.
 2. **Inductive Step:** Along all continuous transitions governed by plant dynamics and control inputs $\mathbf{u}_t \in \mathcal{U}$, the instantaneous rate of change satisfies:
@@ -331,7 +403,16 @@ For a one-dimensional approach to a stationary obstacle, let raw spatial clearan
 $$ \dot{D} = -v, \quad \ddot{D} = -a_{\text{cmd}} $$
 Because acceleration enters raw clearance only at the second time derivative ($L_{\mathbf{g}} h_r = 0$ and $L_{\mathbf{g}} L_{\mathbf{f}} h_r \neq 0$), raw clearance has **relative degree two** ($r = 2$) with respect to force or acceleration inputs. An actuator torque command cannot instantaneously change position or velocity; commanding maximum braking at the boundary $D = 0$ is futile because momentum carries the system across the boundary before velocity can reach zero.
 
-To restore relative degree one ($r = 1$), the barrier coordinate must be augmented with kinetic energy and available stopping capacity. In a one-dimensional approach to a stationary obstacle, let $D$ be measured clearance, $v > 0$ approach speed, and $a_{\text{brake}} > 0$ a validated lower bound on available braking deceleration for the operating state. Defining the **kinetic stopping inset**:\index{Kinetic stopping distance!barrier inset}
+For systems with general relative degree $r \ge 2$, **High-Order Control Barrier Functions (HOCBFs)** construct a cascaded sequence of barrier certificates:
+$$
+\begin{aligned}
+\psi_0(\mathbf{x}) &= h(\mathbf{x}) \\
+\psi_1(\mathbf{x}) &= \dot{\psi}_0(\mathbf{x}) + \alpha_1(\psi_0(\mathbf{x})) \\
+&\;\;\vdots \\
+\psi_r(\mathbf{x}) &= \dot{\psi}_{r-1}(\mathbf{x}) + \alpha_r(\psi_{r-1}(\mathbf{x})) = L_{\mathbf{f}}^r h(\mathbf{x}) + L_{\mathbf{g}} L_{\mathbf{f}}^{r-1} h(\mathbf{x}) \mathbf{u} + \dots \ge 0
+\end{aligned}
+$$
+In physical robotics, rather than tuning abstract class $\mathcal{K}$ functions across multiple derivatives, we can augment the barrier coordinate with kinetic energy and available stopping capacity. In a one-dimensional approach to a stationary obstacle, let $D$ be measured clearance, $v > 0$ approach speed, and $a_{\text{brake}} > 0$ a validated lower bound on available braking deceleration for the operating state. Defining the **kinetic stopping inset**:\index{Kinetic stopping distance!barrier inset}
 $$ h_k(D, v) = D - \frac{v^2}{2a_{\text{brake}}}, \qquad \dot{D} = -v, \quad \dot{v} = a_{\text{cmd}} $$
 Differentiating $h_k(D, v)$ along the system dynamics yields:
 $$ \dot{h}_k = \dot{D} - \frac{v}{a_{\text{brake}}} \dot{v} = -v - \frac{v}{a_{\text{brake}}} a_{\text{cmd}} $$
@@ -375,6 +456,8 @@ Evaluating these conditions reveals two distinct operational regimes:
   The filtered control command is the exact, closed-form Euclidean projection onto the safe half-space boundary:
   $$ \mathbf{u}^* = \mathbf{u}_{\text{nom}} - \left( \frac{\mathbf{a}^\top \mathbf{u}_{\text{nom}} - b}{\|\mathbf{a}\|^2} \right) \mathbf{a} $$
 
+Unifying both cases into a single compact equation:
+$$ \mathbf{u}^* = \mathbf{u}_{\text{nom}} - \frac{\max\left(0, \mathbf{a}^\top \mathbf{u}_{\text{nom}} - b\right)}{\|\mathbf{a}\|^2} \mathbf{a} $$
 This projection modifies the nominal proposal by the minimal Euclidean deviation necessary to preserve forward invariance.
 
 ::: {#psp-appendix-control-feasibility .callout-perspective title="Check feasibility before relying on invariance"}
@@ -564,6 +647,16 @@ In a declared spatial or body twist convention, the **manipulator Jacobian** $J(
 $$ V_E=J(q)\dot q. $$
 For a six-dimensional task and $n\ge6$, rank loss ($\det(JJ^\top)=0$) marks a **kinematic singularity**\index{Kinematic singularity!Jacobian rank deficiency}. Tracking a nonzero twist along a lost direction would require unbounded joint rates in the ideal inverse model; real actuators saturate first. A task-specific design may monitor $w(q)=\sqrt{\det(JJ^\top)}$ against a validated threshold.[^fn-control-yoshikawa-manipulability]
 
+To an ML engineer, the geometry of a kinematic singularity is best understood through the Singular Value Decomposition (SVD) of the Jacobian:
+$$ J(q) = U \Sigma V^\top = \sum_{i=1}^6 \sigma_i \mathbf{u}_i \mathbf{v}_i^\top $$
+where $\sigma_1 \ge \sigma_2 \ge \dots \ge \sigma_6 \ge 0$ are the singular values. The Yoshikawa manipulability index evaluates to the product of these singular values: $w(q) = \prod_{i=1}^6 \sigma_i$. In unregularized differential inverse kinematics, solving for commanded joint rates yields:
+$$ \dot{\mathbf{q}} = J(q)^\dagger V_E = \sum_{i=1}^6 \left( \frac{\mathbf{u}_i^\top V_E}{\sigma_i} \right) \mathbf{v}_i $$
+As the arm approaches a singularity, the smallest singular value vanishes ($\sigma_6 \to 0$). Any commanded task twist with a nonzero projection onto the lost direction ($\mathbf{u}_6^\top V_E \neq 0$) causes the commanded joint rate $\dot{\mathbf{q}}$ to explode as $\mathcal{O}(1/\sigma_6)$, blowing past motor velocity limits and tripping inverter overcurrent protection.
+
+Roboticists resolve this through **Damped Least Squares (DLS)** inverse kinematics:
+$$ J_\lambda^\dagger = J^\top \left( J J^\top + \lambda^2 \mathbf{I} \right)^{-1} $$
+For each singular mode, the effective inversion gain is regularized from $1/\sigma_i$ to $\frac{\sigma_i}{\sigma_i^2 + \lambda^2} \le \frac{1}{2\lambda}$. This is mathematically identical to $L_2$ Tikhonov regularization (ridge regression / weight decay) in machine learning: it deliberately introduces a bounded tracking residual in exchange for strictly bounded joint velocities ($\|\dot{\mathbf{q}}\| \le \|V_E\| / (2\lambda)$).
+
 [^fn-control-yoshikawa-manipulability]: **Yoshikawa Manipulability Measure**\index{Manipulability index!Yoshikawa formulation}: The measure summarizes the velocity ellipsoid for a chosen task Jacobian. Near rank loss, inverse-kinematics commands can exceed joint-rate or torque limits. The actual drive response and fallback depend on the specified controller and hardware.
 
 ### Trajectory transit time and reachable distance
@@ -678,6 +771,17 @@ Let $\lambda_n$ (or $f_n$) denote the normal contact force pushing the bodies ap
 1. Non-penetration (primal feasibility): $\phi(\mathbf{q}) \ge 0$
 2. Repulsive unilateral force (dual feasibility): $\lambda_n \ge 0$
 3. Complementary slackness: $\phi(\mathbf{q}) \lambda_n = 0$
+
+The following matrix connects these non-smooth physical contact laws to the familiar mathematical concepts of constrained optimization:
+
+| Physical Entity | Mechanical Role in Physical Plant | Optimization Duality in ML Systems |
+|:---|:---|:---|
+| **Gap Function** $\phi(\mathbf{q}) \ge 0$ | Spatial clearance preventing interpenetration | Primal inequality constraint $g(\mathbf{x}) \ge 0$ defining the feasible region |
+| **Normal Force** $\lambda_n \ge 0$ | Repulsive contact force pushing bodies apart | Dual Lagrange multiplier $\lambda \ge 0$ associated with the active constraint |
+| **Complementary Slackness** $\phi(\mathbf{q}) \lambda_n = 0$ | Contact force exists only when touching ($\phi = 0$) | KKT condition: multiplier is nonzero only when constraint is active |
+| **Delassus Operator** $\mathbf{A}_{\text{Delassus}}$ | Apparent inverse inertia reflected at contact point | Schur complement of the constraint Jacobian in the KKT system |
+| **Impact Impulse** $P_n = m_{\text{eff}} \Delta v_n$ | Instantaneous momentum transfer across zero duration | Non-differentiable jump in state trajectory; Dirac delta distribution |
+| **Restitution Law** $v_n^+ = -e v_n^-$ | Discontinuous velocity jump across collision boundary | Step discontinuity that breaks smooth reverse-mode automatic differentiation |
 
 Just as Lagrange multipliers in constrained optimization become nonzero ($\lambda > 0$) only when constraints are active and tight ($g = 0$), normal contact forces materialize exclusively upon contact closure:
 
@@ -822,9 +926,11 @@ This derivation explains the distinct physical error regimes during sensor occlu
 
 In machine learning and state estimation, observability is the mathematical dual of reachability: whereas reachability asks whether latent internal states can be steered by control inputs, observability asks whether latent states can be reconstructed from external sensor observations $\mathbf{y}(t)$.
 
+In modern deep learning (such as world models, state-space models, and latent representation learning), neural encoders $\hat{\mathbf{z}} = q_{\boldsymbol{\phi}}(\mathbf{y})$ attempt to reconstruct underlying states from sensory observations. Observability establishes the fundamental, information-theoretic limit of this reconstruction: if a dynamical system is unobservable, the mapping from physical state trajectories to sensor observations is strictly non-injective. In that case, infinitely many distinct physical states produce mathematically indistinguishable observation sequences. No neural network, regardless of parameter count or training data, can reconstruct an unobservable state without adding sensors or executing active dynamic excitation.
+
 A linear time-invariant system $(\mathbf{A}, \mathbf{C})$ is observable on $[0, T]$ if and only if the **Kalman observability matrix** has full column rank $n$:\index{Observability!Kalman rank criterion}
 $$ \mathcal{O} = \begin{bmatrix} \mathbf{C} \\ \mathbf{C}\mathbf{A} \\ \vdots \\ \mathbf{C}\mathbf{A}^{n-1} \end{bmatrix}, \quad \text{rank}(\mathcal{O}) = n $$
-If $\operatorname{rank}(\mathcal{O}) < n$, the unobservable subspace $\ker(\mathcal{O})$ contains initial state trajectories that produce identical output measurements. No linear estimator can distinguish between initial states that differ along $\ker(\mathcal{O})$.
+If $\operatorname{rank}(\mathcal{O}) < n$, the unobservable subspace $\ker(\mathcal{O})$ contains initial state trajectories that produce identical output measurements. No linear or nonlinear estimator can distinguish between initial states that differ along $\ker(\mathcal{O})$.
 
 For a smooth autonomous nonlinear system $\dot{\mathbf{x}} = \mathbf{f}(\mathbf{x})$, $\mathbf{y} = \mathbf{h}(\mathbf{x})$ where $\mathbf{h} = [h_1(\mathbf{x}), \dots, h_p(\mathbf{x})]^\top$, the Hermann-Krener observability criterion [@hermann1977nonlinear] generalizes the Kalman rank test via successive directional derivatives along system dynamics. Differentiating the measurement output equation $\mathbf{y}(t) = \mathbf{h}(\mathbf{x}(t))$ with respect to continuous time yields:
 $$ \dot{\mathbf{y}}(t) = \frac{\partial \mathbf{h}}{\partial \mathbf{x}} \dot{\mathbf{x}} = \frac{\partial \mathbf{h}}{\partial \mathbf{x}} \mathbf{f}(\mathbf{x}) = L_{\mathbf{f}} \mathbf{h}(\mathbf{x}) $$
@@ -905,6 +1011,17 @@ Because the environment cannot pull on the robot and contact surfaces exhibit fi
 In floating-base humanoid and legged systems, high-level policies (such as learned vision-language-action models or action chunking policies) propose desired kinematic behaviors: end-effector manipulation paths, torso orientation, gaze directions, or swing-foot trajectories. However, because the 6-DoF floating base is unactuated, these kinematic proposals cannot be executed directly by joint motors.
 
 The **Hierarchical Whole-Body Control (WBC) Quadratic Program**\index{Whole-body control!hierarchical QP}\index{Whole-body control!multi-task optimization} acts as a real-time multi-task constrained optimization projection layer. It projects competing operational-space task accelerations $\ddot{\mathbf{x}}_i^{\text{des}}$ through a prioritized optimization hierarchy while strictly enforcing rigid-body Newton-Euler dynamics, friction cones, and actuator limits.
+
+To an ML systems engineer, Whole-Body Control solves the exact physical counterpart of multi-task learning with conflicting gradients:
+
+| Concept | Multi-Task Deep Learning (PCGrad / MGDA) | Hierarchical Whole-Body Control (WBC) |
+|:---|:---|:---|
+| **Task Specifications** | Loss functions $\mathcal{L}_1(\boldsymbol{\theta}), \dots, \mathcal{L}_K(\boldsymbol{\theta})$ | Operational-space tasks $\mathbf{x}_1 = f_1(\mathbf{q}), \dots, \mathbf{x}_K = f_K(\mathbf{q})$ |
+| **Shared Resource** | Parameter weight vector $\boldsymbol{\theta} \in \mathbb{R}^D$ | Generalized joint accelerations $\ddot{\mathbf{q}} \in \mathbb{R}^{n+6}$ and torques $\boldsymbol{\tau}$ |
+| **Task Conflict** | Negative gradient inner product $\mathbf{g}_i^\top \mathbf{g}_j < 0$ | Intersecting Jacobian row spaces $\operatorname{im}(\mathbf{J}_i^\top) \cap \operatorname{im}(\mathbf{J}_j^\top) \neq \emptyset$ |
+| **Decoupling Rule** | Projecting gradients onto tangent hyperplanes (PCGrad) | Null-space projection operator $\mathbf{N}_i = \mathbf{I} - \mathbf{J}_i^\dagger \mathbf{J}_i$ |
+| **Priority Hierarchy** | Heuristic loss weighting or GradNorm tuning | Strict lexicographic ordering ($w_1 \gg w_2 \gg \dots \gg w_K$) |
+| **Feasibility Enforcer** | Parameter norm clipping / weight decay | Hard KKT constraints: dynamics, friction cones, torque saturation |
 
 #### Operational-space tasks and analytical null-space projection
 

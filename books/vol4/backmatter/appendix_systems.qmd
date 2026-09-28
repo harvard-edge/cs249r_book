@@ -421,15 +421,22 @@ This statistical ceiling anchors the loaded execution bounds declared in the pla
 
 ### Operating-system determinism through interrupt handling and memory locking
 
-On heterogeneous robotics SoCs, the nervous system and safety monitors execute under real-time operating systems (RTOS) or real-time Linux kernels (such as Linux patched with `PREEMPT_RT`).\index{Real-time operating system!interrupt latency}\index{Memory locking!mlockall page fault elimination}\index{Real-time Linux!kernel mechanics} In standard general-purpose Linux kernels, execution threads in interrupt contexts or kernel critical sections holding non-preemptible spinlocks can stall user-space tasks indefinitely. In physical AI pipelines where control loops govern physical momentum, operating-system determinism requires eliminating non-preemptible kernel sections, bounding interrupt preemption latency, and locking virtual memory.
+On heterogeneous robotics SoCs, the nervous system and safety monitors execute under real-time operating systems (RTOS) or real-time Linux kernels (such as Linux patched with `PREEMPT_RT`).\index{Real-time operating system!interrupt latency}\index{Memory locking!mlockall page fault elimination}\index{Real-time Linux!kernel mechanics}\index{Linux kernel!CFS vs SCHED_FIFO}\index{CPU isolation!nohz_full and isolcpus} In standard general-purpose Linux kernels, execution threads in interrupt contexts or kernel critical sections holding non-preemptible spinlocks can stall user-space tasks indefinitely. In physical AI pipelines where control loops govern physical momentum, operating-system determinism requires eliminating non-preemptible kernel sections, bounding interrupt preemption latency, isolating execution cores, and locking virtual memory.
 
-**PREEMPT_RT Kernel Architecture.** Mainline Linux achieves high throughput by disabling kernel preemption during spinlock acquisition (`preempt_disable()`), deferring interrupts via softirqs, and batching task scheduling. When an unprivileged machine learning process or device driver holds an in-kernel spinlock, a high-priority 1 kHz real-time safety task cannot preempt the CPU, even if its timer has expired. The `PREEMPT_RT` patch transforms Linux into a hard real-time operating system via three structural changes:
+**Linux Completely Fair Scheduler vs. Hard Real-Time Policies.** General-purpose Linux schedules user-space processes using the Completely Fair Scheduler (CFS). CFS models CPU resource allocation through dynamic virtual runtime:
+$$ vruntime_i(t) = \int_0^t \frac{w_0}{w_i} dt $$
+where $w_i$ is the process weight derived from its nice value and $w_0$ is the baseline weight. CFS selects the task with the smallest $vruntime$ from a red-black tree. While CFS maximizes aggregate throughput and fairness, it permits latency unbounded by wall-clock time: if background processes (such as logging daemons, container health monitors, or garbage collection workers) accumulate low $vruntime$ while sleeping, they immediately preempt running computation when awakened.
 
-1. *Sleeping Spinlocks (`rt_mutex`)*: Standard kernel spinlocks (`spinlock_t` and `rwlock_t`) are converted to sleeping mutexes with Priority Inheritance Protocol (PIP) support. When a real-time thread preempts a lower-priority task holding an `rt_mutex`, the lower-priority task sleeps rather than spinning with preemption disabled, and its priority is elevated to prevent unbounded priority inversion. Critical sections that must execute with local CPU interrupts disabled are strictly minimized to low-level hardware access.
-2. *Forced Interrupt Threading*: Hardware interrupt service routines (ISRs) are split into minimal top-half handlers and prioritized kernel threads (`irq/<irq>-<name>`) scheduled under the real-time `SCHED_FIFO` policy.
-3. *High-Resolution Timers (`hrtimers`)*: Traditional Linux timer ticks execute at coarse periodic jiffies ($1\text{ ms}$ or $4\text{ ms}$ granularity), introducing substantial quantization error and timer slack. `PREEMPT_RT` binds the timer subsystem to hardware per-CPU clock event devices (such as the ARM Generic Timer or x86 Local APIC), enabling sub-microsecond timer resolution. Real-time cyclic threads invoke `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next_period, NULL)` using absolute monotonic deadlines, eliminating phase jitter and cumulative drift across successive control cycles.
+In physical AI systems, real-time control threads must instead be configured with POSIX static priority scheduling policies (`SCHED_FIFO` or `SCHED_RR`) across priority levels 1 to 99 (or `SCHED_DEADLINE` implementing Earliest Deadline First). Under `SCHED_FIFO`, the highest-priority runnable thread executes immediately and runs until it blocks on I/O, yields voluntarily, or is preempted by a strictly higher-priority real-time thread.
 
-**Interrupt Handling Latency and Top-Half/Bottom-Half Partitioning.** When an external hardware peripheral (such as an IMU, joint encoder counter, or fieldbus controller) asserts an interrupt request (IRQ), the processor halts user execution, saves register context, and vectors to the hardware ISR. The worst-case interrupt latency $t_{\text{irq,lat}}$ before a real-time user-space control thread begins execution is bounded by:
+**PREEMPT_RT Kernel Architecture.** In mainline Linux kernels, disabling preemption during spinlock acquisition (`preempt_disable()`), executing non-preemptible softirqs, and servicing asynchronous workqueues can delay user-space execution by tens of milliseconds. When an unprivileged machine learning process or device driver holds an in-kernel spinlock, a high-priority 1 kHz real-time safety task cannot preempt the CPU, even if its timer has expired. The `PREEMPT_RT` patch transforms the monolithic Linux kernel into a deterministic real-time operating system via four structural mechanisms:
+
+1. *Sleeping Spinlocks (`rt_mutex`)*: Standard in-kernel spinlocks (`spinlock_t` and `rwlock_t`) are replaced by sleeping mutexes backed by `rt_mutex` with Priority Inheritance Protocol (PIP) support. When a high-priority thread preempts a lower-priority task holding an `rt_mutex`, the lower-priority task sleeps rather than spinning with preemption disabled, and its priority is elevated to prevent unbounded priority inversion. Raw spinlocks (`raw_spinlock_t`) that disable preemption and local interrupts are strictly restricted to low-level hardware register accesses bounded to sub-microsecond durations.
+2. *Preemptible Read-Copy Update (`CONFIG_PREEMPT_RCU`)*: RCU read-side critical sections (`rcu_read_lock()` / `rcu_read_unlock()`) become preemptible, preventing deferred memory reclamation from stalling real-time threads.
+3. *Forced Interrupt Threading*: Hardware interrupt service routines (ISRs) are split into minimal top-half handlers and prioritized kernel threads (`irq/<irq>-<name>`) scheduled under `SCHED_FIFO`.
+4. *High-Resolution Timers (`hrtimers`)*: Traditional Linux timer ticks execute at coarse periodic jiffies ($1\text{ ms}$ or $4\text{ ms}$ granularity), introducing substantial quantization error and timer slack. `PREEMPT_RT` binds the timer subsystem to hardware per-CPU clock event devices (such as the ARM Generic Timer or x86 Local APIC), enabling sub-microsecond timer resolution. Real-time cyclic threads invoke `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next_period, NULL)` using absolute monotonic deadlines, eliminating phase jitter and cumulative drift across successive control cycles.
+
+**Interrupt Handling Latency and Top-Half/Bottom-Half Partitioning.** When an external hardware peripheral (such as an IMU, joint encoder counter, or fieldbus controller) asserts an interrupt request (IRQ), the processor halts user execution, saves register context, and vectors to the hardware ISR via the interrupt controller (such as an ARM Generic Interrupt Controller GICv3 or x86 APIC). The worst-case interrupt latency $t_{\text{irq,lat}}$ before a real-time user-space control thread begins execution is bounded by:
 $$ t_{\text{irq,lat}} = t_{\text{irq\_disabled,max}} + t_{\text{hw\_pipe}} + t_{\text{context\_save}} + \sum_{j \in hp(\text{irq})} t_{\text{ISR},j} $$
 where $t_{\text{irq\_disabled,max}}$ is the longest duration during which CPU interrupts were disabled across the kernel, $t_{\text{hw\_pipe}}$ is the processor pipeline flush delay, $t_{\text{context\_save}}$ is the hardware register preservation time, and $\sum t_{\text{ISR},j}$ represents the execution duration of higher-priority ISRs.
 
@@ -438,31 +445,58 @@ To prevent high-bandwidth sensor streams (such as GigE Vision cameras or 3D lida
 * **Top-half (Hardware ISR)**: Executes in hard-interrupt context with CPU interrupts masked. It executes the absolute minimum hardware operations—reading the peripheral interrupt status register, clearing the physical interrupt line, latching high-resolution hardware counter timestamps, and waking the associated threaded IRQ. Execution time is strictly bounded to sub-microsecond intervals.
 * **Bottom-half (Threaded IRQ)**: In `PREEMPT_RT` and RTOS environments, complex packet deserialization, frame CRC verification, and data copies are deferred to dedicated kernel threads (`irq/<irq>-<name>`). By configuring these threaded IRQs under `SCHED_FIFO` with priorities lower than the 1 kHz safety monitor (e.g., setting camera IRQ threads to priority 50 and the motor permission thread to priority 90), the system guarantees that high-rate perception ingress can never preempt the deterministic control loop.
 
-**Memory Locking and Page Fault Elimination.** Virtual memory subsystems rely on demand paging: when a process accesses an unmapped virtual address, the CPU raises an architectural page fault exception (`#PF`), suspending execution while the kernel page-table handler allocates a physical page frame, updates translation lookaside buffer (TLB) entries, and zeroes the memory (a *minor page fault*, requiring $10\text{--}50\,\mu\text{s}$). If the requested page was swapped to secondary flash storage, the thread blocks on disk I/O (a *major page fault*, requiring $10\text{--}50\text{ ms}$). A single page fault on a cyclic control path instantly violates the 1 ms permission deadline.
+**CPU Shielding and Core Isolation.** Heterogeneous multi-core robotics SoCs must isolate deterministic control threads from background operating-system disturbances. Kernel boot parameters establish strict CPU shielding:
 
-To achieve hard real-time determinism in user space, real-time control processes must implement a four-part memory locking and initialization protocol:
+* `isolcpus=2,3`: Removes cores 2 and 3 from the general kernel scheduler balancing domain, ensuring no user-space tasks are assigned to these cores unless explicitly bound via `sched_setaffinity()`.
+* `nohz_full=2,3`: Enables full dynamic tickless operation. When an isolated core runs a single real-time thread, the kernel completely disables the periodic scheduling timer tick ($100\text{--}1000\text{ Hz}$), eliminating timer interrupt preemption and context-switch jitter.
+* `rcu_nocbs=2,3`: Offloads RCU callback processing from isolated cores to housekeeping cores (cores 0 and 1).
+* *IRQ Affinity Partitioning*: Peripheral hardware interrupts are directed away from real-time cores by writing CPU bitmasks to `/proc/irq/<id>/smp_affinity`. High-rate camera MSI-X vectors and Ethernet controller interrupts are pinned exclusively to housekeeping cores, guaranteeing that the 1 kHz control loop on core 2 experiences zero external hardware interrupt preemption.
+
+**Memory Locking and Page Fault Elimination.** Virtual memory subsystems rely on demand paging: when a process accesses an unmapped virtual address, the CPU raises an architectural page fault exception (`#PF`), suspending execution while the kernel page-table handler allocates a physical page frame, updates translation lookaside buffer (TLB) entries, and zeroes the memory (a *minor page fault*, requiring $10\text{--}50\,\mu\text{s}$). If the requested page was swapped to secondary flash storage, the thread blocks on disk I/O (a *major page fault*, requiring $10\text{--}50\text{ ms}$). Furthermore, Transparent Huge Pages (THP) memory compaction (`khugepaged`) can asynchronously stall threads for tens of milliseconds while defragmenting physical memory pages. A single page fault on a cyclic control path instantly violates the 1 ms permission deadline.
+
+To achieve hard real-time determinism in user space, real-time control processes must implement a rigorous memory locking and CPU initialization protocol:
 
 ```c
-// Real-time process memory initialization
+// Real-time process initialization and memory locking protocol
+#define _GNU_SOURCE
 #include <sys/mman.h>
+#include <sched.h>
+#include <pthread.h>
 #include <malloc.h>
+#include <stdio.h>
 #include <stdlib.h>
 
-void configure_realtime_memory(size_t stack_size) {
-    // 1. Lock all current and future mapped address pages into physical RAM
+void configure_realtime_process(int target_cpu, int rt_priority, size_t stack_size) {
+    // 1. Bind execution to dedicated isolated CPU core (isolcpus / nohz_full)
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(target_cpu, &cpuset);
+    if (sched_setaffinity(0, sizeof(cpu_set_t), &cpuset) != 0) {
+        perror("sched_setaffinity failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // 2. Configure POSIX static real-time priority (SCHED_FIFO)
+    struct sched_param sp = { .sched_priority = rt_priority };
+    if (sched_setscheduler(0, SCHED_FIFO, &sp) != 0) {
+        perror("sched_setscheduler SCHED_FIFO failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // 3. Lock all current and future virtual address mappings into physical RAM
     if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
         perror("mlockall failed");
         exit(EXIT_FAILURE);
     }
 
-    // 2. Disable dynamic glibc heap trimming and anonymous mmap growth
+    // 4. Disable glibc dynamic heap trimming and anonymous mmap allocation
     mallopt(M_TRIM_THRESHOLD, -1);
     mallopt(M_MMAP_MAX, 0);
 
-    // 3. Prefault the thread execution stack to its declared maximum depth
+    // 5. Prefault the thread execution stack to its declared maximum depth
     volatile char stack_buffer[stack_size];
     for (size_t i = 0; i < stack_size; i += 4096) {
-        stack_buffer[i] = 0; // Force physical page allocation and TLB entry
+        stack_buffer[i] = 0; // Trigger minor page fault and populate TLB entry
     }
 }
 ```
@@ -475,26 +509,31 @@ In distributed computing clusters, node liveness and consensus are managed via s
 
 In physical AI systems, an autonomous machine traveling through physical space cannot wait seconds for a software orchestrator. If the GPU driver deadlocks, memory bus crossbars stall, or a kernel panic freezes the operating system, physical momentum continues unchecked. To detect a missed execution checkpoint, an embedded design uses a **hardware watchdog timer**.\index{Watchdog timer!hardware downcounter}\index{Watchdog timer!windowed watchdog}\index{Watchdog timer!token-passing liveness} Its clock and response path must be independent of the monitored processor; an independent crystal oscillator or low-speed internal oscillator (`LSI`) completely decoupled from the main system phase-locked loop (PLL) is required.
 
-**Hardware Down-Counters and Windowed Servicing.** The hardware watchdog timer comprises an autonomous down-counter register $W(t)$ clocked at frequency $f_{\text{wdg}}$. At system initialization, the register is loaded with a threshold value $W_{\text{init}}$. Software execution threads must periodically refresh (or "kick") the register before the count decrements to zero:
-$$ W(t_k) = W_{\text{init}} $$
+**Hardware Down-Counters and Windowed Servicing.** The hardware watchdog timer comprises an autonomous down-counter register $W(t)$ clocked at frequency $f_{\text{wdg}}$ (typically $32\text{ kHz}$ from an independent on-chip RC oscillator). At system initialization, the register is loaded with a threshold value $W_{\text{init}}$. Software execution threads must periodically refresh (or "kick") the register before the count decrements to zero:
+$$ W(t) = W_{\text{init}} - \left\lfloor f_{\text{wdg}} \cdot t \right\rfloor $$
+If software fails to refresh before underflow ($W(t) = 0$), the hardware timer asserts an unmaskable hardware trip.
+
 In safety-critical systems, simple down-counters are vulnerable to runaway execution bugs: if a corrupted control loop enters an infinite spin-loop that happens to execute the watchdog refresh instruction, the watchdog is continually fed despite the control failure. To prevent this, robust physical AI architectures employ a **Windowed Watchdog Timer (WWDG)**. A windowed watchdog defines both an upper bound $W_{\text{upper}}$ and a lower bound $W_{\text{lower}}$. The software refresh is valid only within the admissible time window:
 $$ W_{\text{lower}} \le W(t_k) \le W_{\text{upper}} $$
-If software attempts to refresh the watchdog too early ($W(t_k) > W_{\text{upper}}$)—indicating an abnormal loop short-circuit—or fails to refresh before underflow ($W(t_k) < W_{\text{lower}}$), the hardware watchdog controller trips immediately.
+which defines an admissible servicing window $[t_{\text{win,open}}, t_{\text{win,close}}]$:
+$$ t_{\text{win,open}} = \frac{W_{\text{init}} - W_{\text{upper}}}{f_{\text{wdg}}}, \quad t_{\text{win,close}} = \frac{W_{\text{init}} - W_{\text{lower}}}{f_{\text{wdg}}} $$
+If software attempts to refresh the watchdog too early ($W(t_k) > W_{\text{upper}}$)—indicating an abnormal loop short-circuit or clock glitch—or fails to refresh before underflow ($W(t_k) < W_{\text{lower}}$), the hardware watchdog controller trips immediately.
 
-**Multi-Stage Token-Passing Liveness Checkpoints.** Feeding the watchdog directly from a periodic timer interrupt is an unsafe anti-pattern, because the timer interrupt may continue firing even if the primary motion planning and safety monitor threads are deadlocked. To guarantee that the watchdog monitors true algorithmic progression, control software implements **token-passing checkpointing**:
+**Multi-Stage Token-Passing Liveness Checkpoints.** Feeding the watchdog directly from a periodic timer interrupt is an unsafe anti-pattern, because the timer interrupt may continue firing even if the primary motion planning and safety monitor threads are deadlocked. To guarantee that the watchdog monitors true algorithmic progression, control software implements **token-passing checkpointing** using rolling polynomial accumulators:
+$$ T_{k+1} = \text{CRC32}\left( T_k \oplus \text{Signature}_k \right) $$
 
-1. At the beginning of the 1 kHz tick, an execution token $T_0$ is generated.
-2. Stage 1 (Sensor Ingress): Validates camera, IMU, and joint telemetry timestamps, updating the token: $T_1 = \text{hash}(T_0, \text{sensor\_valid})$.
-3. Stage 2 (State Estimation & Tracking): Computes joint tracking errors, updating $T_2 = \text{hash}(T_1, \text{tracking\_valid})$.
-4. Stage 3 (Permission Enforcer): Validates Control Barrier Functions and stopping distance envelopes, computing $T_3 = \text{hash}(T_2, \text{enforce\_valid})$.
-5. Stage 4 (Actuator Dispatch): Transmits admitted setpoints across the fieldbus, computing $T_{\text{final}} = \text{hash}(T_3, \text{dispatch\_valid})$.
+1. At the beginning of the 1 kHz tick, an execution token $T_0$ is generated from the hardware monotonic cycle counter.
+2. Stage 1 (Sensor Ingress): Validates camera, IMU, and joint telemetry timestamps, updating the token: $T_1 = \text{CRC32}(T_0 \oplus \text{sensor\_valid\_signature})$.
+3. Stage 2 (State Estimation & Tracking): Computes joint tracking errors, updating $T_2 = \text{CRC32}(T_1 \oplus \text{tracking\_valid\_signature})$.
+4. Stage 3 (Permission Enforcer): Validates Control Barrier Functions and stopping distance envelopes, computing $T_3 = \text{CRC32}(T_2 \oplus \text{enforce\_valid\_signature})$.
+5. Stage 4 (Actuator Dispatch): Transmits admitted setpoints across the fieldbus, computing $T_{\text{final}} = \text{CRC32}(T_3 \oplus \text{dispatch\_valid\_signature})$.
 
 Only if $T_{\text{final}}$ matches the precomputed valid signature will the watchdog refresh routine write to the memory-mapped watchdog service register.
 
 **Hardware Fail-Safe Interlocks and Safe Torque Off.** If the software misses its refresh window, the hardware down-counter reaches zero, asserting a non-maskable interrupt (NMI) and triggering an autonomous hardware trip. Crucially, the watchdog's physical trip line is hardwired independently of the monitored microcontroller:
 
-* It drives an external high-reliability optocoupler or solid-state safety relay.
-* The relay directly breaks the bias supply to the inverter gate drivers, asserting **Safe Torque Off (STO)**.
+* It drives an external high-reliability optocoupler or solid-state safety relay through a dedicated open-drain fail-safe pin.
+* The relay directly breaks the bias supply ($V_{\text{gate\_supply}}$) to the inverter gate drivers, asserting **Safe Torque Off (STO)**.
 * Actuator power stages enter a high-impedance state within microseconds ($< 2.0\,\mu\text{s}$), cutting stator electromagnetic torque at the silicon level regardless of whether the application CPU is halted, in an infinite loop, or experiencing a kernel panic.[^fn-sys-watchdog-reset]
 
 [^fn-sys-watchdog-reset]: **Hardware Watchdog Down-Counters**\index{Watchdog timer!hardware downcounter}: A configured watchdog expires when its expected service does not occur. Its oscillator, timeout, output wiring, and plant response differ by device. Feeding it merely from an unrelated interrupt does not prove that the monitored control computation progressed; a firmware-fed reset also need not signal a drive. See the [Linux watchdog API](https://docs.kernel.org/watchdog/watchdog-api.html) for reset behavior and @sec-enforcement-fallback-ladder for stop selection.
@@ -505,19 +544,39 @@ In machine learning control frameworks (such as reinforcement learning policies,
 
 ### Microcontroller timer dead-time insertion
 
-Bridging the digital software domain with physical power silicon requires strict microarchitectural timing interlocks. Each inverter phase comprises a half-bridge with a high-side power MOSFET (or GaN FET / IGBT) and a low-side power MOSFET connected across the DC supply rail $V_{\text{bus}}$. Microcontroller timer peripherals generate complementary pulse-width-modulated (PWM) drive signals with hardware-enforced **dead-time insertion** $t_{\text{dead}}$:\index{Pulse-width modulation!dead-time insertion}\index{Inverter!shoot-through protection}\index{Inverter!dead-time distortion}
+Bridging the digital software domain with physical power silicon requires strict microarchitectural timing interlocks. Each inverter phase comprises a half-bridge with a high-side power MOSFET (or GaN FET / IGBT) and a low-side power MOSFET connected across the DC supply rail $V_{\text{bus}}$. Microcontroller timer peripherals generate complementary pulse-width-modulated (PWM) drive signals with hardware-enforced **dead-time insertion** $t_{\text{dead}}$:\index{Pulse-width modulation!dead-time insertion}\index{Inverter!shoot-through protection}\index{Inverter!dead-time distortion}\index{Power MOSFET!Miller plateau dynamics}
 $$ t_{\text{dead}} \ge t_{\text{off, max}} + t_{\text{prop, skew}} - t_{\text{on, min}} + t_{\text{margin}} $$
 where $t_{\text{off, max}}$ is the maximum turn-off delay of the power switch, $t_{\text{on, min}}$ is the minimum turn-on delay, $t_{\text{prop, skew}}$ is the propagation delay mismatch across isolated gate drivers, and $t_{\text{margin}}$ is an engineering safety buffer.[^fn-sys-pwm-deadtime]
 
-**Gate Charge Dynamics and Asymmetric Switching.** A power MOSFET or GaN FET switch possesses input gate capacitance $C_{\text{iss}} = C_{\text{gs}} + C_{\text{gd}}$, where $C_{\text{gd}}$ is the non-linear reverse transfer (Miller) capacitance. During switching, the gate driver must source or sink peak current $I_{\text{g,peak}} \approx (V_{\text{drive}} - V_{\text{plateau}}) / R_{\text{g,ext}}$. During turn-off, the gate voltage dwells at the Miller plateau while drain-to-source voltage rises across the bus, extending the turn-off duration significantly beyond the turn-on time ($t_{\text{off}} > t_{\text{on}}$).
+**Microcontroller Advanced Timer Architecture.** Modern motor control microcontrollers (such as STM32 Advanced-control timers TIM1/TIM8 or TI C2000 ePWM modules) synthesize PWM waveforms using hardware up-down counting counters (`TIMx_CNT`). In **center-aligned mode**, the counter counts up from 0 to the auto-reload value (`TIMx_ARR`) and back down to 0, producing symmetrical PWM waveforms with period $T_{\text{pwm}} = 2 \cdot \text{ARR} \cdot T_{\text{timer\_clk}}$. Center-aligned PWM halves current ripple compared to edge-aligned mode and provides optimal ADC trigger points at the counter peaks and valleys, where phase currents can be sampled synchronously at the exact midpoint of the switching cycle without high-frequency $dI/dt$ noise.
 
-**Shoot-Through Prevention.** If dead time is insufficient or eliminated by software error, both high-side and low-side switches conduct simultaneously. This creates a low-impedance path directly bridging the DC rail to ground:
+The timer's hardware Dead-Time Generator (DTG) monitors the compare match outputs (`TIMx_CCRx`) and inserts dead-time delay cycles $N_{\text{dtg}}$ using an autonomous digital delay line:
+$$ t_{\text{dead}} = N_{\text{dtg}} \cdot T_{\text{dtg}} $$
+By latching the DTG configuration behind hardware register lock bits (`BDTR.LOCK`), the microcontroller guarantees that the dead-time delay cannot be altered by runaway firmware or memory corruption.
+
+**Gate Charge Dynamics and Asymmetric Switching.** A power MOSFET or GaN FET switch possesses input capacitance $C_{\text{iss}} = C_{\text{gs}} + C_{\text{gd}}$, where $C_{\text{gd}}$ is the non-linear reverse transfer (Miller) capacitance. During gate turn-on and turn-off, charge transfer follows:
+$$ Q_g = \int_0^{t_{\text{sw}}} I_g(t) dt = Q_{\text{gs}} + Q_{\text{gd}} $$
+During turn-off, the gate driver sinks current through gate resistance $R_{g,\text{off}}$. The gate-source voltage $V_{\text{gs}}$ drops to the **Miller plateau voltage** $V_{\text{plateau}}$, where it dwells while the drain-to-source voltage $V_{\text{ds}}$ traverses the entire DC rail:
+$$ t_{\text{plateau}} = \frac{Q_{\text{gd}}}{I_{g,\text{off}}} = \frac{Q_{\text{gd}} \cdot R_{g,\text{off}}}{V_{\text{plateau}} - V_{\text{ee}}} $$
+Because drain-to-source capacitance charging and channel depletion take longer than gate-source charging, turn-off duration significantly exceeds turn-on time ($t_{\text{off}} > t_{\text{on}}$).
+
+**Shoot-Through Prevention and Parasitic Miller Turn-On.** If dead time is insufficient, both high-side and low-side switches conduct simultaneously, creating a low-impedance short circuit directly bridging the DC rail to ground:
 $$ I_{\text{shoot-through}} = \frac{V_{\text{bus}}}{2 R_{\text{ds(on)}} + R_{\text{trace}}} $$
-On a $48\text{ V}$ or $400\text{ V}$ bus with $R_{\text{ds(on)}} = 5\text{ m}\Omega$, short-circuit current surges to hundreds or thousands of amperes within nanoseconds, instantly exceeding silicon thermal safe operating area (SOA) limits and vaporizing bond wires. Dedicated microcontroller timer peripherals (such as STM32 Advanced-control timers TIM1/TIM8 or TI C2000 ePWM modules) feature hardware Dead-Time Generators (DTG). The DTG intercepts complementary PWM outputs and locks rising edges behind hardware counters, rendering shoot-through physically impossible regardless of user-space firmware state.
+On a $48\text{ V}$ or $400\text{ V}$ bus with $R_{\text{ds(on)}} = 5\text{ m}\Omega$, short-circuit current surges to thousands of amperes within nanoseconds, instantly exceeding silicon thermal safe operating area (SOA) limits and vaporizing bond wires.
+
+Even when dead time is configured correctly, half-bridge legs face **parasitic Miller cross-conduction**. When the high-side MOSFET turns on, the phase node voltage slews at high speed ($dV_{\text{ds}}/dt \sim 10\text{--}50\text{ V/ns}$ in modern SiC and GaN bridges). This steep voltage transient forces displacement current through the low-side switch's Miller capacitance:
+$$ I_{\text{miller}} = C_{\text{gd}} \frac{dV_{\text{ds}}}{dt} $$
+This current flows through the low-side gate resistor $R_{g,\text{off}}$ back to ground, inducing a parasitic gate voltage rise:
+$$ V_{\text{gs,induced}} = I_{\text{miller}} \cdot R_{g,\text{off}} = C_{\text{gd}} \frac{dV_{\text{ds}}}{dt} R_{g,\text{off}} $$
+If $V_{\text{gs,induced}}$ exceeds the gate threshold voltage $V_{\text{th}}$ (typically $1.5\text{--}3.0\text{ V}$ in GaN FETs), the low-side switch turns on spuriously while the high-side switch is conducting, inducing catastrophic shoot-through. Power electronics gate drivers counter this using **Active Miller Clamps (AMC)**—an internal low-impedance switch that clamps the gate directly to the negative rail whenever $V_{\text{gs}}$ drops below $1.0\text{ V}$—or split gate drives ($R_{g,\text{on}} / R_{g,\text{off}}$) with antiparallel Schottky diodes.
 
 **Dead-Time Voltage Distortion and Torque Ripple.** While necessary for silicon survival, dead time introduces non-linear voltage distortion into stator windings. During the dead-time interval $t_{\text{dead}}$, both active MOSFET gates are closed, and phase current $I_{\text{phase}}$ is forced to freewheel through antiparallel body diodes. The sign of the phase current determines whether the inverter phase node clamps to $V_{\text{bus}}$ or ground, producing an average phase voltage error:
 $$ \Delta V_{\text{phase}} = -\operatorname{sgn}(I_{\text{phase}}) \cdot \frac{t_{\text{dead}}}{T_{\text{pwm}}} V_{\text{bus}} $$
-In three-phase synchronous machines, this square-wave error injects 5th and 7th harmonic voltages in the stationary $\alpha\beta$ frame, which transform into a **6th harmonic torque ripple** in the rotor synchronous $dq$ reference frame ($f_{\text{ripple}} = 6 f_e$). Left uncompensated by low-level Field-Oriented Control (FOC) current loops, this hardware-induced torque ripple produces high-frequency torque chatter that degrades high-level trajectory precision.
+In three-phase synchronous machines, this square-wave error injects 5th and 7th harmonic voltages into the stationary reference frame. When transformed into the rotor synchronous $dq$ reference frame via Park's transformation, these odd harmonics combine into a **6th harmonic voltage disturbance**:
+$$ \Delta V_d(6\theta_e) = \frac{4}{\pi} \frac{t_{\text{dead}}}{T_{\text{pwm}}} V_{\text{bus}} \sin(6\theta_e), \quad \Delta V_q(6\theta_e) = -\frac{4}{\pi} \frac{t_{\text{dead}}}{T_{\text{pwm}}} V_{\text{bus}} \cos(6\theta_e) $$
+This voltage distortion creates a corresponding **6th harmonic torque ripple**:
+$$ \tau_{\text{ripple}}(6\theta_e) = \frac{3}{2} p \, \lambda_{\text{pm}} \cdot \Delta I_q(6\theta_e) $$
+Left uncompensated, this hardware-induced torque ripple produces high-frequency torque chatter that excites mechanical drivetrain resonances. Modern motor drives implement dead-time compensation algorithms in low-level firmware that inject feedforward voltage vectors opposite to $\Delta V_{d,q}$, linearizing the actuator response for high-level ML policies.
 
 [^fn-sys-pwm-deadtime]: **Inverter Dead-Time Insertion**\index{Pulse-width modulation!dead-time insertion}: Timer dead time is selected from switch and driver timing over temperature and load, then verified with the actual gate waveforms. An overlap can create a damaging bus short; a numeric current or fuse outcome requires the circuit impedance and protection response.
 
@@ -527,19 +586,19 @@ In data center machine learning clusters, power delivery networks (PDNs) are sup
 
 ### Power delivery network impedance and rail droop
 
-Every power delivery network (PDN) exhibits finite parasitic loop inductance $L_{\text{PDN}}$ and equivalent series resistance $R_{\text{PDN}}$ across PCB traces, package BGA balls, and bond wires. When an accelerator initiates a burst of dense general matrix multiplication (GEMM) operations, current draw jumps by $\Delta I$ with nanosecond rise time $t_r$, yielding current slew rates $dI/dt = \Delta I / t_r \sim 10^8\text{--}10^9\text{ A/s}$. Faraday's law of induction dictates an instantaneous voltage collapse $\Delta V_{\text{droop}}$ across the supply rail:\index{Inductive voltage droop!power delivery network}\index{Power delivery network!target impedance}\index{Decoupling capacitors!multi-tier hierarchy}
+Every power delivery network (PDN) exhibits finite parasitic loop inductance $L_{\text{PDN}}$ and equivalent series resistance $R_{\text{PDN}}$ across PCB traces, package BGA balls, and bond wires. When an accelerator initiates a burst of dense general matrix multiplication (GEMM) operations, current draw jumps by $\Delta I$ with nanosecond rise time $t_r$, yielding current slew rates $dI/dt = \Delta I / t_r \sim 10^8\text{--}10^9\text{ A/s}$. Faraday's law of induction dictates an instantaneous voltage collapse $\Delta V_{\text{droop}}$ across the supply rail:\index{Inductive voltage droop!power delivery network}\index{Power delivery network!target impedance}\index{Decoupling capacitors!multi-tier hierarchy}\index{Power delivery network!frequency-domain impedance}
 $$ \Delta V_{\text{droop}} = L_{\text{PDN}} \frac{dI}{dt} + \Delta I \cdot R_{\text{PDN}} $$
 
-**PDN Target Impedance.** To prevent rail excursions from exceeding allowable voltage tolerances $\pm \Delta V_{\max} = V_{\text{nom}} \times \delta_{\text{tol}}$ (typically $\pm 5\%$, or $45\text{ mV}$ on a $0.9\text{ V}$ digital core rail), the power delivery network must maintain an impedance profile strictly below the **target impedance** $Z_{\text{target}}$ across the entire operational frequency band:
+**PDN Target Impedance Across Frequency Decades.** To prevent rail excursions from exceeding allowable voltage tolerances $\pm \Delta V_{\max} = V_{\text{nom}} \times \delta_{\text{tol}}$ (typically $\pm 5\text{ percent}$, or $45\text{ mV}$ on a $0.9\text{ V}$ digital core rail), the power delivery network must maintain an impedance profile strictly below the **target impedance** $Z_{\text{target}}$ across the entire operational frequency band:
 $$ Z_{\text{target}} = \frac{V_{\text{nom}} \cdot \delta_{\text{tol}}}{\Delta I_{\max}} $$
-For a $0.9\text{ V}$ accelerator drawing a $50\text{ A}$ step transient with $5\%$ allowable ripple, $Z_{\text{target}} = 45\text{ mV} / 50\text{ A} = 0.90\text{ m}\Omega$ from DC up to gigahertz frequencies.
+For a $0.9\text{ V}$ accelerator drawing a $50\text{ A}$ step transient with $5\text{ percent}$ allowable ripple, $Z_{\text{target}} = 45\text{ mV} / 50\text{ A} = 0.90\text{ m}\Omega$ from DC up to gigahertz frequencies.
 
-**Multi-Tier Decoupling Hierarchy.** Switched-mode power supplies (VRMs) have limited feedback control loop bandwidth ($100\text{ kHz}$ to $1\text{ MHz}$) and cannot supply charge during nanosecond current transitions. Energy must be buffered across a multi-tier decoupling capacitor hierarchy:
+**Multi-Tier Decoupling Hierarchy.** Switched-mode power supplies (VRMs) have limited feedback control loop bandwidth ($100\text{ kHz}$ to $1\text{ MHz}$) and cannot supply charge during nanosecond current transitions. Energy must be buffered across a multi-tier decoupling capacitor hierarchy structured by frequency response:
 
-1. *On-Die Decoupling*: Deep trench and metal-insulator-metal (MIM) capacitors fabricated directly on the silicon die ($C_{\text{die}} \sim 10\text{--}100\text{ nF}$, parasitic loop inductance $< 10\text{ pH}$, response time $< 0.5\text{ ns}$) supply charge during the initial clock cycles.
-2. *Package Decoupling*: Land-side capacitors (LSC) mounted under the BGA package ($C_{\text{pkg}} \sim 1\text{--}10\,\mu\text{F}$, loop inductance $\sim 50\text{--}200\text{ pH}$, response time $1\text{--}5\text{ ns}$).
-3. *Board-Level High-Frequency MLCCs*: Low-ESL surface-mount multi-layer ceramic capacitors (0201/0402 case sizes, $C \sim 0.1\text{--}10\,\mu\text{F}$, loop inductance $\sim 0.5\text{--}2\text{ nH}$, response time $10\text{--}100\text{ ns}$).
-4. *Bulk Decoupling*: Polymer tantalum or aluminum electrolytic capacitors ($C_{\text{bulk}} \sim 100\text{--}1000\,\mu\text{F}$, response time $1\text{--}10\,\mu\text{s}$) sustain the rail until the active VRM regulation loop stabilizes.
+1. *On-Die Decoupling ($> 100\text{ MHz}$)*: Deep trench and metal-insulator-metal (MIM) capacitors fabricated directly on the silicon die ($C_{\text{die}} \sim 10\text{--}100\text{ nF}$, parasitic loop inductance $< 10\text{ pH}$, response time $< 0.5\text{ ns}$) supply charge during the initial clock cycles.
+2. *Package Decoupling ($10\text{--}100\text{ MHz}$)*: Land-side capacitors (LSC) mounted under the BGA package ($C_{\text{pkg}} \sim 1\text{--}10\,\mu\text{F}$, loop inductance $\sim 50\text{--}200\text{ pH}$, response time $1\text{--}5\text{ ns}$).
+3. *Board-Level High-Frequency MLCCs ($100\text{ kHz}\text{--}10\text{ MHz}$)*: Low-ESL surface-mount multi-layer ceramic capacitors (0201/0402 case sizes, $C \sim 0.1\text{--}10\,\mu\text{F}$, loop inductance $\sim 0.5\text{--}2\text{ nH}$, response time $10\text{--}100\text{ ns}$).
+4. *Bulk Decoupling ($\text{DC}\text{--}100\text{ kHz}$)*: Polymer tantalum or aluminum electrolytic capacitors ($C_{\text{bulk}} \sim 100\text{--}1000\,\mu\text{F}$, response time $1\text{--}10\,\mu\text{s}$) sustain the rail until the active VRM regulation loop stabilizes.
 
 **Anti-Resonance Voltage Spikes.** Parallel resonance between package inductance $L_{\text{pkg}}$ and board decoupling capacitance creates an anti-resonance impedance peak at frequency $f_{\text{anti}} = 1 / (2\pi \sqrt{L_{\text{pkg}} C_{\text{die}}})$, where PDN impedance spikes to $Z_{\text{anti}} \approx \sqrt{L/C} / \text{ESR}$. If the periodic execution cadence of an attention kernel or vision encoder matches $f_{\text{anti}}$, the resonance amplifies supply voltage oscillations, precipitating gate delay violations or triggering hardware brownout resets.
 
@@ -553,7 +612,9 @@ When rail voltage droops from $V_{\text{nom}}$ to $V_{\text{droop}}$, propagatio
 $$ \frac{t_{\text{prop}}(V_{\text{droop}})}{t_{\text{prop}}(V_{\text{nom}})} = \frac{V_{\text{droop}}}{V_{\text{nom}}} \left( \frac{V_{\text{nom}} - V_{\text{th}}}{V_{\text{droop}} - V_{\text{th}}} \right)^\alpha $$
 In a synchronous digital pipeline with clock period $T_{\text{clk}}$, setup time $t_{\text{setup}}$, and clock skew $t_{\text{skew}}$, timing closure requires:
 $$ t_{\text{prop}} + t_{\text{setup}} + t_{\text{skew}} \le T_{\text{clk}} $$
-Stretching $t_{\text{prop}}$ reduces setup slack. A timing failure occurs only if the measured path crosses its slack limit; a brownout reset depends on a separately configured supervisor threshold. Local decoupling can reduce the rail excursion, subject to its impedance and placement. See @sec-placement-thermal-timing-coupling for the coupled dynamics of power delivery droop, clock frequency throttling, and thermal dissipation on heterogeneous SoCs.
+For a core operating at $V_{\text{nom}} = 0.90\text{ V}$ with $V_{\text{th}} = 0.35\text{ V}$ and $\alpha = 1.3$, a $10\text{ percent}$ voltage droop down to $0.81\text{ V}$ stretches gate propagation delay by approximately $22\text{ percent}$. In a 1 GHz clock pipeline ($T_{\text{clk}} = 1000\text{ ps}$) with nominal gate delay $t_{\text{prop}} = 800\text{ ps}$ and setup slack of $150\text{ ps}$, this $22\text{ percent}$ delay stretch ($t_{\text{prop}} \to 976\text{ ps}$) completely wipes out the setup slack, causing setup timing violations, register bit-flips, or catastrophic system lockup.
+
+To mitigate this without overdesigning bulk capacitance, modern AI accelerators incorporate **active clock-stretching circuits**. Fast on-die analog comparators detect rail droop within single clock cycles and immediately divide the master clock frequency by two, temporarily doubling $T_{\text{clk}}$ until the PDN recovers. See @sec-placement-thermal-timing-coupling for the coupled dynamics of power delivery droop, clock frequency throttling, and thermal dissipation on heterogeneous SoCs.
 
 [^fn-sys-sakurai-droop]: **Sakurai-Newton Delay Modeling**\index{Gate delay!Sakurai-Newton model}: The alpha-power law models voltage-dependent gate delay; its parameters are technology dependent. The model predicts reduced setup slack during droop, while a missed deadline, register error, or reset must be established against measured path slack and device thresholds.
 
@@ -563,16 +624,21 @@ In cloud machine learning clusters, GPUs utilize high-bandwidth memory (HBM) phy
 
 ### DRAM bank organization and conflict latency
 
-A modern DRAM chip (LPDDR5 or DDR5) is organized into multiple independent banks (typically 16 to 32 banks), each possessing a single row buffer composed of sensitive sense amplifiers. Accessing storage cells requires three sequential microarchitectural operations:\index{Memory contention!DRAM bank conflicts}\index{Memory contention!row buffer management}
+A modern DRAM chip (LPDDR5 or DDR5) is structured into a hierarchical geometry of channels, ranks, **bank groups**, and banks (typically 4 bank groups containing 4 banks each, for 16 total banks per pseudo-channel). Each individual bank possesses an independent row buffer consisting of sense amplifiers. Accessing storage cells requires three sequential microarchitectural operations:\index{Memory contention!DRAM bank conflicts}\index{Memory contention!row buffer management}\index{Memory contention!bank groups}
+
 1. **Row precharge** ($t_{\text{RP}}$): Restores charge to capacitive memory cells and closes the currently open row buffer (typically $14\text{ ns}$).
-2. **Row activate** ($t_{\text{RCD}}$): Reads an entire page of storage cells (e.g., 2 KB to 8 KB) into the bank's open row buffer ($14\text{ ns}$).
-3. **Column access** ($t_{\text{CAS}} / t_{\text{CL}}$): Reads or writes data beats from the open row buffer onto the memory bus ($14\text{ ns}$).
+2. **Row activate** ($t_{\text{RCD}}$): Reads an entire page of storage cells (e.g., 2 KB to 8 KB) across wordlines into the bank's open row buffer ($14\text{ ns}$).
+3. **Column access** ($t_{\text{CAS}} / t_{\text{CL}}$): Reads or writes data beats from the open row buffer onto the memory data bus ($14\text{ ns}$).
+
+**Bank Groups and Timing Penalties.** To sustain high data rates, modern DRAM organizes banks into bank groups. Consecutive column reads to the same bank group require a long column-to-column delay $t_{\text{CCD\_L}} \approx 8\text{ ns}$ due to internal sense-amplifier routing constraints, whereas column accesses to different bank groups require only $t_{\text{CCD\_S}} \approx 4\text{ ns}$.
 
 **The Bank Conflict Penalty.** When consecutive memory operations target different rows within the same physical bank—a *bank conflict*—the memory controller cannot immediately access the column. It must execute a precharge followed by an activate before issuing the column command, introducing a compulsory stall:
 $$ \Delta t_{\text{conflict}} \approx t_{\text{RP}} + t_{\text{RCD}} $$
 Furthermore, the minimum time between consecutive row activations to the same bank is governed by the row cycle time $t_{\text{RC}} = t_{\text{RAS}} + t_{\text{RP}} \approx 45\text{--}60\text{ ns}$.
 
-When a dense foundation model streaming weights across DRAM rows intersects with high-rate camera DMA writes and a real-time permission thread reading sensor states, repeated row-buffer misses transform low-latency reads into multi-hundred-nanosecond stalls.[^fn-sys-dram-conflicts]
+**Row Buffer Locality vs. Thrashing.** Memory controllers select between an *open-page* or *closed-page* policy. Under an open-page policy, row buffers remain active after access in anticipation of spatial locality. While this maximizes bandwidth for sequential streaming (such as dense GEMM weight fetching or linear camera DMA writes), sporadic random accesses (such as sensor fusion state lookups or 1 kHz safety monitor checks) frequently hit different rows in active banks. When a continuous camera DMA stream writes video frames to the same DRAM bank that holds real-time safety buffers, repeated row-buffer conflicts transform low-latency reads into multi-hundred-nanosecond stalls.[^fn-sys-dram-conflicts]
+
+**Memory Controller Scheduling Starvation.** Modern DRAM controllers employ **First-Ready First-Come-First-Served (FR-FCFS)** command scheduling. FR-FCFS prioritizes column read/write requests that hit currently open row buffers over older requests that require row precharge and activation, maximizing overall DRAM bus throughput. However, under high cognitive load, a continuous flood of vision DMA requests or matrix multiplication memory bursts will repeatedly hit open rows, causing FR-FCFS schedulers to systematically postpone isolated, latency-critical read requests issued by real-time safety threads, leading to unbounded read starvation.
 
 [^fn-sys-dram-conflicts]: **DRAM Bank-Conflict Penalties**\index{Memory contention!DRAM bank conflicts}: A row change in one bank can add precharge and activate time. Video DMA can also queue transactions ahead of a safety read. The resulting delay must be bounded for the specific address mapping, arbitration policy, and workload; a fixed penalty per request is generally unjustified.
 
@@ -582,9 +648,10 @@ On-chip interconnect fabrics (such as ARM CoreLink AXI4 crossbars or Network-on-
 $$ t_{\text{queue,ideal}} = \frac{\sum_{k=1}^K B_k}{\text{BW}_{\text{bus}}} $$
 Adding physical bank-switch penalties $\sum \Delta t_{\text{conflict}}$, refresh overhead ($t_{\text{RFC}}$ stalls where all banks are locked for $200\text{--}400\text{ ns}$ every $3.9\,\mu\text{s}$), and bus turnaround penalties, the safety read latency can expand by more than $10\times$ under heavy cognitive load.
 
-To protect real-time control paths against memory contention, embedded systems implement two hardware defenses:
+To protect real-time control paths against memory contention, embedded systems implement three structural defenses:
 1. *AXI Quality of Service (QoS) Priority Elevation*: The memory interconnect enforces 4-bit `AxQOS` signals, assigning highest priority (`0xF`) to the safety monitor's read channels to enable head-of-line priority preemption over best-effort DMA traffic (`0x0`).
-2. *On-Chip SRAM Isolation*: Critical safety states, barrier function parameters, and active trajectory splines bypass external DRAM entirely, executing exclusively out of static on-chip SRAM or Data Tightly Coupled Memory (DTCM).
+2. *DRAM Bank Partitioning and Page Coloring*: The operating system memory allocator allocates physical memory pages such that real-time safety code and high-rate camera DMA buffers map to strictly disjoint physical DRAM banks, eliminating inter-workload bank conflicts entirely.
+3. *On-Chip SRAM Isolation*: Critical safety states, barrier function parameters, and active trajectory splines bypass external DRAM entirely, executing exclusively out of static on-chip SRAM or Data Tightly Coupled Memory (DTCM).
 
 ## Clock Synchronization and Network Timestamps {#sec-appendix-systems-ptp}
 
@@ -592,7 +659,7 @@ In distributed machine learning clusters, nodes synchronize system clocks via Ne
 
 ### Precision time protocol message exchange
 
-The IEEE 1588 Precision Time Protocol (PTP) and IEEE 802.1AS (generalized PTP) synchronize a Slave clock ($S$) to a Master clock ($M$) by exchanging four physical timestamps across the communication link:\index{Precision Time Protocol!clock synchronization}\index{Precision Time Protocol!delay measurement}
+The IEEE 1588 Precision Time Protocol (PTP) and IEEE 802.1AS (generalized PTP) synchronize a Slave clock ($S$) to a Master clock ($M$) by exchanging four physical timestamps across the communication link:\index{Precision Time Protocol!clock synchronization}\index{Precision Time Protocol!delay measurement}\index{Clock synchronization!PI servo loop}
 1. $t_1$: Master transmits a *Sync* frame, recording its local transmission timestamp.
 2. $t_2$: Slave receives the *Sync* frame, recording its local arrival timestamp.
 3. $t_3$: Slave transmits a *Delay_Req* frame, recording its local transmission timestamp.
@@ -606,9 +673,14 @@ $$ O = \frac{(t_2 - t_1) - (t_4 - t_3)}{2} $$
 The one-way network propagation delay is:
 $$ D = \frac{(t_2 - t_1) + (t_4 - t_3)}{2} $$
 
+**Proportional-Integral (PI) Clock Servo.** Slave clocks adjust their local time base using a closed-loop digital PI servo filter. At synchronization step $k$, the measured offset $O[k]$ drives frequency correction $\Delta f[k]$ applied to the hardware accumulator register:
+$$ \Delta f[k] = K_p O[k] + K_i \sum_{j=0}^k O[j] $$
+where proportional gain $K_p$ tracks phase error and integral gain $K_i$ eliminates steady-state frequency drift caused by quartz crystal thermal gradient variations.
+
 **Path Asymmetry and Conversion Uncertainty.** If forward and reverse path delays are asymmetric ($\Delta D_{\text{asym}} = D_{M \to S} - D_{S \to M} \ne 0$), the calculated offset incurs an unobservable systematic bias of $\Delta D_{\text{asym}} / 2$. Residual clock uncertainty $\epsilon_{\text{ptp}}$—combining asymmetric propagation, oscillator frequency drift between sync intervals, and hardware timestamp quantization—is explicitly bounded:
 $$ \epsilon_{\text{ptp}} \le \frac{|\Delta D_{\text{asym}}|}{2} + \Delta t_{\text{interval}} \cdot \left| \frac{\Delta f}{f_{\text{nom}}} \right| + 2 \tau_{\text{quant}} $$
-This conversion bound is stored directly in the proposal header's `sync_error_ns` field (@tbl-appendix-systems-wire-header) and added to every evidence-age calculation in the 1 kHz permission path.
+This conversion bound is stored directly in the proposal header's `sync_error_ns` field (@tbl-appendix-systems-wire-header) and added to every evidence-age calculation in the 1 kHz permission path:
+$$ t_{\text{age,max}} = (t_{\text{ctrl}} - t_{\text{evidence}}) + \epsilon_{\text{ptp}} $$
 
 ### Physical layer hardware timestamping
 
@@ -642,16 +714,25 @@ mailbox_doorbell = 1;            // Store 2: Interrupt trigger
 ```
 If the CPU reorders Store 2 ahead of Store 1, Core B receives the interrupt before the new joint target is committed to physical memory, reading stale or torn data.
 
-**Hardware Memory Barriers and Shareability Domains.** To enforce deterministic ordering across heterogeneous cores, developers must insert architectural memory barriers:\index{Memory barrier!instruction ordering}
+**Hardware Memory Barriers and Shareability Domains.** To enforce deterministic ordering across heterogeneous cores, developers must insert architectural memory barriers:\index{Memory barrier!instruction ordering}\index{Memory barrier!DMB vs DSB vs ISB}
 ```c
 shared_buffer->q_target = q_cmd; // Struct copy of the joint targets
 __asm__ volatile("dmb oshst" ::: "memory"); // Outer-shareable store barrier
 mailbox_doorbell = 1;            // Assert doorbell register
 ```
-In ARM architectures, barriers operate over explicit shareability domains:
+In ARM architectures, memory barriers and instructions are distinguished by scope and execution semantics:
+
+* `DMB` (Data Memory Barrier): Ensures that memory accesses specified before the barrier appear in memory before memory accesses specified after the barrier. It does not block execution of non-memory instructions.
+* `DSB` (Data Synchronization Barrier): A stricter barrier that halts CPU pipeline instruction dispatch until all previous memory transactions and bus buffer flushes have completed.
+* `ISB` (Instruction Synchronization Barrier): Flushes the CPU instruction prefetch pipeline, ensuring subsequent instructions are fetched anew from cache or memory.
+
+Barriers operate across explicit architectural **shareability domains**:
+
 * `DMB ISHST` (Inner Shareable Store): Orders stores across cores within the local application CPU cluster sharing a coherent L2/L3 cache.
 * `DMB OSHST` / `DMB OSH` (Outer Shareable): Enforces ordering across the entire system-on-chip, including the real-time Cortex-R/M cores, GPU, and DMA subsystems.
-* *Cache Maintenance Operations*: If the shared SRAM is mapped as cached memory, Core A must explicitly clean the cache line to the Point of Coherency (`DC CVAC`) before asserting the doorbell, and Core B must invalidate its local cache line (`DC IVAC`) before reading. Alternatively, mapping the shared mailbox region as Normal Non-Cacheable memory eliminates cache maintenance overhead while retaining barrier-enforced store ordering. See @sec-nervous-mailbox-exchanges and @sec-placement-two-paths-one-die for heterogeneous SoC communication architectures and isolation guarantees.[^fn-sys-memory-barriers]
+* `DMB SY` (System): Enforces ordering across all system masters and peripherals on the SoC.
+
+*Cache Maintenance vs. Non-Cacheable Mappings.* If shared SRAM is mapped as Normal Cacheable memory, Core A must explicitly clean the cache line to the Point of Coherency (`DC CVAC`) before asserting the doorbell, and Core B must invalidate its local cache line (`DC IVAC`) before reading. Because cache clean and invalidate operations require hundreds of CPU cycles and are vulnerable to eviction timing bugs, real-time shared SRAM mailboxes are typically mapped as **Normal Non-Cacheable** (or Device-nGnRnE) memory. Under Non-Cacheable mappings, cache maintenance operations are eliminated entirely, and store barriers (`DMB OSHST`) guarantee single-cycle order enforcement across write buffers. Furthermore, shared mailbox structures must be aligned to cache-line boundaries (`alignas(64)`) to prevent false sharing and atomic cache-line bouncing. See @sec-nervous-mailbox-exchanges and @sec-placement-two-paths-one-die for heterogeneous SoC communication architectures and isolation guarantees.[^fn-sys-memory-barriers]
 
 [^fn-sys-memory-barriers]: **Hardware Memory Barriers**\index{Memory barrier!instruction ordering}: Barriers order accesses only within their specified shareability and memory-attribute contract. On a noncoherent route, cache clean/invalidate operations or coherent mappings are also required. [Arm's memory-ordering guide](https://developer.arm.com/community/arm-community-blogs/b/architectures-and-processors-blog/posts/memory-access-ordering-part-3---memory-access-ordering-in-the-arm-architecture) distinguishes ordering from coherence.
 
@@ -674,13 +755,17 @@ For a commanded voltage step applied from rest ($\omega_m = 0$), quadrature curr
 $$ I_q(t) = \frac{V_{\text{terminal}}}{R_{\text{phase}}} \left( 1 - e^{-t / \tau_e} \right), \quad \tau_e = \frac{L_q}{R_{\text{phase}}} $$
 where $\tau_e$ is the electrical time constant. Current—and therefore delivered torque—reaches approximately 63 percent of its steady-state value after one time constant $\tau_e$ (typically $200\,\mu\text{s}$ to $2\text{ ms}$ in robotics actuators). An unprivileged neural policy step command cannot produce an instantaneous step in physical torque.
 
-### Lumped thermal networks and duty cycle
+Furthermore, achievable current is constrained by inverter voltage saturation:
+$$ \sqrt{V_d^2 + V_q^2} \le \frac{V_{\text{bus}}}{\sqrt{3}} $$
+As rotor speed $\omega_m$ rises, back-EMF $\omega_e \lambda_{\text{pm}}$ increases, consuming available quadrature voltage $V_q$. At the actuator's base speed, voltage headroom vanishes, and torque collapses unless negative direct-axis current ($I_d < 0$, flux weakening) is commanded to demagnetize the stator air gap.
+
+### Lumped thermal networks and stator Joule heating
 
 Current flowing through stator windings dissipates resistive Joule heat:
 $$ P_{\text{loss}}(t) = \frac{3}{2} I_q^2(t) R_{\text{phase}}(T) $$
 where copper electrical resistance increases linearly with temperature:
 $$ R_{\text{phase}}(T) = R_0 \left[ 1 + \alpha_{\text{Cu}} (T - T_0) \right] $$
-with temperature coefficient $\alpha_{\text{Cu}} \approx 0.00393\text{ K}^{-1}$ for copper.
+with temperature coefficient $\alpha_{\text{Cu}} \approx 0.00393\text{ K}^{-1}$ for copper. At an operating temperature of $150^\circ\text{C}$, stator copper resistance is approximately $50\text{ percent}$ higher than at room temperature ($25^\circ\text{C}$). To sustain the same commanded torque $\tau = K_t I_q$, the motor requires identical current $I_q$ but generates $50\text{ percent}$ more thermal dissipation, creating positive feedback between winding temperature and Joule heating that accelerates thermal degradation.
 
 **Multi-Node Lumped Thermal Networks.** In a physical motor, thermal dynamics span multiple physical interfaces with disparate thermal masses:\index{Actuator!stator thermal dynamics}\index{Actuator!thermal ladder network}
 
@@ -734,18 +819,22 @@ In data center machine learning clusters, electrical power is managed by high-ca
 
 ### Inductive droop and capacitive decoupling
 
-When multiple high-torque actuators accelerate simultaneously, the total load current steps by $\Delta I_{\text{load}} = \sum \Delta I_k$ with steep current slew rates $dI_{\text{load}}/dt$. The electrical wiring harness connecting the main battery to distributed joint inverters possesses parasitic loop inductance $L_{\text{bus}}$ and harness resistance $R_{\text{bus}}$. These parasitics impede source current delivery, producing instantaneous inductive rail droop at the actuator inverter terminals:\index{Inductive voltage droop!DC bus harness}\index{Decoupling capacitors!inverter DC bus}
+When multiple high-torque actuators accelerate simultaneously (such as a humanoid jumping or an articulated arm bracing against an unexpected payload), total load current steps by $\Delta I_{\text{load}} = \sum_{k=1}^{N_{\text{axes}}} \Delta I_k$ with steep current slew rates $dI_{\text{load}}/dt \sim 10^5\text{--}10^6\text{ A/s}$. The electrical wiring harness connecting the main battery to distributed joint inverters possesses parasitic loop inductance $L_{\text{bus}}$ (typically $1\text{--}5\,\mu\text{H}$ for a 1-meter harness) and harness resistance $R_{\text{bus}}$. These parasitics impede source current delivery, producing instantaneous inductive rail droop at the actuator inverter terminals:\index{Inductive voltage droop!DC bus harness}\index{Decoupling capacitors!inverter DC bus}\index{Under-Voltage Lockout!gate driver protection}
 $$ \Delta V_{\text{bus}}(t) = R_{\text{bus}} I_{\text{source}}(t) + L_{\text{bus}} \frac{dI_{\text{source}}}{dt} + \Delta V_C(t) $$
-Local inverter bus capacitance $C_{\text{bus}}$ must supply the instantaneous deficit between load demand and source current:
+Local inverter bus capacitance $C_{\text{bus}}$ must supply the instantaneous charge deficit between load demand and battery source current:
 $$ \Delta V_C(t) = \frac{1}{C_{\text{bus}}} \int_0^t \left( I_{\text{load}}(s) - I_{\text{source}}(s) \right) ds $$
 
-If the DC bus terminal voltage drops below the drive's configured Under-Voltage Lockout (UVLO) threshold $V_{\text{UVLO}}$, the gate driver power silicon disables itself to prevent erratic MOSFET gate switching, dropping motor torque instantly. To maintain bus voltage stability during a step acceleration of duration $\Delta t_{\text{step}}$, the minimum local decoupling capacitance is bounded by:
+**Under-Voltage Lockout (UVLO).** If the DC bus terminal voltage drops below the drive's configured Under-Voltage Lockout threshold $V_{\text{UVLO}}$ (e.g., $18\text{ V}$ on a $24\text{ V}$ nominal bus, or $36\text{ V}$ on a $48\text{ V}$ bus), the gate driver IC enters UVLO fault protection, disabling gate bias within microseconds to prevent power MOSFETs from operating in their linear resistive region. This instantly drops motor torque to zero, causing the joint to collapse under gravity.
+
+To maintain DC bus stability during a step acceleration of duration $\Delta t_{\text{step}}$, the minimum local decoupling capacitance is bounded by:
 $$ C_{\text{bus}} \ge \frac{\Delta I_{\text{step}} \cdot \Delta t_{\text{step}}}{2 \Delta V_{\text{droop, max}}} $$
-Local capacitor banks combine low-ESR multi-layer ceramic capacitors (MLCCs) for high-frequency ripple filtering ($20\text{--}100\text{ kHz}$ inverter switching) with bulk electrolytic or polymer capacitors for transient step energy buffering.
+Local capacitor banks combine low-ESR multi-layer ceramic capacitors (MLCCs) for high-frequency ripple filtering ($20\text{--}100\text{ kHz}$ inverter switching) with bulk electrolytic or polymer capacitors for transient step energy buffering. Furthermore, the capacitor bank must be rated for RMS ripple current:
+$$ I_{\text{rms,ripple}} \approx I_{\text{phase}} \sqrt{2 D \left( 1 - \frac{4}{3} D \right)} $$
+preventing internal capacitor overheating from equivalent series resistance ($I^2 \cdot \text{ESR}$).
 
 ### Regenerative braking surges and chopper sizing
 
-During controlled regenerative deceleration or emergency stopping, mechanical kinetic energy $E_k = \frac{1}{2} m v^2$ (linear platform motion) or $E_k = \frac{1}{2} J_{\text{eff}} \dot{q}^2$ (articulated joint rotation) is converted back into electrical energy by the motor acting as a generator. Current flows back through the inverter bridge into the DC bus via active synchronous rectification or freewheeling body diodes.\index{Regenerative braking!chopper resistor}\index{Power electronics!brake chopper}
+During controlled regenerative deceleration or emergency stopping, mechanical kinetic energy $E_k = \frac{1}{2} m v^2$ (linear platform motion) or $E_k = \frac{1}{2} J_{\text{eff}} \dot{q}^2$ (articulated joint rotation) is converted back into electrical energy by the motor acting as a generator. Current flows back through the inverter bridge into the DC bus via active synchronous rectification or freewheeling body diodes.\index{Regenerative braking!chopper resistor}\index{Power electronics!brake chopper}\index{Brake chopper!hysteresis control}
 
 If the battery cannot accept this regenerative current—such as when the battery pack is at 100 percent state-of-charge ($> 4.2\text{ V/cell}$), when battery internal resistance rises at freezing temperatures, or when safety contactors open to isolate the pack—the returned electrical energy $\eta_{\text{regen}} E_k$ is forced into the local bus capacitor $C_{\text{bus}}$. The resulting terminal voltage surge follows the ideal capacitor relationship:
 $$ \Delta E_C = \frac{1}{2} C_{\text{bus}} \left( V_{\text{final}}^2 - V_{\text{initial}}^2 \right) = \eta_{\text{regen}} E_k $$
@@ -753,10 +842,10 @@ $$ V_{\text{final}} = \sqrt{ V_{\text{initial}}^2 + \frac{2 \eta_{\text{regen}} 
 
 If $V_{\text{final}}$ exceeds the MOSFET drain-source breakdown voltage $V_{\text{DSS}}$ or the inverter Over-Voltage Lockout (OVLO) threshold, the power semiconductors enter destructive avalanche breakdown.
 
-**Dynamic Brake Choppers.** To prevent overvoltage destruction, motor drives incorporate an active **dynamic brake chopper**. When DC bus voltage crosses a hardware clamp threshold $V_{\text{clamp}}$, a high-power semiconductor switch (MOSFET or IGBT) modulates an auxiliary low-inductance braking resistor $R_{\text{brake}}$ to burn excess kinetic energy as heat:[^fn-sys-brake-chopper]
+**Dynamic Brake Choppers.** To prevent overvoltage destruction, motor drives incorporate an active **dynamic brake chopper**. When DC bus voltage crosses a hardware clamp threshold $V_{\text{clamp,on}}$, a high-power semiconductor switch (MOSFET or IGBT) modulates an auxiliary low-inductance braking resistor $R_{\text{brake}}$ with hysteresis:[^fn-sys-brake-chopper]
 $$ R_{\text{brake}} \le \frac{V_{\text{clamp}}^2}{P_{\text{regen, peak}}} $$
 $$ P_{\text{regen, peak}} \approx \eta_{\text{regen}} \cdot \tau_{\text{brake}} \cdot \omega_{\max} $$
-In addition to peak power sizing, the braking resistor must be rated for single-pulse adiabatic energy absorption:
+The chopper comparator switches the resistor on when $V_{\text{bus}} \ge V_{\text{clamp,on}}$ and turns off when $V_{\text{bus}} \le V_{\text{clamp,off}}$, preventing rapid oscillation. In addition to peak power sizing, the braking resistor must be rated for single-pulse adiabatic energy absorption:
 $$ E_{\text{pulse}} \ge \eta_{\text{regen}} E_k $$
 with a thermal cooldown time constant that prevents cumulative thermal failure during repeated stop-and-go duty cycles.
 
@@ -772,13 +861,13 @@ If these two traffic classes share a naive best-effort Ethernet fabric with firs
 
 ### Fieldbus serialization and schedulability
 
-On shared physical buses, $N_{\text{axes}}$ actuator drives transmit telemetry and receive setpoints cyclically. To prevent perception traffic from corrupting motor timing, physical AI architectures utilize dedicated deterministic fieldbuses (CAN FD or EtherCAT) or time-scheduled switched Ethernet (IEEE TSN).\index{Fieldbus!CAN-FD arbitration}\index{Fieldbus!CAN-FD WCRT}\index{Fieldbus!EtherCAT on-the-fly}
+On shared physical buses, $N_{\text{axes}}$ actuator drives transmit telemetry and receive setpoints cyclically. To prevent perception traffic from corrupting motor timing, physical AI architectures utilize dedicated deterministic fieldbuses (CAN FD or EtherCAT) or time-scheduled switched Ethernet (IEEE TSN).\index{Fieldbus!CAN-FD arbitration}\index{Fieldbus!CAN-FD WCRT}\index{Fieldbus!EtherCAT on-the-fly}\index{Fieldbus!TSN perception-control multiplexing}
 
 **CAN FD Dual-Rate Bit Timing and Arbitration.** Controller Area Network with Flexible Data-Rate (CAN FD, ISO 11898-1) extends classical CAN by introducing dual bit-rate switching and expanding payload capacity from 8 bytes up to 64 bytes:
 
 * *Arbitration Phase*: Transmitted at the nominal bit rate $R_{\text{nom}}$ (typically $500\text{ kbps}$ or $1\text{ Mbps}$). The bit time $T_{\text{bit,nom}} = 1/R_{\text{nom}}$ must accommodate physical cable propagation delays across the robot chassis and transceiver delays ($2 t_{\text{prop}} + t_{\text{transceiver}}$), allowing non-destructive bitwise priority arbitration. Nodes drive the bus using dominant (logic 0) or recessive (logic 1) states. If two nodes transmit simultaneously, the lower numerical message identifier (higher logical priority) overwrites recessive bits, winning the bus without collision or frame destruction.
 * *Data Phase*: Once arbitration is established, the winning node asserts the Bit Rate Switch (BRS) bit, accelerating transmission to the data bit rate $R_{\text{data}}$ (typically $2\text{--}8\text{ Mbps}$). Because only a single node drives the bus during the data phase, physical propagation delay between distributed nodes no longer constrains bit duration.
-* *Bit-Stuffing Overhead*: To preserve transceiver clock synchronization, the physical layer inserts a dynamic stuff bit after every 5 consecutive identical bits in the arbitration phase, alongside fixed stuff bits embedded within the CRC field.
+* *Bit-Stuffing Overhead*: To preserve transceiver clock synchronization, the physical layer inserts a dynamic stuff bit after every 5 consecutive identical bits in the arbitration phase, alongside fixed stuff bits embedded within the CRC field. In the worst-case bit pattern, bit stuffing can inflate frame transmission duration by up to $20\text{ percent}$.
 
 The serialization duration for frame $i$ is:
 $$ t_{\text{frame},i} \approx \frac{B_{\text{arb},i}}{R_{\text{nom}}} + \frac{B_{\text{data},i}}{R_{\text{data}}} + t_{\text{stuff},i} + t_{\text{interframe},i} $$
@@ -788,7 +877,7 @@ where $B_{\text{arb},i}$ is the arbitration field length (identifier, control bi
 $$ R_i = C_i + B_i + \sum_{j \in hp(i)} \left\lceil \frac{R_i + J_j + \tau_{\text{bit}}}{T_j} \right\rceil C_j $$
 where $C_i = t_{\text{frame},i}$, $J_j$ is the release jitter of higher-priority message $j$, and $B_i$ is the maximum lower-priority blocking duration:
 $$ B_i = \max_{k \in lp(i)} C_k $$
-Because a maximum 64-byte CAN FD frame at $2\text{ Mbps}$ requires approximately $300\text{--}400\,\mu\text{s}$ to serialize, a CAN FD bus at $80\%$ utilization can service at most $10\text{--}15$ joint axes at 1 kHz. CAN FD cannot carry raw camera or lidar perception data; its role is strictly bounded to joint-level motor and sensor communication.
+Because a maximum 64-byte CAN FD frame at $2\text{ Mbps}$ requires approximately $300\text{--}400\,\mu\text{s}$ to serialize, a CAN FD bus at $80\text{ percent}$ utilization can service at most $10\text{--}15$ joint axes at 1 kHz. CAN FD cannot carry raw camera or lidar perception data; its role is strictly bounded to joint-level motor and sensor communication.
 
 **EtherCAT On-the-Fly Ring Processing.** For high-axis-count systems (such as humanoids with 30 to 50 degrees of freedom), EtherCAT (ETG.1000) achieves deterministic 1 kHz to 10 kHz cycle times over standard 100BASE-TX full-duplex Ethernet ($R_{\text{link}} = 100\text{ Mbps}$). Rather than transmitting individual frames per axis, EtherCAT structures communication as an active logical ring:
 
@@ -800,7 +889,7 @@ Because a maximum 64-byte CAN FD frame at $2\text{ Mbps}$ requires approximately
 
 The total round-trip cycle period for $S$ slave drives is bounded by:
 $$ T_{\text{cycle}} \ge \frac{B_{\text{frame}}}{R_{\text{link}}} + t_{\text{master}} + \sum_{s=1}^S t_{\text{slave},s} + t_{\text{prop}} + t_{\text{guard}} $$
-For a 30-axis humanoid exchanging 8 bytes of command setpoints and 12 bytes of feedback per joint, the entire cyclic exchange ($600\text{ bytes}$) fits comfortably within a single $750\text{-byte}$ Ethernet frame. The complete round-trip across all 30 axes executes in approximately $65\,\mu\text{s}$ at $100\text{ Mbps}$, consuming less than $7\%$ of the 1 ms control period. Furthermore, EtherCAT **Distributed Clocks (DC)** synchronize all slave timers to the master with sub-microsecond precision ($< 100\text{ ns}$ clock skew) by measuring and compensating for physical cable propagation delays, enabling synchronous PWM carrier generation across all inverter drives.
+For a 30-axis humanoid exchanging 8 bytes of command setpoints and 12 bytes of feedback per joint, the entire cyclic exchange ($600\text{ bytes}$) fits comfortably within a single $750\text{-byte}$ Ethernet frame. The complete round-trip across all 30 axes executes in approximately $65\,\mu\text{s}$ at $100\text{ Mbps}$, consuming less than $7\text{ percent}$ of the 1 ms control period. Furthermore, EtherCAT **Distributed Clocks (DC)** synchronize all slave timers to the master with sub-microsecond precision ($< 100\text{ ns}$ clock skew) by measuring and compensating for physical cable propagation delays, enabling synchronous PWM carrier generation across all inverter drives.
 
 ### Time-sensitive networking and scheduled ethernet gates
 
@@ -988,12 +1077,15 @@ This clamp is valid only when $D_{\text{clear}}$ exceeds the three fixed allowan
 
 ## Wire Formats for the Record Chain {#sec-appendix-systems-wire-formats}
 
-In distributed machine learning systems, inter-service contracts are defined via serialization frameworks such as Protocol Buffers, FlatBuffers, or JSON schemas, which rely on variable-length wire formats, dynamic deserialization, pointer indirection, and heap allocation. In physical AI systems, however, records crossing the causal boundary between unprivileged deep learning runtimes (executing in user space under Linux on 64-bit application processors) and certified real-time safety monitors (executing on 32-bit lockstep microcontrollers or RTOS partitions) must satisfy strict embedded systems invariants:\index{Serialization!wire formats}\index{Memory layout!natural alignment}\index{Zero-allocation!embedded contract chain}\index{Safety contract chain!14-record lineage}
-1. *Zero Dynamic Allocation*: Deserialization must never invoke dynamic memory managers (`malloc`, `free`, C++ `new`, `delete`). Dynamic allocators suffer from heap fragmentation, unbounded bucket-search times, and global allocator mutex contention that violate hard real-time deadlines. All record slots, mailbox staging areas, and scratch buffers must be statically sized at compile time and preallocated in dedicated static SRAM or Data Tightly Coupled Memory (DTCM) pools.
-2. *Deterministic Parse Time*: Wire formats must eliminate variable-length pointer chasing. Fields must reside at fixed, deterministic byte offsets, allowing validation logic to inspect bounds and timestamps in $\mathcal{O}(1)$ time with cycle-bounded instruction counts.
+In distributed machine learning systems, inter-service contracts are defined via serialization frameworks such as Protocol Buffers, FlatBuffers, or JSON schemas, which rely on variable-length wire formats, dynamic deserialization, pointer indirection, and heap allocation. In physical AI systems, however, records crossing the causal boundary between unprivileged deep learning runtimes (executing in user space under Linux on 64-bit application processors) and certified real-time safety monitors (executing on 32-bit lockstep microcontrollers or RTOS partitions) must satisfy strict embedded systems invariants:\index{Serialization!wire formats}\index{Memory layout!natural alignment}\index{Zero-allocation!embedded contract chain}\index{Safety contract chain!14-record lineage}\index{Hardware exceptions!unaligned access trap}
+
+1. *Zero Dynamic Allocation Invariant*: Deserialization must never invoke dynamic memory managers (`malloc`, `free`, C++ `new`, `delete`). Dynamic heap allocators manage internal free-list bins, take global allocator mutexes, and suffer from heap fragmentation. Under memory pressure, heap operations can invoke the `brk()` or `mmap()` system calls, triggering kernel memory compaction or page faults that stall execution for tens of milliseconds. In hard real-time control, all record slots, mailbox staging areas, scratch buffers, and circular telemetry logs must be statically sized at compile time and preallocated in dedicated static SRAM or Data Tightly Coupled Memory (DTCM) pools.
+2. *Deterministic $\mathcal{O}(1)$ Parse Time*: Wire formats eliminate variable-length fields and pointer chasing. Every scalar and vector resides at a fixed, deterministic byte offset, allowing safety enforcers to inspect bounds, timestamps, and signatures in $\mathcal{O}(1)$ time with cycle-bounded instruction counts.
 3. *Natural Alignment Across Heterogeneous ABIs*: On heterogeneous SoCs combining 64-bit application processors (ARM Cortex-A or x86_64) and 32-bit real-time microcontrollers (ARM Cortex-R52 or Cortex-M7), data types must be naturally aligned. A scalar of size $k$ bytes must reside at an offset satisfying:
 $$ \text{offset} \equiv 0 \pmod k $$
-Specifically, 64-bit timestamps and integers (`uint64_t`, `float64`) align on 8-byte boundaries ($k=8$), 32-bit values (`uint32_t`, `float32`) align on 4-byte boundaries ($k=4$), and 16-bit integers (`uint16_t`) align on 2-byte boundaries ($k=2$). If a data structure violates natural alignment, 32-bit microcontrollers configured with strict alignment checking raise hardware data abort exceptions (`UsageFault`). Even when unaligned accesses are supported in hardware, the memory subsystem splits the load or store into multiple bus transactions, destroying the single-cycle memory atomicity required by lock-free seqlocks. Furthermore, if fields are misaligned, compilers automatically insert invisible, architecture-dependent padding bytes, producing binary layout discrepancies between 64-bit and 32-bit compilers. By declaring all padding explicitly as `reserved` zero-filled bytes, the wire formats guarantee identical bit-level memory layouts across all compilers and processor cores.
+Specifically, 64-bit timestamps and integers (`uint64_t`, `float64`) align on 8-byte boundaries ($k=8$), 32-bit values (`uint32_t`, `float32`) align on 4-byte boundaries ($k=4$), and 16-bit integers (`uint16_t`) align on 2-byte boundaries ($k=2$).
+
+**Microarchitectural Consequences of Alignment Violations.** In certified safety microcontrollers (ISO 26262 ASIL D, IEC 61508 SIL 3), unaligned memory accesses are strictly forbidden. The system configuration register enables unaligned traps (`SCB->CCR |= SCB_CCR_UNALIGN_TRP_Msk`), causing any unaligned halfword or word access to raise an immediate `UsageFault` hardware exception that halts the processor. Even on cores where unaligned accesses are supported in hardware, an unaligned 32-bit or 64-bit access that crosses a 32-bit bus word or 64-byte cache-line boundary splits the memory transaction into multiple bus beats across the AXI/AHB-Lite interconnect. If an interrupt or another bus master intervenes between these beats, the access is torn, destroying single-cycle memory atomicity and corrupting lock-free seqlocks. Furthermore, compilers insert architecture-dependent padding bytes if structs contain unaligned members, producing binary layout discrepancies between 64-bit (AAPCS64) and 32-bit (AAPCS32) compilers. By declaring all padding explicitly as zero-filled `reserved` bytes, wire formats guarantee identical bit-level memory layouts across all compilers and processor cores.
 
 **The 14-Record Safety Contract Chain.** Across this book, the physical AI machine stack maintains an unbroken chain of 14 formal cyber-physical contracts that govern execution from raw electromechanics up to legal release certification:
 
