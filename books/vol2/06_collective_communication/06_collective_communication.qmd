@@ -1445,44 +1445,28 @@ The worked trace in notebook \ref{nbk-collective-communication-alltoall-moe-toke
 
 ##### The dispatch and combine lifecycle {#sec-collective-communication-dispatch-combine-lifecycle-c4a1}
 
-In an MoE transformer layer with $E$ experts distributed across $P$ ranks ($E/P$ experts per rank), each rank holds a local batch of $T$ tokens. A gating router computes top-$k$ routing probabilities over all $E$ experts for each token. This induces two collective communication phases per MoE layer's forward pass, separated by expert computation:
-
-1.  **Token Dispatch (All-to-All)**: Each rank partitions its $T$ local token activation vectors ($\mathbf{x} \in \mathbb{R}^{d_{\text{model}}}$) according to the destination ranks hosting the selected experts. Devices execute an AllToAll collective (or variable-size `AllToAllv`\index{All-to-All!variable-size AllToAllv}) to route tokens across the fabric to the expert host ranks according to the routing matrix\index{All-to-All!routing matrix} via token dispatch\index{All-to-All!dispatch phase}.
-2.  **Token Combine (All-to-All)**: After each rank computes forward passes through its assigned local expert feed-forward networks (FFNs), a second AllToAll collective routes the resulting output vectors back to the originating ranks during token combine\index{All-to-All!combine phase}. Each rank then computes the weighted combination of expert outputs:
-    $$\mathbf{y}_i = \sum_{j \in \text{top-}k} g_{i,j} \cdot \text{Expert}_j(\mathbf{x}_i)$$
+In an MoE transformer layer with $E$ experts distributed across $P$ ranks ($E/P$ experts per rank), each rank holds a local batch of $T$ tokens. A gating router computes top-$k$ routing probabilities over all $E$ experts for each token, inducing two collective communication phases separated by expert computation. During token dispatch\index{All-to-All!dispatch phase}, each rank partitions its $T$ local token activation vectors ($\mathbf{x} \in \mathbb{R}^{d_{\text{model}}}$) according to the destination ranks hosting the selected experts, executing an AllToAll collective (or variable-size `AllToAllv`\index{All-to-All!variable-size AllToAllv}) to route tokens across the fabric according to the routing matrix\index{All-to-All!routing matrix}. After each rank computes forward passes through its assigned local expert feed-forward networks (FFNs), the token combine\index{All-to-All!combine phase} phase executes a second AllToAll collective to route output vectors back to their originating ranks. Each rank then computes the weighted combination of expert outputs:
+$$\mathbf{y}_i = \sum_{j \in \text{top-}k} g_{i,j} \cdot \text{Expert}_j(\mathbf{x}_i)$$
 
 ##### Capacity factors and bounded allocation {#sec-collective-communication-capacity-factors-bounded-allocation-e8d2}
 
 In dense models, collective buffer sizes are static and deterministic. In sparse MoE models, the number of tokens routed to expert $e$ is a stochastic variable $N_e \sim \text{Binomial}(P \cdot T, p_e)$. To avoid dynamic memory allocation and buffer reallocation overhead during communication, systems pre-allocate static expert buffers parameterized by an expert capacity factor\index{Capacity factor!expert routing} $C \ge 1.0$ [@lepikhin2021gshard; @fedus2022switch]:
 $$\text{Capacity}_e = \left\lceil \frac{P \times T \times k}{E} \times C \right\rceil$$
 
-The capacity factor exposes a fundamental systems trade-off:
-
-*   **When $C = 1.0$**: Buffers are sized strictly for the uniform expectation. Under routing skew, any tokens assigned to an expert beyond its capacity are *dropped*\index{Token dropping!capacity factor} (bypassed via residual connections without expert computation), degrading training convergence and downstream task accuracy.
-*   **When $C > 1.0$**: Buffers accommodate more routing variance (typically $C = 1.25$–$1.5$), reducing token dropping without guaranteeing that every routing outcome fits. However, to maintain uniform collective communication, buffers must be padded with dummy tokens to fixed capacity, inflating the physical data volume crossing the network by $C\times$ and forcing GPUs to compute matrix multiplications on padded null tokens.
-*   **Dropless dynamic routing**: Modern high-throughput frameworks utilize variable-size `AllToAllv` with dynamic memory buffers, eliminating padding overhead while preserving all tokens. However, dynamic routing exposes execution time directly to routing skew.
+This capacity factor exposes a fundamental systems trade-off between communication efficiency and model fidelity. Sizing buffers strictly for uniform expectation ($C = 1.0$) avoids padding overhead, but under routing skew any tokens assigned to an expert beyond capacity are dropped\index{Token dropping!capacity factor}—bypassed via residual connections without expert computation—which degrades convergence and downstream accuracy. Increasing the capacity factor ($C > 1.0$, typically $1.25$–$1.5$) accommodates routing variance and reduces dropping, but maintaining uniform collective communication requires padding unused buffer slots with dummy tokens. This inflates physical network traffic by $C\times$ and forces GPUs to perform matrix multiplications on null tokens. Modern high-throughput frameworks therefore turn to dropless dynamic routing using variable-size `AllToAllv` with dynamic memory buffers, eliminating padding overhead while preserving every token, though dynamic routing exposes execution time directly to routing skew.
 
 ##### Bisection saturation and straggler tails {#sec-collective-communication-bisection-saturation-straggler-tails-f3c9}
 
 Because token routing is determined by input semantics, certain "celebrity" experts inevitably receive disproportionate token volumes. An expert receiving $\gamma \times$ the average load ($\gamma > 1$) increases its host GPU's traffic. The host's total receive volume depends on the combined load of all experts assigned to it, which is the rank-level quantity in the bound that follows.
 
-This skew creates two compounding performance bottlenecks from stragglers\index{Straggler!expert skew}:
-
-1.  **Inbound reception bottleneck**: The completion time of the dispatch collective is bounded by the slowest receiver. Even if 95 percent of GPUs complete their AllToAll exchanges in tens of microseconds, the entire cluster stalls waiting for the hottest destination rank to ingest its oversized payload:
-    $$T_{\text{dispatch}} \ge \frac{M_{\text{max}} \times d_{\text{model}} \times \text{sizeof(dtype)}}{\text{BW}_{\text{rx}}}$$
-    where $M_{\text{max}} = \max_p \sum_{e \in \text{rank } p} N_e$.
-2.  **Bisection fabric saturation**: Unlike Ring AllReduce (which maps communication onto nearest-neighbor ring links), AllToAll generates a complete bipartite exchange\index{All-to-All!bipartite exchange} where $(P-1)/P \approx 1$ of all tokens must cross the cluster network fabric. In an oversubscribed fabric with oversubscription ratio $R:1$, the usable bisection bandwidth $\text{BW}_{\text{bisect}} = (P \cdot \text{BW}_{\text{inject}}) / (2R)$ throttles the exchange:
-    $$T_{\text{dispatch}} \ge \frac{V_{\text{cut}}}{\text{BW}_{\text{bisect}}}$$
+This skew creates two compounding performance bottlenecks from stragglers\index{Straggler!expert skew}. An inbound reception bottleneck bounds collective completion by the slowest receiver: even if 95 percent of GPUs complete their AllToAll exchanges in tens of microseconds, the entire cluster stalls waiting for the hottest destination rank to ingest its oversized payload:
+$$T_{\text{dispatch}} \ge \frac{M_{\text{max}} \times d_{\text{model}} \times \text{sizeof(dtype)}}{\text{BW}_{\text{rx}}}$$
+where $M_{\text{max}} = \max_p \sum_{e \in \text{rank } p} N_e$. Concurrently, bisection fabric saturation throttles aggregate throughput. Unlike Ring AllReduce (which maps communication onto nearest-neighbor ring links), AllToAll generates a complete bipartite exchange\index{All-to-All!bipartite exchange} where $(P-1)/P \approx 1$ of all tokens must cross the cluster network fabric. In an oversubscribed fabric with oversubscription ratio $R:1$, the usable bisection bandwidth $\text{BW}_{\text{bisect}} = (P \cdot \text{BW}_{\text{inject}}) / (2R)$ limits the exchange:
+$$T_{\text{dispatch}} \ge \frac{V_{\text{cut}}}{\text{BW}_{\text{bisect}}}$$
 
 ##### Hierarchical MoE exchange {#sec-collective-communication-hierarchical-moe-exchange-a7b5}
 
-To mitigate both bisection saturation and small-message overhead across thousands of GPUs, hierarchical MoE runtimes decompose the flat AllToAll into a two-level collective\index{All-to-All!hierarchical exchange} [@hwang2023tutel]:
-
-1.  **Intra-node aggregation**: GPUs use intra-node NVLink to coalesce tokens destined for any expert residing on the same remote server node.
-2.  **Inter-node exchange**: Nodes execute an inter-node AllToAll over InfiniBand or RoCE, exchanging aggregated, coarse-grained payloads rather than thousands of fine-grained pairwise messages.
-3.  **Intra-node distribution**: Receiving GPUs use NVLink to scatter incoming tokens to the exact GPUs hosting the targeted experts.
-
-This hierarchical decomposition reduces the number of concurrent inter-node network flows from $P(P-1)$ to $N_{\text{nodes}}(N_{\text{nodes}}-1)$, replacing fine-grained, latency-sensitive packets with bandwidth-saturating message bursts that shield the data center bisection from packet fragmentation.
+To mitigate both bisection saturation and small-message overhead across thousands of GPUs, hierarchical MoE runtimes decompose the flat AllToAll into a two-level collective\index{All-to-All!hierarchical exchange} [@hwang2023tutel]. Intra-node NVLink first coalesces tokens destined for any expert residing on the same remote server node. Participating nodes then execute an inter-node AllToAll over InfiniBand or RoCE, exchanging aggregated, coarse-grained payloads rather than thousands of fine-grained pairwise messages. Finally, receiving GPUs use NVLink to scatter incoming tokens to the specific GPUs hosting the targeted experts. This hierarchical decomposition reduces the number of concurrent inter-node network flows from $P(P-1)$ to $N_{\text{nodes}}(N_{\text{nodes}}-1)$, replacing fine-grained, latency-sensitive packets with bandwidth-saturating message bursts that shield the data center bisection from packet fragmentation.
 
 #### AllToAll schedule selection {#sec-collective-communication-alltoall-schedule-selection}
 
@@ -1828,8 +1812,7 @@ $$
 T_{\text{ring}} = \underbrace{2(N-1)\alpha}_{\text{Latency Term}} + \underbrace{2\frac{N-1}{N} \frac{M}{\beta}}_{\text{Bandwidth Term}}
 $$
 
-*   **Bandwidth**: As $N \to \infty$, the term approaches $2M/\beta$. This reaches the full-duplex lower bound: each rank sends nearly $2M$ bytes across the two phases and receives the same amount concurrently.
-*   **Latency**: The latency scales linearly with $N$. For 10,000 nodes, 20,000 sequential hops creates massive latency. This is why Ring is bad for small messages.
+The bandwidth term approaches $2M/\beta$ as $N \to \infty$, reaching the full-duplex lower bound: each rank sends nearly $2M$ bytes across the two phases and receives the same amount concurrently. In contrast, the latency term scales linearly with $N$. Across 10,000 nodes, 20,000 sequential hops accumulate substantial latency, which explains why Ring AllReduce becomes uncompetitive for small payloads.
 
 ::: {#nbk-collective-communication-allreduce-cost-70b-model .callout-notebook title="AllReduce cost for a 70B model"}
 
@@ -2438,11 +2421,7 @@ A naive flat Ring AllReduce ignores this structure, routing data across InfiniBa
 
 @Fig-hierarchical-allreduce confines inter-node traffic to Phase 2. Each corresponding-rank group reduces an $M/G$-byte shard across $P$ nodes. A ring in that group sends $2(P-1)M/(PG)$ bytes per participating GPU and receives the same amount. Summing across the node's $G$ GPUs gives $2(P-1)M/P$ bytes sent per node. Smaller per-port payloads improve elapsed time when the node has independent ports and sufficient fabric capacity; sharding does not create bandwidth on a shared uplink.
 
-The phases form one causal chain:
-
-1.  **Intra-node ReduceScatter over NVLink**: A local reduction among the $G$ GPUs in each node leaves each GPU with $1/G$ of the partially reduced data, using only abundant intra-node bandwidth.
-2.  **Inter-node AllReduce over InfiniBand**: Each corresponding-rank group applies AllReduce to an $M/G$-byte input shard; the algorithm determines the bytes actually transmitted.
-3.  **Intra-node AllGather over NVLink**: Each node redistributes the final shards internally, completing the result without consuming additional inter-node bandwidth.
+The three phases form a single causal pipeline. First, an intra-node ReduceScatter over NVLink performs a local reduction among the $G$ GPUs in each node, leaving each GPU with a $1/G$ shard of partially reduced data while consuming only abundant intra-node bandwidth. Next, each corresponding-rank group applies an inter-node AllReduce over InfiniBand to its $M/G$-byte input shard, where the chosen collective algorithm dictates the bytes transmitted across the network fabric. Finally, an intra-node AllGather over NVLink redistributes the globally reduced shards within each node, completing the collective without consuming additional inter-node bandwidth.
 
 A simple 8-node budget makes this bandwidth multiplication concrete:
 
@@ -2992,25 +2971,13 @@ The topology detection process begins with hardware enumeration. NCCL queries th
 
 :::
 
-Google's TPU pods use a 3D torus topology\index{Torus Topology}\index{TPU!torus interconnect} where each TPU connects directly to 6 neighbors $(\pm X, \pm Y, \pm Z)$; @fig-torus-reduction depicts the same dimension-ordered idea as a 2D simplification. Unlike the hierarchical fat-tree topology of InfiniBand clusters, the torus provides uniform, direct connectivity: every TPU chip has the same number of links (6) and the same per-link bandwidth, regardless of its position in the mesh. One simple AllReduce strategy for this topology is dimension-ordered reduction\index{Dimension-Ordered Reduction}:
-
-1. Reduce along X for each fixed $(Y,Z)$ line, producing partial sums over the X dimension
-2. Reduce those partials along Y for each fixed $(X,Z)$ line, producing partial sums over the $X \times Y$ plane
-3. Reduce those partials along Z for each fixed $(X,Y)$ line to complete the global result
-
-Each dimension-ordered reduction is itself a Ring AllReduce along one axis-aligned torus ring. For a pod with $X{\times}Y{\times}Z$ TPUs, the first step runs independent X-dimension rings, one for each fixed $(Y,Z)$ coordinate, so each participant receives a partial sum over that X line. The second step runs Y-dimension rings to combine those X partials across Y, and the third step runs Z-dimension rings to complete the global reduction. Because every axis processes the full $M$-byte tensor, the bandwidth time is $2M[(X-1)/X + (Y-1)/Y + (Z-1)/Z]/\beta$ for equal per-axis bandwidth $\beta$. The startup term is $2[(X-1)+(Y-1)+(Z-1)]\alpha$. Shorter rings reduce startup cost, but these sequential full-message AllReduces do not retain the bandwidth cost of one global ring. A bandwidth-efficient multidimensional implementation must instead partition the work, for example with dimension-wise ReduceScatter followed by reverse-order AllGather.
+Google's TPU pods use a 3D torus topology\index{Torus Topology}\index{TPU!torus interconnect} where each TPU connects directly to 6 neighbors $(\pm X, \pm Y, \pm Z)$; @fig-torus-reduction depicts the same dimension-ordered idea as a 2D simplification. Unlike the hierarchical fat-tree topology of InfiniBand clusters, the torus provides uniform, direct connectivity: every TPU chip has the same number of links (6) and the same per-link bandwidth, regardless of its position in the mesh. One straightforward AllReduce strategy for this topology is dimension-ordered reduction\index{Dimension-Ordered Reduction}, which decomposes the collective into sequential Ring AllReduces along axis-aligned torus rings. For a pod with $X{\times}Y{\times}Z$ TPUs, the reduction proceeds coordinate by coordinate. Ranks first execute independent X-dimension rings for each fixed $(Y,Z)$ coordinate, producing partial sums along each X line. A second phase runs Y-dimension rings to combine those partials across the $X \times Y$ plane, and a third phase executes Z-dimension rings across fixed $(X,Y)$ coordinates to complete the global reduction. Because every axis processes the full $M$-byte tensor, the bandwidth time is $2M[(X-1)/X + (Y-1)/Y + (Z-1)/Z]/\beta$ for equal per-axis bandwidth $\beta$, while the startup term is $2[(X-1)+(Y-1)+(Z-1)]\alpha$. Shorter rings reduce startup cost, but these sequential full-message AllReduces do not retain the bandwidth cost of one global ring. A bandwidth-efficient multidimensional implementation must instead partition the work, for example with dimension-wise ReduceScatter followed by reverse-order AllGather.
 
 Dimension-ordered reduction follows direct neighbor links and separates axis traffic in time; it does not change the network diameter or eliminate contention with other workloads. The torus topology also provides natural fault tolerance through alternate routing paths: if one link in the X-dimension fails, traffic can detour through the Y or Z dimensions (at the cost of increased latency). The compiler and collective runtime must choose a schedule for the actual topology, message size, and available links.
 
 #### Rail-optimized routing (NVIDIA DGX) {#sec-collective-communication-railoptimized-routing-nvidia-dgx-7081}
 
-In NVIDIA DGX systems, each GPU has its own dedicated NIC. Rail-optimized routing\index{Rail-optimized routing!DGX architecture} exploits this by ensuring that GPUs at the same position within their respective nodes communicate only with each other:
-
-- GPU 0 on Node A talks only to GPU 0 on Node B, Node C, and so on.
-- GPU 1 on Node A talks only to GPU 1 on other nodes.
-- And so on for GPUs 2–7.
-
-This creates 8 independent "rails" of communication that operate in parallel without contention, as @tbl-rail-optimized illustrates.
+In NVIDIA DGX systems, each GPU has its own dedicated NIC. Rail-optimized routing\index{Rail-optimized routing!DGX architecture} exploits this by ensuring that GPUs at matching intra-node positions communicate strictly across nodes: GPU 0 on Node A exchanges data only with GPU 0 on Nodes B and C, GPU 1 communicates only with peer GPU 1s, and so on across all eight GPUs. This creates eight independent rails of communication that operate in parallel without contention (@tbl-rail-optimized).
 
 | **Rail**   | **Participants**                                                                           | **Traffic** |
 |:-----------|:-------------------------------------------------------------------------------------------|:-----------:|
@@ -3037,11 +3004,9 @@ The bandwidth wall arises most acutely in two scenarios: training across data ce
 
 ### Precision reduction via quantization {#sec-communication-collective-operations-collective-operations-quantization-reducing-precision-815b}
 
-Quantization is the least disruptive compression lever when bandwidth is binding because it keeps every gradient element but reduces the bits used to represent it. Most gradients are computed in FP32 (32-bit floating point) or BF16 (16-bit brain float), so reducing bit-width directly reduces communication volume. The useful question is how much gradient fidelity the optimizer can absorb, and the progression from mild to aggressive quantization illustrates the trade-off between compression ratio and gradient fidelity:
+Quantization is the least disruptive compression lever when bandwidth is binding because it keeps every gradient element but reduces the bits used to represent it. Most gradients are computed in FP32 (32-bit floating point) or BF16 (16-bit brain float), so reducing bit-width directly reduces communication volume. The useful question is how much gradient fidelity the optimizer can absorb across the progression from mild to aggressive quantization.
 
-1. **FP16 (16-bit)**\index{FP16!definition}: A common baseline for accelerator training. Half the bits of FP32, with minimal impact on convergence for many models. Provides 2$\times$ compression over FP32.
-2. **INT8 (8-bit)**\index{INT8!definition}: Quantize each gradient vector to 256 discrete levels. This requires computing a scaling factor per tensor: $g_{\text{int8}} = \text{round}(g/s)$ where $s = \max(|g|) / 127$. The receiver reconstructs $\hat{g} = g_{\text{int8}} \times s$. Provides 4$\times$ compression over FP32 but introduces quantization noise proportional to the gradient magnitude.
-3. **1-bit SGD**\index{1-bit SGD}: The extreme case: transmit only the sign of each gradient element (+1 or -1). The receiver reconstructs using a learned or adaptive scaling factor. This achieves 32$\times$ compression over FP32 but introduces substantial noise that can degrade convergence without additional mechanisms [@seide2014; @karimireddy2019error].
+Half-precision representations such as FP16\index{FP16!definition} serve as a standard baseline for accelerator training. By halving the bit-width of FP32, FP16 delivers a $2\times$ reduction in communication volume with minimal impact on model convergence. Moving to INT8\index{INT8!definition} quantizes each gradient vector into 256 discrete levels, achieving a $4\times$ volume reduction relative to FP32. This requires computing a tensor-wide scaling factor $s = \max(|g|) / 127$, quantizing via $g_{\text{int8}} = \text{round}(g/s)$, and having the receiver reconstruct $\hat{g} = g_{\text{int8}} \times s$, which introduces quantization noise proportional to the gradient magnitude. At the extreme, 1-bit SGD\index{1-bit SGD} transmits only the sign of each gradient element ($+1$ or $-1$), yielding a $32\times$ reduction over FP32. The receiver reconstructs values using a learned or adaptive scaling factor, though the substantial noise introduced by 1-bit quantization can severely degrade convergence without error-feedback mechanisms [@seide2014; @karimireddy2019error].
 
 #### Block quantization for gradient communication {#sec-collective-communication-block-quantization-gradient-communication-c883}
 
