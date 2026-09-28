@@ -10,7 +10,7 @@
     {
       index: 0,
       title: "One-Line Install & Milestone 01 Out of the Box",
-      tagline: "Step 1 of 5: From curl to running Frank Rosenblatt's 1958 Perceptron in seconds",
+      tagline: "From curl to running Frank Rosenblatt's 1958 Perceptron in seconds",
       command: "curl -fsSL https://mlsysbook.ai/tinytorch/install.sh | bash",
       gif: "assets/images/demos/tinytorch-01-install-and-run.gif",
       mp4: "assets/images/demos/tinytorch-01-install-and-run.mp4",
@@ -19,7 +19,7 @@
     {
       index: 1,
       title: "Module Mastery & Milestone Progress Grid",
-      tagline: "Step 2 of 5: 20/20 modules completed, autograd verified, 7 milestones unlocked",
+      tagline: "20/20 modules completed, autograd verified, 7 milestones unlocked",
       command: "tito module complete 06 && tito module status",
       gif: "assets/images/demos/tinytorch-02-modules-mastery.gif",
       mp4: "assets/images/demos/tinytorch-02-modules-mastery.mp4",
@@ -27,8 +27,8 @@
     },
     {
       index: 2,
-      title: "TinyGPT Conversational Chat (Typewriter Streaming)",
-      tagline: "Step 3 of 5: Decoder transformer streaming token responses character-by-character on CPU",
+      title: "TinyGPT Conversational Streaming Chat",
+      tagline: "Decoder transformer streaming token responses character-by-character on CPU",
       command: "tito milestone run 05 --part 4",
       gif: "assets/images/demos/tinytorch-03-tinygpt-chat.gif",
       mp4: "assets/images/demos/tinytorch-03-tinygpt-chat.mp4",
@@ -37,7 +37,7 @@
     {
       index: 3,
       title: "TinyGPT Code Completion on TinyPy",
-      tagline: "Step 4 of 5: Autoregressive code generation with 100% AST compiler verification",
+      tagline: "Autoregressive code generation with 100% AST compiler verification",
       command: "tito milestone run 05 --part 3",
       gif: "assets/images/demos/tinytorch-04-tinygpt-code.gif",
       mp4: "assets/images/demos/tinytorch-04-tinygpt-code.mp4",
@@ -46,7 +46,7 @@
     {
       index: 4,
       title: "MLPerf Hardware Optimization Olympics",
-      tagline: "Step 5 of 5: INT8 quantization (4x), im2col (>70x), and KV-cache Pareto frontier",
+      tagline: "INT8 quantization (4x), im2col (>70x), and KV-cache Pareto frontier",
       command: "tito milestone run 06 --part 1",
       gif: "assets/images/demos/tinytorch-05-mlperf-opt.gif",
       mp4: "assets/images/demos/tinytorch-05-mlperf-opt.mp4",
@@ -94,7 +94,7 @@
     const captionEl = document.getElementById("tt-carousel-caption");
     if (captionEl && slidesData[currentSlide]) {
       const data = slidesData[currentSlide];
-      captionEl.innerHTML = `<strong>${data.title}</strong> &middot; <span class="tt-caption-tag">${data.tagline}</span>`;
+      captionEl.innerHTML = `<strong>${data.title}</strong>`;
     }
   }
 
