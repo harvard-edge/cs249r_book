@@ -136,6 +136,8 @@ When all three intersections evaluate to empty ($\mathcal{I}(t_j) \cap \mathcal{
 
 Conversely, if any intersection is non-empty, a physical hazard exists. Rather than rejecting the batch or racing the operations, the runtime supervisor dynamically compiles the batch into a dependency Directed Acyclic Graph (DAG) $\mathcal{G}_{\text{dispatch}} = (\mathcal{V}, \mathcal{E})$, where vertices $\mathcal{V} = \mathcal{T}$ and directed edges $(t_j \to t_k) \in \mathcal{E}$ enforce sequential execution ordering matching the model's sequential emission token order. Independent branches execute concurrently, while dependent nodes block until their causal prerequisites settle.
 
+Bernstein hazard scheduling applies strictly to *declarative tools with statically extractable resource signatures* (such as typed file reads, structured database queries, or REST entity mutations). For unconstrained or opaque tools—such as an arbitrary bash execution primitive (`exec_bash("make test")`) whose exact file access footprint cannot be statically bounded—the runtime must pessimistically assign the universal resource set ($\mathcal{I}(t_k) = \mathcal{O}(t_k) = \mathcal{U}$). An opaque invocation collides with every other concurrent operation, forcing the scheduler to treat it as a full serialization barrier in the dispatch DAG.
+
 Furthermore, the supervisor enforces *per-call fault containment*. If an independent read times out or raises an exception, the runtime does not discard or abort sibling operations in the DAG. Each outcome is matched to its unique call identifier, allowing successful observations to enter context alongside the isolated error frame.
 
 The runtime can also constrain whether the model calls a tool at all. Serving interfaces expose a tool-choice setting that lets the model decide, requires some call, requires one named tool, or forbids calls. A runtime uses a forced call to run a fixed step of a workflow, the deterministic path of a structured workflow, and forbids calls when it needs a final answer, for example after a budget is spent. Forcing shapes what the model emits. It authorizes nothing, and a forced call passes through the same checks as any other.
@@ -379,6 +381,15 @@ By isolating dynamic tool schemas to the *tail leaf* of the prompt layout, cache
 $$\eta_{\text{cache}} = \frac{K_{\text{hist}}}{K_{\text{hist}} + |\mathcal{K}_t|} = \frac{28{,}800}{30{,}000} = 96.0\%$$ {#eq-vol3-slot-cache-hit-rate}
 
 This topology preserves the $98.5\%$ context tax reduction of MIPS retrieval while eliminating cold-prefill latency spikes, sustaining high inference engine throughput across prolonged agentic execution.
+
+::: {.callout-note title="Slot 3 lifecycle across turns: Virtual injection versus sticky clustering"}
+When turn $t$ concludes and tool observation $O_t$ returns, how is the prompt for turn $t+1$ constructed without destroying the Radix cache? If the ephemeral schemas $\mathcal{K}_t$ were committed into the durable history (Slot 2), tool schemas would accumulate uncontrollably over time. If $\mathcal{K}_t$ is simply stripped or replaced at the tail by a new set $\mathcal{K}_{t+1}$, the prefix divergence occurs at $K_{\text{hist}}$, invalidating the KV cache for the model's own response $Y_t$.
+
+Production orchestrators navigate this trade-off using one of two strategies:
+
+1. **Virtual Schema Injection (Context Ephemerality):** Dynamic schemas $\mathcal{K}_t$ are injected into Slot 3 as an ephemeral scratch block during generation. When appending the turn to durable history, $\mathcal{K}_t$ is stripped, committing only $\langle Y_t, O_t \rangle$. The engine accepts a small re-prefill penalty on $Y_t$ and $O_t$ at turn $t+1$, preserving a completely pristine, schema-free trajectory history.
+2. **Sticky Schema Clustering:** Instead of re-retrieving schemas on every single step, retrieved schemas $\mathcal{K}_t$ remain cached across a multi-turn task sub-phase (e.g., git operations or database queries). Cache invalidations are amortized across entire task phases rather than individual turns, maintaining a $100\%$ prefix match throughout the active cluster.
+:::
 
 While strict schema engineering guarantees that an individual runtime can parse, validate, and constrain candidate tool calls, it presupposes that all tool definitions are statically compiled into or locally managed by the host application. Modern enterprise environments, however, are fundamentally decentralized: developer environments, cloud infrastructure, local databases, and web services each expose proprietary interfaces with distinct execution lifecycles. How can heterogeneous external services expose their tools, schemas, and dynamic resources to agent runtimes using an open, standardized protocol without requiring bespoke integration shims for every endpoint? Answering this question shifts our focus from isolated schema definition to interoperable tool discovery.
 
@@ -774,6 +785,12 @@ In real-world computing environments, agent runtimes frequently interact with *u
 
 When an uncooperative tool dispatch encounters an ambiguous timeout $\tau_{\text{timeout}}$, the runtime shifts from transport-level key deduplication to closed-loop *state reconciliation probes*, whose formal decision logic is mapped in @fig-vol3-state-reconciliation-flow. Instead of issuing an immediate retransmission, the supervisor intercepts the ambiguous timeout, suppresses blind re-dispatch, and initiates an inquiry probe to inspect whether the target mutation completed.
 
+Crucially, the verification probe cannot be generated stochastically post-hoc by the foundation model itself—doing so would merely substitute transport ambiguity with model hallucination. Instead, the runtime formalizes every uncooperative mutating tool as a deterministic three-part interface contract:
+
+$$\mathcal{T}_{\text{legacy}} = \langle \text{actuate}(\theta), \text{probe}(\theta, s_0), \text{compensate}(\theta) \rangle$$ {#eq-vol3-legacy-tool-contract}
+
+where $\text{actuate}(\theta)$ executes mutation $\theta$, $\text{probe}(\theta, s_0)$ is a deterministic, nullipotent verification probe authored to verify whether mutation $\theta$ was applied relative to baseline state $s_0$, and $\text{compensate}(\theta)$ is the rollback handler if consistency cannot be confirmed.
+
 ::: {#fig-vol3-state-reconciliation-flow fig-env="figure" fig-pos="htb" fig-cap="**State Reconciliation Probe Architecture for Uncooperative Endpoints**: Closed-loop state reconciliation protocol under ambiguous RPC timeouts. If a mutating tool dispatch triggers a timeout ($\tau_{\text{timeout}}$), the supervisor suppresses automatic retransmission and issues a lightweight nullipotent inquiry probe ($\text{probe}_{\text{post}}$). The protocol branches into three mutually exclusive outcomes: synthesizing a success frame if the postcondition holds ($\sigma_{\text{sever}}$), safely re-dispatching if the environment remains in initial state $s_0$ ($\sigma_{\text{drop}}$), or raising a terminal fault if state has drifted or corrupted ($\sigma_{\text{crash}}$)." fig-alt="Flowchart diagram showing Step 1 dispatching a mutating tool call, a timeout decision branching to normal return on success or Step 2 read-only probe on timeout, followed by a probe state evaluation decision branching into synthetic observation frame, safe re-dispatch, or terminal fault."}
 ![](images/svg/state_reconciliation_probe_flow.svg)
 :::
@@ -1054,10 +1071,10 @@ size_t total_bytes_read = 0;
 while (process_is_running) {
     int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, TIMEOUT_MS);
     for (int i = 0; i < nfds; i++) {
-        // Concurrently drain inbound stdout bytes under backpressure
+        // Concurrently drain inbound stdout bytes under backpressure (edge-triggered drain loop)
         if (events[i].data.fd == child_stdout_fd && (events[i].events & EPOLLIN)) {
-            ssize_t bytes = read(child_stdout_fd, staging_buf, CHUNK_SIZE);
-            if (bytes > 0) {
+            ssize_t bytes;
+            while ((bytes = read(child_stdout_fd, staging_buf, CHUNK_SIZE)) > 0) {
                 total_bytes_read += bytes;
                 ring_buffer_write(&tail_ring_buf, staging_buf, bytes);
                 cas_stream_append(&cas_writer, staging_buf, bytes);
@@ -1069,6 +1086,10 @@ while (process_is_running) {
                     process_is_running = false;
                     break;
                 }
+            }
+            if (bytes == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                process_is_running = false;
+                break;
             }
         }
         // Concurrently pump outbound stdin payload as kernel buffer drains
@@ -1514,11 +1535,11 @@ $$H(P_{\text{tool}}) = -\sum_{i=1}^{N} P(t_i \mid \mathcal{C}) \log_2 P(t_i \mid
 
 High entropy in the tool-routing distribution manifests empirically as tool-selection error $\epsilon_{\text{select}}$, where the model hallucinates non-existent tool names, invents phantom arguments by blending signatures across distinct tools, or selects a sub-optimal endpoint that fails to satisfy the task. While larger, frontier-class dense models possess sufficient representational capacity to disambiguate larger catalogs than smaller quantized models, performance does not scale indefinitely. Above a workload-dependent saturation threshold, expanding the catalog degrades task completion rates: the model becomes overwhelmed by competing schema descriptions, while the latency of the prefill stage increases proportionally with $S_{\text{schema}}$.
 
-Crucially, in multi-turn autonomous agent trajectories, per-turn tool-selection errors compound exponentially across the execution horizon. Consider an agent executing a compound task over an horizon of $T$ discrete turns. Let $\epsilon_t \in [0, 1)$ denote the probability of a tool-selection error at turn $t \in \{1, \dots, T\}$, driven by catalog entropy, semantic overlap, or schema ambiguity. Assuming error independence across turns conditioned on the prior trajectory history, the probability of traversing the entire sequence without a single tool-selection fault is $\prod_{t=1}^T (1 - \epsilon_t)$. Consequently, the cumulative probability of experiencing at least one tool-selection failure across the compound horizon is bounded by:
+Crucially, in multi-turn autonomous agent trajectories, per-turn tool-selection errors compound exponentially across the execution horizon. Consider an agent executing a compound task over an horizon of $T$ discrete turns. Let $\epsilon_t \in [0, 1)$ denote the probability of a tool-selection error at turn $t \in \{1, \dots, T\}$, driven by catalog entropy, semantic overlap, or schema ambiguity. Assuming error independence across turns conditioned on the prior trajectory history, the probability of traversing the entire sequence without a single tool-selection fault is $\prod_{t=1}^T (1 - \epsilon_t)$. Consequently, the exact cumulative probability of experiencing at least one tool-selection failure across the compound horizon is:
 
-$$P(\text{tool error}) \le 1 - \prod_{t=1}^T (1 - \epsilon_t)$$
+$$P(\text{at least one tool error}) = 1 - \prod_{t=1}^T (1 - \epsilon_t)$$ {#eq-vol3-compound-tool-error}
 
-When the per-turn selection error is approximately stationary ($\epsilon_t \approx \epsilon$), this cumulative bound reduces to $P(\text{tool error}) = 1 - (1 - \epsilon)^T$. For small per-turn error rates $\epsilon$, applying the first-order binomial approximation yields $P(\text{tool error}) \approx T \epsilon$. This compound bound reveals a stark systems reality: even a seemingly modest per-turn routing error of $\epsilon = 0.04$ (4 percent) produces a cumulative tool-selection failure rate of $P(\text{tool error}) = 1 - (1 - 0.04)^{20} \approx 55.8$ percent over a 20-turn trajectory, and surges past 87 percent over 50 turns. System architects cannot treat tool catalog size as an unconstrained convenience; minimizing the active tool cardinality at every turn is a strict mathematical requirement for multi-step trajectory survivability.
+When the per-turn selection error is approximately stationary ($\epsilon_t \approx \epsilon$), this cumulative failure probability becomes $P(\text{at least one tool error}) = 1 - (1 - \epsilon)^T$. Moreover, by Boole's inequality (the union bound), even without assuming independence across turns, the failure probability is upper-bounded by $P(\text{at least one tool error}) \le \sum_{t=1}^T \epsilon_t = T\epsilon$. For small per-turn error rates $\epsilon \ll 1$, the first-order binomial expansion of the exact independence formula converges directly to this union bound ($1 - (1 - \epsilon)^T \approx T \epsilon$). This compound formulation reveals a stark systems reality: even a seemingly modest per-turn routing error of $\epsilon = 0.04$ (4 percent) produces a cumulative tool-selection failure rate of $P(\text{at least one tool error}) = 1 - (1 - 0.04)^{20} \approx 55.8$ percent over a 20-turn trajectory, and surges past 87 percent over 50 turns. System architects cannot treat tool catalog size as an unconstrained convenience; minimizing the active tool cardinality at every turn is a strict mathematical requirement for multi-step trajectory survivability.
 
 ::: {#nbk-07-quantifying-kv-cache-memory-and .callout-notebook title="Quantifying KV cache memory and throughput tax across tool catalogs"}
 Consider an agent system deployed on an 8-GPU node running a 70-billion parameter foundation model using Grouped-Query Attention (GQA). The architecture specifies $L = 80$ transformer layers, a hidden dimension $d_{\text{model}} = 8192$, and $n_{\text{kv}} = 8$ key-value heads per layer, with a head dimension of $d_{\text{head}} = 128$. All activations are held in 16-bit precision ($\text{FP16}$, 2 bytes per element).

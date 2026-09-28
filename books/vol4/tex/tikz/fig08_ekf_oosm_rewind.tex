@@ -1,0 +1,134 @@
+\documentclass[tikz,border=12pt]{standalone}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, calc, shapes.geometric, decorations.pathreplacing, backgrounds, fit}
+
+\definecolor{emeraldpine}{HTML}{1A4D3E}
+\definecolor{harvardcrimson}{HTML}{A51C30}
+\definecolor{ethdarkblue}{HTML}{1F407A}
+\definecolor{ethpetrol}{HTML}{007A87}
+\definecolor{ethbronze}{HTML}{B87333}
+\definecolor{ink}{HTML}{1A202C}
+\definecolor{softink}{HTML}{4A5568}
+\definecolor{cardbg}{HTML}{F8FAFC}
+\definecolor{shadecolor}{HTML}{F4F6F9}
+\definecolor{paleink}{HTML}{A0AEC0}
+
+\begin{document}
+\begin{tikzpicture}[
+    >=Latex,
+    font=\sffamily,
+    state node/.style={circle, draw=ethdarkblue, fill=cardbg, thick, minimum size=11mm, inner sep=0pt, font=\small\bfseries},
+    buffer box/.style={draw=paleink!80!ink, fill=cardbg, rounded corners=3pt, minimum width=1.7cm, minimum height=0.9cm, align=center, font=\scriptsize},
+    target box/.style={draw=harvardcrimson, thick, fill=harvardcrimson!10, rounded corners=3pt, minimum width=1.7cm, minimum height=0.9cm, align=center, font=\scriptsize},
+    head box/.style={draw=ethdarkblue, thick, fill=ethdarkblue!10, rounded corners=3pt, minimum width=1.7cm, minimum height=0.9cm, align=center, font=\scriptsize}
+]
+
+% =========================================================
+% 1. Sensor Arrivals (Top)
+% =========================================================
+
+% High-rate IMU streams (enter at +0.2cm; label placed to the right)
+\foreach \t in {1, ..., 5} {
+    \draw[emeraldpine, thick, ->] (\t*2.6 + 0.2, 4.3) -- (\t*2.6 + 0.2, 3.55);
+    \node[anchor=west, font=\tiny, align=left, text=emeraldpine] at (\t*2.6 + 0.25, 4.05) {\textbf{IMU}\\1\,kHz};
+}
+
+% Camera OOSM: captured at t=2, arrives at t=3
+\fill[ethpetrol] (3*2.6, 5.1) circle (2.2pt) 
+    node[anchor=south west, font=\scriptsize\bfseries, text=ethpetrol, xshift=-2pt] {Camera arrival ($t_{\text{capture}}=2$)};
+\draw[ethpetrol, thick, ->] (3*2.6, 5.1) to[out=180, in=90] 
+    node[pos=0.45, above=2pt, font=\scriptsize\bfseries] {Camera (OOSM)} (2*2.6 - 0.2, 3.55);
+
+% LiDAR OOSM: captured at t=1, arrives at t=5 (triggers rewind)
+\fill[ethbronze] (5*2.6, 6.1) circle (2.2pt) 
+    node[anchor=south west, font=\scriptsize\bfseries, text=ethbronze, xshift=-2pt] {LiDAR arrival ($t_{\text{capture}}=1$)};
+\draw[ethbronze, very thick, ->] (5*2.6, 6.1) to[out=175, in=90, looseness=0.6] 
+    node[pos=0.45, above=2pt, font=\scriptsize\bfseries] {LiDAR (OOSM: latency $\Delta t = 4$ epochs)} (1*2.6 - 0.2, 3.55);
+
+
+% =========================================================
+% 2. EKF State Sequence (Middle-High, y = 3.0)
+% =========================================================
+\foreach \t in {0, 1, ..., 5} {
+    \node[state node] (S\t) at (\t*2.6, 3.0) {$\mathbf{x}_{\t}$};
+}
+
+\foreach \t [evaluate=\t as \nextt using int(\t+1)] in {0, 1, ..., 4} {
+    \draw[->, thick, ethdarkblue] (S\t) -- (S\nextt) 
+        node[midway, above=1pt, font=\scriptsize\bfseries, ethdarkblue] {Predict};
+}
+
+
+% =========================================================
+% 3. Rewind & Re-propagation Actions
+% =========================================================
+
+% Step 2: Delayed Kalman Update callout (placed at t=1, y=1.65)
+\node[
+    draw=harvardcrimson, 
+    fill=cardbg, 
+    rounded corners=3pt, 
+    font=\scriptsize, 
+    text=harvardcrimson, 
+    align=center,
+    inner sep=4pt,
+    thick
+] (Step2) at (1*2.6, 1.65) {
+    \textbf{Step 2: Update}\\
+    $\hat{\mathbf{x}}_1^+ = \text{Update}(\hat{\mathbf{x}}_1, \mathbf{z}_{\text{lidar}})$
+};
+
+% Step 1: Rewind from current time t=5 safely below Step 3 text into Step 2 box
+\draw[->, dashed, harvardcrimson, very thick] ([yshift=-2pt]S5.south) 
+    .. controls (12.2, 0.4) and (4.5, 0.4) .. 
+    node[pos=0.5, below=2pt, font=\scriptsize\bfseries, text=harvardcrimson] {
+        \textbf{Step 1: Rewind} state ring buffer to $t=1$
+    } (Step2.south);
+
+% Arrow from Step 2 to Step 3 re-propagation start
+\draw[->, very thick, harvardcrimson] (Step2.north) to[bend left=15] (1*2.6 + 0.45, 2.2);
+
+% Step 3: Fast re-propagation forward (arrows at y = 2.2, label centered at 2.9*2.6)
+\foreach \t [evaluate=\t as \nextt using int(\t+1)] in {1, 2, ..., 4} {
+    \draw[->, very thick, harvardcrimson] (\t*2.6 + 0.45, 2.2) -- (\nextt*2.6 - 0.45, 2.2);
+}
+\node[font=\scriptsize\bfseries, text=harvardcrimson, align=center] at (2.9*2.6, 1.65) {
+    \textbf{Step 3: Fast Re-propagate} forward\\
+    using buffered IMU inputs $\{u_1, u_2, u_3, u_4\}$
+};
+
+
+% =========================================================
+% 4. Timeline (y = -0.5)
+% =========================================================
+\draw[thick, ink, ->] (-1.0, -0.5) -- (14.2, -0.5) node[right, font=\bfseries\small] {Time $t$};
+\foreach \t in {0, 1, ..., 5} {
+    \draw[thick, ink] (\t*2.6, -0.4) -- (\t*2.6, -0.6) node[below=2pt, font=\scriptsize\bfseries] {$t=\t$};
+}
+
+
+% =========================================================
+% 5. State Ring Buffer (Bottom, y = -2.1)
+% =========================================================
+\node[font=\bfseries\small, text=ink, anchor=east, align=right] at (-1.2, -2.1) {
+    \textbf{State Ring}\\[-1pt]\textbf{Buffer}
+};
+
+\node[buffer box] (B0) at (0*2.6, -2.1) {$\hat{\mathbf{x}}_0, \mathbf{P}_0$};
+\node[target box] (B1) at (1*2.6, -2.1) {\textbf{$\hat{\mathbf{x}}_1, \mathbf{P}_1$}\\[-1pt]\tiny\textcolor{harvardcrimson}{Rewind Target}};
+\node[buffer box] (B2) at (2*2.6, -2.1) {$\hat{\mathbf{x}}_2, \mathbf{P}_2$};
+\node[buffer box] (B3) at (3*2.6, -2.1) {$\hat{\mathbf{x}}_3, \mathbf{P}_3$};
+\node[buffer box] (B4) at (4*2.6, -2.1) {$\hat{\mathbf{x}}_4, \mathbf{P}_4$};
+\node[head box]   (B5) at (5*2.6, -2.1) {\textbf{$\hat{\mathbf{x}}_5, \mathbf{P}_5$}\\[-1pt]\tiny\textcolor{ethdarkblue}{Buffer Head}};
+
+\draw[decorate, decoration={brace, amplitude=6pt, mirror}, thick, paleink!80!ink] 
+    ([xshift=-0.85cm, yshift=-0.12cm]B1.south) -- ([xshift=0.85cm, yshift=-0.12cm]B5.south) 
+    node[midway, below=8pt, font=\scriptsize\bfseries, text=softink] {
+        Ring buffer depth $N = 5$ (retains state history $\hat{\mathbf{x}}_k, \mathbf{P}_k$ and IMU controls $\mathbf{u}_k$)
+    };
+
+\end{tikzpicture}
+\end{document}

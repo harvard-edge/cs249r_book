@@ -349,6 +349,11 @@ class FigureContactSheetBuilder:
             "  enabled: false",
             "---",
             "",
+            "\\definecolor{mlsysblue}{HTML}{1F407A}",
+            "\\definecolor{mlsysgreen}{HTML}{008F45}",
+            "\\definecolor{mlsyspurple}{HTML}{7E317B}",
+            "\\definecolor{mlsysamber}{HTML}{E67817}",
+            "\\definecolor{mlsysgray}{HTML}{666666}",
             "\\pagestyle{empty}",
             "",
             f"# {self.volume.upper()} Visual Figure Contact Sheet",
@@ -431,7 +436,7 @@ class FigureContactSheetBuilder:
 
         print(f"Compiling figure contact sheet to {pdf_path.name} with Quarto...")
         proc = subprocess.run(
-            ["quarto", "render", str(qmd_path), "--to", "pdf"],
+            ["quarto", "render", str(qmd_path), "--to", "pdf", "--pdf-engine-opt=--interaction=nonstopmode"],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True
