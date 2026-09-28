@@ -1560,7 +1560,7 @@ If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllT
 
 The worked trace in notebook \ref{nbk-collective-communication-alltoall-moe-token-routing} assumes uniform token routing: every expert receives an identical share of tokens. In production MoE models, routing decisions are dynamic and data-dependent, fundamentally altering the collective communication profile.
 
-##### The dispatch and combine lifecycle
+##### The dispatch and combine lifecycle {#sec-collective-communication-dispatch-combine-lifecycle-c4a1}
 
 In an MoE transformer layer with $E$ experts distributed across $P$ ranks ($E/P$ experts per rank), each rank holds a local batch of $T$ tokens. A gating router computes top-$k$ routing probabilities over all $E$ experts for each token. This induces two consecutive collective communication phases per MoE layer:
 
@@ -1568,7 +1568,7 @@ In an MoE transformer layer with $E$ experts distributed across $P$ ranks ($E/P$
 2.  **Token Combine (All-to-All)**: After each rank computes forward passes through its assigned local expert feed-forward networks (FFNs), a second AllToAll collective routes the resulting output vectors back to the originating ranks during token combine\index{All-to-All!combine phase}. Each rank then computes the weighted combination of expert outputs:
     $$\mathbf{y}_i = \sum_{j \in \text{top-}k} g_{i,j} \cdot \text{Expert}_j(\mathbf{x}_i)$$
 
-##### Capacity factors and bounded allocation
+##### Capacity factors and bounded allocation {#sec-collective-communication-capacity-factors-bounded-allocation-e8d2}
 
 In dense models, collective buffer sizes are static and deterministic. In sparse MoE models, the number of tokens routed to expert $e$ is a stochastic variable $N_e \sim \text{Binomial}(P \cdot T, p_e)$. To avoid dynamic memory allocation and buffer reallocation overhead during communication, systems pre-allocate static expert buffers parameterized by an expert capacity factor\index{Capacity factor!expert routing} $C \ge 1.0$ [@lepikhin2021gshard; @fedus2022switch]:
 $$\text{Capacity}_e = \left\lceil \frac{P \times T \times k}{E} \times C \right\rceil$$
@@ -1579,7 +1579,7 @@ The capacity factor exposes a fundamental systems trade-off:
 *   **When $C > 1.0$**: Buffers accommodate routing variance (typically $C = 1.25$–$1.5$), preventing token dropping. However, to maintain uniform collective communication, buffers must be padded with dummy tokens to fixed capacity, inflating the physical data volume crossing the network by $C\times$ and forcing GPUs to compute matrix multiplications on padded null tokens.
 *   **Dropless dynamic routing**: Modern high-throughput frameworks utilize variable-size `AllToAllv` with dynamic memory buffers, eliminating padding overhead while preserving all tokens. However, dynamic routing exposes execution time directly to routing skew.
 
-##### Bisection saturation and straggler tails
+##### Bisection saturation and straggler tails {#sec-collective-communication-bisection-saturation-straggler-tails-f3c9}
 
 Because token routing is determined by input semantics, certain "celebrity" experts inevitably receive disproportionate token volumes. If one expert receives $\gamma \times$ the average load ($\gamma > 1$), the GPU hosting that expert receives $\gamma \times$ more incoming data during dispatch.
 
@@ -1591,7 +1591,7 @@ This skew creates two compounding performance bottlenecks from stragglers\index{
 2.  **Bisection fabric saturation**: Unlike Ring AllReduce (which maps communication onto nearest-neighbor ring links), AllToAll generates a complete bipartite exchange\index{All-to-All!bipartite exchange} where $(P-1)/P \approx 1$ of all tokens must cross the cluster network fabric. In an oversubscribed fabric with oversubscription ratio $R:1$, the usable bisection bandwidth $\text{BW}_{\text{bisect}} = (P \cdot \text{BW}_{\text{inject}}) / (2R)$ throttles the exchange:
     $$T_{\text{dispatch}} \ge \frac{V_{\text{cut}}}{\text{BW}_{\text{bisect}}}$$
 
-##### Hierarchical MoE exchange
+##### Hierarchical MoE exchange {#sec-collective-communication-hierarchical-moe-exchange-a7b5}
 
 To mitigate both bisection saturation and small-message overhead across thousands of GPUs, hierarchical MoE runtimes decompose the flat AllToAll into a two-level collective\index{All-to-All!hierarchical exchange} [@hwang2023tutel]:
 
@@ -3325,7 +3325,7 @@ Gradient compression is not free; it trades reduced communication for increased 
 
 : **Gradient Compression Methods**: Compression-ratio vs. convergence-impact trade-off for the four canonical gradient compressors. The right choice depends on whether bandwidth or convergence speed is the binding constraint; aggressive compressors only pay off once communication dominates iteration time. {#tbl-gradient-compression-methods}
 
-#### When to use compression {#sec-collective-communication-use-compression-8519}
+#### Decision criteria for gradient compression {#sec-collective-communication-use-compression-8519}
 
 The decision rule is not the compression ratio alone\index{Gradient Compression!break-even condition}. Compression is worthwhile only when the wall-clock time saved per step exceeds the encoding overhead and the extra steps caused by slower convergence. Aggressive compression pays off when communication time dominates compute time (a high $T_{\text{comm}}(N)/(T_{\text{compute}}/N)$ ratio), which typically occurs with smaller models on large clusters; when compute time dominates instead, the convergence slowdown is not worth the savings because the system is not bottlenecked on communication. Independently of that ratio, any lossy compression beyond FP16 should carry error feedback unless the optimizer analysis and convergence tests justify omitting it, since without correction convergence can fail.
 
@@ -3339,7 +3339,7 @@ Now consider the same model on a faster network where communication takes only 3
 
 Writing a highly optimized, topology-aware, hierarchical Ring AllReduce from scratch in C++ would take a dedicated team of engineers months of effort. The engineering decision is which library preserves the chapter's model, topology, and overlap assumptions on the target hardware. The preceding sections developed three complementary strategies for taming communication cost; production libraries realize those strategies through four decision axes: the device memory path, topology awareness, portability, and observability.
 
-### NCCL: Why it is central to NVIDIA GPU workloads {#sec-communication-nccl}
+### NCCL: The GPU acceleration backend {#sec-communication-nccl}
 
 NVIDIA Collective Communications Library (NCCL)[^fn-nccl-gpu-collectives] is central to many NVIDIA multi-GPU training deployments because it turns collective algorithms (covered in @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545 and @sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214) into GPU-resident data movement [@jeaugey2017nccl; @nvidiaNcclUserGuide]. Its adoption stems from three GPU-specific optimizations that MPI and Gloo cannot replicate without hardware vendor support. Kernel fusion\index{NCCL!kernel fusion} folds the reduction operator (sum, average) directly into the memory-copy kernel, so instead of copying data to a buffer, reducing, then copying the results back, NCCL reduces during the transfer and eliminates the intermediate memory traffic that would otherwise cap HBM\index{HBM} bandwidth utilization. Channel pipelining\index{Channel Pipelining}\index{NCCL!channel allocation} opens multiple parallel communication channels to saturate every network interface at once, so a DGX node with 8 NICs reaches 8$\times$ the bandwidth of a single-channel implementation. GPUDirect RDMA\index{NCCL!GPUDirect RDMA} lets the network card read directly from GPU memory over PCIe, bypassing the CPU entirely; without it, data would traverse GPU → CPU memory → NIC → network, adding microseconds of latency and consuming CPU cycles. Together these explain why NCCL is usually the first backend to benchmark for NVIDIA GPU collectives before falling back to generic MPI implementations.
 
@@ -3429,7 +3429,7 @@ The optimal bucket size\index{Bucket Fusion!size tuning} depends on the model ar
 
 The order in which parameters are added to buckets determines overlap effectiveness. DDP assigns parameters to buckets in reverse order of their use in the forward pass, which corresponds to the order in which gradients become available during the backward pass. This reverse-order assignment ensures that the first bucket to fill (and thus the first AllReduce to launch) contains the parameters from the last layers of the forward pass, which are the first layers of the backward pass. This ordering maximizes the overlap window: the earliest buckets have the most subsequent computation behind which to hide their communication.
 
-### Overlap limits: When hiding fails {#sec-communication-overlap-limits}
+### Overlap limits and exposed communication {#sec-communication-overlap-limits}
 
 Communication-computation overlap has fundamental limits. The LogP model's overhead parameter $o$ represents the irreducible GPU time consumed by initiating and completing transfers. Even with perfect overlap, the GPU must spend at least $2o$ per AllReduce operation on initiation and completion. If the model has many layers but each layer's backward pass is short (less than $o$), the GPU spends more time on communication overhead than on computation, and overlap provides no benefit.
 
