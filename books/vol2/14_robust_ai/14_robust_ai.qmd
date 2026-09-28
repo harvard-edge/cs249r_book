@@ -1003,11 +1003,13 @@ System-level faults encompass failures originating from the hardware, code, fram
 
 Consider an operator who sees the same surface symptom from all three pillars: model accuracy is falling while latency and uptime hold steady. A preprocessing bug\index{Software Fault!masquerade as covariate shift} that silently rescales a feature looks exactly like covariate shift to a drift monitor, because the feature statistics have genuinely moved. A numerical overflow\index{Numerical Instability!masquerade as adversarial attack} that corrupts a layer's activations produces confident misclassifications that look exactly like an adversarial example, because the decision flipped without a visible input cause. The disguise is the whole difficulty: the cheap pillar-specific detectors fire on the symptom, not the cause.
 
-Three signals guide the investigation:
+Three complementary signals guide this investigation: the timing boundary of the change, reproducibility under fixed inputs, and cross-layer correlation with infrastructure telemetry.
 
-- **Boundary of change**: Environmental shift can be gradual or abrupt. A change synchronized with a deploy, dependency bump, or schema change instead raises the pipeline-fault hypothesis, especially when features move together in ways the underlying process cannot explain. Timing narrows the investigation without proving the cause.
-- **Fixed-input reproducibility**\index{Fault Diagnosis!fixed-input replay}: Replay golden inputs through version-pinned preprocessing and model artifacts. A deterministic pipeline or numerical bug should reproduce at the same stage, whereas a transient hardware fault often will not and can be isolated through repeated execution or redundant hardware. Drift and adversarial behavior may also reproduce for a fixed input, so replay alone does not identify the cause; compare raw and preprocessed tensors, artifact versions, and population-level statistics alongside the replay result.
-- **Cross-layer correlation**\index{Fault Diagnosis!cross-layer correlation}: An adversarial campaign may correlate with input-space anomalies such as unusual query patterns or gradient-aligned perturbations; a system fault may instead correlate with a code release, an ECC counter, an SDC checker, or a memory-pressure alarm of the kind that @sec-fault-tolerance-reliability already instruments.
+The boundary and timing of a change often provide the first diagnostic clue. While environmental shift can evolve gradually or appear abruptly with real-world events, a shift synchronized with a deployment, dependency bump, or schema migration raises the pipeline-fault hypothesis. This suspicion strengthens when multiple features shift simultaneously in directions that the underlying physical process cannot explain. Timing alone narrows the search space without proving causation.
+
+Reproducibility under fixed inputs\index{Fault Diagnosis!fixed-input replay} tests whether the fault is deterministic. Replaying golden inputs through version-pinned preprocessing pipelines and model artifacts isolates the failure boundary. A deterministic software bug or numerical defect reliably reproduces at the exact same pipeline stage, whereas transient hardware faults typically vanish on replay and require repeated execution or redundant hardware to isolate. Because drift and adversarial inputs also reproduce deterministically for a fixed payload, replay alone cannot settle the diagnosis; operators must compare raw and preprocessed tensors, artifact versions, and population-level statistics alongside the replay output.
+
+Finally, cross-layer correlation\index{Fault Diagnosis!cross-layer correlation} links model behavior to surrounding infrastructure telemetry. An adversarial campaign frequently correlates with input-space anomalies such as query-rate spikes or gradient-aligned perturbations. In contrast, a system-level fault correlates with deployment releases, error-correcting code (ECC) memory counters, silent data corruption (SDC) checkers, or memory-pressure alarms of the kind instrumented in @sec-fault-tolerance-reliability.
 
 The diagnostic discipline is therefore to read the system-level evidence before accepting the drift or attack hypothesis the surface symptom suggests, because each pillar suggests a different intervention and more than one cause can be active at once.
 
@@ -2044,10 +2046,7 @@ The PSI of `{python} CountryPSIDecomposition.psi_total_str` remains inside this 
 
 ##### Step 2 continuous feature analysis {.unnumbered}
 
-For the transaction amount feature (log-transformed for approximate normality), fit Gaussian distributions to the baseline and current samples:
-
-- Baseline distribution: $\mu = 4.2$, $\sigma = 1.1$ (log-dollars)
-- Current distribution: $\mu = 4.5$, $\sigma = 1.3$ (log-dollars)
+For the transaction amount feature (log-transformed for approximate normality), fitting Gaussian distributions to the samples yields a baseline distribution of $\mu = 4.2$ and $\sigma = 1.1$ log-dollars, compared with a current distribution of $\mu = 4.5$ and $\sigma = 1.3$ log-dollars.
 
 For approximately Gaussian distributions, KL divergence has a closed-form solution\index{Kullback-Leibler Divergence!closed-form Gaussian}:
 
@@ -2153,19 +2152,11 @@ A systematic decision framework\index{Retraining Decision Framework!three-level 
 
 ##### Level 1 automated monitoring {#sec-robust-ai-level-1-automated-monitoring-e418}
 
-For this fraud-monitoring scenario, the team configures three investigation thresholds from its historical baseline:
-
-- $\text{PSI} > 0.1$ on any high-importance feature
-- $\mathcal{D}_{\text{KL}} > 0.05$ on continuous features
-- KS test $p$-value $< 0.01$ with Bonferroni correction
+For this fraud-monitoring scenario, the team configures three investigation thresholds from its historical baseline: a population stability index exceeding 0.1 ($\text{PSI} > 0.1$) on any high-importance feature, a Kullback-Leibler divergence exceeding 0.05 ($\mathcal{D}_{\text{KL}} > 0.05$) on continuous features, and a Kolmogorov-Smirnov test $p$-value below 0.01 with Bonferroni correction. Crossing any of these thresholds initiates an operational investigation rather than triggering an automated retraining pipeline.
 
 ##### Level 2 performance correlation {#sec-robust-ai-level-2-performance-correlation-9708}
 
-When one of these scenario-calibrated alerts fires, three performance correlations\index{Retraining Decision Framework!performance correlation} guide the investigation:
-
-- If performance degradation exceeds the service's validated tolerance and coincides with drift: identify the affected slices and test whether recalibration, data repair, or retraining addresses the cause
-- If drift detected but performance stable: Continue monitoring, investigate drift source
-- If performance degrades without detected drift: Investigate concept drift or label shift
+When one of these scenario-calibrated alerts fires, three performance correlations\index{Retraining Decision Framework!performance correlation} guide the investigation. If observed performance degradation exceeds the service's validated tolerance and coincides with detected drift, operators isolate the affected data slices to test whether recalibration, data repair, or retraining directly addresses the root cause. Conversely, when drift is detected while serving performance remains stable, the service continues operating under elevated monitoring while the team investigates the drift source. Finally, if performance degrades without any detectable feature drift, the investigation shifts to unmonitored concept drift or label shift, where the underlying relationship between inputs and outputs has decoupled.
 
 ::: {.column-margin}
 ![](images/svg/robust_ai_psi_drift_knee.svg){width="100%" fig-alt="A line curve that stays nearly flat across the left and rises sharply into a hockey-stick on the right, with a dot marking the knee and the region to the right of the knee shaded to mark a danger zone."}
@@ -2499,14 +2490,7 @@ $$
 x_{\text{adv}} = x + \epsilon \cdot \text{sign}\big(\nabla_x \mathcal{L}(\theta, x, y)\big)
 $$
 
-where:
-
-- $x$ is the original input
-- $x_{\text{adv}}$ is the adversarial example
-- $\mathcal{L}(\theta, x, y)$ is the prediction loss
-- $\nabla_x \mathcal{L}$ identifies the input changes that most increase that loss
-- $\text{sign}(\cdot)$ keeps only the direction of steepest ascent
-- $\epsilon$ controls how much perturbation the attacker is allowed to add
+In this formulation, $x$ denotes the original input, $x_{\text{adv}}$ is the generated adversarial example, and $\mathcal{L}(\theta, x, y)$ represents the prediction loss evaluated at model parameters $\theta$ and true label $y$. The gradient term $\nabla_x \mathcal{L}$ identifies the input-space directions that maximize loss, $\text{sign}(\cdot)$ extracts the sign of each gradient component to follow the direction of steepest ascent, and the scalar $\epsilon$ bounds the maximum allowable perturbation magnitude under the $\ell_\infty$ norm.
 
 @Fig-gradient-attack visualizes how this approach generates adversarial examples by taking a single step in the direction that increases the loss most rapidly, with the perturbation's $\ell_\infty$ magnitude bounded by $\epsilon$.
 
@@ -3444,14 +3428,9 @@ An adversarial defense is a budgeted response to a specific threat model. Strong
 
 ## Data Poisoning Defenses {#sec-robust-ai-data-poisoning-defenses-d070}
 
-A recommendation model may retain its overall accuracy while promoting an attacker's chosen item to a small group of users. The defense must test the targeted behavior as well as the integrity of the training supply chain. Source permissions provide the security boundary; robustness evaluation measures what happens when poisoned records or updates reach the learner. The defense sequence applies four layers in order:
+A recommendation model may retain its overall accuracy while promoting an attacker's chosen item to a small group of users. Defending against that failure requires testing the targeted behavior as well as securing the integrity of the training supply chain. Because source permissions provide the security boundary while robustness evaluation measures what happens when poisoned records or updates reach the learner, defense operates as an ordered four-layer sequence along the data path. Ingress controls first establish provenance and access limits, dictating which sources are authorized to contribute or modify data. Before training commences, anomaly detection and sanitization inspect candidate records to filter suspicious submissions. For poisoned samples that evade ingestion filtering, robust optimization objectives constrain the gradient influence of extreme losses during training. Finally, representation learning reduces the model's reliance on brittle features.
 
-1. **Provenance and access control**: Establish which sources are allowed to modify data.
-2. **Anomaly detection and sanitization**: Catch suspicious records before training.
-3. **Robust objectives**: Reduce the influence of any poisons that remain.
-4. **Representation learning**: Make the model less dependent on brittle artifacts.
-
-Each layer covers a different point in the data path; no single detector can replace end-to-end controls. Representation learning broadens the final layer to ordinary distribution shift: it can reduce dependence on brittle features, but it does not establish that the corpus is free of poisoning.
+Each layer covers a distinct point along the data path, and no single detector can substitute for end-to-end controls. While representation learning broadens defense to handle ordinary distribution shift, it cannot prove that the training corpus is uncompromised.
 
 For the recommendation system, the interception layer in @fig-adversarial-attack-injection examines contributed ratings before they reach training. Its decisions must preserve provenance so later model failures can be traced back to the accepted records.
 
