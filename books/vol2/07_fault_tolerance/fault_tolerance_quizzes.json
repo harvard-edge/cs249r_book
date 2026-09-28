@@ -41,8 +41,8 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Explain why unprotected High Bandwidth Memory (HBM) with a soft-error rate of 250 FIT/Mbit makes distributed training on a 1,024-GPU cluster impossible without Error-Correcting Code (ECC) protection.",
-            "answer": "A cluster of 1,024 GPUs with 80 GB of HBM per device contains approximately $6.87 \\times 10^8$ megabits of memory. At 250 FIT/Mbit ($250 \\times 10^{-9}$ errors per Mbit-hour), the cluster accumulates roughly $1.72 \\times 10^5$ failures per billion hours, resulting in an uncorrected bit flip approximately every 20 to 30 seconds. Without ECC to detect and correct single-bit errors, memory corruption would strike continuously, corrupting gradients or crashing processes before a single training step could reliably complete.",
+            "question": "Using an illustrative unprotected-memory soft-error rate of 250 FIT/Mbit and 80 GiB of HBM per device, explain why a 1,024-GPU training cluster needs ECC protection.",
+            "answer": "Using the chapter's 80 GiB device capacity gives about $7.04\\times10^5$ Mbit across 1,024 GPUs. Multiplying by 250 FIT/Mbit yields about $1.76\\times10^8$ FIT, or 176 uncorrected events per hour, approximately one every 20 seconds. ECC removes many common memory errors before they become application-visible. Without protection, frequent corruption would threaten run integrity even though not every physical bit flip causes a failed training step.",
             "learning_objective": "Analyze why high-density memory subsystems dominate the soft-error failure budget in distributed ML clusters."
           },
           {
@@ -112,13 +112,13 @@
           {
             "question_type": "SHORT",
             "question": "Compare the impact of a single-bit flip in the sign bit versus a single-bit flip in the exponent bits of an IEEE 754 floating-point weight or gradient tensor during neural network training.",
-            "answer": "A sign-bit flip inverts the polarity of the value ($0.5 \\to -0.5$), which reverses the direction of a feature map or gradient update. An exponent-bit flip alters the numerical magnitude exponentially (shifting values by orders of magnitude, such as $10^{-4} \\to 10^{20}$ or collapsing to underflow/NaN), which immediately destabilizes the optimizer and causes catastrophic gradient explosion. Consequently, exponent bit positions exhibit far higher vulnerability to training divergence than mantissa or sign bits.",
+            "answer": "A sign-bit flip reverses the value, potentially changing the direction of an update. An exponent-bit flip can change its scale by orders of magnitude or create a nonfinite value, so it can be more damaging than a low mantissa-bit error. The effect depends on the original bit pattern, operation, and error masking; not every exponent error immediately causes divergence.",
             "learning_objective": "Analyze the vulnerability of floating-point numerical representations to single-bit hardware upsets."
           },
           {
             "question_type": "SHORT",
-            "question": "Explain why Error-Correcting Code (ECC) protection on accelerator memory imposes a throughput penalty on memory-bandwidth-bound training workloads, and quantify the typical overhead.",
-            "answer": "ECC protection appends parity check bits to each memory word (typically requiring 1 parity bit per 8 data bits, or an overhead of $6.25\\%$ to $12.5\\%$). This reduces effective memory bus bandwidth for payload data (e.g., reducing HBM3 peak throughput from 1,600 GB/s to 1,400 GB/s) and consumes device memory capacity, creating a measurable performance tax for memory-bandwidth-bound operations like normalization and activation caching.",
+            "question": "Explain why ECC imposes storage and logic costs, and why its effective payload-bandwidth penalty must be measured for the actual accelerator memory implementation.",
+            "answer": "ECC stores redundant check bits and performs encoding and correction. The physical overhead does not translate directly into a fixed reduction of published HBM bandwidth or user-visible capacity: dedicated check-bit storage and interfaces may already be included in the specification. Measure the exposed cost under the intended workload instead of subtracting a universal parity percentage from a device rating.",
             "learning_objective": "Evaluate the memory bandwidth trade-offs imposed by hardware error detection and correction mechanisms."
           },
           {
@@ -169,13 +169,13 @@
               "Accelerator memory is scarce (40\u201380 GB per device) and shared across weights, optimizer state, and activations; a small leak per batch gradually builds over hundreds of steps until triggering an un-checkpointed OOM crash mid-run.",
               "GPU memory leaks only occur when using mixed-precision BF16 formats and disappear entirely when switching to FP32 weights."
             ],
-            "answer": "The correct answer is C. Large foundation models with optimizer states (e.g. BF16 weights + AdamW states requiring $\\approx 840$ GB on a node) push accelerator memory to near-capacity. A minor leak\u2014such as retaining an activation graph or debugging tensor per step\u2014gradually consumes the remaining headroom over hours of execution, eventually causing a sudden Out-of-Memory (OOM) crash that aborts training without a fresh checkpoint. Automatic disk swapping does not occur on GPU device memory. Immediate segmentation faults describe memory corruption, not gradual leaks. Memory precision changes total memory volume but does not eliminate allocation leaks.",
+            "answer": "The correct answer is C. Model, gradient, optimizer, and activation state can leave little accelerator-memory headroom. Retaining a graph or tensor every step gradually consumes that headroom until allocation fails, potentially far from the leak’s origin. Changing precision affects capacity but does not fix the leak; ordinary device allocations do not automatically spill to disk.",
             "learning_objective": "Analyze the accumulation mechanics and failure risks of accelerator memory leaks in distributed training."
           },
           {
             "question_type": "SHORT",
             "question": "Contrast a pipeline deadlock with a data race condition in distributed parallel training in terms of their system symptoms and impact on model convergence.",
-            "answer": "A pipeline deadlock occurs when execution stages block indefinitely waiting on cyclic communication dependencies (e.g., Stage 1 waiting for buffer space to send forward activations while Stage 2 waits for Stage 1 to receive backward gradients), causing the entire cluster to freeze at 0% GPU utilization without making progress. A data race occurs when concurrent workers update shared model weights or buffers without synchronization, causing non-deterministic updates that corrupt parameter states and degrade or prevent convergence while the cluster appears to run at 100% utilization.",
+            "answer": "A deadlock prevents progress because stages wait on cyclic dependencies; utilization may be low or misleadingly high if communication kernels spin. A data race allows unsynchronized accesses to mutable state, producing timing-dependent results or corrupted updates while execution continues. Neither fault has a universal utilization percentage, so diagnosis requires progress counters, dependency traces, and correctness checks.",
             "learning_objective": "Compare synchronization failure modes across distributed parallel training paradigms."
           },
           {
@@ -224,14 +224,14 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Explain how check-and-verify mechanisms (such as redundant reductions or gradient checksums) prevent Byzantine workers from corrupting global model updates during AllReduce.",
-            "answer": "Check-and-verify mechanisms compute a cryptographic hash, CRC, or checksum over each rank's gradient shard before the reduction. The collective layer compares independent reduction digests or runs redundant reductions on a subset of workers, blocking the optimizer step if checksums disagree or if a rank's contribution statistically deviates from the ensemble. This ensures that mathematically corrupted contributions are caught and drained before they can be added into global model parameters.",
+            "question": "Explain what gradient checksums and redundant computation can each detect during AllReduce, and why checksums alone cannot establish the arithmetic correctness of every worker contribution.",
+            "answer": "Checksums can detect changed bytes in transport or storage, and digests of supposedly identical reduced buffers can expose disagreement. A worker can compute an incorrect gradient and then checksum those incorrect bytes successfully. Detecting that arithmetic fault requires independent recomputation, replay, invariants, or statistical evidence. Those checks can block suspect updates within their coverage; they are not a universal guarantee against arbitrary faulty workers.",
             "learning_objective": "Design check-and-verify mechanisms to detect silent data corruption during distributed collective reductions."
           },
           {
             "question_type": "FILL",
-            "question": "To prevent a single defective GPU from poisoning model weights without triggering an exception, systems employ ____ fault tolerance principles, computing checksums or redundant reductions over gradient shards before applying optimizer updates.",
-            "answer": "The correct answer is Byzantine (or Byzantine fault tolerance / BFT). Byzantine fault tolerance addresses systems where components continue operating but transmit arbitrary, corrupted, or conflicting data.",
+            "question": "A component that remains active but sends arbitrary, corrupted, or conflicting data requires ____ fault tolerance reasoning rather than only fail-stop detection.",
+            "answer": "Byzantine. Such faults require explicit assumptions about faulty participants and independent validation; ordinary byte-integrity checks alone cannot prove that a local gradient was computed correctly.",
             "learning_objective": "Apply Byzantine fault tolerance principles to protect parameter updates against silent data corruption."
           }
         ]
@@ -276,7 +276,7 @@
           {
             "question_type": "TF",
             "question": "Software-based fault injection frameworks are universally preferred over FPGA-based injection for production resilience certification because software tools capture register-level gate timing violations and physical alpha-particle strikes with higher fidelity.",
-            "answer": "False. FPGA-based and radiation beam testing provide ground-truth physical fidelity and microarchitectural accuracy by injecting faults directly into hardware gates and registers. Software-based injection trades physical fidelity for scale, speed, and ease of integration across ML pipelines, but it cannot capture circuit-level timing or physical packaging phenomena.",
+            "answer": "False. Software injection trades physical fidelity for scale and controllable experiments. FPGA-based injection can expose lower-level state in the implemented design, while beam testing probes the actual device under physical radiation. Neither an FPGA implementation nor a tensor-level simulation automatically reproduces every timing, packaging, or fault-propagation behavior of production silicon.",
             "learning_objective": "Compare the fidelity and scalability trade-offs between hardware-based and software-based fault injection methodologies."
           },
           {
@@ -321,7 +321,7 @@
           },
           {
             "question_type": "SHORT",
-            "question": "A training cluster doubles in size from 1,000 GPUs to 4,000 GPUs, reducing its system MTBF by a factor of 4. Assuming checkpoint write time $T_{\\text{write}}$ remains constant, calculate by what factor the Young-Daly optimal checkpoint interval $\\tau_{\\text{opt}}$ changes.",
+            "question": "A training cluster quadruples in size from 1,000 GPUs to 4,000 GPUs, reducing its system MTBF by a factor of 4. Assuming checkpoint write time $T_{\\text{write}}$ remains constant, calculate by what factor the Young-Daly optimal checkpoint interval $\\tau_{\\text{opt}}$ changes.",
             "answer": "Under the Young-Daly formula $\\tau_{\\text{opt}} = \\sqrt{2 \\cdot T_{\\text{write}} \\cdot \\text{MTBF}_{\\text{system}}}$, the optimal interval scales with the square root of MTBF. When MTBF decreases by a factor of 4 ($\\text{MTBF}' = \\text{MTBF}/4$), the new optimal interval becomes $\\tau_{\\text{opt}}' = \\sqrt{2 \\cdot T_{\\text{write}} \\cdot (\\text{MTBF}/4)} = \\frac{1}{2}\\tau_{\\text{opt}}$. The optimal interval halves (becomes $2\\times$ more frequent), not $4\\times$, due to the square-root relationship.",
             "learning_objective": "Calculate the mathematical scaling of the Young-Daly optimal checkpoint interval as cluster size increases."
           },
@@ -390,9 +390,9 @@
               "Approximately 0.5 minutes daily, wasting 5 GPU-hours per day.",
               "Approximately 6.6 minutes daily, wasting 100 GPU-hours per day.",
               "Approximately 15 minutes daily, wasting 500 GPU-hours per day.",
-              "Approximately 31.7 minutes daily, wasting roughly 5,280 GPU-hours per day across the fleet."
+              "Approximately 29.3 minutes daily, wasting roughly 4,880 GPU-hours per day across the fleet."
             ],
-            "answer": "The correct answer is D. Total recovery time per failure is $T_{\\text{recovery}} = 30\\text{ s} + 180\\text{ s} + 36\\text{ s} + 120\\text{ s} = 366\\text{ s} = 6.1\\text{ minutes}$ (or $\\approx 6.6$ minutes depending on rounding). With an MTBF of 5 hours, the cluster experiences $24 / 5 = 4.8$ failures per day. The total daily lost wall-clock time is $4.8 \\times 6.6\\text{ min} \\approx 31.7\\text{ minutes}$ (a $2.2\\%$ capacity loss). Multiplying this across 10,000 GPUs gives $10{,}000 \\times (31.7 / 60) \\approx 5{,}280$ GPU-hours wasted daily. The other options fail to scale the lost minutes across the 10,000-GPU fleet or miscalculate the failure frequency.",
+            "answer": "The correct answer is D. Recovery takes $30+180+36+120=366$ seconds, or 6.1 minutes. At $24/5=4.8$ failures per day, the first-order lost time is $4.8\\times6.1=29.28$ minutes per day. Across 10,000 GPUs this is $10{,}000\\times29.28/60=4{,}880$ GPU-hours, about 2.03 percent of daily capacity. The other choices fail to combine failure frequency, recovery duration, and fleet size.",
             "learning_objective": "Calculate the total recovery time budget and compound daily compute loss across large accelerator clusters."
           },
           {
@@ -403,14 +403,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "In a 1,000-GPU synchronous data-parallel cluster, a single GPU enters thermal throttling and runs at 50% speed. What is the cluster throughput impact, and what mathematical rule dictates whether the operator should kill the straggler immediately?",
+            "question": "In a compute-dominated 1,000-GPU synchronous job, one GPU remains at half speed, reducing useful cluster throughput by approximately half. What comparison determines whether replacing it is worth the interruption?",
             "choices": [
               "Throughput drops by only 0.1% (1/1000th); the straggler should always be tolerated to avoid restart overhead.",
-              "Cluster throughput drops by 50% because AllReduce is bound by the slowest rank; it is optimal to kill the straggler if its slowdown exceeds $T_{\\text{recovery}} / \\text{MTBF}_{\\text{system}}$.",
+              "Compare the useful work lost during replacement, restart, and replay with the work recovered by removing the slowdown over its expected remaining duration.",
               "Cluster throughput remains 100% because asynchronous gradient buffering absorbs all rank jitter.",
               "Throughput drops by 100% because any slow rank immediately triggers an NCCL assertion crash."
             ],
-            "answer": "The correct answer is B. In synchronous training, AllReduce cannot complete until every rank submits its gradients; therefore, one rank running at 50% speed forces all 999 healthy GPUs to idle at the barrier, cutting global cluster throughput by 50%. The break-even rule states that if the fractional throughput loss from the straggler exceeds the fraction of time spent recovering ($T_{\\text{recovery}} / \\text{MTBF}_{\\text{system}}$), terminating the node and recovering onto healthy hardware yields higher aggregate compute goodput. Dropping by 0.1% wrongly assumes asynchronous independent workers. Dropping by 100% or remaining 100% misstates synchronous AllReduce behavior.",
+            "answer": "The correct answer is B. If the slowdown is expected to persist for $K$ useful updates, replacement pays off when $K(t_{\\mathrm{slow}}-t_{\\mathrm{healthy}})>T_{\\mathrm{restart}}+T_{\\mathrm{replay}}$. The restart budget includes waiting for replacement capacity and restoring state. A transient may clear before this threshold; cluster MTBF does not determine the remaining slowdown horizon.",
             "learning_objective": "Evaluate the economic and throughput break-even criteria for proactively replacing stragglers."
           },
           {
@@ -520,13 +520,13 @@
               "Annual downtime is 0 seconds; three replicas provide mathematically absolute fault tolerance under all operating conditions.",
               "Annual downtime drops to approximately 31.5 seconds ($99.9999\\%$ availability); real-world availability is lower because correlated failures (shared power, top-of-rack switches, DNS, software bugs) violate the independence assumption."
             ],
-            "answer": "The correct answer is D. The formula for $k=3$ independent replicas yields $A_{\\text{system}} = 1 - (1 - 0.99)^3 = 1 - (0.01)^3 = 1 - 10^{-6} = 0.999999$ ($99.9999\\%$ availability, or $365 \\times 24 \\times 3600 \\times 10^{-6} \\approx 31.5$ seconds downtime/year). In practice, shared failure domains (such as common top-of-rack switches, power feeds, shared feature stores, or buggy model code deployed across all replicas) introduce correlation that prevents achieving six-nines availability. The 52.6-minute option corresponds to two replicas, not three. The 3.65-day option ignores redundancy entirely. Absolute zero downtime is physically impossible.",
+            "answer": "The correct answer is D. The formula for $k=3$ independent replicas yields $A_{\\text{system}} = 1 - (1 - 0.99)^3 = 1 - (0.01)^3 = 1 - 10^{-6} = 0.999999$ ($99.9999\\%$ availability, or $365 \\times 24 \\times 3600 \\times 10^{-6} \\approx 31.5$ seconds downtime/year). In practice, shared failure domains (such as common top-of-rack switches, power feeds, shared feature stores, or buggy model code deployed across all replicas) introduce correlation that prevents achieving six-nines availability. Two independent 99-percent replicas yield about 52.6 minutes of annual downtime, whereas three yield about 31.5 seconds. The 3.65-day option ignores redundancy entirely. Absolute zero downtime is physically impossible.",
             "learning_objective": "Calculate redundant replica availability and identify factors that violate component independence."
           },
           {
             "question_type": "SHORT",
             "question": "Explain why losing the key-value (KV) cache of an active 128K-token conversation during a GPU failure in stateful LLM serving severely degrades user latency, and describe how prefix caching mitigates this impact.",
-            "answer": "In transformer inference, the KV cache stores precomputed key and value projections for all previous context tokens (reaching tens of gigabytes per session). If a replica crashes and loses this cache, the failover replica must recompute the entire prompt and conversation history from scratch (prefill phase), converting a sub-second response time into multi-second or multi-minute latency that violates serving SLAs. Prefix caching precomputes and shares KV states for common system prompts and documentation across replicas, eliminating redundant prefill computation during failover.",
+            "answer": "The replacement replica must reconstruct any lost per-session KV state before continuing generation, adding prefill latency. A surviving replica with a matching cached prefix can avoid recomputing that prefix, but the uncached conversation suffix still needs processing. Prefix caching helps only when reusable state remains available; it does not automatically replicate every session cache or eliminate failover latency.",
             "learning_objective": "Analyze the latency and state preservation challenges of transformer KV caches in stateful inference serving."
           },
           {
@@ -556,7 +556,7 @@
           {
             "question_type": "SHORT",
             "question": "Compare session affinity with external distributed state stores (such as Redis) for managing stateful conversational inference sessions in terms of failover speed and infrastructure complexity.",
-            "answer": "Session affinity routes requests from the same user to the same GPU replica, enabling ultra-fast local GPU memory access to the KV cache, but leaves sessions vulnerable to state loss if that specific replica crashes. External distributed state stores decouple state from compute by storing session context in Redis or Memcached, enabling seamless failover to any replica at the expense of network serialization latency and managing an additional distributed storage tier.",
+            "answer": "Session affinity keeps a conversation on the replica holding its KV cache, avoiding remote state access but exposing that session to cache loss when the replica fails. An external store can preserve conversation context so another replica can recover it. Unless KV state was also preserved, the replacement still recomputes the cache. The trade-off includes state-transfer latency and another storage dependency.",
             "learning_objective": "Compare session affinity against distributed state stores for stateful inference fault tolerance."
           }
         ]
@@ -608,7 +608,7 @@
               "It drops all incoming traffic until additional ViT-Large GPU replicas finish provisioning.",
               "It converts the ViT-Large model into a text-only classifier to save memory."
             ],
-            "answer": "The correct answer is A. Model fallback ladders dynamically shift traffic to lighter, lower-compute models when queue depths or tail latency violate SLAs, preserving response availability while sacrificing a bounded percentage of accuracy. Hysteresis ensures the system does not oscillate rapidly between tiers. Executing all three simultaneously increases compute load by $3\\times$. Dropping traffic violates availability goals. Converting vision models to text-only is nonsensical.",
+            "answer": "The correct answer is A. Model fallback ladders dynamically shift traffic to lighter, lower-compute models when queue depths or tail latency violate SLAs, preserving response availability while sacrificing a bounded percentage of accuracy. Hysteresis ensures the system does not oscillate rapidly between tiers. Executing all three adds their unequal compute costs rather than reducing load. Dropping traffic violates availability goals. Converting vision models to text-only is nonsensical.",
             "learning_objective": "Evaluate multi-tier model fallback cascades for graceful quality-latency trade-offs."
           },
           {
@@ -646,14 +646,14 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "During pretraining of a foundation model, the training loss curve exhibits gradual divergence over 50 steps without any thrown exceptions or NaNs in the logs. Based on common ML failure signatures, what is the most likely root cause and operational recovery action?",
+            "question": "During pretraining of a foundation model, the training loss curve exhibits gradual divergence over 50 steps without any thrown exceptions or NaNs in the logs. Based on common ML failure signatures, which failure hypothesis and investigation path should be considered?",
             "choices": [
               "Learning rate warm-up is too fast; double the learning rate and continue training.",
               "A disk full error occurred on the central coordinator; delete log files to resume execution.",
               "The tokenizer encountered an unknown character; restart training from Step 0.",
-              "Silent data corruption or subtle distributed rank desynchronization occurred; isolate the suspect rank with checksum replay, drain the node, and roll back to a known-good checkpoint prior to divergence."
+              "Silent data corruption or subtle distributed rank desynchronization may have occurred; investigate with independent replay, quarantine confirmed faulty hardware, and roll back to a known-good checkpoint prior to divergence."
             ],
-            "answer": "The correct answer is D. Gradual loss divergence without explicit exceptions is a hallmark signature of silent data corruption (e.g. a stuck Tensor Core datapath accumulating biased gradients) or rank desynchronization. The proper response is to isolate the faulty worker using checksum validation or step replay, quarantine the defective hardware, and roll back to a clean checkpoint before the divergence began. Increasing learning rate accelerates divergence. Disk full errors and tokenizer errors produce explicit crashes rather than gradual numerical divergence.",
+            "answer": "The correct answer is D. Silent corruption or rank desynchronization is a plausible failure class and warrants independent checks and replay. Gradual loss divergence alone does not diagnose faulty hardware: data defects and numerical instability can look similar. Isolate the cause before draining a node, and restore a validated earlier checkpoint when state is corrupted. Increasing the learning rate without diagnosis can worsen the incident.",
             "learning_objective": "Analyze root causes from training loss curve signatures and select appropriate recovery responses."
           },
           {
@@ -677,7 +677,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain the numerical mechanism of NaN propagation during backward gradient computation in FP16 mixed-precision training, and describe how loss scaling prevents gradient underflow.",
-            "answer": "In IEEE 754 arithmetic, any operation involving NaN produces NaN, meaning an invalid operation (e.g., division by zero in batch norm or log of nonpositive values) in one layer silently corrupts all subsequent parameter updates across the model. In FP16, limited exponent range ($6 \\times 10^{-8}$ to $65{,}504$) causes small gradient values to underflow to zero; loss scaling multiplies the forward loss by a scale factor (e.g. 1,024) before backpropagation to shift gradients into FP16 representable range, then un-scales gradients before parameter update.",
+            "answer": "Invalid operations such as zero divided by zero can produce NaN, which propagates through most arithmetic into gradients and optimizer state. Overflow can first produce infinity and later cause NaN through an invalid combination. Loss scaling raises small FP16 gradients above the underflow range, then unscales them before the update. Dynamic scaling must also detect nonfinite gradients and skip invalid updates; scaling alone does not cure arbitrary NaNs.",
             "learning_objective": "Analyze numerical debugging techniques and loss scaling mechanisms in mixed-precision training."
           },
           {
@@ -770,7 +770,7 @@
             "question": "An engineering team operates a 1,000-GPU training cluster with a system MTBF of 50 hours ($3{,}000\\text{ minutes}$) and a checkpoint write time of 5 minutes. The team intuitively chooses to checkpoint 'every 15 minutes to stay safe.' According to the Young-Daly formula, what is the mathematically optimal interval, and what is the consequence of the team's intuitive choice?",
             "choices": [
               "Optimal interval is 15 minutes; the intuitive choice is mathematically perfect.",
-              "Optimal interval is approximately 173 minutes (~2.9 hours); checkpointing every 15 minutes writes over 11 times too frequently, imposing excessive I/O overhead that wastes massive compute capacity without recovery benefit.",
+              "The first-order optimum is approximately 173 minutes (~2.9 hours); writing every 15 minutes adds more checkpoint overhead than it saves in expected rework under this model.",
               "Optimal interval is 50 hours; checkpointing every 15 minutes causes disk sectors to wear out in days.",
               "Optimal interval is 1 minute; checkpointing every 15 minutes risks losing 100% of the training dataset."
             ],
@@ -779,8 +779,8 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Explain why calculating cluster MTBF purely as $\\text{MTBF}_{\\text{system}} = \\text{MTBF}_{\\text{component}} / N$ dangerously underestimates incident frequency and failure blast radius in real-world data centers.",
-            "answer": "The formula assumes that component failures are statistically independent. In real data centers, shared failure domains (such as top-of-rack switches, power distribution units, cooling infrastructure, and common software/CUDA driver versions) cause correlated failures. A single PDU or switch fault can take down 8 to 500 GPUs simultaneously, multiplying the incident rate and creating a massive blast radius that overwhelms simple single-node recovery strategies.",
+            "question": "Explain what a GPU-only independent-failure estimate, $\\mathrm{MTBF}_{\\mathrm{system}}=\\mathrm{MTBF}_{\\mathrm{component}}/N$, omits about shared failure domains and their recovery consequences.",
+            "answer": "The independent-component formula omits separate shared failure modes such as power or switch outages, and it says nothing about their blast radius. Add those fault domains and their recovery consequences explicitly. Correlation alone does not necessarily increase the count of distinct incidents for fixed marginal component rates; a shared outage can group many component failures into one large event.",
             "learning_objective": "Justify why independent component reliability models fail to capture the risk and blast radius of correlated infrastructure failures."
           },
           {
@@ -792,7 +792,7 @@
               "Because the Python interpreter cannot spawn more than 512 concurrent threads.",
               "Because aggregate cluster failure rate scales linearly ($N\\lambda$), shrinking system MTBF until the cumulative time lost to failure detection, job restarts, checkpoint loading, and rework exceeds the marginal compute speedup of additional parallelism."
             ],
-            "answer": "The correct answer is D. Effective training goodput equals $\\text{MFU} \\times \\text{Scaling Efficiency} \\times (1 - \\text{Failure Overhead})$. As $N$ grows, cluster MTBF drops as $1/N$, multiplying failure frequency. Beyond a critical cluster size, the aggregate time spent detecting failures, reloading checkpoints, synchronizing communicators, and recomputing lost steps outpaces the incremental compute throughput of added GPUs, causing net wall-clock training time to rise. The other choices cite irrelevant power constraints, precision myths, or single-process thread limits.",
+            "answer": "The correct answer is D. Under independent failures, adding workers increases the aggregate failure rate. Recovery and replay can eventually cost more than the marginal compute speedup. Starting from single-node MFU, scaling efficiency accounts for distributed execution losses; a separate retained-progress factor covers excluded recovery losses. Measured distributed MFU already includes scaling losses and must not be multiplied by scaling efficiency again.",
             "learning_objective": "Evaluate the reliability ceiling where aggregate cluster failure overhead outpaces parallel compute scaling."
           },
           {
@@ -837,7 +837,7 @@
           {
             "question_type": "SHORT",
             "question": "Evaluate how the three core mechanisms of ML systems resilience\u2014checkpointing, elastic recovery, and redundancy\u2014complement one another to bound the financial and computational cost of hardware failures.",
-            "answer": "Checkpointing periodically preserves durable training state, bounding the maximum rework lost during a failure to approximately $\\tau_{\\text{opt}}$. Elastic recovery allows training jobs to dynamically reshape and continue progress at reduced worker counts, eliminating cluster idle time when replacement hardware is unavailable. Redundancy deploys independent model replicas across independent failure domains, ensuring sub-second failover and high availability for live serving traffic.",
+            "answer": "Checkpointing preserves recoverable training state and limits rework according to the age of the latest valid checkpoint. Elastic recovery permits progress with fewer workers when the algorithm and available memory support resizing. Independent serving replicas provide alternate capacity after a failure. These mechanisms complement one another, but their checkpoint validity, resize cost, state recovery, and failover latency must all satisfy the recovery contract.",
             "learning_objective": "Evaluate the complementary roles of checkpointing, elastic recovery, and redundancy in large-scale ML infrastructure."
           },
           {
