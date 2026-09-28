@@ -9,6 +9,15 @@
   const slidesData = [
     {
       index: 0,
+      title: "Tito CLI Companion & Environment Diagnostics",
+      tagline: "First-time setup, 100% green health checks, and module workflow companion",
+      command: "tito && tito system health",
+      gif: "assets/images/demos/tinytorch-06-tito-companion.gif",
+      mp4: "assets/images/demos/tinytorch-06-tito-companion.mp4",
+      alt: "Tito CLI companion welcome banner and environment health diagnostic verification"
+    },
+    {
+      index: 1,
       title: "One-Line Install & Milestone 01 Out of the Box",
       tagline: "From curl to running Frank Rosenblatt's 1958 Perceptron in seconds",
       command: "curl -fsSL https://mlsysbook.ai/tinytorch/install.sh | bash",
@@ -17,7 +26,7 @@
       alt: "TinyTorch one-line install and running milestone 01 Perceptron out of the box"
     },
     {
-      index: 1,
+      index: 2,
       title: "Module Mastery & Milestone Progress Grid",
       tagline: "20/20 modules completed, autograd verified, 7 milestones unlocked",
       command: "tito module complete 06 && tito module status",
@@ -26,7 +35,7 @@
       alt: "Completing autograd module and viewing 20/20 modules mastery progress grid"
     },
     {
-      index: 2,
+      index: 3,
       title: "TinyGPT Conversational Streaming Chat",
       tagline: "Decoder transformer streaming token responses character-by-character on CPU",
       command: "tito milestone run 05 --part 4",
@@ -35,7 +44,7 @@
       alt: "TinyGPT conversational interactive terminal chat with live streaming response"
     },
     {
-      index: 3,
+      index: 4,
       title: "TinyGPT Code Completion on TinyPy",
       tagline: "Autoregressive code generation with 100% AST compiler verification",
       command: "tito milestone run 05 --part 3",
@@ -44,22 +53,13 @@
       alt: "TinyGPT code completion on TinyPy dataset with zero syntax errors verified by AST"
     },
     {
-      index: 4,
-      title: "MLPerf Hardware Optimization Olympics",
+      index: 5,
+      title: "MLPerf Benchmarking",
       tagline: "INT8 quantization (4x), im2col (>70x), and KV-cache Pareto frontier",
       command: "tito milestone run 06 --part 1",
       gif: "assets/images/demos/tinytorch-05-mlperf-opt.gif",
       mp4: "assets/images/demos/tinytorch-05-mlperf-opt.mp4",
       alt: "MLPerf optimization triad evaluating dense, spatial, and autoregressive models"
-    },
-    {
-      index: 5,
-      title: "Tito CLI Companion & Environment Diagnostics",
-      tagline: "First-time setup, 100% green health checks, and module workflow companion",
-      command: "tito && tito system health",
-      gif: "assets/images/demos/tinytorch-06-tito-companion.gif",
-      mp4: "assets/images/demos/tinytorch-06-tito-companion.mp4",
-      alt: "Tito CLI companion welcome banner and environment health diagnostic verification"
     },
     {
       index: 6,
