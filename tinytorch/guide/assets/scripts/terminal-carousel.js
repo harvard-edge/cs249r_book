@@ -99,7 +99,7 @@
     if (modal && img) {
       img.src = data.gif;
       img.alt = data.alt;
-      if (title) title.textContent = data.title;
+      if (title) title.textContent = `Tiny🔥Torch · ${data.title}`;
       if (caption) caption.textContent = data.tagline;
       modal.classList.add("show");
       document.body.style.overflow = "hidden";

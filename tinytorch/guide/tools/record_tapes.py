@@ -78,18 +78,51 @@ def create_window_template(term_w: int, term_h: int, title: str) -> tuple[Path, 
     wdraw.ellipse([36, btn_y, 36 + 12, btn_y + 12], fill=(255, 189, 46, 255), outline=(222, 161, 35, 255))
     wdraw.ellipse([56, btn_y, 56 + 12, btn_y + 12], fill=(39, 201, 63, 255), outline=(26, 171, 41, 255))
 
-    # Window title
+    # Window title with authentic Tiny🔥Torch flame branding
     try:
         font = ImageFont.truetype("/System/Library/Fonts/SFNSMono.ttf", 12)
     except Exception:
         font = ImageFont.load_default()
 
-    bbox = font.getbbox(title)
-    tw = bbox[2] - bbox[0]
-    th = bbox[3] - bbox[1]
-    tx = (win_w - tw) // 2
-    ty = (bar_h - th) // 2 - 1
-    wdraw.text((tx, ty), title, fill=(166, 173, 200, 255), font=font)
+    # Clean action subtitle (e.g. 'install & run')
+    action = title
+    if "·" in title:
+        action = title.split("·", 1)[1].strip()
+
+    fire_path = REPO_ROOT / "tinytorch" / "guide" / "assets" / "images" / "logos" / "fire-emoji.png"
+    if fire_path.exists():
+        fire_raw = Image.open(fire_path).convert("RGBA")
+        fire_icon = fire_raw.resize((14, 14), Image.Resampling.LANCZOS)
+
+        prefix = "Tiny"
+        suffix = f"Torch · {action}"
+
+        p_box = font.getbbox(prefix)
+        pw = p_box[2] - p_box[0]
+        ph = p_box[3] - p_box[1]
+
+        s_box = font.getbbox(suffix)
+        sw = s_box[2] - s_box[0]
+
+        fw, fh = fire_icon.size
+        gap = 2
+        total_w = pw + gap + fw + gap + sw
+
+        start_x = (win_w - total_w) // 2
+        text_y = (bar_h - ph) // 2 - 1
+        fire_y = (bar_h - fh) // 2
+
+        # Draw 'Tiny', flame icon, and 'Torch · <action>'
+        wdraw.text((start_x, text_y), prefix, fill=(205, 214, 244, 255), font=font)
+        win.alpha_composite(fire_icon, (start_x + pw + gap, fire_y))
+        wdraw.text((start_x + pw + gap + fw + gap, text_y), suffix, fill=(205, 214, 244, 255), font=font)
+    else:
+        bbox = font.getbbox(title)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        tx = (win_w - tw) // 2
+        ty = (bar_h - th) // 2 - 1
+        wdraw.text((tx, ty), title, fill=(166, 173, 200, 255), font=font)
 
     # 1px border outline
     wdraw.rounded_rectangle([0, 0, win_w - 1, win_h - 1], radius=radius, outline=(69, 71, 90, 255), width=1)
