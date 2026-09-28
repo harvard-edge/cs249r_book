@@ -1,7 +1,7 @@
 # Lab 6: Safety Governor — Build It, Then Break It
 
 **Schedule:** Weeks 10–11 · Milestone 4 due end of Week 11
-**Required Textbook Reading:** [Chapter 12: Safety Enforcement](../../../books/vol4/12_safety/12_safety.qmd), [Chapter 14: Supervisory Intervention](../../../books/vol4/14_supervisory/14_supervisory.qmd), [Chapter 15: Adversarial Verification](../../../books/vol4/15_adversarial/15_adversarial.qmd), [Chapter 16: Safe Release](../../../books/vol4/16_release/16_release.qmd)
+**Required Textbook Reading:** [Chapter 12: Safety Enforcement](../../../books/vol4/12_safety/12_safety.qmd), [Chapter 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd), [Chapter 14: Supervisory Intervention](../../../books/vol4/14_supervisory/14_supervisory.qmd), [Chapter 15: Adversarial Verification](../../../books/vol4/15_adversarial/15_adversarial.qmd), [Chapter 16: Safe Release](../../../books/vol4/16_release/16_release.qmd)
 **Target Competencies:** `[ ] D1 Hardware Authority Routing`, `[ ] D2 Deterministic Safety Enforcement`
 **Milestone Alignment:** Concludes [Milestone 4](../curriculum/syllabus.md#sec-milestones) (End of Week 11)
 
