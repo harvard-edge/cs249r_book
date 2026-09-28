@@ -1,8 +1,8 @@
 # ==============================================================================
-# 04_tinygpt_code.tape: TinyGPT Code Completion on TinyPy with AST Validation
+# 04_tinycopilot.tape: TinyCopilot Code Generation on TinyPy with AST Validation
 # ==============================================================================
 
-Output "tinytorch/guide/assets/images/demos/tinytorch-04-tinygpt-code.gif"
+Output "tinytorch/guide/assets/images/demos/tinytorch-04-tinycopilot.gif"
 
 Set Shell "bash"
 Set FontSize 15
@@ -19,8 +19,8 @@ Enter
 Sleep 500ms
 Show
 
-# Train TinyGPT on Python code and evaluate syntax with AST compiler
-Type "tito milestone run 05-code"
+# Train TinyCopilot on Python code and evaluate syntax with AST compiler
+Type "tito milestone run tinycopilot"
 Sleep 300ms
 Enter
 # Generous hold time to study code completions, compiler diagnostics, and 100% AST validity scorecard

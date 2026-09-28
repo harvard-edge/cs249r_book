@@ -25,7 +25,7 @@ TAPE_TITLES = {
     "01_install_and_run": "tinytorch · install & run",
     "02_modules_mastery": "tinytorch · module status",
     "03_tinygpt_chat": "tinytorch · tinygpt chat",
-    "04_tinygpt_code": "tinytorch · code completion",
+    "04_tinycopilot": "tinytorch · tinycopilot",
     "05_mlperf_opt": "tinytorch · mlperf optimization",
     "06_tito_companion": "tinytorch · tito companion",
     "07_tito_olympics": "tinytorch · tito olympics",

@@ -20,7 +20,7 @@ Train **TinyGPT** from scratch on Shakespeare. Brings together your tokenization
 **Part 2 (`02_vaswani_attention.py` - Attention Proof):**
 Prove your attention mechanism on three synthetic sequence challenges (reversal, copying, prefix-controlled mixed tasks) without external data dependencies.
 
-**Part 3 (`03_tinygpt_code_completion.py` - TinyCopilot):**
+**Part 3 (`03_tinycopilot.py` - TinyCopilot):**
 Train **TinyGPT** on Python code using the TinyPy dataset to complete functions, preserve indentation, and generate syntactically valid code verified with Abstract Syntax Tree parsing.
 
 **Part 4 (`04_tinygpt_chat.py` - Conversational Q&A & Overfitting Detective):**
@@ -95,13 +95,13 @@ python3 milestones/05_2017_transformer/01_tinygpt_shakespeare.py --quick
 python3 milestones/05_2017_transformer/02_vaswani_attention.py
 
 # Part 3: TinyCopilot code generation (Python)
-python3 milestones/05_2017_transformer/03_tinygpt_code_completion.py --quick
+python3 milestones/05_2017_transformer/03_tinycopilot.py --quick
 
 # Part 4: Conversational Q&A and Overfitting Detective
 python3 milestones/05_2017_transformer/04_tinygpt_chat.py --quick
 ```
 
-## Part 3: TinyCopilot with TinyPy (`03_tinygpt_code_completion.py`)
+## Part 3: TinyCopilot with TinyPy (`03_tinycopilot.py`)
 
 ### Why TinyCopilot is the Natural Evolution from Shakespeare
 
@@ -123,25 +123,27 @@ Code completion represents the natural evolution in sequence modeling for three 
 **Quick verification run (recommended for fast turnaround):**
 
 ```bash
-python3 03_tinygpt_code_completion.py --quick
+python3 03_tinycopilot.py --quick
 ```
 
 Or from the TinyTorch repository root:
 
 ```bash
-python3 milestones/05_2017_transformer/03_tinygpt_code_completion.py --quick
+python3 milestones/05_2017_transformer/03_tinycopilot.py --quick
 ```
 
 **Run via TITO CLI:**
 
 ```bash
 tito milestone run 05 --part 3
+# or
+tito milestone run tinycopilot
 ```
 
 **Full training run:**
 
 ```bash
-python3 03_tinygpt_code_completion.py --epochs 10
+python3 03_tinycopilot.py --epochs 10
 ```
 
 ## Part 4: Conversational Concepts & Overfitting Detective (`04_tinygpt_chat.py`)
@@ -176,7 +178,7 @@ python3 milestones/05_2017_transformer/04_tinygpt_chat.py --interactive
 |------|--------|------|------------------|
 | 1 (Default) | `01_tinygpt_shakespeare.py` | Shakespeare Next-Token Prediction | Loss drops from ~3.0 to < 1.0 (PPL < 3.0); generates coherent verse |
 | 2 (Optional) | `02_vaswani_attention.py` | Synthetic Reversal / Copy / Mixed | High accuracy (>95% reversal, >95% copy, >90% mixed) |
-| 3 (TinyCopilot) | `03_tinygpt_code_completion.py` | TinyCopilot Code Generation | Loss drops steadily; generates valid syntax and completes functions |
+| 3 (TinyCopilot) | `03_tinycopilot.py` | TinyCopilot Code Generation | Loss drops steadily; generates valid syntax and completes functions |
 | 4 (Chat) | `04_tinygpt_chat.py` | Conversational Q&A & Overfitting | Train loss drops to < 0.60; detects generalization gap on held-out split |
 
 ## Achievement Unlocked

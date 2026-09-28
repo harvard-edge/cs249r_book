@@ -179,8 +179,8 @@ def test_tinygpt_parameters_and_autograd_training():
     assert any(np.any(p.data != before[id(p)]) for p in params)
 
 
-def test_tinygpt_code_completion_parameters_and_autograd_training():
-    module = milestone('05_2017_transformer/03_tinygpt_code_completion.py')
+def test_tinycopilot_parameters_and_autograd_training():
+    module = milestone('05_2017_transformer/03_tinycopilot.py')
     model, total_params = module.build_model(vocab_size=25, embed_dim=16, num_layers=1, num_heads=2, max_seq_len=16)
     params = model.parameters()
     assert len(params) > 0

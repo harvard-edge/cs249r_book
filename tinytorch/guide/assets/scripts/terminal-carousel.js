@@ -48,8 +48,8 @@
       title: "TinyCopilot: Code Generation on TinyPy",
       tagline: "Autoregressive code synthesis with 100% AST compiler verification",
       command: "tito milestone run 05 --part 3",
-      gif: "assets/images/demos/tinytorch-04-tinygpt-code.gif",
-      mp4: "assets/images/demos/tinytorch-04-tinygpt-code.mp4",
+      gif: "assets/images/demos/tinytorch-04-tinycopilot.gif",
+      mp4: "assets/images/demos/tinytorch-04-tinycopilot.mp4",
       alt: "TinyCopilot code generation on TinyPy dataset with zero syntax errors verified by AST"
     },
     {

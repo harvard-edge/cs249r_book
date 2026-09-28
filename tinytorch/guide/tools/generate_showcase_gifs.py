@@ -324,21 +324,21 @@ def create_tinygpt_chat_gif():
 
 
 # ==============================================================================
-# 4. TINYGPT CODE COMPLETION (AST COMPILER GATING)
+# 4. TINYCOPILOT CODE GENERATION (AST COMPILER GATING)
 # ==============================================================================
-def create_tinygpt_code_gif():
-    frames_dir = Path(tempfile.mkdtemp(prefix="tt_code_"))
+def create_tinycopilot_gif():
+    frames_dir = Path(tempfile.mkdtemp(prefix="tt_copilot_"))
     svg_files = []
     frame_idx = 0
 
-    cmd = "tito milestone run 05 --part 3"
+    cmd = "tito milestone run tinycopilot"
     for i in range(1, len(cmd) + 1, 3):
         p = Text()
         p.append("$ ", style="bold green")
         p.append(cmd[:i], style="bold white")
         p.append("█", style="bold yellow")
         path = str(frames_dir / f"f_{frame_idx:04d}.svg")
-        render_fixed_frame([p], path, "tito code | 84x22")
+        render_fixed_frame([p], path, "tito tinycopilot | 84x22")
         svg_files.append(path)
         frame_idx += 1
 
@@ -406,7 +406,7 @@ def create_tinygpt_code_gif():
         svg_files.append(path)
         frame_idx += 1
 
-    compile_gif(svg_files, OUTPUT_DIR / "tinytorch-04-tinygpt-code.gif", fps=4)
+    compile_gif(svg_files, OUTPUT_DIR / "tinytorch-04-tinycopilot.gif", fps=4)
     shutil.rmtree(frames_dir)
 
 
@@ -488,6 +488,6 @@ if __name__ == "__main__":
     create_install_and_run_gif()
     create_modules_mastery_gif()
     create_tinygpt_chat_gif()
-    create_tinygpt_code_gif()
+    create_tinycopilot_gif()
     create_mlperf_gif()
     print("All 5 showcase GIFs generated successfully!")

@@ -44,6 +44,8 @@ MILESTONE_ALIASES = {
     "shakespeare": "05",
     "code": "05",
     "tinypy": "05",
+    "tinycopilot": "05",
+    "copilot": "05",
     "mlperf": "06",
     "olympics": "06",
     "serving": "06",
@@ -147,9 +149,9 @@ MILESTONE_SCRIPTS = {
                 "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13]
             },
             {
-                "name": "Code Completion",
-                "script": "milestones/05_2017_transformer/03_tinygpt_code_completion.py",
-                "description": "Train TinyGPT on Python code to complete functions and syntax",
+                "name": "TinyCopilot",
+                "script": "milestones/05_2017_transformer/03_tinycopilot.py",
+                "description": "Train TinyCopilot on Python code to complete functions and syntax",
                 "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
             },
             {
@@ -160,7 +162,7 @@ MILESTONE_SCRIPTS = {
             }
         ],
         "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13],  # TinyGPT training requirements
-        "description": "Train TinyGPT from scratch on Shakespeare, code completion, and concept Q&A",
+        "description": "Train TinyGPT from scratch on Shakespeare, TinyCopilot code generation, and concept Q&A",
         "historical_context": "Vaswani et al. (2017) and the Generative LLM revolution (2020-2022) proved transformers and emergent autoregressive scaling",
         "emoji": "🤖"
     },

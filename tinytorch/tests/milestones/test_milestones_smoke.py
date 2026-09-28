@@ -146,10 +146,10 @@ class TestModelConstruction:
         )
         assert module is not None
 
-    def test_milestone_05_code_completion(self):
-        """Milestone 05 Part 3: Code completion model constructs and script loads."""
+    def test_milestone_05_tinycopilot(self):
+        """Milestone 05 Part 3: TinyCopilot code generation model constructs and script loads."""
         module = _import_milestone(
-            MILESTONES_DIR / "05_2017_transformer" / "03_tinygpt_code_completion.py"
+            MILESTONES_DIR / "05_2017_transformer" / "03_tinycopilot.py"
         )
         assert module is not None
         if hasattr(module, "build_model"):
