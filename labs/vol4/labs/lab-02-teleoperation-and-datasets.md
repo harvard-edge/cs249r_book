@@ -3,6 +3,25 @@
 **Schedule:** Weeks 4–5 | **Milestone 2 Alignment:** Contributes to Milestone 2 (End of Week 6)
 **Required Textbook Reading:** [Chapter 5: Physical Data](../../../books/vol4/05_data/05_data.qmd) & [Chapter 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd)
 **Target Competencies:** `[ ] B1 Physical Dataset Engineering & Multi-Tap Logging`
+---
+
+## Overview
+
+### Purpose
+A robot that can move is useless without data to learn from. This lab teaches you how to collect high-quality physical demonstration data — the fuel for every learned policy that follows. You will learn that physical data engineering is harder than web-scraped datasets: every frame must be temporally aligned, every action tap must be logged, and data leakage between train and test splits can silently ruin a model.
+
+### Prerequisites
+**Lab 1 completed.** You need a fully characterized and calibrated station: verified servo enumeration, camera extrinsic matrix, and working inter-core RPC bridge with measured latency.
+
+### Learning Outcomes
+By the end of this lab, you will be able to:
+- Teleoperate a 6-DoF robotic arm using a gamepad with proportional joint-velocity control
+- Record synchronized multi-modal demonstration episodes in LeRobot Dataset v3 format with all four action taps
+- Audit a physical dataset for dropped frames, timestamp violations, and action tap completeness
+- Produce a dataset card and construct leak-free train/validation/test splits
+
+### What You Will Do
+Over two weeks, you will configure the LeRobot teleoperation pipeline, practice driving the SO-101 arm with a gamepad, then systematically record 30 expert demonstrations of a block-reaching task. You will log all four action taps (requested, mapped, enforced, measured) alongside synchronized camera frames, audit the dataset for integrity, split it for training, and produce a dataset card documenting your collection protocol.
 
 ---
 

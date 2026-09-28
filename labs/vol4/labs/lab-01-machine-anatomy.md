@@ -7,6 +7,27 @@
 
 ---
 
+## Overview
+
+### Purpose
+This is your first encounter with the physical machine. Before any learning algorithm touches the robot, you need to answer a fundamental question: *do you trust this hardware?* You will systematically characterize every component — the electrical authority chain, the mechanical envelope, the sensor calibration, and the communication latency — so that every subsequent lab rests on measured, verified foundations rather than assumptions.
+
+### Prerequisites
+None — this is the first lab. You should have read Chapters 1–4 and attended the introductory lecture on the dual-brain architecture.
+
+### Learning Outcomes
+By the end of this lab, you will be able to:
+- Trace the complete authority chain from software intent to physical motor force and identify every point where a command can be intercepted or vetoed
+- Measure and document the mechanical operating envelope of a 6-DoF serial manipulator
+- Calibrate an extrinsic camera-to-robot coordinate transformation and quantify its accuracy
+- Measure inter-core communication latency and diagnose temporal synchronization issues between asynchronous processors
+- Verify safe-state behavior under power loss, sensor dropout, and communication failure
+
+### What You Will Do
+Over three weeks, you will wire the bench station, enumerate and calibrate all six servos, characterize the arm's mechanical travel limits, configure the overhead webcam, compute the camera-to-base transformation matrix, bring up the inter-core RPC bridge between the Qualcomm Linux MPU and the STM32 MCU, and measure round-trip communication latency. You will also deliberately trigger failure conditions — cutting power, blocking the camera, injecting stale data — to verify the system fails safely.
+
+---
+
 ### 1. The Physical Question
 
 Where does computational authority end and physical force begin? If a host computer or neural network issues an erroneous command, what hardware mechanisms guarantee that the machine fails safely? And once you trust the plant, how do you integrate disparate sensory modalities—an external camera perceiving light and an internal encoder measuring angle—across asynchronous processors with aligned spatial frames and synchronized clocks?

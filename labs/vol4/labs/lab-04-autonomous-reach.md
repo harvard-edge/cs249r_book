@@ -3,6 +3,25 @@
 **Schedule:** Weeks 7–8
 **Required Textbook Reading:** [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd), [Chapter 11: Trajectory Planning](../../../books/vol4/11_planning/11_planning.qmd) & [Chapter 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd)
 **Target Competencies:** `[ ] C1 Closed-Loop Autonomous Action`
+---
+
+## Overview
+
+### Purpose
+Everything before this was preparation. This is the moment the full Sense–Propose–Permit–Act loop runs for real — no host PC, no safety net, no tethered connection. The robot sees, decides, asks for permission, and moves, in a continuous loop running entirely on-device. This lab is where you discover whether your trained model, your calibration, your bridge latency, and your safety governor actually work together as a system.
+
+### Prerequisites
+**Lab 3 completed.** You need a quantized ONNX INT8 policy deployed on the UNO Q with verified inference latency < 80 ms, and the full station from Lab 1 with working camera, RPC bridge, and safety governor.
+
+### Learning Outcomes
+By the end of this lab, you will be able to:
+- Integrate camera capture, neural policy inference, inter-core RPC, MCU safety evaluation, and servo actuation into a single continuous control loop
+- Deploy and run an autonomous robotic system untethered from any host computer
+- Measure and decompose end-to-end loop latency into its five component stages
+- Evaluate autonomous manipulation performance through repeated physical trials with quantified success criteria
+
+### What You Will Do
+Over two weeks, you will integrate all the pieces from Labs 1–3 into a single autonomous loop on the UNO Q. You will disconnect the host PC, run the system headlessly, execute 10 physical reach trials from varied starting positions, and break down the total loop latency into its five components (camera, preprocessing, inference, RPC, actuation). This is the first time you see your system operate as a truly autonomous physical agent.
 
 ---
 

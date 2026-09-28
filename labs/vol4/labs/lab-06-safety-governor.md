@@ -7,6 +7,27 @@
 
 ---
 
+## Overview
+
+### Purpose
+A robot that works is not the same as a robot you can trust. In every previous lab, the STM32 safety governor was running in the background — but you never tested whether it actually holds under adversarial conditions. This lab makes safety the explicit subject. In the first week, you build the deterministic safety barriers (velocity clamps, workspace geofences, joint limits). In the second week, you systematically try to defeat them — injecting faults, freezing the brain, corrupting packets, cutting power. If you can't break it, you can trust it.
+
+### Prerequisites
+**Lab 5 completed.** You need a fully working autonomous S·P·A loop with disturbance-tested performance from Lab 5. You also need comfort with STM32 firmware development from Lab 1.
+
+### Learning Outcomes
+By the end of this lab, you will be able to:
+- Implement deterministic real-time safety barriers (velocity saturation, joint limits, workspace geofencing) on a microcontroller
+- Verify single-path hardware authority — prove that no software or electrical bypass can reach actuators without MCU permission
+- Design and execute adversarial fault injection tests (process freeze, packet corruption, sensor dropout, power cutoff)
+- Implement and validate a hardware watchdog timer with zero-backlog command purging
+- Produce telemetry evidence showing active safety intervention (where enforced ≠ requested)
+
+### What You Will Do
+Over two weeks, you will first program the STM32 safety governor firmware — implementing velocity clamps, forward-kinematics-based table geofence, and joint-limit checks — and verify it rejects malicious proposals. Then you will become the adversary: freezing the Linux brain mid-action, flooding the UART buffer with stale commands, unplugging the camera, corrupting packet checksums, and cutting motor power under load. Each attack must either be safely handled or produce documented evidence of the failure mode.
+
+---
+
 ### 1. The Physical Question
 
 Can an independent microcontroller guarantee physical safety even when the Linux brain crashes, lies, or goes silent — and can you **prove** it by systematically trying to break it?

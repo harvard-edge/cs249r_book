@@ -3,6 +3,26 @@
 **Schedule:** Week 6 · Milestone 2 due end of week
 **Required Textbook Reading:** [Chapter 6: Policy Training](../../../books/vol4/06_training/06_training.qmd)
 **Target Competencies:** `[ ] B2 Deterministic Baseline Benchmarking`, `[ ] B3 Edge Model Profiling & Resource Budgets`
+---
+
+## Overview
+
+### Purpose
+You have data. Now the question is: can a neural network learn to do the task better than a hand-written script? This lab is where classical control meets modern imitation learning. You will build both — a deterministic scripted baseline and a learned policy — and compare them head-to-head on the real hardware. You will also confront a core embedded AI challenge: fitting a neural network into the memory and latency budget of an edge processor.
+
+### Prerequisites
+**Lab 2 completed.** You need a verified LeRobot Dataset v3 archive with 30 episodes, all four action taps populated, and clean train/validation/test splits.
+
+### Learning Outcomes
+By the end of this lab, you will be able to:
+- Implement a deterministic scripted reach heuristic using inverse kinematics or positional targeting
+- Train an ACT or SmolVLA imitation learning policy on physical demonstration data
+- Quantize a trained policy to ONNX INT8 format for edge deployment
+- Profile on-device inference latency, peak memory, and thermal behavior on an ARM edge processor
+- Compare a learned policy against a classical baseline using matched physical trials
+
+### What You Will Do
+In one intensive week, you will write a scripted reach baseline, benchmark it on 10 trials, train a learned policy (ACT or SmolVLA) on a GPU workstation using your Lab 2 dataset, export and quantize the model to ONNX INT8, transfer it to the UNO Q, and profile its inference performance. You will compare the learned policy against your scripted baseline using the same starting positions and success criteria.
 
 ---
 
