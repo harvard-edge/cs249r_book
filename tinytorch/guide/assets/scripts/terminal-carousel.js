@@ -45,12 +45,12 @@
     },
     {
       index: 4,
-      title: "TinyGPT Code Completion on TinyPy",
-      tagline: "Autoregressive code generation with 100% AST compiler verification",
+      title: "TinyCopilot: Code Generation on TinyPy",
+      tagline: "Autoregressive code synthesis with 100% AST compiler verification",
       command: "tito milestone run 05 --part 3",
       gif: "assets/images/demos/tinytorch-04-tinygpt-code.gif",
       mp4: "assets/images/demos/tinytorch-04-tinygpt-code.mp4",
-      alt: "TinyGPT code completion on TinyPy dataset with zero syntax errors verified by AST"
+      alt: "TinyCopilot code generation on TinyPy dataset with zero syntax errors verified by AST"
     },
     {
       index: 5,

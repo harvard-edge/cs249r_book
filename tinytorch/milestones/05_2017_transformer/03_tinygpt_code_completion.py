@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The Transformer Era (2017-2022): TinyGPT Code Completion Capstone
+The Transformer Era (2017-2022): TinyCopilot Python Code Generation
 =============================================================================
 
 📚 HISTORICAL CONTEXT:
@@ -19,7 +19,7 @@ forgiven), programming languages demand strict syntactic precision:
    downstream syntax to pass interpreter verification.
 4. Abstract Syntax Tree (AST): The code must compile into a formal syntax tree.
 
-🎯 MILESTONE 05 CAPSTONE: TRAIN TINYGPT TO COMPLETE PYTHON CODE
+🎯 MILESTONE 05 CAPSTONE: TRAIN TINYCOPILOT ON PYTHON CODE
 In this capstone milestone, YOU bring together your full TinyTorch stack:
 - Tokenizing source code characters with YOUR Tokenizer (Module 10)
 - Projecting into continuous latent space with YOUR Embeddings (Module 11)
@@ -731,7 +731,7 @@ def run_milestone(args=None):
         pass_ratio = f"{valid_count}/{len(test_prompts)}"
         success_msg = (
             "[bold green]🏆 MILESTONE ACHIEVED: "
-            "TINYGPT CODE COMPLETION VERIFIED![/bold green]\n\n"
+            "TINYCOPILOT CODE GENERATION VERIFIED![/bold green]\n\n"
             f"  • Initial Loss     : {initial_loss:.4f}\n"
             f"  • Final Loss       : [bold green]{final_loss:.4f}[/bold green]"
             f" (drop: -{loss_drop:.2f})\n"
@@ -773,7 +773,7 @@ def run_milestone(args=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Milestone 05: TinyGPT Python Code Completion"
+        description="Milestone 05: TinyCopilot Python Code Generation"
     )
     parser.add_argument(
         "--quick",
