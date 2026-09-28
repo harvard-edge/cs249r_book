@@ -32,29 +32,32 @@ format:
 \end{marginfigure}
 :::
 
-_Why must the highest-capacity deliberative models on an embodied robot operate at the slowest frequencies, and how can a machine survive the cognitive latency of thought?_
+_Why can a robot recognize what to do yet still be too late to act?_
 
-An embodied robot operating in unstructured human environments requires deep semantic understanding, multimodal scene decomposition, and long-horizon causal reasoning—capabilities delivered by modern vision-language-action foundation models containing billions of parameters. Yet these deep neural networks are fundamentally constrained by the memory wall and thermal dissipation envelopes of mobile edge compute. Even on high-end edge system-on-chips drawing hundreds of watts, streaming gigabytes of weight matrices and autoregressively generating action tokens demands tens or hundreds of milliseconds of compute latency, capping deliberative inference at a leisurely $5\text{--}20\text{ Hz}$. Meanwhile, the physical machine continues moving through continuous space, where an unmodeled obstacle or sudden slip requires microsecond responses. The fundamental challenge of the Brain is therefore not merely raw perceptual accuracy or reasoning depth, but managing the cognitive latency of thought. A physical AI architecture cannot afford to let high-level deliberation directly close the low-level actuator loop. Instead, the Brain must act as an asynchronous, unprivileged proposer: predicting future scene evolutions, chunking trajectories across receding horizons, and delegating continuous execution to lower-rate deterministic layers. This chapter examines the hardware constraints, memory hierarchies, and action-chunking mechanisms of the embodied Brain, revealing how high-capacity foundation models can safely direct physical work without stalling the real-time reflexes necessary for survival.
+A robot reaching for an unfamiliar mug must infer where to grasp while the mug and the surrounding world keep moving. Learned models extend the machine's ability to interpret such scenes, but a useful answer can arrive after the physical conditions that justified it have changed. Larger models also demand more memory traffic and computation from an onboard processor that must share resources with sensing and control. Predicting a sequence of future motions can keep the arm supplied between model updates, yet it cannot make those motions respond to observations the model has not received. The engineering task is to match learned capability to the time available for fresh decisions while preserving independent control of the body. Because motion beyond the causal boundary cannot be recalled, a learned proposal must remain subject to timely physical permission.
 
 {{< pagebreak >}}
 
 ::: {.callout-learning-objectives}
 
-- Compare classical analytical pipelines and learned representations on coverage, robustness, and verifiability
-- Calculate the bandwidth bound on a model's fresh-evaluation rate from its weight footprint and sustained memory bandwidth
-- Estimate key-value cache growth from camera count, tokens per step, and retained history
-- Explain why action chunking multiplies setpoint supply without making proposals any fresher
-- Apply replanning period, inference latency, and target drift to size an action chunk for a moving target
-- Diagnose proposer failures caused by hallucination, miscalibrated confidence, perceptual chattering, and expired intent
-- Evaluate why these proposer limits require a permission path that can refuse any proposal
+- Compare classical analytical pipelines and learned representations on coverage, sensory robustness, and formal verifiability
+- Calculate the memory wall bound on a model's fresh-evaluation rate ($f \le B_{\text{mem}} / M_{\text{weights}}$) under the embodied batch size 1 constraint
+- Estimate key-value cache expansion from multi-camera tokenization, hidden dimensions, and retained history windows
+- Explain how action chunking ($H$) amortizes off-chip weight transfers over physical wall-clock time without improving closed-loop reaction latency
+- Compare action-head working sets with available cache capacity before assuming refinement avoids off-chip transfers
+- Apply replanning period, inference latency, and target drift to size an action chunk for a dynamic target
+- Diagnose cognitive failure modes: semantic hallucinations, uncalibrated softmax overconfidence, perceptual chattering, and expired intent leases
+- Identify the trajectory, timestamps, and validity information a proposer must hand to independent real-time verification
 
 :::
 
 ## The Embodied Brain {#sec-brain-embodied}
 
-In @sec-body, the Physical Body established the physical envelope of moving mass, codifying its continuous torque ceilings ($\boldsymbol{\tau}_{\text{cont}}$), thermal dissipation limits ($I_{\text{rms}} \le I_{\text{cont}}$), bus voltage sag thresholds, and stopping distances ($d_{\text{stop}}$) into the **Limit Record** ($\mathcal{L}_{\text{body}}$, @sec-body-measuring-limits). A warehouse mobile manipulator can operate strictly within every boundary documented in that Limit Record—motor drives well within continuous torque ratings, the control rail holding nominal voltage, and joint velocities below physical ceilings—yet still fail at a task as ordinary as taking an unfamiliar ceramic mug from the moving conveyor at the pick station and handing it to the coworker at the packing station. The machine drops the object or crushes the ceramic rim because low-level motor physics cannot determine what the object is, where its structural affordances lie, or how to reach around clutter. Unlike an advisory display, whose output can be reviewed before it affects the world, a cognitive proposal here can reach moving mass with no human in between. A mistaken proposal can lead to unsafe kinetic energy if the execution path accepts it, so permission must be checked independently. The central dilemma of embodied cognition is that high-capacity neural models are inherently stochastic, computationally expensive, and prone to inventing objects that are not there, yet they must orchestrate physical bodies whose collisions cannot be recalled (the first law, @sec-boundary-bedrock-laws).
+The warehouse mobile manipulator can stay within the torque, thermal, voltage, and stopping limits established in @sec-body and still fail to grasp an unfamiliar ceramic mug from a moving conveyor. Those limits describe what the body can sustain. They do not identify the mug's handle or choose a path around a coworker's hand. A learned model can supply that missing interpretation, but the model's output remains a candidate action until the permission path checks it against current evidence and physical limits.
 
-The Brain is therefore an unprivileged deliberation engine that may only propose (\ref{dfn-boundary-proposal-boundary}). This architectural separation organizes the machine into a **two-speed brain architecture**\index{Two-speed brain architecture!hybrid control} (@fig-two-speed-brain). At the deliberative tier, high-capacity foundation models perform slow cognition at $1\text{--}50\text{ Hz}$, parsing open-world multimodal streams to emit structured proposals. At the real-time tier, deterministic safety monitors execute at $1000\text{ Hz}$ on isolated safety silicon, evaluating candidate proposals against physical limits before granting execution permission ($u^*$), or asserting an asynchronous refusal that triggers deliberative state resynchronization. On the mobile manipulator it holds two learned proposers, an intent model that revises goals at $1\text{--}5\text{ Hz}$ and a chunk policy that emits short sequences of future setpoints at $10\text{--}50\text{ Hz}$, and the permission path may refuse anything either one proposes. That protection holds only while the limits, the state estimate, and the fallback it relies on remain valid.
+The timing problem begins while the model computes. The mug keeps moving, and the arm still needs feedback to track the motion already admitted. A larger model may improve recognition while taking longer to produce the next proposal. The relevant engineering quantities are therefore distinct: how often the model incorporates a fresh observation, how many future setpoints each proposal contains, and how long its evidence remains useful. Increasing the number of setpoints does not renew the evidence behind them.
+
+The resulting **two-speed brain architecture**\index{Two-speed brain architecture!hybrid control} separates learned deliberation from the real-time permission and tracking path (@fig-two-speed-brain). The Brain proposes a goal or a trajectory; faster control continues below the proposal boundary even when deliberation pauses. Action Chunking Transformers (ACT) [@zhao2023learning] and Diffusion Policies [@chi2024diffusionpolicy] can supply multiple future setpoints in one proposal. The permission path determines which part may execute and when continued execution must end. This division gives learning room to improve task capability without giving an inference delay authority to suspend physical protection.
 
 ::: {.column-margin}
 ![](images/svg/spa_locator_p.svg){width="100%" fig-alt="S·P·A locator triad with the Plan node highlighted."}
@@ -63,10 +66,12 @@ The Brain is therefore an unprivileged deliberation engine that may only propose
 :::
 
 ::: {#fig-two-speed-brain fig-env="figure" fig-pos="t" fig-cap="**Two-speed brain architecture**: An unprivileged deliberative realm running at $1\text{--}50\text{ Hz}$ and a real-time realm running at $1000\text{ Hz}$, separated by the proposal-permission privilege boundary. The independent safety enforcer checks sensed state and modeled limits on each control cycle before granting execution permission; a refusal path feeds state resynchronization back to the deliberative policy." fig-alt="Two-speed brain architecture showing unprivileged deliberative planning at 1 to 50 hertz crossing the proposal-permission privilege boundary to 1000 hertz real-time safety enforcement with refusal feedback."}
-![](images/png/fig03_two_speed_brain.png){width="90%"}
+![](images/svg/fig03_two_speed_brain.svg){width="90%"}
 :::
 
-A learned proposer earns its place by doing what hand-authored geometry cannot. It recognizes an object no one modeled from an open-vocabulary instruction, tolerates glare and clutter that break hand-written filters, and anchors what it recognizes to metric coordinates the arm can reach. Each of these capabilities comes from a model whose size also sets how often it can run. @Fig-cadence-gap shows the tension across workload classes, with the models that carry the most parameters updating least often, far below the rates at which the Body's loops close. The chapter's question is therefore what a learned proposer can deliver on time, and at what cost in memory, latency, and freshness.
+A learned proposer earns its place when training gives it useful coverage beyond the hand-authored cases. For the conveyor pick, that means relating the instruction to the visible mug and proposing a graspable region. Recognition still needs measured geometry before it can specify a reachable pose, and robustness to glare or occlusion depends on the operating conditions represented in the evidence. The added capability must fit the processor and the time available to act.
+
+@Fig-cadence-gap places these workloads beside the rates of physical control. Its points represent different workload regimes, so they do not establish a scaling law from parameter count alone. The design decision is which computation can finish before the current proposal expires; the memory and timing calculations below make that decision concrete for the mobile manipulator.
 
 ::: {#fig-cadence-gap fig-env="figure" fig-pos="htb" fig-cap="**Cadence regimes**: Parameter counts and example update rates for different control, vision, and embodied workloads. The points are illustrative workload regimes rather than runs on a common device, and parameter count alone does not determine update rate." fig-alt="Log-log scatter of parameter counts and example update rates for different workload classes, with shaded control and deliberation rate bands."}
 
@@ -120,45 +125,37 @@ plt.close()
 
 ## The Classical Wall {#sec-brain-classical-wall}
 
-For nearly a century, automated control and robotics approached cognition as an explicit geometric and analytical physics problem [@wiener1948cybernetics; @kalman1960new; @craig2005introduction]. Under this classical paradigm, engineers constructed mathematical representations from first principles.
+A gripper in a fixed workcell can approach the same fixture along the same path on every cycle. Engineers can describe that task through geometry, equations of motion, and explicit transitions between stages. Classical control and robotics build on this analytical approach [@wiener1948cybernetics; @kalman1960new; @craig2005introduction]. The difficulty for the conveyor mug is extending the description to objects and conditions that the engineer did not enumerate.
 
-Engineers used analytical kinematics and differential dynamics to map desired end-effector motions into actuator torques using closed-form equations.[^fn-math-classical-dynamics] Perception relied on matching hand-crafted 3D Computer-Aided Design (CAD) models against sensor point clouds using geometric alignment algorithms, such as iterative closest point (ICP) or random sample consensus (RANSAC). High-level task logic was authored as explicit Boolean state machines that dictated deterministic transitions between operational phases, such as approaching, aligning, grasping, and retracting.
+Analytical kinematics and dynamics map desired end-effector[^fn-hw-end-effector] motion into joint motion and actuator torque.[^fn-math-classical-dynamics] Perception can match measured geometry against a known computer-aided design (CAD) model, while a state machine advances through approaching, aligning, grasping, and retracting. In a calibrated workcell these components solve a bounded task with explicit assumptions. Their computational cost and timing still depend on the chosen algorithm, processor, and contact model.
 
-[^fn-math-classical-dynamics]: **Rigid-Body Dynamics Formulation**\index{Rigid-body dynamics!Euler-Lagrange formulation}\index{Equations of motion!manipulator dynamics}: Classical control computes generalized torques via the standard manipulator equation $\mathbf{M}(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})\dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) = \boldsymbol{\tau}$, where $\mathbf{M}(\mathbf{q})$ represents the positive-definite inertia matrix, $\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})$ captures Coriolis and centripetal terms, and $\mathbf{g}(\mathbf{q})$ accounts for gravitational loading. This analytical formulation becomes computationally intractable and physically inaccurate when machines interact with unmodeled frictional contacts, fluid drag, or deformable objects. Derivations are provided in @sec-appendix-control.
+[^fn-hw-end-effector]: **End-Effector**\index{End-effector!definition}: The active tool, gripper, or hand at the distal tip of a robotic manipulator that interacts directly with physical workpieces and the environment.
+
+[^fn-math-classical-dynamics]: **Rigid-Body Dynamics Formulation**\index{Rigid-body dynamics!Euler-Lagrange formulation}\index{Equations of motion!manipulator dynamics}: Classical control computes generalized torques via the standard manipulator equation $\mathbf{M}(\mathbf{q})\ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})\dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) = \boldsymbol{\tau}$, where $\mathbf{M}(\mathbf{q})$ represents the configuration-dependent inertia matrix, $\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})$ captures Coriolis and centripetal terms, and $\mathbf{g}(\mathbf{q})$ accounts for gravitational loading. Specifically, $\mathbf{M}(\mathbf{q})$ captures configuration-dependent mass moments: extending an articulated linkage shifts mass outward from the rotational axes, increasing reflected rotational inertia ($I \propto m r^2$) and demanding quadratically higher joint torque for equivalent angular acceleration. Unmodeled frictional contacts, fluid drag, or deformable objects can make this rigid-body model inaccurate; accounting for those effects can also increase the computational cost. Derivations are provided in @sec-appendix-control.
 
 ::: {#fig-industrial-welding fig-env="figure" fig-pos="t" fig-cap="**Industrial spot-welding workcell**: Multiple six-degree-of-freedom articulated robots execute preprogrammed spot welding paths on stamped automotive chassis at the BMW Leipzig plant. Operating in a calibrated factory environment with submillimeter repeatable fixtures and safety interlock cages, classical controllers provide deterministic cycle timing and formal stability proofs. (Credit: BMW Group / Wikimedia Commons, CC BY-SA 2.0 de)." fig-alt="Articulated industrial robots executing automated spot welding on an automotive chassis within a safety-caged factory cell."}
 ![](images/jpg/fig03_real_industrial_welding.jpg){width="85%"}
 :::
 
-Where the operational environment is strictly structured and bounded (@fig-industrial-welding), classical methods can provide dependable behavior within their modeled conditions. On an automated automotive assembly line, an industrial robot welds stamped steel panels where every workpiece arrives at an exact coordinate within sub-millimeter tolerances. Ambient lighting is tightly regulated by industrial fixtures, and human workers are excluded by physical interlock safety fences. Within the causal boundary defined in @sec-boundary-causal-boundary, this controlled regime permits explicit models, bounded servo timing, and stability analysis under stated assumptions. Engineers can verify selected trajectory and torque constraints and assess controller software coverage against applicable standards without collecting task demonstrations.
+Where the operational environment is strictly structured and bounded (@fig-industrial-welding), classical methods provide dependable behavior within their modeled conditions. On an automated automotive assembly line, an industrial robot welds stamped steel panels where every workpiece arrives at an exact coordinate within sub-millimeter tolerances. Ambient lighting is tightly regulated by industrial fixtures, and human workers are excluded by physical interlock safety fences. Within the causal boundary defined in @sec-boundary-causal-boundary, this controlled regime permits explicit models, bounded servo timing, and formal Lyapunov stability analysis under stated assumptions. Engineers can verify trajectory tracking error bounds ($\lVert \mathbf{e}(t) \rVert \le \epsilon$) and certify controller software coverage against safety standards without collecting empirical demonstrations.
 
-Yet when an embodied machine leaves the structured factory cage to operate in unstructured environments (@fig-unstructured-rescue), this paradigm hits the classical wall [@brooks1991intelligence; @levine2018learning]. The physical world is not a sterile CAD drawing; it is continuous, deformable, and endlessly variable.
+Yet when an embodied machine leaves the structured factory cage to operate in unstructured open-world environments (@fig-unstructured-rescue), this analytical paradigm hits the **classical wall** [@brooks1991intelligence; @levine2018learning]. The physical world is not a sterile CAD drawing; it is continuous, deformable, and endlessly variable.
 
 ::: {#fig-unstructured-rescue fig-env="figure" fig-pos="t" fig-cap="**Unstructured search-and-rescue robot**: A tracked mobile robot navigates an obstacle course with irregular inclines, loose debris, and visual occlusions. In such unmapped environments, preauthored geometric models and rigid state machines can lose coverage; learned policies may help infer spatial affordances and traversability from sensory streams. (Credit: TU Darmstadt Rescue Robotics / Wikimedia Commons, CC BY-SA 3.0)." fig-alt="Tracked mobile robot traversing irregular rubble and wooden obstacles in an unstructured search-and-rescue test arena."}
 ![](images/jpg/fig03_real_unstructured_rescue.jpg){width="85%"}
 :::
 
-The first breakdown is the combinatorial explosion of geometry. In a commercial logistics warehouse handling hundreds of thousands of retail goods, authoring CAD models, mesh templates, and grasp points for every bottle, wrapped package, and flexible garment is impossible. Discretizing orientations, frictional properties, and contact permutations across overlapping, deformable items creates a combinatorial space that hand-crafted templates cannot cover.
+Outside that workcell, the same pipeline must cope with object variation, imperfect sensing, and unexpected task states. A CAD template does not cover every deformation of a garment; glare can erase the depth edge separating two packages; and an unexpected hand can invalidate a preauthored transition from approach to grasp. Adding templates, thresholds, and branches extends coverage, but each addition requires engineering and validation for the new conditions.
 
-The second breakdown arises from sensory brittleness. A hand-crafted edge-and-segmentation pipeline may rely on filters, Harris corners, or surface-normal thresholds. Under changed sunlight, reflections, or dust, a required feature can disappear. In that pipeline, a missing edge can make planar segmentation bridge two objects and propose a grasp in empty space.
-
-The third breakdown is the engineering bottleneck of hand-authored logic. The machine's operational capability is bounded by the engineer's ability to anticipate every physical edge case. When an unexpected variation occurs, such as a bent bracket, a scuffed label, or an unfamiliar obstacle, the hand-authored rulebook contains no matching branch, causing the machine to halt, drop its payload, or collide.
-
-Learned representations answer the first two breakdowns directly and ease the third, because they draw coverage from data rather than from hand-authored models. Physical AI does not abandon classical control; it encloses classical control inside learned semantic proposal loops, retaining analytical stability proofs at the inner servo tier while delegating open-world geometric discovery to neural representations.
+Learning offers a different way to obtain that coverage. Training can associate varied observations with useful object features and demonstrated behavior without requiring a separate geometric template for every instance. This does not replace the analytical controller that tracks a proposed motion. It adds a computationally demanding interpretation stage whose memory traffic and latency must fit above that controller.
 
 ## Learned Representations {#sec-brain-learned-representations}
 
-Asked to take the unfamiliar ceramic mug from the conveyor, a classical pipeline needs a CAD model, a feature threshold, and a state-machine branch that nobody wrote for this object. A learned model trained on many graspable objects can propose the handle as a grasp region from pixels and a sentence of instruction. Physical AI extends classical pipelines with such neural representations wherever hand-authored models lose coverage, and four pillars support the shift.
+Asked to take the unfamiliar ceramic mug from the conveyor, a learned model can relate the instruction to a visible handle and propose a grasp region without an exact CAD template. Vision-language-action (VLA) models combine images, language, and robot state to produce candidate actions [@driess2023palme; @brohan2023rt1; @brohan2023rt2; @kim2024openvla]. Their value is the coverage obtained from training across objects and conditions, rather than a guarantee that any unfamiliar scene will be interpreted correctly.
 
-The first pillar is open-world semantic generalizability. Classical controllers are geometrically precise but semantically blind: an inverse kinematics solver can expertly drive an end-effector to coordinate $(x, y, z)$, yet it possesses zero understanding of whether that location contains a sturdy mug or a fragile glass, or how surrounding objects relate to human tasks. Modern vision-language-action (VLA) foundation models project open-vocabulary natural language instructions and high-resolution camera streams into shared semantic embeddings [@driess2023palme; @brohan2023rt1; @brohan2023rt2; @kim2024openvla]. When commanded to "wipe the coffee spill from the counter and stow the mug in the drying rack," a trained model may propose the mug handle and spill boundary as task-relevant regions without a new CAD model.
+Demonstrations can also teach coordinated behavior for tasks whose contacts and deformations are difficult to specify completely, such as routing a cable with two arms (@fig-aloha-manipulator) [@zhao2023learning; @chi2024diffusionpolicy]. Learned sensory features may tolerate variations represented in that training, while a controller still needs measured geometry and physical limits to execute the proposal. Task success under tested conditions supplies evidence of capability; it does not establish behavior under every lighting change, contact, or payload.
 
-The second pillar is empirical sensory robustness. Hand-authored visual thresholds can flip under changing illumination or texture. Learned representations can tolerate some of these changes when training and testing cover them, but their responses are neither necessarily smooth nor bounded under shift.
-
-The third pillar is the ability to handle complex multi-contact and deformable dynamics. Many physical manipulation tasks (folding textiles, routing flexible wire harnesses through automotive door assemblies, or scooping granular media) involve non-smooth contact mechanics, variable friction, and infinite-dimensional deformations that cannot be modeled in closed-form differential equations. With suitable contact-rich demonstrations and feedback, neural policies can learn compliance-aware responses that reduce force against unexpected resistance.
-
-The fourth pillar is empirical scaling with data and compute, the bitter lesson that @sec-boundary-bedrock-laws sets against the physical wall of onboard energy, heat, and memory. Training on diverse robotic demonstrations (@fig-aloha-manipulator) and multimodal data can improve performance on tested tasks [@zhao2023learning; @chi2024diffusionpolicy].
-
-Each of these gains holds only where training and test data cover the operating conditions, and none of them bounds what the model proposes outside those conditions. That limit is why a learned output reaches the actuators only as a candidate that the permission path may refuse.
+The systems cost follows from how that capability is represented. Images become model inputs, retained context occupies memory, and the model must compute a new action before its observations become stale. The useful comparison with a classical pipeline therefore includes both task coverage and the cost of renewing a proposal.
 
 ::: {#fig-aloha-manipulator fig-env="figure" fig-pos="t" fig-cap="**Bimanual teleoperation workcell**: Dual-arm teleoperation setup featuring two six-degree-of-freedom follower arms, two leader arms for kinesthetic teleoperation, multi-view cameras (overhead and wrist-mounted), and parallel grippers mounted to an extruded aluminum frame. The physical AI policy ingests synchronized multi-camera streams to predict continuous end-effector trajectories, and the permission path must refuse any proposal that would cause self-collision or motor over-torquing during closed-loop execution. (Credit: Stanford University & Google DeepMind, CC-BY / Apache 2.0)." fig-alt="Dual-arm robotic teleoperation workstation with leader and follower arms, overhead cameras, and grippers mounted on an aluminum frame."}
 ![](images/png/fig03_real_aloha_manipulator.png){width="85%"}
@@ -169,65 +166,34 @@ Each of these gains holds only where training and test data cover the operating 
 :::
 
 ::: {#fig-vla-architecture fig-env="figure" fig-pos="t" fig-cap="**Embodied Vision-Language-Action (VLA) architecture**: A representative dataflow. (1) Camera patches receive 2D image-position and camera identifiers alongside language and robot-state tokens; metric depth still requires calibrated evidence. (2) Self-attention mixes the combined token sequence; the colored grid illustrates internal attention weights, not a verified affordance or grasp pose. (3) Discrete autoregressive decoders emit tokens sequentially, whereas continuous decoders generate candidate multi-step chunks ($\mathbf{A}_{t:t+H-1}$) through one pass or iterative denoising. (4) An independent permission path checks candidate motion against sensed state and modeled limits before actuation. (Synthesized from Brohan et al. [@brohan2023rt1; @brohan2023rt2], Kim et al. [@kim2024openvla], and Octo Model Team [@octo_2023])." fig-alt="Comprehensive architectural schematic of a Vision-Language-Action foundation model showing spatial patch slicing, 2D positional embeddings, multimodal self-attention weights in an illustrative image grid, discrete vs. continuous action decoders, and an independent proposal boundary."}
-![](images/png/fig03_vla_architecture.png){width="100%"}
+![](images/svg/fig03_vla_architecture.svg){width="100%"}
 :::
 
-Rather than an opaque monolith, an embodied foundation model is a three-stage neural pipeline (@fig-vla-taxonomy, @fig-vla-architecture) that transforms sensory inputs into candidate motion proposals, and it ends at a boundary where those proposals still need kinematic checks.
+For the mug pick, the model must turn images and instructions into a candidate motion. The dataflow in @fig-vla-taxonomy and @fig-vla-architecture separates that computation into input encoding, a shared representation, and an action decoder, followed by the handoff to independent permission. A token is a vector representing part of an input, such as an image patch; the backbone combines those vectors, and the decoder turns the combined representation into proposed actions. The engineering comparison below follows what each stage stores, transfers, and delivers:
 
 1. **Sensory Ingestion and Spatial Tokenization (The Inputs):**
-   A vision transformer frontend cuts each camera frame into a grid of fixed-size pixel patches and projects each patch into one token, tagged with its image position and, when several cameras are mounted, a learned camera identifier. Language directives and the robot's joint state are projected into tokens of the same width, and the three streams concatenate into one input sequence. Every patch becomes a token that the backbone must attend over and the key-value (KV) cache must hold, so a robot with three cameras (left wrist, right wrist, overhead) contributes hundreds of visual tokens per frame before any text or proprioception arrives (\ref{nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking}). Image position is not metric depth; placing the gripper in 3D still requires depth evidence and calibrated geometry.
+   A vision transformer (ViT) frontend slices each incoming camera frame into a grid of non-overlapping pixel patches of size $P \times P$ (typically $14 \times 14$ or $16 \times 16$ pixels). Each patch is linearly projected into a vector of width $d$, augmented with 2D spatial sinusoidal positional embeddings, and tagged with a learned camera identifier.
+
+   In an illustrative three-camera configuration (left wrist, right wrist, and an overhead torso mount) capturing $224 \times 224$ images, the image frontend prepares a buffer for each view. Each frame yields $(224 / 14)^2 = 256$ spatial patches. Across three cameras, ingestion injects $3 \times 256 = 768$ visual tokens into the model's sequence on every perceptual step. When concatenated with tokenized natural language commands ($\sim 32$ tokens) and proprioceptive joint state embeddings ($\sim 16$ tokens), the initial context sequence length exceeds $S \approx 800$ tokens. In 16-bit floating-point (FP16) precision ($2\,\text{bytes}$ per element) with hidden dimension $d = 4096$, the initial token embedding matrix alone occupies:
+   $$M_{\text{embed}} = S \times d \times 2\,\text{bytes} = 800 \times 4096 \times 2 \approx 6.55\,\text{MB}$$
+   Crucially, 2D image coordinates and internal attention patterns do not constitute metric depth: projecting an end-effector into physical 3D space requires calibrated extrinsic camera matrices and depth telemetry.
 
 2. **Multimodal Alignment and Attention (The Backbone):**
-   The combined sequence passes through tens of transformer layers whose self-attention weighs every token against every other, so attention work grows with the square of sequence length while the KV cache that stores prior token states grows linearly with it. Every added camera or retained frame is therefore paid for in latency and in memory traffic. The same pairwise weighting does not establish geometry, so a text token such as "handle" can attend strongly to a visual patch without that weight being a verified grasp location or metric pose. Nor does the KV cache track object permanence; an explicit state estimator must associate observations across frames and grow its uncertainty while the mug is occluded. The patch-embedding, position-encoding, and attention equations behind both stages are in @sec-appendix-ml-patch-embedding.
+   For the illustrative backbone, the token sequence passes through $L = 32$ transformer layers where standard multi-head self-attention computes pairwise token interactions. The cache estimate below assumes full-width keys and values in every layer. While full self-attention incurs quadratic computational complexity ($O(S^2 d)$ FLOPs), at the systems level the Key-Value (KV) cache that retains prior token states for autoregressive context expands linearly ($O(L \cdot S \cdot d)$):
+   $$M_{\text{KV}} = 2 \times L \times d \times S \times \text{bytes}$$
+   For a 32-layer model with $d = 4096$ using FP16 storage, each context token claims $2 \times 32 \times 4096 \times 2 = 524{,}288\,\text{bytes} \approx 0.524\,\text{MB}$ of KV cache. Reading this KV cache across off-chip DRAM on every token step creates massive memory bus traffic that directly competes with weight streaming. Because memory bus access under Unified Memory Architecture (UMA) is a shared zero-sum resource, fetching tens of megabytes of KV state per step risks starving real-time sensor direct memory access (DMA) buffers. Grouped-query attention (GQA) reduces key-value width by sharing keys and values across query heads; cross-attention can instead limit which retained representations the decoder reads. The saving depends on the architecture and is not implied by action chunking. Furthermore, strong attention weights between language tokens (such as "mug handle") and visual patches do not prove geometric affordance or collision-free clearance; nor does the KV cache track object permanence during physical occlusions. The formal patch-embedding, position-encoding, and attention formulations appear in @sec-appendix-ml-patch-embedding.
 
 3. **Specialized Action Decoders (The Outputs):**
-   Instead of generating conversational text, the final hidden layer $\mathbf{h}_{\text{context}}$ feeds task-specific action decoders. While vision-language navigation (VLN) models emit topological waypoints or heading rates $(v_t, \omega_t)$ (@fig-vln-navigation), manipulation (VLA) models diverge sharply in how they bridge semantic representations to physical motion:
+   Instead of generating open-ended conversational text, the final hidden representation $\mathbf{h}_{\text{context}} \in \mathbb{R}^d$ is routed to specialized action decoders. While vision-language navigation (VLN) models emit topological waypoints or heading rates $(v_t, \omega_t)$ (@fig-vln-navigation), manipulation (VLA) models diverge sharply in how they bridge semantic representations to physical motion:
 
-   * *Discrete Categorical Tokenization (RT-1, RT-2, OpenVLA):* Early VLAs adapt autoregressive language modeling directly to robotics by discretizing continuous joint or Cartesian offsets into $B = 256$ uniform bins per dimension [@brohan2023rt1; @brohan2023rt2; @kim2024openvla]:
-     $$\text{bin}(a_k) = \left\lfloor \frac{a_k - a_{\min}}{a_{\max} - a_{\min}} \times 255 \right\rfloor \in [0, 255]$$
-     Each bin is assigned a discrete token (`<act_000>` to `<act_255>`) in the language vocabulary. While this natively leverages web-scale vision-language pretraining, it introduces a systems bottleneck: a decoder that emits one scalar token at a time needs seven serial token predictions for a 7-DoF action. Its latency depends on caching, hardware, and whether each prediction revisits the full backbone; seven serial steps can miss a control deadline. Furthermore, scalar binning imposes a coarse discretization resolution of $\Delta a = (a_{\max} - a_{\min}) / 256$. When $a_{\max} - a_{\min}$ spans a full joint revolution ($2\pi\,\text{rad}$), each discrete bin corresponds to $\approx 1.4^\circ$. At the end-effector of a 1-meter robotic arm, a single bin flip creates an instantaneous spatial jump of $\Delta x \approx 1.0\,\text{m} \times (1.4 \times \pi / 180) \approx 24.4\,\text{mm}$. When attempting fine insertion or grasping fragile glassware, this spatial quantization forces high-gain controllers to chatter against contact surfaces or crush brittle rims, which is why discrete tokenization requires heavy low-pass filtering or yields to continuous action heads.
-   * *Continuous Generative Action Chunking (Octo, $\pi_0$, ACT, Diffusion Policy):* To avoid paying a full weight sweep for every scalar action, modern generalist policies couple the transformer backbone with continuous generative decoders, such as diffusion policy heads [@chi2024diffusionpolicy; @octo_2023] or flow-matching action experts [@black2024pi0]. Standard continuous regression trained with mean squared error (MSE) loss fails on multimodal human demonstrations: when demonstrators choose either a left or right detour around an obstacle with equal probability, an MSE loss forces the policy to predict the conditional expectation—the arithmetic mean of the two trajectories—directing the robot straight into a collision. Generative heads avoid this mode collapse by sampling full trajectory chunks:
-     $$\mathbf{A}_{t:t+H-1} = [\mathbf{a}_t, \mathbf{a}_{t+1}, \dots, \mathbf{a}_{t+H-1}] \in \mathbb{R}^{H \times d_a} \quad (H = 16\text{--}64\text{ steps})$$
-     A backbone may evaluate one new camera observation, then a smaller decoder may perform several denoising iterations to propose a whole chunk of waypoints. That chunk is one candidate horizon, not a sequence of fresh observations. The next backbone evaluation must arrive before the accepted execution window expires; downstream interpolation and feedback run at their own rates.
+   Discrete action decoders map each action dimension to a categorical token [@brohan2023rt1; @brohan2023rt2; @kim2024openvla]. Sequential token generation can require several model evaluations for one action vector, and discretization limits spatial resolution. Continuous decoders instead emit a trajectory chunk, either directly or through iterative refinement [@chi2024diffusionpolicy; @octo_2023; @black2024pi0]:
+   $$\mathbf{A}_{t:t+H-1} = [\mathbf{a}_t, \mathbf{a}_{t+1}, \dots, \mathbf{a}_{t+H-1}] \in \mathbb{R}^{H \times d_a} \quad (H = 16\text{--}64\text{ steps})$$
+   Here $H$ counts future setpoints and $d_a$ counts values per action. A chunk supplies several requested motions from one sensory context; it does not contain new observations. The runtime comparison therefore depends on how many backbone and decoder evaluations produce the chunk, and how long those evaluations take. @Sec-appendix-ml-multimodal derives discrete tokenization and explains how generative decoders represent alternative demonstrated routes without averaging them into an obstacle.
 
 4. **The Proposal Boundary (Isolation from Actuators):**
    Whether the model is a VLN mobility planner or a VLA manipulation policy, its output is a candidate proposal ($p_t$) on the unprivileged side of the proposal boundary (\ref{dfn-boundary-proposal-boundary}).\index{Unprivileged proposal!proposal boundary} Under the machine model of @sec-boundary-machine-model, the foundation model runs in user space on the application processor and has no path to the pulse-width modulation (PWM) registers or to the current in the motor coils.
 
-   The design rule for this deliberative boundary is that learned models operating at the Brain's inference cadences ($1\text{--}50\text{ Hz}$) propose kinematic setpoints ($\mathbf{q}, \dot{\mathbf{q}}, \ddot{\mathbf{q}}$ or Cartesian poses), **never unbuffered, open-loop motor torques ($\boldsymbol{\tau}$)** directly to inverter switches. Motor torque is coupled to the plant through the manipulator equation of the classical-dynamics note in @sec-brain-classical-wall, plus a contact term $\boldsymbol{\tau}_{\text{contact}}$. Because inertia $\mathbf{M}(\mathbf{q})$ and Coriolis forces $\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})$ vary non-linearly with instantaneous joint configuration and velocity, commanding open-loop torques, without high-frequency feedback, from a neural model that updates at tens of hertz at most can destabilize the limb when model error, friction, or payload variation is large enough. Kinematic setpoints, by contrast, specify an intended spatial path and leave high-gain closed-loop torque synthesis to the Body's drives, whose field-oriented current loops run at $10\text{--}25\text{ kHz}$, once the permission path has admitted each setpoint. Even in high-rate locomotion policies operating at $50\text{--}200\text{ Hz}$ via reinforcement learning, networks command target joint angles or proportional-derivative (PD) setpoint offsets rather than raw motor winding currents. Motor electromagnetic back-EMF, rotor inertia, and inverter dead times require feedback loops running at tens of kilohertz to close current and torque commands deterministically without thermal runaways or torque ripple. (Where specialized high-rate reinforcement learning policies operating at $100\text{--}500\text{ Hz}$ output torques directly, they still require an independently validated high-rate permission path, as @sec-nervous-invariant-checking argues; passivity checks for such torque streams are derived in @sec-appendix-control-passivity.)
-
-::: {#dfn-brain-proposal-contract .callout-definition title="The proposal record"}
-
-***The Proposal Record***\index{Proposal Record!definition}\index{Proposal contract!definition}\index{Proposal boundary!contract schema} ($\mathcal{P}$) is the typed data contract emitted across the proposal boundary from the unprivileged Brain to the real-time Nervous System. As the second formal record in the machine stack's 14-record contract lineage (following the Body's Limit Record and preceding the Nervous System's Transport Budget), it packages candidate trajectory setpoints, capture timestamps, evidence validity horizons, and provenance metadata for independent verification before execution permission is granted:
-$$\mathcal{P} = \langle t_{\text{capture}}, t_{\text{valid}}, H, \Delta t, \mathbf{Q}_{1:H}, \dot{\mathbf{Q}}_{1:H}, \mathbf{X}_{1:H}, \mathbf{g}_{1:H}, \text{model\_id}, \text{lease\_id}, \hat{p}, \text{crc} \rangle$$
-
-1. **Significance**: By formalizing candidate motion into an explicit contract with capture timestamps and validity bounds, the Nervous System can reject stale or uncalibrated proposals before any setpoint reaches an actuator.
-2. **Distinction**: Unlike an internal neural tensor, the Proposal Record is an immutable, verifiable boundary payload checked against physical invariant envelopes.
-3. **Common pitfall**: Omitting observation timestamps or validity horizons, causing downstream controllers to execute delayed proposals computed from obsolete scene states.
-
-:::
-
-The data structure and verification rules defined in @tbl-03-proposal-record-schema govern every Proposal Record transmitted across the proposal boundary:
-
-| Field         | Type            | Unit                    | Systems Semantics and Verification Rule                                                                    |
-|:--------------|:----------------|:------------------------|:-----------------------------------------------------------------------------------------------------------|
-| `t_capture`   | `uint64_t`      | $\text{ns}$             | Hardware timestamp of oldest sensory observation conditioning the proposal.                                |
-| `t_valid`     | `uint64_t`      | $\text{ns}$             | Monotonic time after which proposal expires ($\le t_{\text{capture}} + \tau_{\text{ev}}$).                 |
-| `horizon_H`   | `uint16_t`      | count                   | Number of prospective trajectory setpoints ($H = 16\text{--}64$).                                          |
-| `delta_t`     | `uint32_t`      | $\mu\text{s}$           | Temporal interval between consecutive waypoints ($\Delta t = 20\,000\,\mu\text{s} \implies 50\text{ Hz}$). |
-| `q_traj`      | `float32[H][D]` | $\text{rad}$            | Candidate joint trajectory array across $D$ degrees of freedom.                                            |
-| `q_dot_traj`  | `float32[H][D]` | $\text{rad/s}$          | First derivative setpoints; verified for $C^1$ velocity continuity at chunk seam.                          |
-| `x_cartesian` | `PoseSE3[H]`    | $\text{m}, \text{quat}$ | End-effector target poses; verified against workspace keep-out boundaries.                                 |
-| `gripper_cmd` | `float32[H]`    | $[0, 1]$                | Gripper closure target; evaluated against grasp force and slip limits.                                     |
-| `model_id`    | `uint32_t`      | hash                    | Cryptographic hash of model architecture, weights checkpoint, and calibration profile.                     |
-| `confidence`  | `float32`       | $[0, 1]$                | Model reported confidence $\hat{p}$; compared against empirical ECE threshold.                             |
-| `lease_id`    | `uint64_t`      | UUID                    | Identifier of active intent lease authorizing this operational phase.                                      |
-| `crc32`       | `uint32_t`      | checksum                | Integrity checksum protecting shared-memory ring buffer payload.                                           |
-
-: **The formal Proposal Record schema**: Data contract emitted across the proposal boundary from the unprivileged Brain to the real-time Nervous System. {#tbl-03-proposal-record-schema tbl-colwidths="[18,14,14,54]"}
-
-::: {.column-margin .margin-pointer}
-↪ Zero-copy proposal passing between the Brain and the Nervous System relies on the lock-free buffers analyzed in @sec-nervous-cadences.
-:::
+   The Brain hands over candidate motion together with the time of the observations that support it. Faster downstream loops track admitted setpoints and regulate motor current using current measurements. A long neural inference cannot suspend those loops or renew old evidence. The full latency budget in @sec-brain-memory-wall prices the path from sensing to actuation; @sec-nervous-invariant-checking develops the independent checking responsibility.
 
    Proposals reach the permission path through the handoff of @sec-nervous, and the permission path can refuse a hallucinated proposal when independent measurements, modeled limits, and a feasible fallback support that decision.[^fn-math-unprivileged-control]
 
@@ -237,13 +203,15 @@ The data structure and verification rules defined in @tbl-03-proposal-record-sch
 ![](images/png/fig03_real_vln_topological_navigation.png){width="95%"}
 :::
 
-Each neural stage of this pipeline is paid for in memory traffic. Every patch token must be attended over and held in the KV cache, and every evaluation of the backbone streams its weights from DRAM, so the capabilities this section described arrive at a rate the application processor sets rather than one the task chooses. On the mobile manipulator, that rate for its largest model falls well below the rate at which its arm consumes setpoints.
+The representation and decoder determine which data each evaluation must touch. A decoder that retains token history pays for its cache, and a backbone whose weights do not remain on chip pays for new off-chip transfers. These costs make the architecture choice concrete: the mobile manipulator needs both useful task interpretation and timely renewal of motion proposals, but need not assign them to the same model.
 
 ## Supply, Freshness, and the Memory Wall {#sec-brain-cognitive-pipeline}
 
-At the pick station the mobile manipulator's arm consumes a new setpoint every few tens of milliseconds, while the mug it is reaching for keeps moving along the conveyor. Whatever model proposes those setpoints must settle two questions. The first is how often it can produce a proposal on the application processor the machine actually has; the second is how long each proposal stays true once the mug has moved. The answers explain why the machine carries two learned proposers rather than one.
+At the pick station the mobile manipulator's arm consumes a new setpoint every few tens of milliseconds, while the mug keeps moving along the conveyor. The selected architecture assigns task interpretation to a large, slower intent model and trajectory renewal to a smaller action-chunk policy. Both propose; a separate real-time path checks and tracks admitted motion. We can test that split by pricing a full weight sweep, comparing it with the required renewal period, and then checking the motion buffer against target drift. The single large-model examples below are alternatives used to expose the trade-off, not changes to the selected machine.
 
-After ingestion (the tokenization of @sec-brain-learned-representations), four stages turn those tokens into proposals (@fig-cognitive-pipeline), and Part III develops each one. Here they matter only for what each hands downstream and how quickly that goes stale. On an edge robotics System on Chip (SoC) operating with a Unified Memory Architecture (UMA), memory bandwidth is a shared zero-sum resource partitioned across camera frame ingestion, KV cache lookups, and neural weight streaming. Perception grounds what it recognizes in metric coordinates relative to the base, so that the mug becomes a pose and a graspable handle rather than a label;[^fn-brain-metric-grounding] its output ages from the moment of capture, and @sec-perception turns that age into a contract. Memory carries those estimates through occlusion and must let each one expire when the evidence behind it does (@sec-memory). Intent decomposes a task such as "take the ceramic mug off the conveyor and hand it to the coworker at the packing station" into subgoals, and because the mug moves while the intent model deliberates, it hands the planner a target that expires, an intent lease\index{Intent lease!temporal contract} (@sec-intent-lease). Planning converts that target into candidate setpoints for the base and the arm, the proposals the permission path will judge (@sec-planning). These stages, and the ingestion before them, all run on the application processor and draw on the same memory bus, which is where the machine's cadence is decided.
+After ingestion (the tokenization of @sec-brain-learned-representations), four stages turn those tokens into proposals (@fig-cognitive-pipeline), and Part III develops each one. Here they matter only for what each hands downstream and how quickly that goes stale.
+
+Perception grounds what it recognizes in metric coordinates relative to the base, so that the mug has a 3D position and orientation (an $SE(3)$ pose) and a graspable handle rather than an abstract semantic label;[^fn-brain-metric-grounding] its output ages from the moment of capture, and @sec-perception turns that age into a contract. Memory carries those estimates through occlusion and must let each one expire when the evidence behind it does (@sec-memory). Intent decomposes a task such as "take the ceramic mug off the conveyor and hand it to the coworker at the packing station" into subgoals, and because the mug moves while the intent model deliberates, it hands the planner a target that expires, an intent lease\index{Intent lease!temporal contract} (@sec-intent-lease). Planning converts that target into candidate setpoints for the base and the arm, the proposals the permission path will judge (@sec-planning). These stages, and the ingestion before them, all run on the application processor and draw on the same memory bus, which is where the machine's cadence is decided.
 
 [^fn-brain-metric-grounding]: **Metric Spatial Grounding**\index{Metric spatial grounding}\index{Special Euclidean group!SE(3) grounding}: While disembodied AI operates over discrete semantic tokens, physical AI must ground those semantics in the Special Euclidean group $SE(3)$, mapping entities to metric distances (meters) and spatial orientations (quaternions) relative to the robot's base coordinate frame. Failing to maintain this metric grounding causes neural policies to emit kinematically impossible Cartesian paths that breach actuator workspace boundaries.
 
@@ -255,26 +223,32 @@ After ingestion (the tokenization of @sec-brain-learned-representations), four s
 ↪ High-throughput neural inference accelerators are isolated from deterministic cores in @sec-placement-two-paths-one-die.
 :::
 
+On an edge robotics system-on-chip (SoC) with unified memory, model weights, sensor transfers, and host computation share memory bandwidth. A policy cannot budget the full bus for itself while assuming that new camera frames arrive without interference. The transfer bound below is therefore a lower bound on evaluation time; the worked comparison later uses an assumed sustained fraction of peak bandwidth. @Sec-placement-resource-contention develops the allocation and loaded tests needed to establish that supply on a shared processor.
+
 ### The memory wall {#sec-brain-memory-wall}
 
-The update cadence of an embodied neural policy is fundamentally governed by memory bandwidth rather than peak arithmetic capability. In high-performance computing, the memory wall defines the operational regime where computational execution units spend the vast majority of clock cycles stalled, waiting for operands to arrive from external memory. In physical AI, this architectural bottleneck is exacerbated by the strict real-time requirement to interact continuously with physical mass: while modern accelerator silicon delivers hundreds of teraflops of matrix multiplication performance, the physical interconnect pins and memory interfaces between the processor die and off-chip memory packages provide comparatively modest data transfer rates.
+When each evaluation streams weights that cannot remain on-chip, memory bandwidth can limit the update cadence of an embodied neural policy even when arithmetic capacity is available. The **memory wall**\index{Memory wall!physical inference} describes the limit imposed when operands cannot reach arithmetic units fast enough to use their available throughput. In physical AI, the consequence is a delayed proposal while the body continues moving.
 
-To understand the physical consequence of this bandwidth ceiling, consider what happens if a robot attempts to generate continuous motor actions one discrete step at a time through an autoregressive foundation model (such as a multi-billion-parameter VLA model). A model whose weights cannot remain on chip must stream them across the external DRAM bus once per evaluation, so the bus bandwidth $B_{\text{mem}}$ bounds its evaluation rate at $f_{\max} = B_{\text{mem}} / M_{\text{weights}}$ before tokenization, attention, or decoding adds any time. In single-step autoregressive decoding, each sequential token may require another such evaluation; the actual traffic depends on caching and the decoder architecture. For detailed memory wall derivations and roofline hardware models, see @sec-appendix-systems.
+On-chip static RAM (SRAM) and caches can reuse weights and intermediate state without another external transfer, but only while the working set fits the memory available to that workload. Off-chip LPDDR5 provides much greater capacity through a narrower shared interface. Cache sizes, access latency, and attainable bandwidth depend on the particular processor and allocation; nominal chip-wide capacity does not establish that an action head will remain resident.
 
-This memory wall[^fn-hw-dram-bandwidth] places single-token streaming deep in the memory-bound region of the roofline (@fig-ch03-memory-wall-3d, @fig-patterson-roofline) [@williams2009roofline]. As mapped in @fig-ch03-memory-wall-3d, streaming weights across an external memory bus starves computational units, setting an architectural latency floor that bounds evaluation cadence regardless of peak arithmetic capacity. On the mobile manipulator's application processor it caps the intent model's fresh-evaluation rate, before any vision or decoding work, far below the rate of a joint controller that asks for a new command every millisecond (\ref{nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking}). A model renewed that slowly can say where the arm should go, but it cannot close the loop on moving mass, so it proposes waypoints and a faster loop below it tracks them.
+To understand the physical consequence of this bandwidth ceiling, consider what happens if a robot attempts to generate continuous motor actions one discrete step at a time through an autoregressive foundation model (such as a multi-billion-parameter VLA model). For a decoder that revisits nonresident weights at each token step, each evaluation streams those weights across the external DRAM bus. In single-token decoding with FP16 weights and request batch size $B = 1$, the dense weight projections become matrix-vector operations ($\mathbf{y} = \mathbf{W}\mathbf{x}$), yielding an arithmetic intensity, the operations performed per byte transferred, of just $I \approx 1.0\,\text{FLOP/byte}$. The sustained memory bandwidth $B_{\text{mem}}$ and model weight footprint $M_{\text{weights}}$ strictly bound the maximum fresh-evaluation frequency:
+$$f \le \frac{B_{\text{mem}}}{M_{\text{weights}}}$$
+This bound must use the bandwidth actually available to the policy and the weights it transfers at the selected precision. The worked example below applies it to the mobile manipulator's processor and intent model, before tokenization, multimodal attention, or decoding adds any latency. In single-step autoregressive generation, each action dimension requires predicting additional tokens; if each token revisits off-chip parameters, latency scales linearly with degrees of freedom. Because physical stabilization, joint impedance control, and reflex-level collision avoidance require deterministic update rates of $100\text{--}1000\,\text{Hz}$, the assumed nonresident models cannot supply those control rates. This timing result rules out using that inference path as the fast controller. The separate requirement that learned outputs remain proposals follows from their physical checking obligations, including the timely-but-wrong cases below.
 
-::: {#fig-ch03-memory-wall-3d fig-env="figure" fig-pos="htb" fig-cap="**Memory Bandwidth Wall in Embodied Inference**: Arithmetic intensity and hardware roofline constraints in 3D operational space: streaming a multi-gigabyte foundation model across a narrow DRAM bus leaves peak tensor cores severely underutilized. The resulting evaluation latency establishes an irreducible latency floor that software optimization cannot bypass, necessitating asynchronous decoupling from real-time motor control." fig-alt="Three-dimensional roofline surface plotting arithmetic intensity, memory bandwidth, and compute throughput. An operational point sits deep in the memory-bound slope with idle compute capacity."}
-![](images/png/fig03_memory_wall_3d.png)
-:::
+A separate illustrative sequential pipeline shows where additional delay can enter. Its stage ranges are not the selected chunk policy's timing budget:
+$$\text{Latency}_{\text{E2E}} = t_{\text{shutter}} + t_{\text{MIPI-DMA}} + t_{\text{vision-encoder}} + t_{\text{policy-backbone}} + t_{\text{action-decoder}} + t_{\text{detokenize}} + t_{\text{CAN-bus}} + t_{\text{FOC-driver}}$$
+In this illustrative pipeline, camera shutter exposure integration requires $t_{\text{shutter}} \approx 10\text{--}33\,\text{ms}$, serial MIPI CSI-2 DMA frame grab adds $t_{\text{MIPI-DMA}} \approx 1\text{--}2\,\text{ms}$, Vision Transformer feature extraction takes $t_{\text{vision-encoder}} \approx 15\text{--}30\,\text{ms}$, policy backbone evaluation takes $t_{\text{policy-backbone}} \approx 30\text{--}80\,\text{ms}$, action chunk decoding consumes $t_{\text{action-decoder}} \approx 5\text{--}15\,\text{ms}$, action de-tokenization and safety validation takes $t_{\text{detokenize}} \approx 0.5\text{--}1.0\,\text{ms}$, CAN bus transmission adds $t_{\text{CAN-bus}} \approx 0.5\text{--}2.0\,\text{ms}$, and motor driver current control takes $t_{\text{FOC-driver}} \approx 0.05\text{--}0.1\,\text{ms}$. The rounded total spans $60\text{--}160\,\text{ms}$. These stage ranges describe an example budget, not measured tail latencies or a justified response bound. @Sec-nervous-deterministic-fieldbuses distinguishes those evidence categories; @sec-appendix-systems supplies the memory-wall and roofline background.
 
-[The embodied batch size 1 constraint]{.heading-3-inline}
-Cloud inference servers escape the memory wall by aggregating requests across hundreds of concurrent users into large batches ($B = 64\text{--}256$), multiplying arithmetic intensity by computing matrix-matrix products ($\mathbf{Y} = \mathbf{W}\mathbf{X}$) rather than matrix-vector products. An embodied robot cannot use this luxury. It operates under the **embodied batch size 1 constraint**: the agent commands exactly one physical plant in real time. Batching across time introduces unrecoverable latency ($\Delta t = B \times t_{\text{sample}}$) that starves motor drives, while batching across requests is physically impossible on a single robot. Consequently, embodied deliberation is trapped at $B = 1$, making off-chip memory traffic the non-negotiable ceiling on inference cadence.
+This memory wall[^fn-hw-dram-bandwidth] places single-token streaming deep in the memory-bound region of the roofline (@fig-patterson-roofline) [@williams2009roofline]. On the mobile manipulator's application processor it caps the intent model's fresh-evaluation rate, before any vision or decoding work, far below the rate of a joint controller that asks for a new command every millisecond (\ref{nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking}). A model renewed that slowly can say where the arm should go, but it cannot close the loop on moving mass, so it proposes waypoints and a faster loop below it tracks them.
+
+[Single-token decoding at batch size 1]{.heading-3-inline}
+Servers can combine independent requests so that a weight matrix multiplies several input vectors at once, reusing fetched weights. A robot waiting for its next action token often has only one such request. Waiting for future observations to form a batch would add delay, and sequentially dependent action tokens cannot all be evaluated at once by an autoregressive decoder. This limits reuse in those projections. It does not make every operation in an embodied model a matrix-vector product. Image patches, multiple camera views, prompt tokens, and parallel action decoders can expose matrix-matrix work within one robot's request. The low-intensity estimate therefore describes the single-token weight sweep, not the complete perception-and-action workload.
 
 [^fn-hw-dram-bandwidth]: **Autoregressive DRAM Bandwidth Saturation**\index{GPU!memory bandwidth wall}: Sequential action tokens can trigger repeated full-model weight traffic when weights are nonresident and the decoder revisits the backbone; cache behavior and hardware determine the actual bandwidth ceiling. Action chunking is one way to reduce the number of full policy evaluations per unit of physical time.
 
-This continuous data movement also carries an energy penalty. Fetching weights from off-chip DRAM consumes orders of magnitude more energy than the arithmetic computation itself. That energy drains battery reserves, and the heat it leaves in the chassis raises the local ambient of the joint actuators, shrinking the winding margins of @sec-body-thermal-duty-cycles.
+Repeated off-chip transfers also consume memory-system energy. Their power cost depends on the DRAM, controller, access pattern, and transfer rate, so a bandwidth calculation alone does not establish battery drain or actuator heating. The processor's measured power and the chassis thermal path belong in the shared thermal budget of @sec-body-thermal-duty-cycles.
 
-::: {#fig-patterson-roofline fig-env="figure" fig-pos="t" fig-cap="**Illustrative embodied roofline**: Arithmetic intensity against attainable throughput for an example edge accelerator. Single-token weight streaming can be memory-bound; reuse across a chunk may increase work per byte. A separate real-time loop executes accepted waypoints between fresh model updates." fig-alt="Illustrative roofline diagram plotting arithmetic intensity against attainable throughput, with example points for token decoding and action chunking."}
+::: {#fig-patterson-roofline fig-env="figure" fig-pos="t" fig-cap="**Illustrative embodied roofline**: Arithmetic intensity against attainable throughput using the application processor's dense FP16 GPU ceiling and rounded peak memory bandwidth. Single-token weight streaming can be memory-bound. Chunk length alone does not determine arithmetic intensity; chunked workloads require measured operations and memory traffic. A separate real-time loop executes accepted waypoints between fresh model updates." fig-alt="Illustrative roofline diagram plotting arithmetic intensity against attainable throughput, with a single-token weight-streaming point and a ridge separating memory and compute bounds."}
 
 ```{python}
 #| echo: false
@@ -285,19 +259,21 @@ This continuous data movement also carries an energy penalty. Fetching weights f
 # │ Context: @fig-patterson-roofline
 # │ Goal:    show that embodied inference sits far inside the memory-bound regime
 # │ Show:    arithmetic intensity against attainable throughput for an edge part
-# │ How:     roof from the registry node; each workload amortizes the single-token
-# │          sweep over the chapter's own chunk horizon H and denoising depth K
+# │ How:     roof from the registry node; the point represents an FP16
+# │          matrix-vector weight sweep, excluding other memory traffic
 # ├─────────────────────────────────────────────────────────────────────────────
 from mlsysim import viz
 from mlsysim import Embodied
+from mlsysim.fmt import fmt_qty, fmt_arithmetic_intensity, fmt_percent, fmt_display_math, check
+from mlsysim.core.units import flop, byte
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 
 # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────────
-node = RM.brain_soc  # category: datasheet; the mobile manipulator's application processor
+soc = RM.brain_soc  # category: datasheet; the mobile manipulator's application processor
+# Select dense FP16 GPU throughput; the aggregate sparse INT8 rating is incompatible.
+node = soc.model_copy(update={"compute": soc.compute.model_copy(update={"peak_flops": soc.compute.precision_flops["fp16"]})})
 I_TOKEN = 1.0  # category: illustrative; FLOP/byte for a single-token weight sweep
-H_CHUNK = RM.chunk_horizon  # category: chosen; the machine's action-chunk horizon
-K_DENOISE = 10  # category: illustrative; denoising steps per chunk for the diffusion policy
 
 # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
 peak = node.compute.peak_flops.to("TFLOPs/s").magnitude
@@ -305,13 +281,27 @@ bw = node.memory.bandwidth.to("GB/s").magnitude
 ridge = peak / (bw / 1000)  # FLOP/byte
 attainable = lambda ai: min(bw * ai / 1000, peak)
 
+# ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────────
+# 2026-09-28: prevent aggregate sparse INT8 TOPS from entering an FP16 roofline.
+check(peak == 43, f"Unexpected dense FP16 roof: {peak}")
+check(node.compute.peak_flops < soc.compute.peak_flops, "FP16 roof must not use aggregate INT8 TOPS")
+check(abs(ridge - 210.7843) < 0.001, f"Unexpected dense FP16 ridge: {ridge}")
+
+# ┌── 4. OUTPUT (Format & Export) ──────────────────────────────────────────────
+roof_peak_str = fmt_qty(node.compute.peak_flops, unit="TFLOPs/s", precision=0)
+roof_bw_str = fmt_qty(node.memory.bandwidth, unit="GB/s", precision=0)
+roof_ridge_str = fmt_arithmetic_intensity(ridge * flop / byte, precision=1)
+roof_attainable_str = fmt_qty(attainable(I_TOKEN) * node.compute.peak_flops.units, unit="TFLOPs/s", precision=3)
+roof_fraction_str = fmt_percent(attainable(I_TOKEN) / peak, precision=2, style="prose")
+roof_ridge_display_math = fmt_display_math(
+    rf"I_{{\text{{ridge}}}} = \frac{{\Pi_{{\text{{peak}}}}}}{{\beta_{{\text{{mem}}}}}} = \frac{{{roof_peak_str}}}{{{roof_bw_str}}} \approx {roof_ridge_str}"
+)
+
 points = [
     ("Autoregressive VLA\n(single token)", I_TOKEN),
-    (f"Action chunking\n(H = {H_CHUNK})", H_CHUNK * I_TOKEN),
-    (f"Diffusion policy\n(H = {H_CHUNK}, K = {K_DENOISE})", H_CHUNK * K_DENOISE * I_TOKEN),
 ]
 
-# ┌── 3. PLOT ──────────────────────────────────────────────────────────────────
+# ┌── 5. PLOT ──────────────────────────────────────────────────────────────────
 fig, ax = viz.plot_roofline(node)
 COLORS = viz.COLORS
 ax.set_ylim(peak * 0.0004, peak * 2)  # keep the single-token point on scale
@@ -320,7 +310,7 @@ for idx, (label, ai) in enumerate(points):
     ax.plot(ai, y, "o", ms=8, color=COLORS["VioletLine"], zorder=11)
     # the lowest point has no room beneath the roof, so its label goes above
     if idx == 0:
-        pos, ha, va = (ai * 0.40, y * 4.0), "right", "bottom"
+        pos, ha, va = (ai * 0.30, y * 4.0), "left", "bottom"
     else:
         pos, ha, va = (ai * 2.4, y * 0.30), "left", "top"
     ax.annotate(
@@ -337,7 +327,7 @@ for idx, (label, ai) in enumerate(points):
 
 # the reuse a workload would need before it left the memory-bound regime
 ax.annotate(
-    f"reuse must reach {ridge:.0f} FLOP/byte\nbefore compute binds",
+    f"intensity must reach {ridge:.0f} FLOP/byte\nbefore compute binds",
     xy=(ridge, peak * 0.006),
     xytext=(ridge * 0.30, peak * 0.0012),
     fontsize=8,
@@ -356,44 +346,42 @@ plt.show()
 
 The roofline model in @fig-patterson-roofline formalizes the hardware boundary governing embodied inference by plotting attainable computational throughput against **arithmetic intensity** ($I$), defined as:
 $$I = \frac{\text{FLOPs}}{\text{Bytes transferred from off-chip memory}}$$
-For single-token autoregressive decoding, generating each subsequent action token requires evaluating a matrix-vector product $\mathbf{y} = \mathbf{W}\mathbf{x}$ across all model weights with batch size 1. In 16-bit floating-point precision (FP16, 2 bytes per parameter), each weight participates in exactly one multiply-accumulate operation (2 FLOPs), yielding an arithmetic intensity of:
+Consider the dense weight projections in single-token autoregressive decoding at batch size 1, each evaluating a matrix-vector product $\mathbf{y} = \mathbf{W}\mathbf{x}$. Counting weight traffic alone, with each weight fetched once for that projection, gives an optimistic intensity estimate; activation and context traffic add further bytes. In 16-bit floating-point precision (FP16, 2 bytes per parameter), each weight participates in exactly one multiply-accumulate operation (2 FLOPs), yielding an arithmetic intensity of:
 $$I_{\text{token}} = \frac{2\,\text{FLOPs}}{2\,\text{Bytes}} = 1.0\,\text{FLOP/byte}$$
-On the mobile manipulator's application processor (`node = RM.brain_soc`, an edge SoC with $\Pi_{\text{peak}} = 275\,\text{TFLOPs/s}$ FP16 compute and $\beta_{\text{mem}} = 204\,\text{GB/s}$ memory bandwidth), the hardware ridge point occurs at:
-$$I_{\text{ridge}} = \frac{\Pi_{\text{peak}}}{\beta_{\text{mem}}} = \frac{275 \times 10^{12}\,\text{FLOPs/s}}{204 \times 10^9\,\text{Bytes/s}} \approx 1348\,\text{FLOP/byte}$$
-Because single-token autoregressive decoding operates at $I_{\text{token}} = 1.0 \ll I_{\text{ridge}}$, it sits trapped deep in the memory-bound regime, throttled to $\beta_{\text{mem}} \cdot I_{\text{token}} \approx 0.204\,\text{TFLOPs/s}$—less than 0.1 percent of the silicon's arithmetic peak. For the physical robot, the consequences of this arithmetic starvation are severe: generating a single 7-DoF action from a 7-billion parameter model via sequential token generation requires streaming the full weight footprint seven times, requiring nearly $500\,\text{ms}$ per composite command. Attempting to evaluate this autoregressive loop directly inside the control path starves the motor drives, turning continuous trajectory tracking into jerky, stuttering limit cycles that cannot stabilize moving masses or track dynamic objects.
+For the mobile manipulator's Jetson AGX Orin application processor, the dense FP16 GPU Tensor Core ceiling is `{python} roof_peak_str`; the aggregate sparse INT8 rating cannot be used for this FP16 workload. Using the model's rounded peak memory bandwidth of `{python} roof_bw_str`, the hardware ridge point occurs at:
+`{python} roof_ridge_display_math`
+For this weight-streaming example, $I_{\text{token}} = 1.0\,\text{FLOP/byte}$ is far below `{python} roof_ridge_str`, so memory bandwidth sets the roofline ceiling. Attainable throughput is bounded by $\beta_{\text{mem}} \cdot I_{\text{token}}$, or `{python} roof_attainable_str`, about `{python} roof_fraction_str` of the dense FP16 peak. That ratio is a workload throughput bound, not a measurement of how many cores are idle. If a 7-billion-parameter FP16 decoder emits a 7-DoF action through seven sequential tokens and rereads all weights for each token, the seven transfers alone require nearly $500\,\text{ms}$ at the stated bandwidth. A controller that waits for that entire sequence before each motor update would miss a millisecond deadline; a separate tracking loop must continue between policy evaluations.
 
-Action chunking and trajectory diffusion overcome this bottleneck by amortizing weight transfers across multi-step outputs:
+Action chunking reduces backbone weight traffic per supplied waypoint when one backbone evaluation supports several future actions. That amortization does not establish an equal increase in arithmetic intensity. Predicting a chunk can add decoder work without repeating the backbone's matrix operations for every waypoint; its roofline position depends on the operations performed and the bytes actually transferred.
 
-* **Action Chunking ($H = 16$):** Predicting a chunk of $H=16$ future waypoints in a single forward pass reuses model parameters across 16 outputs, increasing arithmetic intensity sixteenfold to $I \approx 16\,\text{FLOP/byte}$ and lifting attainable throughput to $3.26\,\text{TFLOPs/s}$ (1.2 percent of peak).
-* **Diffusion Policy ($H = 16, K = 10$):** Running $K = 10$ iterative refinement steps over the compact action head yields $H \times K = 160$, driving arithmetic intensity to $I \approx 160\,\text{FLOP/byte}$ and throughput to $32.6\,\text{TFLOPs/s}$ (11.9 percent of peak). While this is a $160\times$ throughput leap over single-token decoding, the workload remains memory-bound on this flagship SoC because $I < I_{\text{ridge}}$. By contrast, on an entry-level edge processor ($\Pi_{\text{peak}} = 32\,\text{TFLOPs/s}, \beta_{\text{mem}} = 100\,\text{GB/s} \implies I_{\text{ridge}} = 320\,\text{FLOP/byte}$), that same $I = 160\,\text{FLOP/byte}$ reaches $16\,\text{TFLOPs/s}$, claiming fully 50 percent of the compute ceiling.
+For an iterative decoder, each refinement pass adds work on the action head. If the head's weights and intermediate state remain resident on chip, later passes can reuse them without another off-chip transfer. If they do not fit, those passes also add memory traffic. Neither the chunk length nor the number of refinement passes alone determines the whole policy's intensity or attainable throughput. The backbone and head must first be budgeted separately, then combined over the same evaluation interval.
 
 ### Action chunking {#sec-brain-action-chunking}
 
-Classical digital control loops evaluate sensors and compute scalar feedback corrections synchronously at high rates ($100\text{--}1000\,\text{Hz}$). In physical AI architectures driven by multi-billion-parameter neural networks, however, single-step closed-loop evaluation at millisecond cadences is physically infeasible due to the memory wall and compute latency. If a neural policy requiring $100\,\text{ms}$ of inference time were evaluated strictly for single-step commands, the physical plant would spend $99\,\text{ms}$ out of every $100\,\text{ms}$ interval unguided, leading to discrete limit cycles and instability. Instead, physical AI decouples deliberation from tracking by predicting continuous trajectory segments. As contrasted in @fig-ch03-action-chunk-3d, single-step neural prediction yields jerky, uncoordinated motion, whereas generating multi-step action chunks produces smooth, dynamically consistent spatio-temporal trajectories.
-
-::: {#fig-ch03-action-chunk-3d fig-env="figure" fig-pos="htb" fig-cap="**Action Chunking versus Single-Step Trajectory Generation**: Spatio-temporal motion comparison in three-dimensional task space: autoregressive single-step predictions (red points) exhibit high tracking jitter and actuator jerk under latency stalls. In contrast, predicting a multi-step action chunk (blue trajectory with green waypoints) generates a $C^2$-continuous spline with bounded spatial uncertainty (translucent tube), ensuring smooth real-time tracking across inference cycles." fig-alt="Three-dimensional trajectory diagram comparing a jagged, discontinuous series of red single-step waypoints against a smooth continuous blue action-chunk curve enclosed within a translucent safety tube."}
-![](images/png/fig03_action_chunk_trajectory_3d.png)
-:::
+The memory bound limits how often a large model can revise its proposal. A controller can track previously admitted motion between those revisions, but a policy that supplies only one future setpoint leaves little planned motion available while it computes. Predicting a trajectory segment gives the controller a sequence to track without making the next fresh observation arrive sooner.
 
 [Supply rate vs. closed-loop reaction latency]{.heading-3-inline}
-To supply dense waypoints despite slow full-model inference, modern physical AI policies employ **action chunking**\index{Action chunking!temporal trajectory} (\ref{dfn-brain-action-chunking}) [@zhao2023learning; @chi2024diffusionpolicy]. Each chunk then crosses the proposal boundary as one packet, the chunk payload of @sec-nervous-cadences. However, systems engineers must never confuse **setpoint supply cadence** with **closed-loop reaction bandwidth**:
+To supply dense waypoints despite slow full-model inference, modern physical AI policies employ **action chunking**\index{Action chunking!temporal trajectory} (\ref{dfn-brain-action-chunking}) [@zhao2023learning; @chi2024diffusionpolicy]. Each chunk then crosses the proposal boundary as one packet, the chunk payload of @sec-nervous-cadences. The transfer saving follows from reusing one evaluation across several outputs.
+
+Predicting a horizon of $H \in [8, 64]$ actions per forward pass spreads the multi-gigabyte DRAM weight streaming cost over $H \times \Delta t_{\text{step}}$ seconds of physical execution. On an edge SoC with $B_{\text{mem}} \approx 204\,\text{GB/s}$ running a 7B FP16 model ($14\,\text{GB}$), generating single-step actions at $50\,\text{Hz}$ would demand $50 \times 14\,\text{GB} = 700\,\text{GB/s}$ of sustained memory bandwidth—exceeding physical bus capacity by over $3.4\times$. An action chunk of $H = 16$ waypoints reduces demanded bandwidth by sixteenfold to $700 / 16 \approx 43.8\,\text{GB/s}$ if one such sweep supplies each full chunk. More frequent replanning, decoder work, and competing memory traffic consume additional bandwidth.
+
+Predicting a sequence also changes how a learned policy uses recent actions, but chunking alone does not establish that the policy attends to the right evidence or recovers from an unfamiliar contact. Those properties depend on training and closed-loop evaluation. The supply calculation establishes only the weight traffic needed for the stated execution schedule.
+
+The selected smaller policy has a separate illustrative schedule. Three quantities distinguish its setpoint supply from the delay before a new observation changes a proposal:
 
 * *Setpoint supply cadence* ($f_{\text{supply}} = 1/\Delta t_{\text{step}} = 50\,\text{Hz}$): The rate at which the trajectory queue delivers discrete waypoints to the joint servo loop.
-* *Policy replanning rate* ($f_{\text{replan}} = 20\,\text{Hz}$, period $T_{\text{replan}} = 50\,\text{ms}$): The cadence at which the neural backbone evaluates new sensory frames.
-* *Closed-loop reaction latency* ($T_{\text{reaction}} = T_{\text{replan}} + t_{\text{infer}} = 50\,\text{ms} + 40\,\text{ms} = 90\,\text{ms}$): The true physical delay before an unmodeled external disturbance or obstacle perceived by the camera can alter the proposed path.
+* *Policy replanning rate* ($f_{\text{replan}} = 20\,\text{Hz}$, period $T_{\text{replan}} = 50\,\text{ms}$): The cadence at which the smaller chunk policy begins an evaluation from fresh sensory frames.
+* *Closed-loop reaction latency* ($T_{\text{reaction}} = T_{\text{replan}} + t_{\text{infer}} = 50\,\text{ms} + 40\,\text{ms} = 90\,\text{ms}$): The worst sampling-phase wait plus the assumed inference time until a revised proposal is available, excluding further admission and physical response delay.
 
-Action chunking solves actuator starvation (supply rate), not feedback latency. If an unexpected obstacle appears immediately after camera exposure, the robot continues executing the open-loop chunk for up to $90\,\text{ms}$ before a revised proposal arrives. Disturbance rejection and obstacle compliance cannot rely on chunk policies; they must be guaranteed by the 1 kHz real-time Nervous System.
+In this illustrative schedule, a disturbance immediately after capture can wait up to $90\,\text{ms}$ for a revised learned proposal, before any additional admission and actuation delay. The independent permission path need not wait for that revision: current qualified evidence can trigger a protective response while the policy computes. Its ability to detect the relevant obstacle and complete a feasible response needs its own timing and sensing evidence. Chunking keeps candidate waypoints available; it establishes neither that response nor its deadline.
 
-A chunking policy (such as Action Chunking with Transformers [ACT], Diffusion Policy, or Flow Matching) generates its whole chunk of $H$ setpoints in one backbone pass followed, for an iterative decoder, by $K = 10\text{--}16$ refinement steps.
+Chunking policies differ in how they produce the horizon. ACT predicts a chunk directly, whereas a diffusion or flow-matching decoder can refine it iteratively. For the following alternative architecture, assume one backbone pass followed by $K = 10\text{--}16$ refinement steps; those counts are a workload choice, not a property of all chunking policies.
 
-To understand why physical AI systems rely on trajectory diffusion rather than standard regression, consider the problem of multimodality in human demonstration data. Standard behavioral cloning trains a deterministic network using mean squared error (MSE) loss: $\mathcal{L}_{\text{MSE}} = \|\pi(\mathbf{o}) - \mathbf{a}\|^2$. This objective implicitly assumes a unimodal Gaussian conditional distribution. In real-world manipulation, however, demonstrations are inherently multimodal: faced with an obstacle, a human demonstrator may navigate either to the left or to the right with equal probability. Under MSE loss, minimizing error across both modes forces the network to predict the conditional expectation—the arithmetic mean of the two trajectories—directing the robot straight into the obstacle.
+An iterative decoder refines a candidate trajectory over several passes. Generative decoders can represent alternative routes around an obstacle, whereas direct mean-squared-error regression can average those routes into an unusable path. @Sec-appendix-ml-diffusion derives the noise-prediction and flow-matching objectives. For the runtime budget here, the decisive quantities are the number of refinement passes, the working set each pass touches, and whether refinement reevaluates the large backbone.
 
-Diffusion policies resolve mode averaging by representing actions as a continuous multi-step trajectory tensor $\mathbf{A} \in \mathbb{R}^{H \times d_a}$, where $H$ is the trajectory horizon and $d_a$ is the action dimension (such as 6-DoF end-effector delta poses and gripper states). Denoising begins by sampling pure Gaussian noise $\mathbf{A}^{(K)} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$. Over $K = 10\text{--}16$ discrete refinement iterations, a learned noise-prediction head $\boldsymbol{\epsilon}_\theta(\mathbf{A}^{(k)}, k, \mathbf{o})$ conditioned on visual and proprioceptive context $\mathbf{o}$ iteratively strips noise from the trajectory tensor.[^fn-math-diffusion-denoising] This transforms unconstrained Gaussian noise into a smooth, kinematically consistent trajectory chunk $\mathbf{A}^{(0)} = [\mathbf{a}_t, \mathbf{a}_{t+1}, \dots, \mathbf{a}_{t+H-1}]$, faithfully capturing complex multimodal behaviors without mode collapse.
+In the alternative backbone-and-head design, refinement reuses the backbone's context rather than reevaluating its weights on every pass. Whether it also avoids off-chip action-head transfers depends on residency. A $\sim 50\text{M}$-parameter head needs approximately $100\,\text{MB}$ for FP16 weights or $25\,\text{MB}$ for INT4 weights, before intermediate activations. The working set must fit the available cache, not merely the chip's nominal total. A head that does not fit adds traffic on each refinement; one that does fit can still spend time on arithmetic and kernel dispatch. Cache capacity and measured runtime therefore decide whether this alternative helps.
 
-[^fn-math-diffusion-denoising]: **Diffusion policy reverse step algebra**: In score-based DDPM sampling, each reverse denoising step evaluates $\mathbf{A}^{(k-1)} = \frac{1}{\sqrt{\alpha_k}} \left( \mathbf{A}^{(k)} - \frac{1 - \alpha_k}{\sqrt{1 - \bar{\alpha}_k}} \boldsymbol{\epsilon}_\theta \right) + \sigma_k \mathbf{z}$, where $\alpha_k$ and $\bar{\alpha}_k$ track the noise schedule and $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$. Setting $\sigma_k = 0$ yields deterministic DDIM trajectories. Full mathematical derivations and schedule parameters are provided in @sec-training-decoder-costs and @sec-appendix-ml-diffusion.
-
-[Flow matching vs. diffusion denoising]{.heading-3-inline}
-While diffusion policies require $K = 10\text{--}16$ curved steps along score-based trajectories, modern flow-matching foundation models (such as Physical Intelligence $\pi_0$ [@black2024pi0] and NVIDIA Project GR00T) straighten probability paths into continuous vector fields using optimal transport and rectified flows. By integrating straight probability trajectories, flow matching can generate high-fidelity trajectory chunks in only $1\text{--}4$ Euler steps. Reducing action head evaluations from 16 steps to 2 steps slashes decode latency from $25\,\text{ms}$ to $3\,\text{ms}$, allowing multi-billion parameter foundation models to achieve $50\text{--}100\,\text{Hz}$ proposal rates.
+Reducing the number of refinement steps can reduce decoder latency, provided the resulting proposals retain the required task quality. That trade-off needs measurement for the selected policy and processor. It does not remove the time required to encode a fresh observation or evaluate the backbone.
 
 ::: {#dfn-brain-action-chunking .callout-definition title="Temporal action chunking"}
 
@@ -404,7 +392,7 @@ While diffusion policies require $K = 10\text{--}16$ curved steps along score-ba
 3.  **Common pitfall**: Executing action chunks open-loop without continuous temporal smoothing or runtime safety filtering. Without smooth blending across overlapping chunk boundaries, switching between independently generated horizons injects acceleration jumps and torque shocks that excite mechanical gearbox resonances.
 
 :::
-For example, when a canonical bimanual manipulator threads a flexible USB cable (@fig-aloha-manipulator), it executes a 32-step action chunk, a longer chunk than the mobile manipulator uses. The policy emits coordinated 14-DoF joint setpoints that smoothly align both grippers, flex the cable, and insert the connector without pausing between individual control cycles.
+For a separate bimanual cable-threading example, consider a 32-step chunk of coordinated 14-DoF joint setpoints on a workcell such as @fig-aloha-manipulator. The longer horizon supplies candidate motion through alignment and insertion; it does not establish successful insertion or smoothness at the next renewal. Those properties depend on the policy, current evidence, and the transition between chunks.
 
 ::: {.column-margin}
 ![](images/svg/margin_action_chunk_windows_strip.svg){width="100%" fig-alt="Sequence strip illustrating overlapping action chunk horizons of 32 steps with 12-step replanning and temporal ensembling."}
@@ -421,19 +409,14 @@ $$\mathbf{a}_t = \frac{\sum_{i=0}^{\min(t, H-1)} w_i \, \mathbf{a}_{t \mid t-i}}
 where $\mathbf{a}_{t \mid t-i}$ represents the action predicted for time step $t$ by the action chunk initiated at time $t-i$, and $m > 0$ is a tunable temporal discount factor. The permission path interpolates the blended waypoints below the proposal boundary (@sec-nervous-cadences).
 
 ::: {.callout-perspective title="The temporal ensembling jerk trap"}
-Exponentially weighted temporal ensembling guarantees positional ($C^0$) continuity by construction, but does not enforce continuity in velocity ($\dot{\mathbf{q}}$, $C^1$) or acceleration ($\ddot{\mathbf{q}}$, $C^2$). When successive action chunks disagree in trajectory slope due to sensor noise or latent representation drift, ensembling creates an instantaneous corner in the reference trajectory. In high-gain joint PD tracking ($\boldsymbol{\tau} = \mathbf{K}_p \mathbf{e} + \mathbf{K}_d \dot{\mathbf{e}}$), a step change in commanded velocity produces an impulsive torque spike that excites drive resonances and can trigger inverter overcurrent faults. For example, in a $1000\,\text{Hz}$ joint servo loop ($\Delta t = 1\,\text{ms}$) with derivative gain $\mathbf{K}_d = 40\,\text{N}\cdot\text{m}\cdot\text{s/rad}$, an instantaneous velocity discontinuity of just $\Delta \dot{q} = 0.5\,\text{rad/s}$ between successive chunks commands an impulsive torque step of $\Delta \tau \approx \mathbf{K}_d \Delta \dot{q} / \Delta t \approx 20\,\text{N}\cdot\text{m}$ within a single servo cycle. Such sudden torque transients excite mechanical gearbox harmonics, accelerate cycloidal pin fatigue, and can trip inverter overcurrent protection. Downstream controllers must pass blended setpoints through an online continuous interpolator (such as a quintic Hermite spline or second-order low-pass filter) to enforce $C^2$ continuity before setpoints cross the causal boundary.
+Exponentially weighted temporal ensembling averages overlapping predictions, but averaging sampled setpoints alone guarantees neither continuous position nor continuous velocity between samples or at chunk boundaries. A downstream interpolator determines those properties. If successive chunks disagree in slope, a controller can receive a step in commanded velocity even when position remains continuous. In joint PD tracking ($\boldsymbol{\tau} = \mathbf{K}_p \mathbf{e} + \mathbf{K}_d \dot{\mathbf{e}}$), that velocity jump produces a finite torque step. With derivative gain $K_d = 40\,\text{N}\cdot\text{m}\cdot\text{s/rad}$ and velocity discontinuity $\Delta \dot{q} = 0.5\,\text{rad/s}$, the derivative term changes by $\Delta \tau = K_d \Delta \dot{q} = 20\,\text{N}\cdot\text{m}$. Dividing by the servo period would instead describe a torque slew rate, not a torque. Abrupt torque changes can excite mechanical resonances or exceed drive limits. Interpolation must match position, velocity, and acceleration at adjoining segments to provide $C^2$ continuity, while enforcing the machine's velocity, acceleration, and torque limits. Smoothness alone does not establish that the requested motion is feasible.
 :::
 
-This operational tension between neural deliberation capacity and physical control latency defines the central scaling frontier of modern robotic brains (@fig-03-vla-scaling-timeline). To understand this frontier, consider the fundamental distinction between two architectural paradigms:
+The separation between policy renewal and trajectory tracking determines what an action rate means (@fig-03-vla-scaling-timeline). Discrete decoders generate action tokens sequentially [@brohan2023rt1; @brohan2023rt2; @kim2024openvla]. Chunked decoders generate several candidate waypoints from one sensory context, either directly or through iterative refinement [@zhao2023learning; @chi2024diffusionpolicy; @black2024pi0]. Supplying more waypoints from that context does not refresh the observation on which they depend.
 
-* **Vision-Language Models (VLMs):** Multimodal foundation models (such as GPT-4V, PaLM-E, and Gemini) ingest camera frames and text prompts to output discrete linguistic tokens ($y \in \mathcal{V}_{\text{text}}$). While VLMs excel at open-world semantic scene understanding, object categorization, and task decomposition, their representations live in abstract linguistic space without spatial coordinates, joint torque limits, or physical time awareness.
-* **Vision-Language-Action Models (VLAs):** Physical AI policies (such as RT-1, RT-2, OpenVLA, and $\pi_0$) extend multimodal transformers directly into the physical world. Rather than producing descriptive text, a VLA grounds visual observations and natural language instructions into physical robotic actions ($\mathbf{a}_t \in \mathbb{R}^{d_a}$)—such as 6-DoF end-effector delta poses, gripper open/close triggers, or continuous joint setpoints.
+A downstream controller can use current state measurements while tracking admitted waypoints between policy renewals. Its feedback corrects tracking errors within its capabilities; a newly perceived obstacle still requires a timely checking or replanning response. The worked mobile-manipulator budget below therefore distinguishes the interval between fresh policy evaluations from the spacing between waypoints.
 
-Between 2020 and 2023, pioneering vision-language-action (VLA)\index{Vision-language-action model} models such as RT-1 [@brohan2023rt1], RT-2 [@brohan2023rt2], and OpenVLA [@kim2024openvla] tokenized continuous actions into discrete bins (typically 256 uniform bins per dimension), predicting one action step per autoregressive forward pass. However, because each forward pass requires streaming every model parameter from DRAM across the silicon memory bus, policy update rates collapsed as model capacity scaled ($f_{\text{action}} \propto 1 / M_{\text{weights}}$)—trapping multi-billion-parameter models behind an insurmountable "deliberation wall" ($1\text{--}3\,\text{Hz}$) that fell far below the $50\,\text{Hz}$ closed-loop threshold required for dynamic contact and reactive manipulation.
-
-Action chunking fundamentally decoupled deliberation from actuation frequency. Instead of streaming billions of parameters for every low-level setpoint, architectures such as ACT [@zhao2023learning], Diffusion Policy [@chi2024diffusionpolicy], and modern flow-matching foundation models (e.g., Physical Intelligence $\pi_0$ [@black2024pi0] and NVIDIA Project GR00T) evaluate their large perceptual backbones periodically to generate entire multi-step action trajectories ($H = 16\text{--}64$). Compact, highly optimized generative action heads then denoise or integrate these trajectories at $50\text{--}100\,\text{Hz}$, shattering the autoregressive memory wall and reconciling multi-billion parameter semantic reasoning with millisecond closed-loop physical control.
-
-::: {#fig-03-vla-scaling-timeline fig-env="figure" fig-pos="htb" fig-cap="**The Embodied Brain Frontier**: Foundation policy parameter capacity ($M_{\\text{weights}}$, log scale, $20\\,\\text{M}$ to $100\\,\\text{B}$ parameters) vs. onboard closed-loop action frequency ($f_{\\text{action}}$, log scale, $0.5\\,\\text{Hz}$ to $200\\,\\text{Hz}$) across robotic policies (2020–2026). Single-token discrete autoregressive policies (RT-1, RT-2-PaLM-E, RT-2-PaLI-X, OpenVLA Base) hit an insurmountable memory wall ($f \\propto 1/M_{\\text{weights}}$) bounded by DRAM streaming bandwidth ($B_{\\text{mem}} / M_{\\text{weights}}$), stranding large models at $1\\text{--}3\\,\\text{Hz}$. Continuous action chunking (ACT, Diffusion Policy) and flow-matching dual-system architectures (Physical Intelligence $\\pi_0$, NVIDIA Project GR00T, 2026 dual-brain SoCs) shatter this bottleneck: decoupling multi-step chunk generation ($H = 16\\text{--}64$) from low-latency generative action heads enables multi-billion parameter foundation models to achieve $50\\text{--}100\\,\\text{Hz}$ real-time reactive control." fig-alt="Log-log plot comparing model parameter count from 15 million to 120 billion on the horizontal axis against onboard action frequency from 0.35 Hz to 210 Hz on the vertical axis. Highlights the steep performance drop of single-token autoregressive models along the deliberation wall vs. the high-frequency frontier of action chunking and flow matching architectures reaching 50 to 100 Hz."}
+::: {#fig-03-vla-scaling-timeline fig-env="figure" fig-pos="htb" fig-cap="**Policy renewal and trajectory tracking**: Each fresh policy evaluation produces candidate motion from a sensory context. Overlapping chunks can supply waypoints between renewals, while a downstream controller uses current state feedback to track admitted motion. Additional waypoints do not refresh the policy's evidence. This schematic shows timing relationships, not measured rates or a hardware performance comparison." fig-alt="Three timing rows distinguish fresh observation and policy evaluation events, overlapping candidate chunks, and frequent downstream tracking steps with current state feedback. The shared time axis has no numerical scale."}
 
 ```{python}
 #| label: fig-03-vla-scaling-timeline
@@ -441,272 +424,54 @@ Action chunking fundamentally decoupled deliberation from actuation frequency. I
 #| warning: false
 #| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ VLA SCALING TIMELINE: PARAMETERS VS. ACTION FREQUENCY (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Section 3.2, @fig-03-vla-scaling-timeline.
-# │ Goal:    Show why single-token autoregression hits a memory wall (1–3 Hz)
-# │          and how action chunking and flow matching achieve 50–100 Hz control.
+# │ POLICY RENEWAL AND TRAJECTORY TRACKING (SCHEMATIC)
+# │ Context: @fig-03-vla-scaling-timeline
+# │ Goal:    distinguish renewed evidence from supplied waypoints and feedback
+# │ Show:    temporal ordering only; coordinates are layout, not measured data
+# │ How:     separate observation, chunk, and downstream tracking rows
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-from matplotlib.lines import Line2D
-import numpy as np
+from matplotlib.patches import Rectangle
 
-plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
-plt.rcParams["axes.edgecolor"] = "#334155"
-plt.rcParams["axes.linewidth"] = 1.0
+fig, ax, _, _ = viz.setup_plot(figsize=(10, 4.5))
+C = viz.COLORS
+ax.set_xlim(-3.0, 10.5)
+ax.set_ylim(-0.7, 3.4)
+ax.axis("off")
 
-fig, ax = plt.subplots(figsize=(14, 8.5), dpi=200, facecolor="#FFFFFF")
-ax.set_facecolor("#FFFFFF")
-ax.spines["top"].set_visible(False)
-ax.spines["right"].set_visible(False)
-ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5, color="#E2E8F0")
-ax.set_axisbelow(True)
-
-# 1. Regimes
-ax.axhspan(0.35, 8.0, color="#FEF2F2", alpha=0.55, zorder=0)
-ax.axhspan(25.0, 200.0, color="#ECFDF5", alpha=0.5, zorder=0)
-
-ax.text(
-    2.2e7,
-    180.0,
-    "CONTINUOUS ACTION CHUNKING & FLOW MATCHING FRONTIER (2023–2026)\nDecoupled proposal generation: multi-step chunks ($H = 16–64$) + fast generative decoders\nMulti-billion parameter foundation models achieve real-time 50–100 Hz closed-loop control",
-    fontsize=8.5,
-    fontweight="bold",
-    color="#047857",
-    alpha=0.9,
-    va="top",
-)
-
-ax.text(
-    2.2e8,
-    0.48,
-    "AUTOREGRESSIVE DELIBERATION WALL (2020–2023)\nSingle-token weight streaming bound by DRAM bandwidth ($f \\leq B_{\\mathrm{mem}} / M_{\\mathrm{weights}}$)\nEach action step requires a full model pass -> catastrophic latency scaling",
-    fontsize=8.5,
-    fontweight="bold",
-    color="#B91C1C",
-    alpha=0.85,
-    va="center",
-)
-
-# 2. Deadlines
-deadlines = [
-    (50.0, "50 Hz: Real-Time Dynamic Manipulation & Tactile Contact Deadline", "#1E793C", "--"),
-    (10.0, "10 Hz: Coarse Visual Servoing & Quasistatic Pick-and-Place Limit", "#D97706", ":"),
-    (2.0, "2 Hz: Cloud VLM Autoregressive Latency Floor (0.5–2 s)", "#A51C30", "-."),
+rows = [
+    (2.6, "Fresh observation\n+ policy evaluation"),
+    (1.5, "Candidate chunks\n(subject to permission)"),
+    (0.2, "Downstream tracking\n+ current state feedback"),
 ]
-for freq, lbl, col, ls in deadlines:
-    ax.axhline(freq, color=col, linestyle=ls, linewidth=1.2, alpha=0.7, zorder=1)
-    ax.text(9.5e10, freq * 1.08, lbl, fontsize=7.5, fontweight="bold", color=col, ha="right", va="bottom")
+for y, label in rows:
+    ax.text(-0.35, y, label, ha="right", va="center", fontsize=9, color=C["primary"])
 
-# 3. Trajectory Curves
-ar_params = np.logspace(np.log10(3.5e7), np.log10(5.5e10), 100)
-ar_freq = 3.0 * (3.5e7 / ar_params) ** 0.15
-ax.plot(ar_params, ar_freq, color="#A51C30", lw=2.2, ls="--", zorder=4, alpha=0.8)
-ax.text(
-    1.2e9,
-    2.4,
-    "Autoregressive Memory Wall: $f \\propto 1 / M_{\\mathrm{weights}}$",
-    fontsize=8.5,
-    fontweight="bold",
-    color="#A51C30",
-    rotation=-6,
-    ha="center",
-    bbox=dict(boxstyle="round,pad=0.2", facecolor="#FFFFFF", edgecolor="#FECACA", alpha=0.9),
-)
+for x, chunk_y in [(0.3, 1.75), (4.1, 1.40), (7.9, 1.05)]:
+    ax.plot(x, 2.6, "o", color=C["BlueLine"], ms=7)
+    ax.annotate("", xy=(x + 0.5, chunk_y + 0.14), xytext=(x, 2.48), arrowprops=dict(arrowstyle="->", color=C["primary"], lw=1))
 
-fx = np.array([8e7, 5e8, 2e9, 3.3e9, 5e9, 1.5e10])
-fy = np.array([50.0, 50.0, 50.0, 52.0, 80.0, 100.0])
-ax.plot(fx, fy, color="#1E793C", lw=2.5, ls="-", zorder=4, alpha=0.85)
-ax.text(
-    1.8e8, 56.0, "Action Chunking Frontier ($H \\geq 16$, Flow Matching)", fontsize=8.5, fontweight="bold", color="#1E793C", ha="left", va="bottom"
-)
+for x, y, end in [(0.8, 1.75, 5.2), (4.6, 1.40, 9.0), (8.4, 1.05, 10.0)]:
+    ax.add_patch(Rectangle((x, y - 0.10), end - x, 0.20, facecolor=C["VioletL"], edgecolor=C["VioletLine"], lw=1))
+    for j in range(1, int((end - x) / 0.4)):
+        xx = x + j * 0.4
+        ax.plot([xx, xx], [y - 0.10, y + 0.10], color=C["VioletLine"], lw=0.7)
 
-def add_badge(ax, text, xy, xytext, color="#1E293B", fontsize=7.8, arrow=True, arrow_color="#94A3B8"):
-    bbox = dict(boxstyle="round,pad=0.45", facecolor="#FFFFFF", edgecolor="#CBD5E1", alpha=0.96, linewidth=0.8)
-    ap = dict(arrowstyle="->", color=arrow_color, linewidth=1.1, shrinkA=3, shrinkB=4) if arrow else None
-    ax.annotate(
-        text, xy=xy, xytext=xytext, fontsize=fontsize, fontweight="normal", color=color, bbox=bbox, arrowprops=ap, ha="center", va="center", zorder=10
-    )
-
-models = [
-    {
-        "name": "BC-Z (2022)",
-        "params": 1e8,
-        "plot_params": 7.5e7,
-        "freq": 10.0,
-        "color": "#475569",
-        "marker": "s",
-        "badge_xytext": (2.2e7, 14.0),
-        "text": "2022 · Google BC-Z\n100M params · 10 Hz\nResNet behavioral cloning",
-    },
-    {
-        "name": "RT-1 (2022)",
-        "params": 3.5e7,
-        "plot_params": 3.5e7,
-        "freq": 3.0,
-        "color": "#004B87",
-        "marker": "o",
-        "badge_xytext": (1.8e7, 4.8),
-        "text": "2022 · Google RT-1\n35M params · 3 Hz (330 ms)\nEfficientNet + TokenLearner",
-    },
-    {
-        "name": "RT-2-PaLM-E (2023)",
-        "params": 1.2e10,
-        "plot_params": 1.2e10,
-        "freq": 3.0,
-        "color": "#D97706",
-        "marker": "D",
-        "badge_xytext": (4.0e9, 4.5),
-        "text": "2023 · RT-2-PaLM-E (12B)\n12B params · ~3 Hz\nDiscrete action tokenization",
-    },
-    {
-        "name": "RT-2-PaLI-X (2023)",
-        "params": 5.5e10,
-        "plot_params": 5.5e10,
-        "freq": 1.0,
-        "color": "#A51C30",
-        "marker": "D",
-        "badge_xytext": (2.5e10, 0.65),
-        "text": "2023 · RT-2-PaLI-X (55B)\n55B params · ~1 Hz (1,000 ms)\nCloud TPU v4 multi-token sweep",
-    },
-    {
-        "name": "OpenVLA (Base, 2024)",
-        "params": 7e9,
-        "plot_params": 7e9,
-        "freq": 6.0,
-        "color": "#E11D48",
-        "marker": "o",
-        "badge_xytext": (1.5e9, 7.5),
-        "text": "2024 · OpenVLA (Base)\n7B params · 6 Hz (RTX 4090)\nLlama-2 + SigLIP discrete bins",
-    },
-    {
-        "name": "ACT (Zhao et al., 2023)",
-        "params": 8e7,
-        "plot_params": 8e7,
-        "freq": 50.0,
-        "color": "#008080",
-        "marker": "^",
-        "badge_xytext": (2.0e7, 72.0),
-        "text": "2023 · Stanford ACT\n80M params · 50 Hz actions\nAction Chunking Transformer ($H=100$)",
-    },
-    {
-        "name": "Diffusion Policy (2023)",
-        "params": 1e8,
-        "plot_params": 1e8,
-        "freq": 30.0,
-        "color": "#6B21A8",
-        "marker": "^",
-        "badge_xytext": (1.8e8, 23.0),
-        "text": "2023 · Diffusion Policy\n100M params · 30 Hz execution\nReceding-horizon DDPM ($H=16$)",
-    },
-    {
-        "name": "Octo-Base (2023)",
-        "params": 9.3e7,
-        "plot_params": 1.35e8,
-        "freq": 10.0,
-        "color": "#0284C7",
-        "marker": "s",
-        "badge_xytext": (2.2e8, 14.0),
-        "text": "2023 · Octo-Base (UC Berkeley)\n93M params · 10 Hz actions\nTransformer diffusion policy",
-    },
-    {
-        "name": "OpenVLA-OFT+ (2024)",
-        "params": 7e9,
-        "plot_params": 7e9,
-        "freq": 50.0,
-        "color": "#B45309",
-        "marker": "*",
-        "badge_xytext": (4.5e9, 25.0),
-        "text": "2024 · OpenVLA-OFT+\n7B params · 50 Hz actions\nChunked parallel decoding",
-    },
-    {
-        "name": "Physical Intelligence pi0 (2024)",
-        "params": 3.3e9,
-        "plot_params": 3.3e9,
-        "freq": 50.0,
-        "color": "#1E793C",
-        "marker": "*",
-        "badge_xytext": (1.4e9, 82.0),
-        "text": "2024 · Physical Intelligence π₀\n3.3B params · 50 Hz actions\nFlow Matching Action Expert",
-    },
-    {
-        "name": "NVIDIA Project GR00T (2024–25)",
-        "params": 5e9,
-        "plot_params": 5e9,
-        "freq": 80.0,
-        "color": "#004B87",
-        "marker": "*",
-        "badge_xytext": (3.5e9, 140.0),
-        "text": "2024–25 · NVIDIA Project GR00T\n~5B params · 50–100 Hz closed-loop\nDual-System slow VLM + fast DiT policy",
-    },
-    {
-        "name": "2026 Frontier (Dual-Brain SoCs)",
-        "params": 1.5e10,
-        "plot_params": 1.5e10,
-        "freq": 100.0,
-        "color": "#A51C30",
-        "marker": "*",
-        "badge_xytext": (2.6e10, 140.0),
-        "text": "2026 Frontier · Embodied Dual-Brain\n15B params · 100 Hz actuation\nHardware-isolated proposal-permission SoC",
-    },
-]
-
-for m in models:
-    s_size = 200 if m["marker"] == "*" else (110 if m["marker"] == "D" else 100)
-    ax.scatter(m["plot_params"], m["freq"], color=m["color"], s=s_size, marker=m["marker"], edgecolor="#FFFFFF", linewidth=1.5, zorder=10)
-    add_badge(
-        ax, m["text"], xy=(m["plot_params"], m["freq"]), xytext=m["badge_xytext"], color="#1E293B", fontsize=7.8, arrow=True, arrow_color=m["color"]
-    )
-
-ax.set_xscale("log")
-ax.set_yscale("log")
-
-ax.set_xlim(1.5e7, 1.2e11)
-ax.set_ylim(0.35, 210)
-
-ax.set_xticks([2e7, 1e8, 1e9, 1e10, 1e11])
-ax.get_xaxis().set_major_formatter(ticker.FuncFormatter(lambda x, p: f"{int(x/1e6)}M" if x < 1e9 else f"{int(x/1e9)}B"))
-
-ax.set_yticks([0.5, 1, 2, 5, 10, 20, 50, 100, 200])
-ax.get_yaxis().set_major_formatter(ticker.FuncFormatter(lambda y, p: f"{y:g} Hz"))
-
-ax.set_xlabel("Foundation Policy Parameter Count $M_{\\mathrm{weights}}$ (log scale)", fontsize=11, fontweight="bold", labelpad=8)
-ax.set_ylabel("Onboard Physical Action Frequency (Hz, log scale)", fontsize=11, fontweight="bold", labelpad=8)
-
-legend_elements = [
-    Line2D([0], [0], marker='o', color='w', markerfacecolor='#A51C30', markersize=8, label='Discrete Autoregressive Tokenization (Single-Step)'),
-    Line2D([0], [0], marker='^', color='w', markerfacecolor='#008080', markersize=8, label='Diffusion Action Chunking (ACT / DDPM)'),
-    Line2D([0], [0], marker='*', color='w', markerfacecolor='#1E793C', markersize=12, label='Continuous Flow Matching / Dual-System VLA (π₀, GR00T)'),
-    Line2D([0], [0], color='#A51C30', lw=2, ls='--', label='Autoregressive Memory Wall Trend ($f \\propto 1/M$)'),
-    Line2D([0], [0], color='#1E793C', lw=2, ls='-', label='Action Chunking Scaling Frontier'),
-]
-legend = ax.legend(
-    handles=legend_elements,
-    loc="lower left",
-    frameon=True,
-    framealpha=0.96,
-    edgecolor="#CBD5E1",
-    fontsize=7.8,
-    title="Embodied Policy Architectures",
-    title_fontsize=8.2,
-)
-legend.get_title().set_fontweight("bold")
-legend.set_zorder(15)
-
+for j in range(24):
+    x = 0.8 + j * 0.4
+    ax.plot([x, x], [0.08, 0.32], color=C["GreenLine"], lw=1.3)
+ax.annotate("", xy=(10.1, -0.2), xytext=(0.0, -0.2), arrowprops=dict(arrowstyle="->", color=C["primary"], lw=1))
+ax.text(10.1, -0.43, "Physical time (schematic)", ha="right", fontsize=9)
+ax.text(5.2, 3.2, "A new waypoint is not a new observation", ha="center", fontsize=11)
 plt.tight_layout()
-plt.subplots_adjust(top=0.95, bottom=0.10, left=0.08, right=0.94)
 plt.show()
 ```
 :::
 
 ### Dual proposal pathways in physical inference {#sec-brain-two-proposers}
 
-In robotics and embodied AI, a natural initial design instinct is to train a single monolithic neural network that accepts raw camera images and natural language instructions, and directly outputs joint setpoints at the motor control rate. In disembodied language or vision tasks, monolithic foundation models achieve impressive generalization by scaling parameter counts into the billions. In physical systems, however, this monolithic aspiration collides violently with the **memory wall**\index{Memory wall!physical inference} of modern computer architecture.
-
-When an autonomous machine moves mass through an operational workspace, its actuators require setpoint updates renewed at 20 to 50 Hz to maintain dynamic stability, reject contact disturbances, and track planned trajectories. If a neural policy contains billions of parameters stored in off-chip DRAM (such as LPDDR5), every single forward pass requires streaming those gigabytes of weights across the silicon memory bus into the processor's execution cores. Because physical memory bandwidth is strictly finite, this memory-streaming latency imposes an unyielding physics-based ceiling on inference frequency. An embedded processor cannot sweep multi-gigabyte weight tensors from memory fast enough to close a real-time mechanical control loop.
-
-To resolve this fundamental conflict between semantic reasoning capacity and real-time control frequency, embodied architectures decouple physical inference into **dual proposal pathways**: a slow, asynchronous *intent model* and a fast, synchronous *action chunking policy*. Notebook \ref{nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking} quantifies this memory bottleneck on the warehouse mobile manipulator's application processor, demonstrating why a single monolithic model cannot satisfy both needs simultaneously.
+The single-model alternatives reduce cost per waypoint, but each fresh context still waits for the large backbone. We can now price the selected split between intent and chunk renewal on the warehouse mobile manipulator. Notebook \ref{nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking} applies the memory bound to this split and tests whether chunking alone could give the larger model the required renewal cadence.
 
 ```{python}
 #| label: calc-brain-action-chunking-lpddr5
@@ -839,7 +604,7 @@ class ActionChunkingLPDDR5:
     chunk_weight_mem_str = fmt_memory(chunk_weight_mem, unit=GB, precision=2)
     b_peak_str = fmt_bandwidth(b_peak, unit=GB / second, precision=0)
     b_sustained_str = fmt_bandwidth(b_sustained, unit=GB / second, precision=1)
-    dram_eff_pct_str = fmt_percent(bus_efficiency, precision=0)
+    dram_eff_pct_str = fmt_percent(bus_efficiency, precision=0, style="prose")
     t_stream_ms_str = fmt_latency(t_stream, unit=millisecond, precision=1)
     t_stream_s_str = fmt_time(t_stream.to(second), 'second', precision=4)
     f_single_str = fmt_frequency(f_single, unit=ureg.hertz, precision=1)
@@ -884,11 +649,11 @@ class ActionChunkingLPDDR5:
 Can action chunking let a multi-billion-parameter model on an embedded compute module renew proposals as fast as the arm consumes them, or does the machine need a second, smaller proposer?
 
 *1. The single-token memory bottleneck.*
-Consider the mobile manipulator's intent model, a `{python} ActionChunkingLPDDR5.params_str` VLA model stored in 16-bit precision (FP16) in the LPDDR5 memory of its application processor, an embedded edge System-on-Chip:
+Consider the mobile manipulator's intent model, represented here by the nominal `{python} ActionChunkingLPDDR5.params_str` parameter count of OpenVLA [@kim2024openvla], stored in 16-bit precision (FP16) in the LPDDR5 memory of its application processor, an embedded edge System-on-Chip:
 
 - Weight footprint: $M_{\text{weights}} =$ `{python} ActionChunkingLPDDR5.params_str` params $\times$ `{python} ActionChunkingLPDDR5.bytes_per_param_str` bytes $\approx$ `{python} ActionChunkingLPDDR5.weight_mem_str`.
-- Theoretical memory bandwidth: $B_{\text{peak}} =$ `{python} ActionChunkingLPDDR5.b_peak_str`.
-- Assumed sustained DRAM bandwidth (`{python} ActionChunkingLPDDR5.dram_eff_pct_str` percent of peak to model bus scheduling and memory overhead): $B_{\text{sustained}} \approx$ `{python} ActionChunkingLPDDR5.b_sustained_str`.
+- Rounded theoretical memory bandwidth used in this model: $B_{\text{peak}} =$ `{python} ActionChunkingLPDDR5.b_peak_str`.
+- Assumed sustained DRAM bandwidth (`{python} ActionChunkingLPDDR5.dram_eff_pct_str` of peak to model bus scheduling and memory overhead): $B_{\text{sustained}} \approx$ `{python} ActionChunkingLPDDR5.b_sustained_str`.
 
 Minimum streaming latency to fetch the weights from DRAM across the silicon bus once:
 `{python} ActionChunkingLPDDR5.t_stream_display_math`
@@ -896,9 +661,9 @@ Minimum streaming latency to fetch the weights from DRAM across the silicon bus 
 Bandwidth-only upper bound on fresh evaluations when each evaluation streams the full weights:
 `{python} ActionChunkingLPDDR5.f_single_display_math`
 
-Beyond model weights, autoregressive foundation models also grow their KV cache. When multi-camera sensory feeds (e.g., `{python} ActionChunkingLPDDR5.cameras_str` $224 \times 224$ RGB streams) are ingested, each video frame contributes hundreds of visual patch tokens (`{python} ActionChunkingLPDDR5.cameras_str` $\times$ `{python} ActionChunkingLPDDR5.patches_per_frame_str` $=$ `{python} ActionChunkingLPDDR5.visual_tokens_str` tokens). In the intent model's `{python} ActionChunkingLPDDR5.kv_layers_str`-layer transformer with hidden dimension $d =$ `{python} ActionChunkingLPDDR5.kv_hidden_str`, storing the FP16 Key and Value states consumes `{python} ActionChunkingLPDDR5.kv_per_token_str` per token:
+Beyond model weights, retained autoregressive context also occupies KV cache. For a hypothetical multi-camera extension of the backbone, when sensory feeds (e.g., `{python} ActionChunkingLPDDR5.cameras_str` $224 \times 224$ RGB streams) are ingested, each video frame contributes hundreds of visual patch tokens (`{python} ActionChunkingLPDDR5.cameras_str` $\times$ `{python} ActionChunkingLPDDR5.patches_per_frame_str` $=$ `{python} ActionChunkingLPDDR5.visual_tokens_str` tokens). In the intent model's `{python} ActionChunkingLPDDR5.kv_layers_str`-layer transformer with hidden dimension $d =$ `{python} ActionChunkingLPDDR5.kv_hidden_str`, storing the FP16 Key and Value states consumes `{python} ActionChunkingLPDDR5.kv_per_token_str` per token:
 `{python} ActionChunkingLPDDR5.kv_display_math`
-Across a `{python} ActionChunkingLPDDR5.visual_tokens_str`-token visual prompt, the KV cache expands by `{python} ActionChunkingLPDDR5.kv_per_frame_str` per frame.
+Across one synchronized `{python} ActionChunkingLPDDR5.visual_tokens_str`-token set of camera frames, the KV cache expands by `{python} ActionChunkingLPDDR5.kv_per_frame_str`. This is a full-width, standard multi-head attention estimate; it is not a measured cache footprint for the published OpenVLA checkpoint.
 
 *2. The action chunking amortization.*
 Suppose the intent model itself emitted an action chunk of $H =$ `{python} ActionChunkingLPDDR5.chunk_horizon_str` future setpoints ($\Delta t =$ `{python} ActionChunkingLPDDR5.chunk_step_str`, spanning `{python} ActionChunkingLPDDR5.chunk_span_str`) from each forward pass, instead of one action step per DRAM weight sweep.
@@ -909,12 +674,12 @@ Suppose the intent model itself emitted an action chunk of $H =$ `{python} Actio
 `{python} ActionChunkingLPDDR5.tau_step_display_math`
 
 *3. The machine's split.*
-Amortization spreads one sweep across more setpoints, but it does not make a fresh proposal arrive sooner. Each new chunk from the intent model would still wait for at least one `{python} ActionChunkingLPDDR5.t_stream_ms_str` sweep, plus tokenization, attention, and decoding. The mobile manipulator therefore divides the work between two models. Its intent model revises the goal at `{python} ActionChunkingLPDDR5.intent_rate_str` with `{python} ActionChunkingLPDDR5.intent_latency_str` of inference. A separate `{python} ActionChunkingLPDDR5.chunk_params_str`-parameter chunk policy, whose `{python} ActionChunkingLPDDR5.chunk_weight_mem_str` of weights sweep in `{python} ActionChunkingLPDDR5.chunk_t_stream_str`, proposes base velocity and arm joint targets together at `{python} ActionChunkingLPDDR5.chunk_rate_str` ($50\,\text{ms}$ replanning period), emitting waypoints spaced at $\Delta t =$ `{python} ActionChunkingLPDDR5.chunk_step_str` (a $50\,\text{Hz}$ supply rate), within a `{python} ActionChunkingLPDDR5.chunk_latency_str` P99 inference budget that includes vision, while the low-level motor drive interpolates and closes current loops at $10\text{--}25\,\text{kHz}$. The intent model's sweep is too slow to renew a proposal every few tens of milliseconds; the chunk policy's is not. @Sec-nervous turns that difference into a lease.
+Amortization spreads one sweep across more setpoints, but it does not make a fresh proposal arrive sooner. Each new chunk from the intent model would still wait for at least one `{python} ActionChunkingLPDDR5.t_stream_ms_str` sweep, plus tokenization, attention, and decoding. The selected design therefore divides the work between two models. Under its stipulated timing assumptions, the intent model revises the goal at `{python} ActionChunkingLPDDR5.intent_rate_str` with `{python} ActionChunkingLPDDR5.intent_latency_str` of inference. A separate `{python} ActionChunkingLPDDR5.chunk_params_str`-parameter chunk policy uses ACT as its size reference and is assumed to be adapted to the mobile manipulator. Its `{python} ActionChunkingLPDDR5.chunk_weight_mem_str` of weights sweep in `{python} ActionChunkingLPDDR5.chunk_t_stream_str`. It proposes base velocity and arm joint targets together at `{python} ActionChunkingLPDDR5.chunk_rate_str` ($50\,\text{ms}$ replanning period), emitting waypoints spaced at $\Delta t =$ `{python} ActionChunkingLPDDR5.chunk_step_str` (a $50\,\text{Hz}$ supply rate), within a `{python} ActionChunkingLPDDR5.chunk_latency_str` P99 inference target that includes vision, while the low-level motor drive interpolates and closes current loops at $10\text{--}25\,\text{kHz}$. The intent model's sweep alone exceeds the required renewal period; the chunk policy's leaves room for the remaining work. That is a candidate architecture, not a measured timing result. Loaded execution must establish the inference target, and a percentile target still permits overruns. @Sec-nervous derives an execution lease whose expiration contains a missed renewal.
 :::
 
-The `{python} ActionChunkingLPDDR5.t_stream_ms_str` sweep in \ref{nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking} is a floor reached before vision, attention, or decoder work begins. Two alternatives to the machine's split, lower weight precision and a single model with a fast head, would attack it, and neither removes it cheaply. INT4 storage would reduce the nominal weight footprint to `{python} ActionChunkingLPDDR5.weight_mem_int4_str` but needs accuracy validation for contact tasks. A single-model design could instead trade cadence for density without changing weight precision. It would evaluate the `{python} ActionChunkingLPDDR5.params_str` backbone periodically while a lightweight diffusion head denoises candidate trajectories on-chip, supplying dense candidate waypoints from each slower full-model evaluation. Its new-observation rate would still be limited by full inference latency, including vision and decoder work, which is why the mobile manipulator gives renewal to a separate chunk policy instead.
+The `{python} ActionChunkingLPDDR5.t_stream_ms_str` sweep in \ref{nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking} is a weight-transfer floor. Vision, attention, and decoder work also consume resources; some computation can overlap those transfers, so their durations are not necessarily additive. Lower weight precision could reduce that floor; a fast action head could reduce later decoder work. These alternatives change different terms in the budget. INT4 storage would reduce the nominal weight footprint to `{python} ActionChunkingLPDDR5.weight_mem_int4_str` but needs accuracy validation for contact tasks. A single-model design could instead trade cadence for density without changing weight precision. It would evaluate the `{python} ActionChunkingLPDDR5.params_str` backbone periodically while a lightweight diffusion head denoises candidate trajectories, reusing on-chip data only when its working set fits, supplying dense candidate waypoints from each slower full-model evaluation. Its new-observation rate would still be limited by full inference latency, including vision and decoder work, which is why the mobile manipulator gives renewal to a separate chunk policy instead.
 
-Retained context adds to the pressure the notebook began to measure. Counting language and proprioception tokens along with the visual patches raises each step to $S \approx$ `{python} ActionChunkingLPDDR5.context_tokens_str` tokens, so at `{python} ActionChunkingLPDDR5.kv_per_token_str` of FP16 key-value state per token each observation step adds `{python} ActionChunkingLPDDR5.kv_per_step_str` of KV cache. Retaining an unpruned `{python} ActionChunkingLPDDR5.history_window_str` historical context window at `{python} ActionChunkingLPDDR5.history_rate_str` yields `{python} ActionChunkingLPDDR5.kv_history_str` of KV cache. Combined with the intent model's `{python} ActionChunkingLPDDR5.weight_mem_str` of weights, this example claims `{python} ActionChunkingLPDDR5.combined_mem_str`, about half of the application processor's `{python} ActionChunkingLPDDR5.soc_mem_gb_str` before runtime overhead, memory that perception, mapping, and the chunk policy also need. Even where memory capacity permits, reading a large cache is further traffic on that same bus (@sec-placement-resource-contention). On edge SoCs utilizing Unified Memory Architecture (UMA), this massive memory traffic has direct safety implications: neural accelerators streaming gigabytes of weights and KV cache saturate the shared memory interconnect. Direct Memory Access (DMA) engines transferring incoming camera video streams and LiDAR packets experience memory arbitration stalls, causing dropped sensor frames and perceptual blind spots precisely when the robot is moving. Embodied architectures must therefore avoid unpruned autoregressive visual histories, relying instead on spatial pooling, cross-attention feature projections, or fixed-horizon action chunking.
+Retained context adds to the pressure the notebook began to measure. Counting language and proprioception tokens along with the visual patches raises each step to $S \approx$ `{python} ActionChunkingLPDDR5.context_tokens_str` tokens, so at `{python} ActionChunkingLPDDR5.kv_per_token_str` of FP16 key-value state per token each observation step adds `{python} ActionChunkingLPDDR5.kv_per_step_str` of KV cache. Retaining an unpruned `{python} ActionChunkingLPDDR5.history_window_str` historical context window at `{python} ActionChunkingLPDDR5.history_rate_str` would yield `{python} ActionChunkingLPDDR5.kv_history_str` of KV cache. This hypothetical history exceeds the published OpenVLA checkpoint's configured context window; the calculation exposes the storage cost of such an extension, rather than claiming that the checkpoint supports it. Combined with the intent model's `{python} ActionChunkingLPDDR5.weight_mem_str` of weights, this example claims `{python} ActionChunkingLPDDR5.combined_mem_str`, about half of the application processor's `{python} ActionChunkingLPDDR5.soc_mem_gb_str` before runtime overhead, memory that perception, mapping, and the chunk policy also need. Even where memory capacity permits, reading a large cache is further traffic on that same bus (@sec-placement-resource-contention). Bounding retained history therefore serves both capacity and timely renewal. Spatial pooling or cross-attention can reduce context traffic; fixed-horizon action output does not by itself bound the observation history retained by the backbone.
 
 ```{python}
 #| label: calc-brain-conveyor-chunk-sizing
@@ -994,15 +759,53 @@ class ConveyorChunkSizing:
     drift_full_str = fmt_length(drift_full, unit=millimeter, precision=1)
 ```
 
-At the pick station, the mobile manipulator's arm takes the mug from a conveyor moving at `{python} ConveyorChunkSizing.v_conv_str`, and each chunk must be executed without letting the mug drift out of reach. Untracked, the belt's steady motion would use up the margin $r_{\text{tol}} - e_0$ between the grasp tolerance and the handle estimate's initial error $e_0$ within the freshness deadline $e_{\max}/v_{\max}$ of @sec-body-measurement-freshness, with $e_{\max} = r_{\text{tol}} - e_0$. A tracker that follows the mug removes that steady motion, but residual slip can still accelerate the target at `{python} ConveyorChunkSizing.a_slip_str`, so a segment executed open-loop for a time $T$ drifts by $\frac{1}{2} a_{\text{slip}} T^2$. Added to the `{python} ConveyorChunkSizing.e_0_str` initial error $e_0$, that drift reaches the `{python} ConveyorChunkSizing.r_tol_str` grasp tolerance after the tracked evidence horizon $\tau_{\text{ev}} = \sqrt{2 (r_{\text{tol}} - e_0) / a_{\text{slip}}} \approx$ `{python} ConveyorChunkSizing.tau_ev_str`. The chunk policy replans every `{python} ConveyorChunkSizing.chunk_period_str` and needs up to `{python} ConveyorChunkSizing.chunk_latency_str` to do so, so while renewals arrive on time the arm executes no more than `{python} ConveyorChunkSizing.open_loop_str` of motion from one observation, which drifts only `{python} ConveyorChunkSizing.drift_open_loop_str` and sits well inside the tracked evidence horizon.
+In the illustrative conveyor calculation, the mobile manipulator's arm takes the mug from a conveyor moving at `{python} ConveyorChunkSizing.v_conv_str`, and each chunk must be executed without letting the mug drift out of reach. Untracked, the belt's steady motion would use up the margin $r_{\text{tol}} - e_0$ between the grasp tolerance and the handle estimate's initial error $e_0$ within the freshness deadline $e_{\max}/v_{\max}$ of @sec-body-measurement-freshness, with $e_{\max} = r_{\text{tol}} - e_0$. A tracker that follows the mug removes that steady motion, but residual slip can still accelerate the target at `{python} ConveyorChunkSizing.a_slip_str`, so a segment executed open-loop for a time $T$ drifts by $\frac{1}{2} a_{\text{slip}} T^2$. Added to the `{python} ConveyorChunkSizing.e_0_str` initial error $e_0$, that drift reaches the `{python} ConveyorChunkSizing.r_tol_str` grasp tolerance after the tracked evidence horizon $\tau_{\text{ev}} = \sqrt{2 (r_{\text{tol}} - e_0) / a_{\text{slip}}} \approx$ `{python} ConveyorChunkSizing.tau_ev_str`. The chunk policy replans every `{python} ConveyorChunkSizing.chunk_period_str` and is assumed to finish within `{python} ConveyorChunkSizing.chunk_latency_str`. Before additional handoff delays, this schedule gives a maximum evidence age at replacement of `{python} ConveyorChunkSizing.open_loop_str` and residual drift of `{python} ConveyorChunkSizing.drift_open_loop_str`, within the tracked evidence horizon. An overrun ends this assumption; the independent lease limits continued execution.
 
-That open-loop span also sets the minimum supply, because a chunk shorter than `{python} ConveyorChunkSizing.h_min_str` setpoints would leave the arm waiting for its successor. The machine's chunk carries `{python} ConveyorChunkSizing.chunk_horizon_str` setpoints at `{python} ConveyorChunkSizing.chunk_step_str` spacing, `{python} ConveyorChunkSizing.chunk_span_str` of motion, longer than the tracked evidence horizon; executed open-loop to its end, it would drift `{python} ConveyorChunkSizing.drift_full_str`, past the tolerance. The setpoints beyond the next replanning instant are therefore a supply buffer, consumed only when renewals stop, and the lease derived in @sec-nervous-cadences ends execution long before that buffer runs out. Overlapping chunks and temporal ensembling then blend the executed motion across each renewal.
+That open-loop span also sets the minimum supply, because a chunk shorter than `{python} ConveyorChunkSizing.h_min_str` setpoints would leave the arm waiting for its successor. The machine's chunk carries `{python} ConveyorChunkSizing.chunk_horizon_str` setpoints at `{python} ConveyorChunkSizing.chunk_step_str` spacing, `{python} ConveyorChunkSizing.chunk_span_str` of motion, longer than the tracked evidence horizon; executed open-loop to its end, it would drift `{python} ConveyorChunkSizing.drift_full_str`, past the tolerance. The unexecuted tail is therefore a supply buffer, not permission to finish the predicted trajectory. If renewal stops, any further prefix remains eligible only while its evidence and active execution lease remain valid. @Sec-nervous-cadences derives the lease and accounts for the handoff delays before that buffer runs out. Overlapping chunks and temporal ensembling then blend the executed motion across each renewal.
 
 ::: {.column-margin .margin-pointer}
 ↪ Bounded action chunk proposals are filtered against forward-invariant barriers in @sec-enforcement-safe-sets-conditional-permission.
 :::
 
-These are the proposer limits Part I hands forward: one chunk covers `{python} ConveyorChunkSizing.chunk_span_str` of motion, a new chunk takes up to `{python} ConveyorChunkSizing.chunk_latency_str`, and the evidence behind it stays within tolerance for about `{python} ConveyorChunkSizing.tau_ev_str`. Together with the candidate trajectory waypoints, they instantiate the **Proposal Record** ($\mathcal{P}$, @tbl-03-proposal-record-schema) transmitted across the proposal boundary. Inheriting the physical plant limits of the **Limit Record** ($\mathcal{L}_{\text{body}}$, @sec-body-measuring-limits) from @sec-body, this Proposal Record hands forward to @sec-nervous, where the real-time Nervous System synthesizes the machine's Transport Budget and enforces invariant safety. They bound when a proposal arrives and how long it remains true, but none of them says whether the proposal was right when it was made.
+Under the stated assumptions, the conveyor calculation supplies the quantities needed to connect cognition to physical permission. One chunk covers `{python} ConveyorChunkSizing.chunk_span_str` of motion, a new chunk takes up to `{python} ConveyorChunkSizing.chunk_latency_str`, and the evidence stays within the stated grasp tolerance for about `{python} ConveyorChunkSizing.tau_ev_str`. The Nervous System must combine these proposer limits with the body's measured limits to establish its handoff record. That requires more information than a trajectory tensor alone. Timely delivery and usable evidence bound how long a proposal can remain eligible; they do not establish that the proposed grasp was correct.
+
+### Information the proposer must supply {#sec-brain-proposer-information}
+
+The conveyor budget gives each payload field a physical purpose. The receiver needs the candidate motion, the capture time from which its evidence ages, and the conditions limiting its validity. The following illustration groups that information with delivery metadata; it is not a new evidence record in the book's record chain. @Sec-nervous owns the execution header and the handoff record that combine this supply with the body's limits.
+
+::: {#dfn-brain-proposal-contract .callout-definition title="The proposal record"}
+
+***The Proposal Record***\index{Proposal Record!definition}\index{Proposal contract!definition}\index{Proposal boundary!contract schema} ($\mathcal{P}$) is a typed candidate-motion payload sent from the unprivileged Brain to the real-time Nervous System. The payload illustration here packages candidate trajectory setpoints, capture timestamps, evidence validity horizons, and provenance metadata for independent verification before execution permission is granted:
+$$\mathcal{P} = \langle t_{\text{capture}}, t_{\text{valid}}, H, \Delta t, \mathbf{Q}_{1:H}, \dot{\mathbf{Q}}_{1:H}, \mathbf{X}_{1:H}, \mathbf{g}_{1:H}, \text{model\_id}, \text{lease\_id}, \hat{p}, \text{crc} \rangle$$
+
+1. **Significance**: Capture timestamps and validity claims let the receiver compare candidate motion with independently established freshness and calibration requirements before admission.
+2. **Distinction**: This candidate payload describes requested motion. It is neither execution permission nor the handoff evidence record; the receiver must check its claims against current state and established limits.
+3. **Common pitfall**: Omitting observation timestamps or validity horizons, causing downstream controllers to execute delayed proposals computed from obsolete scene states.
+
+:::
+
+The fields in @tbl-03-proposal-record-schema illustrate the information needed to interpret a candidate trajectory, rather than prescribing a second wire format. The proposer supplies trajectory and observation information. Validity claims require supporting evidence, while the receiver applies the separately established execution lease. A `lease_id` associates the request with that permission process; it does not let the proposer grant itself authority. The header and handoff contract in @sec-nervous specify delivery, admission, and expiration.
+
+| Field         | Type                        | Unit                    | Systems Semantics and Verification Rule                                                                            |
+|:--------------|:----------------------------|:------------------------|:-------------------------------------------------------------------------------------------------------------------|
+| `t_capture`   | `uint64_t`                  | $\text{ns}$             | Hardware timestamp of oldest sensory observation conditioning the proposal.                                        |
+| `t_valid`     | `uint64_t`                  | $\text{ns}$             | Monotonic time after which proposal expires ($\le t_{\text{capture}} + \tau_{\text{ev}}$).                         |
+| `horizon_H`   | `uint16_t`                  | count                   | Number of prospective trajectory setpoints ($H = 16\text{--}64$).                                                  |
+| `delta_t`     | `uint32_t`                  | $\mu\text{s}$           | Temporal interval between consecutive waypoints ($\Delta t = 20\,000\,\mu\text{s} \implies 50\text{ Hz}$).         |
+| `q_traj`      | `float32[H][D]`             | $\text{rad}$            | Candidate joint trajectory array across $D$ degrees of freedom.                                                    |
+| `q_dot_traj`  | `float32[H][D]`             | $\text{rad/s}$          | Velocity setpoints; checked for continuity when adjoining chunks meet.                                             |
+| `x_cartesian` | `position + orientation[H]` | $\text{m}, \text{quat}$ | End-effector target poses; verified against workspace keep-out boundaries.                                         |
+| `gripper_cmd` | `float32[H]`                | $[0, 1]$                | Gripper closure target; evaluated against grasp force and slip limits.                                             |
+| `model_id`    | `uint32_t`                  | identifier              | Identifier resolving to the model architecture, weights checkpoint, and calibration profile.                       |
+| `confidence`  | `float32`                   | $[0, 1]$                | Model reported confidence $\hat{p}$; interpreted using calibration evidence from observed outcomes.                |
+| `lease_id`    | `uint64_t`                  | identifier              | Identifier linking the proposal to a time-limited permission record; the handoff protocol follows in @sec-nervous. |
+| `crc32`       | `uint32_t`                  | checksum                | Integrity checksum protecting shared-memory ring buffer payload.                                                   |
+
+: **Illustrative proposal payload fields**: Candidate-motion information and associated metadata. The execution header and handoff record are defined in @sec-nervous; this illustration adds no separate qualification record. {#tbl-03-proposal-record-schema tbl-colwidths="[18,14,14,54]"}
+
+::: {.column-margin .margin-pointer}
+↪ Zero-copy proposal passing between the Brain and the Nervous System relies on the lock-free buffers analyzed in @sec-nervous-cadences.
+:::
 
 ::: {#chk-brain-soc-deliberation-limits .callout-checkpoint title="Edge deliberation and memory walls"}
 
@@ -1020,58 +823,64 @@ A chunk the mobile manipulator's policy proposes for the mug can arrive inside i
 
 [^fn-math-symbolic-connectionist]: **Connectionist and Symbolic Duality**\index{Connectionist representations!statistical approximation}\index{Symbolic logic!deterministic safety enforcement}: Physical AI architectures reconcile statistical connectionism with deterministic symbolic computation: high-capacity neural networks synthesize open-world behavioral proposals, while formal symbolic logic and invariant monitors verify kinematic validity before setpoints are granted execution authority.
 
-Without a verified input domain and sensitivity bound, small sensing changes to a learned proposer can yield unexpectedly large changes in proposed motion. Benchmark success does not establish closed-loop stability, timing bounds, or safety for unseen conditions; those properties require separate evidence for the model, runtime, and physical plant.[^fn-math-lipschitz-calibration] Calculating the exact Lipschitz constant of a multi-layer transformer with self-attention and GeLU activations is NP-hard. Consequently, systems safety cannot rely on bounded policy sensitivity alone, mandating external runtime gating.
+Without a verified input domain and sensitivity bound, small sensing changes to a learned proposer can yield unexpectedly large changes in proposed motion. Benchmark success does not establish closed-loop stability, timing bounds, or safety for unseen conditions; those properties require separate evidence for the model, runtime, and physical plant.[^fn-math-lipschitz-calibration] A sensitivity bound, when available, controls only the relationship between input perturbation and output change over its stated domain. It does not establish that the nominal action is physically admissible, so it cannot replace the independent permission decision.
 
 [^fn-math-lipschitz-calibration]: **Lipschitz Continuity in Neural Policies**\index{Lipschitz continuity!policy sensitivity}\index{Adversarial vulnerability!perturbation bounds}: Although neural networks with smooth activations are continuous on compact domains, a bound $L = \sup_{\mathbf{x}_1 \ne \mathbf{x}_2} \frac{\lVert \pi(\mathbf{x}_1) - \pi(\mathbf{x}_2) \rVert}{\lVert \mathbf{x}_1 - \mathbf{x}_2 \rVert}$ must be established over a specified operating domain. If a valid bound exists, sensor error $\lVert \delta \mathbf{x} \rVert \le \epsilon$ implies $\lVert \delta \mathbf{a} \rVert \le L\epsilon$; an unverified $L$ supplies no usable action-error guarantee. Mathematical formulations appear in @sec-appendix-ml.
 
-A learned proposer's failure modes also differ from traditional software defects. A classical program fails by throwing an exception, hanging in an infinite loop, or crashing. A neural network fails silently instead, as the mug chunk did, with output that passes every format check. An independent permission path must reject a detected violation before those values can become actuator commands. Systems architects must design around four primary cognitive vulnerabilities.
+A numerical interface can detect malformed tensors without detecting a mistaken grasp. Both classical and learned software can produce well-formed but incorrect outputs; learning adds failure modes tied to representation, training support, and confidence. Independent checks can reject contradictions visible in qualified geometry or physical limits, but cannot infer every task-level error. The following failure modes identify what additional evidence is needed beyond packet validity.
 
 ### Semantic hallucinations {#sec-brain-semantic-hallucinations}
 
-A shipping carton behind the conveyor carries a printed photograph of a mug, and the mobile manipulator's policy proposes a grasp on the printed handle. The trajectory tensor is finite and within joint limits, yet the object it targets is not there. Its plausibility cannot substitute for an independent geometric check, which would find a flat surface where the policy saw a handle. To prevent such failure modes, systems architects implement **geometric cross-validation**: high-level semantic proposals are cross-checked against independent depth telemetry (stereo disparity, time-of-flight, or LiDAR point clouds). When a 2D vision backbone proposes an end-effector approach vector toward a detected handle, an independent geometric validator evaluates local surface normal curvature and depth discontinuity. Finding a flat planar surface ($0\,\text{mm}$ relief) triggers an immediate geometric contradiction veto, discarding the proposal before actuation.
+A shipping carton behind the conveyor carries a printed photograph of a mug, and the mobile manipulator's vision backbone attends to the visual texture, proposing an end-effector grasp on the printed handle. The trajectory tensor is numerically smooth and well within joint kinematic limits, yet the physical affordance it targets does not exist. In web-scale vision models, semantic attention maps reflect 2D pixel correlations rather than verified 3D metric occupancy.
+
+Independent geometric evidence can contradict the proposed grasp. A validator can compare the alleged handle with calibrated depth telemetry and ask whether the observed relief supports that geometry. A flat surface within the sensor's resolution would undermine this proposal; missing or ambiguous depth would instead leave it unsupported. Neither result makes the learned attention map a metric measurement. @Sec-perception develops the uncertainty and freshness requirements for such checks. The proposer must expose its target and supporting observation so that the receiver can distinguish a supported request from an unverified interpretation.
 
 ### The softmax illusion and out-of-distribution overconfidence {#sec-brain-softmax-illusion}
 
-Deployment interfaces often confuse mathematical normalization with physical probability. In deep neural networks, output logits are passed through a softmax function,[^fn-math-softmax-normalization] whose outputs sum to one whatever the input. As illustrated in @fig-ch03-softmax-simplex, an embodied machine encountering out-of-distribution (OOD) observations—such as novel optical textures, deep shadows, or lens water droplets—can assign confidence scores exceeding $0.95$ to erroneous classifications.
-
-::: {#fig-ch03-softmax-simplex fig-env="figure" fig-pos="htb" fig-cap="**Softmax Probability Simplex**: Normalization geometry on the categorical probability simplex: in-distribution observations (green points) map into the interior with well-calibrated confidence dispersion. Out-of-distribution inputs (red points) are artificially pushed toward external simplex vertices with false confidence exceeding $0.99$. The algebraic softmax operator cannot express epistemic ignorance—as softmax temperature $\tau \to 0$, probability mass concentrates at vertices regardless of input novelty." fig-alt="Tetrahedral 3D probability simplex with four vertices. Green in-distribution points cluster in the interior, while red out-of-distribution points concentrate at the extreme vertices."}
-![](images/png/fig03_softmax_simplex_3d.png)
-:::
+Deployment interfaces frequently conflate mathematical normalization with physical probability of task success. In classification, classification-based tokenization, or categorical action heads, output logits (unnormalized scores) are transformed via the softmax operator:[^fn-math-softmax-normalization]
+$$\sigma(\mathbf{z})_i = \frac{e^{z_i}}{\sum_{j=1}^K e^{z_j}}$$
+whose outputs sum to one purely by algebraic construction. When an embodied machine encounters out-of-distribution (OOD) observations—such as novel optical textures, intense specular glare, heavy shadows, or water droplets on camera lenses—the network can output confidence scores exceeding $\hat{p} > 0.95$ for completely invalid actions simply because one logit arbitrarily exceeds the others.
 
 [^fn-math-softmax-normalization]: **Softmax Normalization and Epistemic Uncertainty**\index{Softmax normalization!epistemic limitations}\index{Probability calibration!algebraic normalization}: The softmax operator $\sigma(\mathbf{z})_i = \frac{e^{z_i}}{\sum_j e^{z_j}}$ enforces normalization across the categorical simplex $\Delta^K$ by algebraic construction rather than Bayesian epistemic confidence. High output confidence reflects only relative logit separation, meaning models assign near-unity probabilities even when evaluating inputs completely outside their training distribution. Derivations appear in @sec-appendix-ml.
 
-Evaluating the true relationship between reported model confidence and empirical physical success requires measuring **Expected Calibration Error (ECE)**\index{Expected Calibration Error!distribution shift}, the gap between how sure the model thinks it is and how frequently the physical task actually succeeds.[^fn-math-ece-math]
+Calibration compares reported confidence with observed outcomes under stated conditions. A score is useful for selecting or abstaining from a proposal only to the extent that this relationship holds for the deployed task. @Sec-appendix-ml-calibration defines binned calibration error and temperature scaling; the architectural requirement here is to carry the applicable calibration evidence with the model identity, without treating confidence as physical permission.
 
-[^fn-math-ece-math]: **Expected Calibration Error Formulation**\index{Expected Calibration Error!mathematical formulation}\index{Model calibration!binned calibration error}: Partition predicted confidence into bins. In each bin, compare observed success frequency with mean reported confidence; average the absolute gaps, weighted by the bin's share of samples. Elevated ECE shows that reported confidence is a poor basis for granting physical permission. The equation and bin definitions appear in @sec-appendix-ml-calibration.
+The stipulated rates in @tbl-03-calibration-degradation illustrate this mismatch; they are not measurements of a deployed policy. In each shifted regime, confidence exceeds task success, so a threshold on the score would admit more failed attempts than its numerical value suggests. The response depends on the affected evidence and the machine's remaining capabilities. A confidence gap alone cannot establish whether a slower motion, another observation, or refusal is feasible.
 
-The regimes in @tbl-03-calibration-degradation show how high reported confidence can coexist with low task success under shift. Near-OOD shifts (covariate shift) preserve semantic categories while degrading low-level pixel features through specular glare or lens droplets, which downstream supervisors can resolve through selective abstention and exploratory tactile probing. Far-OOD shifts introduce completely novel semantic objects or human limb intrusions, demanding outright proposal rejection and safe fallback. The single-row differences are confidence–success gaps, not ECE; computing ECE requires bins over a specified evaluation set. Raw scores cannot grant execution permission without validation and independent physical checks.
+| Distribution Shift Regime               | Physical & Environmental Trigger                                             | Conf. vs. Success ($\text{conf} \text{ vs. } \text{success}$) | Confidence–Success Gap ($\text{conf}-\text{acc}$) | Downstream Supervisory Action                                                     |
+|:----------------------------------------|:-----------------------------------------------------------------------------|:--------------------------------------------------------------|:--------------------------------------------------|:----------------------------------------------------------------------------------|
+| **In-Distribution** (Nominal Baseline)  | Clean optics, structured laboratory lighting, nominal workpiece textures     | $\text{conf}=0.91, \, \text{acc}=0.89$                        | $+0.02$                                           | Apply independent limits before nominal execution                                 |
+| **Near-OOD Shift** (Covariate Shift)    | Specular reflections, lens water droplets, dynamic shadow transitions        | $\text{conf}=0.89, \, \text{acc}=0.52$                        | $+0.37$                                           | Abstain or seek new evidence; permit probing only with a qualified contact policy |
+| **Far-OOD Shift** (Semantic Shift)      | Uncataloged deformable obstacles, human limb intrusion into workspace        | $\text{conf}=0.78, \, \text{acc}=0.08$                        | $+0.70$                                           | Reject proposal; use feasible controlled response                                 |
+| **Sensor Degradation** (Hardware Drift) | Photodetector thermal noise ($>75^\circ\text{C}$), focal blur from vibration | $\text{conf}=0.84, \, \text{acc}=0.31$                        | $+0.53$                                           | Restrict operation to modes supported despite the sensor degradation              |
 
-| Distribution Shift Regime               | Physical & Environmental Trigger                                             | Conf. vs. Success ($\text{conf} \text{ vs. } \text{success}$) | Confidence–Success Gap ($\text{conf}-\text{acc}$) | Downstream Supervisory Action                                                      |
-|:----------------------------------------|:-----------------------------------------------------------------------------|:--------------------------------------------------------------|:--------------------------------------------------|:-----------------------------------------------------------------------------------|
-| **In-Distribution** (Nominal Baseline)  | Clean optics, structured laboratory lighting, nominal workpiece textures     | $\text{conf}=0.91, \, \text{acc}=0.89$                        | $+0.02$                                           | Apply independent limits before nominal execution                                  |
-| **Near-OOD Shift** (Covariate Shift)    | Specular reflections, lens water droplets, dynamic shadow transitions        | $\text{conf}=0.89, \, \text{acc}=0.52$                        | $+0.37$                                           | Selective abstention triggered: clamp velocity, initiate exploratory tactile probe |
-| **Far-OOD Shift** (Semantic Shift)      | Uncataloged deformable obstacles, human limb intrusion into workspace        | $\text{conf}=0.78, \, \text{acc}=0.08$                        | $+0.70$                                           | Reject proposal; use feasible controlled response                                  |
-| **Sensor Degradation** (Hardware Drift) | Photodetector thermal noise ($>75^\circ\text{C}$), focal blur from vibration | $\text{conf}=0.84, \, \text{acc}=0.31$                        | $+0.53$                                           | Trigger operational downgrade; restrict kinematics to certified limits             |
-
-: **Illustrative Confidence–Success gaps under distribution shift**: Confidence and task-success rates for four operating regimes, with the supervisory response each gap calls for. {#tbl-03-calibration-degradation tbl-colwidths="[18,18,20,24,20]"}
+: **Illustrative Confidence–Success gaps under distribution shift**: Stipulated confidence and task-success rates for four operating regimes, with candidate responses requiring separate physical justification. These values are illustrative, not test results. {#tbl-03-calibration-degradation tbl-colwidths="[18,18,20,24,20]"}
 
 ### Perceptual chattering and covariate shift {#sec-brain-perceptual-chattering}
 
-Ambiguous images can make successive object classifications change rapidly. If a motion planner treats each new label as a fresh physical state, it may discard useful motion history, as each reclassification did in the Tempe collision (@sec-boundary-when-fails).\index{Perceptual chattering!state reset hazard} In physical manipulation, perceptual chattering injects high-frequency direction reversals into trajectory planners, and the commanded reversals demand torque steps that the drivetrain must absorb, oscillations that damage gearboxes. To eliminate perceptual chattering, robust runtimes employ three systems remedies: (1) **temporal hysteresis and debouncing**, requiring a new semantic classification to persist across $N$ consecutive observation cycles before committing a state transition; (2) **Bayesian evidence accumulation**, fusing sequential belief distributions to prevent single-frame feature flicker from resetting motion plans; and (3) **kinematic rate limiting**, enforcing jerk and acceleration bounds so semantic classification switches cannot translate into instantaneous actuator impulses. Temporal smoothing can help motion continuity, but it cannot repair a false obstacle estimate; independent detection and a feasible response remain necessary.
+When sensory observations hover near decision boundaries between competing latent classes, frame-to-frame sensor noise can cause rapid classification toggling. If an unprivileged motion planner treats each reclassification as an instantaneous change in the physical world state, it resets its trajectory optimization at high rates. In the fatal 2018 Tempe collision, the investigation identified this failure mechanism among the system failures: the perception system alternated between classifying a pedestrian as an unknown object, a vehicle, and a bicycle, repeatedly resetting its path prediction history (@sec-boundary-when-fails).\index{Perceptual chattering!state reset hazard}
+
+In physical manipulation, perceptual chattering can inject repeated direction reversals into trajectory setpoints. Over a finite control interval, a commanded velocity change implies a finite requested acceleration, $\Delta \dot{\mathbf{q}} / \Delta t$, which can exceed the actuator's capability. A PD controller also responds to the velocity error with a torque change, as the temporal ensembling example showed. The resulting current demand and tracking error depend on the controller gains, drive limits, and mechanical load; a voltage collapse or protection trip is not inevitable. Physical AI runtimes reduce chattering through three architectural mechanisms:
+
+1. **Temporal hysteresis and debouncing:** Requiring a newly detected semantic class or state transition to persist across $N$ consecutive observation windows before committing a state change.
+2. **Bayesian recursive evidence accumulation:** Fusing consecutive latent distributions to prevent single-frame sensor noise from resetting motion plans.
+3. **Kinematic rate and jerk limiting:** Enforcing strict acceleration and jerk limits at the real-time tier so that semantic classification jitter cannot propagate as torque shocks to motor shafts.
 
 ### Temporal expiration of intent {#sec-brain-temporal-expiration-intent}
 
-A proposal stays valid only as long as the evidence behind it, a span the conveyor-pick example computes as the evidence horizon $\tau_{\text{ev}}$. If the mobile manipulator's intent model needs `{python} ActionChunkingLPDDR5.intent_latency_str` to deliberate, the people and carts in the aisle, the arm itself, and the mug on the conveyor have already moved by the time the plan is ready. Delayed downstream communication or execution leads to acting on an expired intent lease (@sec-intent-lease), commanding the physical body based on an obsolete mental representation. A proposer that stalls outright leaves the plant moving with no plan at all, so recovery must live in a local controller below it, a requirement the 2015 DARPA Robotics Challenge Finals imposed on legged entrants by degrading communications deliberately [@krotkov2017darpa].\index{Incidents!DARPA Robotics Challenge} When an intent lease expires without renewal, the machine executes a **graceful degradation ladder**: (1) the downstream queue completes currently buffered chunk waypoints to a controlled zero-velocity deceleration; (2) if still unrenewed, the arm transitions into compliant gravity-compensation mode to prevent rigid collisions; and (3) upon breaching the hard maximum timeout ($t_{\text{lease\_max}}$), the safety runtime asserts an operational stop and locks holding brakes.
+The conveyor calculation already gives expiration a physical meaning. A smooth chunk can arrive after the evidence supporting the mug's position has aged beyond its grasp tolerance. Renewing a goal identifier or retransmitting the same trajectory does not renew that evidence. The slower intent model must therefore supply a goal whose continuing validity can be checked while the smaller policy renews motion from current observations.
 
-The four vulnerabilities, with the memory wall of @sec-brain-cognitive-pipeline, give three independent reasons against granting a learned proposer actuator authority. The memory wall means the most capable model cannot renew a proposal as fast as the machine consumes one. Hallucination, overconfidence, and chattering mean that a proposal can be wrong or unstable while its reported confidence stays high, so confidence cannot certify it. Expiry means that even a correct proposal stops being correct once the world has moved. @Tbl-03-classical-vs-learned sets the learned proposer's limits beside those of the classical methods the chapter began with and shows which side of the proposal boundary each capability occupies.
+The receiver must distinguish refusing a late replacement from ending an active command. A rejected new proposal does not by itself invalidate the previously admitted one. Continued execution depends on the active command's own evidence, state constraints, and lease; when those no longer hold, the permission path must begin a response that the body can still complete. @Sec-nervous-cadences establishes the execution timing, while @sec-intent-lease develops the longer-lived goal's validity. Stopping, compliant support, and unpowered holding require different physical conditions; @sec-enforcement-fallback-ladder chooses among them after establishing the response budgets.
 
-| Systems Dimension                 | Classical Analytical Methods                                                      | Learned Foundation Models                                                                   | Physical AI Architectural Synthesis                                                   |
-|:----------------------------------|:----------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------|
-| **Foundational Principle**        | Analytical differential equations, geometry, CAD models, Lyapunov stability       | High-capacity neural representations fitted to empirical multimodal data                    | **Hybrid Hierarchy:** Learned intent proposals gated by the permission path           |
-| **Generalizability & Perception** | **Model-dependent:** Explicit geometry and features may lose coverage under shift | **Data-dependent:** Open-vocabulary grounding can improve coverage but may fail under shift | **Unprivileged Deliberation:** Foundation models synthesize continuous semantic goals |
-| **Mathematical Verifiability**    | **Conditional:** Selected properties can be proved within model assumptions       | **Limited:** Empirical behavior needs separate bounds and runtime evidence                  | **Proposal Boundary:** Gate checks modeled limits using independent evidence          |
-| **Temporal Pacing**               | **Hard Real-Time:** Deterministic millisecond execution loops ($1\text{ kHz}$)    | **Multi-Rate:** Full inference, chunk refresh, and waypoint execution have distinct rates   | **Split Proposers:** A small chunk policy renews while the intent model revises goals |
-| **Failure Modes & Fallback**      | Boolean branch crashes; failure on uncataloged objects; rule exhaustion           | Semantic hallucinations; out-of-distribution overconfidence; expired intent                 | **Conditional Fallback:** Reject detected violations and execute a feasible response  |
+The resulting architecture combines useful learned interpretation with bounded execution rather than assigning all correctness to either side. @Tbl-03-classical-vs-learned compares the roles. The learned proposer supplies task coverage, but its timing and empirical support constrain that contribution. Analytical checks supply explicit physical conditions, but their conclusions remain conditional on valid models, observations, and execution.
+
+| Systems Dimension                 | Classical Analytical Methods                                                                       | Learned Foundation Models                                                                   | Physical AI Architectural Synthesis                                                   |
+|:----------------------------------|:---------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------|
+| **Foundational Principle**        | Analytical differential equations, geometry, CAD models, Lyapunov stability                        | High-capacity neural representations fitted to empirical multimodal data                    | **Hybrid Hierarchy:** Learned intent proposals gated by the permission path           |
+| **Generalizability & Perception** | **Model-dependent:** Explicit geometry and features may lose coverage under shift                  | **Data-dependent:** Open-vocabulary grounding can improve coverage but may fail under shift | **Unprivileged Deliberation:** Foundation models synthesize continuous semantic goals |
+| **Mathematical Verifiability**    | **Conditional:** Selected properties can be proved within model assumptions                        | **Limited:** Empirical behavior needs separate bounds and runtime evidence                  | **Proposal Boundary:** Gate checks modeled limits using independent evidence          |
+| **Temporal Pacing**               | **Boundable:** Selected controllers support real-time deadlines under stated execution assumptions | **Multi-Rate:** Full inference, chunk refresh, and waypoint execution have distinct rates   | **Split Proposers:** A small chunk policy renews while the intent model revises goals |
+| **Failure Modes & Fallback**      | Implementation defects; model mismatch; failure on uncataloged objects                             | Semantic hallucinations; out-of-distribution overconfidence; expired intent                 | **Conditional Fallback:** Reject detected violations and execute a feasible response  |
 
 : **Classical analytical methods vs. learned foundation models**: Trade-offs across generalizability, verifiability, pacing, and fallback, with the synthesis that partitions proposal capability from execution authority. {#tbl-03-classical-vs-learned tbl-colwidths="[20,26,26,28]"}
 
@@ -1083,7 +892,7 @@ Learned capability is useful only when the machine can interpret and constrain i
 
 **Fallacy**: *An engineering team must choose entirely between formal classical safety proofs and learned empirical capability.*
 
-An assembly plant compares a classical wiring-harness controller with a learned diffusion policy. The classical design exposes explicit motion constraints but struggles with cable deformation; the learned policy completes 96 percent of trial insertions without establishing worst-case force or velocity bounds. These strengths address different engineering obligations. The learned policy can propose adaptive motions while a deterministic supervisor checks them against the physical limits, using a control barrier function where its assumptions apply [@ames2019control] (detailed in @sec-enforcement). Partitioning capability from enforcement lets the team evaluate task performance and the protection mechanism separately. High empirical success does not establish the supervisor's adequacy or the safety of the integrated machine.
+Consider an assembly plant comparing a classical wiring-harness controller with a learned diffusion policy. The classical design exposes explicit kinematic constraints but struggles with flexible cable deformation; the learned policy can improve task coverage while still proposing motions outside physical limits. The team can retain both capabilities by separating candidate generation from independent enforcement. @Sec-enforcement-minimal-intervention develops a filter that makes the least change needed to satisfy its modeled constraints, subject to valid state, feasible control, and timely execution. A permitted correction can help the whole machine finish the insertion even when the raw proposal was inadequate. The team must evaluate task success, proposer shortcomings, and protective behavior separately.
 
 :::
 
@@ -1091,7 +900,7 @@ An assembly plant compares a classical wiring-harness controller with a learned 
 
 **Pitfall**: *Allowing a neural model's high confidence to bypass deterministic geometric boundaries.*
 
-A cleanroom manipulator mistakes glare on a transparent barrier for open space and proposes reaching through it while carrying reagent vials. The proposal contains finite, in-range coordinates and arrives within its deadline. Those checks establish that the packet is usable, not that its interpretation of the scene is correct. High confidence cannot resolve the same perceptual error that produced the trajectory. Before granting permission, the permission path must compare the proposal with independently maintained geometric boundaries (such as hard-coded stay-out zones or real-time depth maps).
+A cleanroom manipulator mistakes glare on a transparent glass partition for open workspace and proposes reaching through it while carrying reagent vials. The proposal contains finite, in-range coordinates, arrives within its deadline, and carries a reported confidence of $\hat{p} = 0.98$. Those checks establish numerical validity, timely delivery, and a high reported score; they do not establish a correct interpretation of the scene. High model confidence cannot resolve the same optical ambiguity that caused the perceptual hallucination. Before granting actuation permission, the real-time permission path must validate the candidate trajectory against bounded, qualified local geometric evidence. A full host-resident occupancy map is not automatically available to an isolated real-time checker; the handoff must supply the relevant limits and their validity.
 
 :::
 
@@ -1099,7 +908,7 @@ A cleanroom manipulator mistakes glare on a transparent barrier for open space a
 
 **Fallacy**: *Raw softmax probabilities or predicted confidence scores reflect true physical success rates.*
 
-**Softmax output is an algebraic artifact of exponent normalization, not a physical probability of mission success.** A bin-picking policy reports $\hat{p} \approx 0.90$ for a group of grasps, but only 64 of 100 physical attempts succeed. An abstention threshold based on the reported score would therefore accept more failures than its numerical value suggests. The discrepancy concerns calibration: confidence does not yet match observed success in the operating conditions (as illustrated in @tbl-03-calibration-degradation). It does not, by itself, establish whether the policy ranks candidates correctly. Engineers must validate the relationship between scores and outcomes across the intended domain before using confidence to choose between execution, another observation, and operator assistance. Independent physical limits still apply to accepted grasps.
+A bin-picking policy can assign high scores to grasps that fail under changed lighting. The softmax operation normalizes its logits; it does not measure physical success. The illustrative gaps in @tbl-03-calibration-degradation show why an abstention threshold needs outcome evidence from relevant conditions. Calibration can improve interpretation of a score within its tested scope, but cannot certify geometry or guarantee behavior under a new shift. Independent physical checks remain necessary even for a well-calibrated model.
 
 :::
 
@@ -1107,7 +916,7 @@ A cleanroom manipulator mistakes glare on a transparent barrier for open space a
 
 **Pitfall**: *Coupling high-frequency semantic classifications directly to motor setpoints without continuous filtering.*
 
-A delivery robot observes reflective tarps over traffic cones. At every perception update, its pipeline changes the classification among obstacle, movable drape, and free path. If each change immediately resets motor setpoints, uncertainty in the scene becomes repeated requests for direction reversal. The drive motors cannot follow those requests beyond their torque slew limits, and the chassis chatters and shudders. The architecture needs continuity between changing interpretations and physical commands. Filtering or action chunking can support that continuity, but the resulting trajectory must still respect the body's motion limits when the semantic estimate changes.
+A delivery robot observes reflective tarps flapping over traffic cones. At every perception update ($20\,\text{Hz}$), its vision pipeline alternates classifications between an open corridor, a rigid obstacle, and a compliant drape. If each discrete reclassification immediately resets motor setpoints, sensory noise translates into repeated requests for instantaneous velocity reversals. In a joint PD servo loop ($\boldsymbol{\tau} = \mathbf{K}_p \mathbf{e} + \mathbf{K}_d \dot{\mathbf{e}}$), a velocity-command step changes the requested torque through the derivative term. Repeated reversals can exceed acceleration or drive-current limits and excite mechanical resonances. Temporal debouncing and belief filtering can reduce semantic switching, while trajectory interpolation and explicit motion limits govern the setpoints delivered to the drives. A smooth trajectory still needs a feasibility check.
 
 :::
 
@@ -1115,25 +924,27 @@ A delivery robot observes reflective tarps over traffic cones. At every percepti
 
 **Fallacy**: *A numerically valid and smooth action chunk can safely be executed whenever it arrives.*
 
-The mobile manipulator's chunk policy proposes an arm trajectory toward the mug on the conveyor. Host scheduling delays delivery, while residual belt slip has carried the mug toward the edge of the grasp tolerance. The trajectory remains smooth and numerically valid, but the observation that justified it no longer describes where the mug is. Executing it could close the gripper on the rim or knock the mug from the belt. Once the delay outlasts the chunk lease of @sec-nervous-cadences, the lease ends the stalled policy's authority and the arm enters its validated fallback stop instead of waiting, and when the delayed trajectory finally arrives, the observation it was computed from is too old for the permission path to admit it. Smoothness describes the proposed command; temporal validity determines whether the machine may still act on it.
+The mobile manipulator's chunk policy proposes an arm trajectory toward the mug, but host scheduling or memory stalls delay delivery beyond the tracked evidence horizon. The packet's waypoints remain smooth and within joint limits while conveyor slip moves the target outside the grasp tolerance. The receiver must reject the stale replacement. It may continue a previously admitted command only while that command's own evidence and lease remain valid; otherwise it must enter the qualified response in time to preserve the body's limits. Packet smoothness cannot extend either deadline.
 
 :::
 
 ## Summary {#sec-brain-summary}
 
-Learned representations give the mobile manipulator what hand-authored geometry could not, the ability to find the handle of a mug it has never seen. The price is paid in memory traffic and in time. The largest model evaluates least often, and every setpoint either proposer supplies ages with the observation that produced it.
+Learned representations give the mobile manipulator what hand-authored geometry could not: the open-world semantic capability to recognize and manipulate unfamiliar objects without precomputed CAD models or manual state machine branches. Yet this flexibility is paid for in memory bus traffic, compute latency, and stochastic uncertainty. On a fixed processor, larger nonresident weight footprints raise the transfer-time floor for each fresh evaluation, and every setpoint emitted across the proposal boundary ages continuously with the physical observation that produced it.
 
 ::: {.callout-takeaways title="Learned proposers and deliberation limits"}
-* **Weight traffic bounds how often a model sees**: One sweep of the intent model's `{python} ActionChunkingLPDDR5.weight_mem_str` of weights takes `{python} ActionChunkingLPDDR5.t_stream_ms_str` on the application processor before vision or decoding begins, so its fresh-evaluation rate cannot exceed about `{python} ActionChunkingLPDDR5.f_single_str` whatever its compute peak.
-* **Chunking multiplies supply, not freshness**: A `{python} ActionChunkingLPDDR5.chunk_horizon_str`-setpoint chunk spreads one evaluation across `{python} ActionChunkingLPDDR5.chunk_span_str` of motion, but every setpoint is as old as the observation behind it. The machine therefore gives renewal to a small chunk policy at `{python} ActionChunkingLPDDR5.chunk_rate_str` within `{python} ActionChunkingLPDDR5.chunk_latency_str`.
-* **Size a chunk between starvation and drift**: The replanning period plus inference latency (`{python} ConveyorChunkSizing.open_loop_str`) sets the minimum supply, and target drift sets the evidence horizon (`{python} ConveyorChunkSizing.tau_ev_str`). Setpoints beyond the next renewal are a buffer that the lease ends, not a plan.
-* **Retained context is paid for twice**: Keeping `{python} ActionChunkingLPDDR5.history_window_str` of multi-camera history adds `{python} ActionChunkingLPDDR5.kv_history_str` of key-value cache, which with the weights claims about half the processor's memory, and every read of it is traffic on the bus that real-time transfers share.
-* **Confidence is not calibration**: Softmax scores sum to one by construction, so reported confidence can stay high while task success collapses under distribution shift. Only calibration measured over the operating domain can justify an abstention threshold.
-* **A proposal is true only for a while**: Intent and chunks expire with the evidence behind them, and a smooth, in-range, on-time proposal can still be stale or wrong.
+
+* **Memory traffic can bound fresh inference**: When every evaluation streams nonresident weights, the weight footprint and sustained bandwidth set a latency floor. Fetching the intent model's `{python} ActionChunkingLPDDR5.weight_mem_str` takes `{python} ActionChunkingLPDDR5.t_stream_ms_str` even before accounting for vision and decoding, already too slow for the machine's chunk-renewal period.
+* **Chunking supplies motion without refreshing evidence**: A chunk of `{python} ActionChunkingLPDDR5.chunk_horizon_str` setpoints spreads one backbone evaluation across `{python} ActionChunkingLPDDR5.chunk_span_str` of candidate motion. It reduces transfer cost per supplied waypoint, but reaction to a new observation still waits for the next policy evaluation.
+* **Supply and validity bound different horizons**: The conveyor example needs at least `{python} ConveyorChunkSizing.h_min_str` setpoints to bridge renewal, while target drift limits the evidence horizon to about `{python} ConveyorChunkSizing.tau_ev_str`. A longer queue does not authorize longer execution; the permission path must end motion before the applicable physical budget expires.
+* **Retained context competes with current sensing**: The hypothetical unpruned history consumes `{python} ActionChunkingLPDDR5.kv_history_str` of cache state. Its storage and transfer costs share the application's memory resources with new observations and proposal generation, so context retention belongs in the timing and capacity budget.
+* **Reported confidence needs independent evidence**: A normalized model score does not establish physical success under distribution shift. Calibration assesses the score over tested conditions, while independent geometry and physical limits constrain the motion that may execute.
+* **A proposal must remain rejectable**: Candidate trajectories need observation times and validity information as well as setpoints. The Nervous System combines those proposer limits with measured body limits to define the header, handoff, and permitted execution window.
+
 :::
 
-The cognitive models of the Brain represent the pinnacle of semantic flexibility in Physical AI, enabling autonomous systems to interpret visual nuance, understand human instructions, and generate complex manipulation plans. Yet every limit derived in this chapter is fundamentally a limit of supply, truth, or memory bandwidth—never of executive authority. High-capacity foundation models operate asynchronously across the memory wall, producing candidate proposals that are inherently stochastic, computationally expensive, and bound to stale sensory timestamps. Systems engineering demands that these neural representations never directly touch the physical plant. Instead, the Brain functions as an unprivileged advisor whose candidate trajectory chunks enter the causal pipeline solely as bounded, revocable offers. The central engineering challenge is therefore to construct a deterministic intermediary capable of arbitrating these offers under hard real-time deadlines.
+For the conveyor pick, we can now separate an insufficient proposer from an insufficient permission path. A model that cannot refresh its proposal before the evidence expires needs a different workload, processor allocation, or operating condition. A timely model can still propose the wrong grasp, so its output must remain independently rejectable. The body's limits and the proposer's qualified supply together constrain how long the machine may continue when the next proposal is missing.
 
 ::: {.callout-chapter-connection title="From learned proposals to the permission path"}
-How long may one proposal keep driving the machine if its successor never arrives? The mobile manipulator's chunk policy renews every `{python} ConveyorChunkSizing.chunk_period_str` and its intent model far less often, and either can stall, arrive late, or be wrong about the mug. @Sec-nervous receives the Proposal Record emitted here, sets how often the permission path evaluates each candidate chunk, and derives from the stopping budget of @sec-body how long a proposed trajectory may drive the actuators before the machine falls back to an invariant-safe stop. It records both in the handoff record alongside the proposer limits established here.
+How long may one proposal keep driving the machine if its successor never arrives? The mobile manipulator's chunk policy targets a proposal period of `{python} ConveyorChunkSizing.chunk_period_str`, while its intent model updates less often. Either can stall, arrive late, or be wrong about the mug. @Sec-nervous defines the proposal header and the handoff timing; the interval between successful admissions must be qualified with transport and validation included, rather than inferred from the nominal proposal period. It derives from the stopping budget of @sec-body how long a proposed trajectory may drive the actuators before a stopping response must begin, and records the resulting lease and check cadence in the handoff record.
 :::
