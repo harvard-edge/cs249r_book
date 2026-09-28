@@ -143,7 +143,7 @@ An operating-system scheduler decides which ready task executes next. Raising a 
 
 Real-time operating-system mechanisms address particular sources of delay. Preallocating and locking memory avoids demand paging in the timed loop; assigning processor affinity avoids migrations; priority inheritance lets a low-priority lock holder finish when a higher-priority task needs its lock. These mechanisms need configuration and timing evidence. @Sec-appendix-systems-timers develops the scheduling, interrupt, and memory mechanisms needed to calculate their contribution to a response bound.
 
-Shared hardware adds delays that software priority does not control. Memory-map updates can interrupt other cores,[^fn-os-tlb-shootdown] and direct memory transfers may require cache-coherence work.[^fn-hw-dma-coherence] More fundamentally, a control task cannot read an encoder buffer while another device monopolizes the route to that buffer. The **Unified Memory Architecture (UMA) Crossbar Trap**\index{Unified Memory Architecture!crossbar trap} is this mismatch between a high-priority software task and a shared physical memory path. @Sec-appendix-systems-dram explains how memory arbitration creates the waits; @sec-placement-resource-contention evaluates their effect on placement.
+Shared hardware adds delays that software priority does not control. Memory-map updates can interrupt other cores,[^fn-os-tlb-shootdown] and direct memory access (DMA) transfers may require cache-coherence work.[^fn-hw-dma-coherence] More fundamentally, a control task cannot read an encoder buffer while another device monopolizes the route to that buffer. The **Unified Memory Architecture (UMA) Crossbar Trap**\index{Unified Memory Architecture!crossbar trap} is this mismatch between a high-priority software task and a shared physical memory path. @Sec-appendix-systems-dram explains how memory arbitration creates the waits; @sec-placement-resource-contention evaluates their effect on placement.
 
 Dedicated motor-control hardware shortens the path from sensing to actuation. Local sensor interfaces, timer registers, and on-chip memory keep current regulation independent of the host's inference runtime. The controller in @fig-real-motor-controller illustrates this arrangement: current-sense resistors provide feedback, power routing carries drive current, and gate-drive outputs switch the inverter. Hardware timers also enforce the separation between complementary switch transitions needed to avoid a short circuit through the bridge.[^fn-hw-epwm-deadtime]
 
@@ -159,17 +159,17 @@ Dedicated motor-control hardware shortens the path from sensing to actuation. Lo
 ![](images/jpg/fig04_real_motor_drive_controller.jpg){width="85%"}
 :::
 
-In the two-processor implementation (@fig-04-two-processor-implementation), deliberative planning and reactive enforcement do not share a processor core, a cache hierarchy, or a common memory bus. The slow, stochastic path runs on parallel hardware (Linux host application processors and tensor accelerators) optimized for raw throughput across wide data streams, while the fast, deterministic path runs on isolated hardware (bare-metal microcontrollers or FPGA cores) optimized for worst-case execution time and cycle-counted predictability. On the mobile manipulator, the permission path runs on the safety microcontroller (MCU). Structurally, this establishes a hardware-enforced capability ring: the host machine acts strictly as an unprivileged client with zero memory-mapped input/output (MMIO) access to motor drive registers, while the microcontroller holds exclusive hardware write privilege. Separate chips are one realization; a single die can also host the permission path if its response bound and fault containment are shown to hold (@sec-placement-two-paths-one-die).
+In the two-processor implementation (@fig-04-two-processor-implementation), deliberative planning and reactive enforcement do not share a processor core, a cache hierarchy, or a common memory bus. The slow, stochastic path runs on parallel hardware (Linux host application processors and tensor accelerators) optimized for raw throughput across wide data streams, while the fast, deterministic path runs on isolated hardware (bare-metal microcontrollers or field-programmable gate array (FPGA) cores) optimized for worst-case execution time and cycle-counted predictability. On the mobile manipulator, the permission path runs on the safety microcontroller (MCU). Structurally, this establishes a hardware-enforced capability ring: the host machine acts strictly as an unprivileged client with zero memory-mapped input/output (MMIO) access to motor drive registers, while the microcontroller holds exclusive hardware write privilege. Separate chips are one realization; a single die can also host the permission path if its response bound and fault containment are shown to hold (@sec-placement-two-paths-one-die).
 
-::: {#fig-04-two-processor-implementation fig-env="figure" fig-pos="t" fig-cap="**The two-processor implementation**: An application processor publishes learned proposals to a shared mailbox. An independently scheduled microcontroller, which runs the permission path, checks freshness and physical limits before commanding motor current and executes a defined fallback on stale or unsafe proposals." fig-alt="Block diagram with an application processor proposing action chunks through a shared mailbox to a microcontroller permission controller, which checks commands before motor inverters drive the plant."}
+::: {#fig-04-two-processor-implementation fig-env="figure" fig-pos="t" fig-cap="**The two-processor implementation**: An application processor publishes learned proposals to a shared mailbox. An independently scheduled microcontroller, which runs the permission path, checks freshness and physical limits before commanding motor current and executes a defined fallback when active motion no longer remains admissible." fig-alt="Block diagram with an application processor proposing action chunks through a shared mailbox to a microcontroller permission controller, which checks commands before motor inverters drive the plant."}
 ![](images/svg/fig04_two_processor.svg){width="100%"}
 :::
 
-Safety in physical AI is an architectural partition in silicon, not an operating system scheduling priority. The high-throughput deliberative engine acts strictly as an unprivileged client, while dedicated real-time silicon acts as the hardware gatekeeper. The partition settles where each workload runs, but it leaves the two sides on separate clocks at rates that differ by orders of magnitude, and every proposal must still cross between them without either side waiting for the other.
+The partition must preserve exclusive actuator access and bounded permission checks under the faults assigned to it. Dedicated silicon is one way to meet that obligation; physical separation alone does not establish it. The exchange now has to connect workloads on different clocks without making the faster reader wait for the slower writer.
 
 ## Multi-Rate Cadences {#sec-nervous-cadences}
 
-Mechanical linkages, electromagnetic motor windings, and deep neural accelerators operate under fundamentally different physical and computational laws. While software execution in pure cyber environments can be paused, buffered, or rescheduled without physical consequence, the physical world moves forward inexorably under the conservation of momentum and energy. To bridge this temporal impedance mismatch, an embodied machine must partition its real-time communication across a structured, four-tier distributed systems concurrency hierarchy.
+A motor drive cannot wait for the next camera-based proposal before regulating winding current. Conversely, requiring the learned policy to run at the current-loop rate would spend computation without creating equally frequent observations. Separate cadences let each workload meet its own physical or computational deadline, provided the exchange preserves freshness and never blocks local control.
 
 ### Physical time constants and sampling phase lag {#sec-nervous-time-constants-phase-lag}
 
@@ -227,8 +227,8 @@ class MachineTiers:
 
 The mobile manipulator's motor inverters regulate winding current every $50\ \mu\text{s}$ ($20\text{ kHz}$), while its chunk policy requires `{python} MachineStallTravel.t_chunk_str` at P99 to ingest camera frames and generate an action chunk. No single execution cadence serves both the body's continuous electromagnetic dynamics and the computational cost of deep visual inference. An embodied machine therefore operates across four coupled cadences (@fig-04-multirate-cadence-buffer), each dictated by a distinct physical and systems time constant:
 
-1. **Inner Commutation and Current Loop ($20\text{ kHz}$, $50\,\mu\text{s}$ cycle):** Governed by the stator winding electrical time constant ($\tau_e = L/R \approx 0.5\text{ ms}$). Sampling phase currents ten times per electrical time constant synchronously with PWM carrier midpoints fixes $T_s = 50\,\mu\text{s}$. Operating directly inside dedicated motor drive silicon or real-time FPGA logic, this loop executes Clarke and Park vector transforms, proportional-integral current regulation in the rotor reference frame, and space-vector PWM modulation to command electromagnetic torque without phase distortion.
-2. **Kinematic Safety Enforcer and Joint Impedance Loop ($1\text{ kHz}$, $1000\,\mu\text{s} \pm 10\,\mu\text{s}$ cycle):** Operating on an isolated real-time microcontroller, this loop evaluates safety barrier certificates, validates proposal freshness and checksums, interpolates admitted trajectory chunks into fine-grained joint setpoints using $C^2$ quintic splines, calculates gravity compensation and joint impedance ($\boldsymbol{\tau} = \mathbf{J}^T (\mathbf{K} \mathbf{e} + \mathbf{D} \dot{\mathbf{e}})$), and executes emergency stopping fallbacks upon lease expiry.
+1. **Inner Commutation and Current Loop ($20\text{ kHz}$, $50\,\mu\text{s}$ cycle):** Governed by the stator winding electrical time constant ($\tau_e = L/R \approx 0.5\text{ ms}$). Sampling phase currents ten times per electrical time constant synchronously with PWM carrier midpoints fixes $T_s = 50\,\mu\text{s}$. Operating directly inside dedicated motor drive silicon or real-time FPGA logic, this loop executes Clarke and Park vector transforms, proportional-integral current regulation in the rotor reference frame, and space-vector PWM modulation to command electromagnetic torque within the allocated timing margin.
+2. **Permission and Joint-Control Loop ($1\text{ kHz}$, $1000\,\mu\text{s} \pm 10\,\mu\text{s}$ cycle):** The isolated real-time microcontroller checks proposal integrity, freshness, and physical limits, then tracks admitted motion against measured joint state. It requests a state-matched fallback when active authority ends. The trajectory construction in @sec-planning supplies smooth motion between waypoints; @sec-enforcement develops the command checks and response selection.
 3. **Action-Chunk Policy Stream (`{python} MachineTiers.f_chunk_str`, $50\text{ ms}$ cycle):** Bridging observation age and mechanical execution, the local policy emits receding-horizon action chunks ($H =$ `{python} MachineTiers.chunk_horizon_str` waypoints). Compact visuomotor networks (such as Action Chunking with Transformers or Diffusion Policy heads) run on an edge neural accelerator, amortizing memory bandwidth weight-streaming overhead ($f \le B/M$) across physical wall-clock execution time.
 4. **Multimodal Intent Planner (`{python} MachineTiers.f_intent_str`, $200\text{ ms}$ cycle):** High-capacity Vision-Language-Action (VLA) foundation models evaluate multi-camera video, linguistic instructions, and scene affordances to emit strategic task goals and navigation targets.
 
@@ -236,7 +236,7 @@ The mobile manipulator's motor inverters regulate winding current every $50\ \mu
 ↩ Microsecond interrupt latency requirements build upon the sensor freshness bounds introduced in @sec-body-measurement-freshness.
 :::
 
-The inner loop rate is governed by the physical time constants of the actuator and the structural resonance of the machine. For an actuator with electrical time constant $\tau_e = L/R$, stator winding current responds to applied voltage over that interval. For an illustrative winding with $L/R = 0.5\text{ ms}$, choosing ten current samples per electrical time constant gives $T_s = 50\,\mu\text{s}$, or $20\text{ kHz}$. For the winding $L/R$ derivation, see @sec-appendix-systems. At the joint level, the mechanical time constant and structural stiffness dictate the required closed-loop bandwidth, and a discrete sample-and-hold loop introduces phase delay proportional to computation latency and sampling interval.[^fn-math-zoh-phaselag] At an assumed joint-loop crossover of $20\text{ Hz}$, a $1\text{ ms}$ sample-and-hold interval contributes $\Delta\phi = -(2\pi \cdot 20)(0.001)/2 \approx -3.6^\circ$ of phase lag. If the allowed sampling erosion is $5^\circ$, the interval must be below about $1.39\text{ ms}$; $1\text{ kHz}$ is one feasible choice before computation and transport delays are added.
+The inner loop rate is governed by the physical time constants of the actuator and the structural resonance of the machine. For an actuator with electrical time constant $\tau_e = L/R$, stator winding current responds to applied voltage over that interval. For an illustrative winding with $L/R = 0.5\text{ ms}$, choosing ten current samples per electrical time constant gives $T_s = 50\,\mu\text{s}$, or $20\text{ kHz}$. For the winding $L/R$ derivation, see @sec-appendix-systems. At the joint level, the mechanical time constant and structural stiffness dictate the required closed-loop bandwidth, and a discrete sample-and-hold loop introduces phase delay proportional to computation latency and sampling interval.[^fn-math-zoh-phaselag] The crossover frequency is the frequency at which the open-loop gain has unit magnitude; phase margin measures how much additional lag it can tolerate there before losing its stability margin. At an assumed joint-loop crossover of $20\text{ Hz}$, a $1\text{ ms}$ sample-and-hold interval contributes $\Delta\phi = -(2\pi \cdot 20)(0.001)/2 \approx -3.6^\circ$ of phase lag. If the allowed sampling erosion is $5^\circ$, the interval must be below about $1.39\text{ ms}$; $1\text{ kHz}$ is one feasible choice before computation and transport delays are added.
 
 [^fn-math-zoh-phaselag]: **Zero-Order Hold Phase Lag**\index{Zero-order hold}: Holding a discrete control command constant across sampling interval $T_s$ introduces an effective delay of $T_s/2$, producing a linear phase reduction $\Delta \phi = -\omega T_s / 2$. In high-bandwidth robotic actuators, this delay directly reduces open-loop stability margins, driving lightly damped mechanical modes into resonance. For the formal frequency-domain derivation of discrete sampling phase erosion, see @sec-appendix-control.
 
@@ -244,11 +244,11 @@ Slow control loops erode the stability margin of the feedback controller. Accumu
 
 Perception, which feeds the chunk policy, executes at an intermediate rate dictated by photon collection physics, exposure windows, and target velocity relative to the sensor field of view. In an illustrative $300\text{ lux}$ scene with a `{python} MachineTiers.t_exp_str` exposure, the base at its `{python} MachineTiers.v_str` drive limit travels $\Delta x = v\,T_{\text{exp}} =$ `{python} MachineTiers.d_exp_str` during the exposure; image-plane blur additionally depends on depth, optics, and camera motion. Exposure signal-to-noise, this displacement, and processing time jointly bound a useful perception rate for the task.
 
-The chunk-policy rate is chosen within the renewal latency that @sec-brain-cognitive-pipeline measures on the application processor. On the mobile manipulator, a `{python} MachineTiers.f_chunk_str` renewal and a `{python} MachineTiers.chunk_horizon_str`-waypoint chunk, the chunk horizon $H$ of action-chunking policies [@zhao2023learning], bridge observation and actuation rates.
+The chunk-policy rate must fit the proposal-supply budget established in @sec-brain-cognitive-pipeline. On the mobile manipulator, a `{python} MachineTiers.f_chunk_str` renewal and a `{python} MachineTiers.chunk_horizon_str`-waypoint chunk, the chunk horizon $H$ of action-chunking policies [@zhao2023learning], bridge observation and actuation rates.
 
 ### Lock-free and wait-free mailbox exchanges {#sec-nervous-mailbox-exchanges}
 
-Because these cadences execute on isolated hardware domains at different frequencies, data exchange across rate boundaries must be asynchronous, nonblocking, and zero-copy (@fig-04-multirate-cadence-buffer). If a $1\text{ kHz}$ control loop waits on a mutex lock held by a $20\text{ Hz}$ neural network runtime, a single scheduling delay in the operating system immediately causes priority inversion, forcing the real-time controller to miss its execution deadline.
+Because these cadences execute on isolated hardware domains at different frequencies, data exchange across rate boundaries must give the timed reader bounded, nonblocking access (@fig-04-multirate-cadence-buffer). If a $1\text{ kHz}$ control loop waits on a mutex lock held by a $20\text{ Hz}$ neural network runtime, a single scheduling delay in the operating system immediately causes priority inversion, forcing the real-time controller to miss its execution deadline.
 
 A communication library does not by itself establish this property. Serialization, memory allocation, queues, and task scheduling can all delay delivery. Shared memory avoids some copying and kernel work, but it still needs a rule that prevents the reader from using a half-written proposal. The contract must bound the reader's work even when the writer stops at the worst possible point.
 
@@ -261,16 +261,16 @@ A baseline nonblocking exchange uses a **single-producer single-consumer (SPSC) 
 ::: {#dfn-nervous-lock-free-seqlock .callout-definition title="Lock-free seqlock buffer"}
 
 ***Lock-free seqlock buffer***\index{Lock-free seqlock buffer!definition}\index{Sequence lock!shared memory} is a nonblocking shared-memory synchronization mechanism that couples an atomic sequence counter with explicit hardware memory barriers, allowing an unprivileged writer to publish multi-word trajectory payloads without blocking and enabling concurrent readers to verify payload integrity via counter parity checks:
-$$c_{\text{start}} \equiv c_{\text{end}} \pmod 2 \quad \text{and} \quad c_{\text{start}} = c_{\text{end}}$$
+$$c_{\text{start}} \equiv c_{\text{end}} \equiv 0 \pmod 2 \quad \text{and} \quad c_{\text{start}} = c_{\text{end}}$$
 where an odd counter value signals active writer mutation, and an identical even counter pair confirms an uncorrupted, race-free payload read.
 
 1.  **Significance**: Decouples high-rate real-time control loops ($1\text{ kHz}$) from variable-latency neural policy processes ($10\text{--}50\text{ Hz}$) without mutual exclusion locks, preventing operating system priority inversion from causing hard real-time deadline misses.
-2.  **Distinction**: Unlike mutexes or semaphores that suspend thread execution during contention, a seqlock reader never blocks; if a collision or torn read is detected, the reader retains its previously validated trajectory spline within a bounded execution budget ($O(1)$ time).
+2.  **Distinction**: Unlike mutexes or semaphores that suspend thread execution during contention, this seqlock reader never retries within the tick; if a collision or torn read is detected, the one-attempt reader retains its previously validated trajectory spline only while its own state, evidence, and lease remain valid, within a bounded execution budget ($O(1)$ time).
 3.  **Common pitfall**: Omitting bidirectional hardware memory barriers (`DMB OSH` / `DMB OSHLD` on ARM) around payload accesses, which allows out-of-order processor pipelines to speculate or hoist memory loads ahead of the initial sequence counter validation.
 
 :::
 
-The writer, the untrusted application processor, makes the counter odd, copies the complete proposal into the shared slot, makes the payload visible across the interconnect, and then makes the counter even with release ordering. The reader, the permission path, makes one bounded copy attempt per tick. It rejects the attempt if the counter was odd or changed during the copy, and otherwise promotes the copy to its active spline only after the checksum and freshness checks pass, so a rejected read leaves the active spline unchanged and the reader never waits for the writer. Because the writer is a preemptible user-space process rather than a kernel thread, a writer stopped mid-write can leave the counter odd indefinitely; the reader then immediately drops the corrupted snapshot in $\mathcal{O}(1)$ time without spinning, keeps its last validated spline, and when that spline's lease expires, safely initiates the fallback stop.
+The writer, the untrusted application processor, makes the counter odd, copies the complete proposal into the shared slot, makes the payload visible across the interconnect, and then makes the counter even with release ordering. The reader, the permission path, makes one bounded copy attempt per tick. It rejects the attempt if the counter was odd or changed during the copy, and otherwise promotes the copy to its active spline only after integrity, freshness, and physical-admissibility checks pass, so a rejected read leaves the active spline unchanged and the reader never waits for the writer. Because the writer is a preemptible user-space process rather than a kernel thread, a writer stopped mid-write can leave the counter odd indefinitely; the reader then immediately drops the corrupted snapshot in $\mathcal{O}(1)$ time without spinning, keeps its last validated spline only while its own state, evidence, and lease remain admissible, and initiates the state-matched fallback when that authority ends.
 
 A first-in, first-out queue preserves publication order, but that is not always the right contract for motion. If the consumer falls behind, queued proposals describe progressively older physical states. **Backpressure cannot pause moving physical mass**. The reader needs the latest complete admissible proposal and a deadline for using it. This does not forbid buffering the waypoints of an admitted trajectory; those waypoints have a defined execution schedule and remain subject to the proposal's lease. It forbids treating eventual delivery of historical proposals as evidence of timely control.
 
@@ -278,7 +278,7 @@ A **wait-free three-slot mailbox** can avoid read/write collisions by assigning 
 
 Sequential telemetry has a different requirement. A single-producer single-consumer ring buffer preserves a sequence of records until its bounded capacity fills, whereas the proposal mailbox exposes the latest complete candidate. @Sec-appendix-systems-ipc supplies the shared-memory, slot-ownership, and ring-buffer mechanisms, including memory ordering and cache-line separation. The permission interface needs their bounded access and publication guarantees; it does not need a queue of historical motion commands.
 
-The single-slot mailbox's own collisions are rare and cheap. A read collides only when it overlaps a write, and a write occupies the slot for microseconds once per chunk period. If the writer's and reader's clocks drift against each other, only a small fraction of reads collide; if they lock at an unfavorable phase, one read may collide with every write. Either way, a write far shorter than one reader tick cannot overlap two adjacent reads, so a detected odd or changed counter makes the reader discard one attempt and keep its last validated spline. A collision therefore costs one tick of freshness.
+Under the assumed short, uninterrupted write, a collision can discard one read attempt without delaying the tick. A preempted or failed writer can instead leave the slot odd across many ticks. Bounded reader work therefore does not imply bounded publication delay: the active chunk continues only while its own evidence, state, and lease remain valid. The lease supplies the missing limit on continued execution.
 
 How long a spline's lease may run is a question about the plant, not the mailbox. Under the irreversibility law (principle \ref{pri-vol4-irreversibility}), each millisecond a stalled proposal keeps its authority is travel that no later check can recall, so the lease must be paid for out of the stopping budget.
 
@@ -286,7 +286,7 @@ How long a spline's lease may run is a question about the plant, not the mailbox
 
 When a learned policy stream stalls—whether due to an operating system page fault, a thermal throttle event on the vision accelerator, dynamic memory fragmentation, or an unhandled exception in the perception pipeline—the physical robot does not freeze instantly in place. Because physical mass possesses momentum ($p = mv$), the actuators continue executing whatever trajectory spline was last committed to the motor drive inverters. To prevent an unrenewed proposal from driving the robot blindly into an obstacle, the deterministic nervous system enforces an explicit **proposal lease**\index{Proposal lease!definition}\index{Lease!stopping budget}. The lease represents a hard, non-negotiable physical lifespan attached to each admitted chunk: if a fresh proposal does not arrive and pass validation before the lease expires, the safety microcontroller unilaterally revokes tracking authority and transitions the machine into a controlled braking fallback.
 
-Critically, a proposal lease cannot be selected as an arbitrary software convenience (such as a generic $500\text{ ms}$ heartbeat timeout). In distributed systems, leases govern access to transient shared resources; in physical AI, a lease governs the physical kinetic energy of heavy machinery. Because software rollback is physically impossible, the lease duration must be derived directly from the physical stopping budget: the elapsed time of the lease plus the communication transport latency, the mechanical brake onset latency, and the braking distance itself must strictly fit within the remaining obstacle clearance $D_{\text{clear}}$.
+Critically, a proposal lease cannot be selected as an arbitrary software convenience (such as a generic $500\text{ ms}$ heartbeat timeout). In distributed systems, leases govern access to transient shared resources; in physical AI, a lease governs the physical kinetic energy of heavy machinery. Because software rollback is physically impossible, the lease duration must be derived directly from the physical stopping budget: the elapsed time of the lease plus the communication transport latency, the physical braking-onset latency, and the braking distance itself must strictly fit within the remaining obstacle clearance $D_{\text{clear}}$.
 
 ```{python}
 #| label: calc-nervous-machine-lease-budget
@@ -407,7 +407,7 @@ class MachineLeaseBudget:
 Notebook \ref{nbk-nervous-watchdog-stopping-lease} walks through the exact mathematical derivation sizing the mobile manipulator's chunk lease at its drive limit.
 
 ::: {#nbk-nervous-watchdog-stopping-lease .callout-notebook title="Lease sizing from the stopping budget"}
-**Problem**: The warehouse mobile manipulator cruises down an aisle at its `{python} MachineLeaseBudget.v_str` drive limit toward a person who has stepped out from a rack end and stopped `{python} MachineLeaseBudget.d_clear_str` ahead. Its chunk policy renews one last proposal and then stalls. How much time remains before braking must begin, and how much of it does the chunk lease spend?
+**Problem**: In the illustrative aisle scenario, the warehouse mobile manipulator cruises down an aisle at its `{python} MachineLeaseBudget.v_str` drive limit toward a person who has stepped out from a rack end and stopped `{python} MachineLeaseBudget.d_clear_str` ahead. The permission path admits one last chunk and then receives no admissible replacement. How much time remains before braking must begin, and how much of it does the chunk lease spend?
 
 *1. What @sec-body-kinetic-momentum left*:
 
@@ -422,25 +422,25 @@ Notebook \ref{nbk-nervous-watchdog-stopping-lease} walks through the exact mathe
 
 *3. The lease path (row 4 of the stopping budget)*:
 
-- The stalled proposal keeps its authority for the chosen chunk lease, $T_{\text{lease}} =$ `{python} MachineLeaseBudget.t_lease_str`. The permission path notices the expiry on its next tick, $T_{\text{tick}} =$ `{python} MachineLeaseBudget.t_tick_str`, and the stop command reaches the drives one bus cycle later, $T_{\text{bus}} =$ `{python} MachineLeaseBudget.t_bus_str`. Each of the three enters $\tau_{\text{delay}}$. The joint loop's stability latency margin sets the tick; at `{python} MachineLeaseBudget.mm_per_ms_str` per millisecond the stopping budget can afford it.
+- Measured from that last successful admission, the stalled proposal can retain authority for at most the chosen chunk lease, $T_{\text{lease}} =$ `{python} MachineLeaseBudget.t_lease_str`. The permission path notices the expiry on its next tick, $T_{\text{tick}} =$ `{python} MachineLeaseBudget.t_tick_str`, and the stop command reaches the drives one bus cycle later, $T_{\text{bus}} =$ `{python} MachineLeaseBudget.t_bus_str`. Each of the three enters $\tau_{\text{delay}}$. The joint loop's stability latency margin sets the tick; at `{python} MachineLeaseBudget.mm_per_ms_str` per millisecond the stopping budget can afford it.
 - The row adds $v\,(T_{\text{lease}} + T_{\text{tick}} + T_{\text{bus}})$, the distance covered in `{python} MachineLeaseBudget.t_lease_path_str` at `{python} MachineLeaseBudget.v_str`, which is `{python} MachineLeaseBudget.d_lease_path_str`. The running total rises from `{python} MachineLeaseBudget.prior_total_str` to `{python} MachineLeaseBudget.running_total_str`, leaving `{python} MachineLeaseBudget.remaining_str`.
-- From the last valid renewal to brake onset, the machine spends `{python} MachineLeaseBudget.t_renewal_to_onset_str`, and `{python} MachineLeaseBudget.t_ceiling_left_str` of the ceiling remains for the terms that later chapters add.
-- The lease has a floor as well as a ceiling. The chunk policy publishes a fresh chunk every `{python} MachineLeaseBudget.t_chunk_period_str`, and with a `{python} MachineLeaseBudget.t_renewal_jitter_str` allowance for renewal jitter any lease shorter than `{python} MachineLeaseBudget.t_renewal_need_str` would let a healthy proposer's own chunks expire. The chosen `{python} MachineLeaseBudget.t_lease_str` sits just above that floor.
+- From the last successful admission to brake onset, the machine spends `{python} MachineLeaseBudget.t_renewal_to_onset_str`, and `{python} MachineLeaseBudget.t_ceiling_left_str` of the ceiling remains unallocated by this partial calculation. Evidence age through admission and the later stopping-profile terms must still fit.
+- Continuous tracking gives the lease a floor as well as a ceiling. The scenario targets one successfully admitted replacement every `{python} MachineLeaseBudget.t_chunk_period_str`, with a `{python} MachineLeaseBudget.t_renewal_jitter_str` allowance for variation, giving a `{python} MachineLeaseBudget.t_renewal_need_str` renewal floor. This is a chosen admission-interarrival requirement, not a bound proved by the proposer's P99 inference time. It must include transport, validation, and mailbox delays. The chosen `{python} MachineLeaseBudget.t_lease_str` sits just above that floor; missed renewals end tracking instead of extending it.
 
 **Systems insight**: A chunk lease is a term in the stopping budget, not a timeout chosen for convenience. Every millisecond added to it costs `{python} MachineLeaseBudget.mm_per_ms_str` of clear distance at the drive limit, distance that the observation age and the planner's stop profile will need. **The pre-brake ceiling is an unyielding temporal budget; the chunk lease is an explicit expenditure. Every millisecond granted to the lease is physical stopping clearance permanently deducted from perception and braking margins.**
 :::
 
 ### Supervisory timers and proposal wire contracts {#sec-nervous-supervisory-timers}
 
-The worst case is a proposer that renews its lease on the frame before an obstacle appears and then stalls while its heartbeat stays live. Nothing reads the frame showing the obstacle, and braking begins only when the lease expires, plus one tick, one bus cycle, and brake onset; the frame's own age, which @sec-perception measures, adds to that. The permission path bounds this worst-case exposure without needing to inspect raw camera frames, because the enforcer reads the encoders, the IMU, and the evidence time stamped in the proposal's header.
+The stalled-proposer timeline starts with the evidence used by the last admitted chunk. That evidence ages through capture, processing, transport, and admission; admission starts the chunk lease but does not reset the evidence timestamp. After a stall, lease expiry is followed by detection on a permission tick, command transport, and physical brake onset. Each elapsed interval enters the stopping budget once. The dispatch-to-admission interval needs its own bound; neither the stored dispatch age nor the newly started lease accounts for it. The evidence-age accounting in @sec-perception must use the same event boundaries, including any processing after a stored dispatch-age value. An earlier evidence deadline or independent hazard check can end authority before lease expiry. The chunk lease bounds continued execution of one admitted motion segment; the goal's validity bounds how long its underlying target remains supported, and neither is the predicted trajectory horizon.
 
 Three independent supervisory timers guard the exchange, and each monitors a distinct failure domain:
 
 1. **The Chunk Lease ($T_{\text{lease}} =$ `{python} MachineLeaseBudget.t_lease_str`):** Bounds how long an admitted proposal may command the actuators. Only a freshly validated, admitted proposal chunk renews the lease. Its duration is derived directly from the physical stopping budget, sitting between the renewal floor and the pre-brake ceiling (\ref{nbk-nervous-watchdog-stopping-lease}).
-2. **The Host Heartbeat ($f_{\text{heartbeat}} =$ `{python} MachineLeaseBudget.f_heartbeat_str`, timeout `{python} MachineLeaseBudget.t_heartbeat_timeout_str`):** Asserts that the application processor OS kernel and user-space runtime are alive. Its silence revokes the active proposal immediately without waiting for the lease. Crucially, heartbeat pulses **never renew the chunk lease**, because a live process can easily suffer algorithmic livelock or produce corrupted, out-of-distribution setpoints.
-3. **The Microcontroller Self-Watchdog ($T_{\text{self}} =$ `{python} MachineLeaseBudget.t_self_watchdog_str`):** Certifies that the permission path itself is successfully executing its invariant checks. The permission loop feeds this hardware watchdog only upon successfully completing all verification checks in a tick; a hung enforcer trips the watchdog even if timer interrupts continue firing (@sec-nervous-hardware-isolation).
+2. **The Host Heartbeat ($f_{\text{heartbeat}} =$ `{python} MachineLeaseBudget.f_heartbeat_str`, timeout `{python} MachineLeaseBudget.t_heartbeat_timeout_str`):** Asserts that the application processor OS kernel and user-space runtime are alive. Expiry of its timeout revokes the active proposal without waiting for the chunk lease. Crucially, heartbeat pulses **never renew the chunk lease**, because a live process can easily suffer algorithmic livelock or produce corrupted, out-of-distribution setpoints.
+3. **The Microcontroller Self-Watchdog ($T_{\text{self}} =$ `{python} MachineLeaseBudget.t_self_watchdog_str`):** Monitors whether the permission path completes its required checks within the watchdog interval. The permission loop feeds this hardware watchdog only upon successfully completing all verification checks in a tick; a hung enforcer trips the watchdog even if timer interrupts continue firing (@sec-nervous-hardware-isolation).
 
-The lease is enforced through the **proposal header**\index{Proposal header}, the structured wire contract that allows the permission path to validate candidate trajectories without trusting host software. By contract, the header carries a sequence number, the evidence timestamp of the sensory frame the proposal was computed from (along with clock conversion error bounds), the issue timestamp, the lease expiry, a cryptographic digest of the parent record for lineage tracing, the coordinate frame identifier, the payload type, and a cyclic redundancy check (CRC-32). The payload contains a compact sequence of $H$ waypoints specifying joint positions and velocities. It carries no raw torque commands, because learned policies specify kinematic intent, whereas torque is computed by the cycle-deterministic joint tracker on the permission path. A proposal retains authority only until the earlier of its lease expiry and its evidence deadline, regardless of whether explicit cancellation packets arrive.
+The payload requirements from @sec-brain describe the candidate motion and the observations supporting it. This chapter adds the transport and authority contract around that payload. The lease is enforced through the **proposal header**\index{Proposal header}, the structured wire contract that allows the permission path to validate candidate trajectories without trusting host software. By contract, the header carries a sequence number, the evidence timestamp of the sensory frame the proposal was computed from (along with clock conversion error bounds), the issue timestamp, the lease expiry, a cryptographic digest of the parent record for lineage tracing, the coordinate frame identifier, the payload type, and a cyclic redundancy check (CRC-32). The payload contains a compact sequence of $H$ waypoints specifying joint positions and velocities. In this selected architecture, the learned policy supplies kinematic intent and the joint tracker computes torque on the permission path, so this payload carries no raw torque commands. A torque-output policy would require a different payload and corresponding admission checks; its output would still be a proposal. A proposal retains authority only until the earlier of its lease expiry and its evidence deadline, regardless of whether explicit cancellation packets arrive.
 
 ::: {.column-margin}
 **Byte layout:** The proposal header's and chunk payload's fields, types, and offsets are given in @sec-appendix-systems-wire-header.
@@ -452,12 +452,12 @@ A record crossing the boundary is protected against three different failures by 
 
 The reader's possible failures fall into four classes (@tbl-04-boundary-fallbacks), and none of them lets a failed producer make the permission path wait. The classes keep the exchange from blocking; they do not by themselves contain the plant, because the fallback each one selects still needs bounded timing and a validated stop.
 
-| Failure Class        | Reader Detection Condition                              | Physical Systems Fallback Action                                | Bounded Response                      |
-|:---------------------|:--------------------------------------------------------|:----------------------------------------------------------------|:--------------------------------------|
-| **Torn / In-Flight** | Odd $c_{\text{start}}$ or changed $c_{\text{end}}$      | Reject current snapshot; use admissible prior chunk or fallback | One bounded attempt; measure duration |
-| **Malformed**        | Checksum or configured command bound fails              | Reject proposal; use independently checked fallback             | Measure check and response            |
-| **Stale**            | Past proposal expiry or evidence deadline (local clock) | End tracking authority; enter the state-matched fallback        | Deadline from plant budget            |
-| **Missing**          | Sequence gap                                            | Record audit gap; evaluate current record on its own merits     | One tick for flag                     |
+| Failure Class        | Reader Detection Condition                              | Physical Systems Fallback Action                                        | Bounded Response                      |
+|:---------------------|:--------------------------------------------------------|:------------------------------------------------------------------------|:--------------------------------------|
+| **Torn / In-Flight** | Odd $c_{\text{start}}$ or changed $c_{\text{end}}$      | Reject current snapshot; use admissible prior chunk or fallback         | One bounded attempt; measure duration |
+| **Malformed**        | Checksum or configured command bound fails              | Reject candidate; retain admissible active chunk or use fallback        | Measure check and response            |
+| **Stale**            | Past proposal expiry or evidence deadline (local clock) | Reject stale candidate; end active authority if its own deadline passed | Deadline from plant budget            |
+| **Missing**          | Sequence gap                                            | Record audit gap; evaluate current record on its own merits             | One tick for flag                     |
 
 : **Boundary contract failure classes and deterministic fallback matrix**: Exchange faults across the proposal boundary by class, with the fallback each selects. Fallback paths are selected without waiting on host recovery. {#tbl-04-boundary-fallbacks tbl-colwidths="[20,30,35,15]"}
 
@@ -477,7 +477,7 @@ An overrun means something different at each tier of the concurrency hierarchy:
 
 * **Commutation Loop ($20\text{ kHz}$):** Sub-microsecond timing jitter budget. An overrun or overcurrent fault trips inverter gate drives immediately in hardware.
 * **Permission Tick ($1\text{ kHz}$):** Update budget of $1000\,\mu\text{s}$. An overrun triggers a deterministic transition to the validated local stopping trajectory.
-* **Chunk Policy Stream (`{python} MachineTiers.f_chunk_str`):** Inference latency (`{python} MachineStallTravel.t_chunk_str` P99) is stochastic. The system tolerates tail latency jitter up to the `{python} MachineLeaseBudget.t_lease_str` chunk lease. If an inference overrun exceeds the lease, the enforcer revokes tracking authority and halts the machine.
+* **Chunk Policy Stream (`{python} MachineTiers.f_chunk_str`):** Inference latency (`{python} MachineStallTravel.t_chunk_str` P99) is stochastic. Continued execution is limited by the active chunk's remaining lease and evidence validity, not a fresh lease measured from the start of each inference. If authority expires before a replacement is admitted, the enforcer requests the state-matched fallback.
 * **Intent Planner (`{python} MachineTiers.f_intent_str`):** Strategic goals expire under their own supervisory lease, triggering a state-matched station-keeping hold.
 
 Every timed cadence is a deadline, and the lease budget assumes that the tick, the bus cycle, and brake onset meet theirs on every cycle. That assumption needs a worst-case bound on every step between the enforcer's check and the drives, and neither a faster processor nor a longer latency measurement supplies one.
@@ -490,11 +490,11 @@ A response bound instead accounts for the permitted work and waiting along the p
 
 ### Response time analysis and execution variance {#sec-nervous-rta-variance}
 
-Establishing a mathematically defensible worst-case response time requires bounding every term in the classical Response Time Analysis (RTA) recurrence [@liu1973scheduling; @sha1990priority]:
+Response Time Analysis (RTA) decomposes a task's response into computation, blocking, and interference [@liu1973scheduling; @sha1990priority]. Each term needs an upper bound under the declared operating conditions:
 $$R_i = C_i + B_i + I_i \le D_i$$
-where $C_i$ is the worst-case execution time (WCET) of task $\tau_i$, $B_i$ is the maximum blocking time spent waiting for lower-priority tasks to exit shared critical sections (bounded by priority inheritance or priority ceiling protocols), $I_i$ is the maximum interference time incurred from higher-priority preempting tasks, timer interrupts, and bus transactions, and $D_i$ is the relative deadline.
+where $C_i$ is the worst-case execution time (WCET) of task $\tau_i$, $B_i$ is the maximum blocking time spent waiting for lower-priority tasks to exit shared critical sections (bounded by priority inheritance or priority ceiling protocols), $I_i$ is the maximum interference time incurred from higher-priority preempting tasks, timer interrupts, and bus transactions, and $D_i$ is the relative deadline. This expression is a response-time budget; the scheduling recurrence used to calculate interference is developed in @sec-appendix-systems-timers.
 
-Consider a cycle-critical joint control loop running at $1.0\text{ kHz}$ ($D_i = 1000\,\mu\text{s}$). If worst-case control computation requires $C_i = 150\,\mu\text{s}$, blocking on a shared trajectory buffer under a priority ceiling protocol is bounded at $B_i = 50\,\mu\text{s}$, and higher-priority timer and deterministic bus interrupt interference is bounded at $I_i = 40\,\mu\text{s}$, the worst-case response time is:
+Consider an illustrative cycle-critical joint control loop running at $1.0\text{ kHz}$ ($D_i = 1000\,\mu\text{s}$). If worst-case control computation requires $C_i = 150\,\mu\text{s}$, blocking on a shared trajectory buffer under a priority ceiling protocol is bounded at $B_i = 50\,\mu\text{s}$, and higher-priority timer and deterministic bus interrupt interference is bounded at $I_i = 40\,\mu\text{s}$, the worst-case response time is:
 $$R_i = 150\,\mu\text{s} + 50\,\mu\text{s} + 40\,\mu\text{s} = 240\,\mu\text{s} \le 1000\,\mu\text{s}$$
 This yields an analyzed timing margin of $760\,\mu\text{s}$. If even one term—such as lock contention on an unmediated mutex ($B_i \to \infty$) or unscheduled direct memory access traffic competing for memory buses ($I_i \to \infty$)—lacks an analyzed mathematical upper bound, the system has no bound on its worst-case response time, however small the mean latency appears in statistical benchmarks.[^fn-math-liu-layland] When $R_i$ exceeds $D_i$, the real-time enforcer misses its execution slot. In the physical machine, a missed deadline freezes the motor inverters on stale setpoints, introducing phase erosion ($\Delta\phi = -\omega T_s / 2$) that destabilizes high-gain feedback loops. In the safety budget, if the enforcer is delayed by priority inversion or bus starvation, it cannot evaluate chunk freshness or command emergency deceleration on time: every millisecond that scheduling latency expands response delay directly consumes $v \cdot \Delta t$ ($1.5\text{ mm}$ per millisecond at the drive limit) of physical stopping clearance.
 
@@ -549,7 +549,7 @@ Clock synchronization aligns the instants at which distributed drives sample or 
 On the mobile manipulator the candidate communication links sort strictly by hierarchy:
 
 1. **Board-Level Peripheral Interconnects (SPI, Memory-Mapped I/O):** Connects microcontrollers directly to joint encoders, current-shunt ADCs, and gate drivers with sub-microsecond latency ($< 1\,\mu\text{s}$) under a fixed transfer schedule.
-2. **Deterministic Drive Command Buses (EtherCAT, TSN Ethernet):** Transports cyclic joint setpoints and sensor feedback across all distributed drive inverters within a guaranteed $1.0\text{ ms}$ bus cycle ($T_{\text{bus}}$) with sub-microsecond synchronization jitter ($\sigma_{\text{jitter}} < 100\text{ ns}$).
+2. **Deterministic Drive Command Buses (EtherCAT, TSN Ethernet):** Transports cyclic joint setpoints and sensor feedback across all distributed drive inverters within an allocated $1.0\text{ ms}$ bus cycle ($T_{\text{bus}}$) with sub-microsecond synchronization jitter ($\sigma_{\text{jitter}} < 100\text{ ns}$).
 3. **Chassis and Auxiliary Diagnostic Buses (CAN-FD):** Manages lower-rate battery management systems (BMS), environmental sensors, and diagnostic telemetry where priority arbitration is acceptable under verified worst-case bus load.
 
 None of these bounds belongs to a protocol acronym alone. Each depends on the configured devices, wiring, payload sizes, and schedule. The critical architectural question is whether all servo axes fit within the permission path's bus cycle budget.
@@ -689,17 +689,17 @@ class FieldbusSchedulability:
 - Frame serialization time: `{python} FieldbusSchedulability.t_frame_ethercat_str`.
 - Hardware forwarding mechanism: Dedicated EtherCAT peripheral node controller application-specific integrated circuits (ASICs) (such as the Beckhoff ET1100) utilize internal hardware shift registers to extract commanded setpoints and insert sensor feedback on the fly as the physical Ethernet telegram traverses the node. Because the frame is never stored in a software buffer before retransmission, each physical peripheral node introduces only an internal silicon gate delay ($0.6\,\mu\text{s}$ per hop).
 - Node forwarding delay: `{python} FieldbusSchedulability.num_axes_str` peripheral ASIC controller hops at $0.6\,\mu\text{s}$ per hop $=$ `{python} FieldbusSchedulability.t_hop_ethercat_str`.
-- Modeled frame serialization plus `{python} FieldbusSchedulability.num_axes_str` forwarding hops: $T_{\text{bus}} =$ `{python} FieldbusSchedulability.t_frame_ethercat_str` $+$ `{python} FieldbusSchedulability.t_hop_ethercat_str` $=$ `{python} FieldbusSchedulability.t_total_ethercat_str`.
+- Modeled frame serialization plus `{python} FieldbusSchedulability.num_axes_str` forwarding hops: $T_{\text{occupancy}} =$ `{python} FieldbusSchedulability.t_frame_ethercat_str` $+$ `{python} FieldbusSchedulability.t_hop_ethercat_str` $=$ `{python} FieldbusSchedulability.t_total_ethercat_str`.
 - Result: These modeled bus terms occupy `{python} FieldbusSchedulability.rho_ethercat_pct_str` of the cycle, leaving `{python} FieldbusSchedulability.t_margin_ethercat_str` **unallocated by this bus calculation**. Coordinator/node processing, propagation, clock synchronization, retries, application computation, and actuator response still consume the end-to-end deadline.
 
-**Systems insight**: For the machine's `{python} FieldbusSchedulability.num_axes_str` axes at 64 bytes per axis, CAN-FD serialization alone misses the `{python} FieldbusSchedulability.cycle_time_str` bus cycle, while EtherCAT frame and forwarding occupancy leaves room for other work. In cyber-physical safety, every millisecond of bus latency or serialization delay adds directly to pre-brake delay $\tau_{\text{delay}}$, consuming $v \cdot \Delta t_{\text{bus}}$ ($1.5\text{ mm}$ per millisecond at the drive limit) of stopping clearance. Worse, CAN-FD arbitration is non-preemptive: if an emergency stop command arrives while an unprivileged telemetry frame is transmitting, the brake command blocks for at least $140.4\,\mu\text{s}$, and retransmissions under electromagnetic noise compound this delay across multiple cycles. By circulating a single frame through hardware shift registers, EtherCAT confines bus transit to `{python} FieldbusSchedulability.t_total_ethercat_str`, guaranteeing that emergency braking commands reach drive inverters deterministically within the budgeted $T_{\text{bus}} =$ `{python} FieldbusSchedulability.cycle_time_str`. **TSN Ethernet**\index{Time-sensitive networking} can carry gigabit camera feeds and microsecond servo frames on one physical link, but only if its time-gated queues are configured and verified across every switch so that video bursts cannot collide with time-critical control slots.
+**Systems insight**: For this scenario's `{python} FieldbusSchedulability.num_axes_str` axes at 64 bytes per axis, CAN-FD serialization alone misses the `{python} FieldbusSchedulability.cycle_time_str` bus cycle. EtherCAT frame and forwarding occupancy leaves `{python} FieldbusSchedulability.t_margin_ethercat_str` for the remaining work, so it remains a candidate. This calculation does not prove the complete response bound. Arbitration and retransmission allowances belong in the CAN-FD analysis; coordinator, device, and fault-response delays belong in the EtherCAT analysis. Only after those terms fit can either configuration claim the allocated bus cycle. Each additional transport delay consumes stopping clearance as $v \cdot \Delta t_{\text{bus}}$.
 :::
 
 ### Bandwidth and jitter trade-offs on the synchronization frontier {#sec-nervous-synchronization-frontier}
 
 The serialization example separates three quantities that a bus specification can otherwise blur. Bandwidth bounds how many bytes fit in an interval. Command response time includes waiting, transmission, and processing before a drive can act. Synchronization jitter bounds variation in the relative timing of distributed updates. A design can improve one while leaving another unchanged.
 
-The protocol landscape in @fig-04-fieldbus-evolution compares bandwidth and timing regimes. It cannot supply the response bound for the machine's configured network. A CAN-FD schedule needs a bound on competing frames and non-preemptive blocking; an EtherCAT path needs frame, forwarding, and device delays; a TSN schedule needs reserved windows and clock-error allowances.[^fn-net-tsn-fieldbus] These are inputs to the response calculation, not guarantees obtained by selecting a protocol name.
+The configured scenario in @fig-04-fieldbus-evolution compares only serialization and forwarding occupancy against the allocated bus cycle. It rejects the larger CAN-FD payload before a full response analysis and leaves the other candidates to be evaluated. It supplies neither a synchronization-jitter bound nor a complete response bound. A CAN-FD schedule needs a bound on competing frames and non-preemptive blocking; an EtherCAT path needs frame, forwarding, and device delays; a TSN schedule needs reserved windows and clock-error allowances.[^fn-net-tsn-fieldbus] These are inputs to the response calculation, not guarantees obtained by selecting a protocol name.
 
 Freshness adds a further requirement. Even a command delivered within its transport bound may have been computed from old evidence. The proposal header's evidence timestamp and expiry therefore remain necessary on a synchronized network. The transport budget must leave room for the command's physical response, and the permission path must refuse a command whose authority has ended.
 
@@ -716,7 +716,7 @@ Freshness adds a further requirement. Even a command delivered within its transp
 
 [^fn-net-tsn-fieldbus]: **Time-Sensitive Networking**\index{Time-sensitive networking}: IEEE 802.1Qbv Time-Sensitive Networking establishes deterministic Ethernet communication by configuring time-aware traffic shapers across network switches. High-priority control frames execute within dedicated, pre-scheduled transmission windows, while asynchronous high-bandwidth payloads (such as uncompressed camera streams) are temporarily gated. This scheduled time-division multiplexing allows vision telemetry and microsecond servo commands to coexist over a unified physical link without packet collision or buffer bloat.
 
-::: {#fig-04-fieldbus-evolution fig-env="figure" fig-pos="htb" fig-cap="**The nervous system frontier: fieldbus bandwidth vs. clock synchronization jitter across industrial robotic protocols (1979–2026)**: Trade-off between raw transmission bandwidth (log scale, $100\\,\\text{kbps}$ to $10\\,\\text{Gbps}$) and worst-case synchronization jitter (log scale, $10\\,\\text{ns}$ to $20\\,\\text{ms}$). Regime I (top): Non-deterministic soft real-time protocols (Modbus RTU, CAN 2.0B, CAN-FD) subject to CSMA/CR collision arbitration and unmanaged queuing jitter ($0.2\\text{--}20\\,\\text{ms}$). Regime II (middle): Coordinated multi-axis joint servo loops ($1\\,\\text{kHz}$, jitter $\\le 100\\,\\mu\\text{s}$) utilizing switched Ethernet and static TDMA (FlexRay, PROFINET RT). Regime III (bottom): Sub-microsecond motor inverter and physical AI synchronization frontier (EtherCAT, EtherCAT G, IEEE TSN 802.1AS/Qbv), achieving sub-100 ns clock alignment via hardware distributed clocks and processing-on-the-fly forwarding to eliminate torque ripple during $20\\text{--}40\\,\\text{kHz}$ PWM field-oriented control." fig-alt="Log-log plot of fieldbus raw bandwidth from 0.05 Mbps to 25 Gbps on the horizontal axis against worst-case synchronization jitter from 10 ns to 50 ms on the vertical axis. Three distinct shaded regions demarcate soft real-time CSMA protocols, 1 kHz coordinated joint servo protocols, and sub-microsecond hardware-synchronized EtherCAT and TSN fabrics. Specific milestones from 1979 Modbus to 2024 TSN highlight bandwidth gains and jitter reductions."}
+::: {#fig-04-fieldbus-evolution fig-env="figure" fig-pos="htb" fig-cap="**Scenario bus occupancy before response qualification**: Modeled serialization and forwarding terms for the configured servo-axis example, compared with the allocated bus cycle. The larger CAN-FD payload exceeds the allocation before other delays are counted. The smaller payload and EtherCAT leave unallocated time, but controller response, competing traffic, device delays, and fault allowances still need qualification. These calculated values are not measured end-to-end response or synchronization bounds." fig-alt="Horizontal bars compare modeled occupancy for CAN-FD with 64-byte and 32-byte per-axis payloads and EtherCAT. The 64-byte CAN-FD bar exceeds the vertical line marking the allocated bus cycle; the other bars remain below it."}
 
 ```{python}
 #| label: fig-04-fieldbus-evolution
@@ -724,249 +724,43 @@ Freshness adds a further requirement. Even a command delivered within its transp
 #| warning: false
 #| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ NERVOUS SYSTEM FRONTIER: FIELDBUS BANDWIDTH VS. JITTER (FIGURE)
+# │ CONFIGURED FIELDBUS OCCUPANCY AGAINST THE ALLOCATED CYCLE
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Section 4.5, @fig-04-fieldbus-evolution.
-# │ Goal:    Show the trade-off between raw transmission bandwidth and clock
-# │          synchronization jitter across 40+ years of industrial fieldbuses.
+# │ Context: @fig-04-fieldbus-evolution, after the serialization notebook.
+# │ Goal:    Separate a necessary occupancy check from response qualification.
+# │ Show:    Three scenario occupancies and the allocated bus-cycle limit.
+# │ How:     Reuse the guarded FieldbusSchedulability results above.
 # └─────────────────────────────────────────────────────────────────────────────
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-from matplotlib.lines import Line2D
-import numpy as np
+from mlsysim import viz
 
-plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
-plt.rcParams["axes.edgecolor"] = "#334155"
-plt.rcParams["axes.linewidth"] = 1.0
-
-fig, ax = plt.subplots(figsize=(14, 8.5), dpi=200, facecolor="#FFFFFF")
-ax.set_facecolor("#FFFFFF")
-ax.spines["top"].set_visible(False)
-ax.spines["right"].set_visible(False)
-ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5, color="#E2E8F0")
+viz.set_book_style()
+fig, ax = plt.subplots(figsize=(10, 4.5))
+occupancy_us = [
+    FieldbusSchedulability.t_total_canfd_64.to(microsecond).magnitude,
+    FieldbusSchedulability.t_total_canfd_32.to(microsecond).magnitude,
+    FieldbusSchedulability.t_total_ethercat.to(microsecond).magnitude,
+]
+labels = ["CAN-FD: 64 bytes / axis", "CAN-FD: 32 bytes / axis", "EtherCAT: frame + hops"]
+formatted = [
+    FieldbusSchedulability.t_total_canfd_64_us_str,
+    FieldbusSchedulability.t_total_canfd_32_str,
+    FieldbusSchedulability.t_total_ethercat_str,
+]
+cycle_us = FieldbusSchedulability.cycle_time.to(microsecond).magnitude
+bars = ax.barh(labels, occupancy_us, color=viz.COLORS["VioletL"], edgecolor=viz.COLORS["VioletLine"], height=0.5)
+bars[0].set_hatch("///")
+ax.invert_yaxis()
+for bar, label in zip(bars, formatted):
+    ax.text(bar.get_width() + cycle_us * 0.02, bar.get_y() + bar.get_height() / 2, label, va="center")
+ax.axvline(cycle_us, color=viz.COLORS["RedLine"], linestyle="--", label=f"Allocated cycle: {FieldbusSchedulability.cycle_time_str}")
+ax.set_xlim(0, max(occupancy_us) * 1.22)
+ax.set_xlabel("Modeled serialization and forwarding occupancy (µs)")
+ax.grid(axis="y", visible=False)
 ax.set_axisbelow(True)
-
-# 1. Regimes
-ax.axhspan(1000.0, 50000.0, color="#FEF2F2", alpha=0.55, zorder=0)
-ax.axhspan(1.0, 1000.0, color="#FFFBEB", alpha=0.45, zorder=0)
-ax.axhspan(0.006, 1.0, color="#ECFDF5", alpha=0.55, zorder=0)
-
-ax.text(
-    2.5,
-    22000.0,
-    "NON-DETERMINISTIC / SOFT REAL-TIME REGIME\nCSMA/CR arbitration, unmanaged switches, non-preemptive packet delays\nSuitable for supervisory diagnostics, BMS telemetry, and human interfaces",
-    fontsize=8.2,
-    fontweight="bold",
-    color="#B91C1C",
-    alpha=0.9,
-    va="center",
-)
-
-ax.text(
-    0.07,
-    40.0,
-    "COORDINATED MULTI-AXIS JOINT SERVO REGIME (1 kHz Control Loops)\nHardware-scheduled TDMA or priority-bypassed Layer 2 industrial Ethernet\nRequired for smooth multi-axis trajectory interpolation, impedance control, and haptics",
-    fontsize=8.0,
-    fontweight="bold",
-    color="#B45309",
-    alpha=0.9,
-    va="center",
-)
-
-ax.text(
-    0.07,
-    0.021,
-    "SUB-MICROSECOND INVERTER &\nPHYSICAL AI SYNCHRONIZATION FRONTIER\nHardware Distributed Clocks (EtherCAT DC) & IEEE 802.1AS gPTP\nEnables 20–40 kHz PWM Field-Oriented Control (FOC) without torque ripple",
-    fontsize=8.0,
-    fontweight="bold",
-    color="#047857",
-    alpha=0.95,
-    va="center",
-)
-
-# 2. Deadlines
-deadlines = [
-    (1000.0, "1,000 µs (1 ms): Soft Real-Time Supervisory & Telemetry Limit", "#475569", "-."),
-    (100.0, "100 µs: 1 kHz Coordinated Multi-Axis Joint Servo Jitter Boundary", "#D97706", ":"),
-    (1.0, "1.0 µs: Motor Inverter PWM Commutation Deadline (FOC 20–40 kHz)", "#A51C30", "--"),
-    (0.1, "100 ns: Ultra-Precision Distributed Clocks Boundary (Beckhoff DC / IEEE 1588)", "#1E793C", ":"),
-]
-for jitter, lbl, col, ls in deadlines:
-    ax.axhline(jitter, color=col, linestyle=ls, linewidth=1.2, alpha=0.75, zorder=1)
-    ax.text(22000.0, jitter * 1.15, lbl, fontsize=7.5, fontweight="bold", color=col, ha="right", va="bottom")
-
-# 3. Frontier Line & Fill
-fx = [100.0, 1000.0, 10000.0]
-fy = [0.05, 0.035, 0.02]
-ax.plot(fx, fy, color="#1E793C", lw=2.2, ls="-", zorder=3, alpha=0.85)
-
-ax.fill_between([80.0, 100.0, 1000.0, 10000.0, 23000.0], [0.05, 0.05, 0.035, 0.02, 0.02], 0.006, color="#A7F3D0", alpha=0.25, zorder=1)
-
-ax.text(
-    220.0,
-    0.28,
-    "Physical AI Actuation Frontier\nEtherCAT · EtherCAT G · IEEE TSN (802.1AS/Qbv)\nSub-100 ns sync for 50+ coordinated actuators",
-    fontsize=8.0,
-    fontweight="bold",
-    color="#1E793C",
-    va="center",
-)
-
-def add_badge(ax, text, xy, xytext, color="#1E293B", fontsize=7.8, arrow=True, arrow_color="#94A3B8"):
-    bbox = dict(boxstyle="round,pad=0.45", facecolor="#FFFFFF", edgecolor="#CBD5E1", alpha=0.96, linewidth=0.8)
-    ap = dict(arrowstyle="->", color=arrow_color, linewidth=1.1, shrinkA=3, shrinkB=4) if arrow else None
-    ax.annotate(
-        text, xy=xy, xytext=xytext, fontsize=fontsize, fontweight="normal", color=color, bbox=bbox, arrowprops=ap, ha="center", va="center", zorder=10
-    )
-
-protocols = [
-    {
-        "name": "Modbus RTU",
-        "bw": 0.115,
-        "jitter": 20000.0,
-        "year": 1979,
-        "color": "#475569",
-        "marker": "s",
-        "badge_xytext": (0.10, 26000.0),
-        "text": "1979 · Modbus RTU (RS-485)\n115.2 kbps · ~20 ms jitter\nSerial polling master-slave",
-    },
-    {
-        "name": "CAN 2.0B",
-        "bw": 1.0,
-        "jitter": 2500.0,
-        "year": 1986,
-        "color": "#A51C30",
-        "marker": "o",
-        "badge_xytext": (0.22, 2500.0),
-        "text": "1986 · Classic CAN 2.0B\n1 Mbps · 1,000–5,000 µs jitter\nCSMA/CR priority arbitration",
-    },
-    {
-        "name": "CAN-FD",
-        "bw": 5.0,
-        "jitter": 350.0,
-        "year": 2012,
-        "color": "#E11D48",
-        "marker": "o",
-        "badge_xytext": (8.5, 350.0),
-        "text": "2012 · CAN-FD\n5 Mbps · 200–500 µs jitter\n64-byte payload, dual bitrate",
-    },
-    {
-        "name": "FlexRay",
-        "bw": 10.0,
-        "jitter": 1.5,
-        "year": 2005,
-        "color": "#008080",
-        "marker": "^",
-        "badge_xytext": (3.5, 4.5),
-        "text": "2005 · FlexRay\n10 Mbps · 1–2 µs jitter\nDeterministic static TDMA cycle",
-    },
-    {
-        "name": "PROFINET RT",
-        "bw": 100.0,
-        "jitter": 1000.0,
-        "year": 2003,
-        "color": "#D97706",
-        "marker": "D",
-        "badge_xytext": (32.0, 2200.0),
-        "text": "2003 · PROFINET RT\n100 Mbps · ~1 ms jitter\nSoftware Layer 2 bypass",
-    },
-    {
-        "name": "PROFINET IRT",
-        "bw": 100.0,
-        "jitter": 0.5,
-        "year": 2006,
-        "color": "#B45309",
-        "marker": "D",
-        "badge_xytext": (25.0, 0.45),
-        "text": "2006 · PROFINET IRT\n100 Mbps · 0.2–0.5 µs jitter\nHardware TDMA ASIC + PTCP sync",
-    },
-    {
-        "name": "EtherCAT (100BASE-TX)",
-        "bw": 100.0,
-        "jitter": 0.05,
-        "year": 2003,
-        "color": "#1E793C",
-        "marker": "*",
-        "badge_xytext": (20.0, 0.045),
-        "text": "2003 · EtherCAT (Beckhoff)\n100 Mbps · 20–80 ns jitter\nProcessing-on-the-fly, Distributed Clocks",
-    },
-    {
-        "name": "EtherCAT G",
-        "bw": 1000.0,
-        "jitter": 0.035,
-        "year": 2018,
-        "color": "#004B87",
-        "marker": "*",
-        "badge_xytext": (420.0, 0.016),
-        "text": "2018 · EtherCAT G\n1 Gbps · 30–50 ns jitter\nBranch controller gigabit fabric",
-    },
-    {
-        "name": "IEEE TSN (802.1AS/Qbv)",
-        "bw": 10000.0,
-        "jitter": 0.02,
-        "year": 2024,
-        "color": "#6B21A8",
-        "marker": "*",
-        "badge_xytext": (3200.0, 0.040),
-        "text": "2024 · IEEE TSN (802.1AS + 802.1Qbv)\n1–10 Gbps · 10–30 ns jitter\nConverged IT/OT Time-Aware Shaper",
-    },
-]
-
-for p in protocols:
-    s_size = 220 if p["marker"] == "*" else (110 if p["marker"] == "D" else 100)
-    ax.scatter(p["bw"], p["jitter"], color=p["color"], s=s_size, marker=p["marker"], edgecolor="#FFFFFF", linewidth=1.5, zorder=10)
-    add_badge(ax, p["text"], xy=(p["bw"], p["jitter"]), xytext=p["badge_xytext"], color="#1E293B", fontsize=7.8, arrow=True, arrow_color=p["color"])
-
-ax.set_xscale("log")
-ax.set_yscale("log")
-
-ax.set_xlim(0.05, 25000.0)
-ax.set_ylim(0.006, 50000.0)
-
-ax.yaxis.set_minor_locator(ticker.NullLocator())
-
-ax.set_xticks([0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0])
-ax.get_xaxis().set_major_formatter(
-    ticker.FuncFormatter(lambda x, p: f"{int(x*1000)} kbps" if x < 1.0 else (f"{int(x)} Mbps" if x < 1000.0 else f"{int(x/1000)} Gbps"))
-)
-
-ax.set_yticks([0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0])
-ax.get_yaxis().set_major_formatter(
-    ticker.FuncFormatter(lambda y, p: f"{int(y*1000)} ns" if y < 1.0 else (f"{int(y)} µs" if y < 1000.0 else f"{int(y/1000)} ms"))
-)
-
-ax.set_xlabel("Fieldbus Raw Bandwidth / Bitrate (log scale)", fontsize=11, fontweight="bold", labelpad=8)
-ax.set_ylabel(
-    "Worst-Case Clock Synchronization Jitter (log scale)  [ $\\downarrow$ Lower Jitter = Higher Determinism ]",
-    fontsize=10.5,
-    fontweight="bold",
-    labelpad=8,
-)
-
-legend_elements = [
-    Line2D([0], [0], marker='s', color='w', markerfacecolor='#475569', markersize=8, label='Serial Master-Slave (Modbus RS-485)'),
-    Line2D([0], [0], marker='o', color='w', markerfacecolor='#A51C30', markersize=8, label='Asynchronous CSMA/CR (CAN, CAN-FD)'),
-    Line2D([0], [0], marker='^', color='w', markerfacecolor='#008080', markersize=8, label='Time-Triggered Static TDMA (FlexRay)'),
-    Line2D(
-        [0], [0], marker='D', color='w', markerfacecolor='#B45309', markersize=8, label='Switched / Isochronous Industrial Ethernet (PROFINET RT/IRT)'
-    ),
-    Line2D([0], [0], marker='*', color='w', markerfacecolor='#1E793C', markersize=12, label='On-the-Fly & Converged TSN (EtherCAT, TSN 802.1AS/Qbv)'),
-]
-legend = ax.legend(
-    handles=legend_elements,
-    loc="upper right",
-    frameon=True,
-    framealpha=0.96,
-    edgecolor="#CBD5E1",
-    fontsize=7.8,
-    title="Industrial Fieldbus Architectures",
-    title_fontsize=8.2,
-)
-legend.get_title().set_fontweight("bold")
-legend.set_zorder(15)
-
-plt.tight_layout()
-plt.subplots_adjust(top=0.95, bottom=0.10, left=0.08, right=0.94)
+ax.spines[["top", "right"]].set_visible(False)
+ax.legend(loc="lower right", frameon=False)
+fig.tight_layout()
 plt.show()
 ```
 
@@ -976,9 +770,7 @@ A bounded path delivers each command to the drives within its cycle, but it is i
 
 ## Actuation Authority {#sec-nervous-actuation-authority}
 
-Authority on the mobile manipulator is the physical ability to write the drive registers that energize its base and arm windings and deliver mechanical power. In modern operating systems, hardware memory management units (MMUs) and execution rings (such as x86 Ring 0 kernel mode versus Ring 3 user mode, or ARM Exception Levels EL1 versus EL0) enforce process isolation: an unprivileged user application cannot execute privileged CPU instructions or directly mutate page tables. In physical AI architectures, actuation authority establishes the cyber-physical equivalent of hardware privilege separation.
-
-In an embodied machine, allowing complex, uncertified perception and planning software to write actuator control registers directly is a fatal architectural anti-pattern. A learned foundation model or trajectory planner on an application processor must run in an unprivileged domain (Ring 3), possessing zero physical authority to write PWM timer registers (`TIMx_CCR`), set gate-driver current references, or toggle motor bridge enable pins that govern current delivery to stator windings. Instead, high-level software generates unprivileged trajectory proposals ($p_t$). These proposals pass across an isolated memory transport interface into a deterministic safety microcontroller operating as the privileged supervisor (Ring 0). As contrasted in @fig-04-privilege-enforcer-registers, decoupling proposal generation from physical execution privilege ensures that a software crash, kernel panic, or runaway GPU kernel cannot command unverified torque to the motors.
+A mailbox cannot protect the mobile manipulator if the host also has a diagnostic route that writes directly to a drive. The partition established in @sec-nervous-silicon-partitioning therefore needs exclusive control over every path that can energize the windings. Actuation authority is this physical ability to change drive commands, including PWM registers, current references, and bridge-enable signals. The host publishes proposals; the permission path alone admits commands to those interfaces (@fig-04-privilege-enforcer-registers).
 
 ::: {#fig-04-privilege-enforcer-registers fig-env="figure" fig-pos="t" fig-cap="**Hardware proposal boundary**: (a) Decoupled enforcer on an isolated safety microcontroller with exclusive write privilege over motor drive registers, while the host processor proposes trajectories across a shared-memory link. (b) Collapsed unsafe architecture where unverified host software writes actuator registers directly, creating a single failure domain." fig-alt="Comparison of hardware privilege architectures: (a) Decoupled real-time enforcer gating actuator registers with a separate torque-cutoff trip branch; (b) Unsafe collapsed architecture with direct unchecked writes from host to motor registers."}
 ![](images/svg/fig04_privilege_enforcer_registers.svg){width="90%"}
@@ -988,7 +780,7 @@ In an embodied machine, allowing complex, uncertified perception and planning so
 ↪ Actuator override masking registers implement the hardware preemption tiers formulated in @sec-intervention-authority-log.
 :::
 
-The microcontroller continuously evaluates physical safety invariants: verifying that commanded joint positions lie within physical reach envelopes, that joint velocities do not exceed certified limits, and that projected decelerations remain safely within dynamic stopping clearance ($d_{\text{stop}} \le D_{\text{clear}}$). If a proposal satisfies all invariants, the microcontroller grants execution permission, interpolates waypoints into high-frequency current references ($u_t$), and writes to the physical gate-driver registers. If a proposal is invalid or expired, the enforcer revokes permission ($\bot$) and requests a controlled deceleration or hold. A separate hardware trip zone can remove drive torque on a fault; opening switches does not itself brake moving mass.[^fn-hw-tripzone-break]
+The microcontroller continuously evaluates physical safety invariants: verifying that commanded joint positions lie within physical reach envelopes, that joint velocities do not exceed certified limits, and that projected decelerations remain safely within dynamic stopping clearance ($d_{\text{stop}} \le D_{\text{clear}}$). If a proposal satisfies all invariants, the microcontroller grants execution permission, interpolates waypoints into high-frequency current references ($u_t$), and writes to the physical gate-driver registers. An invalid or expired candidate is refused ($\bot$); it does not automatically revoke a different active chunk. The active chunk continues only while its own state, evidence, and lease remain valid. When those checks fail, the enforcer ends its authority and requests a controlled deceleration or hold. A separate hardware trip zone can remove drive torque on a fault; opening switches does not itself brake moving mass.[^fn-hw-tripzone-break]
 
 [^fn-hw-tripzone-break]: **Hardware Trip Zone**\index{Hardware trip zone}: Microcontroller hardware trip zones (such as TI `EPWM_TZFRC` or STM32 `TIMx_BDTR` Break inputs) couple analog overcurrent and overvoltage comparators directly to timer output logic. Upon fault detection, configured trip logic may force gate signals high-impedance or activate a validated braking mode. These have different mechanical consequences: torque removal can leave the plant coasting, while dynamic braking requires a rated energy path.
 
@@ -1000,7 +792,7 @@ The refusal carries its own physical cost. If the enforcer rejects an invalid pr
 
 By virtue of the causal boundary established in @sec-boundary-causal-boundary, the enforcer treats the origin of an aberrant proposal as irrelevant. A remote memory exploit in an operating system daemon, an adversarial camera perturbation inducing model hallucination, and an arithmetic overflow in a neural matrix multiplier all produce the same boundary event, an invalid proposal packet. Because the enforcer evaluates invariant bounds against physical sensor feedback from optical encoders and current shunts rather than inspecting neural network weights, it needs no model of why a proposal went wrong, and the host, which cannot write actuator registers directly, has no path around it. Protection against a compromised host still depends on independent sensing, a correct limit model, actuator capability, and a feasible fallback.
 
-To guard against internal hardware faults or microcontroller latch-ups within the enforcer itself, the system incorporates out-of-band supervisory channels and physical disconnects. These channels consist of unprogrammable analog circuits, hardwired emergency stop mushroom push buttons, and dual-channel safety relays that sever power to the motor inverter bridges independently of all digital logic through Safe Torque Off (@fig-real-estop, IEC 61800-5-2), which physically interrupts gate-driver bias to prevent torque-producing stator current.[^fn-std-iec61800-sto] These disconnects cost availability. Re-energizing a tripped high-voltage DC bus requires pre-charging the inverter filter capacitors through current-limiting resistors, because closing the contactor onto empty capacitors draws an inrush large enough to weld its contacts, and the pre-charge takes hundreds of milliseconds before motor control can resume. A disconnect therefore trades availability and active control for a fault response whose mechanical consequences depend on brakes, load, and stored energy, and it can act when the primary controller fails only if it shares no hidden clock, power rail, or silicon with that controller.
+If the enforcer itself hangs, it may be unable to request that controlled response. An out-of-band interlock must then trigger the separately qualified fault response. Safe Torque Off (STO) prevents torque-producing drive signals; it does not isolate the main supply or guarantee that a moving load stops within the normal powered-braking budget.[^fn-std-iec61800-sto] A separate contactor can provide supply isolation, and a rated brake or other restraint may be needed to contain the resulting motion. The illustrated interlock (@fig-real-estop) makes the torque-inhibit path independent of the proposal software; qualification must still establish its behavior under shared power, clock, and wiring faults.
 
 [^fn-std-iec61800-sto]: **Safe Torque Off (STO)**\index{Safe torque off}: An STO implementation removes torque-producing drive signals through a hardware interlock. An IEC 61800-5-2 integrity rating depends on the actual devices, diagnostic coverage, wiring, and validation, not on the circuit pattern alone.
 
@@ -1008,12 +800,7 @@ To guard against internal hardware faults or microcontroller latch-ups within th
 ![](images/svg/fig04_sto_safety_circuit.svg){width="100%"}
 :::
 
-The hardware interlock shown in @fig-real-estop executes this protection across four discrete stages:
-
-1. *Stage 1 (Dual-channel positive-break input):* An emergency stop mushroom pushbutton incorporates dual normally closed contacts. Depressing the actuator mechanically forces both contact sets open, even in the presence of contact welding.
-2. *Stage 2 (Monitored safety relays with EDM):* Redundant force-guided safety relays cross-check both contact channels and monitor relay state via External Device Monitoring (EDM) feedback. Any channel discordance (such as a cut wire or welded contact) permanently prevents circuit reset.
-3. *Stage 3 (Optocoupled gate-bias cutoff):* Opening the safety relays severs the power rail feeding the optocouplers that supply gate-bias voltage ($+15\,\text{V}$) to the motor inverter gate drivers. Without gate bias, the high-side and low-side power switches remain in an open, high-impedance state, physically preventing torque generation regardless of software PWM commands.
-4. *Stage 4 (Spring-applied holding brake engagement):* De-energizing the circuit simultaneously cuts current to an electromechanical holding brake solenoid, allowing mechanical springs to clamp friction pads against the motor shaft and arrest rotating inertia.
+The switch and monitored relay channels detect an emergency input or channel disagreement and inhibit drive torque. The spring-applied holding brake provides a separate restraint. Its name does not establish a dynamic stopping capability: normal powered deceleration applies it after rest, while emergency application during motion needs its own energy and stopping-distance qualification. The response selection and sequencing in @sec-enforcement-stop-categories depend on those physical capabilities.
 
 ::: {#psp-nervous-hardware-authority .callout-perspective title="Hardware authority invariant"}
 If an unverified learned policy has direct memory-mapped write access to actuator gate-driver registers, the machine has no safety layer, and its next out-of-distribution input reaches the motors unchecked.
@@ -1023,9 +810,9 @@ Write privilege is therefore a physical fact about wires and registers, not a so
 
 ## Hardware Isolation {#sec-nervous-hardware-isolation}
 
-Independence between the application processor and the permission path is a claim that often fails its first verification. In server-side machine learning infrastructure, multi-tenant workloads are considered isolated when encapsulated in software abstractions—such as Linux cgroups, Docker containers, or virtual machine hypervisors. In cyber-physical AI systems, however, **software virtualization is an architectural illusion of isolation**. Virtual partitions share the same physical silicon substrate, memory interconnect, power distribution network (PDN), and clock distribution trees. A software exception in a containerized vision daemon cannot breach memory protection directly, but an accelerator power spike or memory bus sweep executed by that daemon immediately propagates across shared physical hardware channels.
+A separate permission processor can still reset when an accelerator burst pulls down their shared supply. It can also miss a tick while waiting for a shared memory bus. The partition therefore needs evidence about common resources, not another software boundary. Execution, timing, power, and memory define the fault paths that must be examined.
 
-Verifying true fault-domain independence requires proving physical isolation across four distinct hardware dimensions: independent execution silicon with private instruction pipelines, separate timing references from segregated crystal oscillators, isolated power rails from independent regulators, and segregated memory domains without shared dynamic random-access memory chips or interconnect arbitration buses.[^fn-std-iso26262-ffi] Any shared substrate needs a formal common-cause fault analysis demonstrating that failure in the unprivileged deliberative domain cannot compromise the cycle-deterministic execution of the independent permission path.
+Private execution resources, independent timing references, isolated power rails, and bounded memory access can contain these paths.[^fn-std-iso26262-ffi] Where resources remain shared, the design must show that interference and the declared common-cause faults cannot defeat the permission deadline or its qualified fallback. @Sec-placement develops the resource allocation and loaded measurements for that decision; here the obligation is to carry each dependency into the Transport Budget.
 
 [^fn-std-iso26262-ffi]: **Freedom from Interference (FFI)**\index{Freedom from interference}: ISO 26262-9 and IEC 61508 formalize Freedom from Interference (FFI) as the absence of cascading faults between software elements possessing different safety integrity levels. Unverified neural policies sharing silicon or bus fabrics with safety-critical tasks require architects to demonstrate spatial (memory protection), temporal (independent scheduling and timers), and electrical isolation (independent power rails). Shared resources require evidence that interference cannot defeat the specified enforcement deadlines and fault response.
 
@@ -1084,17 +871,17 @@ On a shared silicon package or common thermal heat sink, sustained computational
 *A transient on the shared rail reaches every load that draws from it; the permission path rides through on its own isolated, held-up rail.*
 :::
 
-The permission path must distinguish two failure modes of the proposer, unresponsiveness and corruption. Unresponsiveness occurs when an inference pipeline hangs, a scheduling deadline is missed, or operating system memory fragmentation blocks execution, producing no output. The permission path detects it through the heartbeat of @sec-nervous-cadences, which the application processor must deliver across an isolated channel before its timeout.
+The permission path must distinguish two failure modes of the proposer, unresponsiveness and corruption. Unresponsiveness occurs when an inference pipeline hangs, a scheduling deadline is missed, or operating system memory fragmentation blocks execution, producing no output. A host failure can trip the heartbeat timer; a live host that stops publishing admissible chunks instead reaches the active chunk's lease or evidence deadline. These are the distinct timer obligations established in @sec-nervous-supervisory-timers.
 
 Corruption occurs when the proposer remains fully active and passes its heartbeat deadline, but generates kinematically impossible setpoints, discontinuous velocity requests, or numerical infinities resulting from out-of-distribution visual inputs or matrix overflow. The enforcer answers the two failures through separate mechanisms. A missing fresh chunk or a missed heartbeat revokes the proposal when its timer expires, whereas corruption triggers an immediate invariant rejection on the arrival of the malformed proposal packet.
 
-The chunk lease is distinct from the host heartbeat. When the application processor stays alive but stops publishing admissible chunks, the drives would otherwise keep tracking the last admitted setpoints, and the machine would keep moving under a proposal that nothing has renewed, until the enforcer detects the expiry and begins deceleration. Enforcing the lease at the causal boundary (@sec-boundary-causal-boundary) bounds that interval. On the mobile manipulator, @sec-nervous-cadences sized that interval as a term of the stopping budget and charged it against the pre-brake ceiling.[^fn-math-watchdog-lease] The heartbeat can report that the process is alive, but it cannot renew an expired chunk, and its period is independent of the proposer's. Only the chunk policy renews often enough to hold the lease, and @sec-nervous-coupled-budget shows why the intent model cannot.
+The timer distinction now has a physical consequence. A live heartbeat cannot justify continued tracking after the active chunk expires; the stopping-budget lease ends that authority independently.[^fn-math-watchdog-lease] The coupled budget in @sec-nervous-coupled-budget checks whether the chunk policy can supply renewals often enough. It also shows why the slower intent model must supply goals rather than hold the motion lease itself.
 
 [^fn-math-watchdog-lease]: **Chunk Lease Bound**\index{Watchdog lease!bound}: For a constant-speed approach, the chunk lease, the tick, the bus cycle, and brake onset must satisfy the pre-brake inequality of @sec-nervous-cadences once the observation age $t_{\text{age}}$ joins them on the left side, and a post-expiry hold $T_{\text{hold}}$ adds to that side as well. The right-hand side is the pre-brake ceiling, not a lease to spend in full. For the complete algebraic derivation of lease bounds under bounded deceleration, see @sec-appendix-control-teleop-leases.
 
 A timer feed proves only that the feed path ran. In *Bookout v. Toyota* (2013), a plaintiff expert argued that a timer-tick interrupt kept servicing the watchdog while other tasks could die [@barr2013toyota]; this is a reported trial mechanism, not a finding that electronic faults caused unintended acceleration in every investigated vehicle.
 
-When a lease expires or an enforcer rejects a corrupted proposal, the permission path executes an explicit degradation strategy rather than an unconditioned power cut, because cutting power hands a moving actuator to whichever unpowered state its drive falls into (@sec-body-power-integrity), and none of those states is a controlled stop. Degradation follows a deterministic state hierarchy calculated within the permission path. An optional short continuation of the last validated trajectory is permissible only while its chunk lease remains valid and its stopping margin is feasible. After expiry, any further hold or dead reckoning $T_{\text{hold}}$ enters $\tau_{\text{delay}}$ and must fit in the `{python} MachineLeaseBudget.t_ceiling_left_str` of pre-brake ceiling that the lease path and brake onset leave at the drive limit (\ref{nbk-nervous-watchdog-stopping-lease}); the enforcer must begin braking sooner if the measured bounds of the remaining terms do not fit. If communication does not resume within that budget, the permission path requests controlled deceleration using the available torque and thermal budget established in @sec-body-actuator-limits. It reaches rest only if clearance and braking capability remain sufficient. A gravity-loaded arm may require a rated mechanical holding brake after motion has been arrested.
+When active authority ends and no admissible continuation remains, the permission path executes an explicit degradation strategy rather than an unconditioned power cut, because cutting power hands a moving actuator to whichever unpowered state its drive falls into (@sec-body-power-integrity), and none of those states is a controlled stop. The permission path selects degradation from the current physical state and the responses still feasible there. An optional short continuation of the last validated trajectory is permissible only while its state, evidence, chunk lease, and stopping margin remain valid. After expiry, any separately authorized fallback delay $T_{\text{hold}}$ enters $\tau_{\text{delay}}$ and must fit in the `{python} MachineLeaseBudget.t_ceiling_left_str` of pre-brake ceiling that the lease path and brake onset leave at the drive limit (\ref{nbk-nervous-watchdog-stopping-lease}); the enforcer must begin braking sooner if the measured bounds of the remaining terms do not fit. The permission path requests controlled deceleration before that budget is exhausted using the available torque and thermal budget established in @sec-body-actuator-limits. It reaches rest only if clearance and braking capability remain sufficient. A gravity-loaded arm may require a rated mechanical holding brake after motion has been arrested.
 
 Once the physical plant is brought to a complete, stationary halt, the architecture executes a **recovery handshake**\index{Recovery handshake} before restoring autonomous proposal authority. The safety microcontroller asserts a persistent `FAULT_HELD` latch in a status word it owns and reports the exact physical rest pose $(\mathbf{q}_{\text{rest}}, \dot{\mathbf{q}} = \mathbf{0})$. The application processor must discard stale action chunks, invalidate state tied to the interrupted motion, ingest fresh observations tagged with new hardware timestamps, and publish a re-synchronized chunk proposal.
 
@@ -1120,13 +907,9 @@ Placing an unverified policy inside the fast loop exposes the plant to three cla
 2. *Out-of-distribution torque spikes:* Occurs when an adversarial visual input or unseen physical contact state produces an instantaneous, discontinuous torque reversal within a single cycle.
 3. *Structural limit cycling:* Occurs when unmodeled gearbox compliance or sensor phase lag couples with high-gain neural policy feedback into self-excited limit-cycle resonance.
 
-In distributed networking systems, in-line packet firewalls (such as kernel-level eBPF filters) inspect network packets at line rate, dropping or rewriting malformed packets in bounded $\mathcal{O}(1)$ time before they reach application sockets. In physical AI, the safety microcontroller acts as a **deterministic in-line packet firewall for physical actuation**. Operating within a microsecond execution budget inside tightly coupled memory (TCM/SRAM), the enforcer inspects every candidate proposal through a three-stage pre-actuation intervention pipeline:
+The interface must reject an inadmissible candidate without waiting for the producer, and recheck the active command against current physical state. Position and velocity limits ($\mathbf{q} \in [\mathbf{q}_{\min}, \mathbf{q}_{\max}]$ and $|\dot{\mathbf{q}}| \le \dot{\mathbf{q}}_{\max}$) are necessary but do not by themselves establish a feasible stop. A torque-slew constraint, $|\dot{\boldsymbol{\tau}}| = |(\boldsymbol{\tau}_k - \boldsymbol{\tau}_{k-1})/\Delta t| \le \dot{\boldsymbol{\tau}}_{\max}$, can limit command changes, but a corrected command must still satisfy the other physical limits. Contact may additionally require accounting for exchanged energy, $\int \boldsymbol{\tau}^T \dot{\mathbf{q}}\,dt$; @sec-appendix-control-passivity develops that background.
 
-1. *Stage 1 (Kinematic boundary clamping):* The enforcer projects commanded joint positions and velocities against certified kinematic limits, clamping setpoints that exceed workspace envelopes ($\mathbf{q} \in [\mathbf{q}_{\min}, \mathbf{q}_{\max}]$) or velocity ceilings ($|\dot{\mathbf{q}}| \le \dot{\mathbf{q}}_{\max}$).
-2. *Stage 2 (Rate-of-change torque limiter):* To prevent high-frequency current spikes that stress motor drive inverters and excite unmodeled structural resonances, the enforcer bounds torque slew: $|\dot{\boldsymbol{\tau}}| = |(\boldsymbol{\tau}_k - \boldsymbol{\tau}_{k-1})/\Delta t| \le \dot{\boldsymbol{\tau}}_{\max}$. Commands exceeding the maximum allowable rate of torque change are rate-limited to preserve drive thermal margins and prevent mechanical shock.
-3. *Stage 3 (Passivity energy observer):* The enforcer maintains a virtual energy tank that monitors the cumulative energy exchanged between the controller and the physical plant ($\int \boldsymbol{\tau}^T \dot{\mathbf{q}}\,dt$). If out-of-distribution neural policy chattering begins injecting non-passive energy into high-frequency structural modes, the passivity observer detects the energy surplus and immediately injects virtual damping or transitions the machine to a safe holding state before destructive resonance occurs (@sec-appendix-control-passivity).
-
-Under deadline misses or compute underruns, the firewall does not stall or spin: it drops the late proposal in $\mathcal{O}(1)$ time, evaluates remaining lease clearance, and executes a certified stopping suffix.
+Choosing and composing those filters requires the state and motion models developed later in the volume. @Sec-enforcement constructs the admissibility calculation and selects a feasible continuation, hold, or stop. The architectural result here is its execution contract: checks must finish within their allocated response time, use qualified physical evidence, and retain sole actuator authority. Neither fast inference nor a fast rejection routine establishes that contract on its own.
 
 The same reasoning covers the one proposer that is not learned. A remote operator is a third proposer. Its commands pass the same permission path, and network delay spends the same pre-brake budget (@sec-intervention-human-authority). Neither speed nor a human origin gives a proposal authority; only passing the permission path's checks does, and each check spends part of a budget that the next section lays out handoff by handoff.
 
@@ -1134,10 +917,10 @@ The same reasoning covers the one proposer that is not learned. A remote operato
 
 Before turning to the handoffs between proposer and actuator, verify your understanding of the exchange, hardware isolation, and pre-actuation invariant defenses:
 
-- [ ] **Nonblocking exchange**: Can you explain how the seqlock reader detects a torn read in one bounded attempt, and why a writer stopped mid-write leaves the active spline valid only until its lease expires?
+- [ ] **Nonblocking exchange**: Can you explain how the seqlock reader detects a torn read in one bounded attempt, and why a writer stopped mid-write cannot extend the active spline's state, evidence, or lease validity?
 - [ ] **Four dimensions of physical isolation**: Can you enumerate the four physical boundaries (silicon pipelines, timing crystals, power rails, memory buses) that a check for fault-domain independence must cover, and explain how shared paths would need validation?
 - [ ] **Physical derivation of chunk leases**: Can you explain why the chunk lease must be sized from stopping distance and clearance rather than chosen as a software timeout, and why a heartbeat never renews it?
-- [ ] **Rate matching and authority**: Can you explain why a policy that runs at the plant's own rate still produces only proposals, and which check answers each of its three failure modes?
+- [ ] **Rate matching and authority**: Can you explain why a policy that runs at the plant's own rate still produces only proposals, and what timing, state, and fallback obligations remain?
 
 :::
 
@@ -1149,25 +932,25 @@ Upstream, sensing transfers raw transducer signals to perception pipelines. Perc
 
 The example allocation in @tbl-04-synthesis-grid marks which limits are design-limiting at each handoff, and its numbers are chosen budgets, not measurements. The matrix gathers the budgets of all three Part I chapters, together with the sensor capture that @sec-boundary-machine-model places at the Boundary. In the Boundary row ($\mathcal{H}_1$), where the world becomes measurement, bandwidth and latency bind first, because raw multi-camera pixels stream over SerDes lanes and the exposure window sets a floor on image age before serialization begins. The Brain rows ($\mathcal{H}_2$, $\mathcal{H}_3$) bind first on energy and latency, the inference costs that @sec-brain established. The Body row ($\mathcal{H}_5$) binds first on determinism and heat, because the current loops of @sec-body must run on time and every ampere they deliver warms the windings and the power stage.
 
-The Nervous System row ($\mathcal{H}_4$) is the architectural bridge that ties the Brain and the Body together. The proposal boundary (@sec-boundary-machine-model) between the learned planner and the enforcer carries an action proposal ($p_t$), which consists of a compact spline parameterization or waypoint chunk. For the compact payload assumed in this grid, $\beta < 100\text{ kB/s}$ is budgeted, so bandwidth does not bind at this boundary; latency, determinism ($\sigma_t$), and fault domain isolation ($\mathcal{F}$) do. The permission path isolates stochastic proposals with nonblocking mailboxes and expiring leases. On the mobile manipulator the latency limit is the chunk lease, which takes `{python} MachineLeaseBudget.t_lease_str` of the `{python} MachineLeaseBudget.t_ceiling_str` pre-brake ceiling at the drive limit (@sec-nervous-cadences), and each chunk is admitted or refused within one `{python} MachineLeaseBudget.t_tick_str` permission tick. Isolation rests on a private bus, a separate oscillator, and the isolated, held-up rail of @sec-nervous-hardware-isolation.
+The Nervous System row ($\mathcal{H}_4$) is the architectural bridge that ties the Brain and the Body together. The proposal boundary (@sec-boundary-machine-model) between the learned planner and the enforcer carries an action proposal ($p_t$), which consists of a compact spline parameterization or waypoint chunk. For the compact payload assumed in this grid, $\beta < 100\text{ kB/s}$ is budgeted, so bandwidth does not bind at this boundary; latency, determinism ($\sigma_t$), and fault domain isolation ($\mathcal{F}$) do. The permission path isolates stochastic proposals with nonblocking mailboxes and expiring leases. On the mobile manipulator the latency limit is the chunk lease, which takes `{python} MachineLeaseBudget.t_lease_str` of the `{python} MachineLeaseBudget.t_ceiling_str` pre-brake ceiling at the drive limit (@sec-nervous-cadences), and the active command is rechecked within each `{python} MachineLeaseBudget.t_tick_str` permission tick. Full trajectory admission has a separate work and response budget and must finish before a candidate becomes active; the tick does not imply that arbitrary map queries or whole-trajectory validation fit within it. Isolation rests on a private bus, a separate oscillator, and the isolated, held-up rail of @sec-nervous-hardware-isolation.
 
-From the causal boundary perspective framed in @sec-boundary-causal-boundary, when a physical AI system fails, the breakdown manifests as an unbudgeted limit crossing at a specific handoff cell rather than an abstract deficiency in learned intelligence. When diagnosing an over-budget stop, trajectory overrun, or subsystem fault, engineers walk @tbl-04-synthesis-grid through a three-step operational root-cause procedure:
+From the causal boundary perspective framed in @sec-boundary-causal-boundary, an interface failure can be localized to the handoff and budget it violates. Semantic mistakes or missing physical assumptions can still escape an otherwise timely interface; the matrix does not replace task evaluation or hazard analysis. When diagnosing an over-budget stop, trajectory overrun, or subsystem fault, engineers walk @tbl-04-synthesis-grid through a three-step operational root-cause procedure:
 
 1. *Locate the boundary seam:* Identify which physical handoff ($\mathcal{H}_1\text{--}\mathcal{H}_5$) recorded the initial timing excursion, sequence gap, torn payload, or thermal trip.
 2. *Check the binding dimension:* Query the specific physical limit ($\tau, \beta, \mathcal{E}, \sigma_t, \mathcal{F}$) designated as *BINDING* for that handoff cell, which dictates the resource bottleneck governing the interface.
-3. *Evaluate like-for-like evidence:* Compare runtime diagnostic traces directly against the certified bound kind (`requirement`, `proven bound`, or `measured distribution`), verifying whether the failure stemmed from an unmodeled microarchitectural tail event or a physical budget violation.
+3. *Evaluate like-for-like evidence:* Compare runtime diagnostic traces directly against the recorded bound kind (`requirement`, `proven bound`, or `measured distribution`), verifying whether the failure stemmed from an unmodeled microarchitectural tail event or a physical budget violation.
 
 A handoff diagnosis must compare like evidence. For the $\mathcal{H}_2$ state-estimation path, suppose engineers allocate a $30.0\text{ ms}$ latency budget and measure $P_{99}=24.5\text{ ms}$ on a baseline hardware-in-the-loop run, a sampled margin of $+5.5\text{ ms}$. After thermal throttling, a measured $P_{99}=85.0\text{ ms}$ gives $-55.0\text{ ms}$ against that design budget. The decision is to reduce or reallocate workload and retain independent enforcement while revalidating. A $P_{99}$ sample diagnoses the regression; it is not a worst-case timing proof.
 
-| Canonical Handoff Boundary                                  | Latency Limit ($\tau$)                                                                                                                                                                                            | Bandwidth Limit ($\beta$)                                                                                      | Energy & Heat Limit ($\mathcal{E}$)                                                                 | Determinism Limit ($\sigma_t$)                                                                     | Fault Domain Isolation ($\mathcal{F}$)                                                          |
-|:------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------|
-| **$\mathcal{H}_1$: Sensing $\to$ Perception** *(Boundary)*  | **BINDING** \newline $\tau \le 16.7\text{ ms}$ (exposure & readout sets sensor age)                                                                                                                               | **BINDING** \newline $\beta \ge 1.2\text{ GB/s}$ (multi-camera 4K uncompressed streams)                        | *Non-binding* \newline $P < 3\text{ W}$ (sensor head dissipation isolated)                          | **BINDING** \newline $\sigma_t \le 1.0\text{ ms}$ (frame-sync triggers prevent skew)               | *Non-binding* \newline Defended by SerDes hardware & DMA ring buffers                           |
-| **$\mathcal{H}_2$: Perception $\to$ State** *(Brain)*       | **BINDING** \newline $\tau \le 30.0\text{ ms}$ (visual-inertial odometry & feature window)                                                                                                                        | *Non-binding* \newline $\beta \approx 10\text{--}50\text{ MB/s}$ (compressed keypoints & voxels)               | **BINDING** \newline $P \approx 15\text{--}35\text{ W}$ (edge vision backbone accelerator envelope) | *Non-binding* \newline Defended by sliding-window state estimator buffers                          | **BINDING** \newline Spatial memory isolation: MPUs prevent memory corruption                   |
-| **$\mathcal{H}_3$: State $\to$ Plan** *(Brain)*             | **BINDING** \newline $\tau \le 100.0\text{ ms}$ (autoregressive tokenization & diffusion horizon)                                                                                                                 | *Non-binding* \newline $\beta < 5\text{ MB/s}$ (low-dimensional state & prompt embeddings)                     | **BINDING** \newline $P \approx 30\text{--}75\text{ W}$ (transformer/diffusion matrix accelerators) | *Non-binding* \newline Defended by receding-horizon chunking & spline buffers                      | **BINDING** \newline Sandboxed policy container prevents host panics halting telemetry          |
-| **$\mathcal{H}_4$: Plan $\to$ Enforcer** *(Nervous System)* | **BINDING** \newline chunk lease `{python} MachineLeaseBudget.t_lease_str` (chosen, inside limits derived from the stopping budget); per-tick admission within each `{python} MachineLeaseBudget.t_tick_str` tick | *Non-binding* \newline Defended by compact parameterized splines ($\beta < 100\text{ kB/s}$)                   | *Non-binding* \newline $P < 0.5\text{ W}$ (fixed-point constraint evaluation on MCU)                | **BINDING** \newline $\sigma_t \le 100\,\mu\text{s}$ (cycle-deterministic packet reception on MCU) | **BINDING** \newline Hardware boundary: private bus, separate oscillator, isolated held-up rail |
-| **$\mathcal{H}_5$: Enforcer $\to$ Actuator** *(Body)*       | **BINDING** \newline $\tau \le 1.0\text{ ms}$ (servo interval $1.0\text{ ms}$; PWM loop $50\,\mu\text{s}$)                                                                                                        | *Non-binding* \newline $\beta \approx 1\text{--}5\text{ Mbps}$ (cyclic packets over deterministic command bus) | **BINDING** \newline $I^2 R$ copper winding dissipation, MOSFET switching losses                    | **BINDING** \newline $\sigma_t < 10\,\mu\text{s}$ (hard real-time PWM phase alignment & FOC)       | **BINDING** \newline Galvanic isolation, out-of-band analog E-stops, STO circuits               |
+| Canonical Handoff Boundary                                  | Latency Limit ($\tau$)                                                                                                                                                                                                                                                         | Bandwidth Limit ($\beta$)                                                                                      | Energy & Heat Limit ($\mathcal{E}$)                                                                 | Determinism Limit ($\sigma_t$)                                                                     | Fault Domain Isolation ($\mathcal{F}$)                                                          |
+|:------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------|
+| **$\mathcal{H}_1$: Sensing $\to$ Perception** *(Boundary)*  | **BINDING** \newline $\tau \le 16.7\text{ ms}$ (exposure & readout sets sensor age)                                                                                                                                                                                            | **BINDING** \newline $\beta \ge 1.2\text{ GB/s}$ (multi-camera 4K uncompressed streams)                        | *Non-binding* \newline $P < 3\text{ W}$ (sensor head dissipation isolated)                          | **BINDING** \newline $\sigma_t \le 1.0\text{ ms}$ (frame-sync triggers prevent skew)               | *Non-binding* \newline Defended by SerDes hardware & DMA ring buffers                           |
+| **$\mathcal{H}_2$: Perception $\to$ State** *(Brain)*       | **BINDING** \newline $\tau \le 30.0\text{ ms}$ (visual-inertial odometry & feature window)                                                                                                                                                                                     | *Non-binding* \newline $\beta \approx 10\text{--}50\text{ MB/s}$ (compressed keypoints & voxels)               | **BINDING** \newline $P \approx 15\text{--}35\text{ W}$ (edge vision backbone accelerator envelope) | *Non-binding* \newline Defended by sliding-window state estimator buffers                          | **BINDING** \newline Spatial memory isolation: MPUs prevent memory corruption                   |
+| **$\mathcal{H}_3$: State $\to$ Plan** *(Brain)*             | **BINDING** \newline $\tau \le 100.0\text{ ms}$ (autoregressive tokenization & diffusion horizon)                                                                                                                                                                              | *Non-binding* \newline $\beta < 5\text{ MB/s}$ (low-dimensional state & prompt embeddings)                     | **BINDING** \newline $P \approx 30\text{--}75\text{ W}$ (transformer/diffusion matrix accelerators) | *Non-binding* \newline Defended by receding-horizon chunking & spline buffers                      | **BINDING** \newline Host faults must not halt the independent permission path                  |
+| **$\mathcal{H}_4$: Plan $\to$ Enforcer** *(Nervous System)* | **BINDING** \newline chunk lease `{python} MachineLeaseBudget.t_lease_str` (candidate allocation; complete age-to-admission budget still required); active-command checks within each `{python} MachineLeaseBudget.t_tick_str` tick; full admission budget recorded separately | *Non-binding* \newline Defended by compact parameterized splines ($\beta < 100\text{ kB/s}$)                   | *Non-binding* \newline $P < 0.5\text{ W}$ (fixed-point constraint evaluation on MCU)                | **BINDING** \newline $\sigma_t \le 100\,\mu\text{s}$ (cycle-deterministic packet reception on MCU) | **BINDING** \newline Hardware boundary: private bus, separate oscillator, isolated held-up rail |
+| **$\mathcal{H}_5$: Enforcer $\to$ Actuator** *(Body)*       | **BINDING** \newline $\tau \le 1.0\text{ ms}$ (servo interval $1.0\text{ ms}$; PWM loop $50\,\mu\text{s}$)                                                                                                                                                                     | *Non-binding* \newline $\beta \approx 1\text{--}5\text{ Mbps}$ (cyclic packets over deterministic command bus) | **BINDING** \newline $I^2 R$ copper winding dissipation, MOSFET switching losses                    | **BINDING** \newline $\sigma_t < 10\,\mu\text{s}$ (hard real-time PWM phase alignment & FOC)       | **BINDING** \newline Galvanic isolation, out-of-band analog E-stops, STO circuits               |
 
-: **Handoffs-by-limits synthesis grid**: A five-by-five matrix mapping five canonical signal handoffs ($\mathcal{H}_1\text{--}\mathcal{H}_5$) across the Boundary (@sec-boundary-machine-model), Brain (@sec-brain), Body (@sec-body), and Nervous System (@sec-nervous) against five physical limits ($\tau, \beta, \mathcal{E}, \sigma_t, \mathcal{F}$). Cells marked *BINDING* are the budgets that drive selection; *Non-binding* means the scenario budget meets that dimension with margin. The matrix is the diagnostic rubric for Part I, in which safety and determinism appear as properties of isolated hardware boundaries, not software conventions. {#tbl-04-synthesis-grid tbl-colwidths="[16,16,18,18,16,16]"}
+: **Handoffs-by-limits synthesis grid**: A five-by-five matrix mapping five canonical signal handoffs ($\mathcal{H}_1\text{--}\mathcal{H}_5$) across the Boundary (@sec-boundary-machine-model), Brain (@sec-brain), Body (@sec-body), and Nervous System (@sec-nervous) against five physical limits ($\tau, \beta, \mathcal{E}, \sigma_t, \mathcal{F}$). Cells marked *BINDING* are the budgets that drive selection; *Non-binding* means the scenario budget meets that dimension with margin. These illustrative allocations organize the timing and isolation evidence still required; a non-binding cell is not a qualification verdict. {#tbl-04-synthesis-grid tbl-colwidths="[16,16,18,18,16,16]"}
 
 To ensure these budgets survive the lifecycle of the machine, every boundary condition in the grid is recorded as part of the machine's Transport Budget handoff record, the verifiable contract between hardware designers, systems engineers, and model developers. Each entry carries the six elements of a limit record (@sec-body-measuring-limits) and adds the fields that locate the limit at a handoff and say what kind of bound it is (@tbl-04-schema-notebook).
 
@@ -1294,13 +1077,13 @@ class PartOneCoupledBudget:
 
 The three chapters of Part I each set terms of one budget, and the chunk lease is where they meet. @Sec-body-kinetic-momentum fixed the distance side. At its `{python} PartOneCoupledBudget.v_str` drive limit the loaded machine must stop inside the `{python} PartOneCoupledBudget.d_clear_str` clear distance at a rack end, and the braking term and the fixed overheads leave `{python} PartOneCoupledBudget.t_ceiling_str` for everything that happens before braking force begins. @Sec-nervous-cadences spent part of that time. A proposer that stalls keeps its authority for one lease, the stop reaches the drives one tick and one bus cycle later, and the stopping budget stands at `{python} PartOneCoupledBudget.running_total_str`.
 
-The lease cannot be made as short as the budget would like, because a proposer must renew it. @Sec-brain-cognitive-pipeline established what each learned proposer can supply. The intent model's weights take `{python} PartOneCoupledBudget.intent_sweep_str` to stream from memory once, before any vision work, and a full inference takes `{python} PartOneCoupledBudget.t_intent_str`, so at `{python} PartOneCoupledBudget.f_intent_str` it cannot renew a proposal every few tens of milliseconds. The chunk policy's weights stream in `{python} PartOneCoupledBudget.chunk_sweep_str`, and at `{python} PartOneCoupledBudget.f_chunk_str` it publishes a fresh chunk every `{python} PartOneCoupledBudget.t_chunk_period_str`, each within its `{python} PartOneCoupledBudget.t_chunk_str` P99 inference time, so it can.
+The lease cannot be made as short as the budget would like, because a proposer must renew it. @Sec-brain-cognitive-pipeline established what each learned proposer can supply. The intent model's weights take `{python} PartOneCoupledBudget.intent_sweep_str` to stream from memory once, before any vision work, and a full inference takes `{python} PartOneCoupledBudget.t_intent_str`, so at `{python} PartOneCoupledBudget.f_intent_str` it cannot renew a proposal every few tens of milliseconds. The chunk policy's weights stream in `{python} PartOneCoupledBudget.chunk_sweep_str`, and its selected `{python} PartOneCoupledBudget.f_chunk_str` cadence calls for a fresh chunk every `{python} PartOneCoupledBudget.t_chunk_period_str`. Its illustrative `{python} PartOneCoupledBudget.t_chunk_str` P99 inference time makes that cadence a plausible supply target, not a guaranteed renewal bound. Late or missing renewals remain the permission path's responsibility.
 
-These facts fix the **lease rule**\index{Chunk lease!lease rule} for this machine. The lease must outlast one chunk period plus an allowance for renewal jitter, which together set the `{python} PartOneCoupledBudget.t_renewal_need_str` floor of \ref{nbk-nervous-watchdog-stopping-lease}. It must also fit inside the pre-brake ceiling once the tick, the bus cycle, and brake onset are reserved, which leaves `{python} PartOneCoupledBudget.t_lease_upper_str` less the observation age that @sec-perception measures. The chosen `{python} PartOneCoupledBudget.t_lease_str` sits just above the lower limit, because every millisecond of lease costs `{python} PartOneCoupledBudget.mm_per_ms_str` at the drive limit, and later chapters add terms that need that distance.
+These facts fix the **lease rule**\index{Chunk lease!lease rule} for this machine. For continuous tracking, the lease must outlast the chosen successful-admission interval plus its variation allowance, which together set the `{python} PartOneCoupledBudget.t_renewal_need_str` floor of \ref{nbk-nervous-watchdog-stopping-lease}. It must also fit inside the pre-brake ceiling once the tick, the bus cycle, and brake onset are reserved, which leaves `{python} PartOneCoupledBudget.t_lease_upper_str` less the evidence age at admission. The capture-to-dispatch age developed in @sec-perception is only part of that subtraction; dispatch-to-admission work remains an unclosed allowance in this calculation. The chosen `{python} PartOneCoupledBudget.t_lease_str` sits just above the renewal target, because every millisecond of lease costs `{python} PartOneCoupledBudget.mm_per_ms_str` at the drive limit. It remains a candidate allocation until the complete capture-to-admission age and later response terms fit. Increasing the lease to hide admission delays would spend further clearance rather than close that missing budget.
 
-Each chunk carries the base's velocity and the arm's joint targets together, so one lease governs both bodies, and when it lapses each body enters its own stop. The lease is sized on the base's `{python} PartOneCoupledBudget.t_ceiling_str` pre-brake ceiling because that ceiling is tighter than the limit the arm's commitment sets. The same lease bounds the arm, and @sec-planning-handoff derives the arm's limit and checks its lease path and ceiling against its own clearance. The arm's evidence horizon bounds a different lease, the intent lease, which limits how long an admitted goal from the intent model stays valid, and the intent model's slower targets expire under it (@sec-intent-lease).
+Each chunk carries the base's velocity and the arm's joint targets together, so the selected architecture uses one candidate lease for both bodies. Each body must have a feasible state-matched response when that lease lapses. The base's `{python} PartOneCoupledBudget.t_ceiling_str` pre-brake ceiling constrains the allocation here; it does not establish that the arm has more margin. The illustrative arm calculation in @sec-planning-handoff checks response travel and stopping against its own clearance. Qualifying the shared lease requires both bodies' timing, evidence, current state, and fallback limits to hold. The arm's evidence horizon bounds a different lease, the intent lease, which limits how long an admitted goal from the intent model stays valid, and the intent model's slower targets expire under it (@sec-intent-lease).
 
-The $\mathcal{H}_4$ row of @tbl-04-synthesis-grid is this chapter's Transport Budget handoff record filled in, combining the Limit Record (@sec-body) with the proposer limits from @sec-brain. Its value is the `{python} PartOneCoupledBudget.t_lease_str` chunk lease handed from the chunk policy to the permission path, a `requirement` chosen inside limits derived from the stopping budget and valid up to the `{python} PartOneCoupledBudget.v_str` drive limit, loaded, on a dry floor, at the chunk period above; its margin is the span between the renewal floor and the ceiling-derived upper limit less the observation age, and its detector is the lease timer on the safety microcontroller, counted on that processor's own clock.
+The $\mathcal{H}_4$ row of @tbl-04-synthesis-grid is this chapter's Transport Budget handoff record filled in, combining the Limit Record (@sec-body) with the proposer limits from @sec-brain. Its value is the `{python} PartOneCoupledBudget.t_lease_str` chunk lease handed from the chunk policy to the permission path, a `requirement` proposed for the `{python} PartOneCoupledBudget.v_str` drive limit, loaded, on a dry floor, at the admission-renewal target above; its final margin remains unresolved until evidence age through admission and the remaining stop terms are bounded, and its detector is the lease timer on the safety microcontroller, counted on that processor's own clock.
 
 ::: {#chk-nervous-handoffs-grid .callout-checkpoint title="The handoffs matrix and physical budgets"}
 
@@ -1309,7 +1092,7 @@ Before testing the lease on a humanoid and reviewing the engineering fallacies, 
 - [ ] **Signal handoff classification**: Can you identify the five canonical handoffs ($\mathcal{H}_1\text{--}\mathcal{H}_5$) bridging physical plant mechanics to high-level deliberative reasoning?
 - [ ] **Binding physical constraints**: Can you explain why sensory handoffs bind first on bandwidth and exposure latency, whereas actuation handoffs bind first on determinism and heat?
 - [ ] **Handoff record provenance**: Can you describe why every numerical limit in an autonomous system must record its evidence category, operating conditions, bound kind, and verification status?
-- [ ] **The lease rule**: Can you state the two limits on the chunk lease, one set by the proposer's renewal period and one by the pre-brake ceiling, and explain why the chunk policy can renew the lease while the intent model cannot?
+- [ ] **The lease rule**: Can you state the two limits on the chunk lease, one set by successful-admission interarrival and one by the pre-brake ceiling, and explain why a P99 inference time alone proves neither?
 
 :::
 
@@ -1355,11 +1138,11 @@ class HumanoidFallDeadline:
 
 An upright biped diverges from balance on the characteristic timescale $\tau_{\text{fall}} = \sqrt{z_c/g}$, where $z_c$ is its center-of-mass height. Modeling the biped in the sagittal plane as an inverted pendulum of point mass $m$ pivoting above a contact point at height $z_c$, Newton's second law for a small angular deflection $\theta$ from vertical yields:
 $$m z_c^2 \ddot{\theta} = m g z_c \sin\theta \implies \ddot{\theta} \approx \frac{g}{z_c} \theta$$
-The characteristic equation $\ddot{\theta} - \omega_0^2 \theta = 0$ yields natural divergence modes $e^{\pm \omega_0 t}$ with natural frequency $\omega_0 = \sqrt{g/z_c}$. The unstable positive pole governs how quickly an unrecovered perturbation tilts out of control, with characteristic divergence timescale:
+The characteristic equation $\ddot{\theta} - \omega_0^2 \theta = 0$ yields natural divergence modes $e^{\pm \omega_0 t}$ with natural frequency $\omega_0 = \sqrt{g/z_c}$. The growing exponential mode governs how quickly an unrecovered perturbation tilts out of control, with characteristic divergence timescale:
 $$\tau_{\text{fall}} = \frac{1}{\omega_0} = \sqrt{\frac{z_c}{g}}$$
 For an adult-scale humanoid with center of mass near hip height ($z_c = 0.9\,\text{m}$) and gravitational acceleration $g = 9.81\,\text{m/s}^2$, this evaluates to $\tau_{\text{fall}} = \sqrt{0.9 / 9.81} \approx 0.303\,\text{s} = 303\,\text{ms}$ (about `{python} HumanoidFallDeadline.t_fall_str`). This is a characteristic growth timescale, not a universal deadline for recovery. The latest feasible recovery action also depends on the initial lean and angular velocity, the support geometry, and the steps the machine can reach. The timescale shows why deliberation cannot suspend local balance control; a state-dependent recovery calculation must establish the actual deadline.
 
-The split holds, and what changes is the deadline its terms answer to:
+The split holds, but a biped needs a state-dependent recovery deadline. A capture point is a foot-placement target for arresting the modeled fall; reaching it requires both time and available actuator effort. The lease terms must leave enough of each for recovery:
 
 * **The lease is sized from the dynamic capture-point deadline.** On a wheeled mobile base, an expired lease commands mechanical deceleration to rest ($v \cdot T_{\text{lease}}$). On an underactuated biped, static halting is catastrophic: applying mechanical holding brakes mid-gait causes the torso to pivot forward into an uncontrolled ground collision. The lease fallback action therefore transitions from mechanical braking to **emergency capture-point step execution**. The lease, the tick, the bus cycle, and the observation age must fit inside the state-dependent recovery budget while leaving time to execute the step. The characteristic fall timescale motivates this calculation but does not replace it.
 * **The proposer must meet the recovery budget.** A renewal period that consumes most of the characteristic fall timescale is a reason to keep the slower intent model outside local balance control. Whether a chunk policy can renew the lease must be checked against the actual recovery deadline and the time needed to execute the fallback.
@@ -1373,7 +1156,7 @@ A block diagram draws a logical line between high-level deliberation and low-lev
 ::: {.fallacy-pitfall}
 **Pitfall**: *Servicing a safety watchdog inside a high-priority timer interrupt rather than an application-verified safety loop.*
 
-The mobile manipulator's self-watchdog removes drive power through the Safe Torque Off path of @sec-nervous-actuation-authority if it receives no feed within `{python} MachineLeaseBudget.t_self_watchdog_str`, because an enforcer that has stopped completing its checks can no longer command a controlled stop. Suppose engineers refresh it from a high-priority timer interrupt and the lower-priority enforcement task deadlocks. The interrupt continues firing every `{python} MachineLeaseBudget.t_tick_str` tick even though the task has frozen and stopped checking torque limits, clearance, and chunk leases. The watchdog therefore stays fed while the enforcer has silently lost its safety function.
+The mobile manipulator's self-watchdog inhibits torque through the Safe Torque Off path of @sec-nervous-actuation-authority if it receives no feed within `{python} MachineLeaseBudget.t_self_watchdog_str`, because an enforcer that has stopped completing its checks can no longer command a controlled stop. Suppose engineers refresh it from a high-priority timer interrupt and the lower-priority enforcement task deadlocks. The interrupt continues firing every `{python} MachineLeaseBudget.t_tick_str` tick even though the task has frozen and stopped checking torque limits, clearance, and chunk leases. The watchdog therefore stays fed while the enforcer has silently lost its safety function.
 
 In distributed systems engineering, this represents the classic **liveness versus semantic correctness fallacy**: a node that responds to network ping heartbeats can be completely livelocked, thrashing on memory allocation, or deadlocked on an internal mutex. A watchdog service pulse must never assert mere scheduler activity; it must be conditioned on the successful, sequential retirement of all required verification stages (a windowed hardware watchdog pet conditioned on a monotonic task-completion token). An independent timer tick establishes only that hardware interrupt vectors still cycle, not that the controller has safely evaluated the machine's physical state (@sec-nervous-hardware-isolation).
 
@@ -1399,7 +1182,7 @@ Suppose the machine's arm evaluates a control barrier function [@ames2019control
 ::: {.fallacy-pitfall}
 **Fallacy**: *Nominal, fault-free operating logs are sufficient to prove physical architectural isolation.*
 
-The mobile manipulator completes normal trials without a missed enforcement deadline. Those logs show behavior under a fault-free workload; they do not expose the hidden physical couplings that emerge only under faults. Qualification therefore injects power transients, floods communication buses, corrupts policy memory, and locks a shaft on a dynamometer. Each experiment must check an explicit response bound, such as whether locked-rotor detection clamps current within $2.0\text{ ms}$, rather than treating the absence of a crash as success. Evidence for isolation comes from exercising the claimed fault boundaries and measuring continued enforcement or the required safe transition.
+Suppose the mobile manipulator completes normal trials without a missed enforcement deadline. Those logs show behavior under a fault-free workload; they do not expose the hidden physical couplings that emerge only under faults. Qualification therefore injects power transients, floods communication buses, corrupts policy memory, and locks a shaft on a dynamometer. Each experiment must check an explicit response bound, such as whether locked-rotor detection clamps current within $2.0\text{ ms}$, rather than treating the absence of a crash as success. Evidence for isolation comes from exercising the claimed fault boundaries and measuring continued enforcement or the required safe transition.
 
 **Architect's countermeasure**: Validate fault-domain independence through active fault-injection regimes (power sags, clock glitches, bus flooding, and memory corruption) with quantitative pass-fail response bounds.
 :::
@@ -1407,23 +1190,23 @@ The mobile manipulator completes normal trials without a missed enforcement dead
 ::: {.fallacy-pitfall}
 **Pitfall**: *Assuming zero packet loss in robotics middleware equates to deterministic real-time delivery.*
 
-A common architectural error is deploying general-purpose publish-subscribe middleware (such as ROS 2 over DDS) configured with "Reliable" Quality of Service (QoS) on a cycle-critical control link. While Reliable QoS guarantees eventual packet delivery without data loss, it achieves this by buffering unacknowledged packets and retransmitting dropped frames across the network. When temporary bus congestion or wireless interference causes packet loss, the middleware triggers a retransmission storm. Transport latency surges from sub-millisecond nominal values to tens or hundreds of milliseconds, starving the motor drive of fresh setpoints. In physical motion control, lossless queuing is a hazard. Cycle-critical control requires either deterministic hardware buses (EtherCAT) or middleware configured for "Best Effort" delivery with a queue depth of one (lossy freshest-value delivery), where late packets are dropped immediately in $\mathcal{O}(1)$ time rather than retransmitted.
+A publish-subscribe transport can deliver every retained packet and still deliver motion commands too late. Reliable delivery policies may buffer and retry packets, so an outage can leave the consumer draining historical commands after communication resumes. A freshest-value policy avoids that backlog but does not itself bound scheduling, transmission, or processing. The cycle-critical path needs both bounded delivery and an explicit rule for rejecting stale commands; the mailbox and configured bus calculations establish those separate obligations.
 
-**Architect's countermeasure**: Restrict general-purpose publish-subscribe middleware to supervisory perception and diagnostic streams. Use hardware time-triggered buses or zero-allocation, wait-free shared-memory mailboxes with depth-one freshest-value semantics for all cycle-critical actuation paths.
+**Architect's countermeasure**: Budget the complete transport response under the declared traffic and faults, and enforce freshness at the consumer. Keep supervisory traffic from delaying cycle-critical commands, regardless of the middleware or bus selected.
 :::
 
 ## Summary {#sec-nervous-summary}
 
-@Sec-body derived an illustrative stopping budget for the loaded machine, and @sec-brain established illustrative budgets for proposal supply and evidence age. This chapter set the permission path's check rate from the joint loop's stability latency margin, and it combined those budgets to allocate the time for which a proposal may drive the actuators. The result on the mobile manipulator is a chunk lease long enough to outlast one renewal of the chunk policy and short enough to fit inside the pre-brake ceiling, and the Transport Budget handoff record carries that lease, with its conditions and its evidence, to every later chapter. The lease and every other mechanism of this chapter remain claims until they have been exercised under compute delays, bus faults, bad proposals, sensor errors, and loss of braking authority. Part I opened on the irreversibility law (principle \ref{pri-vol4-irreversibility}), and the lease closes Part I as a rule about authority, since motion that cannot be recalled may be commanded only for as long as the stopping budget can pay for its travel.
+@Sec-body derived an illustrative stopping budget for the loaded machine, and @sec-brain established illustrative budgets for proposal supply and evidence age. This chapter set the permission path's check rate from the joint loop's stability latency margin, and it combined those budgets to allocate the time for which a proposal may drive the actuators. The illustrative result on the mobile manipulator is a chunk lease that exceeds the chosen renewal floor and fits the partial pre-brake budget, and the Transport Budget handoff record carries that lease, with its conditions and its evidence, to every later chapter. The lease and every other mechanism of this chapter remain claims until they have been exercised under compute delays, bus faults, bad proposals, sensor errors, and loss of braking authority. Part I opened on the irreversibility law (principle \ref{pri-vol4-irreversibility}), and the lease closes Part I as a rule about authority, since motion that cannot be recalled may be commanded only for as long as the stopping budget can pay for its travel.
 
 ::: {.callout-takeaways title="The permission path and determinism"}
 * **Proposal is not permission:** High-level learned models act strictly as unprivileged proposal engines ($p_t$). Physical write privilege over motor drive registers is reserved exclusively for the deterministic real-time enforcer, on silicon whose isolation from the proposer has been demonstrated.
 * **Cadence is dictated by physics, not software:** The 4-tier concurrency hierarchy ($20\text{ kHz}$ FOC current regulation, $1\text{ kHz}$ kinematic enforcer checks, $20\text{--}50\text{ Hz}$ action-chunk inference, and $1\text{--}5\text{ Hz}$ multimodal deliberation) is governed by physical time constants ($\tau_e = L/R$), discrete phase-lag margins ($\Delta\phi = -\omega T_s / 2$), exposure horizons, and model execution budgets.
-* **The exchange never waits, and every proposal expires:** The permission path reads the mailbox in one bounded attempt per tick and keeps its last validated chunk on a collision, and the proposal header's evidence time and expiry end that chunk's authority whether or not any cancellation arrives.
-* **Worst-case bounds outrank empirical distributions:** A statistical latency percentile ($P_{99}$) cannot prove real-time safety. Deterministic certification requires analytical Response Time Analysis ($R_i = C_i + B_i + I_i \le D_i$), eliminating unbounded bus contention and memory allocations from the safety path.
+* **The exchange never waits, and every proposal expires:** The permission path reads the mailbox in one bounded attempt per tick and keeps an independently admissible active chunk on a collision, and the proposal header's evidence time and expiry end that chunk's authority whether or not any cancellation arrives.
+* **Worst-case bounds outrank empirical distributions:** A statistical latency percentile ($P_{99}$) cannot prove real-time safety. A response claim needs bounded computation, blocking, and interference ($R_i = C_i + B_i + I_i \le D_i$) under its stated conditions, supported by the corresponding analysis and qualification evidence.
 * **The veto is only as independent as what it shares:** A permission path that shares a clock, a power rail, a memory bus, or silicon with the proposer can be silenced by the proposer's faults, so independence is a claim that fault injection must demonstrate, not a property of separate processes.
-* **Stopping dynamics dimension the chunk lease:** On the mobile manipulator at its drive limit, the pre-brake ceiling is `{python} MachineLeaseBudget.t_ceiling_str`. The chosen `{python} MachineLeaseBudget.t_lease_str` lease sits just above the shortest lease the chunk policy can renew, and the path from its last renewal to brake onset spends `{python} MachineLeaseBudget.t_renewal_to_onset_str`, bringing the stopping budget to `{python} MachineLeaseBudget.running_total_str` of the `{python} MachineLeaseBudget.d_clear_str` clear distance.
-* **A failure is an over-budget limit at one handoff:** The Transport Budget handoff record places each limit at one of five handoffs with its conditions, evidence category, and bound kind, so a regression is diagnosed against its allocated budget with like-for-like evidence.
+* **Stopping dynamics dimension the chunk lease:** On the mobile manipulator at its drive limit, the pre-brake ceiling is `{python} MachineLeaseBudget.t_ceiling_str`. The chosen `{python} MachineLeaseBudget.t_lease_str` lease sits just above the selected renewal floor, and the path from its last admission to brake onset spends `{python} MachineLeaseBudget.t_renewal_to_onset_str`, bringing the partial stopping ledger to `{python} MachineLeaseBudget.running_total_str` of the `{python} MachineLeaseBudget.d_clear_str` clear distance before evidence age through admission and the remaining stop terms.
+* **Locate interface regressions at their handoff:** The Transport Budget handoff record places each limit at one of five handoffs with its conditions, evidence category, and bound kind, so a regression is diagnosed against its allocated budget with like-for-like evidence.
 :::
 
 The Body's stopping limits, the Brain's renewal rate, and the Nervous System's response delays now constrain the same decision: how long a proposal may retain authority. The Transport Budget records the resulting allocation and the evidence still needed to justify it. This architectural account does not establish that every stop is feasible; the remaining observation, planning, and enforcement terms must also fit. It does establish a machine through which experience can be gathered without granting the collecting policy unrestricted actuation authority.
