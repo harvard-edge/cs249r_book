@@ -1,7 +1,7 @@
 # Lab 4: Closing the Gap — Real Data & Fine-Tuning
 
 **Schedule:** Weeks 7–8 · Milestone 2 due end of Week 8
-**Required Textbook Reading:** [Chapter 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd), [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd)
+**Required Textbook Reading:** [Chapter 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd), [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd), [Chapter 9: Spatial Memory](../../../books/vol4/09_memory/09_memory.qmd)
 **Target Competencies:** `[ ] B3 Edge Model Profiling & Resource Budgets`, `[ ] C1 Closed-Loop Autonomous Action`
 **Milestone Alignment:** Concludes [Milestone 2](../curriculum/syllabus.md#sec-milestones) (End of Week 8)
 
