@@ -1,118 +1,153 @@
-# Lab 4: Autonomous Closed-Loop Reach
+# Lab 4: Closing the Gap — Real Data & Fine-Tuning
 
-**Schedule:** Weeks 7–8
-**Required Textbook Reading:** [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd), [Chapter 11: Trajectory Planning](../../../books/vol4/11_planning/11_planning.qmd) & [Chapter 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd)
-**Target Competencies:** `[ ] C1 Closed-Loop Autonomous Action`
+**Schedule:** Weeks 7–8 · Milestone 2 due end of Week 8
+**Required Textbook Reading:** [Chapter 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd), [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd)
+**Target Competencies:** `[ ] B3 Edge Model Profiling & Resource Budgets`, `[ ] C1 Closed-Loop Autonomous Action`
+**Milestone Alignment:** Concludes [Milestone 2](../curriculum/syllabus.md#sec-milestones) (End of Week 8)
+
 ---
 
 ## Overview
 
 ### Purpose
-Everything before this was preparation. This is the moment the full Sense–Propose–Permit–Act loop runs for real — no host PC, no safety net, no tethered connection. The robot sees, decides, asks for permission, and moves, in a continuous loop running entirely on-device. This lab is where you discover whether your trained model, your calibration, your bridge latency, and your safety governor actually work together as a system.
+Your sim-trained VLA struggled on real hardware — the sim2real gap was real and measurable. Now you learn how the field actually solves this: collect a small dataset of real-world demonstrations and use it to fine-tune the simulation-trained model. This is the modern Physical AI workflow: pre-train cheaply in simulation, then adapt efficiently with real data. By the end of this lab, you will close the loop completely — a fine-tuned VLA running autonomously on the edge, with no host tether, achieving real physical tasks.
 
 ### Prerequisites
-**Lab 3 completed.** You need a quantized ONNX INT8 policy deployed on the UNO Q with verified inference latency < 80 ms, and the full station from Lab 1 with working camera, RPC bridge, and safety governor.
+**Lab 3 completed.** You need a sim-trained VLA deployed on the Dragonwing, a documented sim2real gap table, and working inter-core RPC. You also need the full calibrated station from Lab 2.
 
 ### Learning Outcomes
 By the end of this lab, you will be able to:
-- Integrate camera capture, neural policy inference, inter-core RPC, MCU safety evaluation, and servo actuation into a single continuous control loop
-- Deploy and run an autonomous robotic system untethered from any host computer
-- Measure and decompose end-to-end loop latency into its five component stages
-- Evaluate autonomous manipulation performance through repeated physical trials with quantified success criteria
+- Teleoperate a robot to collect a structured physical demonstration dataset with all four action taps logged
+- Fine-tune a simulation-pre-trained VLA on a small real-world dataset
+- Quantify how fine-tuning reduces the sim2real gap compared to the sim-only model
+- Integrate vision, inference, RPC, safety, and actuation into a single autonomous control loop running untethered on edge hardware
+- Evaluate autonomous manipulation through repeated physical trials
 
 ### What You Will Do
-Over two weeks, you will integrate all the pieces from Labs 1–3 into a single autonomous loop on the UNO Q. You will disconnect the host PC, run the system headlessly, execute 10 physical reach trials from varied starting positions, and break down the total loop latency into its five components (camera, preprocessing, inference, RPC, actuation). This is the first time you see your system operate as a truly autonomous physical agent.
+In Week 7, you will teleoperate the robot with a gamepad, collect 30 real-world demonstration episodes in LeRobot Dataset v3 format, audit the dataset, and fine-tune the Lab 3 sim-trained VLA on this real data. In Week 8, you will deploy the fine-tuned model, disconnect the host PC, and run the full autonomous Sense–Propose–Permit–Act loop untethered. You will measure the improvement over the sim-only model and decompose the end-to-end loop latency.
 
 ---
 
 ### 1. The Physical Question
-Can a trained neural policy run completely untethered on edge silicon, closing the physical loop between live camera pixels and motor torques without relying on an external workstation or cloud server?
+
+Can a small amount of real-world data rescue a model that was trained entirely in simulation? How many demonstrations do you need, and how much of the sim2real gap does fine-tuning actually close?
 
 ---
 
 ### 2. Hardware Setup
 
-> **Hardware Setup:** See the [Station Reference Card](station-reference.md) for the standard bench configuration.
+> **Standard Bench Configuration:** See the [Station Reference Card](station-reference.md).
 
-
-1. **Edge Board:** Arduino UNO Q running standalone (Qualcomm Linux MPU + STM32 MCU).
-2. **Network Connection:** Disconnected or headless network (zero tethering to a workstation during task execution).
-3. **Camera & Arm:** USB webcam mounted above the table; Seeed SO-101 arm in resting pose.
-4. **Target Setup:** A soft colored foam block placed at an arbitrary, unscripted location inside the reachable workspace envelope.
+Additional requirements:
+1. **USB Gamepad:** Xbox or Logitech controller for teleoperation input.
+2. **Foam Block Targets:** Colored foam blocks (red, blue, yellow) for manipulation tasks.
+3. **GPU Workstation:** For fine-tuning the VLA on real data.
 
 ---
 
 ### 3. Step-by-Step Protocol
 
-#### Step 1: Autonomous Loop Integration
-1. Assemble the autonomous runtime script on Qualcomm Linux (`pai_edge_runtime.py`):
-   ```python
-   import cv2
-   from pai_bridge import BridgeClient
-   from pai_onnx import PolicyRunner
+#### Phase A: Real-World Data Collection & Fine-Tuning (Week 7)
 
-   cam = cv2.VideoCapture(0)
-   bridge = BridgeClient()
-   policy = PolicyRunner("so101_act.onnx")
-
-   # Main closed-loop cycle
-   while True:
-       ret, frame = cam.read()
-       joint_state = bridge.get_joint_state()
-
-       # 1. Propose action chunk
-       action_chunk = policy.predict(frame, joint_state)  # K steps
-
-       # 2. Stream chunk across RPC bridge to STM32
-       bridge.send_action_chunk(action_chunk)
+##### Step 1: Teleoperation Setup
+1. Configure the LeRobot teleoperation interface with the USB gamepad.
+   ```yaml
+   robot:
+     type: manipulator
+     motors:
+       bus: uno_q_bridge
+       port: /dev/ttyACM0
+       baudrate: 1000000
+     cameras:
+       overhead:
+         type: opencv
+         index_or_path: /dev/video0
+         fps: 30
+         width: 640
+         height: 480
    ```
-2. Verify that the script handles camera frame preprocessing, normalizes joint state inputs, and streams the predicted action chunk over the internal RPC bridge.
+2. Map gamepad axes to SO-101 joint velocities. Verify proportional control with zero lag.
+3. Practice smooth teleoperation for 10 minutes before recording.
 
-#### Step 2: The Untethered Autonomous Reach
-1. Disconnect all USB cables connecting the UNO Q to your laptop. The UNO Q must run exclusively on its dedicated power supply.
-2. Place the block at an arbitrary starting position in the workspace.
-3. Trigger task start via the onboard user button or a headless SSH command.
-4. **Witness the Loop:**
-   * The camera captures the scene.
-   * The ONNX policy processes the frame and current joint state.
-   * The policy proposes a 16-step action chunk ($a_{\text{req}}$).
-   * The STM32 MCU validates the trajectory and commands the STS3215 servos ($a_{\text{enf}}$).
-   * The arm smoothly reaches toward the block and touches it.
+##### Step 2: Record 30 Demonstration Episodes
+1. Define the task protocol: reach toward and touch a colored foam block from 5 varied starting positions.
+2. Record 30 demonstration episodes. Each episode logs all 4 action taps ($a_{\text{req}}$, $a_{\text{map}}$, $a_{\text{enf}}$, $a_{\text{meas}}$) plus synchronized camera frames in LeRobot Dataset v3 format.
+3. Record 3 additional "adversarial" episodes with deliberately poor demonstrations (jerky motion, overshoot). Label them as failure cases.
+4. Audit dataset integrity: verify zero dropped frames, confirm timestamp monotonicity, check action tap completeness.
+5. Split into train/validation/test (24/3/3) with leak-free episode boundaries. Produce a dataset card.
 
-#### Step 3: Loop Latency Breakdown
-1. Instrument the edge runtime script to log the latency breakdown over 50 consecutive cycles:
-   * $t_{\text{cam}}$: Frame capture and V4L2 buffer copy.
-   * $t_{\text{inf}}$: Neural policy ONNX inference.
-   * $t_{\text{rpc}}$: Inter-core RPC transmission time to STM32.
-   * $t_{\text{bus}}$: Half-duplex TTL servo packet transmission time.
-2. Plot the end-to-end loop latency histogram. Verify that the 99th-percentile tail latency satisfies $t_{99} < 100\text{ ms}$.
+##### Step 3: Fine-Tune the Sim-Trained VLA
+1. Load the sim-trained VLA checkpoint from Lab 3.
+2. Fine-tune on your 24-episode real-world training set using the staff-provided training recipe.
+3. Monitor train/val loss convergence. Early-stop on validation loss.
+4. Export the fine-tuned model to ONNX INT8. Verify model size $< 50\text{ MB}$.
+5. Transfer to the UNO Q Dragonwing.
+
+#### Phase B: Autonomous Closed-Loop Operation (Week 8)
+
+##### Step 4: Sim-Only vs. Fine-Tuned Comparison
+1. Run the **sim-only VLA** (Lab 3 checkpoint) on 10 physical reach trials. Record success rate and positioning error.
+2. Run the **fine-tuned VLA** on the same 10 target positions. Record success rate and positioning error.
+3. Construct the improvement table:
+
+   | Model | Success Rate | Mean Error (mm) | Sim2Real Gap Reduction |
+   |:---|:---:|:---:|:---:|
+   | IK baseline (Lab 2) | | | — |
+   | Sim-only VLA (Lab 3) | | | — |
+   | Fine-tuned VLA | | | |
+
+##### Step 5: Untethered Autonomous Loop
+1. Integrate the full Sense–Propose–Permit–Act pipeline:
+   camera capture → VLA inference → RPC proposal → MCU safety check → servo command → telemetry return.
+2. **Disconnect the host PC.** Run the loop headlessly on the UNO Q.
+3. Execute 10 physical reach trials from varied starting positions. Record success/failure and final positioning error for each.
+
+##### Step 6: Latency Decomposition
+1. Break down end-to-end loop latency:
+   $$T_{\text{total}} = t_{\text{cam}} + t_{\text{prep}} + t_{\text{inf}} + t_{\text{rpc}} + t_{\text{act}}$$
+2. Target: $T_{\text{total}} \le 80\text{ ms}$ (≥ 12.5 Hz loop rate).
+3. Identify the bottleneck component. Can you reduce it?
 
 ---
 
-### 4. The Disturbance & Failure Test
-1. **Unannounced Novel Position:** Place the block in an unfamiliar starting pose never seen in the 30 training demonstrations (e.g., far right boundary).
-   * *Observation:* Verify whether the policy generalizes and reaches the new position, or whether it exhibits compounding error.
-2. **Visual Clutter Obstacle:** Place a benign, neutral object (e.g., an empty tape roll) adjacent to the block. Verify that the visual perception pipeline does not get distracted or drive into the clutter.
+### 4. Disturbance & Failure Tests
+
+- Reduce lighting to 50% mid-trial. Does the fine-tuned model handle it better than the sim-only model?
+- Introduce a 200 ms artificial delay in the camera pipeline. Does the MCU reject the stale proposal?
+- Disconnect the webcam mid-reach. Verify the system enters safe hold.
 
 ---
 
 ### 5. Multi-Tap Telemetry Trace
-Record the full multi-tap trace of an untethered autonomous reach:
-* Plot the 6 joint angle trajectories over time ($t = 0$ to $t_{\text{end}}$).
-* Overlay requested action proposals ($a_{\text{req}}$) and measured physical feedback ($a_{\text{meas}}$).
-* Measure the final positioning accuracy: Euclidean distance between arm end-effector and block center of mass.
+
+Capture the full 4-tap telemetry during an autonomous reach:
+* $a_{\text{req}}$: VLA's proposed action (Dragonwing output)
+* $a_{\text{map}}$: Mapped joint command sent over RPC
+* $a_{\text{enf}}$: MCU's permitted command (after safety checks)
+* $a_{\text{meas}}$: Actual servo encoder readback
+
+Verify convergence: $a_{\text{meas}} \to a_{\text{enf}}$ within $\pm 0.5^\circ$.
 
 ---
 
 ### 6. Common Pitfalls & Debugging
-* ⚠️ **Headless Camera Exposure Shifts:** When running headless without an interactive GUI, ensure auto-exposure does not hunt or oscillate between frames. Lock camera exposure and white balance using `v4l2-ctl -c exposure_auto=1`.
-* ⚠️ **Thread Starvation:** Ensure camera capture runs in a separate thread from policy inference so that V4L2 buffers do not drop frames while the neural model computes.
+
+* ⚠️ **Overfitting on Small Datasets:** With only 24 training episodes, the fine-tuned model can overfit. Monitor validation loss carefully and use early stopping.
+* ⚠️ **Distribution Mismatch:** If your teleop demonstrations are much smoother or jerkier than the sim training data, the fine-tuned model may learn a mixed style. Be consistent in your demonstration quality.
+* ⚠️ **Telemetry Dropped Frames:** At 30 FPS, even one dropped camera frame creates a gap in the action sequence. Audit timestamp monotonicity before training.
 
 ---
 
-### 7. Sign-Off Criteria (The Exit Check)
-To receive credit for Lab 5:
-1. [ ] **Witnessed Untethered Reach:** Demonstrate a live autonomous reach on the SO-101 arm running entirely from the Arduino UNO Q without host PC intervention.
-2. [ ] **Physical Task Completion:** The arm must successfully make contact with the block placed at a staff-selected arbitrary position within the envelope.
-3. [ ] **End-to-End Latency Profile:** Submit a verified latency breakdown showing total loop execution time $< 100\text{ ms}$.
-*Staff signs off `[ ] C1` on the team's [Competency Card](../curriculum/student-competencies.md).*
+### 7. Sign-Off Criteria (Milestone 2 Exit Check)
+
+| # | Criterion | Measurable Threshold |
+|:---:|:---|:---|
+| 1 | **Dataset collected** | 30 complete episodes; all 4 action taps populated per timestep |
+| 2 | **Dataset card** | Collection protocol, sensor specs, splits, and known limitations documented |
+| 3 | **Fine-tuning converges** | Val loss decreasing; no NaN gradients |
+| 4 | **Sim-only vs. fine-tuned comparison** | Quantified improvement table with at least 10 matched physical trials each |
+| 5 | **Untethered loop runs** | ≥ 10 consecutive trials without host intervention |
+| 6 | **Success rate** | Fine-tuned VLA: ≥ 7/10 reaches within 15 mm of target |
+| 7 | **Loop latency** | $T_{\text{total}} \le 80\text{ ms}$ (p50); $< 120\text{ ms}$ (p99) |
+
+*Staff signs off `[ ] B3` and `[ ] C1` on the team's [Competency Card](../curriculum/student-competencies.md).*

@@ -13,7 +13,7 @@
 A robot that works is not the same as a robot you can trust. In every previous lab, the STM32 safety governor was running in the background — but you never tested whether it actually holds under adversarial conditions. This lab makes safety the explicit subject. In the first week, you build the deterministic safety barriers (velocity clamps, workspace geofences, joint limits). In the second week, you systematically try to defeat them — injecting faults, freezing the brain, corrupting packets, cutting power. If you can't break it, you can trust it.
 
 ### Prerequisites
-**Lab 5 completed.** You need a fully working autonomous S·P·A loop with disturbance-tested performance from Lab 5. You also need comfort with STM32 firmware development from Lab 1.
+**Lab 5 completed.** You need a fully working autonomous S·P·A loop with a fine-tuned VLA and disturbance-tested performance from Lab 5. You also need comfort with STM32 firmware development from Lab 2.
 
 ### Learning Outcomes
 By the end of this lab, you will be able to:

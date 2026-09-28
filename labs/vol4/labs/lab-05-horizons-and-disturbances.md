@@ -8,20 +8,20 @@
 ## Overview
 
 ### Purpose
-Your robot can act autonomously — but can it handle the unexpected? The real world doesn't hold still while your model thinks. This lab stress-tests your system along three axes: how far ahead the model can predict before physical drift accumulates (action horizons), whether language can redirect physical behavior (language conditioning), and what happens when the environment changes mid-action (disturbance recovery). This is where you learn the difference between a demo that works once and a system that works reliably.
+Your fine-tuned VLA can reach targets autonomously — but can it handle the unexpected? The real world doesn't hold still while your model thinks. This lab stress-tests your system along three axes: how far ahead the model can predict before physical drift accumulates (action horizons), whether language can redirect physical behavior (language conditioning), and what happens when the environment changes mid-action (disturbance recovery). This is where you learn the difference between a demo that works once and a system that works reliably.
 
 ### Prerequisites
-**Lab 4 completed.** You need a working untethered S·P·A loop on the UNO Q with ≥ 7/10 reach success rate and verified end-to-end latency ≤ 80 ms.
+**Lab 4 completed.** You need a fine-tuned VLA running in an untethered autonomous S·P·A loop on the UNO Q with ≥ 7/10 reach success rate and verified end-to-end latency ≤ 80 ms.
 
 ### Learning Outcomes
 By the end of this lab, you will be able to:
 - Benchmark how action chunk horizon length (K) affects manipulation success rate, motion smoothness, and recovery ability
 - Demonstrate that natural language prompts can produce measurably different physical trajectories on the same scene
-- Evaluate closed-loop disturbance recovery by measuring whether a policy replans or drifts when the target is displaced mid-reach
+- Evaluate closed-loop disturbance recovery by measuring whether the VLA replans or drifts when the target is displaced mid-reach
 - Quantify the tradeoff between open-loop prediction efficiency and closed-loop adaptation
 
 ### What You Will Do
-In one week, you will run systematic experiments across three dimensions. First, you will benchmark four action chunk horizons (K = 1, 8, 16, 32) with matched trials. Second, you will test SmolVLA's language conditioning by giving contrasting prompts ("pick up the red block" vs. "pick up the blue block") and measuring the resulting trajectory divergence. Third, you will physically shift the target object 50 mm mid-reach and evaluate whether the policy replans toward the new location or completes its original trajectory into empty space.
+In one week, you will run systematic experiments across three dimensions. First, you will benchmark four action chunk horizons (K = 1, 8, 16, 32) with matched trials. Second, you will test SmolVLA's language conditioning by giving contrasting prompts ("pick up the red block" vs. "pick up the blue block") and measuring the resulting trajectory divergence. Third, you will physically shift the target object 50 mm mid-reach and evaluate whether the VLA replans toward the new location or completes its original trajectory into empty space.
 
 ---
 
