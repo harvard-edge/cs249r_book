@@ -65,7 +65,6 @@ Engineering mastery is tracked using the [Physical AI Station Competency Card](c
 
 Six labs follow the textbook's four parts in order, building from pen-and-paper math through simulation, real hardware, learned control, and finally safety governance. The final three weeks are an open capstone.
 
-![Volume IV Physical AI Studio 14-Week Curriculum Map](assets/images/vol4-course-structure-map.svg)
 
 | | Lab | Weeks | Book Part & Chapters | What You Will Do |
 |:---:|:---|:---:|:---|:---|
@@ -79,13 +78,10 @@ Six labs follow the textbook's four parts in order, building from pen-and-paper 
 
 ---
 
-## 6. Reference & Governance Documents
+## 6. Reference Documents
 
-| Domain | Document | Primary Focus & Target Audience |
-|:---|:---|:---|
-| **Academic Policy** | 📋 **[Master Course Syllabus](curriculum/syllabus.md)** | Full academic grading weights (15% M1, 25% M2, 20% M3, 15% M4, 25% M5), team roles, and safety contract. |
-| **Student Rubric** | 🏷️ **[Physical AI Competency Card](curriculum/student-competencies.md)** | The 12-item platform-independent rubric signed off at the bench across 4 quadrants. |
-| **Station Setup** | 🔧 **[Station Reference Card](labs/station-reference.md)** | Standard bench hardware, wiring diagram, three engineering rules, and four-tap telemetry schema. |
-| **Hardware Kit** | 📦 **[Kit Bill of Materials (BOM)](staff/kit-bom.md)** | Complete component list, pricing, power rails, and supplier links for the UNO Q and SO-101 arm. |
-| **Bench Bring-Up** | 🧪 **[Postdoc Pre-Flight Qualification Guide](staff/feasibility-plan.md)** | Engineering bring-up protocol and the four hardware validation steps (Steps 1–4). |
-| **Staff Roadmap** | 🗓️ **[Staff Implementation Master Plan](staff/staff-implementation-plan.md)** | Comprehensive 13-week execution schedule (Sep 21 – Dec 18, 2026) for hardware bring-up, "Student Zero" runs, and class-set replication. |
+| Document | Description |
+|:---|:---|
+| 📋 **[Master Course Syllabus](curriculum/syllabus.md)** | Grading weights, milestones, team roles, and safety contract. |
+| 🏷️ **[Physical AI Competency Card](curriculum/student-competencies.md)** | The 12-skill rubric signed off at the bench across 4 quadrants. |
+| 🔧 **[Station Reference Card](labs/station-reference.md)** | Standard bench hardware, wiring, engineering rules, and telemetry schema. |
