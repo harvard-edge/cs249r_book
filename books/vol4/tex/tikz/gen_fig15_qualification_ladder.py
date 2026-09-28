@@ -37,44 +37,63 @@ transitions = [
 fig, ax = plt.subplots(figsize=(7.5, 5.5))
 
 ax.set_yscale("log")
-ax.set_xlim(-5, 112)
-ax.set_ylim(0.08, 5e6)
+ax.set_xlim(-5, 114)
+ax.set_ylim(0.08, 8e6)
 
+# Dashed cross-hairs
 for name, fid, tput, color, subtitle, infra in stages:
-    # Marker dot
+    ax.plot([fid, fid], [0.08, tput], color=paleink, linewidth=0.8,
+            linestyle="--", zorder=1)
+    ax.plot([-5, fid], [tput, tput], color=paleink, linewidth=0.8,
+            linestyle="--", zorder=1)
+
+# Markers and stage labels
+for name, fid, tput, color, subtitle, infra in stages:
     ax.plot(fid, tput, "o", color=color, markersize=10, zorder=6,
             markeredgecolor="white", markeredgewidth=2)
 
-    # Name label above marker
-    ax.text(fid, tput * 2.5, name, fontsize=14, fontweight="bold",
-            color=color, ha="center", va="bottom", zorder=5)
+    # Name label above marker (offset for In-Situ to prevent arrow strike)
+    if name == "In-Situ":
+        ax.text(fid + 2.5, tput * 2.5, name, fontsize=14, fontweight="bold",
+                color=color, ha="left", va="bottom", zorder=5)
+    else:
+        ax.text(fid, tput * 2.5, name, fontsize=14, fontweight="bold",
+                color=color, ha="center", va="bottom", zorder=5)
 
-    # Subtitle and infra below marker — tighter spacing on log scale
-    ax.text(fid, tput * 0.40, subtitle, fontsize=7.5, color=color,
+    # Subtitle and infra below marker — tailored offsets to avoid curve clipping
+    if name == "SIL":
+        sub_y = tput * 0.18
+        inf_y = tput * 0.06
+    elif name == "HIL":
+        sub_y = tput * 0.28
+        inf_y = tput * 0.10
+    else:
+        sub_y = tput * 0.35
+        inf_y = tput * 0.14
+
+    ax.text(fid, sub_y, subtitle, fontsize=8, color=color,
             ha="center", va="top", zorder=5, style="italic")
-    ax.text(fid, tput * 0.18, infra, fontsize=7, color=color,
+    ax.text(fid, inf_y, infra, fontsize=7.5, color=color,
             ha="center", va="top", zorder=5)
 
-    # Dashed cross-hairs
-    ax.plot([fid, fid], [0.08, tput], color=paleink, linewidth=0.6,
-            linestyle="--", zorder=1)
-    ax.plot([-5, fid], [tput, tput], color=paleink, linewidth=0.6,
-            linestyle="--", zorder=1)
+# Transition arrows and carefully positioned labels
+t_data = [
+    ("+ Timing &\nRegister Access", 0, 1, 19.0, 3.0e5, "left", "bottom"),
+    ("+ Real Physics",              1, 2, 53.0, 4.0e3, "left", "bottom"),
+    ("+ Environmental\nInteraction", 2, 3, 79.0, 9.0e1, "left", "bottom"),
+]
 
-# Transition arrows — shrink endpoints so arrowheads don't hide behind dots
-for label, i_from, i_to in transitions:
+for label, i_from, i_to, lx, ly, ha, va in t_data:
     _, f1, t1, _, _, _ = stages[i_from]
     _, f2, t2, _, _, _ = stages[i_to]
-    mid_f = (f1 + f2) / 2 + 6
-    mid_t = np.sqrt(t1 * t2)
     ax.annotate("",
                 xy=(f2, t2), xytext=(f1, t1),
                 arrowprops=dict(arrowstyle="-|>", color=ethdarkblue,
-                               lw=1.8, connectionstyle="arc3,rad=-0.15",
-                               shrinkA=8, shrinkB=8),
-                zorder=7)
-    ax.text(mid_f, mid_t, label, fontsize=7.5, fontweight="bold",
-            color=ethdarkblue, ha="left", va="center")
+                               lw=2.0, connectionstyle="arc3,rad=-0.15",
+                               shrinkA=9, shrinkB=9),
+                zorder=4)
+    ax.text(lx, ly, label, fontsize=8, fontweight="bold",
+            color=ethdarkblue, ha=ha, va=va, zorder=5)
 
 # Axes
 ax.set_xlabel("Hardware Fidelity (%)", fontsize=11, fontweight="bold",

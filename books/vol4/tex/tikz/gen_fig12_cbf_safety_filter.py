@@ -34,8 +34,8 @@ ax.fill_between(xs, boundary_y, 7, color=safegreen, alpha=0.10, zorder=0)
 ax.fill_between(xs, 0, boundary_y, color=harvardcrimson, alpha=0.10, zorder=0)
 
 ax.plot(xs, boundary_y, color=harvardcrimson, linewidth=2.2, zorder=2)
-ax.text(6.3, 7.0, r"$\partial\mathcal{C}$", fontsize=14, fontweight="bold",
-        color=harvardcrimson, ha="center", va="top", clip_on=False)
+ax.text(6.1, 5.8, r"$\partial\mathcal{C}$", fontsize=13, fontweight="bold",
+        color=harvardcrimson, ha="left", va="center")
 
 inset_y = 0.12 * xs**2 + 0.2 * xs + 2.2
 ax.plot(xs, inset_y, color=ethdarkblue, linewidth=1.5, linestyle="--", zorder=2)
@@ -65,14 +65,14 @@ u_nom_dir = np.array([1.6, -1.8])
 ax.annotate("", xy=x_pt + u_nom_dir, xytext=x_pt,
             arrowprops=dict(arrowstyle="-|>", color=harvardcrimson,
                            lw=2.0, linestyle="--"))
-ax.text(x_pt[0] + u_nom_dir[0] + 0.1, x_pt[1] + u_nom_dir[1] - 0.2,
-        r"$f(x,\, u_{\mathrm{nom}})$", fontsize=9, color=harvardcrimson, ha="left")
+ax.text(x_pt[0] + u_nom_dir[0] + 0.1, x_pt[1] + u_nom_dir[1] - 0.25,
+        r"$f(x,\, u_{\mathrm{nom}})$", fontsize=9.5, fontweight="bold", color=harvardcrimson, ha="left")
 
 u_safe_dir = np.array([-0.3, 1.4])
 ax.annotate("", xy=x_pt + u_safe_dir, xytext=x_pt,
             arrowprops=dict(arrowstyle="-|>", color=safegreen, lw=2.2))
 ax.text(x_pt[0] + u_safe_dir[0] + 0.1, x_pt[1] + u_safe_dir[1] + 0.15,
-        r"$f(x,\, u^*)$", fontsize=9, color=safegreen, ha="left")
+        r"$f(x,\, u^*)$", fontsize=9.5, fontweight="bold", color=safegreen, ha="left")
 
 ax.add_patch(Rectangle((0, 0), 7, 7, fill=False, edgecolor=paleink,
                         linewidth=0.8, zorder=1))
@@ -89,12 +89,12 @@ ax.set_ylim(-0.5, 5)
 ax.set_aspect("equal")
 
 # Admissible half-space (below the line)
-fill_x = np.array([-0.5, -0.5, 5.0, 6.0])
-fill_y = np.array([2.75, -0.5, -0.5, -0.5])
+fill_x = np.array([-0.5, -0.5, 6.0])
+fill_y = np.array([-0.5, 2.75, -0.5])
 ax.fill(fill_x, fill_y, color=ethdarkblue, alpha=0.06, zorder=0, clip_on=True)
 
-# Constraint line: u2 = (5 - u1)/2
-cx = np.linspace(-0.3, 5.5, 100)
+# Constraint line: u2 = (5 - u1)/2 (stopped at 5.2 to avoid crowding u1 axis label)
+cx = np.linspace(-0.3, 5.2, 100)
 cy = (5 - cx) / 2
 ax.plot(cx, cy, color=ethdarkblue, linewidth=2.0, zorder=2)
 
@@ -107,7 +107,7 @@ ax.annotate("", xy=(5.8, 0), xytext=(0, 0),
             arrowprops=dict(arrowstyle="-|>", color=paleink, lw=1.0))
 ax.annotate("", xy=(0, 4.8), xytext=(0, 0),
             arrowprops=dict(arrowstyle="-|>", color=paleink, lw=1.0))
-ax.text(5.8, -0.3, r"$u_1$", fontsize=11, color=ink, ha="center", va="top")
+ax.text(5.8, -0.35, r"$u_1$", fontsize=11, color=ink, ha="center", va="top")
 ax.text(-0.3, 4.8, r"$u_2$", fontsize=11, color=ink, ha="center", va="bottom")
 
 ax.spines["left"].set_visible(False)
@@ -126,7 +126,7 @@ ax.annotate("", xy=u_nom, xytext=origin,
                            lw=1.8, linestyle="--"))
 ax.plot(*u_nom, "o", color=harvardcrimson, markersize=5, zorder=5)
 ax.text(u_nom[0] + 0.15, u_nom[1] + 0.15, r"$u_{\mathrm{nom}}$",
-        fontsize=10, fontweight="bold", color=harvardcrimson)
+        fontsize=10.5, fontweight="bold", color=harvardcrimson)
 
 # u* — orthogonal projection onto u1 + 2*u2 = 5
 # a=(1,2), aT*u_nom = 3+7=10, excess = 10-5=5, |a|^2=5
@@ -135,8 +135,9 @@ u_star = np.array([2.0, 1.5])
 ax.annotate("", xy=u_star, xytext=origin,
             arrowprops=dict(arrowstyle="-|>", color=safegreen, lw=2.0))
 ax.plot(*u_star, "o", color=safegreen, markersize=5, zorder=5)
-ax.text(u_star[0] - 0.5, u_star[1] - 0.1, r"$u^*$",
-        fontsize=10, fontweight="bold", color=safegreen, ha="right")
+# Place u* label below-right of the point, well clear of the red dashed line and constraint line
+ax.text(u_star[0] + 0.18, u_star[1] - 0.50, r"$u^*$",
+        fontsize=11, fontweight="bold", color=safegreen, ha="left", va="center")
 
 # Δu projection line
 ax.plot([u_nom[0], u_star[0]], [u_nom[1], u_star[1]],
