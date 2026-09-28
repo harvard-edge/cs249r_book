@@ -1705,8 +1705,7 @@ The latency equation decomposes per-request latency into fixed overheads (kernel
 
 $$T_{\text{lat}}(B) = T_{\text{fixed}} + B \times T_{\text{variable}}$$
 
-*   $T_{\text{fixed}}$: Costs paid once per batch (for example, loading weights from HBM, kernel launch latency).
-*   $T_{\text{variable}}$: Marginal cost of adding one request (for example, compute time for that sample).
+In this formulation, $T_{\text{fixed}}$ captures costs paid once per batch, such as loading weights from HBM and kernel launch latency, while $T_{\text{variable}}$ denotes the marginal cost of adding one request, such as the compute time for that sample.
 
 The throughput equation describes the system's capacity:
 
@@ -2797,13 +2796,13 @@ This dropped P99 latency to $L_{\text{lat}} =$ `{python} A100HardwareScenario.p9
 
 ### Chunked prefill and prompt-decode interleaving {#sec-inference-chunked-prefill}
 
-Continuous batching admits work at iteration boundaries, but in production workloads, requests arrive with widely disparate prompt lengths. Processing these prompts exposes a fundamental systems tension between the two operational phases of autoregressive language models:
+Continuous batching admits work at iteration boundaries, but in production workloads, requests arrive with widely disparate prompt lengths. Processing these prompts exposes a fundamental systems tension between the two operational phases of autoregressive language models: prefill and decode.
 
-1.  **Prefill phase**: Computes key-value representations across all prompt tokens ($S_{\text{prompt}}$) concurrently. Because all prompt tokens are processed in parallel, the linear projection general matrix multiply (GEMM) operations operate on large sequence dimensions ($M = S_{\text{prompt}}$). For an attention layer with hidden dimension $d_{\text{model}}$, arithmetic intensity scales with prompt length:
-    $$\text{AI}_{\text{prefill}} \approx \frac{2 \cdot S_{\text{prompt}} \cdot d_{\text{model}}^2}{2 \cdot d_{\text{model}}^2} = S_{\text{prompt}} \quad \left[\frac{\text{FLOPs}}{\text{byte of weights loaded}}\right]$$
-    Under this weight-traffic-only approximation, increasing $S_{\text{prompt}}$ beyond the accelerator's ridge point makes the projection compute-bound. Attention, other memory traffic, and communication can still limit the complete prefill phase.
+During the prefill phase, the engine computes key-value representations across all prompt tokens ($S_{\text{prompt}}$) concurrently. Because all prompt tokens are processed in parallel, the linear projection general matrix multiply (GEMM) operations operate on large sequence dimensions ($M = S_{\text{prompt}}$). For an attention layer with hidden dimension $d_{\text{model}}$, arithmetic intensity scales with prompt length:
+$$\text{AI}_{\text{prefill}} \approx \frac{2 \cdot S_{\text{prompt}} \cdot d_{\text{model}}^2}{2 \cdot d_{\text{model}}^2} = S_{\text{prompt}} \quad \left[\frac{\text{FLOPs}}{\text{byte of weights loaded}}\right]$$
+Under this weight-traffic-only approximation, increasing $S_{\text{prompt}}$ beyond the accelerator's ridge point makes the projection compute-bound. Attention, other memory traffic, and communication can still limit the complete prefill phase.
 
-2.  **Decode phase**: Generates a single token per sequence sequentially. With typical batch sizes ($B_{\text{dec}} \le 64$), the arithmetic intensity $\text{AI}_{\text{decode}} \approx B_{\text{dec}} \ll \text{ridge point}$, placing the weight projections in a memory-bandwidth-bound regime under this approximation. Each decode iteration streams the active weights from High Bandwidth Memory (HBM) and reuses them across the batch. Larger batches and growing KV-cache traffic change that balance.
+In contrast, the subsequent decode phase generates a single token per sequence sequentially. With typical batch sizes ($B_{\text{dec}} \le 64$), the arithmetic intensity $\text{AI}_{\text{decode}} \approx B_{\text{dec}} \ll \text{ridge point}$, placing the weight projections in a memory-bandwidth-bound regime under this approximation. Each decode iteration streams the active weights from High Bandwidth Memory (HBM) and reuses them across the batch. Larger batches and growing KV-cache traffic change that balance.
 
 ::: {#dfn-inference-chunked-prefill .callout-definition title="Chunked prefill"}
 
@@ -3075,12 +3074,7 @@ Recommendation batching starts by grouping work around embedding locality rather
 
 :::
 
-Recommendation systems expose the same scheduling principle under a different bottleneck. Their computation pattern involves four stages:
-
-1. **Sparse feature lookup**\index{Sparse Feature Lookup}\index{Embedding table!sparse feature lookup}: Retrieve embeddings for user, item, and context features
-2. **Dense feature processing**: Transform and normalize dense features
-3. **Feature interaction**\index{Feature Interaction}\index{Feature interaction!recommendation systems}: Compute interactions between features (often via attention or factorization)
-4. **Ranking head**\index{Ranking Head}\index{Ranking head!recommendation systems}: Produce final scores
+Recommendation systems expose the same scheduling principle under a different bottleneck. Their computation pattern decomposes into four sequential stages: sparse feature lookup\index{Sparse Feature Lookup}\index{Embedding table!sparse feature lookup} retrieves embeddings for user, item, and context features; dense feature processing transforms and normalizes continuous inputs; feature interaction\index{Feature Interaction}\index{Feature interaction!recommendation systems} evaluates relationships between representations (often via attention or factorization); and a ranking head\index{Ranking Head}\index{Ranking head!recommendation systems} produces final scores.
 
 The sparse embedding lookup often dominates latency and determines batching strategy. Feature-parallel batching processes different feature types in parallel rather than batching entire requests:
 
@@ -4062,14 +4056,7 @@ PagedAttention [@kwon2023], introduced in vLLM\index{vLLM!PagedAttention integra
 
 :::
 
-PagedAttention provides four capacity benefits:
-
-- **Internal fragmentation**: It allocates pages as tokens arrive, leaving unused space only within a sequence's partially filled final page.
-- **External fragmentation**: Any free page can be used by any sequence.
-- **Dynamic growth**: Sequences can grow without preallocation.
-- **Prefix sharing**: Common prefixes can share physical pages.
-
-Together, these properties turn KV cache capacity into a schedulable resource rather than a fixed per-request reservation.
+PagedAttention provides four distinct capacity advantages. By allocating fixed-size pages dynamically as tokens arrive, it restricts internal fragmentation to at most a sequence's partially filled final page, while eliminating external fragmentation because any free physical page can be mapped to any active sequence. At the same time, sequences can grow dynamically without worst-case preallocation, and common prefixes across requests can share physical pages directly in memory. Together, these properties turn KV cache capacity into a schedulable resource rather than a fixed per-request reservation.
 
 ::: {#exmp-inference-pagedattention-implementation-details .callout-example title="PagedAttention implementation details"}
 
@@ -4655,9 +4642,7 @@ class SpeculativeSpeedup:
     et_low_str = fmt_count(et_low, precision=2, commas=False, label="token", allow_fractional=True)
 ```
 
-- **High acceptance** $(\alpha_{\text{acc}} = 0.9)$: Expected `{python} SpeculativeSpeedup.et_high_str` per round, speedup of `{python} SpeculativeSpeedup.sp_high_mult_str`.
-- **Medium acceptance** $(\alpha_{\text{acc}} = 0.7)$: Expected `{python} SpeculativeSpeedup.et_med_str` per round, speedup of `{python} SpeculativeSpeedup.sp_med_mult_str`.
-- **Low acceptance** $(\alpha_{\text{acc}} = 0.5)$: Expected `{python} SpeculativeSpeedup.et_low_str` per round, speedup of `{python} SpeculativeSpeedup.sp_low_mult_str`.
+Evaluating this model across representative acceptance regimes illustrates how sharply returns depend on draft accuracy: high acceptance ($\alpha_{\text{acc}} = 0.9$) yields an expected `{python} SpeculativeSpeedup.et_high_str` per verification round for a `{python} SpeculativeSpeedup.sp_high_mult_str` speedup, medium acceptance ($\alpha_{\text{acc}} = 0.7$) delivers `{python} SpeculativeSpeedup.et_med_str` per round for a `{python} SpeculativeSpeedup.sp_med_mult_str` speedup, and low acceptance ($\alpha_{\text{acc}} = 0.5$) drops progress to `{python} SpeculativeSpeedup.et_low_str` per round, yielding a modest speedup of `{python} SpeculativeSpeedup.sp_low_mult_str`.
 
 ::: {.column-margin}
 ![](images/svg/vol2_inference_margin_001.svg){width="100%" fig-alt="Speculative decoding speedup curve highlighting the 70 percent acceptance threshold."}
@@ -4757,10 +4742,11 @@ $$y = x W_0^T + \frac{\alpha_k}{r_k} x A_k^T B_k^T$$ {#eq-lora-forward}
 
 where $x \in \mathbb{R}^{1 \times d_{\text{in}}}$ is a row vector, $y \in \mathbb{R}^{1 \times d_{\text{out}}}$, and $\alpha_k$ is a fixed scaling factor. Each adapted projection adds $r_k(d_{\text{in}} + d_{\text{out}})$ parameters instead of a full $d_{\text{in}}d_{\text{out}}$ weight matrix. The resident adapter budget therefore depends on which layers are adapted, their dimensions and ranks, precision, and the number of simultaneously loaded tenants.
 
-However, serving requests with heterogeneous adapters in a single continuous batch introduces a critical execution dilemma:
+However, serving requests with heterogeneous adapters in a single continuous batch introduces a critical execution dilemma between batch efficiency and kernel dispatch overhead.
 
-1.  **Adapter-grouped batching**: If the scheduler groups incoming requests by adapter ID into separate batches, continuous batching degenerates into small, fragmented batches (often batch size 1 or 2 for low-traffic adapters). This forfeits the high throughput of shared weight streaming and imposes unacceptable queuing delays on cold adapters.
-2.  **Sequential adapter kernel dispatch**: If requests with different adapters are packed into a single batch, the base projection $X W_0^T$ runs efficiently as a single dense GEMM across all tokens. However, evaluating the individual adapter deltas requires dispatching separate small matrix-vector multiplication kernels for each request's unique adapter $(A_{k(i)}, B_{k(i)})$. Launching hundreds of small GEMMs per layer introduces severe CPU launch serialization, kernel launch latency ($\sim 3\text{--}5\ \mu\text{s}$ per kernel), and low GPU streaming multiprocessor (SM) occupancy.
+If the scheduler adopts adapter-grouped batching by partitioning incoming requests by adapter ID into separate batches, continuous batching degenerates into small, fragmented batches—often with batch sizes of only one or two requests for low-traffic adapters. This forfeits the high throughput of shared base-weight streaming and imposes unacceptable queuing delays on cold adapters.
+
+Conversely, if requests with different adapters are packed into a single unified batch, the base projection $X W_0^T$ runs efficiently as a single dense GEMM across all tokens. However, evaluating the individual adapter deltas requires dispatching separate small matrix-vector multiplication kernels for each request's unique adapter $(A_{k(i)}, B_{k(i)})$. Launching hundreds of small GEMMs per layer introduces severe CPU launch serialization, kernel launch latency ($\sim 3\text{--}5\ \mu\text{s}$ per kernel), and low GPU streaming multiprocessor (SM) occupancy.
 
 ::: {#dfn-inference-multi-lora-bgmv .callout-definition title="Batched gather-matrix-vector multiplication (BGMV)"}
 
@@ -4789,13 +4775,11 @@ By gathering adapter weights within batched kernels, BGMV avoids dispatching a s
 
 ##### Unified paged adapter memory management {#sec-inference-paged-adapter-memory}
 
-To manage thousands of adapters without exhausting GPU HBM, S-LoRA [@lin2023slora] organizes adapter storage into a multi-tier memory hierarchy governed by paged memory management:
+To manage thousands of adapters without exhausting GPU HBM, S-LoRA [@lin2023slora] organizes adapter storage into a multi-tier memory hierarchy governed by paged memory management. Within GPU HBM, the runtime allocates a static memory pool partitioned into fixed-size physical pages (such as 2 MB chunks). Adapter matrices $A_k$ and $B_k$ are allocated non-contiguously across free pages, eliminating external fragmentation when adapters of varying ranks ($r \in \{8, 16, 32, 64\}$) are dynamically loaded and unloaded.
 
--   **Paged adapter pool**: GPU HBM allocates a static memory pool partitioned into fixed-size physical pages (e.g., 2 MB chunks). Adapter matrices $A_k$ and $B_k$ are allocated non-contiguously across free pages, eliminating external fragmentation when adapters of varying ranks ($r \in \{8, 16, 32, 64\}$) are dynamically loaded and unloaded.
--   **Asynchronous prefetching over PCIe**: Infrequently accessed adapters are kept in host CPU DRAM or NVMe storage. When a request targeting an un-cached adapter arrives in the waiting queue, the scheduler initiates an asynchronous direct memory access (DMA) copy over PCIe Gen5 into free HBM adapter pages while the GPU executes current decode iterations.
--   **Tensor-parallel adapter sharding**: S-LoRA aligns adapter inputs and outputs with the base layer while communicating low-rank intermediates [@lin2023slora]. With the weight orientation in @eq-lora-forward, Megatron's column-parallel and row-parallel names describe $W_0^T$:
-    -   *Column-parallel layers*: Partition $W_0$ and $B_k$ along their output rows, and $A_k$ along its rank rows. Each rank computes part of $xA_k^T$; an AllGather assembles the rank-dimensional intermediate before multiplication by the local $B_k^T$.
-    -   *Row-parallel layers*: Partition $W_0$ and $A_k$ along their input columns, and $B_k$ along its output rows. An AllReduce first sums the partial rank-dimensional intermediates. Each rank then computes its output slice, inserts it into the matching positions of its base-layer partial output, and participates in the base layer's final AllReduce.
+Infrequently accessed adapters are kept in host CPU DRAM or NVMe storage. When a request targeting an uncached adapter arrives in the waiting queue, the scheduler initiates an asynchronous direct memory access (DMA) copy over PCIe Gen5 into free HBM adapter pages while the GPU executes current decode iterations.
+
+When scaling across multiple devices, S-LoRA aligns adapter inputs and outputs with the base layer while communicating low-rank intermediates [@lin2023slora]. With the weight orientation in @eq-lora-forward, Megatron's column-parallel and row-parallel conventions describe $W_0^T$. In column-parallel layers, $W_0$ and $B_k$ partition along their output rows, and $A_k$ along its rank rows; each rank computes part of $xA_k^T$, and an AllGather assembles the rank-dimensional intermediate before multiplication by the local $B_k^T$. In row-parallel layers, $W_0$ and $A_k$ partition along their input columns, and $B_k$ along its output rows; an AllReduce first sums the partial rank-dimensional intermediates, after which each rank computes its output slice, inserts it into the matching positions of its base-layer partial output, and participates in the base layer's final AllReduce.
 
 This layout reduces adapter replication but does not eliminate communication. Its additional collectives operate on rank-dimensional intermediates; the final output assembly shares the base layer's collective. The trade-off is lower adapter memory per rank against added synchronization.
 
@@ -5455,11 +5439,7 @@ Device 3:                      [Req1] [Req2] [Req3] [Req4] ...
 
 Once the pipeline is full, throughput is limited by the slowest stage. For $p$ balanced stages with negligible transfer overhead, this is $p$ times the throughput of executing the whole model sequentially on one device, not $p$ times a single stage's throughput. An individual request still traverses every stage, so its execution latency remains approximately the sum of the stage times.
 
-Pipeline parallelism is appropriate for inference in three scenarios:
-
-- Memory constraints require sharding but latency requirements are relaxed
-- Throughput matters more than individual request latency
-- Network bandwidth between devices is limited (only point-to-point communication)
+Pipeline parallelism is particularly appropriate for inference when memory constraints require sharding across devices but latency targets are relaxed, when aggregate throughput matters more than individual request latency, or when inter-device network bandwidth is limited to point-to-point communication rather than high-speed AllReduce fabrics.
 
 @Tbl-pipeline-tensor-comparison captures the trade-offs between these two sharding approaches:
 
@@ -5816,13 +5796,9 @@ Expert parallelism distributes experts across devices, with each device hosting 
 
 :::
 
-The communication pattern differs from tensor parallelism: instead of all-reduce (*same data to all devices*), expert parallelism uses all-to-all\index{All-to-All!expert parallelism} (*different data to different devices* based on routing). This AllToAll pattern creates a critical system challenge: load balancing. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle. Three mechanisms address load imbalance:
+The communication pattern differs from tensor parallelism: instead of all-reduce (*same data to all devices*), expert parallelism uses all-to-all\index{All-to-All!expert parallelism} (*different data to different devices* based on routing). This AllToAll pattern creates a critical systems challenge: load balancing. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle.
 
-- **Auxiliary loss**\index{Auxiliary Loss}: An additional term in the training loss penalizes uneven expert utilization by rewarding uniform routing probabilities.
-- **Capacity factor**\index{Capacity Factor}: Each expert has a maximum number of tokens it will accept per batch (typically 1.25$\times$ the fair share). Tokens exceeding this are dropped or rerouted.
-- **Expert buffering**\index{Expert Buffering}: Tokens are buffered and processed in subsequent iterations if experts are at capacity, smoothing out load spikes at the cost of latency variance.
-
-These mechanisms keep expert utilization balanced enough that routing remains a throughput advantage instead of a new straggler source.
+Three complementary mechanisms address this imbalance across training and serving. At training time, an auxiliary loss\index{Auxiliary Loss} penalizes uneven expert utilization by rewarding uniform routing probabilities. At serving time, enforcing an expert capacity factor\index{Capacity Factor} establishes a ceiling on the number of tokens an individual expert will accept per batch (typically 1.25$\times$ the fair share), dropping or rerouting tokens that exceed this limit. In addition, expert buffering\index{Expert Buffering} queues excess tokens for processing in subsequent iterations if experts operate at capacity, smoothing out transient load spikes at the cost of increased latency variance. Together, these mechanisms keep expert utilization balanced enough that routing remains a throughput advantage instead of a new straggler source.
 
 #### Routing failure modes {#sec-inference-scale-moe-routing-failures}
 
@@ -6446,14 +6422,7 @@ Archetype B (DLRM at Scale) relies on $P_{99} \le 100\text{ ms}$ performance bou
 
 Load balancing serves two primary goals that sometimes conflict: latency minimization and utilization maximization. Latency minimization routes requests to the replicas that can serve them fastest, considering current queue depth and processing time; utilization maximization spreads load evenly to avoid both idle replicas and overloaded replicas. The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized.
 
-Evaluation therefore needs four signals that cover both tail latency and load balance:
-
-- **Maximum queue length**: This determines worst-case latency.
-- **Load variance**: This measures how evenly work is distributed.
-- **Utilization spread**: This shows whether some replicas are idle while others are saturated.
-- **Decision overhead**: This captures the cost of making the routing choice.
-
-A policy that optimizes only one of these signals can look healthy in aggregate while sending unlucky requests into the tail.
+Evaluation therefore requires four complementary signals that jointly cover tail latency and fleet balance. Maximum queue length determines worst-case latency, while load variance measures how evenly work is distributed across replicas. The utilization spread reveals whether some replicas sit idle while others are saturated, and decision overhead captures the operational cost of computing the routing choice itself. A policy that optimizes only one of these signals can look healthy in aggregate while sending unlucky requests into the tail.
 
 ### Round-robin and random assignment {#sec-inference-scale-roundrobin-random-assignment-f374}
 
@@ -7646,11 +7615,7 @@ Backpressure works only when the request contract propagates through the whole s
 
 The same request identifier must connect routing, queueing, prefill, decode, cache allocation, and response streaming. A useful serving trace records admitted and rejected requests, queue delay, TTFT, TPOT, input and output tokens, cache pages, batch membership, preemptions, cancellations, and fallback decisions. Aggregate accelerator utilization cannot distinguish useful work from late or canceled work. SLO goodput and wasted-token rate close that gap by reporting how much completed work met its contract and how much execution the system performed after the result had lost value.
 
-A saturated LLM fleet under KV cache pressure has three relief valves that generic backpressure cannot provide:
-
-- **Context eviction**\index{Context eviction!KV cache pressure}: Use an explicitly supported sliding-window or approximate cache-eviction policy with a quality check, or truncate the retained history and recompute its state. Dropping old KV entries is not generally equivalent to recomputing a shorter conversation because later cached states already depend on earlier context.
-- **Speculative decoding**: Disable speculative decoding to reclaim the GPU memory its draft model occupies.
-- **Fallback routing**\index{Fallback routing!graceful degradation}: Route new requests to a smaller quantized fallback model until the primary queue drains.
+A saturated LLM fleet operating under severe KV cache pressure has three domain-specific relief valves that generic backpressure cannot provide. First, engines can apply context eviction\index{Context eviction!KV cache pressure} by using an explicitly supported sliding-window or approximate cache-eviction policy with a quality check, or by truncating the retained history and recomputing its state—recognizing that silently dropping old KV entries is not generally equivalent to recomputing a shorter conversation because later cached states already depend on earlier context. Schedulers can also temporarily disable speculative decoding, reclaiming the GPU memory that its draft model occupies. Finally, fallback routing\index{Fallback routing!graceful degradation} redirects incoming requests to a smaller quantized fallback model until the primary queue drains.
 
 Each response trades output quality or latency for continued availability, which is often preferable to rejection from the user's perspective. The system designer must specify which degradation modes are acceptable at each pressure tier, because the correct trade-off depends on the application, a real-time assistant tolerates context truncation better than silent quality degradation.
 
@@ -9434,12 +9399,7 @@ The following are illustrative design cases, not verified descriptions of named 
 
 An embedding-heavy recommendation service\index{Recommendation system!embedding-heavy serving case} binds on sparse lookup rather than dense forward-pass compute. This scenario models feeds, advertising, and content ranking with a large distributed embedding store.
 
-The scale numbers explain why embedding locality dominates the design:
-
-- Request volume: Billions of requests per day
-- Latency target: $<10\text{ ms}$ P99
-- Model diversity: Hundreds of model variants
-- Feature cardinality: Trillions of unique entities
+The operational scale explains why embedding locality dominates the architecture: the service processes billions of requests per day under a P99 latency target below $10\text{ ms}$, spanning hundreds of distinct model variants over an entity catalog comprising trillions of unique sparse features.
 
 The serving stack separates sparse lookup from dense ranking:
 
@@ -9468,12 +9428,7 @@ The serving lesson is that recommendation latency is often dominated by embeddin
 
 A multi-model generation API\index{Generation API!serving case} binds on request variance: short prompts, long-context requests, and different model sizes share capacity while users expect predictable TTFT. The infrastructure serves GPT-class models to large developer and application workloads while maintaining quality of service across diverse workloads.
 
-The scale numbers explain why continuous batching and admission control dominate:
-
-- Request volume: Millions of requests per hour
-- Latency target: TTFT $<2\text{s}$, throughput varies by model
-- Model sizes: Billions to hundreds of billions of parameters
-- Context lengths: Up to 128K tokens
+The operating scale explains why continuous batching and admission control dominate the infrastructure: the platform serves millions of requests per hour under a time-to-first-token target below $2\text{ s}$, hosting models that range from billions to hundreds of billions of parameters with context lengths reaching up to 128K tokens.
 
 The serving stack separates routing, scheduling, cache management, and shard groups:
 
@@ -9507,18 +9462,9 @@ An Orca-style design uses continuous batching to refill completed slots. Chunked
 
 : **Batching strategy comparison**: Slot reuse and prefill interference are separate concerns. Continuous batching addresses the first; chunking gives control over the second. Neither mechanism alone establishes utilization or latency numbers. {#tbl-batching-strategies-comparison}
 
-Large GPT-class models often require 8-way or greater tensor parallelism for memory capacity and latency:
+Large GPT-class models often require 8-way or greater tensor parallelism for memory capacity and latency. A representative deployment allocates eight H100 GPUs per large-model shard group connected via high-speed NVLink for intra-node communication, with consistent hashing at the gateway to maintain session affinity and enable cross-turn KV cache reuse.
 
-- 8$\times$ H100 per large-model shard group
-- NVLink for intra-node communication
-- Consistent hashing for session affinity (KV cache reuse)
-
-The illustrative API applies rate limiting at multiple levels to prevent noisy neighbors:
-
-- Per-API-key request rate limits
-- Per-API-key token-per-minute limits
-- Organization-level capacity quotas
-- Global model capacity limits
+To prevent noisy neighbors from exhausting capacity, the illustrative API applies hierarchical rate limiting across multiple granularities: per-API-key request arrival limits, per-API-key token-per-minute consumption limits, organization-level capacity quotas, and global model capacity ceilings.
 
 A possible capacity policy shifts resources between models based on queue depth, subject to model-loading delay and each service's minimum allocation:
 
@@ -9534,12 +9480,7 @@ LLM APIs are governed by variance control. Continuous batching, prefix caching, 
 
 The search-ranking scenario\index{Search ranking!illustrative cascade} binds on cascade cost: each query coordinates many smaller models under one end-to-end latency budget rather than serving one large model. The ensemble combines specialized models for query understanding, document relevance, and result ranking.
 
-The scale numbers explain why a cascade is mandatory:
-
-- Request volume: Billions of searches per day
-- Latency target: $<200\text{ ms}$ end-to-end
-- Model count: Dozens of models per query
-- Result processing: Thousands of documents per query
+The operational scale explains why a cascade architecture is mandatory: the system must process billions of searches per day under a strict end-to-end latency target of less than $200\text{ ms}$, evaluating thousands of candidate documents per query across dozens of specialized models.
 
 To meet this latency budget while evaluating thousands of documents, the system employs a ranking cascade\index{Ranking cascade!multi-stage filtering} (@fig-ranking-cascade) that progressively narrows the candidate set through increasingly expensive models.
 
@@ -9778,13 +9719,9 @@ async_q3 = async model3(query, predicted_q1, predicted_q2)
 # Use actual results if they arrive in time, otherwise use speculative
 ```
 
-Search ranking deployments can run ranking models on Tensor Processing Units (TPUs)[^fn-tpu-serving-accelerator] optimized for transformer inference. TPU pods provide:
+Search ranking deployments can run ranking models on Tensor Processing Units (TPUs)[^fn-tpu-serving-accelerator] optimized for transformer inference. TPU pods provide a 2D mesh topology for efficient AllReduce communication, high memory bandwidth for attention operations, and custom hardware quantization for high serving efficiency.
 
 [^fn-tpu-serving-accelerator]: [offset=-10mm] **TPUs for inference**\index{TPU!inference}: Systolic-array execution can provide a regular timing profile for fixed-shape ranking workloads. Tail latency still depends on batching, input preparation, communication, and queueing around the accelerator.
-
-- 2D mesh topology for efficient AllReduce
-- High memory bandwidth for attention operations
-- Custom quantization for serving efficiency
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -9806,12 +9743,7 @@ The serving lesson is that ranking cascades reduce cost by spending expensive mo
 
 The multimodal recommendation scenario\index{Recommendation system!multimodal serving case} binds on freshness under a tight ranking SLO: video understanding is expensive, new content arrives continuously, and user modeling remains online. It combines video understanding (vision) with user modeling (recommendation) for personalized content ranking, creating a multimodal inference challenge where different model types must coordinate.
 
-The scale numbers explain why online/offline separation matters:
-
-- Request volume: Millions of video rankings per second
-- Latency target: $<50\text{ ms}$ P99
-- Content volume: Millions of new videos daily
-- Modalities: Video, audio, text, user signals
+The operating scale explains why clear online/offline separation matters: the system handles millions of video rankings per second under a tight P99 latency target below $50\text{ ms}$, ingesting millions of new videos daily across video, audio, text, and user interaction signals.
 
 The serving stack separates content and user paths:
 
