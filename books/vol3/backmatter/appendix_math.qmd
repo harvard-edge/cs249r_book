@@ -42,44 +42,37 @@ $$b_t = (x_0, a_0, o_0, x_1, a_1, o_1, \dots, x_t)$$
 
 where $x_t$ denotes the reasoning tokens the model generated at step $t$. The belief is built from what the agent has seen, not from what the environment now contains, so it can be stale the moment a tool or another writer changes the environment. That gap is why the runtime, not the model, is responsible for invalidating stale observations (@sec-vol3-context-engineering-context-rot), and why a plan is treated as a revisable hypothesis rather than a fixed program (@sec-vol3-test-time-compute-planning-revision).
 
-## Lyapunov Liveness Verification {#sec-vol3-appendix-math-lyapunov}
+## Ranking Functions and Progress Evidence {#sec-vol3-appendix-math-lyapunov}
 
-To mathematically prove liveness and guarantee termination in a stochastic control graph, the runtime constructs a **Monotonically Decreasing Variant Function** (a Lyapunov or ranking function) $V: \mathcal{S} \times \mathcal{B} \to \mathbb{R}^+$. A control topology satisfies guaranteed termination if, for every execution step $t$, the expected value of $V$ decreases by at least a strictly positive constant $\delta > 0$:
+A ranking function can establish a bound on admitted steps under explicit transition assumptions. Suppose $V_t$ is a nonnegative integer and every admitted step decreases it by at least one:
 
-$$\mathbb{E}\left[ V(S_{t+1}, b_{t+1}) \mid S_t, b_t \right] \le V(S_t, b_t) - \delta$$
+$$V_{t+1} \le V_t - 1.$$
 
-The runtime enforces this condition by defining $V$ over an explicit composite vector of execution resources:
+Then at most $V_0$ such steps can be admitted. An enforced remaining-step allowance is one example: decrement it when work is admitted and refuse another admission at zero. This bounds the count, not the duration of a step, task completion, or termination of previously dispatched remote work. Deadlines and outstanding-effect contracts remain separate (@sec-vol3-controlplane-accounting).
 
-$$V(t) = \mathbf{w}^T \begin{bmatrix} K_{\max} - k_t \\ T_{\text{budget}} - T_{\text{consumed},t} \\ \mathcal{D}_{\text{goal}}(S_t, S^*) \end{bmatrix}$$
+A task-progress measure has a different obligation: it must reflect the chosen task and observations. Useful investigation can leave candidate state unchanged, and an exploratory change can temporarily worsen a check result. Hash recurrence and stagnant metrics are therefore fallible signals for intervention, not ranking-function proofs (@sec-vol3-sagas-watchdogs).
 
-where:
-
-- $K_{\max} - k_t$ is the remaining step ceiling.
-- $T_{\text{budget}} - T_{\text{consumed},t}$ is the remaining token and financial compute balance.
-- $\mathcal{D}_{\text{goal}}(S_t, S^*)$ is a metric measuring distance to goal state completion.
-
-If an agent executes an action that fails to reduce $\mathcal{D}_{\text{goal}}$, the step and token budget terms still make $V(t)$ strictly decrease. When $V(t) \le 0$, the runtime ends the trajectory. The budget terms are the per-trajectory ceilings of @sec-vol3-controlplane-accounting, and the distance term is the environment-based progress signal of @sec-vol3-sagas-watchdogs. Because the budget terms alone guarantee termination, the distance term matters for detecting a loop early rather than for ending it.
+Expected-drift arguments require an explicit stochastic stopping model and its assumptions. Merely adding a distance-to-goal term to remaining tokens or spending does not establish such a result. The quantities have different units, their transitions need not share a monotonic direction, and a resource bound alone does not prove useful progress.
 
 ## Information Flow Security Lattice {#sec-vol3-appendix-math-lattice}
 
-An **information flow security lattice** formalizes how data and privileges can flow through an agentic system, modeled as a partially ordered set:
+An **information-flow security lattice** expresses an ordering on security labels and operations for combining them:
 
 $$\mathcal{L} = \langle S, \sqsubseteq, \sqcup, \sqcap \rangle$$
 
-where $S$ is the set of security labels, $\sqsubseteq$ defines the flow relation ("can flow to"), $\sqcup$ is the join operator (least upper bound), and $\sqcap$ is the meet operator (greatest lower bound).
+where $S$ is the set of security labels, $\sqsubseteq$ is the label ordering, $\sqcup$ is the join operator (least upper bound), and $\sqcap$ is the meet operator (greatest lower bound). A runtime must separately specify how this ordering governs each protected use or destination.
 
-In an autonomous agent runtime, we define two orthogonal label dimensions: **Secrecy** (Confidentiality) and **Integrity** (Trustworthiness). For our threat model, let integrity be represented by a dynamic taint tag $\tau \in \{\text{Trusted}, \text{Untrusted}\}$:
+Integrity provenance and confidentiality answer different questions. Integrity concerns the evidence permitted to influence a decision; confidentiality concerns permitted recipients. As a small illustration of integrity-dependency propagation, let $\tau \in \{\text{Trusted}, \text{Untrusted}\}$ use this order:
 
 $$\text{Trusted} \sqsubset \text{Untrusted}$$
 
-* A user prompt authored by the verified system operator carries label $\tau = \text{Trusted}$.
-* Any text ingested from the environment, including web pages, issue comments, pull request diffs, compiler error output, and database records, carries label $\tau = \text{Untrusted}$.
+Here `Trusted` means qualified under the policy for a specified use, not universally true. An authenticated task instruction can establish permitted scope without certifying every factual assertion it contains. A protected runner's observation can support a particular test result under its execution contract; a README's claim that the test passed cannot substitute for it. `Untrusted` records a dependency not so qualified. This two-element example is not a complete policy for both integrity and confidentiality.
 
-During context assembly, every segment $x_i$ in the agent context window $C_t$ has an associated taint tag $\tau(x_i)$. The cumulative context taint $\tau(C_t)$ is the join across all constituent tokens:
+For a context $C_t$ containing labeled input segments $x_i$, a conservative aggregate label joins their dependencies:
 
 $$\tau(C_t) = \bigsqcup_{i=1}^{|C_t|} \tau(x_i)$$
 
-If a single untrusted document enters the context window, the cumulative context transitions to $\tau(C_t) = \text{Untrusted}$. Because the join is monotone, taint can only be cleared by a step outside the model, such as a quarantined reader that returns typed fields, and never by further context. @Sec-vol3-security-taint-tracking applies this rule to decide which tool calls may accept an argument derived from a tainted context.
+Under this conservative policy, selecting any untrusted input makes the aggregate carry untrusted provenance. The join summarizes tracked dependencies; it does not measure causal influence inside attention. Extraction into typed fields does not clear provenance. A trusted decision may endorse a particular use on stated evidence, while authorized release of confidential data is a separate declassification decision. Derived summaries and stored records retain the relevant dependencies. @Sec-vol3-security-taint-tracking applies these distinctions at the operation and destination boundary.
 
 ## Heavy-Tailed Queueing Theory {#sec-vol3-appendix-math-queueing}
 
@@ -87,7 +80,7 @@ Queueing delay depends on the variability of service times, not only on their me
 
 $$\mathbb{E}[W_{\text{queue}}] = \frac{\lambda \mathbb{E}[S^2]}{2 (1 - \rho)}$$
 
-Under heavy-tailed service times, $\mathbb{E}[S^2]$ is very large or unbounded (@sec-vol3-appendix-math-pareto). In a cluster this appears as head-of-line blocking. When a first-in, first-out queue admits a 200-step trajectory, that trajectory holds its worker, sandbox, and cache memory for tens of minutes, and hundreds of two-step tasks behind it wait. Separating long trajectories from short ones, by priority lanes or by admission limits per class, is the remedy developed in @sec-vol3-controlplane-scheduling and @sec-vol3-agent-economics-capacity.
+Under heavy-tailed service times, $\mathbb{E}[S^2]$ can be very large or unbounded (@sec-vol3-appendix-math-pareto). When service is assigned to an entire trajectory without intervening admission opportunities, long tasks can delay shorter tasks. Call-level fair admission and class-aware policies can reduce this interference under their stated service and workload assumptions (@sec-vol3-controlplane-scheduling). Worker, workspace, and cache occupancy need not share the same lifetime; @sec-vol3-agent-economics-capacity develops the capacity consequences.
 
 ## Heavy-Tailed Pareto Service Times {#sec-vol3-appendix-math-pareto}
 
@@ -108,7 +101,7 @@ With infinite variance, the mean wait in @sec-vol3-appendix-math-queueing is unb
 
 ## LoRA Matrix Decomposition {#sec-vol3-appendix-math-lora}
 
-Parameter-Efficient Fine-Tuning (PEFT) techniques rely on decomposing dense weight updates into low-rank matrices. For a dense weight matrix $W_0 \in \mathbb{R}^{d \times k}$, LoRA decomposes the accumulated weight update $\Delta W$ into the product of two low-rank matrices $B \in \mathbb{R}^{d \times r}$ and $A \in \mathbb{R}^{r \times k}$, where the rank satisfies $r \ll \min(d, k)$:
+Low-rank adaptation (LoRA) is one parameter-efficient fine-tuning method. For a frozen weight matrix $W_0 \in \mathbb{R}^{d \times k}$, it parameterizes an update using trainable factors $B \in \mathbb{R}^{d \times r}$ and $A \in \mathbb{R}^{r \times k}$, typically with $r \ll \min(d, k)$. With the scaling convention used in @sec-vol3-fine-tuning-peft, the effective matrix is
 
 $$W = W_0 + \Delta W = W_0 + \frac{\alpha}{r} (B \cdot A)$$
 
@@ -118,13 +111,15 @@ During forward computation on an input activation vector $x$:
 
 $$h = W_0 x + \Delta W x = W_0 x + \frac{\alpha}{r} B (A x)$$
 
-Matrix $A$ is initialized from a Gaussian distribution $\mathcal{N}(0, \sigma^2)$, while matrix $B$ is initialized to zero, ensuring that $\Delta W = 0$ at the start of training. Because the adapter holds $r(d + k)$ parameters instead of $dk$, a serving system can hold one copy of the base model and many small adapters, one per agent role, which is the deployment pattern of @sec-vol3-fine-tuning-peft.
+A common initialization draws $A$ from a Gaussian distribution $\mathcal{N}(0, \sigma^2)$ and sets $B$ to zero, giving $\Delta W = 0$ initially. This preserves this layer's forward mapping when its other components and inputs are unchanged. The factors contain $r(d + k)$ trainable parameters rather than the base matrix's $dk$. Sharing a base with several adapters is one deployment option, not an isolation boundary between their roles.
 
 During backward propagation, gradients of the scalar loss $\mathcal{L}$ with respect to the adapter projection matrices $A$ and $B$ are computed using the matrix chain rule:
 
 $$\frac{\partial \mathcal{L}}{\partial A} = \frac{\alpha}{r} B^T \left( \frac{\partial \mathcal{L}}{\partial h} \right) x^T, \quad \frac{\partial \mathcal{L}}{\partial B} = \frac{\alpha}{r} \left( \frac{\partial \mathcal{L}}{\partial h} \right) (x^T A^T)$$
 
 The frozen base weights $W_0$ receive zero gradient accumulation, eliminating optimizer state memory for $W_0$ while preserving exact activation gradients $\frac{\partial \mathcal{L}}{\partial x} = W_0^T \left( \frac{\partial \mathcal{L}}{\partial h} \right) + \frac{\alpha}{r} A^T B^T \left( \frac{\partial \mathcal{L}}{\partial h} \right)$ to backpropagate through preceding layers.
+
+At the stated initialization, $B=0$ makes the gradient of $A$ zero, while the gradient of $B$ can be nonzero. Updating $B$ can therefore enable subsequent updates to both factors. Freezing the base eliminates its parameter-update state, not the need to propagate information through the layer or retain the activations required by the chosen backward implementation.
 
 ## Generalized Advantage Estimation and KL Divergence {#sec-vol3-appendix-math-rl}
 
@@ -223,7 +218,7 @@ If a failure is instead detected where it occurs and costs on average the $m/2$ 
 
 $$m^* \approx \sqrt{\frac{2 \cdot T_{\text{ver}}}{(1 - p) \cdot T_{\text{step}}}}$$
 
-The optimal verification cadence is therefore the same square-root law that sets checkpoint intervals in fault-tolerant computing, and @sec-vol3-persistence-checkpointing uses it in that form (@eq-vol3-young-formula).
+These square-root balances concern the stated verification or lost-work model. @Sec-vol3-persistence-checkpointing instead compares checkpoint pauses with reconstruction of recorded state; reconstructing recorded events is not resampling lost model turns.
 
 ## PageRank Symbol Graphing for Repository Maps {#sec-vol3-appendix-math-pagerank}
 
@@ -233,67 +228,93 @@ $$\mathbf{r} = (1 - d) \mathbf{p} + d A^T D^{-1} \mathbf{r}$$
 
 where $d \approx 0.85$ is the damping factor, $A$ is the adjacency matrix, $D$ is the degree matrix, and $\mathbf{p}$ is a personalization preference vector initialized to bias toward files mentioned in the user's issue description or recent git diffs.
 
-Sorting symbols by score and packing them greedily until the budget is spent favors the definitions most referenced by, and closest to, the files the task names. @Sec-vol3-persistent-graphrag uses this ranking for graph retrieval over code, and @sec-vol3-long-term-memory-agentic-retrieval pre-stages such a map before the agent searches.
+Sorting symbols by score and packing them within a token budget produces one candidate repository map. @Sec-vol3-persistent-graphrag considers this ranking as an optional graph prioritizer; a runtime can pre-stage such a map under the policy described in @sec-vol3-long-term-memory-agentic-retrieval. Ranking and packing do not guarantee that the selected symbols preserve a complete dependency path or supply the evidence a task needs.
 
-## Statistical Significance and Monte Carlo Bootstrapping {#sec-vol3-appendix-math-bootstrap}
+## Statistical Planning and Bootstrap Intervals {#sec-vol3-appendix-math-bootstrap}
 
-An agent's outcome on a task varies from run to run (@sec-vol3-evaluation-resampling), so a measured improvement is evidence only when it exceeds what that variation could produce by chance.
+The sampling design determines which uncertainty calculation applies. @Sec-vol3-evaluation-resampling distinguishes tasks from repeated runs, and @sec-vol3-evaluation-wilson separates a single proportion from a paired candidate–baseline difference. This section gives two additional tools: an approximate sample-size calculation for independent arms and a bootstrap construction for a declared statistic. Neither replaces the chapter's paired-score comparison.
 
-The required sample size $N$ to detect an effect size $\Delta p = p_2 - p_1$ with statistical significance $\alpha$ and statistical power $1 - \beta$ is formally governed by the two-proportion hypothesis test:
+### Plan an independent-arm comparison
 
-$$N \ge \frac{\left( z_{1 - \alpha/2} \sqrt{2 \bar{p}(1 - \bar{p})} + z_{1 - \beta} \sqrt{p_1(1 - p_1) + p_2(1 - p_2)} \right)^2}{(p_2 - p_1)^2}$$
+Suppose two arms contain independent Bernoulli trials, with the same number $n$ in each arm. Their hypothesized success probabilities are $p_1$ and $p_2$, with $0<p_1<p_2<1$. Let $\Delta p=p_2-p_1$ and $\bar p=(p_1+p_2)/2$. Under these assumptions, the difference of sample proportions has alternative variance
 
-where $\bar{p} = (p_1 + p_2) / 2$, $z_{1 - \alpha/2}$ is the standard normal critical value, and $z_{1 - \beta}$ is the power critical value.
+$$\frac{p_1(1-p_1)+p_2(1-p_2)}{n}.$$
+
+For a two-sided normal-approximation test with significance target $\alpha$ and power target $1-\beta$, a common planning approximation places the positive rejection boundary $z_{1-\alpha/2}\sqrt{2\bar p(1-\bar p)/n}$ below the alternative mean by $z_{1-\beta}$ alternative standard deviations. Here $z_q$ is the standard normal quantile at probability $q$. Solving that relation gives
+
+$$n_{\text{plan}}=
+\left\lceil
+\frac{\left[z_{1-\alpha/2}\sqrt{2\bar p(1-\bar p)}+
+z_{1-\beta}\sqrt{p_1(1-p_1)+p_2(1-p_2)}\right]^2}{(\Delta p)^2}
+\right\rceil.$$
+
+This is the equal-arm normal approximation implemented in [Brant's independent-proportion planning calculator](https://www.stat.ubc.ca/~rollin/stats/ssize/b2). It neglects the far rejection tail under the specified alternative and uses an approximate pooled null variance. It is not an exact power guarantee, a minimum sample size for every useful finding, or a test of already observed results. Rare outcomes, dependence, unequal allocation, missing labels, or a paired design require the corresponding design calculation. Increasing repeats on a fixed task does not create independent tasks.
 
 ```{python}
 #| label: calc-vol3-appendix-sample-size
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ WORKED SAMPLE SIZE FOR THE TWO-PROPORTION TEST (LEGO)
+# │ INDEPENDENT-ARM SAMPLE-SIZE PLANNING (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: The worked example below the displayed equation, and the matching
-# │          claim in @sec-vol3-evaluation-wilson.
-# │
-# │ Goal: Evaluate the equation above for the rates the appendix quotes, so
-# │       the appendix and the chapter that cites it cannot disagree.
-# │ Show: The required sample size per arm.
-# │ How:  calc_two_proportion_sample_size in its pooled form, which is the
-# │       equation displayed directly above.
+# │ Goal: Evaluate the displayed normal-approximation formula per arm.
+# │ Scope: Hypothetical rates, equal independent arms, rounded normal quantiles.
+# │ Show: Assumed rates and an approximate planning count, not a release verdict.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-
 from mlsysim import *
 
 class BootstrapSampleSize:
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    p1 = 0.30  # scenario assumption: baseline agent success rate
-    p2 = 0.35  # scenario assumption: targeted success rate
-    z_alpha = 1.96  # two-sided significance level of 0.05
-    z_beta = 0.84  # power of 0.80
+    # 1. LOAD: scenario assumptions; not estimated deployment performance.
+    p1, p2 = 0.30, 0.35
+    alpha, power = 0.05, 0.80
+    z_alpha, z_beta = 1.96, 0.84  # rounded quantiles for these design targets
 
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    required = math.ceil(calc_two_proportion_sample_size(p1, p2 - p1, z_alpha=z_alpha, z_beta=z_beta, pooled=True))
+    # 2. EXECUTE: use the established pooled two-proportion helper.
+    unrounded = calc_two_proportion_sample_size(p1, p2 - p1, z_alpha=z_alpha, z_beta=z_beta, pooled=True)
+    required = math.ceil(unrounded)
+    pooled_rate = (p1 + p2) / 2
+    direct = (z_alpha * math.sqrt(2 * pooled_rate * (1 - pooled_rate)) + z_beta * math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))) ** 2 / (p2 - p1) ** 2
 
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(required > 1_000, f"A five-point delta at this power should demand more than a thousand tasks, got {required}")
-    check(
-        math.ceil(calc_two_proportion_sample_size(p1, 2 * (p2 - p1), z_alpha=z_alpha, z_beta=z_beta, pooled=True)) < required,
-        "A larger detectable delta must need fewer tasks",
-    )
+    # 3. GUARD: inspect the helper against the displayed formula and rounding.
+    check(0 < p1 < p2 < 1, "Interior independent-arm planning rates")
+    check(abs(unrounded - direct) < 1e-9, "Helper matches displayed formula")
+    check(required - 1 < direct <= required, "Round upward per arm")
+    check(required == 1375, "Scenario planning count")
 
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    p1_str = fmt(p1, precision=2, commas=False)
-    p2_str = fmt(p2, precision=2, commas=False)
+    # 4. OUTPUT: every export is consumed in the notebook below.
+    p1_str, p2_str = fmt(p1, precision=2), fmt(p2, precision=2)
+    alpha_str, power_str = fmt(alpha, precision=2), fmt(power, precision=2)
+    z_alpha_str, z_beta_str = fmt(z_alpha, precision=2), fmt(z_beta, precision=2)
     required_str = fmt_int(required)
 ```
 
-For an agent baseline success rate $p_1$ of `{python} BootstrapSampleSize.p1_str` and a targeted improvement to a $p_2$ of `{python} BootstrapSampleSize.p2_str` with $\alpha = 0.05$ and $\beta = 0.20$, the required $N$ is `{python} BootstrapSampleSize.required_str` tasks per arm.
+::: {.callout-notebook title="Plan two independent arms"}
 
-Metrics such as cost or turns per trajectory are often heavy-tailed, so intervals that assume a normal distribution can mislead. The nonparametric bootstrap [@efron1994bootstrap] avoids that assumption by drawing $B$ bootstrap resamples with replacement and computing the empirical percentile confidence interval:
+**Problem**: For hypothetical success probabilities `{python} BootstrapSampleSize.p1_str` and `{python} BootstrapSampleSize.p2_str`, what equal-arm sample count does the approximation give at significance target `{python} BootstrapSampleSize.alpha_str` and power target `{python} BootstrapSampleSize.power_str`?
 
-$$[\theta_{\text{lower}}, \theta_{\text{upper}}] = \left[ \hat{\theta}^*_{\lfloor 0.025 B \rfloor}, \; \hat{\theta}^*_{\lfloor 0.975 B \rfloor} \right]$$
+**Calculation**: Using rounded normal quantiles `{python} BootstrapSampleSize.z_alpha_str` and `{python} BootstrapSampleSize.z_beta_str`, then rounding the result upward, gives `{python} BootstrapSampleSize.required_str` independent trials per arm.
 
-@Sec-vol3-evaluation-wilson uses these intervals, and the sample-size formula above, to decide how many tasks an evaluation needs before a difference can be trusted.
+**Scope**: This plans a particular independent-arm experiment before its outcomes are observed. It does not establish that an observed difference is significant, and it does not apply to the paired repair comparison by ignoring its within-task dependence. Sampling and grader fidelity still limit the population claim.
+
+:::
+
+### Bootstrap the statistic at its sampling unit
+
+For a statistic without a convenient analytic interval, the nonparametric bootstrap approximates repeated sampling from the observed empirical distribution [@efron1994bootstrap]. Let $z_1,\ldots,z_m$ be the independent sampled units and $\widehat\theta$ the statistic computed from them. Draw $m$ units with replacement, recompute the statistic, and repeat this procedure $B_{\text{boot}}$ times. If a unit is a paired task record, keep both configurations' outcomes together; independently resampling the two columns destroys the pairing. Clustered observations require a resampling design that preserves the relevant cluster dependence.
+
+Let $B_{\text{boot}}\ge1$ be an integer. Denote replicate $b$ by $\widehat\theta^{*(b)}$ and sort the bootstrap statistics as $\widehat\theta^*_{(1)}\le\cdots\le\widehat\theta^*_{(B_{\text{boot}})}$. Define their empirical quantile by
+
+$$Q^*(u)=\inf\left\{x:\frac{1}{B_{\text{boot}}}
+\sum_{b=1}^{B_{\text{boot}}}\mathbf{1}\{\widehat\theta^{*(b)}\le x\}\ge u\right\},
+\qquad 0<u<1.$$
+
+Equivalently, $Q^*(u)=\widehat\theta^*_{(\lceil B_{\text{boot}}u\rceil)}$. The one-based index lies between $1$ and $B_{\text{boot}}$, including for small resample counts; different software may use interpolated quantiles instead.
+
+For $0<\alpha<1$, the percentile interval with nominal coverage $1-\alpha$ is
+
+$$[Q^*(\alpha/2),\ Q^*(1-\alpha/2)].$$
+
+This definition makes the ordering and finite-resample quantile convention explicit. The [SciPy bootstrap documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.bootstrap.html) describes percentile intervals and paired resampling; it also distinguishes percentile, basic, and bias-corrected methods. The construction is not a universal coverage guarantee. A small or unrepresentative sample, strong skew, dependence, or a statistic that behaves poorly under resampling can invalidate its interpretation. More bootstrap replicates reduce Monte Carlo variability conditional on the data; they do not supply missing tasks, repair missing outcomes, or establish an unobserved tail. The paired-score interval in @sec-vol3-evaluation-wilson is a separate method, not this bootstrap interval.
 
 ## Deterministic Finite Automata and Grammar-Constrained Logit Decoding {#sec-vol3-appendix-math-dfa}
 
@@ -337,7 +358,7 @@ By induction over the sequence length, every completed generation $x_{1:T}$ endi
 
 ## Higher-Order Daly Checkpoint Cadence Derivation {#sec-vol3-appendix-math-daly}
 
-@Sec-vol3-persistence-checkpointing sets the checkpoint interval with Young's first-order balance between checkpoint overhead and lost work (@eq-vol3-young-formula):
+The following classical model balances checkpoint overhead against work that must be re-executed after a failure. It is distinct from reconstructing a recorded trajectory from available events and workspace artifacts in @sec-vol3-persistence-checkpointing:
 
 $$T_{\text{opt}} = \sqrt{2 \cdot T_{\text{save}} \cdot M_{\text{MTBF}}}$$
 
@@ -359,95 +380,111 @@ Substituting $\lambda = 1 / M_{\text{MTBF}}$ yields Daly's higher-order analytic
 
 $$T_{\text{opt}}^{\text{Daly}} = \sqrt{2 \cdot T_{\text{save}} \cdot M_{\text{MTBF}}} \cdot \left[ 1 + \frac{1}{3}\sqrt{\frac{T_{\text{save}}}{2 M_{\text{MTBF}}}} \right] - T_{\text{save}}$$
 
-When checkpointing is fast relative to the time between failures ($T_{\text{save}} \ll M_{\text{MTBF}}$), the correction is small. For example, with $T_{\text{save}} = 2.5\text{ s}$ and $M_{\text{MTBF}} = 1{,}600\text{ s}$, the second-order term $\frac{1}{3}\sqrt{\frac{T_{\text{save}}}{2 M_{\text{MTBF}}}} \approx \frac{1}{3}\sqrt{0.00078} \approx 0.0093$ changes the interval by less than 1 percent, so Young's first-order formula is the practical rule for agent runtimes, whose checkpoints are small next to their failure intervals.
+When checkpointing is fast relative to the time between failures ($T_{\text{save}} \ll M_{\text{MTBF}}$), the relative correction is small. This limiting behavior does not establish which recovery-cost model applies to an agent runtime. Select the model from the actual checkpoint, failure, reconstruction, and new-execution contract.
 
-## Unbiased Pass@$k$ Combinatorial Derivation and Numerical Stability {#sec-vol3-appendix-math-pass-at-k}
+## Pass@$k$ and Repeated-Run Consistency {#sec-vol3-appendix-math-pass-at-k}
 
-Estimating pass@$k$ by plugging a task's observed success rate $\hat{p} = c/n$ into $1 - (1 - \hat{p})^k$ is biased when $n$ is small. @chen2021evaluating derived an unbiased estimator by treating evaluation as sampling $k$ of the $n$ attempts without replacement.
+Fix one task, its initial-state distribution, the complete run policy, and a binary pass criterion. Suppose the runs are independent and identically distributed conditional on that task, with per-run pass probability $p$. Among $n\ge k\ge1$ fully graded runs, let $c$ pass. These are integer counts with $0\le c\le n$. Pending or unavailable labels require the declared missing-outcome policy rather than silent exclusion.
 
-Let $n$ denote the total number of candidate trajectories generated and evaluated for a given benchmark task ($n \ge k$), and let $c$ denote the number of trajectories that successfully satisfy the verification oracle ($0 \le c \le n$).
+### Average over candidate subsets
 
-Suppose an evaluation system selects a subset of $k$ trajectories uniformly at random without replacement. The task is counted as solved under the Pass@$k$ metric if at least one of the $k$ selected trajectories succeeded. Conversely, the failure condition occurs if and only if all $k$ selected trajectories were drawn from the pool of $n - c$ failed trajectories.
+For every subset $J$ of $k$ run indices, let $I_J$ indicate that at least one member passed. Averaging these indicators over all $\binom nk$ subsets gives
 
-The total number of ways to draw $k$ trajectories from the candidate pool of size $n$ is $\binom{n}{k}$. If $n - c < k$, the pool contains fewer than $k$ failures, making it impossible to select $k$ failing trajectories; thus, the probability of complete failure is strictly zero, and $\text{Pass}@k = 1.0$.
+$$\widehat q_k=\frac{1}{\binom nk}\sum_{|J|=k}I_J
+=1-\frac{\binom{n-c}{k}}{\binom nk}.$$
 
-If $n - c \ge k$, the number of ways to draw $k$ failures from the $n - c$ failed trajectories is $\binom{n - c}{k}$. Under uniform random sampling without replacement, the probability that all $k$ drawn trajectories fail is:
+The failure numerator is zero when $n-c<k$. Each subset comprises $k$ conditionally independent runs, so $\mathbb{E}[I_J]=1-(1-p)^k$. Linearity of expectation therefore establishes
 
-$$\Pr(\text{all } k \text{ selections fail}) = \frac{\binom{n - c}{k}}{\binom{n}{k}}$$
+$$\mathbb{E}[\widehat q_k]=1-(1-p)^k.$$
 
-The unbiased probability that at least one of the $k$ trajectories succeeds is the complement:
+The subset indicators need not be mutually independent for this expectation argument. Chen et al. [-@chen2021evaluating] use this unbiased estimator for test-passing candidate availability. It does not establish that a deployed selector returns a passing candidate within its allowance; @sec-vol3-test-time-compute-pass-at-k develops that distinction. Generating $n=k$ is valid, although its sampling variability must still be assessed.
 
-$$\text{Pass}@k = 1 - \frac{\binom{n - c}{k}}{\binom{n}{k}}$$
+### Evaluate the ratio without factorials
 
-Averaging across a test suite of $M$ benchmark tasks yields the global unbiased estimator:
+For $n-c\ge k$, expand the failure ratio as
 
-$$\text{Pass}@k = \mathbb{E}_{\text{tasks}}\left[ 1 - \frac{\binom{n - c}{k}}{\binom{n}{k}} \right]$$
+$$\frac{\binom{n-c}{k}}{\binom nk}
+=\prod_{j=0}^{k-1}\frac{n-c-j}{n-j}
+=\prod_{j=0}^{k-1}\left(1-\frac{c}{n-j}\right).$$
 
-### Numerical stability via log-sum expansion
+Direct floating-point factorials can overflow even when the final ratio lies in $[0,1]$. The product avoids those factorials. A log representation also avoids intermediate products of many small factors:
 
-Evaluating binomial coefficients via direct factorials ($\binom{n}{k} = \frac{n!}{k!(n-k)!}$) rapidly causes floating-point overflow on standard 64-bit hardware, where factorials exceed IEEE 754 float limits at $171! \approx 7.26 \times 10^{306}$. Expanding the ratio into a telescoping product:
+$$s_{\text{fail}}=\sum_{j=0}^{k-1}\log\left(1-\frac{c}{n-j}\right),
+\qquad \widehat q_k=1-\exp(s_{\text{fail}}).$$
 
-$$\frac{\binom{n - c}{k}}{\binom{n}{k}} = \frac{\frac{(n - c)!}{k! (n - c - k)!}}{\frac{n!}{k! (n - k)!}} = \frac{(n - c)! (n - k)!}{n! (n - c - k)!} = \prod_{i=1}^k \frac{n - c - k + i}{n - k + i}$$
+In floating-point code, `log1p(-c / (n-j))` and `-expm1(s_fail)` reduce cancellation when the ratio is close to one. Handle $n-c<k$ before taking logarithms, returning $\widehat q_k=1$; $c=0$ gives zero coverage. The arithmetic takes $\mathcal{O}(k)$ terms but still has finite-precision limits. Stable evaluation does not remove uncertainty in the measured pass probability.
 
-Computing this product directly can suffer from arithmetic underflow when $k$ is large. Converting the product into the log-domain yields a numerically stable summation:
+### Require every repeated run to pass
 
-$$\ln\left( \frac{\binom{n - c}{k}}{\binom{n}{k}} \right) = \sum_{i=1}^k \ln\left( \frac{n - c - k + i}{n - k + i} \right)$$
+Let $I_J^{\text{all}}$ indicate that every run in subset $J$ passed. Counting successful subsets and applying the same expectation argument gives
 
-Exponentiating and subtracting from unity yields the standard runtime formulation implemented in evaluation harnesses:
+$$\widehat r_k=\frac{\binom ck}{\binom nk},
+\qquad \mathbb{E}[\widehat r_k]=p^k.$$
 
-$$1 - \frac{\binom{n - c}{k}}{\binom{n}{k}} = 1 - \exp\left( \sum_{i=1}^k \ln\left( \frac{n - c - k + i}{n - k + i} \right) \right)$$
+The numerator is zero when $c<k$. Otherwise,
 
-This formulation computes the estimator stably for large rollout counts (for example, $n = 1{,}000$ and $k = 100$) in $\mathcal{O}(k)$ time. @Sec-vol3-test-time-compute-pass-at-k reads pass@$k$ as the ceiling of best-of-$k$ selection, and @sec-vol3-evaluation-pass-k reports it beside pass$^k$.
+$$\widehat r_k=\prod_{j=0}^{k-1}\frac{c-j}{n-j}.$$
 
-### The reliability estimator pass$^k$
+This is the task-level repeated-run estimator in @eq-pass-pow-k. For a declared task distribution with task-specific probabilities $p_i$, the population quantities are
 
-Pass@$k$ asks whether at least one of $k$ runs succeeds. Reliability asks whether all $k$ do. Drawing $k$ of the $n$ runs without replacement, all $k$ succeed only if all are drawn from the $c$ successes, so the unbiased estimator is
+$$\operatorname{pass@}k=\mathbb{E}_i[1-(1-p_i)^k],
+\qquad \operatorname{pass}^{k}=\mathbb{E}_i[p_i^k].$$
 
-$$\text{pass}^k = \mathbb{E}_{\text{tasks}}\left[ \frac{\binom{c}{k}}{\binom{n}{k}} \right] = \mathbb{E}_{\text{tasks}}\left[ \prod_{i=0}^{k-1} \frac{c - i}{n - i} \right]$$
-
-which is zero whenever $c < k$ and matches @eq-pass-pow-k. The product form avoids overflow in the same way as the telescoping product above. For a task with independent per-run success probability $p$, $\text{pass}@k = 1 - (1-p)^k$ rises with $k$ while $\text{pass}^k = p^k$ falls, which is why the two diverge as $k$ grows and why an agent's potential and its reliability must be reported separately.
+Average the task-level estimates with the declared task weights, not weights proportional to how many repeats a task received. Under independently sampled new tasks and independent runs, the probability that all $k$ new tasks pass is instead $(\mathbb{E}_i[p_i])^k$. That is a different experiment. Shared outages, retained state, or feedback-conditioned revisions can violate the conditional independence used here. @Sec-vol3-evaluation-pass-k states which complete policy, criterion, task distribution and observation cutoff accompany these metrics.
 
 ## Wald's Sequential Probability Ratio Test (SPRT) Decision Boundaries {#sec-vol3-appendix-math-sprt}
 
-@Sec-vol3-evaluation-releases decides whether to promote or roll back a canary with Wald's sequential probability ratio test [@wald1945sequential]. This section derives the test's statistic and its two stopping boundaries in the chapter's convention.
+The sequential example in @sec-vol3-evaluation-releases compares two specified Bernoulli distributions [@wald1945sequential]. It is distinct from the chapter's paired offline comparison. Let independent labels $x_i\in\{0,1\}$ have a stationary acceptance probability $p$, with the label and observation policy fixed in advance. The simple hypotheses are
 
-Let $x_1, x_2, \dots$ be the outcomes of successive canary trajectories, with $x_i = 1$ for an accepted task and $x_i = 0$ otherwise, independent with success probability $p$. The test compares
+$$H_0:p=p_0,\qquad H_1:p=p_1,\qquad 0<p_1<p_0<1.$$
 
-$$H_0: p = p_0 \quad (\text{the acceptable success rate}), \qquad H_1: p = p_1 = p_0 - \Delta \quad (\text{the degraded rate the gate must catch})$$
+Both probabilities are design inputs. Treating an estimated historical baseline as known without accounting for its uncertainty changes this model. With $d_n=\sum_{i=1}^{n}x_i$, use the chapter's log-likelihood ratio in favor of the specified degradation:
 
-A single outcome has probability $P(x \mid p) = p^{x} (1 - p)^{1 - x}$. After $n$ trajectories with $d_n$ accepted, the log-likelihood ratio in favor of $H_0$ is
+$$\Lambda_n=\sum_{i=1}^{n}\log\frac{\Pr(x_i\mid p_1)}{\Pr(x_i\mid p_0)}
+=d_n\log\frac{p_1}{p_0}+(n-d_n)\log\frac{1-p_1}{1-p_0}.$$
 
-$$\Lambda_n = \sum_{i=1}^n \ln \frac{P(x_i \mid p_0)}{P(x_i \mid p_1)} = d_n \ln \frac{p_0}{p_1} + (n - d_n) \ln \frac{1 - p_0}{1 - p_1}$$
+A pass adds a negative increment and a failure a positive one. Stop and select $H_1$ at $\Lambda_n\ge u$, select $H_0$ at $\Lambda_n\le\ell$, and otherwise continue, with $\ell<0<u$. A statistical selection is not itself production authorization. In particular, selecting $p_0$ against this particular $p_1$ does not establish general noninferiority or absence of harmful effects.
 
-Each success adds $\ln(p_0/p_1) > 0$ and each failure adds $\ln\big((1-p_0)/(1-p_1)\big) < 0$, so $\Lambda_n$ is a random walk that drifts upward under $H_0$ and downward under $H_1$. The test promotes when $\Lambda_n \ge A$, rolls back when $\Lambda_n \le B$, and otherwise keeps sampling.
+### Separate realized errors from design targets
 
-### Deriving the boundaries
+For the untruncated test, write its realized errors as
 
-Let $\alpha$ be the probability of promoting a degraded candidate, $\Pr(\text{promote} \mid H_1)$, and $\beta$ the probability of rolling back a good one, $\Pr(\text{roll back} \mid H_0)$. Let $\Omega_P$ be the set of outcome sequences that end in promotion. Every sequence $\mathbf{x} \in \Omega_P$ satisfies $P(\mathbf{x} \mid H_0) \ge e^{A} P(\mathbf{x} \mid H_1)$, so summing over $\Omega_P$,
+$$a_* = \Pr_0(\text{select }H_1),\qquad
+b_* = \Pr_1(\text{select }H_0).$$
 
-$$1 - \beta = \sum_{\mathbf{x} \in \Omega_P} P(\mathbf{x} \mid H_0) \ge e^{A} \sum_{\mathbf{x} \in \Omega_P} P(\mathbf{x} \mid H_1) = e^{A} \alpha \quad\Longrightarrow\quad A \le \ln\frac{1 - \beta}{\alpha}$$
+Here $\Pr_h$ means probability under $H_h$. At an upper-boundary stopping path, its likelihood under $H_1$ is at least $e^u$ times that under $H_0$. Summing over all such paths gives
 
-Symmetrically, every sequence $\mathbf{x}$ in the rollback set $\Omega_R$ satisfies $P(\mathbf{x} \mid H_0) \le e^{B} P(\mathbf{x} \mid H_1)$, so
+$$1-b_*\ge e^u a_*.$$
 
-$$\beta = \sum_{\mathbf{x} \in \Omega_R} P(\mathbf{x} \mid H_0) \le e^{B} \sum_{\mathbf{x} \in \Omega_R} P(\mathbf{x} \mid H_1) = e^{B} (1 - \alpha) \quad\Longrightarrow\quad B \ge \ln\frac{\beta}{1 - \alpha}$$
+Likewise, summing over lower-boundary paths gives
 
-Neglecting the overshoot when $\Lambda_n$ crosses a boundary, Wald's approximation sets the boundaries at these limits:
+$$b_*\le e^\ell(1-a_*).$$
 
-$$A = \ln\frac{1 - \beta}{\alpha}, \qquad B = \ln\frac{\beta}{1 - \alpha}$$
+These relations concern realized operating characteristics, not arbitrary target values. Neglecting boundary overshoot replaces the inequalities by equalities. Substituting desired errors $\alpha$ and $\beta$ then yields Wald's approximate boundaries
 
-which are the boundaries @sec-vol3-evaluation-releases uses. Because the overshoot only makes the realized error rates smaller, the test is conservative.
+$$u=\log\frac{1-\beta}{\alpha},\qquad
+\ell=\log\frac{\beta}{1-\alpha},
+\qquad 0<\alpha,\beta<1,\quad\alpha+\beta<1.$$
 
-### Expected length of the test
+The targets have the same meanings as in @eq-vol3-release-sprt-boundaries: $\alpha$ targets selecting degradation under $p_0$, and $\beta$ targets selecting $p_0$ under $p_1$. Discrete observations generally overshoot the boundaries. The approximation does not establish $a_*\le\alpha$ and $b_*\le\beta$ individually; [Fischer and Ramdas](https://arxiv.org/html/2410.16076v1) analyze that limitation. Validate the operating characteristics under the selected model and actual stopping policy. A sample or time cap introduces another disposition, inconclusive, whose probability must not be folded into favorable selection.
 
-Each step adds $z_i = \ln\big(P(x_i \mid p_0)/P(x_i \mid p_1)\big)$. Under the degraded rate, $\mathbb{E}_{p_1}[z] = p_1 \ln(p_0/p_1) + (1 - p_1) \ln\big((1-p_0)/(1-p_1)\big) < 0$, and by Wald's identity the expected number of canary trajectories before a decision is
+### Approximate the number of labels until either decision
 
-$$\mathbb{E}_{p_1}[N] \approx \frac{(1 - \alpha) B + \alpha A}{\mathbb{E}_{p_1}[z]}$$
+Let $N$ be the untruncated stopping sample count. Under $H_1$, the mean increment is
 
-The worked canary in @sec-vol3-evaluation-releases evaluates this expression. Because the canary receives only a share of traffic, the expected number of trajectories converts into hours of exposure, which is what sets the canary's traffic share.
+$$m_1=p_1\log\frac{p_1}{p_0}+(1-p_1)\log\frac{1-p_1}{1-p_0}>0.$$
+
+For these independent, bounded Bernoulli log increments and a stopping time with finite expectation, Wald's identity gives $\mathbb{E}_1[\Lambda_N]=m_1\mathbb{E}_1[N]$. If overshoot is neglected, the terminal expectation is approximately $(1-b_*)u+b_*\ell$. Substituting the design target $\beta$ for the realized error gives the further planning approximation
+
+$$\mathbb{E}_1[N]\approx\frac{(1-\beta)u+\beta\ell}{m_1}.$$
+
+The mixture includes both terminal decisions, including mistaken selection of $H_0$, as in [Hory and Hero's average-sample-number expression](https://arxiv.org/pdf/quant-ph/0402181). It is not the conditional expected sample count until a degradation alarm. @Sec-vol3-evaluation-releases computes this approximation and adds an explicit label-delay model; the time conversion does not follow from the probability test alone.
+
+Changing task mix, correlated trials, outcome-dependent completion ordering or missing labels can invalidate the assumed stream. A protocol must state which labels become available and how their order and unresolved cases enter the analysis. Multiple monitored metrics, repeated restarts and hard operational tripwires also change the decision procedure. Expected sample count is neither a maximum traffic exposure nor a harm bound. Admission limits and the recovery of outstanding effects remain separate runtime obligations.
 
 ## Truncated SVD and Low-Rank Attention Approximations {#sec-vol3-appendix-math-svd}
 
-Low-rank compression of the attention state is one of the model-design levers that lower the bytes stored per token (@sec-vol3-kvcache-geometry). Its mathematical basis is the truncated singular value decomposition (SVD) of the key and value matrices.
+An existing attention-state matrix can be approximated by a lower-rank matrix, trading storage for reconstruction error. The truncated singular value decomposition (SVD) gives an error bound for this approximation. It is not a derivation of learned latent-attention architectures or a guarantee about task quality; @sec-vol3-kvcache-geometry distinguishes those model-design and storage choices.
 
 Let $\mathbf{K}^{(l)} \in \mathbb{R}^{S \times d_{\text{head}}}$ denote the uncompressed Key activation matrix for layer $l$ across an active sequence of $S$ tokens. The singular value decomposition factors $\mathbf{K}^{(l)}$ into orthogonal singular vectors:
 
@@ -469,44 +506,54 @@ $$\eta_r = \frac{\sum_{i=1}^r \sigma_i^2}{\sum_{i=1}^{d_{\text{head}}} \sigma_i^
 
 When the singular values decay steeply, a rank well below $d_{\text{head}}$ preserves most of the energy, and the error in every reconstructed attention score $\mathbf{q}^T \hat{\mathbf{k}}$ is bounded by $\|\mathbf{q}\|_2$ times the largest discarded singular value. How steeply the spectrum decays, and therefore what rank a model tolerates, must be measured per model and per layer; compression that looks free on average can still change which earlier tokens a step attends to most.
 
-## Quadratic Compounding Error in Trajectory Imitation {#sec-vol3-appendix-math-compounding-error}
+## Conditional Error Bounds in Trajectory Imitation {#sec-vol3-appendix-math-compounding-error}
 
-The error compounding bound of sequential imitation learning under autoregressive distribution shift was formally established by @ross2011reduction. Here we provide the complete measure-theoretic derivation.
+The bounds in @sec-vol3-fine-tuning-exposure-bias distinguish errors measured on reference-policy states from errors measured on learner-policy states. Neither bound predicts the realized cost of a particular agent. We derive the distinction for a finite horizon $H$, a deterministic reference policy $\pi^*$, and a possibly stochastic learner $\pi$ with the same initial-state distribution and environment dynamics.
 
-Let an agent policy $\pi_\theta$ interact with a discrete-time Markov Decision Process over horizon $H$. Assume the policy incurs an expected per-step 0-1 error rate bounded by $\epsilon \in (0, 1)$ under the state distribution $d_{\pi^*}^t$ induced by an optimal expert $\pi^*$:
+Let $d_\pi^t$ be the state distribution before decision $t$ under $\pi$, and $d_\pi=H^{-1}\sum_{t=1}^H d_\pi^t$. Include the relevant history in the state where needed. For immediate task cost $C(s,a)\in[0,1]$, define
 
-$$\mathbb{E}_{s \sim d_{\pi^*}^t} \left[ \mathbb{I}\left( \pi_\theta(s) \neq \pi^*(s) \right) \right] \le \epsilon$$
+$$J(\pi)=\sum_{t=1}^H\mathbb E_{s\sim d_\pi^t,\;a\sim\pi(\cdot\mid s)}[C(s,a)].$$
 
-Let $d_{\pi_\theta}^t$ denote the state distribution induced by running policy $\pi_\theta$ up to time step $t$. At step $t$, the Total Variation distance between the student and expert state distributions is bounded by the probability that $\pi_\theta$ has committed at least one mistake at any prior step $\tau < t$:
+Separately, let $\ell(s,\pi)=\Pr_{a\sim\pi(\cdot\mid s)}[a\ne\pi^*(s)]$. This disagreement loss is not necessarily the task cost or the token-level training loss.
 
-$$D_{\text{TV}}\left( d_{\pi_\theta}^t, d_{\pi^*}^t \right) \le 1 - (1 - \epsilon)^t \le t \epsilon$$
+### Errors on reference-policy states
 
-The expected cumulative task loss $\mathcal{J}(\pi_\theta)$ over horizon $H$ evaluates to the sum of error expectations across all time steps:
+Write $\epsilon_t=\mathbb E_{s\sim d_{\pi^*}^t}[\ell(s,\pi)]$ and $\epsilon_E=H^{-1}\sum_t\epsilon_t$. Couple the two executions so they share environment randomness while their actions agree. Along a reference execution, draw hypothetical learner actions at each visited state. Until the first disagreement, these draws also describe the coupled learner.
 
-$$\mathcal{J}(\pi_\theta) = \mathbb{E}_{\tau \sim \pi_\theta} \left[ \sum_{t=1}^H \mathbb{I}\left( \pi_\theta(s_t) \neq \pi^*(s_t) \right) \right] = \sum_{t=1}^H \mathbb{E}_{s \sim d_{\pi_\theta}^t} \left[ \mathbb{I}\left( \pi_\theta(s) \neq \pi^*(s) \right) \right]$$
+By the union bound, the probability of at least one disagreement is at most $\sum_t\epsilon_t=H\epsilon_E$. This argument needs no independence between disagreements. Before divergence, the coupled executions incur the same costs; afterward, their total cost difference is at most $H$. Therefore
 
-Applying the variational inequality $\mathbb{E}_{P}[f] \le \mathbb{E}_{Q}[f] + \|f\|_\infty D_{\text{TV}}(P, Q)$ where $\|f\|_\infty = 1$:
+$$J(\pi)-J(\pi^*)\le H\Pr(\text{any disagreement})
+\le \min\{H,\;H^2\epsilon_E\}.$$
 
-$$\begin{aligned}
-\mathcal{J}(\pi_\theta) &\le \sum_{t=1}^H \left( \mathbb{E}_{s \sim d_{\pi^*}^t} \left[ \mathbb{I}\left( \pi_\theta(s) \neq \pi^*(s) \right) \right] + D_{\text{TV}}\left( d_{\pi_\theta}^t, d_{\pi^*}^t \right) \right) \\
-&\le \sum_{t=1}^H \left( \epsilon + t \epsilon \right) \\
-&= \epsilon H + \epsilon \frac{H(H+1)}{2} \\
-&= \mathcal{O}\left( \epsilon H^2 \right)
-\end{aligned}$$
+This yields the expert-distribution bound of @ross2011reduction, Theorem 2.1, with the additional trivial horizon cap. Marginal error bounds do not justify replacing the union bound by $1-(1-\epsilon)^H$; that product requires further conditional-probability assumptions.
 
-Under the DAgger algorithm, by collecting corrective demonstrations on states sampled from the policy's own rollout distribution $d_{\pi_{\theta_k}}$, the Total Variation penalty vanishes because the training distribution directly covers the student's operational mistakes. The expected cumulative regret simplifies to:
+### Errors on learner-policy states
 
-$$\mathcal{J}(\pi_{\text{DAgger}}) \le \epsilon H + \mathcal{O}(1) = \mathcal{O}(\epsilon H)$$
+Now let $\epsilon_\pi=\mathbb E_{s\sim d_\pi}[\ell(s,\pi)]$. Define $Q_t^{\pi^*}(s,a)$ as expected cost from step $t$ through $H$ after taking $a$ and then following $\pi^*$. Let
 
-recovering the optimal linear scaling bound as explored in @sec-vol3-fine-tuning-exposure-bias.
+$$A_t^{\pi^*}(s,a)=Q_t^{\pi^*}(s,a)-Q_t^{\pi^*}(s,\pi^*(s)).$$
+
+Compare policies that switch from the learner to the reference after successively later steps. Their cost differences telescope, giving
+
+$$J(\pi)-J(\pi^*)=
+\sum_{t=1}^H\mathbb E_{s\sim d_\pi^t,\;a\sim\pi(\cdot\mid s)}
+[A_t^{\pi^*}(s,a)].$$
+
+Suppose $A_t^{\pi^*}(s,a)\le u$ for every learner-reachable state and action, with $u\ge0$. The disadvantage is zero when the action agrees with the reference, so each expectation is at most $u$ times the corresponding disagreement probability. Thus
+
+$$J(\pi)-J(\pi^*)\le\min\{H,\;uH\epsilon_\pi\},$$
+
+as in Theorem 2.2. Linear dependence on $H$ requires a horizon-independent $u$; in general, $u$ can grow with the remaining horizon. If the immediate cost itself is disagreement, the simpler identity $J(\pi)=H\epsilon_\pi$ follows directly, but does not describe arbitrary task costs.
+
+DAgger obtains reference labels at states visited during successive policy collections and aggregates the examples for supervised learning. Its guarantees also require the stated learning and sampling assumptions. Collecting such records alone neither proves a small population error for the released policy nor makes the distribution penalty vanish. The chapter uses these bounds to motivate coverage and evaluation, not to promise that a particular training method eliminates compounding errors.
 
 ## Optimal Supervisory Escalation Thresholds under Asymmetric Damage {#sec-vol3-appendix-math-escalation}
 
-Deciding whether a proposed action should wait at an approval gate (@sec-vol3-controlplane-hitl) rather than run automatically is a binary decision under uncertainty with asymmetric costs.
+As an optional decision model, when policy permits a choice between automatic execution and human review, that choice can be modeled as a binary decision under uncertainty with asymmetric costs. The approval gate in @sec-vol3-controlplane-hitl enforces the selected policy; it does not make prohibited actions eligible for a cost-based exception.
 
 Let $a \in \mathcal{A}$ denote a candidate action proposed by the model. The true outcome state is binary: success ($Y = 0$) or catastrophic invariant failure ($Y = 1$). The runtime has an estimate $\hat{p} = \mathbb{P}(Y = 1 \mid \mathbf{x}, a) \in [0, 1]$ computed from features $\mathbf{x}$ it can observe, such as the action's authority level, recent error counts, or the task's domain.
 
-We define the loss matrix $\mathbf{L}(d, y)$ for decision $d \in \{\text{Auto}, \text{Escalate}\}$ and outcome $y \in \{0, 1\}$:
+We define the loss matrix $\mathbf{L}(d, y)$ for decision $d \in \{\text{Auto}, \text{Escalate}\}$ and outcome $y \in \{0, 1\}$. This simplified model assumes that human review always prevents the modeled damage; the approval mechanism itself supplies no such guarantee:
 
 - $\mathbf{L}(\text{Auto}, 0) = C_{\text{compute}}$: The direct token and compute cost of autonomous execution.
 - $\mathbf{L}(\text{Auto}, 1) = C_{\text{compute}} + C_{\text{blast}}$: The compute cost plus the unrecoverable damage of external failure.
@@ -533,7 +580,7 @@ Using the upper confidence bound $p_{\text{UCB}}(\hat{p}, \alpha) \approx \hat{p
 
 $$d^* = \text{Escalate} \iff p_{\text{UCB}}(\hat{p}, \alpha) > \frac{C_{\text{human}}}{C_{\text{blast}}}$$
 
-As the uncertainty $\sigma_p$ grows, in domains the estimator has seen little of, the rule escalates more actions without manual retuning. The rule decides when to ask for approval; it does not replace the gate for irreversible actions, which @sec-vol3-sagas-pivot requires regardless of $\hat{p}$.
+As the uncertainty $\sigma_p$ grows, in domains the estimator has seen little of, the rule escalates more actions without manual retuning. This optional cost model does not override mandatory authority, precondition, or approval checks. @Sec-vol3-sagas-pivot develops those checks for declared commitment regions, including partial and uncertain outcomes.
 
 ## Multi-Agent Amdahl's Law Stationary Root Analysis {#sec-vol3-appendix-math-amdahl}
 
@@ -586,7 +633,7 @@ Even with an infinite quorum of neural voters, the collective accuracy is strict
 
 ## High-Dimensional Measure Concentration and the Curse of Dimensionality {#sec-vol3-appendix-math-curse-dimensionality}
 
-As discussed in @sec-vol3-persistent-dense-retrieval, high-dimensional vector retrieval breaks spatial partitioning trees (such as $k$-d trees and $R$-trees), degrading them into exhaustive linear scans. This section derives the closed-form volume of a $D$-dimensional continuous Euclidean ball and formalizes the loss of distance contrast under Beyer's theorem.
+The exact-versus-approximate search choice in @sec-vol3-persistent-dense-retrieval depends on the stored representations and workload. This section derives the volume of a $D$-dimensional Euclidean ball and examines conditions under which distance contrast deteriorates. These conditional geometric results are not a guarantee that every learned embedding collection defeats spatial indexes or requires approximate search.
 
 ### Continuous hypersphere volume and shell concentration
 
