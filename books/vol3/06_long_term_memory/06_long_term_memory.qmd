@@ -766,7 +766,7 @@ $$\text{Graph Overhead} \approx N \times M \times 8 \text{ bytes} = 10^7 \times 
 
 When combined with alignment padding and heap metadata, an HNSW index can expand the base storage requirements of the vector dataset by 25 to 50 percent, requiring that the entire graph and its associated vectors reside permanently in host RAM to avoid catastrophic disk paging during graph hops.
 
-To scale durable storage across commodity nodes without exhausting physical memory, systems engineers employ Inverted File with Product Quantization (IVFPQ, also denoted IVF-PQ). IVFPQ combines coarse geometric clustering with lossy vector compression, transforming an unmanageable continuous search problem into a compact table lookup.
+To scale durable storage across commodity nodes without exhausting physical memory, systems engineers employ Inverted File with Product Quantization (IVFPQ, also denoted IVF-PQ). IVFPQ combines coarse geometric clustering with lossy vector compression, transforming an unmanageable continuous search problem into a compact table lookup. Just as the GIF image format reduces 16.8 million colors to a 256-color palette—allowing each pixel to be stored as a single 1-byte index instead of 3 raw RGB bytes—Product Quantization reduces high-dimensional vectors to short codes by clustering each subspace into a local "palette" of centroids.
 
 The Inverted File (IVF) stage acts as a coarse spatial partition. The storage engine clusters the vector corpus into $C$ distinct Voronoi cells using offline $k$-means clustering, generating centroids $\{\mathbf{c}_1, \mathbf{c}_2, \dots, \mathbf{c}_C\}$. Each centroid serves as the key for an inverted list containing the identifiers of all vectors falling within its geometric cell. At query time, the runtime evaluates the query vector against only the $C$ centroids, selects the top $n_{\text{probe}}$ closest cells (where $n_{\text{probe}} \ll C$), and restricts candidate evaluation entirely to the postings lists associated with those selected clusters.
 
@@ -937,7 +937,27 @@ In a pure chunk-based retrieval architecture, the runtime must either issue $k$ 
 
 ### Structural code property graphs
 
-To overcome the chunk fragmentation boundary, persistent storage must model software as a formal multi-relational graph. Following the foundational formulation of Code Property Graphs (CPGs) by @yamaguchi2014modeling and subsequent graph-augmented retrieval architectures [@edge2024graphrag], we model a software repository as a directed, edge-labeled, attributed multigraph:
+To overcome the chunk fragmentation boundary, persistent storage must model software as a formal multi-relational graph. Consider a simple Python refactoring scenario where an agent needs to update a renamed validation function:
+
+```python
+# auth.py
+def validate_token(token: str) -> bool:
+    return len(token) > 10
+
+# api.py
+from auth import validate_token
+def process_request(req):
+    if validate_token(req.token):
+        save_db(req)
+
+# db.py
+def save_db(req):
+    pass
+```
+
+If the agent only uses text chunking, chunks from `api.py` might be disconnected from `auth.py`. But if the repository is represented as a graph, the explicit `CALLS` edge between `process_request` and `validate_token` ensures the agent sees the exact execution path.
+
+Following the foundational formulation of Code Property Graphs (CPGs) by @yamaguchi2014modeling and subsequent graph-augmented retrieval architectures [@edge2024graphrag], we model a software repository as a directed, edge-labeled, attributed multigraph:
 
 $$G = (V, E, \Sigma_V, \Sigma_E, \mu_V, \mu_E)$$
 
@@ -1185,14 +1205,10 @@ A naive implementation of agent memory couples storage mutation directly to the 
 
 This synchronous write design introduces a disastrous latency tax. Computing transformer embeddings and updating multi-tier index graphs introduces hundreds of milliseconds of compute delay ($T_{\text{index}} \gg 100\text{ ms}$), while invoking a secondary model for trajectory reflection introduces multi-second inference stalls ($T_{\text{reflect}} > 5\text{ s}$). Pausing the interactive agent loop ($B=1$) to execute heavy memory transformations on every turn violates interactive latency budgets and monopolizes accelerator resources.
 
-To reconcile real-time execution with durable learning, dependable agent runtimes decouple storage mutation into a **Dual Write Path Architecture** (@fig-vol3-dual-write-path-quarantine and @tbl-vol3-dual-write-path):
+To reconcile real-time execution with durable learning, dependable agent runtimes decouple storage mutation into a **Dual Write Path Architecture** (@tbl-vol3-dual-write-path):
 
 1. **The Fast Append Write Path (Synchronous, Sub-Millisecond):** On the critical interactive execution path, the runtime treats memory writes with append-only write-ahead semantics. When an agent emits a tool call, receives an environment observation, or records an immediate progress note, the supervisor appends the serialized event tuple directly to a local, append-only Write-Ahead Log (WAL) or in-memory circular buffer ($T_{\text{append}} < 1\text{ ms}$). No embedding models are invoked, no vector graphs are traversed, and no LLM reflections are triggered. The agent proceeds immediately to its next reasoning step with zero latency penalty.
 2. **The Asynchronous Background Reflection Path (Offline, Batch Consolidation):** Operating completely out-of-band—during multi-second tool waits, inter-turn idle windows, or after task completion—an asynchronous memory consolidation daemon ingests recent WAL segments. This background pipeline evaluates surprisal filters (@sec-vol3-memory-admission-gate), triggers deliberative LLM reflection passes [@shinn2023reflexion], extracts generalized semantic schemas (@sec-vol3-memory-consolidation), updates HNSW vector graphs, and applies tombstone bitsets to prune obsolete records.
-
-::: {#fig-vol3-dual-write-path-quarantine fig-env="figure" fig-pos="htb" fig-cap="**The Dual Write Path and Write Admission Quarantine Pipeline**: Decoupling synchronous, append-only write-ahead logging (WAL) on the interactive critical path ($< 1\\text{ ms}$) from asynchronous, surprisal-gated episodic consolidation. Path 1 appends raw event tuples $e_t$ to an in-memory ring buffer and local NVMe SSD without embedding computation or GPU stalls. Path 2 gates background episodic admission through a five-stage quarantine sieve—enforcing tenant isolation, secret scrubbing, SHA-256 provenance anchoring, deterministic verification closure, and geometric surprisal filtering ($\\\\mathcal{N}(e) > \\tau_{\\text{novel}}$)—before deliberative LLM reflection compresses traces and materializes them across vector indexes and in-memory tombstone bitsets." fig-alt="Systems architecture diagram of the Dual Write Path and Write Admission Quarantine Pipeline showing Tier 1 agent event emission splitting into Path 1 synchronous append-only WAL on the left and Path 2 asynchronous admission quarantine gate on the right, flowing into Tier 3 offline episodic consolidation and multi-substrate materialization, contrasted with naive synchronous coupling in Tier 4."}
-![](images/png/fig-vol3-dual-write-path-quarantine.png){width=\"100%\"}
-:::
 
 | **Operational Dimension**  | **Fast Append Write Path**                   | **Asynchronous Reflection Path**                    |
 |:---------------------------|:---------------------------------------------|:----------------------------------------------------|
@@ -1503,6 +1519,11 @@ $$\rho_{\text{dead}} = \frac{|V_{\text{tombstone}}|}{|V_{\text{total}}|}$$
 
 When $\rho_{\text{dead}}$ exceeds a predefined threshold $\theta_{\text{compact}}$ (typically $0.15 \le \theta_{\text{compact}} \le 0.20$), a background thread clones the active graph segment, purges all chunks where $e_{\text{death}} \le e_{\text{current}}$, re-links the HNSW entry points, and atomically swaps the compacted index pointer.
 
+#### In-memory tombstone filtering {.unnumbered}
+
+To guarantee that an agent never receives stale context after modifying a file, the runtime implements **In-Memory Tombstone Filtering**. When a file is modified, the runtime immediately adds its path to a `tombstoned_ids` set. During any subsequent vector or lexical search, the retrieval engine checks this set. Any candidate chunk whose ID appears in the tombstoned set is instantly discarded before it can reach the model's prompt. The memory store flags these modified entries and syncs the updated chunks in the background without blocking the agent's execution.
+
+::: {.callout-note title="Under the hood: Distributed CDC and epoch RCU" collapse="true"}
 #### Causal read-your-writes fencing over distributed change data capture {.unnumbered}
 
 In distributed or multi-worker agent deployments (such as a multi-agent system where Worker 1 executes code modifications while Worker 2 or an auxiliary search agent queries an index replica), invalidation cannot rely on a single process-local hash table.
@@ -1540,6 +1561,7 @@ Production agent storage engines eliminate these race conditions using **Atomic 
 - **Deferred Epoch Reclamation:** The superseded neighbor buffer $L_{\text{old}}$ is placed onto an epoch retirement queue. Memory is freed only after all reader threads registered in epochs $E \le E_{\text{retire}}$ have completed their traversals.
 
 Epoch RCU guarantees that vector similarity lookups remain wait-free and nanosecond-fast, while background reconciliation safely mutates graph topologies and tombstone sets without locking active inference workers.
+:::
 
 Index invalidation closes one storage property mechanically, since the retrieval engine never serves a superseded chunk. Under the invariant closure principle (\ref{pri-invariant-closure}) it cannot certify the task, whose evidence still comes from the end-to-end boundary [@saltzer1984endtoend], where checks confirm that the agent's changes satisfy the environment's own invariants. What the storage layer owes that boundary is an honest record of the source. Whenever the agent mutates a file, the runtime captures an authoritative content hash and file modification timestamp directly from the OS kernel before executing any subsequent retrieval or deliberation step. Durable memory must remain subservient to the physical state of the machine.
 

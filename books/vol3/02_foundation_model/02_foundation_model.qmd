@@ -1378,20 +1378,17 @@ $$|Q_{\text{DFA}}| \propto |Q_{\text{terminals}}| \cdot K^d$$
 
 For a moderately nested schema ($d = 5, K = 10$), $|Q_{\text{DFA}}|$ exceeds $100{,}000$ discrete states. Storing precomputed $16\text{ KB}$ vocabulary bitmasks across $100{,}000$ states requires more than $1.6\text{ GB}$ of memory—far exceeding the accelerator's on-chip L2 cache and triggering continuous HBM thrashing during decode.
 
-Modern serving runtimes resolve this combinatorial explosion by compiling context-free schemas into **Pushdown Automata (PDAs)** equipped with an explicit register-backed delimiter stack $\Gamma$. As synthesized in @fig-vol3-pda-stack-constrained-decoding, delegating delimiter tracking to a runtime stack collapses the required state space down to the bare lexical syntax:
+Modern serving runtimes resolve this combinatorial explosion by compiling context-free schemas into **Pushdown Automata (PDAs)** equipped with an explicit register-backed delimiter stack $\Gamma$. Delegating delimiter tracking to a runtime stack collapses the required state space down to the bare lexical syntax:
 
 $$|Q_{\text{PDA}}| = |Q_{\text{lexical}}| + |\Gamma| \approx 64\text{ states}$$
 
 The entire PDA transition and validity table shrinks below $1\text{ MB}$, fitting permanently inside the accelerator's L2 cache. During autoregressive decode, the GPU manages the parse stack entirely within hardware register banks:
+
 - **Scope Entry:** When the model emits an opening delimiter (`{` or `[`), the runtime executes an on-device push ($\text{PUSH}(\Gamma, \text{SCOPE})$), incrementing stack depth $d \leftarrow d + 1$ in $< 1\text{ ns}$.
 - **Vectorized Bitmask Slicing:** The active parser state $(q_t, \text{top}(\Gamma))$ indexes the corresponding $16\text{ KB}$ bitmask directly from L2 cache at $12\text{ TB/s}$ in $1.33\text{ ns}$. A fused Triton/CUDA kernel performs vectorized bitwise tests across SM warp lanes, suppressing illegal vocabulary logits with $-\infty$ biases in on-chip SRAM before softmax reduction.
 - **Scope Exit & Acceptance:** When a closing delimiter (`}` or `]`) is emitted, the runtime executes an on-device pop ($\text{POP}(\Gamma)$), restoring the parent scope. When the stack clears to its sentinel marker $Z_0$ upon sequence completion, the automaton transitions to $q_{\text{accept}}$, unmasking exclusively the end-of-sequence token (`<|end_of_text|>`).
 
 By pairing on-chip register stacks with vectorized SRAM logit slicing, the serving engine guarantees $100.00\%$ structural compliance ($R_{\text{syntax}} \equiv 1.0$) with zero host CPU interrupts and zero PCIe bus synchronization overhead.
-
-::: {#fig-vol3-pda-stack-constrained-decoding fig-env="figure" fig-pos="htb" fig-cap="**Pushdown Automaton (PDA) Stack Constrained Decoding**: Hardware datapath and state collapse mechanics for recursive grammar enforcement. The top panels contrast the exponential state explosion of flat DFAs ($|Q| \\propto K^d$) against register-backed PDA stacks ($\\Gamma$). The middle datapath traces single-step logit slicing across four hardware stages: raw GEMV unembedding, L2 cache bitmask fetch ($1.33\\text{ ns}$), fused SRAM $-\\infty$ logit masking, and normalized softmax output with $R_{\\text{syntax}} \\equiv 1.0$. The bottom panel contrasts fused on-chip PDA execution against host-driven PCIe synchronization stalls." fig-alt="Systems schematic illustrating recursive schema compilation into a 4-slot pushdown register stack, comparing DFA vs PDA state space, followed by a 4-stage hardware datapath from raw logits through L2 bitmasks to fused SRAM masking, and a contrast between host PCIe stalls and on-chip execution."}
-![](images/svg/fig-vol3-pda-stack-constrained-decoding.svg)
-:::
 
 ### The syntactic divide
 
