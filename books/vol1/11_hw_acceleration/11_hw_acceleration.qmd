@@ -1210,7 +1210,9 @@ These nested loops expose three recurring computational patterns: element-wise o
 
 Vector operations\index{Vector Operation!hardware acceleration}\index{SIMD!data-level parallelism} accelerate computation by executing a single instruction across multiple data elements simultaneously. In the scalar formulation of @lst-loop_level_dense, processing a batch of `{python} WeightMatrixCalc.wm_batch_str` samples through a `{python} WeightMatrixCalc.wm_in_str`-to-`{python} WeightMatrixCalc.wm_out_str` dense layer requires `{python} WeightMatrixCalc.wm_batch_macs_m_str`. A scalar processor issues a distinct instruction to load each input-weight pair, perform the multiplication, and update the accumulator, incurring full instruction-fetch, decode, and branch-prediction overhead on every element. Vector pipelines eliminate this instruction overhead by operating on vector registers spanning multiple parallel execution lanes.
 
-RISC-V\index{RISC-V!vector extensions},[^fn-riscv-ai-customization] an open instruction-set architecture (ISA) with a standardized vector extension [@waterman2013], provides a concrete vehicle for this execution model. In RISC-V vector assembly (@lst-riscv_vector_mac), vector instructions express operations over arrays of runtime-configured length, decoupling software from the physical lane width of the processor.
+Rather than executing a single arithmetic operation per instruction (scalar execution), vector hardware uses wide registers (e.g., 128 to 512 bits) capable of holding multiple numbers simultaneously. A single vector instruction directs parallel arithmetic logic units to execute across all elements concurrently.
+
+RISC-V\index{RISC-V!vector extensions},[^fn-riscv-ai-customization] an open instruction-set architecture (ISA) with a standardized vector extension [@waterman2013], provides a concrete vehicle for this execution model. In RISC-V vector assembly (@lst-riscv_vector_mac), code is decoupled from fixed hardware widths: the instruction `vsetvli` queries the hardware to determine how many elements fit into available registers, processes that chunk, and loops until all features are exhausted.
 
 [^fn-riscv-ai-customization]: **RISC-V (reduced instruction set computer V)**\index{RISC-V!AI customization}: The open ISA allows hardware teams to add custom ML instructions, including vector dot products, activation functions, and sparse tensor operations, without changing the base ISA. The trade-off is software ecosystem maturity: custom extensions require corresponding compiler, library, and runtime support, which can limit portability and increase integration work.
 
@@ -1587,7 +1589,7 @@ While SIMD and SIMT units execute vector work efficiently, large matrix computat
 
 [^fn-tensor-core-alignment]: **Tensor Core dimension alignment**\index{Tensor Core!dimension alignment}: NVIDIA Tensor Cores are most efficient when matrix dimensions are aligned to precision- and architecture-specific multiples, such as multiples of 8 or 16 for common FP16/BF16/INT8 paths. Modern cuBLAS and cuDNN can still use Tensor Cores for many nonaligned dimensions, but poorly aligned shapes may trigger less efficient kernels, require padding, or reduce effective throughput [@nvidia_cublas; @nvidia2021cudnn]. This is why model architects often choose embedding and channel dimensions such as 512 rather than 500 and why batch-size-1 inference may fail to reach peak Tensor Core utilization: alignment and arithmetic intensity jointly determine whether the hardware's matrix engines stay full.
 
-NVIDIA Parallel Thread Execution (PTX) exposes this architecture through warp-synchronous matrix instructions.[^fn-tensor-core-origin] In @lst-tensor_core_op, all 32 threads in a warp execute `mma.sync` collectively to compute a matrix tile product $D = A \times B + C$.
+While high-level frameworks hide low-level matrix intrinsics, inspecting the intermediate assembly reveals how hardware coordinates spatial execution. In NVIDIA Parallel Thread Execution (PTX), Tensor Core operations are invoked through warp-synchronous matrix instructions (`mma.sync`).[^fn-tensor-core-origin] The instruction mnemonic encodes the exact tile geometry and data types: `.m16n8k16` specifies the matrix tile dimensions ($M=16, N=8, K=16$), `.row.col` defines the row-major and column-major memory layouts of inputs $A$ and $B$, and the trailing types (`.f32.f16.f16.f32`) declare that FP16 inputs are multiplied and accumulated into an FP32 destination. In @lst-tensor_core_op, all 32 threads in a warp execute this single instruction collectively to compute the matrix tile product $D = A \times B + C$.
 
 [^fn-tensor-core-origin]: **Tensor Core**\index{Tensor Core!throughput mechanism}: A single Tensor Core instruction executes a complete matrix-multiply-accumulate operation on a small tile of data using a dedicated hardware block [@nvidia_tensors_fp16_2017; @NVIDIA2020]. This approach bypasses the overhead of fetching and scheduling dozens of individual arithmetic instructions on general-purpose CUDA cores. Because these blocks constitute a large fraction of a modern accelerator's advertised tensor throughput, failing to use them can leave most of the chip's theoretical peak unavailable to the workload.
 
@@ -3363,9 +3365,9 @@ To avoid the eviction overhead and unpredictability of automatic caches, AI acce
 
 #### Off-chip memory {#sec-hardware-acceleration-offchip-memory-ecdb}
 
-When tensor working sets exceed on-chip SRAM capacity, operands and parameters reside in device-local DRAM. Rather than sequential hierarchy levels, High Bandwidth Memory (HBM)\index{HBM!3D die stacking}, Graphics DDR (GDDR)\index{GDDR!off-chip DRAM variant}, and Low-Power DDR (LPDDR)\index{LPDDR!low-power DRAM variant} represent alternative memory architectures engineered for distinct cost, bandwidth, and power envelopes. High-performance accelerators use HBM, which stacks DRAM dies vertically using through-silicon vias (TSVs) and interfaces with the accelerator die across a wide silicon interposer (e.g., 1,024 to 8,192 bits). This wide bus delivers multi-terabyte-per-second bandwidth at lower clock frequencies and lower energy per bit than conventional DRAM, but requires complex 2.5D packaging. Where silicon interposers are cost-prohibitive, accelerators adopt GDDR, which uses narrower buses (e.g., 256 to 384 bits) driven at high pin speeds across standard circuit boards. Mobile and embedded accelerators utilize LPDDR, trading raw bandwidth for low operating voltage and reduced standby power.
+When tensor working sets exceed on-chip SRAM capacity, operands and parameters reside in device-local DRAM. Rather than sequential hierarchy levels, HBM\index{HBM!3D die stacking}, Graphics DDR (GDDR)\index{GDDR!off-chip DRAM variant}, and Low-Power DDR (LPDDR)\index{LPDDR!low-power DRAM variant} represent alternative memory architectures engineered for distinct cost, bandwidth, and power envelopes. High-performance accelerators use HBM, which stacks DRAM dies vertically using through-silicon vias (TSVs) and interfaces with the accelerator die across a wide silicon interposer (e.g., 1,024 to 8,192 bits). This wide bus delivers multi-terabyte-per-second bandwidth at lower clock frequencies and lower energy per bit than conventional DRAM, but requires complex 2.5D packaging. Where silicon interposers are cost-prohibitive, accelerators adopt GDDR, which uses narrower buses (e.g., 256 to 384 bits) driven at high pin speeds across standard circuit boards. Mobile and embedded accelerators utilize LPDDR, trading raw bandwidth for low operating voltage and reduced standby power.
 
-When parameter and activation footprints exceed device-local DRAM capacity, the system must offload state to host DRAM (typically standard DDR). Accessing host memory requires crossing an I/O interconnect such as PCIe or a coherent fabric like NVLink or Compute Express Link (CXL). Because PCIe bandwidth (tens of gigabytes per second) is one to two orders of magnitude lower than accelerator DRAM bandwidth, unmanaged offloading stalls arithmetic execution. Efficient runtimes mitigate this penalty by overlapping asynchronous Direct Memory Access (DMA) copies with kernel execution, prefetching upcoming layer parameters while current layers compute.
+When parameter and activation footprints exceed device-local DRAM capacity, the system must offload state to host DRAM (typically standard DDR). Accessing host memory requires crossing an I/O interconnect such as PCIe or a coherent fabric like NVLink or Compute Express Link (CXL). Because PCIe bandwidth (tens of gigabytes per second) is one to two orders of magnitude lower than accelerator DRAM bandwidth, unmanaged offloading stalls arithmetic execution. Efficient runtimes mitigate this penalty by overlapping asynchronous direct memory access (DMA) copies with kernel execution, prefetching upcoming layer parameters while current layers compute.
 
 At the base of the hierarchy, nonvolatile flash storage and solid-state drives (SSDs) provide persistent, multi-terabyte capacity for datasets and training checkpoints [@narayanan2021]. With read latencies measured in tens of microseconds and bus bandwidths capped at single-digit gigabytes per second, flash devices cannot participate directly in kernel execution. Checkpointing and data-loading pipelines treat flash storage as an asynchronous streaming source, staging batches through host DRAM into accelerator memory before computation begins.
 
@@ -3617,7 +3619,7 @@ Data movement also dominates the energy budget of hardware accelerators. Transfe
 
 Peak FLOP/s indicates what execution units can deliver when operands are already on chip, but sustained accelerator throughput is ultimately bounded by the rate at which the memory hierarchy delivers data. The Roofline Model[^fn-roofline-performance-model]\index{Roofline Model!efficiency measurement} [@williams2009] formalizes this relationship by plotting attainable performance against arithmetic intensity, establishing whether an operation is compute bound\index{Compute-Bound!roofline classification} or memory bound\index{Memory-Bound!roofline classification}. Rather than evaluating compute capacity in isolation, the model intersects hardware arithmetic throughput with memory bandwidth, revealing which physical ceiling binds execution before an engineer commits optimization effort.
 
-[^fn-roofline-performance-model]: **Roofline model**\index{Roofline model!optimization diagnostic}: Introduced by @williams2009 at UC Berkeley, building on earlier I/O complexity work from the 1980s. Their specific contribution was making the compute vs. bandwidth trade-off *visual* and *actionable*: the characteristic roofline plot immediately reveals whether a kernel is compute bound (hitting the flat ceiling) or memory bound (hitting the sloped bandwidth line) and quantifies the gap to hardware limits. A kernel operating at only 50 percent of its ceiling has a clear 2$\times$ utilization gap to close, making this the standard diagnostic tool for accelerator optimization.
+[^fn-roofline-performance-model]: **Roofline model**\index{Roofline model!optimization diagnostic}: Introduced by @williams2009 at UC Berkeley, building on earlier I/O complexity work from the 1980s. Their specific contribution was making the compute vs. bandwidth trade-off visual and actionable: the characteristic roofline plot immediately reveals whether a kernel is compute bound (hitting the flat ceiling) or memory bound (hitting the sloped bandwidth line) and quantifies the gap to hardware limits. A kernel operating at only 50 percent of its ceiling has a clear 2$\times$ utilization gap to close, making this the standard diagnostic tool for accelerator optimization.
 
 ```{python}
 #| echo: false
@@ -4527,11 +4529,11 @@ Consider a convolution applying 16 filters of size $3{\times}3$ to an $8{\times}
 
 :::
 
-This combinatorial explosion presents a central puzzle in ML systems: if the unconstrained search space contains billions of candidates, how do compilers and kernel developers routinely achieve near-peak hardware efficiency? Rather than evaluating arbitrary permutations, production systems restrict their search to a small family of canonical dataflow patterns—spatial and temporal schedules engineered to exploit the specific reuse properties of neural network operators.
+This combinatorial explosion defines a central challenge in ML systems: while an unconstrained search space contains billions of candidates, compilers and kernel developers achieve near-peak hardware efficiency by pruning the search. Rather than evaluating arbitrary permutations, production systems restrict their candidate set to a small family of canonical dataflow patterns—spatial and temporal schedules engineered to exploit the specific reuse properties of neural network operators.
 
 ## Dataflow Optimization {#sec-hardware-acceleration-dataflow-optimization-strategies-ce52}
 
-Spatial and temporal mapping (@sec-hardware-acceleration-hardware-mapping-fundamentals-neural-networks-f9a9) establish where operations execute and where operands reside, but **dataflow optimization**\index{Dataflow optimization!data movement minimization} governs the exact trajectories and schedules of data moving through processing elements and the memory hierarchy. In a systolic array or tiled vector unit, the temporal schedule and spatial routing of weights, inputs, and partial sums dictate how frequently operands must be fetched from energy-expensive DRAM rather than reused from local registers or scratchpads. By controlling off-chip traffic, the dataflow establishes the effective operational intensity of the kernel, determining whether execution achieves the compute-bound plateau or stalls in the memory-bound regime of the Roofline model. Optimizing compilers (@sec-hardware-acceleration-compiler-support-172e) and runtime systems (@sec-hardware-acceleration-runtime-support-f94f) therefore tailor dataflow patterns to match the reuse characteristics of each layer to the hardware constraints of the target accelerator.
+In a Google TPU v1 processing a $256 \times 256$ matrix multiplication, fetching every weight from external DRAM would consume over $100\times$ more energy than multiplying the numbers. While spatial and temporal mapping establish where operations execute and where operands reside, **dataflow optimization**\index{Dataflow optimization!data movement minimization} governs the exact trajectories and schedules of data moving through processing elements and the memory hierarchy to maximize operand reuse. In a systolic array or tiled vector unit, the temporal schedule and spatial routing of weights, inputs, and partial sums dictate how frequently operands must be fetched from energy-expensive DRAM rather than reused from local registers or scratchpads. By controlling off-chip traffic, the dataflow establishes the effective operational intensity of the kernel, determining whether execution achieves the compute-bound plateau or stalls in the memory-bound regime of the Roofline model. Optimizing compilers (@sec-hardware-acceleration-compiler-support-172e) and runtime systems (@sec-hardware-acceleration-runtime-support-f94f) therefore tailor dataflow patterns to match the reuse characteristics of each layer to the hardware constraints of the target accelerator.
 
 Three recurring architectural decisions structure this design space:
 
@@ -4554,12 +4556,12 @@ To prevent arithmetic pipelines from stalling, a data movement strategy must cap
 ::: {#lst-matmul_data_movement lst-cap="**Naïve Matrix-Multiplication Dataflow**: The loop nest revisits weight rows, input columns, and output accumulators, exposing the reuse that a mapping must capture in local memory."}
 
 ```{.python}
-## Matrix multiplication where:
-## weights: [512x256] - model parameters
-## input:   [256x32]  - batch of activations
-## Z:       [512x32]  - output activations
+# Matrix multiplication where:
+# weights: [512x256] - model parameters
+# input:   [256x32]  - batch of activations
+# Z:       [512x32]  - output activations
 
-## Computing each output element Z[i,j]:
+# Computing each output element Z[i,j]:
 for i in range(512):
     for j in range(32):
         for k in range(256):
@@ -4587,10 +4589,10 @@ A key advantage of weight stationary is that it maximizes weight reuse, reducing
 ::: {#lst-weight_stationary lst-cap="**Weight Stationary Dataflow**: Weights stay resident in local memory while inputs and partial sums stream through, minimizing parameter read traffic; best for CNNs and matrix multiplications with heavy weight reuse."}
 
 ```{.python}
-## Weight Stationary Matrix Multiplication
-## - Weights remain fixed in local memory
-## - Input activations stream through
-## - Partial sums accumulate for final output
+# Weight Stationary Matrix Multiplication
+# - Weights remain fixed in local memory
+# - Input activations stream through
+# - Partial sums accumulate for final output
 
 for weight_block in weights:  # Load and keep weights stationary
     load_to_local(weight_block)  # Fixed in local storage
@@ -4619,9 +4621,9 @@ This approach aligns naturally with systolic arrays, where computation progresse
 ::: {#lst-output_stationary lst-cap="**Output Stationary Dataflow**: Partial sums stay resident in local memory while weights and inputs stream through, so each output is written out only once, minimizing accumulation write traffic; best for fully connected layers and attention."}
 
 ```{.python}
-## - Partial sums remain in local memory
-## - Weights and input activations stream through dynamically
-## - Final outputs are written only once
+# - Partial sums remain in local memory
+# - Weights and input activations stream through dynamically
+# - Final outputs are written only once
 
 for output_block in outputs:  # Keep partial sums stationary
     accumulator = 0  # Initialize accumulation buffer
@@ -4640,9 +4642,9 @@ The two strategies examined so far each fix a different operand in local memory:
 ::: {#lst-input_stationary lst-cap="**Input Stationary Dataflow**: Input activations stay resident in local memory while weights stream through, reducing activation read traffic when one activation tile feeds several computations."}
 
 ```{.python}
-## - Input activations remain in local memory
-## - Weights stream through dynamically
-## - Partial sums accumulate and are written out
+# - Input activations remain in local memory
+# - Weights stream through dynamically
+# - Partial sums accumulate and are written out
 
 for input_block in inputs:  # Keep input activations stationary
     load_to_local(input_block)  # Fixed in local storage
@@ -4772,12 +4774,12 @@ In a naïve execution model, each operation executes as a separate GPU kernel, f
 import torch
 import torch.nn.functional as F
 
-## Input tensor
+# Input tensor
 X = torch.randn(1024, 1024).cuda()
 running_mean = torch.zeros(1024, device=X.device)
 running_var = torch.ones(1024, device=X.device)
 
-## Step-by-step execution (naïve approach)
+# Step-by-step execution (naïve approach)
 X1 = torch.relu(X)  # Intermediate tensor stored in memory
 X2 = F.batch_norm(
     X1, running_mean, running_var, training=False
