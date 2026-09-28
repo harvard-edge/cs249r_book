@@ -11,9 +11,9 @@
 
 ## About This Volume
 
-Volume II picks up where Volume I ends, moving from a single machine to fleets of machines connected by high-speed networks. It covers the mathematical and algorithmic demand for scale, how to build the physical infrastructure that meets it, how to serve models to billions of users, and how to do all of this safely and responsibly.
+Volume II moves from introductory single-machine ML systems to fleets of machines connected by high-speed networks. It covers the mathematical and algorithmic demand for scale, how to build the physical infrastructure that meets it, how to serve models to billions of users, and how to do all of this safely and responsibly.
 
-Where Volume I teaches you to optimize a single node (one to eight accelerators, shared memory, PCIe/NVLink within one box), Volume II teaches you to orchestrate many nodes (hundreds to thousands of accelerators, InfiniBand/Ethernet fabric, message passing, fault tolerance across racks and datacenters).
+The assumed foundation is local model execution, memory hierarchy, training and inference, and accelerator basics. The advanced material explains how those constraints change when many nodes coordinate through network fabrics, message passing, and fault tolerance across racks and datacenters. Security, privacy, environmental limits, and governance enter as design requirements throughout; the final part develops their enforcement mechanisms.
 
 ## What You Will Learn
 
@@ -39,12 +39,12 @@ Where Volume I teaches you to optimize a single node (one to eight accelerators,
     <tr>
       <td><b>III. Deployment at Scale</b></td>
       <td>Serving and operations</td>
-      <td>How to engineer kernels for peak performance, serve models under tail-latency SLOs, deploy to edge devices, and manage production MLOps lifecycles</td>
+      <td>How to diagnose bottlenecks and improve runtime performance, serve models under tail-latency SLOs, deploy to edge devices, and manage production MLOps lifecycles</td>
     </tr>
     <tr>
       <td><b>IV. The Responsible Fleet</b></td>
       <td>Governance and boundaries</td>
-      <td>How to secure ML systems against adversaries, ensure empirical robustness under drift, operate within planetary carbon limits, and govern models responsibly</td>
+      <td>How to secure ML systems against adversaries, evaluate and improve empirical robustness under drift, operate within planetary carbon limits, and govern models responsibly</td>
     </tr>
   </tbody>
 </table>
@@ -168,7 +168,7 @@ Where Volume I teaches you to optimize a single node (one to eight accelerators,
 
 ## Prerequisites
 
-Volume II assumes you have read Volume I or have equivalent knowledge of single-machine ML systems: the Iron Law of ML Systems, the D.A.M Taxonomy, training and inference pipelines, model compression, and hardware acceleration fundamentals.
+Volume II assumes an introductory ML systems course or equivalent experience with single-machine execution, memory hierarchy, training and inference pipelines, and hardware acceleration. It does not require reading Volume I. *Introduction to Machine Learning Systems* is an optional source for that background; this volume provides its own foundation recaps and introduces the C³ framework for reasoning about fleets.
 
 ## Working in the Open
 
@@ -196,7 +196,7 @@ If you notice an error, have a suggestion, or want to propose a topic, please [o
     </tr>
     <tr>
       <td><b>Main README</b></td>
-      <td><a href="../../../../README.md">Repository root</a></td>
+      <td><a href="../../README.md">Repository root</a></td>
     </tr>
     <tr>
       <td><b>Full textbook</b></td>
