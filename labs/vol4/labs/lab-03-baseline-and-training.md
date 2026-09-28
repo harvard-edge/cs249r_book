@@ -1,4 +1,4 @@
-# Lab 3: VLAs — From Simulation to Hardware
+# Lab 3: Learned Control with Vision-Language-Action Models
 
 **Schedule:** Weeks 5–6 · Milestone 2 due end of Week 8 (with Lab 4)
 **Required Textbook Reading:** [Chapter 5: Physical Data](../../../books/vol4/05_data/05_data.qmd), [Chapter 6: Policy Training](../../../books/vol4/06_training/06_training.qmd)

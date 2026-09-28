@@ -1,4 +1,4 @@
-# Lab 4: Closing the Gap — Real Data & Fine-Tuning
+# Lab 4: Real-World Data Collection & Fine-Tuning
 
 **Schedule:** Weeks 7–8 · Milestone 2 due end of Week 8
 **Required Textbook Reading:** [Chapter 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd), [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd), [Chapter 9: Spatial Memory](../../../books/vol4/09_memory/09_memory.qmd)

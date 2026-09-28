@@ -1,4 +1,4 @@
-# Lab 5: Action Horizons, Language & Disturbances
+# Lab 5: Stress-Testing — Prediction, Language & Recovery
 
 **Schedule:** Week 9 · Milestone 3 due end of week
 **Required Textbook Reading:** [Chapter 10: Grounded Intent](../../../books/vol4/10_intent/10_intent.qmd), [Chapter 11: Trajectory Planning](../../../books/vol4/11_planning/11_planning.qmd), [Chapter 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd)

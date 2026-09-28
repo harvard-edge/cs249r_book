@@ -1,4 +1,4 @@
-# Lab 1: Kinematics & Simulation
+# Lab 1: Robot Kinematics & Digital Twin
 
 **Schedule:** Weeks 1–2 · Milestone 1 due end of Week 4 (with Lab 2)
 **Required Textbook Reading:** [Chapter 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd), [Chapter 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd)

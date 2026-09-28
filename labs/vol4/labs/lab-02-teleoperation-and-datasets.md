@@ -1,4 +1,4 @@
-# Lab 2: Hardware Bring-Up & Real-World Control
+# Lab 2: From Simulation to Real Hardware
 
 **Schedule:** Weeks 3–4 · Milestone 1 due end of Week 4
 **Required Textbook Reading:** [Chapter 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd), [Chapter 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd)
