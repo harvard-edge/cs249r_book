@@ -20,7 +20,7 @@ Sleep 500ms
 Show
 
 # Train TinyGPT on Python code and evaluate syntax with AST compiler
-Type "python3 tinytorch/milestones/05_2017_transformer/03_tinygpt_code_completion.py --quick"
+Type "tito milestone run 05-code"
 Sleep 300ms
 Enter
 # Generous hold time to study code completions, compiler diagnostics, and 100% AST validity scorecard

@@ -47,6 +47,8 @@ tito() {
     python3 "$_real_tito" milestone run 01
   elif [[ "$1" == "milestone" && "$2" == "run" && "$3" == "05" ]]; then
     python3 "$REPO_DIR/tinytorch/milestones/05_2017_transformer/04_tinygpt_chat.py" --quick --epochs 6 --prompt "Q: What is autograd in TinyTorch?" --temperature 0.1 --top-k 1 --stream
+  elif [[ "$1" == "milestone" && "$2" == "run" && "$3" == "05-code" ]]; then
+    python3 "$REPO_DIR/tinytorch/milestones/05_2017_transformer/03_tinygpt_code_completion.py" --quick --epochs 3
   elif [[ "$1" == "milestone" && "$2" == "run" && "$3" == "06" ]]; then
     python3 "$REPO_DIR/tinytorch/milestones/06_2018_mlperf/01_optimization_olympics.py"
   else
