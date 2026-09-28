@@ -439,7 +439,7 @@ def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs
         TimeElapsedColumn(),
         console=console
     ) as progress:
-        task = progress.add_task(f"[cyan]Training...", total=epochs)
+        task = progress.add_task("[cyan]Training...", total=epochs)
 
         for epoch in range(epochs):
             train_loss, train_acc = train_epoch(model, train_loader, optimizer, loss_fn)

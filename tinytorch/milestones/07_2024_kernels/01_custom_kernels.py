@@ -1,34 +1,57 @@
 #!/usr/bin/env python3
 """
-Milestone 07: Custom GPU Kernels (2024) - Native Hardware Acceleration
-======================================================================
+Custom GPU Kernels (2024-Present): Native Hardware Acceleration
+=============================================================================
 
-Historical Context:
-Between 2021 and 2024, machine learning systems crossed the foreign function
-interface (FFI). Eager Python execution was replaced by compiled, hardware-tuned
-acceleration backends:
+📚 HISTORICAL CONTEXT:
+Between 2021 and 2024, modern machine learning systems crossed the Foreign Function
+Interface (FFI) boundary. Eager Python execution and pure PyTorch interpreters were
+eclipsed by hardware-specialized compiler frameworks:
 1. OpenAI Triton (2021-2024): Authoring block-SPMD GPU shaders in Python syntax
-   that compile directly into PTX assembly.
+   that compile directly into PTX assembly and run at near-peak CUDA performance.
 2. Apple Metal Performance Shaders (2020-2024): Exploiting unified memory
-   architectures to eliminate host-to-device PCIe bandwidth transfers.
-3. C++ SIMD Vectorization: Passing raw DRAM pointers to AVX2/AVX-512 and ARM
-   NEON vector registers executing 8 to 16 floating-point operations per cycle.
+   architectures to eliminate host-to-device PCIe bandwidth transfer bottlenecks.
+3. C++ SIMD Vectorization: Passing raw DRAM pointers directly to AVX2/AVX-512 and
+   ARM NEON vector registers executing 8 to 16 floating-point operations per cycle.
 
-This milestone tests all three native extension paths from Chapter 21.
+🎯 MILESTONE 07: VERIFY YOUR CUSTOM KERNEL EXTENSIONS
+In this systems extension milestone, YOU test all three hardware compilation paths
+developed in Chapter 21, verifying numerical fidelity against standard TinyTorch
+and benchmarking raw hardware acceleration!
+
+✅ REQUIRED MODULES & EXTENSIONS (Run after Chapter 21):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Module 01 (Tensor)        : YOUR strided tensor data structure
+  Module 17 (Acceleration)  : YOUR fused operations and cache tiling concepts
+  Module 21 (Extensions)    : YOUR compiled C++, Metal, and Triton kernels
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🏗️ ARCHITECTURE (The Silicon Acceleration Bridge):
+    ┌──────────────┐
+    │ Python Layer │  YOUR TinyTorch High-Level Tensors
+    └──────┬───────┘
+           │ Foreign Function Interface (FFI / ctypes / pybind11)
+           ▼
+    ┌────────────────────────────────────────────────────────┐
+    │ Native Silicon Execution Engines                       │
+    ├──────────────────┬──────────────────┬──────────────────┤
+    │ C++ SIMD Vector  │ Apple Metal MPS  │ OpenAI Triton    │
+    │ AVX2 / ARM NEON  │ Unified Memory   │ GPU PTX Shaders  │
+    └──────────────────┴──────────────────┴──────────────────┘
 """
 
 import os
+from pathlib import Path
+import platform
 import sys
 import time
-import platform
+
 import numpy as np
 
 # Ensure repository root is on sys.path
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
-
-from tinytorch.core.tensor import Tensor
 
 
 def print_banner():
@@ -37,6 +60,8 @@ def print_banner():
     print("  Verifying C++ SIMD, Apple Metal MPS, and OpenAI Triton GPU Shaders")
     print("=" * 76)
     print(f"  Platform: {platform.system()} ({platform.machine()}) | Python {sys.version.split()[0]}")
+
+
 # =============================================================================
 # 🎓 ZONE 1: STUDENT HARDWARE EXTENSIONS (C++ SIMD, Apple Metal MPS, OpenAI Triton)
 # =============================================================================

@@ -3,7 +3,7 @@
 The Transformer Era (2017-2022): TinyGPT Code Completion Capstone
 =============================================================================
 
-HISTORICAL CONTEXT:
+📚 HISTORICAL CONTEXT:
 In 2017, Vaswani et al. published "Attention Is All You Need," introducing the
 Transformer architecture. In 2021, Chen et al. (OpenAI) released Codex,
 showing that autoregressive transformers trained on source code develop deep
@@ -19,34 +19,46 @@ forgiven), programming languages demand strict syntactic precision:
    downstream syntax to pass interpreter verification.
 4. Abstract Syntax Tree (AST): The code must compile into a formal syntax tree.
 
-MILESTONE 05 CAPSTONE: TRAIN TINYGPT TO COMPLETE PYTHON CODE
-In this milestone, you bring together your full TinyTorch stack:
-- Tokenizing source code characters with your Tokenizer (Module 10)
-- Projecting into continuous latent space with your Embeddings (Module 11)
-- Computing self-attention with your Causal Multi-Head Attention (Module 12)
-- Stacking decoder layers with your Pre-LN Transformer Blocks (Module 13)
-- Computing exact analytical gradients with your Autograd engine (Module 06)
-- Optimizing weights with your AdamW optimizer (Module 07)
+🎯 MILESTONE 05 CAPSTONE: TRAIN TINYGPT TO COMPLETE PYTHON CODE
+In this capstone milestone, YOU bring together your full TinyTorch stack:
+- Tokenizing source code characters with YOUR Tokenizer (Module 10)
+- Projecting into continuous latent space with YOUR Embeddings (Module 11)
+- Computing self-attention with YOUR Causal Multi-Head Attention (Module 12)
+- Stacking decoder layers with YOUR Pre-LN Transformer Blocks (Module 13)
+- Computing exact analytical gradients with YOUR Autograd engine (Module 06)
+- Optimizing weights with YOUR AdamW optimizer (Module 07)
 - Autoregressively completing code prompts with top-k sampling (Module 13)
 - Quantitatively verifying generated code with Python AST parsing!
 
-REQUIRED MODULES:
-=============================================================================
-  Module 01 (Tensor)        : Strided tensor data structure
-  Module 02 (Activations)   : GELU activation
-  Module 03 (Layers)        : Linear projection layers
-  Module 04 (Losses)        : CrossEntropyLoss
-  Module 05 (DataLoader)    : Mini-batch DataLoader
-  Module 06 (Autograd)      : Reverse-mode computational graph
-  Module 07 (Optimizers)    : AdamW optimizer
-  Module 08 (Training)      : Trainer training loop
-  Module 10 (Tokenization)  : Character Tokenizer
-  Module 11 (Embeddings)    : Token + Learned Positional Embeddings
-  Module 12 (Attention)     : Causal Multi-Head Attention
-  Module 13 (Transformers)  : Pre-LN Transformer Blocks and TinyGPT
-=============================================================================
+✅ REQUIRED MODULES (Run after Module 13):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Module 01 (Tensor)        : YOUR strided tensor data structure
+  Module 02 (Activations)   : YOUR GELU activation function
+  Module 03 (Layers)        : YOUR Linear projection layers
+  Module 04 (Losses)        : YOUR CrossEntropyLoss
+  Module 05 (DataLoader)    : YOUR mini-batch DataLoader
+  Module 06 (Autograd)      : YOUR reverse-mode computational graph
+  Module 07 (Optimizers)    : YOUR AdamW optimizer
+  Module 08 (Training)      : YOUR Trainer training loop
+  Module 10 (Tokenization)  : YOUR Character Tokenizer
+  Module 11 (Embeddings)    : YOUR Token + Learned Positional Embeddings
+  Module 12 (Attention)     : YOUR Causal Multi-Head Attention
+  Module 13 (Transformers)  : YOUR Pre-LN Transformer Blocks and TinyGPT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-SUCCESS CRITERIA:
+🏗️ ARCHITECTURE (Decoder-Only Generative Transformer):
+    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+    │ Code Tokens │───▶│ Embeddings  │───▶│   Causal    │───▶│     MLP     │
+    │ "def add("  │    │  YOUR M11   │    │  Attention  │    │  YOUR M03   │
+    └─────────────┘    └─────────────┘    │  YOUR M12   │    └─────────────┘
+                                          └─────────────┘           │
+                                                 │                  ▼
+                                                 └─────────▶ ┌─────────────┐
+                                                             │ Next Token  │
+                                                             │ AST Parsed! │
+                                                             └─────────────┘
+
+📊 SUCCESS CRITERIA:
   Loss Convergence  : Training loss drops steadily (loss < 2.0 or drop > 1.0)
   Syntactic Validity: Generated code parses cleanly via ast.parse (rate >= 60%)
   Code Completion   : Completes function definitions and class structures
@@ -66,6 +78,10 @@ import numpy as np
 project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (YOUR Modules 01-13)
+# =============================================================================
 
 from tinytorch.core.tensor import Tensor  # noqa: E402
 from tinytorch.core.losses import CrossEntropyLoss  # noqa: E402

@@ -1,17 +1,47 @@
 #!/usr/bin/env python3
-"""Milestone 06.2: measure KV caching without changing the computation.
-
-Replay one fixed token sequence through the GPT built in Module 13. The baseline
-recomputes each causal prefix; Module 18's cache processes only the new token.
-Both paths run embedding, attention, feed-forward layers, and output projection.
-Check their logits before comparing repeated timings. This is an inference
-microbenchmark on an untrained model, not a language-quality evaluation.
-
-Required modules: 01-08, 11-13, and 18 (including their prerequisites).
-The attention work across N prefixes is cubic without a cache and quadratic
-with a cache. Actual speedup depends on sequence length and machine overhead;
-there is no required timing ratio.
 """
+Generative Serving (2022-Present): KV Cache Generation Speedup
+=============================================================================
+
+📚 HISTORICAL CONTEXT:
+When OpenAI deployed ChatGPT in late 2022, naive autoregressive generation was
+catastrophically slow: generating token N required recomputing the key and value
+vectors for all previous N-1 tokens through every transformer layer. The computational
+cost per sequence grew cubically: O(S^3) total attention operations.
+
+The introduction of Key-Value (KV) Caching transformed generative AI serving:
+- Prefill Phase: Compute and cache keys and values for all prompt tokens once.
+- Decode Phase: Compute only the single query vector for the new token, retrieve
+  cached keys and values from DRAM/SRAM, and append the new token in O(1) time.
+This slashes decoding cost to O(S^2) and delivers interactive token streaming!
+
+🎯 MILESTONE 06 PART 2: MEASURE YOUR KV CACHE SPEEDUP
+Replay a token sequence through YOUR TinyGPT model with and without YOUR KV Cache.
+Verify numerical output invariance (identical logits) and measure the real wall-clock
+speedup delivered by YOUR Module 18 implementation!
+
+✅ REQUIRED MODULES (Run after Module 18):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Module 01 (Tensor)        : YOUR strided tensor data structure
+  Module 06 (Autograd)      : YOUR no_grad inference scope
+  Module 11 (Embeddings)    : YOUR Token + Learned Positional Embeddings
+  Module 12 (Attention)     : YOUR Causal Multi-Head Attention
+  Module 13 (Transformers)  : YOUR Stacked Transformer Blocks & TinyGPT
+  Module 18 (Memoization)   : YOUR KV Cache state reuse engine
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🏗️ ARCHITECTURE (Naive vs. KV Cached Autoregressive Serving):
+    NAIVE (O(S^2) per step):
+    Step 1: [Tok 1] ──────────────▶ Compute Q, K, V
+    Step 2: [Tok 1, Tok 2] ───────▶ Recompute ALL Q, K, V  (Redundant!)
+    Step 3: [Tok 1, Tok 2, Tok 3] ─▶ Recompute ALL Q, K, V  (Wasteful!)
+
+    WITH YOUR KV CACHE (O(1) per step):
+    Step 1: [Tok 1] ──────────────▶ Store K1, V1 in YOUR Cache
+    Step 2: [Tok 2] ──────────────▶ Compute only Q2, K2, V2; reuse K1, V1!
+    Step 3: [Tok 3] ──────────────▶ Compute only Q3, K3, V3; reuse K1, K2, V1, V2!
+"""
+
 from contextlib import nullcontext
 from pathlib import Path
 import sys
@@ -21,21 +51,17 @@ import numpy as np
 from rich.console import Console
 from rich.table import Table
 
+# Add project root
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (YOUR Modules 01, 06, 13, 18)
+# =============================================================================
 
-# =============================================================================
-# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (KV Cache & Autoregressive Serving)
-# =============================================================================
-#
-# This benchmark pairs your TinyGPT Transformer (Module 13) with your
-# KV Cache Memoization engine (Module 18):
-#   Baseline: O(S^2) prefix recomputation on every new token
-#   Accelerated: O(1) single-token incremental decode using YOUR KV Cache
-#
-# =============================================================================
-# 📊 ZONE 2: MILESTONE HARNESS & VERIFICATION
-# =============================================================================
+from tinytorch.core.tensor import Tensor  # noqa: E402
+from tinytorch.core.autograd import no_grad  # noqa: E402
+from tinytorch.core.transformers import GPT  # noqa: E402
+from tinytorch.perf.memoization import enable_kv_cache, disable_kv_cache  # noqa: E402
 
 def replay_prefixes(model, tokens, cache=None):
     """Return the next-token logits at every position of one fixed sequence.
@@ -75,9 +101,6 @@ def measure_replay(model, tokens, cache=None, repeats=7):
 
 def compare_cached_replay(model, tokens, repeats=7):
     """Verify equivalent outputs and time the same model with and without caching."""
-    from tinytorch.core.autograd import no_grad
-    from tinytorch.perf.memoization import enable_kv_cache, disable_kv_cache
-
     if getattr(model, '_cache_enabled', False):
         raise ValueError('Pass an uncached model; this comparison manages its cache.')
     if tokens.ndim != 2 or tokens.shape[0] != 1 or not 0 < tokens.shape[1] <= model.max_seq_len:
@@ -108,14 +131,6 @@ def compare_cached_replay(model, tokens, repeats=7):
 
 def main():
     console = Console()
-    try:
-        from tinytorch.core.transformers import GPT
-        from tinytorch.perf.memoization import enable_kv_cache
-    except ImportError as error:
-        console.print(f"Missing implementation: {error}")
-        console.print("Export modules 01-08, 11-13, and 18, including their prerequisites.")
-        return 1
-
     console.print('[bold cyan]Milestone 06.2: KV Cache: Same Computation, Less Repetition[/bold cyan]')
     model = GPT(vocab_size=27, embed_dim=32, num_layers=2, num_heads=2, max_seq_len=64)
     tokens = np.random.default_rng(7).integers(0, model.vocab_size, (1, 64))

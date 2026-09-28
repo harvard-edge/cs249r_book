@@ -1,39 +1,77 @@
 #!/usr/bin/env python3
-"""Milestone 06.1: compare optimization candidates against one trained baseline.
+"""
+The MLPerf Era (2018-Present): The Hardware Optimization Olympics
+=============================================================================
 
-Train a small DigitMLP, then independently round and prune copies of its weights.
-Measure each candidate's accuracy and latency on the same workload. TinyTorch
-executes both candidates as dense float32 arrays: INT8 code storage is a modeled
-artifact size, and zero weights alone do not reduce allocated model memory.
+📚 HISTORICAL CONTEXT:
+In 2018, a consortium of 30+ leading AI companies and academic institutions (including
+Google, Harvard, Stanford, and Intel) founded MLPerf (now MLCommons). Their core
+insight was transformative: accuracy alone is meaningless without measuring efficiency,
+latency, and hardware throughput under strict statistical measurement discipline.
 
-The cache lifecycle and vectorized-matmul examples are separate mechanisms, not
-additional optimizations applied to this MLP. Part 06.2 measures equivalent GPT
-inference with and without a cache. These are classroom experiments inspired by
-MLPerf's measurement discipline, not official MLPerf submissions or guarantees
-of speed, compression, or preserved accuracy.
+In the post-Moore era, deploying deep learning models in production demands a
+principled optimization cascade:
+1. Profiling (Module 14): Pinpointing latency, FLOPs, and memory bottlenecks.
+2. Quantization (Module 15): Compressing 32-bit floats to 8-bit integers (4x memory drop).
+3. Compression (Module 16): Pruning insignificant weights to exploit parameter sparsity.
+4. Acceleration (Module 17): Fusing memory operations and vectorizing GEMM arithmetic.
+5. Memoization (Module 18): Reusing prior key-value state to slash autoregressive decode.
+6. Benchmarking (Module 19): Computing the Pareto frontier across accuracy vs latency.
+
+🎯 MILESTONE 06: THE OPTIMIZATION OLYMPICS
+Using YOUR Tiny🔥Torch systems implementations, you will optimize trained neural
+networks and evaluate them against rigorous MLPerf-inspired benchmarks. You will
+measure real wall-clock latency, parameter memory reduction, and Pareto trade-offs!
+
+✅ REQUIRED MODULES (Run after Module 20):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Module 01 (Tensor)        : YOUR strided tensor data structure
+  Module 03 (Layers)        : YOUR Linear projection layers
+  Module 13 (Transformers)  : YOUR MinimalTransformer architecture
+  Module 14 (Profiling)     : YOUR Profiler for FLOPs, memory, and latency
+  Module 15 (Quantization)  : YOUR INT8 Quantizer (symmetric and asymmetric)
+  Module 16 (Compression)   : YOUR Magnitude Pruning and Sparsity Compressor
+  Module 17 (Acceleration)  : YOUR im2col and Vectorized GEMM Kernels
+  Module 18 (Memoization)   : YOUR KV Cache state reuse engine
+  Module 19 (Benchmarking)  : YOUR Statistical MLPerf Benchmarking Engine
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🏗️ ARCHITECTURE (The Systems Optimization Cascade):
+    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+    │  Baseline   │───▶│  Profile    │───▶│  Quantize   │───▶│    Prune    │
+    │ FP32 Model  │    │  YOUR M14   │    │  YOUR M15   │    │  YOUR M16   │
+    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+                                                 │                  │
+                                            4x Smaller!        50% Sparse!
+                                                 ▼                  ▼
+    ┌─────────────┐    ┌─────────────┐    ┌────────────────────────────────┐
+    │   Pareto    │◀───│  Benchmark  │◀───│ Accelerate & Cache (M17 & M18) │
+    │  Frontier   │    │  YOUR M19   │    │ im2col, SIMD GEMM, KV Cache    │
+    └─────────────┘    └─────────────┘    └────────────────────────────────┘
 """
 
-import sys
-import os
-import time
+from contextlib import nullcontext, redirect_stdout
 import copy
-import pickle
 import io
-from contextlib import redirect_stdout, nullcontext
-import numpy as np
-rng = np.random.default_rng(7)
+import os
 from pathlib import Path
+import pickle
+import sys
+import time
+
+import numpy as np
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
+
+rng = np.random.default_rng(7)
 
 # Add project root
 repo_root = str(Path(__file__).resolve().parents[2])
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
-
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich import box
 
 console = Console()
 

@@ -1,26 +1,55 @@
+#!/usr/bin/env python3
 """
-Milestone 05: The Transformer Era (Part 4) - Conversational Concepts & Overfitting Detective.
+The Transformer Era (2017-2022): TinyGPT Conversational Chat & Overfitting Detective
+=============================================================================
 
-In this milestone part, you train TinyGPT as a conversational question answering
+📚 HISTORICAL CONTEXT:
+In late 2022, OpenAI released ChatGPT, showing that fine-tuned autoregressive
+transformers could serve as fluent conversational partners. Conversational AI
+relies on dialogue formatting, next-token prediction, and live streaming decode.
+
+In this milestone part, you train TinyGPT as an interactive question-answering
 assistant that explains TinyTorch concepts ("TinyTorch Teaching TinyTorch").
 
-Key Systems and Educational Concepts:
-  1. Conversational Dialogue Modeling:
-     Autoregressively formatting prompts with 'Q: ...' and completing 'A: ...'.
-  2. The Overfitting Detective Experiment:
-     Comparing Train Loss versus Test Loss curves on held-out concept splits
-     (tinytorch_train.txt vs tinytorch_test.txt).
-     Because a 119K parameter model has more weights than the 13 KB dataset has
-     characters, students observe how micro-models can achieve near-zero training
-     loss by rote memorization while held-out test loss reveals the generalization gap.
-  3. Interactive Streaming Inference:
-     Character-by-character typewriter streaming using rich.Live.
+🎯 MILESTONE 05 PART 4: CONVERSATIONAL CHAT & THE OVERFITTING DETECTIVE
+In this interactive milestone, YOU bring together your student-authored modules:
+1. Conversational Dialogue Modeling:
+   Formatting prompts with "Q: ..." and completing answers with "A: ...".
+2. The Overfitting Detective Experiment:
+   Comparing Train Loss versus Test Loss on held-out concept splits.
+   Because a 119K parameter model has more weights than the dataset has
+   characters, you will observe how micro-models can achieve near-zero training
+   loss through rote memorization, exposing the generalization gap.
+3. Interactive Typewriter Streaming:
+   Token-by-token terminal typewriter streaming via live UI rendering.
 
-All components are assembled from the student-authored TinyTorch LEGO bricks:
-  - Module 02 & 03: Activation functions (GELU) and Multi-Layer Perceptron
-  - Module 11: Token and Learned Positional Embeddings
-  - Module 12: Causal Multi-Head Self-Attention
-  - Module 13: Pre-LayerNorm Residual Transformer Blocks
+✅ REQUIRED MODULES (Run after Module 13):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Module 01 (Tensor)        : YOUR strided tensor data structure
+  Module 02 (Activations)   : YOUR GELU activation function
+  Module 03 (Layers)        : YOUR Linear projection layers
+  Module 04 (Losses)        : YOUR CrossEntropyLoss
+  Module 05 (DataLoader)    : YOUR mini-batch DataLoader
+  Module 06 (Autograd)      : YOUR reverse-mode computational graph
+  Module 07 (Optimizers)    : YOUR AdamW optimizer
+  Module 08 (Training)      : YOUR Trainer training loop
+  Module 10 (Tokenization)  : YOUR Character Tokenizer
+  Module 11 (Embeddings)    : YOUR Token + Learned Positional Embeddings
+  Module 12 (Attention)     : YOUR Causal Multi-Head Attention
+  Module 13 (Transformers)  : YOUR Pre-LN Transformer Blocks & TinyGPT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🏗️ ARCHITECTURE (Decoder-Only Conversational Transformer):
+    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+    │  Dialogue   │───▶│ Embeddings  │───▶│   Causal    │───▶│     MLP     │
+    │  "Q: What"  │    │  YOUR M11   │    │  Attention  │    │  YOUR M03   │
+    └─────────────┘    └─────────────┘    │  YOUR M12   │    └─────────────┘
+                                          └─────────────┘           │
+                                                 │                  ▼
+                                                 └─────────▶ ┌─────────────┐
+                                                             │ Next Token  │
+                                                             │ Live Stream │
+                                                             └─────────────┘
 """
 
 import argparse
@@ -37,6 +66,10 @@ import numpy as np
 project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (YOUR Modules 01-13)
+# =============================================================================
 
 from tinytorch.core.tensor import Tensor  # noqa: E402
 from tinytorch.core.losses import CrossEntropyLoss  # noqa: E402

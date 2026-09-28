@@ -142,17 +142,17 @@ class DatasetManager:
         if available_mb > 0:
             print(f"    * Available space: {available_mb:.1f} MB")
         else:
-            print(f"    * Available space: (unable to check)")
+            print("    * Available space: (unable to check)")
         print(f"    * Required space:  ~{required_mb} MB")
 
         if not has_space:
-            print(f"    * Status: INSUFFICIENT SPACE")
+            print("    * Status: INSUFFICIENT SPACE")
             print()
             print(f"  Please free up at least {required_mb - available_mb:.0f} MB and try again.")
             print("=" * 60)
             return False
         else:
-            print(f"    * Status: Ready to download")
+            print("    * Status: Ready to download")
         print()
 
         # Auto-confirm mode (for CI/testing)
@@ -462,6 +462,7 @@ class DatasetManager:
             # Read labels
             return np.frombuffer(f.read(), dtype=np.uint8).astype(np.int64)
 
+
 def main():
     """Test dataset manager functionality."""
     print("🧪 Testing TinyTorch Dataset Manager")
@@ -521,6 +522,7 @@ def main():
         print(f"   TinyTalks sample failed: {e}")
 
     print("\n✅ Dataset Manager test complete!")
+
 
 if __name__ == "__main__":
     main()
