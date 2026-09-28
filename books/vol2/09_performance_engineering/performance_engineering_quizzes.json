@@ -46,9 +46,9 @@
           },
           {
             "question_type": "ORDER",
-            "question": "Order the following levels of the GPU memory hierarchy from lowest access energy per byte (most energy efficient) to highest access energy per byte (least energy efficient):\n\n(1) L2 Cache\n(2) Registers\n(3) High-Bandwidth Memory (HBM)\n(4) Shared Memory (SRAM)",
-            "answer": "The correct order is (2) Registers -> (4) Shared Memory (SRAM) -> (1) L2 Cache -> (3) High-Bandwidth Memory (HBM). Accessing register files costs roughly ~0.01 pJ, on-chip shared memory (SRAM) costs ~0.5 pJ, on-chip L2 cache costs intermediate energy across SMs, and off-chip HBM costs ~640 pJ per access (~10 pJ/byte), climbing by over $1000\\times$ across the physical hierarchy.",
-            "learning_objective": "Classify GPU memory hierarchy levels by physical access energy cost per byte"
+            "question": "Order the following levels of the GPU memory hierarchy from nearest to the streaming multiprocessor arithmetic units to farthest: (1) L2 Cache, (2) Registers, (3) High-Bandwidth Memory (HBM), (4) Shared Memory (SRAM).",
+            "answer": "The correct order is (2) Registers -> (4) Shared Memory (SRAM) -> (1) L2 Cache -> (3) High-Bandwidth Memory (HBM). Registers and shared memory provide local working storage, L2 serves reuse across SMs, and off-chip HBM supplies bulk capacity. Keeping reusable intermediates near compute avoids costly off-chip transfers; numerical energy comparisons additionally require a common transaction size and measurement boundary.",
+            "learning_objective": "Order GPU storage tiers by proximity to compute and explain the cost of off-chip traffic."
           },
           {
             "question_type": "TF",
@@ -58,14 +58,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "On an NVIDIA H100 GPU, accessing data from on-chip SRAM (shared memory) costs approximately 0.5 pJ per access, while fetching the same data from off-chip HBM costs roughly 640 pJ (a $\\sim 1280\\times$ ratio). What is the primary thermodynamic and performance consequence of repeatedly streaming intermediate tensors through HBM rather than retaining them in on-chip SRAM?",
+            "question": "What is the primary energy and performance consequence of repeatedly streaming intermediate tensors through off-chip HBM rather than retaining them in on-chip SRAM?",
             "choices": [
               "Off-chip transfers bypass the L2 cache entirely, preventing the GPU memory management unit from performing virtual address translation",
-              "Streaming through HBM dissipates tens of watts per GPU in memory interface power alone and stalls SMs for hundreds of nanoseconds per access, whereas SRAM access completes in 20–30 clock cycles at sub-picojoule energy",
+              "Off-chip transfers consume memory-interface energy and can limit throughput through bandwidth and latency, whereas retaining reusable intermediates in SRAM reduces HBM traffic",
               "Streaming through HBM causes numerical drift and precision loss because DRAM capacitors lose charge over multi-nanosecond round-trips",
               "SRAM access draws higher total power because operating at higher clock frequencies increases dynamic capacitance dissipation beyond HBM interface PHYs"
             ],
-            "answer": "The correct answer is B. Streaming through HBM dissipates tens of watts per GPU in memory interface power alone and stalls SMs for hundreds of nanoseconds per access, whereas SRAM access completes in 20–30 clock cycles at sub-picojoule energy. Moving data off-chip across longer wires to HBM stacks costs $\\sim 10\\text{ pJ/byte}$ (about 640 pJ per 64-byte transaction), drawing 35–50 W per GPU solely across memory interfaces at full bandwidth and introducing $\\sim 300\\text{ ns}$ latency bubbles. Keeping intermediate activations in on-chip SRAM cuts access energy by over $1000\\times$ and latency to $\\sim 20\\text{ ns}$. The other options invent false physical claims about DRAM precision drift, misrepresent SRAM power scaling, or misdescribe GPU virtual memory translation.",
+            "answer": "The correct answer is B. Repeated off-chip transfers consume energy and bandwidth without adding useful arithmetic. Fusion and tiling can retain intermediates in SRAM and reduce that traffic, subject to local capacity and occupancy constraints. Neither numerical precision drift in DRAM nor failed address translation explains this bottleneck; transaction-size conventions are needed before comparing access energies quantitatively.",
             "learning_objective": "Evaluate the thermodynamic and latency consequences of off-chip HBM data movement versus on-chip SRAM caching"
           }
         ]
@@ -104,13 +104,13 @@
           {
             "question_type": "SHORT",
             "question": "Explain how PagedAttention enables a 2–4$\\times$ throughput improvement in LLM serving without modifying model weights or numerical precision, contrasting its memory allocation mechanism with traditional contiguous preallocation.",
-            "answer": "Traditional serving systems preallocate contiguous memory for each request's maximum possible sequence length (e.g. 4096 tokens), wasting 60–80% of GPU memory due to internal fragmentation when average sequence lengths are much shorter. PagedAttention divides the KV cache into fixed-size physical pages allocated on-demand as sequences grow, eliminating fragmentation and recovering wasted HBM. This recovered memory allows the scheduler to admit significantly larger batch sizes, which directly increases serving throughput.",
-            "learning_objective": "Explain how virtual memory paging concepts in PagedAttention eliminate KV cache fragmentation to expand serving batch capacity"
+            "answer": "Contiguous preallocation reserves capacity for each request's maximum length, leaving unused slots when sequences are shorter. PagedAttention allocates fixed-size blocks as sequences grow and reuses free blocks across requests, sharply reducing allocation waste, though a final partly filled block can remain. The recovered capacity permits larger batches; reported 2–4-fold throughput gains depend on the workload and latency constraint rather than following automatically from paging.",
+            "learning_objective": "Explain how paged allocation reduces KV fragmentation and can expand batch capacity."
           },
           {
             "question_type": "FILL",
             "question": "The architectural pattern that decouples LLM inference by executing the compute-bound prompt prefill phase and the bandwidth-bound autoregressive token decode phase on separate, specialized hardware pools is known as ____ serving.",
-            "answer": "disaggregated. disaggregated completes the statement regarding the architectural pattern that decouples llm inference by ex.",
+            "answer": "disaggregated. Separate pools specialize for prompt processing and token generation; transferring the KV cache between them adds a communication cost that the specialization must repay.",
             "learning_objective": "Identify the architectural term for separating prefill and decode workloads across specialized hardware pools"
           },
           {
@@ -161,13 +161,13 @@
               "CUDA Graphs execute exclusively on CPU cores and cannot capture GPU kernels that exceed 1000 TFLOP/s",
               "CUDA Graphs require disaggregated serving network fabrics to replay kernel dispatches across multiple nodes"
             ],
-            "answer": "The correct answer is A. CUDA Graphs require deterministic execution with fixed tensor shapes and static memory allocations, which matches the repetitive token-by-token decode loop but conflicts with dynamic, variable-length prefill prompts. CUDA Graphs record a sequence of GPU kernel launches once and replay it with a single CPU launch command (reducing overhead from 15 ms to <0.1 ms across 70 layers). Because the recorded graph expects fixed memory addresses and tensor dimensions, it seamlessly executes repeated single-token decode steps. Prefill, however, receives dynamic prompt lengths and variable sequence shapes, which would trigger graph invalidation and costly recompilation. The other choices mischaracterize CUDA Graphs as integer-only, CPU-only, or network-bound constructs.",
+            "answer": "The correct answer is A. Stable captured work lets graph replay reduce repeated host launch overhead. Decode often admits such a repetitive execution region, while varying prefill shapes require bucketing, padding, updates, or separate captures. Capture also depends on memory-address and operation constraints; variable prompts do not make graph use universally impossible. Integer-only or CPU-only execution is not the explanation.",
             "learning_objective": "Evaluate the operational constraints and execution prerequisites of CUDA Graphs in LLM serving pipelines"
           },
           {
             "question_type": "SHORT",
             "question": "FlashAttention performs strictly MORE total floating-point operations (FLOPs) than standard unfused attention due to online softmax rescaling. Explain the systems principle that allows FlashAttention to achieve a 2–4$\\times$ wall-clock speedup despite executing more arithmetic.",
-            "answer": "Standard attention is severely memory-bandwidth bound because it materializes the full $S \\times S$ score and probability matrices to high-latency off-chip HBM, causing the GPU arithmetic units to spend most of their time stalled waiting for memory transfers. FlashAttention tiles $Q, K, V$ into fast on-chip SRAM and never writes the quadratic $S \\times S$ matrix to HBM. Because memory bandwidth is the binding bottleneck, the additional rescaling FLOPs execute on otherwise idle Tensor Cores during SRAM resident operations for 'free', trading cheap excess compute to eliminate expensive off-chip data movement.",
+            "answer": "Standard unfused attention materializes score and probability matrices in HBM. FlashAttention tiles the computation so these intermediates remain on chip. Extra rescaling arithmetic can be cheaper than the removed HBM traffic when data movement is the bottleneck. The additional work is not literally free or necessarily executed on Tensor Cores; the net gain depends on sequence length, kernel implementation, and the resulting resource limits.",
             "learning_objective": "Analyze the I/O-aware systems trade-off of trading extra arithmetic operations in SRAM to eliminate off-chip HBM traffic"
           },
           {
@@ -178,14 +178,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "Consider an unfused layer execution of $Y = \\text{LayerNorm}(\\text{GELU}(XW + b))$ with hidden dimension 4096 and batch size 2048 in FP16. The unfused path launches 3 separate kernels (GEMM, GELU, LayerNorm) and materializes intermediate tensors $Z_1$ and $Z_2$ (16 MB each) to HBM. How does operator fusion alter the memory traffic and execution characteristics of this sequence?",
+            "question": "Consider a bias-GELU-dropout chain applied to a tensor with hidden dimension 4096 and batch size 2048 in FP16. The unfused path launches three kernels and materializes two intermediate tensors of approximately 16.8 MB each. If a fused kernel can retain their values in registers or SRAM, how does fusion change memory traffic and execution?",
             "choices": [
               "It increases total HBM traffic to 128 MB because the fused kernel must write debug checkpoints after each sub-operation",
-              "It reduces HBM round-trips from 6 to 2 (saving 64 MB of intermediate write/read traffic per layer) and reduces 3 kernel launches to 1, keeping $Z_1$ and $Z_2$ resident in SM registers or SRAM",
+              "It removes four intermediate transfers totaling approximately 67.1 MB and reduces three launches to one, while preserving the input read and final output write",
               "It converts the operation into a pure CPU task to bypass GPU shared memory allocation limits",
               "It eliminates the need to load the weight matrix $W$ from HBM by synthesizing weights dynamically in registers"
             ],
-            "answer": "The correct answer is B. It reduces HBM round-trips from 6 to 2 (saving 64 MB of intermediate write/read traffic per layer) and reduces 3 kernel launches to 1, keeping $Z_1$ and $Z_2$ resident in SM registers or SRAM. In the unfused pipeline, the GEMM writes $Z_1$ (16 MB), GELU reads $Z_1$ (16 MB) and writes $Z_2$ (16 MB), and LayerNorm reads $Z_2$ (16 MB) before writing $Y$, incurring $16 \\times 4 = 64\\text{ MB}$ of redundant off-chip traffic and 3 separate dispatch overheads. The fused kernel reads inputs once, computes the GEMM, GELU, and LayerNorm sequentially within SM registers/SRAM, and writes only the final output $Y$, cutting round trips by $3\\times$. The other options describe non-existent debug traffic, impossible CPU offloading, or absurd weight synthesis.",
+            "answer": "The correct answer is B. Each of two intermediates contains 2048 × 4096 × 2 bytes, or about 16.8 MB. Writing and rereading both costs four such transfers, about 67.1 MB (64 MiB). Fusion removes those transfers when the intermediate values remain on chip. It does not eliminate required input reads or create model weights; register pressure and occupancy still constrain the implementation.",
             "learning_objective": "Calculate intermediate memory traffic savings and launch overhead reduction achieved through operator fusion"
           }
         ]
@@ -235,14 +235,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A 70B parameter model is deployed across 8 NVIDIA H100 GPUs (80 GB each). In FP16, weights consume 17.5 GB/GPU, leaving 62.5 GB/GPU for KV cache. Quantizing weights to INT4 reduces weight storage to 4.4 GB/GPU, while quantizing the KV cache to INT8 halves the per-token KV cache footprint. Why does this precision engineering intervention increase maximum batch capacity by significantly more than the raw $4\\times$ weight reduction ratio alone suggests?",
+            "question": "A 70B model uses 17.5 GB of weights per GPU on eight 80 GB GPUs. Ignoring runtime reserves and quantization metadata, INT4 weights use approximately 4.4 GB per GPU and INT8 KV cache halves the per-token cache footprint. Why does the KV capacity gain combine two distinct effects rather than equal the fourfold weight reduction?",
             "choices": [
               "Because INT4 weights bypass the GPU memory hierarchy and execute directly from CPU system RAM",
               "Because quantizing the KV cache converts autoregressive decoding into non-autoregressive parallel generation",
               "Because INT8 KV cache pages eliminate the need for GPU virtual address translation tables in PagedAttention",
               "Because reducing weights from 17.5 GB to 4.4 GB expands available KV cache space from 62.5 GB to 75.6 GB per GPU, which—when multiplied by halving the per-request INT8 KV cache footprint—multiplicatively expands total admitted batch capacity"
             ],
-            "answer": "The correct answer is D. Because reducing weights from 17.5 GB to 4.4 GB expands available KV cache space from 62.5 GB to 75.6 GB per GPU, which—when multiplied by halving the per-request INT8 KV cache footprint—multiplicatively expands total admitted batch capacity. The capacity gain is compound: freeing weight memory provides an immediate $+13.1\\text{ GB}$ (+21%) more physical memory for KV cache buffers per GPU, and quantizing each token's KV cache to INT8 doubles the number of tokens that fit inside each available gigabyte. This compound expansion allows the serving scheduler to admit significantly larger batches, shifting decode toward the compute roofline. The other options propose non-existent CPU offloading, confuse quantization with non-autoregressive decoding, or misrepresent PagedAttention page tables.",
+            "answer": "The correct answer is D. The ideal KV budget grows from 62.5 GB to 75.6 GB, a factor of 75.6/62.5 ≈ 1.21. Halving bytes per cached token multiplies capacity by another two, yielding approximately 2.42 times the original token capacity, not more than four times. Runtime reserves, metadata, sequence lengths, and scheduler policy reduce the deployable batch limit; quantization does not remove autoregressive dependencies or page tables.",
             "learning_objective": "Synthesize how weight and KV-cache quantization interact multiplicatively to expand serving batch capacity"
           }
         ]
@@ -294,7 +294,7 @@
           {
             "question_type": "FILL",
             "question": "In `torch.compile`, the compilation mode that exhaustively benchmarks multiple candidate tile sizes, thread block configurations, and memory access patterns on the target GPU to select the fastest implementation is called ____.",
-            "answer": "max-autotune. max-autotune completes the statement regarding in `torch.compile`, the compilation mode that exhaustively b.",
+            "answer": "max-autotune. This mode benchmarks candidate implementations and retains a fast choice for the target workload and hardware, trading compilation work for subsequent execution efficiency.",
             "learning_objective": "Identify the torch.compile configuration mode responsible for hardware kernel autotuning"
           },
           {
@@ -345,26 +345,26 @@
           {
             "question_type": "SHORT",
             "question": "Explain why speculative decoding provides substantial speedup at batch size 1 but exhibits diminishing or even negative returns as serving batch size increases (e.g. batch size 64).",
-            "answer": "At batch size 1, decode is deeply memory-bound, leaving Tensor Cores mostly idle; target verification of $K$ tokens is virtually 'free' because it utilizes otherwise idle compute to amortize the fixed weight-loading time. At batch size 64, batched decode is already compute-bound; target verification of $K$ tokens now adds real arithmetic latency, and draft generation adds extra overhead. Furthermore, variable acceptance lengths across 64 concurrent requests introduce scheduling bubbles and load imbalance in continuous batching engines.",
+            "answer": "At small batches, target verification can reuse one weight pass across several candidate positions while arithmetic units have spare capacity. Larger batches already amortize weight reads, so additional verification and draft work can erase that benefit. The crossover is workload-dependent: batch size 64 alone does not establish compute saturation. Measure accepted output per round, draft and verification costs, and loaded throughput before enabling speculation.",
             "learning_objective": "Evaluate the interaction between speculative decoding efficiency and serving batch size dynamics"
           },
           {
             "question_type": "TF",
             "question": "True or False: In a Mixture of Experts (MoE) architecture, scaling the number of experts from 8 to 256 is a cost-free capacity scaling knob because each token only activates top-$k$ experts during inference.",
-            "answer": "False. While per-token active compute FLOPs remain constant, scaling expert count introduces significant system-level costs: (1) total parameter footprint grows, requiring more aggregate GPU memory; (2) AllToAll collective communication volume and latency increase across expert-parallel nodes; (3) router load balancing becomes more difficult, increasing the risk of expert over-capacity or straggler stalls.",
+            "answer": "False. More experts increase total weight capacity even when each token activates a fixed number. Distributing them can add communication, routing imbalance, and latency, but transferred activation bytes do not necessarily grow with total expert count when token count, top-k, and representation size are fixed. Placement and the number of destinations determine the actual network cost.",
             "learning_objective": "Analyze the system-level memory, communication, and load balancing costs of scaling expert counts in MoE models"
           },
           {
             "question_type": "MCQ",
-            "question": "In a speculative decoding deployment, a draft model generates $k=5$ candidate tokens in 4 ms. The target model verifies all 5 tokens in a single 32 ms parallel pass. If the empirical token acceptance rate is $p_{\\text{acc}} = 0.78$, yielding an expected $\\mathbb{E}[\\text{accepted}] = 3.5$ tokens per round, what is the effective inter-token latency (ITL) and the speedup over baseline autoregressive decode (32 ms per token)?",
+            "question": "In a speculative decoding deployment, draft generation takes 4 ms and target verification takes 32 ms. Measurements show a mean of 3.5 emitted tokens per round, including correction or bonus tokens. What is the amortized time per emitted token and speedup over a 32 ms autoregressive baseline?",
             "choices": [
               "Effective ITL is 36.0 ms/token, representing a $0.89\\times$ slowdown due to draft model overhead",
               "Effective ITL is 7.2 ms/token, representing a $4.4\\times$ speedup",
               "Effective ITL is 20.5 ms/token, representing a $1.56\\times$ speedup",
-              "Effective ITL is approximately 10.3 ms per token ($(4\\text{ ms} + 32\\text{ ms}) / 3.5$), achieving a $3.1\\times$ speedup over baseline autoregressive decode"
+              "Approximately 10.3 ms per emitted token and a 3.1-fold amortized speedup"
             ],
-            "answer": "The correct answer is D. Effective ITL is approximately 10.3 ms per token ($(4\\text{ ms} + 32\\text{ ms}) / 3.5$), achieving a $3.1\\times$ speedup over baseline autoregressive decode. Total round time is $t_{\\text{draft}} + t_{\\text{verify}} = 4\\text{ ms} + 32\\text{ ms} = 36\\text{ ms}$. With an expected yield of 3.5 tokens per round, the effective inter-token latency is $36\\text{ ms} / 3.5 \\approx 10.29\\text{ ms per token}$. Compared to the baseline step time of 32 ms per token, the speedup is $32 / 10.29 \\approx 3.11\\times$. The other options make arithmetic errors in total round time or token yields.",
-            "learning_objective": "Calculate the effective inter-token latency and speedup of a speculative decoding pipeline under geometric acceptance expectations"
+            "answer": "The correct answer is D. A round takes 4 + 32 = 36 ms and emits 3.5 tokens on average, so amortized time is 36/3.5 ≈ 10.29 ms per token and speedup is 32/10.29 ≈ 3.11. Dividing by all five candidate tokens would wrongly assume full acceptance. This average does not establish an inter-token latency percentile because outputs can arrive in blocks.",
+            "learning_objective": "Calculate amortized time per emitted token from measured round cost and output yield."
           }
         ]
       }
@@ -402,7 +402,7 @@
           {
             "question_type": "SHORT",
             "question": "Describe the physical mechanism of 'SM Partitioning' when running concurrent compute and NCCL communication streams on an accelerator like the NVIDIA H100, and explain why a 3–6% compute throughput penalty is considered an acceptable trade-off.",
-            "answer": "NCCL collective kernels require Streaming Multiprocessors (typically 4–8 SMs out of 132 on an H100) to manage network protocols, copy buffers, and drive NVLink transfers. Dedicating these SMs to communication reduces the compute resources available for concurrent GEMMs by 3–6%. This is an overwhelmingly favorable trade-off because sacrificing 3–6% compute throughput hides tens of milliseconds of sequential communication that would otherwise expose a much larger 20–50% wall-clock penalty.",
+            "answer": "Some communication implementations use SM resources that would otherwise execute GEMMs. Reserving resources can therefore reduce local compute throughput while allowing collective transfers to overlap useful computation. A few percent compute penalty is worthwhile only if the reduction in exposed communication is larger; SM counts and the benefit depend on the collective, transport, hardware, and workload rather than a fixed universal reservation.",
             "learning_objective": "Explain the physical resource contention mechanism of SM partitioning during concurrent compute and communication execution"
           },
           {
@@ -444,41 +444,41 @@
             "question": "A production LLM serving decode step on an NVIDIA H100 reports a Model FLOPs Utilization (MFU) of only 2.5%, but a Model Bandwidth Utilization (MBU) of 86%. How should the performance engineer interpret these diagnostic metrics?",
             "choices": [
               "The GPU hardware is malfunctioning and must be power-cycled to clear thermal throttling",
-              "The implementation is well-optimized and operating near the physical memory-bandwidth limit; the low MFU is an expected reflection of the low arithmetic intensity of batch-1 decode (~1 FLOP/byte)",
+              "The measurements are consistent with a bandwidth-limited path; low MFU alone is not evidence of poor implementation when MBU is high",
               "The low MFU indicates severe kernel launch latency on the CPU dispatcher that requires rewriting into CUDA Graphs",
               "The high MBU indicates excessive gradient checkpointing overhead that is saturating the PCIe bus"
             ],
-            "answer": "The correct answer is B. The implementation is well-optimized and operating near the physical memory-bandwidth limit; the low MFU is an expected reflection of the low arithmetic intensity of batch-1 decode (~1 FLOP/byte). In autoregressive token decode at small batch sizes, execution is bound by HBM memory bandwidth (reading weights). An achieved MBU of 86% indicates that the memory subsystem is delivering data near its physical ceiling. Because arithmetic intensity is $\\sim 1\\text{ FLOP/byte}$ (far below the H100 ridge point of $\\sim 295\\text{ FLOP/byte}$), the Tensor Cores are starved for data, capping MFU at $\\sim 2.5\\%$. Evaluating decode efficiency via MFU rather than MBU misdiagnoses a healthy memory-saturated pipeline as underperforming. The other choices fabricate hardware failures, PCIe saturation, or launch overhead.",
+            "answer": "The correct answer is B. High MBU and low MFU can be consistent with a memory-bound decode path rather than defective hardware or dominant launch gaps. Check FLOPs and bytes at the same boundary: 2.5% of 989 TFLOP/s divided by 86% of 3.35 TB/s implies about 8.6 FLOP/byte, not one. Further diagnosis should test redundant traffic and the request critical path before declaring the entire service optimal.",
             "learning_objective": "Evaluate the diagnostic roles of Model FLOPs Utilization (MFU) and Model Bandwidth Utilization (MBU) across training and inference regimes"
           },
           {
             "question_type": "SHORT",
             "question": "Using the 4-level profiling hierarchy (Application, Distributed/Communication, Trace/Timeline, Operation/Hardware Counters), describe the step-by-step drill-down sequence an engineer should use to diagnose an LLM serving pipeline that misses its P99 latency SLA.",
-            "answer": "1. Level 4 (Application): Measure end-to-end P99 time-to-first-token and inter-token latency to confirm the SLA violation. 2. Level 3 (Distributed): Inspect multi-GPU traces to check for rank imbalance, network congestion, or unsynchronized AllReduce collectives. 3. Level 2 (Trace/Timeline): Use Nsight Systems to examine the CUDA HW/API timelines, identifying whether the gap is caused by CPU launch overhead, serialized NCCL calls, or unfused element-wise kernels. 4. Level 1 (Hardware Counters): Use Nsight Compute on the slowest kernel to inspect roofline position, memory bandwidth saturation, occupancy, and Tensor Core instruction mix.",
+            "answer": "Start with application metrics such as P99 first-token and inter-token latency. Use framework traces across ranks to localize scheduling, data-transfer, or collective delays. Inspect kernel timelines to distinguish launch gaps, late arrival, and serialized work. Finally, use hardware counters on the implicated kernel to test memory bandwidth, occupancy, and instruction mix. Distributed scope cuts across this application-to-hardware hierarchy; it is not a separate fixed level.",
             "learning_objective": "Synthesize a structured multi-level profiling diagnostic protocol to isolate performance bottlenecks"
           },
           {
             "question_type": "FILL",
-            "question": "In GPU kernel profiling, when matrix tile dimensions fail to satisfy hardware alignment requirements (such as multiples of 8 for FP16 or 16 for INT8), the GPU silently falls back from specialized Tensor Cores to scalar ____ Cores, causing arithmetic throughput to collapse.",
-            "answer": "CUDA. CUDA completes the statement regarding in gpu kernel profiling, when matrix tile dimensions fail to.",
-            "learning_objective": "Identify the hardware execution unit fallback caused by matrix alignment mismatch in GPU kernels"
+            "question": "If profiling confirms that a matrix operation uses scalar GPU arithmetic rather than Tensor Core instructions, the scalar units are called ____ Cores; tensor dimensions alone do not establish that execution path.",
+            "answer": "CUDA. Kernel selection depends on datatype, shape, library, and hardware. Misalignment may reduce efficiency without universally forcing a scalar fallback; inspect the executed instruction mix.",
+            "learning_objective": "Distinguish scalar CUDA execution from Tensor Core execution using profiling evidence."
           },
           {
             "question_type": "MCQ",
-            "question": "Why can enabling high-fidelity memory profiling tools (such as `torch.cuda.memory._record_memory_history()`) in PyTorch trigger Out-Of-Memory (OOM) crashes in workloads that run stably without profiling (the Heisenberg effect of profiling)?",
+            "question": "Why can enabling shape recording in a high-fidelity PyTorch profiler perturb tensor lifetimes and increase memory demand in a workload that runs stably without profiling?",
             "choices": [
               "The profiler increases GPU clock frequency beyond thermal limits, triggering emergency memory shutdowns",
               "The profiler converts all FP16 tensors to FP64 double-precision matrices during recording",
-              "The profiler retains references to intermediate activation tensors beyond their normal lifetime to capture allocation metadata, preventing the caching allocator from reusing memory buffers",
+              "Shape recording can retain tensor references, inhibit reference-count-dependent optimizations, and introduce extra copies",
               "The profiler overwrites the CUDA driver's virtual memory page tables with TensorBoard logs"
             ],
-            "answer": "The correct answer is C. The profiler retains references to intermediate activation tensors beyond their normal lifetime to capture allocation metadata, preventing the caching allocator from reusing memory buffers. To trace allocation and deallocation events with Python stack traces, the profiler holds tensor handles active, extending their live ranges. This prevents PyTorch's caching allocator from reclaiming physical memory blocks, artificially inflating peak memory consumption and causing OOM errors. The other choices invent absurd mechanisms regarding clock frequencies, FP64 conversions, or driver table corruption.",
+            "answer": "The correct answer is C. Shape recording can retain tensor references and affect optimizations or copies, so the instrumented run may require more memory. Allocation-history recording instead records allocator events and has metadata overhead; it should not be assumed to keep every activation alive. Compare matched instrumented and uninstrumented runs rather than attributing the change to clock rates or automatic precision conversion.",
             "learning_objective": "Analyze the observer effect (Heisenberg effect) of profiling tools on memory allocation and system behavior"
           },
           {
             "question_type": "TF",
             "question": "True or False: In an NVIDIA Nsight Systems trace, observing that the CUDA API row on the CPU thread displays wide bars significantly larger than the corresponding CUDA HW kernel bars indicates that the GPU kernels are executing too slowly.",
-            "answer": "False. Wide CUDA API bars relative to CUDA HW bars indicate that the CPU is the bottleneck (kernel launch overhead): the CPU dispatcher is spending excessive time preparing launch configurations and enqueueing commands, failing to feed the GPU fast enough and leaving the GPU idle between dispatches.",
+            "answer": "False. Wide CPU API bars do not show that GPU kernels themselves are slow. They may reflect host launch overhead, synchronization, or blocking calls. Correlate them with GPU idle gaps and dependencies before diagnosing a host-submission bottleneck; graph replay helps only the overhead it actually removes.",
             "learning_objective": "Evaluate CPU-GPU interaction patterns and launch bottlenecks on Nsight Systems timeline traces"
           }
         ]
@@ -516,14 +516,14 @@
           },
           {
             "question_type": "SHORT",
-            "question": "In a synchronous data-parallel cluster of 1,000 GPUs, explain why a single 'gray failure' node that runs only 10% slower than normal can reduce the effective training throughput of the ENTIRE 1,000-GPU fleet by a full 10%.",
-            "answer": "Synchronous data parallelism requires all 1,000 GPUs to synchronize gradients via an AllReduce barrier at every step before advancing to the optimizer update. Because the collective cannot complete until the slowest rank reaches the barrier, the execution time of the entire 1,000-GPU cluster is bound by the maximum step time across all nodes ($T_{\\text{step}} = \\max_i T_i$). The single 10% straggler forces 999 healthy GPUs to sit idle waiting at the barrier, causing cluster-wide throughput to drop by the full 10%.",
+            "question": "In a synchronous data-parallel cluster of 1,000 GPUs, explain why one gray-failure node that delivers 10% less processing throughput can reduce the entire fleet's useful throughput by roughly 10% when its work determines every step's critical path.",
+            "answer": "All ranks must complete their required work before a synchronized step can advance. A rank delivering 90% of normal throughput takes 1/0.9 ≈ 1.111 times as long for the same work, so the fleet can be limited to 90% of its original throughput. The result assumes that this delay is exposed and dominates the critical path. A 10% increase in duration would instead imply about a 9.1% throughput loss.",
             "learning_objective": "Analyze how barrier synchronization amplifies single-node gray failures and stragglers into cluster-wide throughput collapses"
           },
           {
             "question_type": "FILL",
             "question": "The 10–20% throughput gap between highly tuned, unmonitored benchmark configurations (such as MLPerf) and real-world production clusters burdened by checkpointing, health heartbeats, logging, and thermal entropy is known as the ____ run tax.",
-            "answer": "hero. hero completes the statement regarding the 10–20% throughput gap between highly tuned, unmonitored .",
+            "answer": "hero. Benchmark configurations can exclude production duties such as checkpointing and monitoring. Capacity planning must measure that gap under the actual operating workload rather than assume a fixed percentage.",
             "learning_objective": "Identify the industry term describing the efficiency gap between idealized benchmark runs and production deployments"
           },
           {
@@ -561,38 +561,38 @@
         "questions": [
           {
             "question_type": "ORDER",
-            "question": "In the 70B LLM optimization playbook case study on 8× H100 GPUs, arrange the optimization rounds in their correct, prioritized sequence of execution:\n\n(1) Operator Fusion & CUDA Graphs (`torch.compile` max-autotune and FlashAttention-2 to eliminate element-wise traffic and dispatch gaps)\n(2) Precision Engineering (AWQ INT4 weight quantization and INT8 KV cache compression to break the memory wall and expand batch size)\n(3) Adaptive Speculative Decoding (deploying a 1.5B draft model to compress inter-token latency under low-batch loads)",
-            "answer": "The correct order is (2) Precision Engineering -> (1) Operator Fusion & CUDA Graphs -> (3) Adaptive Speculative Decoding. Precision engineering was applied first because reducing weight footprint yielded the largest bandwidth relief and freed memory to expand batch capacity from 8 to 32. Fusion was applied second to eliminate the newly exposed element-wise and launch bottlenecks. Speculative decoding was applied third to optimize interactive tail latency once baseline throughput targets were met.",
-            "learning_objective": "Order the prioritized optimization rounds of the production 70B LLM performance engineering playbook"
+            "question": "In the constructed batch-one 70B decode budget, order the three optimization experiments: (1) Operator fusion and graph replay, (2) Weight precision reduction, (3) Speculative decoding.",
+            "answer": "The correct order is (2) Weight precision reduction -> (1) Operator fusion and graph replay -> (3) Speculative decoding. Precision first reduces the exposed GEMM interval. Fusion and replay then reduce attention, element-wise, and launch intervals. Speculation finally changes output per target pass. Each round uses explicit assumptions and a shared timing boundary; the sequence is not a universal optimization order.",
+            "learning_objective": "Order the experiments in a constructed decode budget and explain their shared accounting boundary."
           },
           {
             "question_type": "MCQ",
-            "question": "In the 70B LLM case study, why was precision engineering (AWQ INT4 weights and INT8 KV cache) applied as Round 1 rather than starting with speculative decoding or operator fusion?",
+            "question": "Why does the constructed batch-one 70B decode example test INT4 weights before speculative decoding or operator fusion?",
             "choices": [
               "Because the GPU driver disables CUDA Graphs and compiler optimizations unless weights are formatted in INT4",
-              "Because weight loading from HBM was the single largest bottleneck (deeply memory-bound at 1.0 FLOP/byte), and shrinking weights and KV cache freed 13.1 GB/GPU of memory to expand batch capacity from 8 to 32, which was a prerequisite for subsequent throughput gains",
+              "The assumed profile identifies weight traffic as the first target; reducing its exposed GEMM interval provides a consistent baseline for subsequent experiments",
               "Because speculative decoding cannot mathematically operate on FP16 models",
               "Because operator fusion only works on models with fewer than 10 billion parameters"
             ],
-            "answer": "The correct answer is B. Because weight loading from HBM was the single largest bottleneck (deeply memory-bound at 1.0 FLOP/byte), and shrinking weights and KV cache freed 13.1 GB/GPU of memory to expand batch capacity from 8 to 32, which was a prerequisite for subsequent throughput gains. Roofline analysis revealed that decode at batch size 1 was severely bandwidth-bound, streaming 17.5 GB of weights per GPU per token. Quantizing weights to INT4 directly reduced weight-read traffic by $4\\times$, and halving KV cache footprint expanded feasible batch sizes, transforming the economics of serving. Speculative decoding at batch 8 without memory headroom would have caused out-of-memory errors. The other choices state false claims about driver restrictions, parameter limits, or mathematical impossibilities.",
+            "answer": "The correct answer is B. The example assumes weight streaming is the first target and tests a 45% reduction in its exposed GEMM interval while leaving other intervals unchanged. It does not infer a batch expansion or simultaneous throughput gain from freed memory. Compiler restrictions, model-size limits, and an inability to speculate in FP16 are not the reason for this order.",
             "learning_objective": "Justify the architectural sequencing of optimization interventions in a production LLM serving pipeline"
           },
           {
             "question_type": "SHORT",
-            "question": "In Round 3 of the 70B LLM case study, explain why the serving system implements an 'adaptive' speculation policy that disables speculative decoding when batch size exceeds 16.",
-            "answer": "At low batch sizes (<16), decode is memory-bound and Tensor Cores have spare compute capacity, making draft-token verification virtually 'free' and compressing inter-token latency from 32 ms to 10.3 ms. At higher batch sizes ($\\ge 16$), the workload approaches the compute-bound roofline; target verification of candidate tokens adds real arithmetic delay, draft generation overhead compounds, and variable token acceptance rates disrupt continuous batching schedulers. Disabling speculation at high load preserves maximum aggregate throughput.",
+            "question": "Why must a serving controller measure the batch-size crossover for speculative decoding rather than infer a universal cutoff from a batch-one decode budget?",
+            "answer": "Batching already shares weight reads across requests, reducing the spare compute that makes verification economical. Draft overhead, acceptance, cache capacity, and verification kernels determine where speculation stops improving useful service. The batch-one budget establishes no cutoff at 16 or any other batch size. Measure latency and loaded throughput for the draft-target pair under the intended request mix before selecting a policy.",
             "learning_objective": "Analyze the systems rationale for load-dependent adaptive speculative decoding policies"
           },
           {
             "question_type": "MCQ",
-            "question": "After Round 1 (INT4 weights and INT8 KV cache) reduced GEMM time by 45%, throughput at batch size 32 reached 720 tokens/s, still below the 1,000 tokens/s target. What diagnostic finding explained why throughput remained capped before Round 2 was implemented?",
+            "question": "An 85 ms decode step has exposed intervals of 32.3 ms GEMM, 20.4 ms attention, 11.9 ms element-wise work, 10.2 ms AllReduce, and 10.2 ms launch/runtime overhead. Reducing only GEMM time by 45% leaves 70.465 ms. Why does this still miss a 50 ms objective?",
             "choices": [
               "The InfiniBand network cable was disconnected during the benchmark run",
               "The GPU ran out of power and throttled clock frequency to zero",
-              "The bottleneck had shifted to non-GEMM components: unfused element-wise operations (14%), attention KV-cache reads (24%), and kernel launch gaps (12%), which collectively consumed over half of the remaining step time",
+              "The unchanged non-GEMM intervals still total 52.7 ms, so reducing GEMM alone by the assumed amount cannot reach the objective",
               "INT4 quantization caused the model to produce infinite repetitive token loops"
             ],
-            "answer": "The correct answer is C. The bottleneck had shifted to non-GEMM components: unfused element-wise operations (14%), attention KV-cache reads (24%), and kernel launch gaps (12%), which collectively consumed over half of the remaining step time. Optimization is a waterbed problem: accelerating GEMMs exposed the long tail of non-GEMM operations (LayerNorm, GELU, residual adds, and CPU dispatch gaps). Reaching the 1,000 tokens/s target required Round 2's operator fusion (`torch.compile`), FlashAttention-2, and CUDA Graphs to eliminate these newly dominant non-GEMM overheads. The other choices present unrealistic failure scenarios.",
+            "answer": "The correct answer is C. GEMM becomes 32.3 × 0.55 = 17.765 ms, while all other exposed intervals remain 52.7 ms; the sum is 70.465 ms. The next experiment must address other critical-path costs. With attention at 14.28 ms, element-wise work at 3.4 ms, and launch/runtime overhead at 2 ms, the later constructed budget totals 47.645 ms; these are assumptions, not benchmark claims.",
             "learning_objective": "Analyze bottleneck displacement across iterative optimization rounds using timeline breakdown data"
           }
         ]
@@ -639,7 +639,7 @@
           {
             "question_type": "TF",
             "question": "True or False: Upgrading a distributed training workload from FP16 to FP8 precision automatically halves total step time across any multi-node GPU cluster.",
-            "answer": "False. While FP8 doubles peak Tensor Core throughput and halves memory footprint for GEMMs, it yields zero speedup for communication-bound collective steps (if gradients remain uncompressed), dispatch-latency overheads, or memory-bound element-wise kernels. By Amdahl's law, the actual training speedup is strictly bounded by the proportion of step time spent in precision-sensitive GEMM operations.",
+            "answer": "False. Higher FP8 peak throughput applies to supported arithmetic, not automatically to the entire step. Uncompressed collectives, host dispatch, and unaffected kernels can remain unchanged, while lower precision may also reduce some memory traffic. End-to-end speedup depends on which exposed intervals change and whether model quality remains acceptable.",
             "learning_objective": "Evaluate the limitations of low-precision arithmetic adoption under Amdahl's law in distributed training"
           },
           {
