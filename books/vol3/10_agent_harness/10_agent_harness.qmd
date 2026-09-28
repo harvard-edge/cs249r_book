@@ -282,6 +282,50 @@ The ACB operationalizes this exact separation of concerns for agent execution:
 4. **Process Credentials (`struct cred`) $\longleftrightarrow$ Macaroon Capability Pointer (`cap_token_ptr`):** Rather than granting ambient permissions, the ACB points to an unforgeable, monotonically attenuated Macaroon token (@sec-vol3-security-confused-deputy).
 5. **Scheduler Entity (`sched_entity`) $\longleftrightarrow$ Deficit Round-Robin Envelopes:** Turn counters, token accumulators, priority weights, and financial spend meters enforce multi-dimensional resource bounds outside the model's awareness.
 
+In production high-concurrency runtimes, the 256-byte `AgentControlBlock` represents the physical memory layout of an agent descriptor in host shared memory or a native Rust/C core (enabling zero-copy dispatch and crossing process boundaries without GIL overhead). In standard application frameworks, this same structure is represented as a typed Python `@dataclass` or Pydantic model. The Python listings in this chapter demonstrate the supervisory state logic that operates on these records.
+
+```python
+from dataclasses import dataclass, field
+from typing import Set, Optional
+from enum import Enum
+
+class AgentState(Enum):
+    READY = "READY"
+    CALLING_MODEL = "CALLING_MODEL"
+    WAITING_TOOL = "WAITING_TOOL"
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    PAUSED = "PAUSED"
+    FINALIZING = "FINALIZING"
+
+@dataclass
+class TrajectoryRecord:
+    # Identity
+    trajectory_id: str
+    tenant_id: str
+    parent_id: Optional[str] = None
+
+    # Status
+    current_state: AgentState = AgentState.READY
+    pending_control: Optional[str] = None
+
+    # Budgets and spend
+    budget_spent_cents: float = 0.0
+    tokens_used: int = 0
+
+    # Pending work and grants
+    pending_tool_calls: Set[str] = field(default_factory=set)
+    held_escrow_handle: Optional[str] = None
+    capability_token: Optional[str] = None
+
+    # Pointers
+    kv_lease_id: Optional[str] = None
+    wal_stream_offset: int = 0
+```
+
+::: {.callout-note title="Under the hood: High-performance C/Rust kernels" collapse="true"}
+
+For high-throughput multi-tenant engines, the `TrajectoryRecord` is packed into a fixed 256-byte shared-memory block to avoid GIL contention and enable zero-copy descriptor passing.
+
 ```c
 // Packed 256-byte Agent Control Block (ACB) Descriptor
 struct __attribute__((__packed__, aligned(64))) AgentControlBlock {
@@ -329,6 +373,7 @@ struct __attribute__((__packed__, aligned(64))) AgentControlBlock {
     uint8_t  _reserved[56];          // Zero-padded to exact 256-byte cache line boundary
 }; // sizeof(struct AgentControlBlock) == 256 bytes
 ```
+:::
 
 The ACB achieves this radical memory decoupling by acting as a descriptor holding indirection handles to external physical resources, indexing non-contiguous KV-cache pages via PagedAttention block tables.[^fn-paged-attention-overhead] When an agent enters an extended tool wait or approval escrow, retaining its $8.59\text{ GB}$ KV cache on GPU pins memory that could serve active batches; migrating these blocks over PCIe to host DRAM frees accelerator capacity, though migration is bounded by interconnect bandwidth.[^fn-kv-eviction-bandwidth] As detailed in @tbl-vol3-acb-pointers:
 
@@ -444,6 +489,8 @@ The guard costs a lock, a set lookup, and an append, which is negligible next to
 :::
 
 ### Formal state transition invariants
+
+The **Agent Harness** is the supervisory client running on the host CPU. It does not execute matrix multiplications, allocate GPU tensor buffers, or run CUDA logit-masking kernels; those are the domain of the **Inference Serving Engine** (such as vLLM or an external model API) running on the GPU accelerator. The harness's responsibility during prefill and decode is simply to stream tokens, manage quotas, and detect tool delimiters.
 
 The execution cycle of an agent loop is not an instruction fetch-decode-execute cycle of a CPU. Rather, the runtime operates as a **hierarchical statechart** reconciling supervisory lifecycle management with physical accelerator memory and I/O boundaries:
 
@@ -640,6 +687,10 @@ Cooperative process yielding decouples execution by transitioning the trajectory
 
 In a synchronous runtime architecture, dedicating a POSIX thread to each active trajectory allocates between $2\text{ MB}$ and $8\text{ MB}$ of thread stack memory per agent. Across $2{,}000$ concurrent trajectories, this pattern locks up to $16\text{ GB}$ of host memory solely in dormant call stacks, consumes kernel task-table entries, and caps concurrency at $10^2\text{--}10^3$ agents due to OS context-switching overhead and thread limits. When trajectories stall during long-running tool execution ($\tau_{\text{tool}} \gg \tau_{\text{model}}$), blocking threads leave valuable CPU and accelerator resources idle.
 
+Students familiar with Python's `asyncio` or JavaScript's event loop already understand the solution: **cooperative yielding**. When a coroutine awaits an I/O operation like a network request or a `sleep()`, it releases the thread so other tasks can run. The agent harness applies this exact principle to tool execution. Instead of blocking, the harness registers that the trajectory is waiting on a specific event (a model stream chunk, a tool IPC response, a timer deadline, or a supervisory signal) and suspends it. A central event loop wakes the trajectory only when the awaited event occurs, scaling to tens of thousands of concurrent trajectories without exhausting memory.
+
+::: {.callout-note title="Under the hood: The stochastic computer reactor pattern" collapse="true"}
+
 To scale agent execution across tens of thousands of concurrent trajectories, the runtime implements the **Stochastic Computer Reactor Pattern** [@schmidt1995reactor]. Rather than binding threads to trajectories, the harness operates a fixed pool of worker threads sized strictly to available CPU cores ($N_{\text{workers}} = N_{\text{cores}}$). These workers drive a kernel event demultiplexer (`epoll` on Linux or `kqueue` on BSD/macOS) that multiplexes four distinct classes of heterogeneous descriptors:
 
 1. **Inference streaming descriptors**: Non-blocking TCP sockets carrying HTTP/2 Server-Sent Events (SSE) or bidirectional gRPC streams that deliver incremental token chunks and finish reasons from local or disaggregated model inference engines.
@@ -649,7 +700,10 @@ To scale agent execution across tens of thousands of concurrent trajectories, th
 
 To prevent pathological thread thrashing, the Reactor enforces **edge-triggered non-blocking I/O** (`EPOLLET` or `EV_CLEAR` with `O_NONBLOCK`). Under high-throughput streaming workloads where inference engines emit 50 to 100 tokens per second, standard level-triggered notification (`EPOLLIN`) repeatedly awakens multiple worker threads for the same socket before data can be completely read, inducing destructive thundering-herd context switches. Under edge-triggered notification, a worker thread is signaled exactly once when new data arrives at the socket buffer. The worker then executes an unrolled user-space drain loop until the underlying `read` or `recv` syscall returns `EAGAIN` or `EWOULDBLOCK`, ensuring that event transitions fire strictly on state change boundaries.
 
-The Reactor achieves zero-copy ACB dispatch by exploiting the 64-bit user data payload in kernel event structures (`epoll_data.ptr` in Linux `struct epoll_event`, or `udata` in BSD `struct kevent`). When registering an active file descriptor, the harness populates this field directly with the raw 64-bit virtual memory address of the owning `AgentControlBlock` (ACB). When `epoll_wait` unblocks, the event loop dereferences `epoll_data.ptr` in $O(1)$ time, eliminating intermediate hash-table lookups, mutex contention, and descriptor-to-trajectory indirection on the critical path. The four-stage event-driven reactivation pipeline is detailed in @tbl-vol3-event-wakeup-pipeline.
+The Reactor achieves zero-copy ACB dispatch by exploiting the 64-bit user data payload in kernel event structures (`epoll_data.ptr` in Linux `struct epoll_event`, or `udata` in BSD `struct kevent`). When registering an active file descriptor, the harness populates this field directly with the raw 64-bit virtual memory address of the owning `AgentControlBlock` (ACB). When `epoll_wait` unblocks, the event loop dereferences `epoll_data.ptr` in $O(1)$ time, eliminating intermediate hash-table lookups, mutex contention, and descriptor-to-trajectory indirection on the critical path.
+:::
+
+The four-stage event-driven reactivation pipeline is detailed in @tbl-vol3-event-wakeup-pipeline.
 
 | Stage                          | Subsystem Component                   | Operational Mechanism & Transition Invariants                                                                       |
 |:-------------------------------|:--------------------------------------|:--------------------------------------------------------------------------------------------------------------------|

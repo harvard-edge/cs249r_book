@@ -170,7 +170,7 @@ $$\mathcal{H}_{1:t-1} = \left( e_1, e_2, \dots, e_{t-1} \right)$$
 
 where each event $e_i$ represents an input instruction, a proposed tool call, an observation payload, or an intermediate reasoning trace. The host runtime must never dump this unbounded log into the model's receptive field. Instead, the runtime must dynamically compute a logical working set $\mathcal{W}(t) \subset \mathcal{H}_{1:t-1}$ governed by an explicit context budgeting constraint:
 
-$$S_{\text{budget}} = S_{\text{system}} + S_{\text{tools}} + S_{\text{memory}} + S_{\text{history}} \le S_{\max}$$
+$$S_{\text{budget}} = S_{\text{system}} + S_{\text{tools}} + S_{\text{memory}} + S_{\text{history}} \le S_{\text{prompt}}^{\max} = S_{\max} - K_{\text{gen}}^{\max}$$
 
 where:
 
@@ -178,7 +178,7 @@ where:
 - $S_{\text{tools}}$ is the token allocation for canonical tool declarations, execution privileges, and JSON schema signatures.
 - $S_{\text{memory}}$ is the token allocation for retrieved semantic memory, active workspace state, and verified codebase artifacts.
 - $S_{\text{history}}$ is the dynamic token allocation for recent interaction turns, tool execution outputs, and transient scratchpad tokens.
-- $S_{\max}$ defines the physical sequence ceiling (or effective frontier $M^* \le S_{\max}$) beyond which quadratic prefill compute stalls the execution loop or attentional dilution degrades reasoning.
+- $S_{\max}$ defines the physical sequence ceiling (or effective frontier $M^* \le S_{\max}$), and $K_{\text{gen}}^{\max}$ reserves sufficient generation headroom for autoregressive decoding so that input prefill does not exhaust context capacity.
 
 When an unmanaged agent trajectory appends raw tool traces without compaction, $S_{\text{history}}$ expands monotonically, compressing $S_{\text{memory}}$ and ultimately violating the budget constraint $S_{\text{budget}} \le S_{\max}$. To prevent out-of-memory faults or severe latency penalties, the runtime must dynamically regulate each budget partition.
 
@@ -283,7 +283,7 @@ The linear projection compute encompasses the query ($Q$), key ($K$), value ($V$
 
 $$F_{\text{linear}} = 24 M L d^2 \quad \text{FLOPs}$$
 
-Because every token interacts independently with static model weight matrices of dimension $d \times d$, this component scales linearly with sequence length ($O(M)$).
+To see the origin of the factor of $24$: each layer executes four attention projections ($W_Q, W_K, W_V, W_O$, each $d \times d$, requiring $4 \times 2 M d^2 = 8 M d^2$ FLOPs) and two feed-forward network projections (an up-projection $d \to 4d$ and down-projection $4d \to d$, each with $4d^2$ weights, requiring $2 \times 2 \times 4 M d^2 = 16 M d^2$ FLOPs; modern SwiGLU architectures with intermediate dimension $\frac{8}{3}d$ utilize three projections totaling $3 \times 2 \times \frac{8}{3} M d^2 = 16 M d^2$). Summing attention and MLP projections across an $L$-layer model yields $(8 + 16) M L d^2 = 24 M L d^2$ FLOPs. Because every token interacts independently with static model weight matrices of dimension $d \times d$, this component scales linearly with sequence length ($O(M)$).
 
 The self-attention core, however, requires computing the pairwise dot products between all $M$ query vectors and all $M$ key vectors ($Q K^T$), producing an $[M, M]$ attention matrix for each attention head. Multiplying the resulting softmax-normalized attention score matrix against the $[M, d]$ value tensor ($(Q K^T) V$) requires another equivalent matrix multiplication.[^fn-flashattention-sram-tiling] Computing these two operations across all heads in an $L$-layer network requires:
 
@@ -444,7 +444,7 @@ The *Leaf* zone captures dynamic execution observations and the ephemeral scratc
 | **Root**     | Tier 0 (Supervisor)     | Immutable ($0$ mutations/task)      | $10\% - 20\%$       | Task termination, security policy update  |
 | **Trunk**    | Tier 1 (Verified State) | Low ($1$ mutation / $5 - 10$ turns) | $50\% - 70\%$       | File write, plan transition, git checkout |
 | **Leaf**     | Tier 2 (Untrusted Data) | High ($1$ mutation / turn)          | $20\% - 30\%$       | New tool execution, step completion       |
-: **Working-Memory Context Zones and Authority Stratification**: Authority tiers, mutation frequencies, token allocations, and invalidation triggers across context zones. {#tbl-vol3-context-zone-stratification}
+: **Working-Memory Context Zones and Authority Stratification**: Authority tiers, mutation frequencies, token allocations, and invalidation triggers across context zones. Note: Authority Tiers (0 to 2) govern prompt instruction trust within the model's receptive field; they are distinct from H·S·A Authority Levels ($A_0$ to $A_3$), which govern external environment side-effect reversibility. {#tbl-vol3-context-zone-stratification}
 
 This three-zone partitioning enforces a structural separation between control instructions and untrusted data. When an agent receives an external error message, that error is staged exclusively within the low-authority Leaf zone. The supervisor never allows an observation to overwrite or interleave with the Root directives, ensuring that the model evaluates external stimuli against an uncorrupted supervisory baseline.
 
@@ -598,7 +598,7 @@ Rather than deleting historical tool calls or delegating summarization to a neur
 
 $$\text{Digest}(O_t) = \langle \text{status: OK}, \text{exit\_code: } 0, \text{bytes: } 48{,}192, \text{cas\_handle: } \text{sha256:7f8a}\dots \rangle$$
 
-The complete raw payload is committed to host Content-Addressed Storage (CAS) on disk. The in-context working set retains the unalterable causal fact that tool invocation $a_t$ completed with a specific exit code and byte count, without consuming prompt capacity. If a future reasoning step requires inspecting the raw data, the model can dereference the CAS handle via a deterministic inspection tool (`cas_read(handle)`). Tool-result clearing reclaims $95\text{--}99\%$ of the observation's token footprint in under a millisecond of host CPU time, with zero information loss for execution control flow.
+The complete raw payload is committed to host Content-Addressed Storage (CAS) on disk. Crucially, the raw observation payload remains resident in the active Leaf zone for immediate consumption during turn $t$. Tool-result clearing executes retroactively on historical turns ($t-1, t-2, \dots$) during compaction passes, or immediately for non-actionable bulk outputs (such as a 5,000-line passing test suite), committing the raw payload to on-disk CAS while preserving only the digest in long-term context. The in-context working set retains the unalterable causal fact that tool invocation $a_t$ completed with a specific exit code and byte count, without consuming prompt capacity. If a future reasoning step requires inspecting the raw data, the model can dereference the CAS handle via a deterministic inspection tool (`cas_read(handle)`). Tool-result clearing reclaims $95\text{--}99\%$ of the observation's token footprint in under a millisecond of host CPU time, with zero information loss for execution control flow.
 
 #### Tier 2: Lossless filtering and terminal normalization {.unnumbered}
 
@@ -710,11 +710,11 @@ To prevent both attentional degradation and serving engine thrashing, the superv
 
 Watermarks cannot be selected by intuition. The operational band $[\tau_{\text{low}}, \tau_{\text{high}}]$ defines a fundamental systems optimization problem that balances GPU prefill latency, prefix-cache retention, and model retrieval fidelity.
 
-Let $\Delta L_{\text{turn}}$ represent the average token arrival rate per turn (the sum of newly staged tool observations and generated action tokens). The compaction cadence—the interval between successive compaction passes measured in trajectory turns—is governed by:
+Let $\Delta L_{\text{turn}}$ represent the average token arrival rate per turn (the sum of newly staged tool observations and generated action tokens). The compaction cadence—the interval between successive compaction passes measured in trajectory turns—is governed by @eq-vol3-hysteretic-compaction-cadence:
 
 $$\Delta T = \frac{\tau_{\text{high}} - \tau_{\text{low}}}{\Delta L_{\text{turn}}}$$ {#eq-vol3-hysteretic-compaction-cadence}
 
-The amortized computational cost per turn $\bar{C}_{\text{turn}}(\tau_{\text{high}}, \tau_{\text{low}})$ across this $\Delta T$-turn cycle is:
+The amortized computational cost per turn $\bar{C}_{\text{turn}}(\tau_{\text{high}}, \tau_{\text{low}})$ across this $\Delta T$-turn cycle is given by @eq-vol3-hysteretic-compaction-cost:
 
 $$\bar{C}_{\text{turn}}(\tau_{\text{high}}, \tau_{\text{low}}) = \bar{C}_{\text{prefill}}([\tau_{\text{low}}, \tau_{\text{high}}]) + \frac{1}{\Delta T} \left( C_{\text{compaction\_pass}} + C_{\text{prefix\_bust}} \right)$$ {#eq-vol3-hysteretic-compaction-cost}
 
@@ -722,7 +722,7 @@ where:
 
 1. $\bar{C}_{\text{prefill}}([\tau_{\text{low}}, \tau_{\text{high}}])$ is the average per-turn prefill cost across the operating interval, combining linear weight projections ($2 P \cdot L$) and quadratic self-attention operations ($4 N_{\text{layers}} d_{\text{model}} L^2$).
 2. $C_{\text{compaction\_pass}}$ is the execution cost of the compaction pass itself (sub-millisecond host CPU overhead for deterministic AST filtering; or secondary inference latency if invoking an auxiliary summarizer).
-3. $C_{\text{prefix\_bust}}$ is the physical GPU prefill penalty incurred on the subsequent turn by rewriting the Trunk zone ($[L_{\text{root}}, L_{\text{leaf}}]$):
+3. $C_{\text{prefix\_bust}}$ is the physical GPU prefill penalty incurred on the subsequent turn by rewriting the Trunk zone ($[L_{\text{root}}, L_{\text{leaf}}]$), formulated in @eq-vol3-prefix-bust-cost:
 
 $$C_{\text{prefix\_bust}} = \frac{2 P (\tau_{\text{low}} - L_{\text{root}})}{\mathcal{P}_{\text{prefill}}}$$ {#eq-vol3-prefix-bust-cost}
 
@@ -1135,7 +1135,7 @@ $$\text{FLOPs} = 2 \times (70 \times 10^9) \times 128 = 1.792 \times 10^{13} \te
 $$T_{\text{prefill, Tombstone}} = \frac{1.792 \times 10^{13}}{2.010 \times 10^{15}} \approx 0.0089 \text{ seconds} = 8.9 \text{ milliseconds}$$
 
 **Trade-off Analysis:**
-Append-only tombstoning reduces prefill latency from **1,704 ms to 8.9 ms**—a **191$\times$ speedup**—by preserving KV cache reuse. However, it incurs an attention tax: the model's attention heads must actively suppress the 850 stale tokens still present in the prompt prefix by attending to the invalidation record at the tail. If the model exhibits high attention distraction, the runtime must pay the 1.7-second prefill penalty of Hard Eviction to guarantee semantic purity.
+Append-only tombstoning reduces prefill latency from **1,704 ms to 8.9 ms**—a **191$\times$ speedup**—by preserving KV cache reuse. However, it incurs an attention tax: the model's attention heads must actively suppress the 850 stale tokens still present in the prompt prefix by attending to the invalidation record at the tail. To guarantee reliable suppression in production, the host supervisor couples tail tombstoning with prompt-level recency steering: the supervisory root explicitly instructs the model that any code block or environment observation referenced by an invalidation record at the prompt tail is strictly superseded and void. Because the tail record sits immediately adjacent to the autoregressive generation boundary, recency bias and local attention heads prioritize the invalidation constraint over the distant, attenuated prefix tokens. If the model exhibits high attention distraction despite recency steering, the runtime must pay the 1.7-second prefill penalty of Hard Eviction to guarantee semantic purity.
 :::
 
 The tension between prefill compute efficiency and semantic purity represents a core architectural trade-off of agent context management. When an agent operates over short horizons or interacts with small source trees, aggressive JIT refreshing and hard context purging minimize the probability of hallucination. But as working contexts approach long horizons ($S > 32\text{,}768$ tokens) and prefill latencies begin to dominate the user experience, runtimes must rely on structured tombstoning and precise dependency tracking to maintain operational coherence without triggering catastrophic KV cache thrashing.
