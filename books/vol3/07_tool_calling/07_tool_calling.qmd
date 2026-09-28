@@ -75,12 +75,11 @@ The distinction between proposal, effect, and evidence comes from @sec-vol3-intr
 
 ### One mediated round trip
 
-@Sec-vol3-foundation-model-contract established the model-side call surface: a response can contain structured tool-call blocks rather than a final answer. What follows is the runtime's responsibility. Between a proposal leaving the model and an observation entering the next call, the runtime performs four kinds of work:
+@Sec-vol3-foundation-model-contract established the model-side call surface: a response can contain structured tool-call blocks rather than a final answer. What follows is the runtime's responsibility. Between a proposal leaving the model and an observation entering the next call, the runtime mediates the entire round trip across four coordinated stages.
 
-1. **Validate the request.** Parse the proposed arguments and check them against the tool's declared interface. Required fields, types, ranges, and parameter relationships constrain what the request means. Conditions that depend on changing environment state must also be enforced at the appropriate execution boundary, not inferred from a prior read.
-2. **Authorize and bound the operation.** Check the session's grants for the target resource and operation, together with applicable resource limits. Reading a private record requires authority just as changing it does. Neither a well-formed proposal nor an advertised tool supplies that authority.
-3. **Dispatch and track the outcome.** Invoke the permitted operation and retain enough identity and status to distinguish rejection before dispatch, work still running, a reported result, and an unknown effect. A timeout is an outcome of waiting, not proof that execution stopped.
-4. **Return an interpretable observation.** Correlate the result with the call and stage a bounded payload with its relevant status and omission information. A shortened log must say that it is shortened; a dispatch acknowledgment must not masquerade as a completed effect.
+Request validation parses proposed arguments against the tool's declared interface, verifying required fields, types, ranges, and parameter relationships. Conditions that depend on changing environment state must also be enforced at the appropriate execution boundary rather than inferred from a prior read. Operation authorization then evaluates the session's grants for the target resource and operation alongside applicable resource limits; reading a private record requires explicit authority just as modifying it does, and neither a well-formed proposal nor an advertised tool supplies that grant.
+
+Following authorization, dispatch invokes the permitted operation while outcome tracking retains enough identity and status to distinguish rejection before dispatch, work still running, a reported result, and an unknown effect. A timeout is an outcome of waiting, not proof that execution stopped. Finally, observation shaping correlates the result with the call identifier and stages a bounded payload with its relevant status and omission information. A shortened log must explicitly disclose that it was shortened, just as a dispatch acknowledgment must not masquerade as a completed effect.
 
 These responsibilities refine the Introduction's execution lifecycle rather than replace it. Some checks must occur together at the endpoint: an edit conditioned on a source version needs the version check coupled to the update. The host and endpoint each enforce the boundary they own. A remote server cannot grant itself permission by advertising a tool, and a host's approval does not exempt the endpoint from checking access.
 
@@ -189,10 +188,7 @@ The expected version connects the read contract from Long-Term Memory to the wri
 
 The endpoint must therefore compare the expected version and apply the replacement as one conditional update. For this example, assume the workspace's source service supplies that operation: it identifies the target, checks the expected version, replaces the content, and publishes the new version within a coordination boundary shared by all relevant writers. That may be implemented by a suitable storage transaction or a locking protocol that every such writer obeys. The schema does not create this property, and an ordinary file read followed by a separate version check and write does not provide it.
 
-The two branches are concrete:
-
-1. If the applicable source version is still `r17`, the conditional update commits the replacement and returns `r18`. The returned version identifies the source state produced by this edit.
-2. If another writer changed the source first, the comparison fails and this attempt applies no replacement. The result reports a version conflict. The agent needs an authorized read of the changed source and a reconsidered proposal, not an automatic overwrite with the old replacement.
+The two branches are concrete. If the applicable source version is still `r17`, the conditional update commits the replacement and returns `r18`, identifying the source state produced by this edit. If another writer changed the source first, the comparison fails and this attempt applies no replacement, returning a version conflict. The agent then requires an authorized read of the changed source and a reconsidered proposal, rather than an automatic overwrite with the old replacement.
 
 If writers can bypass the coordination boundary, the endpoint cannot promise this protection merely by checking a stored version label. Its implementation must supply a valid conditional-update mechanism for that environment or decline to offer the guarantee. The same principle applies to a prior dry run: inspecting a proposed diff does not reserve the source version or authorize the later write. Execution must enforce the applicable precondition and current grants again.
 
@@ -222,11 +218,7 @@ A local service can keep repository access near the working copy and simplify ow
 
 MCP provides `tools/list` for discovering tool definitions and `tools/call` for invocation. Definitions include a name, description, and input schema; an invocation identifies the tool and supplies arguments. These messages describe the interface exchange, not a task's permission grant. The [MCP tools specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools) defines the protocol fields and also requires server-side input validation and access controls.
 
-Consider a repository service advertising `read_source` and `apply_patch`. These are illustrative tool names, not built-in MCP operations. A short integration sequence is enough to locate the policy boundary:
-
-1. The host's client discovers the service's definitions. The host associates each accepted definition with that service and its locally governed tool policy, so a matching name from another server cannot silently select a different implementation.
-2. The host selects which accepted definitions to expose for the repair. The model proposes a call using the advertised interface. Catalog selection helps present relevant options, but it is not the invocation's authorization check.
-3. Before dispatch, the host validates and authorizes the proposed operation for the current task. The endpoint independently checks the request against the resources and permissions it controls. Only then may execution proceed under the tool's contract.
+Consider a repository service advertising `read_source` and `apply_patch`. These are illustrative tool names, not built-in MCP operations. A short integration sequence locates the policy boundary. The host's client first discovers the service's definitions, associating each accepted schema with that specific service and its locally governed tool policy so that a matching name from another server cannot silently select a different implementation. The host then selects which accepted definitions to expose for the repair, allowing the model to propose a call using the advertised interface; catalog selection narrows candidate options, but does not substitute for an authorization check. Finally, before dispatch, the host validates and authorizes the proposed operation for the current task, while the endpoint independently verifies the request against the resources and permissions it controls. Only then may execution proceed under the tool's contract.
 
 For the connection-pool repair, learning that `apply_patch` exists does not enlarge the permitted edit paths or remove the expected-version precondition taught in the preceding section. If the advertised implementation cannot provide the required conditional update, the runtime cannot infer that guarantee from the function name. It needs a suitable implementation or must report that the requested operation is unavailable under the task's contract.
 
@@ -259,14 +251,9 @@ Permission to perform the restart is therefore different from permission to repe
 
 ### A delayed attempt can still take effect
 
-An unchanged-state probe is useful evidence, but it does not establish that an earlier request will never execute. Consider this possible sequence:
+An unchanged-state probe is useful evidence, but it does not establish that an earlier request will never execute. Suppose the runtime dispatches restart attempt A, but the request is delayed in transit before reaching the service. When the caller times out, it reads the container state and accurately observes that the container has not restarted. Treating that unchanged state as proof of nonexecution, the runtime dispatches attempt B, which arrives and completes the restart. The delayed attempt A subsequently arrives and restarts the container a second time.
 
-1. The runtime dispatches restart attempt A. The request is delayed before reaching the service.
-2. The caller times out and reads the container state. The container has not restarted; the read is accurate at that instant.
-3. Treating that unchanged state as proof of nonexecution, the runtime dispatches attempt B. B arrives and restarts the container.
-4. The delayed A arrives afterward and restarts the container again.
-
-The probe was not stale or incorrect. The inference drawn from it was incorrect: “not yet observed” became “cannot still happen.” An already running attempt can create the same problem. A cancellation request also does not settle the issue unless the endpoint confirms what stopped and whether an effect occurred or can still occur. Safe repetition requires more than a timeout followed by a read.
+The probe was not stale or incorrect; rather, the inference drawn from it was flawed, mistaking “not yet observed” for “cannot still happen.” An already running attempt can create the same problem. A cancellation request also does not settle the issue unless the endpoint confirms what stopped and whether an effect occurred or can still occur. Safe repetition requires more than a timeout followed by a read.
 
 ### Repeat behavior belongs to the operation
 
