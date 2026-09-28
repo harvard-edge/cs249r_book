@@ -1,9 +1,8 @@
-# Lab 4: Deterministic Baseline & SmolVLA/ACT Export
+# Lab 3: Baseline, Policy Training & Edge Export
 
-**Schedule:** Week 6 | **Part:** [Part II: Teaching the Machine](module-2-teaching-the-machine.md)
+**Schedule:** Week 6 · Milestone 2 due end of week
 **Required Textbook Reading:** [Chapter 6: Policy Training](../../../books/vol4/06_training/06_training.qmd)
 **Target Competencies:** `[ ] B2 Deterministic Baseline Benchmarking`, `[ ] B3 Edge Model Profiling & Resource Budgets`
-**Milestone Alignment:** Concludes [Milestone 2](../curriculum/syllabus.md#sec-milestones) (End of Week 6)
 
 ---
 
@@ -14,11 +13,8 @@ Why do we use machine learning instead of classical control? Does a learned neur
 
 ### 2. Hardware Setup
 
-| Component | Station Function | Technical Role | Visual Reference |
-|:---|:---|:---|:---:|
-| **Arduino UNO Q Board** | Edge inference target | Qualcomm QRB2210 running INT8 quantized ONNX policy | <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Seeed SO-101 Arm** | Physical validation plant | 6-DoF execution of scripted baseline vs. learned policy | <img src="../assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Logitech C270 Webcam** | Visual observation source | Real-time workspace frames fed to baseline CV & neural policy | <img src="../assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+> **Hardware Setup:** See the [Station Reference Card](station-reference.md) for the standard bench configuration.
+
 
 1. **Workstation / GPU Server:** Machine learning training environment equipped with PyTorch and LeRobot.
 2. **Edge Board:** Arduino UNO Q with Qualcomm Debian Linux.

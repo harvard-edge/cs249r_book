@@ -1,9 +1,8 @@
-# Lab 6: Action Horizons, Language & Disturbances
+# Lab 5: Action Horizons, Language & Disturbances
 
-**Schedule:** Week 9 | **Part:** [Part III: Running the Machine](module-3-running-the-machine.md)
+**Schedule:** Week 9 · Milestone 3 due end of week
 **Required Textbook Reading:** [Chapter 10: Grounded Intent](../../../books/vol4/10_intent/10_intent.qmd) & [Chapter 12: Safety Enforcement](../../../books/vol4/12_enforcement/12_enforcement.qmd)
 **Target Competencies:** `[ ] C2 Temporal Horizons & Action Dynamics`, `[ ] C3 Disturbance Recovery & Replanning`
-**Milestone Alignment:** Concludes [Milestone 3](../curriculum/syllabus.md#sec-milestones) (End of Week 9)
 
 ---
 
@@ -14,11 +13,8 @@ How far into the future can an embodied model predict open-loop actions before p
 
 ### 2. Hardware Setup
 
-| Component | Station Function | Technical Role | Visual Reference |
-|:---|:---|:---|:---:|
-| **Seeed SO-101 Arm** | Physical manipulation follower arm | Executes variable action chunk horizons ($K \in \{1, 8, 16, 32\}$) | <img src="../assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Arduino UNO Q Board** | Edge VLA runtime engine | Runs SmolVLA/ACT inference and dynamic chunk replanning | <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Logitech C270 Webcam** | Live optical feedback | Provides continuous 30 FPS observation frames for disturbance detection | <img src="../assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+> **Hardware Setup:** See the [Station Reference Card](station-reference.md) for the standard bench configuration.
+
 
 1. **Edge Board:** Arduino UNO Q running the closed-loop runtime pipeline.
 2. **Robot Station:** Seeed SO-101 arm and overhead USB webcam.
