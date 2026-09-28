@@ -61,29 +61,25 @@ Engineering mastery is tracked using the [Physical AI Station Competency Card](c
 
 ---
 
-## 5. The 14-Week Semester Schedule
+## 5. The 14-Week Lab Schedule
 
-Formal classroom instruction and new textbook readings run through **Week 11**, covering the four parts of the textbook across **6 focused labs**. The final three weeks (**Weeks 12–14**) are preserved as an open **Capstone Project Studio**:
+Six labs follow the textbook's four parts in order, building from pen-and-paper math through simulation, real hardware, learned control, and finally safety governance. The final three weeks are an open capstone.
 
 ![Volume IV Physical AI Studio 14-Week Curriculum Map](assets/images/vol4-course-structure-map.svg)
 
----
-
-## 6. Studio Lab Directory & Reading Guide
-
-| Lab & Link | Schedule | Required Textbook Reading | Primary Physical AI Focus | Competency Check-Off |
-|:---|:---:|:---|:---|:---:|
-| **[Lab 1: Kinematics & Simulation](labs/lab-01-machine-anatomy.md)** | Weeks 1–2 | **Ch 1:** Causal Boundary · **Ch 2:** Physical Body | Derive DH parameters and inverse kinematics by hand. Build a digital twin in simulation. Command the simulated robot with your own IK equations. Map the workspace and identify singularities. | `A1` |
-| **[Lab 2: Hardware Bring-Up & Real-World Control](labs/lab-02-teleoperation-and-datasets.md)** | Weeks 3–4 | **Ch 3:** Cognitive Brain · **Ch 4:** Nervous System | Wire the bench; port IK to the STM32 MCU; control the real robot via CLI; calibrate webcam ($T_{\text{cam}}^{\text{base}}$); measure RPC latency; quantify sim2real discrepancies; verify safe-state behavior. | `A2` · `A3` · `D1` |
-| **[Lab 3: VLAs — From Simulation to Hardware](labs/lab-03-baseline-and-training.md)** | Weeks 5–6 | **Ch 5:** Physical Data · **Ch 6:** Policy Training | Evaluate a pre-trained VLA in simulation. Deploy the sim-trained VLA to the UNO Q Dragonwing via RPC. Run it on real hardware. Measure and analyze the sim2real gap. | `B1` · `B2` |
-| **[Lab 4: Closing the Gap — Real Data & Fine-Tuning](labs/lab-04-autonomous-reach.md)** | Weeks 7–8 | **Ch 7:** Closed-Loop Evaluation · **Ch 8:** Sensor Perception · **Ch 9:** Spatial Memory | Teleoperate to collect 30 real-world episodes. Fine-tune the sim-trained VLA on real data. Deploy untethered. Run the full S·P·A loop autonomously. Quantify sim2real gap closure. | `B3` · `C1` |
-| **[Lab 5: Action Horizons, Language & Disturbances](labs/lab-05-horizons-and-disturbances.md)** | Week 9 | **Ch 10:** Grounded Intent · **Ch 11:** Trajectory Planning · **Ch 13:** Silicon Placement | Benchmark action chunk horizons ($K=1$ vs $16$). Test SmolVLA language conditioning. Shift target 50 mm mid-reach to evaluate replanning vs. drift. | `C2` · `C3` |
-| **[Lab 6: Safety Governor — Build It, Then Break It](labs/lab-06-safety-governor.md)** | Weeks 10–11 | **Ch 12:** Safety Enforcement · **Ch 14:** Supervisory Intervention · **Ch 15:** Adversarial Verification · **Ch 16:** Safe Release | Implement real-time velocity clamps and table geofences on STM32. Inject synthetic faults (frozen Linux, dropped frames, stale packets). Configure hardware watchdog. Verify zero command backlog on resume. | `D1` · `D2` |
-| **[Capstone Project Studio](labs/lab-capstone-studio.md)** *(Synthesis & Physical Release)* | Weeks 12–14 | **Chapters 1–17** *(Complete Book Synthesis)* | 3 full weeks: independent task design, peer adversarial fault exchange, 20 held-out physical disturbance trials, and oral defense of the **Physical Release Dossier**. Generalize the pipeline to a different robot architecture. | `D3` *(Full Card Mastery)* |
+| | Lab | Weeks | Book Part & Chapters | What You Will Do |
+|:---:|:---|:---:|:---|:---|
+| 1 | **[Kinematics & Simulation](labs/lab-01-machine-anatomy.md)** | 1–2 | Part I — Ch 1 *Causal Boundary*, Ch 2 *Physical Body* | Derive inverse kinematics by hand. Build a digital twin in simulation. Command the simulated robot with your own equations. |
+| 2 | **[Hardware Bring-Up & Real-World Control](labs/lab-02-teleoperation-and-datasets.md)** | 3–4 | Part I — Ch 3 *Cognitive Brain*, Ch 4 *Nervous System* | Wire the bench. Port your IK to the STM32 MCU. Control the real robot via CLI. Calibrate the camera. Measure the sim-to-real gap. |
+| 3 | **[VLAs — From Simulation to Hardware](labs/lab-03-baseline-and-training.md)** | 5–6 | Part II — Ch 5 *Physical Data*, Ch 6 *Policy Training* | Run a pre-trained VLA in simulation. Deploy it to the real robot. Measure how much performance drops — the sim2real gap. |
+| 4 | **[Closing the Gap — Real Data & Fine-Tuning](labs/lab-04-autonomous-reach.md)** | 7–8 | Part II–III — Ch 7 *Evaluation*, Ch 8 *Perception*, Ch 9 *Spatial Memory* | Collect real-world demonstrations. Fine-tune the sim-trained VLA. Deploy untethered. Run the full autonomous loop. |
+| 5 | **[Action Horizons, Language & Disturbances](labs/lab-05-horizons-and-disturbances.md)** | 9 | Part III — Ch 10 *Grounded Intent*, Ch 11 *Trajectory Planning*, Ch 13 *Silicon Placement* | Benchmark action chunk lengths. Test language conditioning. Shift the target mid-reach. Stress-test the system. |
+| 6 | **[Safety Governor — Build It, Then Break It](labs/lab-06-safety-governor.md)** | 10–11 | Part III–IV — Ch 12 *Safety Enforcement*, Ch 14 *Intervention*, Ch 15 *Verification*, Ch 16 *Release* | Program the MCU safety governor. Then try to defeat it: freeze the brain, corrupt packets, cut power. |
+| | **[Capstone Project Studio](labs/lab-capstone-studio.md)** | 12–14 | Synthesis — Ch 17 *Epistemic Frontier* | Independent task design. Peer adversarial fault exchange. Physical Release Dossier defense. Generalize to a new robot. |
 
 ---
 
-## 7. Reference & Governance Documents
+## 6. Reference & Governance Documents
 
 | Domain | Document | Primary Focus & Target Audience |
 |:---|:---|:---|
