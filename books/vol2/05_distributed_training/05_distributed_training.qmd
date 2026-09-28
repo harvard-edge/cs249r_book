@@ -387,7 +387,7 @@ The systematic optimization methodology established for single-machine training 
 
 @Fig-3d-parallelism-cube shows that the total accelerator count is $N_{\text{total}} = d \times p \times t$\index{3D parallelism!accelerator allocation}. The axes represent distinct mathematical partitions, but they are not independent configuration knobs. Tensor and pipeline degrees must divide the model structure, the data-parallel degree and microbatch schedule must produce a viable global batch, every partition must fit memory, and each communication group must map onto an adequate topology and acceptable failure domain. Training systems therefore select a jointly feasible coordinate rather than tuning $d$, $p$, and $t$ in isolation.
 
-### Engineering trade-offs: Selecting a parallelism strategy {#sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344}
+### Parallelism strategy selection and engineering trade-offs {#sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344}
 
 Choosing the right parallelism strategy is not a matter of preference; it is a constraint satisfaction problem governed by parameter count $(P)$, batch size $(B)$, and interconnect bandwidth. @Tbl-parallelism-tradeoffs quantifies the parallelism communication costs\index{Parallelism!communication costs} for each strategy, revealing which approaches are physically feasible for a given hardware topology.
 
@@ -909,7 +909,7 @@ class FrontierTrainingContext:
     frontier_params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
 ```
 
-#### Compute phase: Forward and backward passes {#sec-distributed-training-systems-systems-compute-phase-forward-backward}
+#### Compute-phase forward and backward passes {#sec-distributed-training-systems-systems-compute-phase-forward-backward}
 
 ```{python}
 #| echo: false
@@ -1504,7 +1504,7 @@ In a system with 8 GPUs training a ResNet model, each GPU computes local gradien
 
 The cycle of splitting data, computing gradients, synchronizing results, and updating parameters repeats for each batch. Frameworks automate this cycle, but they cannot remove the ordering constraint that makes the replicas coherent: every worker must update only after the synchronized gradient is complete.
 
-### Trade-offs: The communication wall {#sec-distributed-training-systems-systems-data-parallelism-tradeoffs}
+### Communication wall trade-offs in data parallelism {#sec-distributed-training-systems-systems-data-parallelism-tradeoffs}
 
 Data parallelism is a common starting strategy for a reason: it scales throughput linearly with device count, provided the model fits in memory and communication is not the bottleneck. However, it hits a hard ceiling defined by the communication-computation ratio: once gradient exchange dominates useful computation, more workers mainly add synchronization work [@ben-nun2019].
 
@@ -1770,7 +1770,7 @@ class GradAccumScenario:
 
 The calculation changes the scaling decision: when inter-node bandwidth is the binding constraint, gradient accumulation on a bandwidth-rich node can beat naive scale-out even if the wall-clock run becomes modestly longer. Four insights emerge. NVLink enables efficient scaling within single nodes (`{python} Scaling8GPU.efficiency_8gpu_str` efficiency), while inter-node communication kills efficiency (dropping to `{python} Scaling32GPU.efficiency_32gpu_str`). Gradient accumulation beats naive scale-out for communication-bound runs when the scale-out network is slow, so the sweet spot for this GPT-2 scenario is 8 GPUs per node with gradient accumulation, not naive scaling to 32+ GPUs. OpenAI's GPT-2 paper reports training on 32 V100s across 4 nodes using optimized communication (likely gradient accumulation combined with pipeline parallelism), not pure data parallelism.
 
-### Memory-efficient data parallelism: ZeRO and FSDP {#sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69}
+### Memory-efficient data parallelism with ZeRO and FSDP {#sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69}
 
 The memory constraints of data parallelism motivate a family of techniques that shard memory state across workers while preserving the simplicity of data parallel training. The Zero Redundancy Optimizer (ZeRO)[^fn-zero-redundancy-optimizer] [@rajbhandari2020] and its PyTorch implementation, Fully Sharded Data Parallel (FSDP)\index{FSDP!memory reduction}\index{Fully Sharded Data Parallel|see{FSDP}} [@zhao2023], enable training models that would otherwise require model parallelism.
 
@@ -2468,7 +2468,7 @@ Interconnect selection determines whether large-scale deployments remain compute
 
 Synchronization frequency presents a trade-off between communication efficiency and convergence behavior. Accumulating gradients for 4 microsteps reduces synchronization frequency by 75 percent, but the realized step-time reduction depends on the compute/communication mix and how much communication can overlap with backpropagation. In standard implementations, gradient accumulation reuses one resident gradient buffer and accumulates in place; memory pressure comes from keeping that buffer resident and from any larger microbatch or activation choices, not from storing 4 independent gradient tensors. Asynchronous methods eliminate synchronization costs entirely but introduce staleness that degrades convergence by 15--30 percent\index{Gradient staleness!asynchronous convergence} for large learning rates.
 
-### The physics of scaling: Amdahl's Law with communication {#sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f}
+### Scaling physics and Amdahl's Law with communication {#sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f}
 
 Just as the Iron Law of Processor Performance governs single-thread execution, distributed training is governed by an extended version of Amdahl's Law\index{Amdahl's Law}\index{Amdahl, Gene|seealso{Amdahl's Law}} that explicitly accounts for communication overhead. The time to complete one training step on $N$ devices is not simply $T_{\text{single}} / N$, but is constrained by the sequential nature of synchronization. @Sec-appdx-fleet-foundations-amdahls-fleet derives the speedup ceiling at fleet scale and works it through a concrete example; the essential consequence here is that a fixed synchronization fraction caps speedup no matter how many accelerators are added.
 
@@ -2671,7 +2671,7 @@ The theorem isolates the benefit that follows from the assumptions. With equal l
 
 The theorem assumes perfect synchronization (BSP). When workers proceed at different rates or use stale gradients, convergence guarantees degrade as staleness increases.
 
-### Staleness impact: BSP vs. SSP vs. ASP {#sec-distributed-training-systems-systems-staleness-impact-bsp-vs-ssp-vs-asp-e153}
+### Staleness impact across synchronization models {#sec-distributed-training-systems-systems-staleness-impact-bsp-vs-ssp-vs-asp-e153}
 
 The operational guarantees of BSP, SSP, and ASP established in @sec-distributed-training-systems-systems-synchronization-models-396f have convergence consequences, but there is no universal additive staleness penalty independent of the objective, step-size schedule, worker count, and delay model. The staleness parameter $\tau_{\text{stale}}$ quantifies how many updates occur between computing and applying a gradient, tying throughput to solution quality [@ho2013more; @dutta2018slow].
 
@@ -2910,7 +2910,7 @@ Given a 7B-parameter model distributed across a cluster of 64 A100 GPUs (80 GB H
 
 :::
 
-### Worked example: Convergence comparison for 8 vs. 64 workers {#sec-distributed-training-systems-systems-worked-example-convergence-comparison-8-vs.-64-workers-57ce}
+### Convergence comparison for 8 versus 64 workers {#sec-distributed-training-systems-systems-worked-example-convergence-comparison-8-vs.-64-workers-57ce}
 
 To illustrate these concepts concretely, consider scaling from 8 to 64 workers when training a transformer language model with baseline batch size $B = 32$ per worker.
 
@@ -3094,7 +3094,7 @@ Despite higher parallelism, 64-GPU training costs more per run due to communicat
 
 :::
 
-### Trade-off: Communication cost vs. convergence speed {#sec-distributed-training-systems-systems-tradeoff-communication-cost-vs.-convergence-speed-cb7c}
+### Communication cost versus convergence speed {#sec-distributed-training-systems-systems-tradeoff-communication-cost-vs.-convergence-speed-cb7c}
 
 The fundamental trade-off in distributed training is between communication efficiency and convergence quality. @Fig-comm-convergence-tradeoff visualizes this trade-off space.
 
@@ -4742,7 +4742,7 @@ Megatron-SP decouples this pair:
 
 Because standard TP executes two AllReduces per transformer block ($2 \times 2(t-1)/t \times M_{\text{act}}$ bytes), while Megatron-SP executes two ReduceScatter and AllGather pairs ($2 \times [(t-1)/t + (t-1)/t] \times M_{\text{act}} = 2 \times 2(t-1)/t \times M_{\text{act}}$ bytes), the aggregate communication volume is identical. Sequence parallelism reduces activation memory outside attention by a factor of $t$ without consuming any additional interconnect bandwidth.
 
-##### Context parallelism: Ring attention versus Ulysses {#sec-distributed-training-context-parallelism-ring-ulysses-8b1f}
+##### Context parallelism with ring attention versus Ulysses {#sec-distributed-training-context-parallelism-ring-ulysses-8b1f}
 
 When sequence length $S$ reaches 64,000 to 1,000,000+ tokens, activation memory exceeds device capacity even with Sequence Parallelism and activation checkpointing. Context Parallelism (CP degree $c$) shards the sequence across a dedicated group of $c$ accelerators. Two primary architectural paradigms govern context parallelism:
 
@@ -5068,7 +5068,7 @@ The distinction dictates fundamentally different cluster designs: dense GPU pods
 
 :::
 
-### Trade-offs: The bubble vs. bandwidth dilemma {#sec-distributed-training-systems-systems-model-parallelism-tradeoffs}
+### Pipeline bubble versus bandwidth dilemma {#sec-distributed-training-systems-systems-model-parallelism-tradeoffs}
 
 Model parallelism breaks the memory wall but introduces sequential dependencies that reduce hardware utilization. The engineering challenge is balancing pipeline bubbles (idle time) against all-to-all bandwidth (communication time).
 
@@ -5557,7 +5557,7 @@ plt.close()
 
 :::
 
-## Multi-Model Training: RLHF and Alignment {#sec-distributed-training-rlhf}
+## Multi-Model Training for Alignment and RLHF {#sec-distributed-training-rlhf}
 
 The parallelism strategies examined so far assume a single model being trained on a single objective. Reinforcement learning from human feedback (RLHF)\index{Reinforcement learning from human feedback!multi-model coordination}\index{RLHF|see{Reinforcement learning from human feedback}} and its variants break this assumption by requiring multiple models to coordinate within a single training loop, each with different memory footprints, compute profiles, and gradient requirements. At a high level, RLHF generates model outputs, scores them with preference-derived reward signals, regularizes updates against a reference model, and then updates the policy; proximal policy optimization (PPO) implements this online loop with separate policy, reference, reward, and value models, while direct preference optimization (DPO)-style methods remove much of that rollout and value-model machinery. This creates a heterogeneous fleet management problem that cannot be solved by any single parallelism strategy and represents a qualitatively different distributed systems challenge from standard pretraining.
 
@@ -5624,7 +5624,7 @@ Standard pretraining involves one model, one loss function, and one gradient str
 
 The aggregate memory demand of the four-model PPO system dwarfs standard pretraining. A naive co-location of a 70B policy, 70B reference, 13B reward, and 13B value model requires approximately `{python} DistTrainH100Capacity.ppo_total_mem_gb_str` of accelerator memory, before accounting for the KV caches and intermediate activations generated during sequence generation. On H100 GPUs with `{python} DistTrainH100Capacity.h100_mem_gb_str` of HBM each, this system requires a minimum of `{python} DistTrainH100Capacity.min_gpus_mem_str` for parameter storage alone. Once generation-phase KV caches (which grow linearly with output sequence length) and training-phase activations are included, the practical minimum rises to `{python} DistTrainH100Capacity.min_gpus_practical_str` for a single RLHF training instance.
 
-### Infrastructure asymmetry: Training vs. inference models {#sec-distributed-training-rlhf-asymmetry}
+### Infrastructure asymmetry between training and inference models {#sec-distributed-training-rlhf-asymmetry}
 
 The defining infrastructure challenge of RLHF is not the *total memory footprint* but the *asymmetry* between the models' compute profiles. The policy and value models require full backward passes with gradient computation, activation checkpointing, and optimizer updates, compute-intensive operations that benefit from tensor parallelism and high arithmetic intensity. The reference and reward models, by contrast, perform only forward passes: they are inference workloads embedded within a training loop, with memory access patterns dominated by KV cache management rather than gradient accumulation.
 
@@ -5686,7 +5686,7 @@ The generation phase itself introduces a sequential bottleneck absent from stand
 
 RLHF systems address this asymmetry through temporal multiplexing\index{Temporal multiplexing!RLHF phases}. During the generation phase, the cluster behaves like an inference system: the policy model generates sequences while the reference model computes log-probabilities, and the dominant resource is HBM reserved for token-by-token attention state. During the training phase, the same fleet switches back to training mode: gradients are computed through the policy and value models using the 3D parallelism configuration developed in @sec-distributed-training-systems-systems-hybrid-parallelism-12a0. Serving systems handle that phase with request batching and KV-cache placement; here, the important point is the mode switch. RLHF is not one steady training loop, but an alternation between inference-shaped work and training-shaped work, and standard training frameworks rarely manage that transition by themselves.
 
-### DPO: Simplifying the fleet {#sec-distributed-training-rlhf-dpo}
+### Direct preference optimization in the fleet {#sec-distributed-training-rlhf-dpo}
 
 DPO\index{Direct preference optimization!memory budget}\index{DPO|see{Direct preference optimization}} [@rafailov2023dpo] eliminates the reward model and value model entirely by reformulating the alignment objective as a classification loss over preference pairs. Instead of generating sequences, computing rewards, and estimating advantages, DPO directly optimizes the policy to assign higher log-probability to preferred responses over dispreferred ones, using the reference model only to compute a KL-divergence regularization term.
 
@@ -5694,7 +5694,7 @@ The infrastructure implications are substantial. DPO reduces the multi-model sys
 
 The trade-off is capability. DPO operates on a static preference dataset, meaning the policy cannot explore new responses and receive feedback during training. PPO's online generation allows the policy to improve iteratively on its own outputs, potentially discovering better strategies that the static dataset does not contain. For deployment scenarios where the preference data comprehensively covers the target distribution, DPO's infrastructure simplification dominates. For scenarios requiring adaptive exploration (training models to solve novel reasoning tasks, for example), PPO's online feedback loop may justify the 2$\times$ infrastructure overhead.
 
-### Quantitative analysis: PPO vs. DPO resource requirements {#sec-distributed-training-rlhf-quantitative}
+### Resource requirements for PPO versus DPO {#sec-distributed-training-rlhf-quantitative}
 
 To make the infrastructure trade-off concrete, consider aligning a 70B policy model on a cluster of 256 H100 GPUs (`{python} DistTrainH100Capacity.h100_mem_gb_str` HBM each).
 

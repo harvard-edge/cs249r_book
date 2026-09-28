@@ -375,7 +375,7 @@ At `{python} QueuingTheory.rho_pct_str` utilization $(\rho = 0.8)$: with an expo
 
 :::
 
-#### Worked allocation: Dominant-resource fairness {#sec-fleet-orchestration-drf-worked-allocation}
+#### Dominant-resource fairness allocation {#sec-fleet-orchestration-drf-worked-allocation}
 
 Dominant-resource fairness (DRF)\index{Dominant Resource Fairness!worked allocation}\index{DRF|see{Dominant Resource Fairness}} makes a multi-resource entitlement comparable by normalizing each tenant's allocation against fleet capacity and taking its largest share [@ghodsi2011]. Consider the deliberately small cluster in @tbl-fleet-orchestration-drf-allocation: 8 GPUs, 32 CPU cores, 256 GB of memory, and 80 Gb/s of network capacity. Tenant A's replica requires 1 GPU, 4 cores, 32 GB, and 10 Gb/s; Tenant B's distributed worker requires 2 GPUs, 2 cores, 16 GB, and 20 Gb/s.
 
@@ -1054,7 +1054,7 @@ As contrasted in @fig-fleet-orchestration-slurm-vs-k8s, the fundamental distinct
 
 :::
 
-### Slurm: The HPC heritage {#sec-fleet-orchestration-slurm}
+### Slurm and HPC scheduling heritage {#sec-fleet-orchestration-slurm}
 
 The Slurm Workload Manager\index{Slurm!workload manager}[^fn-slurm-hpc-workload] originated at Lawrence Livermore National Laboratory as a scalable, fault-tolerant resource manager for Linux clusters [@yoo2003]. Its batch-oriented design fits the distinctive requirements of scientific computing: long-running jobs, expensive shared hardware, and users who can specify resource needs in advance. In ML infrastructure, the same model maps to GPU training through partitions for heterogeneous accelerator pools and predictable allocations for long-running distributed jobs.
 
@@ -1107,7 +1107,7 @@ Finally, **trackable resources (TRES)**\index{Trackable Resource!definition}\ind
 
 These extensions make Slurm more ML-aware while preserving its batch-scheduler model. Kubernetes starts from a different contract: users declare the desired state of services and jobs, and controllers continuously reconcile the cluster toward that state.
 
-### Kubernetes: Declarative orchestration {#sec-fleet-orchestration-kubernetes}
+### Kubernetes declarative container orchestration {#sec-fleet-orchestration-kubernetes}
 
 Kubernetes is a common platform for ML infrastructure, particularly for organizations requiring unified management of training and serving workloads [@burns2016; @kubernetes_orchestration]. Where Slurm's model is imperative ("run this job on these resources"), Kubernetes uses a **declarative model**\index{Declarative Model!definition} ("ensure this state exists"), using control loops that continuously reconcile desired state with actual state. This fundamental difference shapes every aspect of ML workload management, from job submission to failure recovery.
 
@@ -2841,7 +2841,7 @@ Spot pricing and reservation strategy squeeze the cost of running a job, but the
 
 General-purpose schedulers treat training jobs as opaque boxes, so they cannot tell whether a model is in the steep early phase of learning or the final diminishing-returns phase. Custom ML schedulers trade implementation complexity for that visibility: they peer inside the training loop to optimize time-to-accuracy rather than only time-to-completion. The selection question is which internal signal addresses the fleet's binding bottleneck, and the four systems differ less by scheduler sophistication than by the signal they ask the platform to trust: consumed service, iteration boundaries, completion value, or measured goodput.
 
-### Tiresias: Duration-agnostic scheduling {#sec-fleet-orchestration-tiresias}
+### Tiresias duration-agnostic scheduling {#sec-fleet-orchestration-tiresias}
 
 **Tiresias**\index{Tiresias!definition} [@gu2019tiresias] addresses the fundamental problem identified in @sec-fleet-orchestration-gang-scheduling: ML job durations are unpredictable, and scheduling policies that rely on exact duration estimates can make poor decisions when those estimates are unavailable or unreliable. Rather than fighting this information asymmetry, Tiresias eliminates the requirement for duration estimates entirely. It uses a two-dimensional attained service\index{Attained Service Scheduling!two-dimensional}[^fn-attained-service-scheduling] scheduler that makes priority decisions based on what a job has already consumed, not what it claims it will consume. Jobs accumulate "service" based on GPU-time consumed, with priority decreasing as service increases. The two dimensions are time (how long the job has been running) and resources (how many GPUs the job uses), capturing both elapsed duration and resource intensity.
 
@@ -2851,7 +2851,7 @@ A discretized version groups jobs into service bins (for example, less than 1 GP
 
 Experiments on production cluster traces from Microsoft and Alibaba show 40 to 60 percent reduction in average job completion time compared to FIFO scheduling, with the largest improvements for short jobs that previously waited behind long-running training runs. The improvement is not free: long-running training jobs experience increased completion times because they are systematically deprioritized. However, the aggregate benefit is positive because there are many more short jobs than long ones, and the short-job improvement exceeds the long-job penalty in total.
 
-### Gandiva: Iteration-aware scheduling {#sec-fleet-orchestration-gandiva}
+### Gandiva iteration-aware scheduling {#sec-fleet-orchestration-gandiva}
 
 **Gandiva**\index{Gandiva!definition} [@xiao2018gandiva] exploits iteration-boundary time slicing, enabling higher utilization through controlled oversubscription. A cluster with 100 GPUs might support 120 concurrent jobs if each spends 20 percent of its iteration time waiting for data, because the scheduler can interleave data loading from one job with GPU computation from another on the same device. The critical insight that makes this practical is that iteration boundaries provide natural preemption points where GPU state is minimal. Between iterations, only model weights and optimizer state reside on the GPU; the intermediate activations from forward and backward passes have been freed. This minimal state makes context switching cheap (seconds rather than minutes), unlike preempting mid-iteration when the full activation memory is in use.
 
@@ -2871,7 +2871,7 @@ Gandiva also implements **grow-shrink elasticity**\index{Grow-Shrink Elasticity!
 
 :::
 
-### Themis: Finish-time fairness {#sec-fleet-orchestration-themis}
+### Themis finish-time fairness {#sec-fleet-orchestration-themis}
 
 Traditional fair-share scheduling treats all GPU-seconds equally, even when equal shares produce very different completion delays. **Themis**\index{Themis!definition} [@mahajan2020themis] instead measures fairness in normalized finish time: each job compares its completion time under contention with the completion time it would receive under an isolated fair share of the cluster.
 
@@ -2879,7 +2879,7 @@ Themis allocates resources to improve the worst finish-time fairness ratio acros
 
 This approach benefits shorter jobs and nearly-complete jobs without excessive penalty to longer ones, and it aligns scheduling decisions with the economic value of completing work rather than the simple accounting of resource consumption. Themis implements this metric through an auction mechanism where jobs bid for resources based on their current marginal value (how much their completion time improves per GPU-hour allocated), creating a market-like dynamic that naturally directs resources to their highest-value use.
 
-### Pollux: Adaptive resource allocation {#sec-fleet-orchestration-pollux}
+### Pollux adaptive resource allocation {#sec-fleet-orchestration-pollux}
 
 **Pollux**\index{Pollux!definition} [@qiao2021pollux] takes the most aggressive approach of the four research schedulers by jointly optimizing resource allocation and training hyperparameters. Where Tiresias, Gandiva, and Themis make scheduling decisions about jobs (when to run, how to share), Pollux makes decisions within jobs (how many GPUs and what batch size). The key observation is that the optimal number of GPUs for a training job depends on the current batch size, learning rate, and gradient noise level, all of which change during training as the model moves through different phases of convergence.
 

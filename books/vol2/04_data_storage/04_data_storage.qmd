@@ -1274,7 +1274,7 @@ class HbmModelBudget:
     )
 ```
 
-### Tier 0: GPU HBM {#sec-storage-tier0-hbm}
+### Tier 0 GPU HBM {#sec-storage-tier0-hbm}
 
 The most constrained resource in the entire system is also the most scarce. HBM\index{HBM!storage hierarchy} is the only storage tier where weights and activations can reside during active computation. HBM is a 3D-stacked memory technology that places DRAM dies vertically atop the accelerator, connected by thousands of through-silicon vias that provide aggregate bandwidth of `{python} HbmTierBandwidth.h100_bw_tb_per_s_str` on an H100. This bandwidth is roughly 17$\times$ higher than the chapter's 200 GB/s host-DRAM figure and roughly 480$\times$ higher than a single 7 GB/s NVMe drive. That bandwidth is what makes large-scale deep learning feasible: a matrix multiplication involving billions of parameters requires reading those parameters from memory every forward and backward pass.
 
@@ -1410,7 +1410,7 @@ class DRAMInterconnect:
     embedding_table_gb_str = fmt_memory(embedding_table, unit=GB, precision=0, commas=False)
     remaining_dram_gb_str = fmt_memory(remaining_dram, unit=GB, precision=0, commas=False)
 ```
-### Tier 1: Host DRAM {#sec-storage-tier1-dram}
+### Tier 1 host DRAM {#sec-storage-tier1-dram}
 
 One level below HBM, host DRAM\index{DRAM!data pipeline staging} serves as the staging area for the data pipeline. Every byte of training data that reaches the accelerator passes through host DRAM first (unless GPUDirect Storage bypasses it, as described in @sec-storage-gds). A typical training node contains 512 GB to 2 TB of system memory shared across the host CPU and its peripherals. While the bandwidth between host DRAM and the accelerator is limited to what PCIe Gen 5 (about `{python} DRAMInterconnect.pcie5_bw_gb_per_s_str` per direction, `{python} DRAMInterconnect.pcie5_bidir_bw_gb_per_s_str` bidirectional) or NVLink (`{python} DRAMInterconnect.nvlink_bw_gb_per_s_str`) can provide, host DRAM plays three critical roles in the ML storage hierarchy.
 
@@ -1528,7 +1528,7 @@ class NvmeTierContext:
     tokenized_shard_gb_str = fmt_memory(tokenized_shard, unit=GB, precision=0, commas=False)
     metadata_reduction_mult_str = fmt_multiple(metadata_reduction_val, precision=0, commas=True)
 ```
-### Tier 2: Local NVMe {#sec-storage-tier2-nvme}
+### Tier 2 local NVMe {#sec-storage-tier2-nvme}
 
 When the working set exceeds host DRAM, the system falls to Tier 2: the local NVMe\index{NVMe!ML storage tier} drives attached directly to the compute node. NVMe[^fn-nvme-storage-protocol] provides a high-performance protocol designed specifically for solid-state drives, achieving `{python} NvmeTierContext.nvme_bw_gb_per_s_str` of sequential throughput per drive. With four drives in a RAID-0 configuration, a single node can sustain roughly `{python} NvmeTierContext.raid0_bw_gb_per_s_str` of sequential reads before overhead, sufficient to stream the `{python} NvmeTierContext.tokenized_text_tb_str` serialized dataset from local disk in about `{python} NvmeTierContext.tokenized_local_stream_min_str` under ideal sequential conditions.
 
@@ -1658,7 +1658,7 @@ A practical concern at this tier is SSD endurance\index{SSD endurance!checkpoint
 
 Local NVMe provides high bandwidth and low latency within a single node, but distributed training requires every node to access the same datasets and see the same checkpoints. This shared-namespace requirement cannot be satisfied by node-local storage alone and motivates the next tier in the hierarchy.
 
-### Tier 3: Parallel file systems {#sec-storage-tier3-pfs}
+### Tier 3 parallel file systems {#sec-storage-tier3-pfs}
 
 Beyond the single node, the workload requires a shared namespace where all workers can access the same datasets and where durable checkpoints are globally visible. This is the role of the parallel file system\index{Parallel File System!ML infrastructure}.[^fn-pfs-storage-architecture]
 
@@ -2033,7 +2033,7 @@ Consider a training cluster with 512 nodes, each running 8 GPUs. The training jo
 
 Parallel file systems solve the shared-namespace problem for active training clusters, but their cost per byte is too high for the organization's complete data holdings. The petabytes of raw training data, historical checkpoints, and preprocessed datasets that an ML organization accumulates over years require a tier optimized for capacity and durability rather than bandwidth.
 
-### Tier 4: Object storage {#sec-storage-tier4-object}
+### Tier 4 object storage {#sec-storage-tier4-object}
 
 At the scale of petabytes, object storage\index{Object Storage!cloud storage tier} provides the durable, cost-effective foundation of the hierarchy. Services like Amazon S3\index{Amazon S3!key-value namespace} and Google Cloud Storage\index{Google Cloud Storage!key-value namespace} organize data in object namespaces where objects are retrieved by keys rather than by POSIX directory paths [@awsS3ObjectKeys; @googleCloudStorageObjects]. Unlike file systems, which organize data in hierarchical directories with metadata-rich operations (rename, link, permission inheritance), object storage treats each object as an opaque blob identified by a unique key. This simplification eliminates the metadata complexity that plagues parallel file systems at scale and enables horizontal scaling to very large capacity pools.
 
@@ -2163,7 +2163,7 @@ class GlacierCost:
     glacier_annual_usd_str = fmt_usd(glacier_annual_cost, precision=0)
 ```
 
-### Tier 5: Archive and cold storage {#sec-storage-tier5-archive}
+### Tier 5 archive and cold storage {#sec-storage-tier5-archive}
 
 The final tier provides long-term preservation for compliance and auditability. Archive services (such as S3 Glacier) are designed for data that is rarely accessed: training logs from previous years, superseded model checkpoints, audit trails for regulatory compliance. At a representative \$0.004/GB/month, archive storage costs roughly `{python} GlacierCost.glacier_annual_usd_str` per year for 100 TB, which is 5$\times$ cheaper than the \$0.02/GB/month object-storage assumption used in @sec-storage-tier4-object. The trade-off is retrieval latency measured in minutes to hours, making this tier unsuitable for operational access.
 
@@ -3846,7 +3846,7 @@ During autoregressive generation, the server keeps a per-request record of the a
 
 Retrieval-augmented inference adds another serving-time working set. Graph-based approximate nearest-neighbor (ANN) indexes replace sequential model loading with random index traversal; flat scans, inverted-file (IVF) indexes, and product-quantized (PQ) indexes instead trade more sequential work or compression for fewer graph hops.
 
-## Retrieval Infrastructure: Vector Indexes {#sec-data-storage-retrieval-infrastructure}
+## Retrieval Infrastructure and Vector Indexes {#sec-data-storage-retrieval-infrastructure}
 
 A retrieval system first converts documents into vectors that represent semantic meaning, then serves an inference request by finding nearby vectors and returning their source documents as context. With a graph-based ANN index, the storage system traverses a high-dimensional vector graph instead of streaming sequential blobs via formats such as TFRecord or Parquet. This is one index family, not a universal vector-database layout: exact flat search, IVF partitioning, and PQ-compressed variants impose different bandwidth, capacity, and recall trade-offs.
 

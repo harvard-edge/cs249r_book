@@ -1225,7 +1225,7 @@ The majority of operations in a transformer inference pipeline are memory-bound.
 
 The memory-bound nature of inference also explains a common source of confusion: GPU benchmarks reporting peak TFLOP/s often fail to predict real inference performance. Two GPUs with different TFLOP/s but identical memory bandwidth will achieve virtually identical LLM decode throughput at batch size 1, because decode is entirely memory bound. The correct metric for comparing GPUs for LLM inference is not FLOP/s but rather the combination of memory bandwidth and memory capacity. Bandwidth determines the token generation rate, and capacity determines the maximum batch size (and therefore throughput). Only at large batch sizes, where decode approaches the compute-bound regime, do the FLOP/s differences between GPUs translate into throughput differences.
 
-## Serving Regimes: Batch Size and Prefill-Decode {#sec-performance-engineering-serving-regimes-9f2c}
+## Serving Regimes, Batch Size, and Prefill-Decode {#sec-performance-engineering-serving-regimes-9f2c}
 
 When an LLM serving endpoint goes live, serving requests individually at batch size 1 wastes over 90 percent of an accelerator's compute capacity and inflates per-token cost. Yet naively lumping requests into larger batches can cause latency spikes if prompt processing and token generation are treated as identical operations. The serving regime—how a system manages the batch dimension and divides prompt processing from token generation—determines whether decode stays pinned to the memory-bound slope or climbs toward the compute roof. These two structural features are levers through which all subsequent optimization techniques act.
 
@@ -1805,7 +1805,7 @@ The highest-payoff case is operator-specific fusion\index{Operator Fusion!operat
 
 To appreciate the quantitative impact, consider each category applied to a single transformer layer with hidden dimension 4096 and batch size 2048 in FP16. Element-wise fusion of a bias-GELU-dropout chain in this shape eliminates two intermediate tensors of `{python} FusionTrafficCalc.tensor_mb_str` each, saving `{python} FusionTrafficCalc.traffic_mb_str` of HBM traffic per layer. Across `{python} FusionTrafficCalc.num_layers_str` layers, this reclaims about `{python} FusionTrafficCalc.traffic_gb_str` of HBM traffic per forward pass. Reduction fusion of LayerNorm avoids materializing large prenormalization tensors and intermediate statistics. Operator-specific attention fusion (FlashAttention) provides the largest single gain by removing the quadratic score and probability matrices that dominate long-context attention. The cumulative effect of all three fusion categories can remove a large fraction of HBM traffic for a memory-bound transformer forward pass, but the end-to-end speedup must still be verified with profiling because the bottleneck may shift.
 
-### CUDA graphs: Amortizing launch overhead {#sec-performance-engineering-cuda-graphs}
+### CUDA graphs for launch overhead amortization {#sec-performance-engineering-cuda-graphs}
 
 An orthogonal technique for reducing the overhead term in the iron law is CUDA graphs\index{CUDA Graphs!launch overhead elimination}.[^fn-cuda-graphs-constraint] While operator fusion combines multiple operations into fewer kernels, CUDA Graphs amortize repeated CPU submission of a stable kernel sequence.
 
@@ -1821,7 +1821,7 @@ The constraint is structural rather than numerical. A graph executable replays c
 
 Operator fusion and CUDA Graphs attack different sources of exposed time: fusion removes kernels and intermediate traffic, while graph replay reduces repeated host submission for the kernels that remain.\index{CUDA Graphs!kernel replay} When a trace attributes a material fraction of end-to-end time to CPU launch gaps and the workload admits stable capture, replay becomes a candidate intervention; profiling after capture must confirm that the gap moved rather than assuming all noncompute overhead disappeared.
 
-### FlashAttention: Tiled attention as a system primitive {#sec-performance-engineering-flashattention}
+### FlashAttention and tiled attention primitives {#sec-performance-engineering-flashattention}
 
 Standard self-attention computes $\text{Softmax}(\mathbf{Q}\mathbf{K}^T / \sqrt{d_k})\mathbf{V}$, where $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ are matrices of shape $[\text{sequence length}{\times}\text{head dimension}]$. The naive implementation materializes the full $S{\times}S$ attention matrix $\mathbf{A} = \mathbf{Q}\mathbf{K}^T$ in HBM, where $S$ is the sequence length. For $S = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 \approx 134$ MB per attention head, so the quadratic score tensors run to several gigabytes per layer. The simplified HBM-traffic accounting compares HBM-visible bytes for a 64-head Llama-style layer under explicit traffic assumptions.
 
@@ -3021,7 +3021,7 @@ For TPU hardware specifically, XLA performs layout optimizations unavailable on 
 
 The trade-off for XLA's performance is compilation latency and rigidity. Because XLA must analyze the full static graph, initial compilation can take minutes for large models, compared to seconds for `torch.compile`. Any change in input shape triggers a full recompilation. This makes XLA excellent for steady-state production workloads where the graph is static and the model runs for days or weeks, but challenging for research environments involving dynamic shapes or rapid experimental iteration. The choice between `torch.compile` and XLA often follows the hardware and software stack: NVIDIA GPU workflows commonly start from PyTorch, while TPU workflows commonly use JAX or TensorFlow with XLA.
 
-### TensorRT: Inference optimization {#sec-performance-engineering-tensorrt}
+### TensorRT inference optimization {#sec-performance-engineering-tensorrt}
 
 NVIDIA TensorRT is a specialized inference compiler that treats the model not as a flexible program but as a rigid global optimization problem. Because inference requires no backward pass and no gradient storage, TensorRT applies aggressive transformations that would be mathematically invalid or impractically slow for training. It performs a calibration pass where it runs the model on representative data to determine the numerical range of every activation tensor.
 
@@ -3944,7 +3944,7 @@ The resulting trace, viewable in TensorBoard or Chrome's trace viewer, matters o
 
 : **Profiler views and interventions**: PyTorch profiler views are useful when each visual signal points to a concrete next experiment. {#tbl-performance-engineering-profiler-views tbl-colwidths="[24,38,38]"}
 
-### Nsight Systems: Reading the timeline {#sec-performance-engineering-nsight-systems}
+### Timeline analysis with Nsight Systems {#sec-performance-engineering-nsight-systems}
 
 The profiler is therefore a triage tool, not the final performance proof: it identifies whether the next experiment should target fusion, memory planning, CUDA Graphs, or overlap. NVIDIA Nsight Systems\index{Nsight Systems} answers the trace-level question raised by higher-level profiling: whether the GPU timeline is continuous, whether the CPU is feeding it fast enough, and whether communication overlaps compute. The tool captures every GPU kernel launch, CUDA memory operation, NCCL communication, and CPU thread activity onto a unified timeline.
 
@@ -4269,7 +4269,7 @@ When planning capacity, engineers must budget for the reality tax. If a benchmar
 
 Measurement without action is overhead. The optimization playbook translates node-level traces and fleet-wide MFU into a surgical sequence of interventions, each targeting the specific bottleneck that measurement identified.
 
-## The Optimization Playbook: A 70B LLM Case Study {#sec-performance-engineering-playbook}
+## Optimization Playbook for Large Language Models {#sec-performance-engineering-playbook}
 
 Consider a raw, unoptimized 70-billion parameter PyTorch model that must serve 1,000 tokens per second in production by next week. The optimization sequence begins with baseline measurement, followed by roofline classification to identify the dominant bottleneck. Applying optimization techniques indiscriminately is ineffective. The optimization playbook requires a systematic, prioritized attack: first unblocking the memory wall, then fusing operators, and finally applying algorithmic techniques like speculative decoding in a specific, compounding sequence.
 
@@ -4568,7 +4568,7 @@ Test the ability to design an optimization plan:
 
 :::
 
-### Case study: Optimizing a 70B LLM serving pipeline {#sec-performance-engineering-case-study}
+### Optimization of a 70B LLM serving pipeline {#sec-performance-engineering-case-study}
 
 To illustrate how the diagnostic sequence and combining principles work in practice, consider the task of optimizing a 70B parameter LLM for production serving. The target is a real-time chatbot application requiring TTFT under 500 ms, ITL under 50 ms, and throughput of at least 1,000 tokens/second across the cluster. The model is deployed on a node of 8 H100 GPUs connected by NVLink.
 
@@ -4591,7 +4591,7 @@ An Nsight Systems trace breaks down a single decode step at batch size 1 into fi
 
 The roofline analysis confirms that decode is deeply memory-bound, with arithmetic intensity approximately 1 FLOP/byte at batch size 1. The GPU achieves 2.7 TB/s effective bandwidth (80 percent of peak), indicating reasonable kernel-level efficiency but a fundamental algorithmic limitation.
 
-#### Optimization round 1: Precision engineering {#sec-performance-engineering-case-round1}
+#### Optimization round 1 precision engineering {#sec-performance-engineering-case-round1}
 
 The first optimization targets the largest opportunity: reducing the bytes per weight read from HBM. Applying AWQ INT4 weight quantization reduces the per-GPU weight footprint from `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` to about `{python} KVCacheAnalysis.weight_int4_gb_str` on an `{python} KVCacheAnalysis.tensor_parallel_degree_str`-GPU node. The raw weight-read traffic drops by 4$\times$, and the effective bandwidth for weight reads roughly doubles once on-the-fly dequantization to FP16 is included.
 
@@ -4601,7 +4601,7 @@ Postoptimization metrics show that batch-1 ITL reaches 48 ms, meeting the 50 ms 
 
 The Nsight Systems trace\index{Nsight Systems!decode trace breakdown} shows that GEMM time decreased by approximately 45 percent due to reduced weight reads, but attention and element-wise operations remain unchanged. The bottleneck has partially shifted.
 
-#### Optimization round 2: Operator fusion {#sec-performance-engineering-case-round2}
+#### Optimization round 2 operator fusion {#sec-performance-engineering-case-round2}
 
 The second round targets\index{Operator Fusion!case study} the 14 percent of step time consumed by element-wise operations and the 24 percent consumed by attention. Applying `torch.compile` with the `max-autotune` backend fuses element-wise operations (GELU, LayerNorm, residual additions), reducing their contribution from 14 percent to approximately 4 percent of step time. Simultaneously, enabling FlashAttention-2 replaces the standard attention implementation, reducing attention HBM traffic by approximately 16$\times$ for the prefill phase.
 
@@ -4609,7 +4609,7 @@ For the decode phase, FlashAttention's impact is more modest because decode atte
 
 Postoptimization metrics show TTFT at 380 ms, meeting the 500 ms target; ITL at 32 ms for batch size 1, well below the 50 ms target; and throughput at batch size 32 at 1,050 tokens/second, meeting the throughput target.
 
-#### Optimization round 3: Speculative decoding {#sec-performance-engineering-case-round3}
+#### Optimization round 3 speculative decoding {#sec-performance-engineering-case-round3}
 
 With the throughput target met, the team focuses on further reducing ITL for the best user experience. Speculative decoding with a 1.5B draft model (AWQ INT4 quantized to 0.75 GB) is deployed on the same GPUs. The draft model generates 5 candidate tokens in 4 ms (benefiting from the INT4 quantization applied in Round 1). The target model verifies the candidate block in approximately 32 ms, comparable to one optimized autoregressive decode step.
 
