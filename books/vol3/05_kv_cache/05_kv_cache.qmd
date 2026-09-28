@@ -412,6 +412,9 @@ The physical memory footprint of the key-value cache is dictated fundamentally b
    This achieves an eightfold memory reduction while preserving the modeling expressiveness of dense multi-head attention.
 3. **Multi-head Latent Attention (MLA):** While GQA significantly shrinks the KV cache, frontier agent workloads operating over context windows of 128,000 to 1,000,000 tokens continue to exhaust accelerator memory. Multi-head Latent Attention, pioneered in DeepSeek-V2 and DeepSeek-V3 [@deepseek2024v2; @deepseek2024v3], introduces low-rank projection compression directly into the key-value cache pipeline.
 
+Normally, caching attention means saving wide, full-sized key and value vectors for every token in history. In MLA, we compress these into compact vectors. Thanks to linear algebra associativity $A(BC) = (AB)C$, the model can multiply its current query by the decompression matrix once in fast cache memory (SRAM), and then compare that single transformed query directly against the compressed historical states in memory—avoiding ever having to expand or store full keys and values in High-Bandwidth Memory (HBM).
+
+::: {.callout-note title="Under the hood: Multi-head latent attention formalism" collapse="true"}
 Instead of caching uncompressed key and value vectors across all heads, MLA projects the hidden activation $\mathbf{h}_t \in \mathbb{R}^d$ of token $t$ into a compact, low-rank key-value latent vector $\mathbf{c}_t^{KV} \in \mathbb{R}^{d_c}$ via a learned down-projection matrix $W^{DKV} \in \mathbb{R}^{d_c \times d}$:
 
 $$\mathbf{c}_t^{KV} = W^{DKV} \mathbf{h}_t$$
@@ -455,6 +458,7 @@ $$m_{\text{token, MLA}} = (d_c + d_R) \cdot b$$
 In DeepSeek-V2 and DeepSeek-V3 [@deepseek2024v2; @deepseek2024v3], the architecture sets $d_c = 512$ and $d_R = 64$. Under 16-bit storage ($b = 2$ bytes), each token occupies:
 
 $$m_{\text{token, MLA}} = (512 + 64) \times 2\text{ bytes} = 1{,}152\text{ bytes per layer} \quad (576\text{ elements})$$
+:::
 
 Contrast this against alternative attention configurations for equivalent 128-head models:
 
@@ -1191,9 +1195,11 @@ where request $i$ has prompt length $S_{\text{prompt}}^{(i)}$ and matched prefix
 
 ### Provider prompt caching
 
-Most agent builders call a model through a hosted API rather than running the engine, and they meet the same mechanism as a billing feature. The provider caches the KV state of a prompt prefix and bills cached input tokens at a fraction of the normal input rate. Some interfaces reuse any sufficiently long matching prefix automatically. Others ask the caller to mark cache breakpoints, the positions up to which the prefix should be stored, and may charge extra for the tokens written into the cache. Cached entries expire after an idle time-to-live, typically minutes, because the provider runs the same leaf-first eviction as the radix cache, on a shared fleet.
+Most agent builders call a model through a hosted API rather than running the engine, and they meet the same mechanism as a billing feature. The provider caches the KV state of a prompt prefix and bills cached input tokens at a fraction of the normal input rate (often a 50 percent to 90 percent discount). Some interfaces reuse any sufficiently long matching prefix automatically (like OpenAI's prefix caching). Others ask the caller to mark cache breakpoints, the positions up to which the prefix should be stored (like Anthropic's prompt caching), and may charge extra for the tokens written into the cache. Cached entries expire after an idle time-to-live (TTL), typically 5 to 15 minutes, because the provider runs the same leaf-first eviction as the radix cache on a shared fleet.
 
-Three harness consequences follow. The breakpoints belong at the boundaries of the stable zones in the three-zone prompt layout, after the tool definitions and after the long-lived history, so that each zone is cached once and reused. The time-to-live couples caching to tool waits. A tool that runs longer than the time-to-live returns to a cold cache, and the next turn pays full input price for the whole context, which is the provider-side version of the retain-or-evict decision in @sec-vol3-kvcache-swapping. Finally, the hit rate becomes directly visible in the bill, as the ratio of cached to uncached input tokens the API reports, which makes it the cheapest metric of cache health a harness can track.
+**A Concrete Economics Example:** Consider an agent loop with a 10,000-token system prompt (tools and codebase context) that takes 10 sequential turns. If each turn adds 500 tokens of observation and generation, a naive loop sends 10k, 10.5k, 11k... up to 14.5k tokens, paying for ~122,500 total input tokens. With prompt caching properly aligned, the static 10,000-token prefix is prefilled exactly once. Subsequent turns hit the cache, meaning the developer only pays the standard rate for the new 500-token deltas and the heavily discounted rate for the 10,000-token prefix. Over a 10-turn trajectory, this drops API costs by nearly 80 percent and slashes time-to-first-token latency.
+
+Three harness consequences follow. First, the breakpoints belong at the boundaries of the stable zones in the three-zone prompt layout—after the tool definitions and after the long-lived history—so that each zone is cached once and reused. Second, the API time-to-live heavily couples caching economics to tool waits. If an integration test takes 6 minutes and the provider's TTL is 5 minutes, the test execution flushes the cache. The next turn pays full input price for the whole context and suffers the full prefill latency penalty, which is the provider-side version of the retain-or-evict decision in @sec-vol3-kvcache-swapping. Finally, the hit rate becomes directly visible in the bill, as the ratio of cached to uncached input tokens the API reports, which makes it the cheapest and most actionable metric of cache health an agent engineer can track.
 
 Prefix caching removes the prefill of everything the trajectory has already sent. It cannot remove the prefill of what is new, and in an agent the new tokens arrive in large pieces, one tool observation at a time.
 
@@ -1205,7 +1211,11 @@ Chunked prefill resolves this physical collision by slicing monolithic prompts i
 
 ### The prefill-decode interference dilemma
 
-Prefill and decode conflict because they saturate different resources. Decode is bound by memory bandwidth (principle \ref{pri-vol3-memory-bandwidth-decoding}) while prefill is bound by compute. Under the Roofline model, the operational intensity $\mathcal{I}$ of a workload measures the ratio of floating-point operations executed to memory bytes transferred across the accelerator memory bus:
+Prefill and decode conflict because they saturate different resources. Decode is bound by memory bandwidth (principle \ref{pri-vol3-memory-bandwidth-decoding}) while prefill is bound by compute.
+
+To understand why, consider the physical layout of an AI accelerator: the High-Bandwidth Memory (HBM) is a massive warehouse storing the model's weights (e.g., 140 GB for a 70B model), while the on-chip SRAM acts as the fast, compute-adjacent workbench. During the decode phase, the GPU generates exactly one token. To do so, it must haul the entire 140 GB model from the warehouse (HBM) onto the workbench (SRAM), just to perform a tiny bit of math for that single token—like wheeling an entire library into an office just to read one word. Because moving data takes far longer than doing the math, the processing chips sit idle waiting for the forklift. This makes decoding strictly memory-bound. In contrast, during the prefill phase, the GPU wheels in the same 140 GB library but reads 4,000 words simultaneously. The math units are kept fully occupied multiplying the massive incoming prompt against the loaded weights. This makes prefilling strictly compute-bound.
+
+Under the Roofline model, the operational intensity $\mathcal{I}$ of a workload measures the ratio of floating-point operations executed to memory bytes transferred across the accelerator memory bus:
 
 $$\mathcal{I} = \frac{\text{Floating Point Operations (FLOPs)}}{\text{Memory Traffic (Bytes)}}$$
 
@@ -1359,6 +1369,8 @@ Chunked prefill demonstrates that memory-bound and compute-bound workloads can b
 
 ### Disaggregated prefill-decode serving {#sec-vol3-kvcache-disaggregated}
 
+In an agent cluster, prompts are massive (codebases, tools, history), but outputs are brief commands. If one GPU handles both, heavy reading tasks stall fast typing tasks. Disaggregation simply assigns reading tasks to "prefill specialist" GPUs and typing tasks to "decode specialist" GPUs, using direct GPU-to-GPU network cables to hand off the notes.
+
 While chunked prefill bounds the iteration latency of prompt ingestion, it leaves a fundamental microarchitectural conflict unresolved: prefill and decode phases possess diametrically opposed hardware requirements. Prefill is compute-bound, demanding massive matrix-arithmetic throughput ($\mathcal{I}_{\text{prefill}} \gg 100\text{ FLOPs/Byte}$) to saturate dense Tensor Core pipelines over wide token chunks. Conversely, autoregressive decode is memory-bandwidth-bound ($\mathcal{I}_{\text{decode}} \approx 1\text{ FLOP/Byte}$), streaming gigabytes of parameter weights and historical KV blocks across High-Bandwidth Memory (HBM) buses to generate one token at a time.
 
 When an engine co-locates both phases on the same accelerator, prefill matrix multiplications monopolize Streaming Multiprocessor (SM) warp schedulers, register files, and shared memory tiles. Even when partitioned into 512-token slices, a prefill chunk inflates decode iteration latency from $46.7\text{ ms}$ to $158.7\text{ ms}$—a 3.4-fold pacing penalty that degrades Inter-Token Latency (ITL) service-level objectives (SLOs). Furthermore, co-location forces operators to deploy identical GPU configurations across the entire cluster, forfeiting hardware specialization. Prefill benefits from higher tensor-parallelism degrees ($TP = 4\text{--}8$) to scale arithmetic throughput, whereas decode benefits from lower tensor parallelism ($TP = 1\text{--}2$) to eliminate latency-sensitive inter-GPU all-reduce communication barriers.
@@ -1435,6 +1447,7 @@ Two physical dynamics further widen the advantage of disaggregation in productio
 
 Crucially, executing prompt recomputation would freeze all concurrent decode streams on that node for seconds, destroying ITL guarantees. In contrast, GPUDirect RDMA transfers are orchestrated entirely by asynchronous network DMA engines. The KV state streams silently into physical HBM blocks while the decode GPUs continue executing autoregressive steps without preemption stalls.[^fn-rocev2-flow-control]
 
+::: {.callout-note title="Under the hood: Enterprise datacenter networking and layout transposition" collapse="true"}
 #### Disaggregated KV layout transposition and remote block table synthesis {.unnumbered}
 
 While the transfer roofline in @eq-disaggregation-machine-balance models network bandwidth as a scalar throughput pipeline, practical disaggregated architectures encounter a fundamental systems challenge: **tensor parallelism topology asymmetry**.
@@ -1451,7 +1464,7 @@ This parallelism asymmetry creates the **cross-parallelism KV layout transpositi
 
 If handled naively via the host CPU, each prefill GPU would copy its head slice to host DRAM, the CPU would stitch the 8 slices into a contiguous multi-head layout, and copy the unified tensor to the decode GPU. This triple-copy pipeline would saturate PCIe buses and completely negate the speedup of network disaggregation.
 
-Production disaggregated serving systems (such as Splitwise [@patel2024] and Mooncake [@qin2024mooncake]) eliminate host CPU serialization through **all-to-all scatter-gather GPUDirect RDMA over InfiniBand/RoCEv2**.[^fn-rdma-direct-zerocopy] The source prefill GPUs issue asynchronous RDMA Write operations directly from their local HBM across the network fabric. Each prefill GPU $k \in \{0, \dots, TP_P - 1\}$ writes its single KV head slice directly into the destination GPU's memory at a head-interleaved byte offset:
+Production disaggregated serving systems (such as Splitwise [@patel2024] and Mooncake [@qin2024mooncake]) eliminate host CPU serialization through **all-to-all scatter-gather GPUDirect RDMA over InfiniBand/RoCEv2**. The source prefill GPUs issue asynchronous RDMA Write operations directly from their local HBM across the network fabric. Each prefill GPU $k \in \{0, \dots, TP_P - 1\}$ writes its single KV head slice directly into the destination GPU's memory at a head-interleaved byte offset:
 
 $$\text{DstOffset}(l, h_k, p) = \text{BaseAddr}(p) + \left( l \cdot n_{\text{kv}} + h_k \right) \cdot B \cdot d_{\text{head}} \cdot b_{\text{bytes}}$$ {#eq-disagg-scatter-gather}
 
@@ -1463,6 +1476,7 @@ To coordinate this transfer, the serving architecture enforces a **Remote Block 
 2. *Descriptor Exchange:* The coordinator packages the allocated physical base addresses into a Remote Transfer Descriptor and transmits it over a low-latency sideband control-plane channel (e.g., gRPC or UCX) to the prefill orchestrator.
 3. *Direct Memory Placement:* The prefill GPUs use these remote physical addresses as the target scatter list for their RDMA Write operations.
 4. *Zero-Copy Ingestion:* Once the RDMA completion queue entry (CQE) signals transfer completion, the decode node instantly binds the pre-allocated block table into its local PagedAttention scheduler, transitioning the request into the active decode queue with zero memory copies.
+:::
 
 [^fn-rocev2-flow-control]: **RoCEv2 Lossless Interconnect Dynamics**: High-throughput disaggregated KV cache transfer over RDMA over Converged Ethernet (RoCEv2) relies on Priority Flow Control (PFC, IEEE 802.1Qbb) and explicit congestion notification (ECN, RFC 3168) to prevent packet drops and buffer overflows. In sustained agent burst transfers, unmitigated PFC can cause head-of-line blocking and PFC deadlocks across network leaf switches, necessitating end-to-end congestion control algorithms such as DCQCN or TIMELY.
 
@@ -1713,13 +1727,15 @@ def swap_out_trajectory(seq_id: int, block_table: BlockTable,
 
 Asynchronous DMA transfers between accelerator HBM and host DRAM over PCIe Gen5 require host physical pages to be *pinned* (page-locked via POSIX `mlock` or CUDA `cudaHostAlloc`). Pinned pages are guaranteed never to be paged out to secondary swap storage or relocated by the operating system virtual memory subsystem, enabling the GPU's PCIe DMA engines to read and write physical host DRAM addresses directly without CPU intervention.
 
-However, dynamically allocating pinned host memory during runtime serving introduces a severe operating system scalability hazard: **kernel lock contention on `mmap_lock`**.
+However, dynamically allocating pinned host memory during runtime serving introduces a severe operating system scalability hazard. Because OS virtual memory allocations require heavy kernel locks, creating and destroying memory on-the-fly during tool waits causes massive latency spikes across the entire node. To avoid this, high-performance agent runtimes eliminate dynamic allocation entirely by implementing a static memory arena pre-allocated at daemon startup.
 
+::: {.callout-note title="Under the hood: Kernel virtual memory serialization" collapse="true"}
 In Linux, calling `cudaHostAlloc` or `cudaFreeHost` invokes kernel memory management syscalls (`mmap`, `mprotect`, and `pin_user_pages()`). These primitives must acquire the process's virtual memory descriptor lock (`mm->mmap_lock`, historically known as `mmap_sem`) in exclusive write mode. In a high-throughput multi-tenant server hosting dozens of concurrent agent workers:
 
 1. Every tool-wait transition that invokes dynamic `cudaHostAlloc` acquires `mmap_lock` for writing, invalidating the kernel's virtual memory area (VMA) tree.
 2. Concurrent CPU worker threads attempting to handle minor page faults, expand thread stacks, or manage CUDA context mappings are blocked behind the write lock.
 3. This kernel serialization produces massive tail latency spikes—frequently causing $150\text{--}300\text{ ms}$ of unprompted control-plane jitter across all active inference streams on the host node, degrading inter-token latency and triggering watchdog alarms.
+:::
 
 High-performance agent runtimes eliminate this kernel serialization by implementing a **Static Slab-Allocated Host Arena (`HostBlockArena`)**:
 

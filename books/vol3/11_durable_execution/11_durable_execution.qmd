@@ -153,13 +153,51 @@ Write-ahead ordering cannot magically resolve the third state, the **in-doubt ac
 2. **Reconciliation probes**: When interacting with external APIs lacking native idempotency, the recovery manager runs a side-effect read probe (e.g., querying whether the database replica exists) to determine whether the mutation occurred.
 3. **Supervisory escalation**: If the environment remains indeterminate, the supervisor halts execution and escalates to human review rather than gambling on a blind retry.
 
+Here is a concrete example of how an agent harness resolves an in-doubt action using a read-only reconciliation probe:
+
+```python
+async def recover_in_doubt_action(intent_event, log):
+    """
+    Recover an action that was authorized and logged but lacks a result.
+    Example: agent crashed while calling create_server(name="db-prod")
+    """
+    tool_name = intent_event.tool_name
+    args = intent_event.args
+
+    # Check if the external resource was actually created before the crash
+    if tool_name == "create_server":
+        server_name = args.get("name")
+
+        # 1. Execute a read-only reconciliation probe
+        existing_server = await cloud_api.get_server(name=server_name)
+
+        if existing_server:
+            # 2a. The action succeeded before the crash. Log the result and resume cleanly.
+            result = ToolResult(
+                tool_call_id=intent_event.tool_call_id,
+                status="success",
+                output=f"Server {server_name} already exists (recovered)."
+            )
+        else:
+            # 2b. The action never reached the server (or failed). Safe to retry.
+            result = await cloud_api.create_server(name=server_name)
+
+        # 3. Append the settled result to the log so the trajectory can continue
+        await log.append(result)
+```
+
 ::: {.column-margin .margin-pointer}
 ↩ Idempotency keys, lease renewal, and external settlement reconciliation are established in @sec-vol3-tool-calling.
 :::
 
-### ARIES recovery versus agent trajectory persistence
+### Sovereign APIs vs. Rollbackable State
 
-The discipline of write-ahead logging originates in relational database recovery, formalized in the classical ARIES[^fn-aries-steal-noforce] (Algorithm for Recovery and Isolation Exploiting Semantics) protocol [@mohan1992aries]. In database systems, ARIES guarantees atomicity and durability under a steal/no-force buffer management policy through three sequential passes over the log following a crash:
+When your local Python script updates a local SQLite database, if power cuts out mid-transaction, SQLite simply discards the uncommitted journal file—the database returns to its clean previous state. But if your agent calls `requests.post('https://api.stripe.com/v1/charges')` or `git push origin main`, and your laptop battery dies while waiting for the response, you cannot "rollback" the internet. The payment was processed, or the commit was merged. The action crossed an isolation boundary into an external sovereign system that knows nothing about your agent's internal state.
+
+Internal state (local files, in-memory records) is rollbackable. External sovereign actuation (Stripe, GitHub, AWS, Slack) is irrevocable. Because sovereign APIs cannot be "prepared" or "undone," the write-ahead logging acts as the irreversible commitment point ($e_{\text{flush}} \prec a_{\text{ext}}$). That is why intent must be written before effect.
+
+::: {.callout-note title="Under the hood: ARIES recovery and two-phase commit" collapse="true"}
+The discipline of write-ahead logging originates in relational database recovery, formalized in the classical ARIES (Algorithm for Recovery and Isolation Exploiting Semantics) protocol [@mohan1992aries]. ARIES operates under a steal/no-force buffer policy, where dirty uncommitted pages can be flushed to disk while committed pages need not be forced synchronously; the write-ahead invariant ($\text{PageLSN} \le \text{FlushedLSN}$) guarantees crash consistency. In database systems, ARIES achieves atomicity and durability through three sequential passes over the log following a crash:
 
 1. **Analysis pass**: Scans forward from the most recent checkpoint record to the crash point. It reconstructs the in-memory transaction table and the Dirty Page Table (DPT), identifying active loser transactions and determining the earliest unwritten modification across all pages ($\text{RedoLSN} = \min_{\text{page} \in \text{DPT}} \text{page.RecLSN}$).
 2. **Redo pass ("repeating history")**: Scans forward from $\text{RedoLSN}$ to the crash point, reapplying logged physical changes for all transactions (both committed and uncommitted) if the disk page's current sequence number is older than the log record ($\text{PageLSN} < \text{Record.LSN}$). This brings the database to the exact physical state it occupied at the crash instant.
@@ -177,7 +215,7 @@ These external tool mutations are **physically irrevocable**. No database before
 - **Intent barriers instead of page rollback**: Because physical undo is impossible for external mutations, the runtime prevents phantom effects by enforcing the strict write-ahead intent barrier $e_{\text{flush}} \prec a_{\text{ext}}$ before dispatch.
 - **Forward compensation instead of backward undo**: When an in-doubt action cannot be safely rolled back, the recovery engine either settles the mutation using an idempotency key, dispatches a compensatory forward action (such as deleting an orphaned cloud volume or issuing an inverse refund transaction via the Saga pattern), or suspends the trajectory for supervisory escalation.
 
-### Asymmetric distributed commit: Why sovereign APIs break two-phase commit
+#### Asymmetric distributed commit: Why sovereign APIs break two-phase commit
 
 The physical irrevocability of external actions is not merely an engineering inconvenience; it is a fundamental distributed systems dilemma. In classical distributed database systems, multi-node transactional consistency is achieved through the Two-Phase Commit (2PC) protocol [@gray1978]. Under 2PC, a centralized coordinator orchestrates state changes across participating resource managers:
 
@@ -195,9 +233,13 @@ The subsequent network dispatch $a_{\text{ext}}$ is not a proposal or a vote; it
 This structural asymmetry defines the **2PC Uncertainty Window** ($W_{\text{doubt}}$):
 $$W_{\text{doubt}} = \left[ t(e_{\text{flush}}),\, t(e_{\text{obs}}) \right]$$
 During this window, the coordinator has committed locally ($e_{\text{flush}}$), but network latency, packet loss, or host crashes can sever communication before the observation ($e_{\text{obs}}$) is received and persisted. If the agent host crashes during $W_{\text{doubt}}$, recovery discovers an **in-doubt action** (@tbl-vol3-durable-recovery-states). Because the external action cannot be aborted via 2PC rollback, recovery cannot simply re-dispatch the action (which risks catastrophic duplicate execution) nor assume failure (which risks abandoning unmanaged external resources). Instead, the uncertainty window must be reconciled through deterministic idempotency keys or out-of-band inquiry probes before execution can advance.
+:::
 
 ### Durability overhead and group commit amortization
 
+Flushing the disk on every single agent event is slow—taking up to $10\text{ ms}$ on cloud block storage like AWS EBS. To keep trajectories fast, modern agent runtimes use *group commit*: instead of each agent waiting for its own disk flush, multiple concurrent agent threads batch their events together into a single synchronous disk write, dividing the latency cost across all of them.
+
+::: {.callout-note title="Under the hood: POSIX storage and group commit pipelines" collapse="true"}
 Enforcing a synchronous `fdatasync()` barrier on the critical path of every tool execution introduces non-volatile media latency. While a single NVMe flush takes between $80$ and $150\ \mu\text{s}$ on local flash, network-attached block volumes (such as AWS EBS or Google Persistent Disk) incur $2$ to $15\ \text{ms}$ per barrier. In multi-agent environments hosting tens or hundreds of concurrent agent trajectories on a shared node, serializing flushes causes severe queueing contention.
 
 The standard systems mechanism resolving this bottleneck is **group commit**\index{Group commit!trajectory logging} [@dewitt1984], detailed in @tbl-vol3-group-commit-pipeline. Instead of independently executing `fdatasync()`, concurrent agent worker threads enqueue authorized event records into a lock-free multi-producer ring buffer and park on completion futexes.
@@ -221,6 +263,7 @@ The effective latency experienced by an individual agent thread comprises the ex
 $$t_{\text{eff}} = \frac{W}{2} + \frac{t_{\text{writev}}(\bar{k}) + t_{\text{sync}}}{\bar{k}}$$ {#eq-vol3-group-commit-latency}
 
 As trajectory concurrency scales ($\lambda \to \infty$), window $W$ can be shrunk toward zero, dividing the physical sync penalty $t_{\text{sync}}$ across $K_{\max}$ trajectories and reducing per-turn barrier overhead to negligible levels without violating the causal write-ahead invariant of any individual agent.
+:::
 
 ::: {#chk-11-wal-invariants .callout-checkpoint title="Write-ahead ordering"}
 Before moving on, check that you can answer the following:
@@ -453,57 +496,51 @@ Long-running tools create the opposite case. A job started through an asynchrono
 
 Moving a trajectory between workers—due to node draining, thermal throttling, or spot preemption—is a scheduled resume. The departing worker allows the current turn to complete, takes a checkpoint, and releases its lease; the arriving worker restores the checkpoint and continues.
 
+The critical distributed systems failure hazard during migration is the **split-brain execution dilemma**\index{Split-brain!trajectory migration} [@kleppmann2017designing]. To understand this, imagine you are running an agent script on your laptop. You close the laptop lid and board a flight. The central scheduler notices your laptop stopped sending heartbeats, assumes your machine died, and assigns the agent task to a new server in the cloud. Four hours later, you land, open your laptop lid, and your OS immediately wakes up the sleeping Python process. The script has no idea four hours passed—to its internal instruction pointer, it simply resumes mid-loop and sends a tool request over the airport Wi-Fi.
+
+Without fencing, your "zombie" laptop and the cloud server will both execute actions for the same agent, corrupting the task. A *fencing token* is simply an incrementing ticket number that tells external gateways: *ignore requests from anyone holding an older ticket.*
+
+::: {.callout-note title="Under the hood: Distributed leases and the fencing token fallacy" collapse="true"}
 The sequential phases of live trajectory handoff are illustrated in @fig-vol3-trajectory-migration.
 
 ::: {#fig-vol3-trajectory-migration fig-env="figure" fig-pos="htb" fig-cap="**Live Trajectory Migration Architecture**: End-to-end sequence across departing node, distributed coordinator, and arriving node. Clean turn-boundary quiescence ensures no in-flight tool actions during state handoff. Fencing tokens prevent split-brain dual execution." fig-alt="Distributed architecture diagram showing migration sequence between two worker hosts and a centralized coordinator."}
 ![](images/svg/fig-vol3-trajectory-migration.svg)
 :::
 
-The critical distributed systems failure hazard during migration is the **split-brain execution dilemma**\index{Split-brain!trajectory migration} [@kleppmann2017designing]. In distributed execution topologies, trajectory ownership is governed by distributed leases with periodic heartbeats ($\Delta t_{\text{heartbeat}} \approx 2\ \text{s}$) and lease timeouts ($\text{TTL}_{\text{lease}} \approx 10\ \text{s}$). If active worker $A$ experiences a transient network partition, a stop-the-world garbage collection pause, or kernel CPU throttling under cgroups quota exhaustion, its heartbeat packets stall.
+In distributed execution topologies, trajectory ownership is governed by distributed leases with periodic heartbeats ($\Delta t_{\text{heartbeat}} \approx 2\ \text{s}$) and lease timeouts ($\text{TTL}_{\text{lease}} \approx 10\ \text{s}$). If active worker $A$ experiences a transient network partition, a stop-the-world garbage collection pause, or kernel CPU throttling under cgroups quota exhaustion, its heartbeat packets stall.
 
-When the lease coordinator observes that $\text{TTL}_{\text{lease}}$ has elapsed without a renewal, it declares worker $A$ dead, revokes the lease, and re-assigns trajectory $\tau$ to arriving worker $B$. When partitioned worker $A$ eventually resumes execution, it suffers from the classic distributed systems "zombie worker" delusion: because a process cannot reliably measure the passage of physical time during a kernel freeze, worker $A$ remains completely unaware that its lease has expired and continues executing turns. Without defensive barriers, worker $A$ and worker $B$ concurrently dispatch tool actions, flush conflicting intents to the write-ahead log, and mutate external filesystems—producing catastrophic data corruption and non-deterministic split-brain behavior.
+When the lease coordinator observes that $\text{TTL}_{\text{lease}}$ has elapsed without a renewal, it declares worker $A$ dead, revokes the lease, and re-assigns trajectory $\tau$ to arriving worker $B$. When partitioned worker $A$ eventually resumes execution, it suffers from the classic distributed systems "zombie worker" delusion.
 
-To make split-brain mutations mathematically impossible, the runtime enforces a **tripartite fencing token architecture** using monotonically increasing 64-bit epoch numbers $\gamma$\index{Fencing token!distributed lease}:[^fn-distributed-fencing-tokens]
+To make split-brain mutations mathematically impossible, the runtime enforces a **tripartite fencing token architecture** using monotonically increasing 64-bit epoch numbers $\gamma$\index{Fencing token!distributed lease}. Rather than relying on synchronized wall-clock time across cluster nodes, the storage gateway validates the token's strictly increasing logical counter on every mutation, rejecting dispatches that carry an outdated epoch number:
 
 1. **Epoch Generation at the Coordinator:** When the distributed consensus lease service (e.g., etcd, ZooKeeper, or Spanner) reallocates trajectory $\tau$ to worker $B$, it atomically increments the trajectory's epoch counter:
    $$\gamma_B = \gamma_A + 1$$
    Worker $B$ receives $\gamma_B$ embedded in its migration lease grant.
-2. **Tool Gateway Proxy Monotonic Fence:** Third-party sovereign APIs (such as payment processors, version control services, or cloud infrastructure providers) possess independent authorization realms and cannot inspect internal agent lease tokens $\gamma$. If a partitioned zombie worker were permitted to dispatch raw network requests directly to an external endpoint, the sovereign service would execute the side effect unconditionally. To close this vulnerability, all outbound tool dispatches must terminate at an internal **Tool Gateway Proxy** acting as the non-bypassable Policy Enforcement Point (PEP). Every side-effecting invocation carries the worker's assigned fencing token:
+2. **Tool Gateway Proxy Monotonic Fence:** Third-party sovereign APIs possess independent authorization realms and cannot inspect internal agent lease tokens $\gamma$. All outbound tool dispatches must terminate at an internal **Tool Gateway Proxy** acting as the Policy Enforcement Point (PEP). Every side-effecting invocation carries the worker's assigned fencing token:
    $$a_{\text{ext}} = \langle \tau,\, \text{tool},\, \text{args},\, \gamma \rangle$$
-   The Tool Gateway Proxy maintains an authoritative high-water epoch register $\gamma_{\text{high-water}}(\tau)$ synchronized with the lease coordinator. Any dispatch arriving with $\gamma < \gamma_{\text{high-water}}(\tau)$ is terminated at the proxy boundary with an unrecoverable authorization fault (`STALE_EPOCH_FENCED`), preventing stale network requests, POSIX syscalls, or cloud mutations from reaching physical endpoints.
-3. **Write-Ahead Log Optimistic Concurrency Fence:** The durable trajectory storage engine validates $\gamma$ on every append operation. Event flushes enforce conditional write invariants:
-   $$\text{Append}(e_{\text{flush}},\, \gamma) \iff \gamma \ge \gamma_{\text{WAL}}(\tau)$$
-   When zombie worker $A$ attempts to commit an intent event with stale token $\gamma_A$, the database rejects the write with a serialization conflict, stopping phantom log corruption before it reaches disk.
-4. **Model Serving Inference Fence:** Prefix-cached sessions and KV blocks in the accelerator cluster (@sec-vol3-kv-cache) are bound to epoch $\gamma$. When worker $B$ binds to session prefix $\tau$, the serving cluster revokes worker $A$'s access token, preventing the zombie worker from consuming accelerator compute cycles.
+   The Tool Gateway Proxy maintains an authoritative high-water epoch register $\gamma_{\text{high-water}}(\tau)$. Any dispatch arriving with $\gamma < \gamma_{\text{high-water}}(\tau)$ is terminated at the proxy boundary with an unrecoverable authorization fault (`STALE_EPOCH_FENCED`).
+3. **Write-Ahead Log Optimistic Concurrency Fence:** The durable trajectory storage engine validates $\gamma$ on every append operation. When zombie worker $A$ attempts to commit an intent event with stale token $\gamma_A$, the database rejects the write with a serialization conflict.
+4. **Model Serving Inference Fence:** Prefix-cached sessions and KV blocks in the accelerator cluster are bound to epoch $\gamma$. When worker $B$ binds to session prefix $\tau$, the serving cluster revokes worker $A$'s access token.
 
-If stale worker $A$ wakes up and attempts to issue an external tool call or flush an intent record, both the tool gateway and the storage engine reject the operation because $\gamma_A < \gamma_B$. Worker $A$ receives a terminal fencing error and immediately self-terminates (`SIGTERM`), containing the blast radius before any mutation can leak.
-
-### The fencing token fallacy and deterministic idempotency key synthesis
+#### The fencing token fallacy and deterministic idempotency key synthesis
 
 While monotonic epoch fencing successfully rejects late-arriving requests from partitioned workers ($\gamma < \gamma_{\text{high-water}}$), relying on epoch numbers alone introduces a subtle and dangerous failure mode: the **Fencing Token Fallacy**.
 
-Consider a partitioned worker $A$ operating under epoch $\gamma_A$. Worker $A$ initiates an external tool call at turn $t$ to a sovereign cloud provisioning or payment API. The Tool Gateway Proxy validates that $\gamma_A \ge \gamma_{\text{high-water}}$ and dispatches the HTTP request across the physical network. Immediately following socket dispatch, worker $A$ suffers a stop-the-world kernel freeze or network partition. Its lease expires before it can receive the server's acknowledgment or append the `ToolResult` event to the write-ahead log.
+Consider a partitioned worker $A$ operating under epoch $\gamma_A$. Worker $A$ initiates an external tool call at turn $t$ to a sovereign cloud API. The Tool Gateway Proxy validates that $\gamma_A \ge \gamma_{\text{high-water}}$ and dispatches the HTTP request. Immediately following socket dispatch, worker $A$ suffers a stop-the-world kernel freeze. Its lease expires before it can append the `ToolResult` event to the write-ahead log.
 
-The distributed lease coordinator detects the heartbeat timeout, revokes worker $A$'s lease, and promotes arriving worker $B$ with incremented epoch:
-$$\gamma_B = \gamma_A + 1$$
-Worker $B$ restores the latest checkpoint, replays the log suffix, and discovers an in-doubt `ToolIntent` at turn $t$ lacking a corresponding `ToolResult`. Following standard crash recovery discipline, worker $B$ re-dispatches the action, presenting its valid, higher epoch token $\gamma_B$.
+The distributed lease coordinator promotes arriving worker $B$ with incremented epoch $\gamma_B = \gamma_A + 1$. Worker $B$ restores the latest checkpoint, replays the log suffix, and discovers an in-doubt `ToolIntent` at turn $t$ lacking a corresponding `ToolResult`. Worker $B$ re-dispatches the action, presenting its valid, higher epoch token $\gamma_B$.
 
-Because $\gamma_B > \gamma_A$, the Tool Gateway Proxy's epoch check passes unconditionally:
-$$\gamma_B \ge \gamma_{\text{high-water}}(\tau)$$
-If the gateway simply forwards the request to the external API, the sovereign endpoint—which possesses zero visibility into internal agent lease epochs—executes the mutation a **second time**. The fencing token successfully prevented the zombie worker from issuing subsequent requests, but it completely failed to prevent duplicate execution across epoch transitions.
+Because $\gamma_B > \gamma_A$, the Tool Gateway Proxy's epoch check passes unconditionally ($\gamma_B \ge \gamma_{\text{high-water}}(\tau)$). If the gateway simply forwards the request to the external API, the endpoint executes the mutation a **second time**. The fencing token prevented the zombie worker, but it failed to prevent duplicate execution across epoch transitions.
 
-To dismantle the Fencing Token Fallacy, the Tool Gateway Proxy must function not merely as a passive epoch filter, but as an **active bidirectional idempotency bridge**:
+To dismantle the Fencing Token Fallacy, the Tool Gateway Proxy must function as an **active bidirectional idempotency bridge**:
 
 1. **Deterministic Cryptographic Key Derivation:** The proxy synthesizes a collision-resistant idempotency key directly from immutable trajectory coordinates:
    $$K_{\text{idemp}} = \text{HMAC-SHA256}\left(K_{\text{secret}},\, \tau \mathbin{\Vert} t \mathbin{\Vert} \text{tool\_call\_id}\right)$$ {#eq-vol3-idempotency-key}
-   Because $\tau$, turn index $t$, and `tool_call_id` are anchored in the immutable write-ahead log, worker $A$ and worker $B$ compute bit-exact identical idempotency keys for turn $t$ regardless of their differing epoch tokens $\gamma_A$ and $\gamma_B$. The gateway injects $K_{\text{idemp}}$ into standardized external transport headers (such as `Idempotency-Key` for HTTP REST APIs, `ClientToken` for AWS SDKs, or database transaction tags).
+   Worker $A$ and worker $B$ compute bit-exact identical idempotency keys for turn $t$. The gateway injects $K_{\text{idemp}}$ into standardized external transport headers (such as `Idempotency-Key` for HTTP REST APIs).
 2. **Authoritative In-Flight Reservation Table:** The Tool Gateway Proxy maintains a persistent, distributed reservation ledger tracking the lifecycle of every active idempotency key across three explicit states:
    $$\mathcal{T}_{\text{gateway}}[K_{\text{idemp}}] \in \left\{ \text{PENDING}(\gamma_A, t_{\text{dispatch}}),\, \text{COMMITTED}(\text{cached\_response}),\, \text{FAILED}(\text{error\_payload}) \right\}$$
-   When worker $B$ presents turn $t$ with epoch $\gamma_B$, the gateway checks $\mathcal{T}_{\text{gateway}}[K_{\text{idemp}}]$ before touching the external network:
-
-   - **Case 1 (`PENDING`):** Worker $A$'s prior network call is currently in flight. Rather than issuing a concurrent duplicate request, the gateway parks worker $B$'s dispatch on an in-flight promise. If the pending call completes successfully, the gateway transitions the entry to `COMMITTED`, caches the response, and fulfills worker $B$'s promise with the cached payload.
-   - **Case 2 (`COMMITTED`):** Worker $A$'s call completed, but worker $A$ crashed before writing `ToolResult`. The gateway immediately returns `cached_response` to worker $B$ without dispatching any network packets.
-   - **Case 3 (`ABANDONED` / Timeout):** If the in-flight lease expires without response, the gateway issues a single-flight reconciliation probe or dispatches with the identical $K_{\text{idemp}}$, guaranteeing that the external sovereign endpoint deduplicates the call at its own database boundary.
+   When worker $B$ presents turn $t$ with epoch $\gamma_B$, the gateway checks $\mathcal{T}_{\text{gateway}}[K_{\text{idemp}}]$ before touching the external network, returning cached responses for already committed calls or deduplicating pending ones.
+:::
 
 ### Resume under drift
 
@@ -854,13 +891,9 @@ Recovery in this chapter never calls the model. The trajectory record is recompu
 The log says what happened. When what happened was wrong, and some of it cannot be undone, how does the trajectory recover? Failure recovery takes up that question. It uses this chapter's log to know which effects committed, compensates the ones that can be answered by another action, repairs forward through the model where the effect can stand, stops at the one action that cannot be reversed, and detects when a trajectory has stopped making progress at all.
 :::
 
-[^fn-aries-steal-noforce]: **ARIES Buffer Policies**: Classical ARIES operates under a steal and no-force buffer management policy where dirty uncommitted pages can be flushed to disk while committed pages need not be forced synchronously. The write-ahead logging invariant guarantees that a dirty page cannot be written to non-volatile storage before its corresponding log record is flushed ($PageLSN \le FlushedLSN$). This decoupling maximizes transaction throughput while preserving crash consistency.
-
 [^fn-fdatasync-inode-overhead]: **POSIX Synchronization Semantics**: The standard `fsync()` system call flushes both dirty file data blocks and modified inode metadata, including file access timestamps and permission attributes. In contrast, `fdatasync()` flushes only modified data blocks and essential metadata required for data retrieval, such as file size changes. By omitting non-essential timestamp writes to disk, `fdatasync()` avoids redundant storage controller flushes on high-throughput WAL critical paths.
 
 [^fn-cow-snapshot-overhead]: **Copy-on-Write Page Duplication**: Filesystem-level copy-on-write snapshotting leverages kernel pointer updates to freeze workspace state without copying physical blocks immediately. However, extensive file modifications following a snapshot induce metadata fragmentation and subsequent copy penalties when dirty pages are written. Maintaining an excessive number of active historical checkpoints can degrade subsequent sandbox filesystem I/O by up to 25 percent.
-
-[^fn-distributed-fencing-tokens]: **Fencing Token Guarantees**: Monotonically increasing fencing tokens prevent the distributed split-brain dilemma where a paused or partitioned worker erroneously believes it still retains an active lease. Rather than relying on synchronized physical wall-clock time across cluster nodes, the storage gateway validates the token's strictly increasing logical counter on every mutation. Dispatches carrying an outdated epoch number are rejected immediately at the resource proxy.
 
 [^fn-floating-point-associativity]: **Kernel Non-Determinism**: IEEE 754 floating-point addition is non-associative because rounding occurs after each intermediate operation. In high-performance GPU GEMM kernels and parallel attention reductions, the summation order depends on dynamic thread-block scheduling across streaming multiprocessors. Even at temperature zero, minute roundoff variations in logit calculations can alter the top token choice at argmax boundaries.
 
