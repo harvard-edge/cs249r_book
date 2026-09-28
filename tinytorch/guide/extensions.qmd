@@ -19,24 +19,11 @@ In modern deep learning systems, the core runtime is only the beginning. When ne
 
 TinyTorch adopts the extensibility model. The 20 core modules constitute an immutable foundation. Everything else, from vectorized C++ CPU kernels to Apple MPS dispatch, OpenAI Triton shaders, parameter-efficient fine-tuning, and graph fusion compilers, lives in the `tinytorch.extensions` ecosystem.
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     TinyTorch Extension Ecosystem                       │
-│                                                                         │
-│   • Parameter-Efficient Fine-Tuning (LoRALinear)                        │
-│   • Activation Checkpointing (checkpoint)                              │
-│   • Mixed-Precision Training (LossScaler)                               │
-│   • Graph Compilation & Operator Fusion (compile_graph)                 │
-│   • Vectorized CPU Kernels (simd_matmul, simd_fused_bias_gelu)          │
-│   • GPU Accelerator Dispatch (mps_matmul, triton_fused_gelu)            │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                 TinyTorch Core Engine (Modules 01–20)                   │
-│             Tensor  •  Autograd  •  Layer  •  Optimizer                 │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+::: {#fig-extensions-architecture fig-env="figure" fig-pos="htb" fig-cap="**The TinyTorch extension architecture.** The twenty core modules form a minimal, stable engine. Systems optimizations plug cleanly into the core contracts through four native extension points." fig-alt="Architecture diagram showing six extensions (LoRA, Checkpointing, Loss Scaler, Graph Fusion, SIMD Matmul, GPU Dispatch) connecting through a central boundary into the core engine (Tensor, Autograd, Layer, Optimizer)."}
+
+![](assets/images/diagrams/tinytorch_extensions_architecture.svg)
+
+:::
 
 ---
 
@@ -135,40 +122,17 @@ Every extension in `tinytorch.extensions` is a complete, self-contained systems 
 
 ---
 
-## Extension Walkthroughs & Scorecards
+## Extension Walkthroughs & Systems Impact
+
+:::{.callout-tip title="Full Implementations and Mathematical Proofs: Chapter 21"}
+For the complete reference implementations, mathematical derivations, and step-by-step code traces of each extension, see **Chapter 21: Extensions** in the companion textbook [*TinyTorch: From Tensors to Transformers*](https://mlsysbook.ai/tinytorch/assets/downloads/TinyTorch-Book.pdf). For runnable hardware kernels (C++ SIMD, Apple Metal MPS, OpenAI Triton), see [Milestone 07: Custom GPU Kernels](milestones/07_kernels.qmd).
+:::
 
 ### 1. Parameter-Efficient Fine-Tuning (LoRA)
 
 **The Bottleneck:** Updating all weights in a dense layer during fine-tuning requires tracking Adam momentum and variance (8 bytes/param) plus gradients (4 bytes/param). For a 4096 × 16384 projection layer (67.1M parameters), storing Adam states alone consumes 536.9 MB.
 
-**Implementation:**
-```python
-import numpy as np
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Layer
-
-class LoRALinear(Layer):
-    def __init__(self, in_features: int, out_features: int, rank: int = 4):
-        super().__init__()
-        # 1. The frozen pre-trained weights (no gradients, no optimizer states)
-        self.weight = Tensor(
-            np.random.randn(in_features, out_features) / np.sqrt(in_features),
-            requires_grad=False
-        )
-        self.bias = Tensor(np.zeros(out_features), requires_grad=False)
-
-        # 2. Low-rank adapter matrices (trained!)
-        self.A = Tensor(
-            np.random.randn(in_features, rank) / np.sqrt(in_features),
-            requires_grad=True
-        )
-        self.B = Tensor(np.zeros((rank, out_features)), requires_grad=True)
-
-    def forward(self, x: Tensor) -> Tensor:
-        base = x.matmul(self.weight) + self.bias
-        adapter = x.matmul(self.A).matmul(self.B)
-        return base + adapter
-```
+**Architectural Strategy:** Freeze pre-trained weights ($W_0$) and inject low-rank trainable adapter matrices ($A \in \mathbb{R}^{d \times r}, B \in \mathbb{R}^{r \times k}$ with $r \ll \min(d, k)$). Forward computation evaluates $y = x W_0 + \frac{\alpha}{r} x A B$. Only $A$ and $B$ receive gradients, reducing trainable parameters and optimizer states by over 99%.
 
 **Scorecard (4096 × 16384 Projection Layer):**
 
@@ -185,33 +149,7 @@ class LoRALinear(Layer):
 
 **The Bottleneck:** Saving intermediate activations across deep networks causes memory to scale linearly with depth $O(L \cdot T \cdot D)$, triggering out-of-memory crashes on long sequences.
 
-**Implementation:**
-```python
-from tinytorch.core.tensor import Tensor, Function
-from tinytorch.core.autograd import no_grad
-
-def checkpoint(function, *args):
-    class CheckpointFunction(Function):
-        def forward(self, *numpy_arrays):
-            with no_grad():
-                out_tensor = function(*self.inputs)
-            return out_tensor.data if isinstance(out_tensor, Tensor) else out_tensor
-
-        def backward(self, grad_output):
-            detached_inputs = [
-                Tensor(t.data, requires_grad=t.requires_grad) if isinstance(t, Tensor) else t
-                for t in self.inputs
-            ]
-            recomputed_out = function(*detached_inputs)
-            grad_tensor = Tensor(grad_output) if not isinstance(grad_output, Tensor) else grad_output
-            recomputed_out.backward(grad_tensor)
-            return tuple(
-                x.grad.data if isinstance(x, Tensor) and x.grad is not None else None
-                for x in detached_inputs
-            )
-
-    return CheckpointFunction.apply(*args)
-```
+**Architectural Strategy:** Intercept the autograd tape via a custom `Function`. During the forward pass, execute activations inside a `no_grad()` context and discard intermediate layer states. During the backward pass, recompute forward activations on the fly from detached boundary tensors before calculating gradients, cutting peak activation memory by over 80%.
 
 **Scorecard (32-Layer Transformer, $T = 2048, D = 4096$):**
 
@@ -227,26 +165,7 @@ def checkpoint(function, *args):
 
 **The Bottleneck:** In FP16 training, gradient values below $2^{-24} \approx 5.96 \times 10^{-8}$ silently underflow to exact zero, extinguishing parameter updates.
 
-**Implementation:**
-```python
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.optimizers import Optimizer
-
-class LossScaler:
-    def __init__(self, scale: float = 65536.0):
-        self.scale = scale
-
-    def backward(self, loss: Tensor):
-        # Scale loss to shift gradients above the underflow threshold
-        scaled_loss = loss * self.scale
-        scaled_loss.backward()
-
-    def unscale_(self, optimizer: Optimizer):
-        # Unscale parameter gradients before optimizer step
-        for p in optimizer.params:
-            if p.grad is not None:
-                p.grad = p.grad / self.scale
-```
+**Architectural Strategy:** Multiply scalar loss by $S = 65,536$ ($2^{16}$) before initiating backpropagation. This shifts small gradient magnitudes into the normal FP16 dynamic range. Before the optimizer step, unscale parameter gradients back by dividing by $S$.
 
 **Scorecard (IEEE 754 float16 Underflow Analysis):**
 
@@ -262,26 +181,7 @@ class LossScaler:
 
 **The Bottleneck:** Eager define-by-run execution materializes intermediate tensors into DRAM after every operation. An elementwise chain $(x + \text{bias}) \cdot \text{scale}$ incurs two full round-trips to DRAM, saturating memory bandwidth.
 
-**Implementation:**
-```python
-class TracedNode:
-    def __init__(self, name):
-        self.name = name
-    def __add__(self, other):
-        other_name = other.name if isinstance(other, TracedNode) else str(other)
-        return TracedNode(f"({self.name} + {other_name})")
-    def __mul__(self, other):
-        other_name = other.name if isinstance(other, TracedNode) else str(other)
-        return TracedNode(f"({self.name} * {other_name})")
-
-def compile_graph(func, *input_names):
-    traced_inputs = [TracedNode(name) for name in input_names]
-    output = func(*traced_inputs)
-    code = f"def fused_kernel({', '.join(input_names)}):\n"
-    code += f"    # Fused by TinyTorch Compiler\n"
-    code += f"    return {output.name}\n"
-    return code
-```
+**Architectural Strategy:** Trace symbolic expressions into a lightweight computational Abstract Syntax Tree (AST). Emit a single fused loop kernel that loads input operands once, performs intermediate operations in CPU registers or GPU SRAM, and writes only the final output tensor back to DRAM.
 
 **Scorecard (Elementwise Chain on $10^7$ float32 Elements):**
 
