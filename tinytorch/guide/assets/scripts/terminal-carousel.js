@@ -51,6 +51,24 @@
       gif: "assets/images/demos/tinytorch-05-mlperf-opt.gif",
       mp4: "assets/images/demos/tinytorch-05-mlperf-opt.mp4",
       alt: "MLPerf optimization triad evaluating dense, spatial, and autoregressive models"
+    },
+    {
+      index: 5,
+      title: "Tito CLI Companion & Environment Diagnostics",
+      tagline: "First-time setup, 100% green health checks, and module workflow companion",
+      command: "tito && tito system health",
+      gif: "assets/images/demos/tinytorch-06-tito-companion.gif",
+      mp4: "assets/images/demos/tinytorch-06-tito-companion.mp4",
+      alt: "Tito CLI companion welcome banner and environment health diagnostic verification"
+    },
+    {
+      index: 6,
+      title: "TinyTorch Olympics & Competition Events",
+      tagline: "Speed, compression, and accuracy leaderboards with interlocking Olympic rings",
+      command: "tito olympics",
+      gif: "assets/images/demos/tinytorch-07-tito-olympics.gif",
+      mp4: "assets/images/demos/tinytorch-07-tito-olympics.mp4",
+      alt: "TinyTorch Olympics competition events board and ASCII Olympic rings logo"
     }
   ];
 

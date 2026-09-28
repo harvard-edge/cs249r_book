@@ -27,6 +27,8 @@ TAPE_TITLES = {
     "03_tinygpt_chat": "tinytorch · tinygpt chat",
     "04_tinygpt_code": "tinytorch · code completion",
     "05_mlperf_opt": "tinytorch · mlperf optimization",
+    "06_tito_companion": "tinytorch · tito companion",
+    "07_tito_olympics": "tinytorch · tito olympics",
 }
 
 
@@ -42,6 +44,13 @@ def create_window_template(term_w: int, term_h: int, title: str) -> tuple[Path, 
     win_h = term_h + bar_h + 2 * pad_y
     canvas_w = win_w + 2 * margin
     canvas_h = win_h + 2 * margin
+
+    if canvas_w % 2 != 0:
+        canvas_w += 1
+        win_w += 1
+    if canvas_h % 2 != 0:
+        canvas_h += 1
+        win_h += 1
 
     # Canvas with dark slate background matching site card aesthetics (#0f172a)
     canvas = Image.new("RGBA", (canvas_w, canvas_h), (15, 23, 42, 255))

@@ -12,6 +12,7 @@ export PYTHONPATH="$REPO_DIR/tinytorch"
 export TITO_ALLOW_SYSTEM=1
 export TINYTORCH_NON_INTERACTIVE=1
 export TITO_NON_INTERACTIVE=1
+export VIRTUAL_ENV="$REPO_DIR/.venv"
 
 cd "$REPO_DIR" || exit 1
 
