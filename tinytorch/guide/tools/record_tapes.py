@@ -203,10 +203,10 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
         tpl_path, term_x, term_y = create_window_template(first_img.width, first_img.height, title)
 
         # Compile frames to GIF using ffmpeg with window overlay and optimal color palette
-        print(f"  ▶ Compiling GIF with ffmpeg -> {output_gif.name}...")
+        print(f"  ▶ Compiling high-fidelity GIF with ffmpeg -> {output_gif.name}...")
         output_gif.parent.mkdir(parents=True, exist_ok=True)
 
-        ffmpeg_cmd = [
+        ffmpeg_gif_cmd = [
             "ffmpeg", "-y",
             "-loop", "1", "-i", str(tpl_path),
             "-framerate", str(capture_fps),
@@ -216,18 +216,47 @@ def record_tape(tape_path: Path, output_gif: Path, fps: int = 16) -> Path:
             "-start_number", "1",
             "-i", str(frames_dir / "frame-cursor-%05d.png"),
             "-filter_complex",
-            f"[1][2]overlay=shortest=1[term];[0][term]overlay=x={term_x}:y={term_y}:shortest=1[merged];[merged]fps={fps},split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer",
+            f"[1][2]overlay=shortest=1[term];[0][term]overlay=x={term_x}:y={term_y}:shortest=1[merged];[merged]fps={fps},split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=diff[p];[s1][p]paletteuse=dither=none",
             str(output_gif),
         ]
 
-        ff_proc = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+        ff_proc = subprocess.run(ffmpeg_gif_cmd, capture_output=True, text=True)
         if ff_proc.returncode != 0:
-            print(f"  ❌ FFmpeg compilation failed!")
+            print(f"  ❌ FFmpeg GIF compilation failed!")
             print(f"  STDERR: {ff_proc.stderr}")
             sys.exit(1)
 
         size_kb = output_gif.stat().st_size / 1024
         print(f"  ✨ Generated {output_gif.name}: {size_kb:.1f} KB ({total_frames} frames)")
+
+        # Also compile TrueColor MP4 for modern video player support with zero color quantization
+        output_mp4 = output_gif.with_suffix(".mp4")
+        print(f"  ▶ Compiling high-definition MP4 -> {output_mp4.name}...")
+        ffmpeg_mp4_cmd = [
+            "ffmpeg", "-y",
+            "-loop", "1", "-i", str(tpl_path),
+            "-framerate", str(capture_fps),
+            "-start_number", "1",
+            "-i", str(frames_dir / "frame-text-%05d.png"),
+            "-framerate", str(capture_fps),
+            "-start_number", "1",
+            "-i", str(frames_dir / "frame-cursor-%05d.png"),
+            "-filter_complex",
+            f"[1][2]overlay=shortest=1[term];[0][term]overlay=x={term_x}:y={term_y}:shortest=1[merged];[merged]fps={fps},format=yuv420p",
+            "-c:v", "libx264",
+            "-crf", "18",
+            "-preset", "slow",
+            "-movflags", "+faststart",
+            str(output_mp4),
+        ]
+
+        ff_mp4_proc = subprocess.run(ffmpeg_mp4_cmd, capture_output=True, text=True)
+        if ff_mp4_proc.returncode == 0:
+            mp4_size_kb = output_mp4.stat().st_size / 1024
+            print(f"  ✨ Generated {output_mp4.name}: {mp4_size_kb:.1f} KB (TrueColor H.264)")
+        else:
+            print(f"  ⚠️ MP4 compilation notice: {ff_mp4_proc.stderr[:120]}")
+
         return output_gif
 
     finally:

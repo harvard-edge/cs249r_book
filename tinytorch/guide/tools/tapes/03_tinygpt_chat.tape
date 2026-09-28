@@ -5,10 +5,10 @@
 Output "tinytorch/guide/assets/images/demos/tinytorch-03-tinygpt-chat.gif"
 
 Set Shell "bash"
-Set FontSize 12
+Set FontSize 15
 Set FontFamily "Menlo"
-Set Width 880
-Set Height 680
+Set Width 1200
+Set Height 820
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 35ms
 

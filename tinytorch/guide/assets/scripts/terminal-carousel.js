@@ -13,6 +13,7 @@
       tagline: "Step 1 of 5: From curl to running Frank Rosenblatt's 1958 Perceptron in seconds",
       command: "curl -fsSL https://mlsysbook.ai/tinytorch/install.sh | bash",
       gif: "assets/images/demos/tinytorch-01-install-and-run.gif",
+      mp4: "assets/images/demos/tinytorch-01-install-and-run.mp4",
       alt: "TinyTorch one-line install and running milestone 01 Perceptron out of the box"
     },
     {
@@ -21,6 +22,7 @@
       tagline: "Step 2 of 5: 20/20 modules completed, autograd verified, 7 milestones unlocked",
       command: "tito module complete 06 && tito module status",
       gif: "assets/images/demos/tinytorch-02-modules-mastery.gif",
+      mp4: "assets/images/demos/tinytorch-02-modules-mastery.mp4",
       alt: "Completing autograd module and viewing 20/20 modules mastery progress grid"
     },
     {
@@ -29,6 +31,7 @@
       tagline: "Step 3 of 5: Decoder transformer streaming token responses character-by-character on CPU",
       command: "tito milestone run 05 --part 4",
       gif: "assets/images/demos/tinytorch-03-tinygpt-chat.gif",
+      mp4: "assets/images/demos/tinytorch-03-tinygpt-chat.mp4",
       alt: "TinyGPT conversational interactive terminal chat with live streaming response"
     },
     {
@@ -37,6 +40,7 @@
       tagline: "Step 4 of 5: Autoregressive code generation with 100% AST compiler verification",
       command: "tito milestone run 05 --part 3",
       gif: "assets/images/demos/tinytorch-04-tinygpt-code.gif",
+      mp4: "assets/images/demos/tinytorch-04-tinygpt-code.mp4",
       alt: "TinyGPT code completion on TinyPy dataset with zero syntax errors verified by AST"
     },
     {
@@ -45,6 +49,7 @@
       tagline: "Step 5 of 5: INT8 quantization (4x), im2col (>70x), and KV-cache Pareto frontier",
       command: "tito milestone run 06 --part 1",
       gif: "assets/images/demos/tinytorch-05-mlperf-opt.gif",
+      mp4: "assets/images/demos/tinytorch-05-mlperf-opt.mp4",
       alt: "MLPerf optimization triad evaluating dense, spatial, and autoregressive models"
     }
   ];
@@ -56,12 +61,20 @@
     // Update slides
     const slides = document.querySelectorAll(".tt-carousel-slide");
     slides.forEach((slide, idx) => {
+      const vid = slide.querySelector("video");
       if (idx === currentSlide) {
         slide.classList.add("active");
         slide.setAttribute("aria-hidden", "false");
+        if (vid) {
+          vid.currentTime = 0;
+          vid.play().catch(() => {});
+        }
       } else {
         slide.classList.remove("active");
         slide.setAttribute("aria-hidden", "true");
+        if (vid) {
+          vid.pause();
+        }
       }
     });
 
@@ -92,13 +105,22 @@
     if (!data) return;
 
     const modal = document.getElementById("tt-lightbox-modal");
+    const video = document.getElementById("tt-lightbox-video");
+    const videoSrc = document.getElementById("tt-lightbox-video-src");
     const img = document.getElementById("tt-lightbox-img");
     const title = document.getElementById("tt-lightbox-title");
     const caption = document.getElementById("tt-lightbox-caption");
 
-    if (modal && img) {
-      img.src = data.gif;
-      img.alt = data.alt;
+    if (modal) {
+      if (img) {
+        img.src = data.gif;
+        img.alt = data.alt;
+      }
+      if (video && videoSrc) {
+        videoSrc.src = data.mp4;
+        video.load();
+        video.play().catch(() => {});
+      }
       if (title) title.textContent = `Tiny🔥Torch · ${data.title}`;
       if (caption) caption.textContent = data.tagline;
       modal.classList.add("show");
@@ -111,7 +133,9 @@
       return;
     }
     const modal = document.getElementById("tt-lightbox-modal");
+    const video = document.getElementById("tt-lightbox-video");
     if (modal) {
+      if (video) video.pause();
       modal.classList.remove("show");
       document.body.style.overflow = "";
     }
