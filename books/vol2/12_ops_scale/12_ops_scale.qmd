@@ -1025,14 +1025,9 @@ A dedicated ML platform team is justified when fragmentation costs more than the
 
 The earlier economics identify three potential benefits of shared ownership: infrastructure efficiency, faster releases, and fewer incidents. As an illustrative capacity calculation, increasing effective utilization from 35 percent to 75 percent lets fewer provisioned GPUs deliver the same useful work, if peak demand and reliability headroom permit that reduction. Faster delivery and fewer incidents are additional hypotheses to measure; neither a guaranteed engagement gain nor a fixed incident-reduction percentage follows from introducing a platform. The business case combines observed capacity savings with independently valued release and reliability improvements.
 
-The qualitative case follows from the same fragmentation cost. Platform failures are coordination failures as much as infrastructure failures, and shared ownership improves four coordination surfaces:
+The qualitative case follows from the same fragmentation cost. Platform failures are coordination failures as much as infrastructure failures, and shared ownership improves four critical operational dimensions. Standardized practices ensure that every model meets baseline quality standards for telemetry, automated rollback capability, and runbook documentation. Centralized platform teams also make deep operational expertise accessible across the organization rather than leaving it siloed inside individual product groups. Structurally, platform roles establish dedicated career paths for engineers focused on machine learning systems and reliability. Finally, platform-level controls establish governance readiness, providing the auditable lineage and compliance enforcement required as regulatory scrutiny of production models increases.
 
-- **Consistency**: Standardized practices ensure all models meet baseline quality standards for monitoring, rollback capability, and documentation.
-- **Knowledge sharing**: Centralized teams make operational expertise available to all model teams rather than leaving it siloed.
-- **Career development**: Platform roles provide career paths for ML engineers interested in infrastructure.
-- **Governance readiness**: Platform-level controls provide the foundation for compliance as regulatory requirements for AI grow.
-
-The decision to establish a platform team typically occurs when organizations recognize that the alternative, allowing fragmentation to continue, imposes costs exceeding the platform investment. This recognition often follows a significant production incident that revealed cross-model dependencies or operational gaps. The resulting economics show why platform operations become more valuable as the model fleet grows.
+The decision to establish a platform team typically occurs when organizations recognize that allowing fragmentation to continue imposes coordination costs exceeding the platform investment. This recognition often follows a significant production incident that revealed cross-model dependencies or operational gaps. The resulting economics show why platform operations become more valuable as the model fleet grows.
 
 ::: {#psp-ops-scale-platform-superlinear-returns .callout-perspective title="Platform returns improve with every model added"}
 
@@ -2121,21 +2116,9 @@ Beyond these core requirements, the distinguishing feature of enterprise registr
 
 :::
 
-The key takeaway from @fig-model-registry is that a single upstream update can silently invalidate every downstream consumer unless the registry enforces explicit dependency edges. The necessity of this tracking becomes clear when considering a recommendation system with four interdependent model roles:
+The key takeaway from @fig-model-registry is that a single upstream update can silently invalidate every downstream consumer unless the registry enforces explicit dependency edges. The necessity of this tracking becomes clear in a recommendation system where an upstream embedding model $E$ produces user and item representations, a retrieval model $R$ consumes those representations to generate candidate sets, three ranking models ($R_1$, $R_2$, $R_3$) score the candidates using features derived from $E$, and an ensemble model $M$ combines the rankers' scores into a final ranking.
 
-- Embedding Model E produces user and item embeddings
-- Retrieval Model R uses embeddings from E to generate candidates
-- Ranking Models R1, R2, R3 score candidates using embeddings from E
-- Ensemble Model M combines outputs from R1, R2, R3
-
-The dependency graph must be explicit in the registry because the update approval process is graph traversal. When Embedding Model E is updated, the registry executes four graph-traversal steps:
-
-1. Identify all dependent models (R, R1, R2, R3, M)
-2. Trigger re-evaluation of dependent models with new embeddings
-3. Block deployment of the new E until compatibility is verified
-4. Coordinate deployment order if updates proceed
-
-Without explicit dependency tracking, organizations discover dependencies through production failures when an upstream model change breaks downstream consumers.
+Because the update approval process is fundamentally a graph traversal, this dependency graph must be explicit in the registry. When embedding model $E$ is updated, the registry traverses downstream edges to identify all dependent models ($R$, $R_1$, $R_2$, $R_3$, and $M$), triggers their automated re-evaluation against the newly proposed embeddings, and blocks deployment of $E$ until compatibility is verified across every consumer before coordinating their rollouts in topological order. Without explicit dependency tracking, organizations discover architectural coupling through production outages when an upstream change silently corrupts downstream assumptions.
 
 @Lst-registry-schema illustrates how a single YAML entry captures artifact location, training provenance, and evaluation thresholds, giving the dependency tracker enough metadata to identify which downstream models must be re-evaluated when the upstream embedding changes.
 
@@ -2214,13 +2197,7 @@ The extended timeline reflects the difficulty of detecting regressions in ensemb
 
 #### Interaction effects {#sec-ml-operations-scale-interaction-effects-9ae7}
 
-Ensemble components interact in ways that make local validation insufficient; three recurring patterns explain why the platform needs holdouts, intermediate logging, and long soak periods:
-
-- **Compensation effects**: The retrieval model starts returning lower-quality candidates and the ranking model learns to compensate by upweighting quality signals; once retrieval is fixed, ranking can over-compensate and degrade results.
-- **Distribution shift propagation**: An upstream model improves locally but changes the input distribution seen by downstream models trained on the old representation.
-- **Feedback loops**: Ranking decisions affect which items users interact with, and those interactions become training data for future models over days to weeks.
-
-Managing these interactions requires holdout groups that experience no changes and provide stable baselines, extensive logging of intermediate model outputs beyond final recommendations, long-term monitoring for feedback loop effects, and periodic ensemble reset experiments that retrain all components together.
+Ensemble components interact in ways that make local validation insufficient, necessitating holdouts, intermediate logging, and extended soak periods. In compensation effects, a degraded retrieval model begins returning lower-quality candidates, prompting downstream ranking models to compensate by heavily upweighting auxiliary quality signals; once retrieval is fixed, ranking overcompensates and degrades overall recommendations. Similarly, distribution shift propagates when an upstream model improves locally but alters the feature distribution ingested by downstream models trained on older representations. Over longer horizons, feedback loops compound these distortions when ranking decisions dictate the items users interact with, generating biased feedback that serves as training data for future models over subsequent weeks. Managing these interactions requires holdout groups that experience no changes to provide stable baselines, extensive logging of intermediate model outputs beyond final recommendations, continuous monitoring for feedback loop drift, and periodic ensemble reset experiments that retrain all components simultaneously.
 
 ### Model lifecycle management {#sec-ml-operations-scale-model-lifecycle-management-f112}
 
@@ -2442,14 +2419,7 @@ The next layer turns shared representations into candidate sets and business sig
 
 :::
 
-@Fig-ecommerce-graph traces this blast radius: a single change to the user embedding model propagates through two direct consumers and two further transitive nodes, ending at the business rules layer. Operational procedures must therefore address four coordination requirements:
-
-1. Re-evaluate all downstream models with new embeddings before deployment
-2. Consider simultaneous deployment of related components
-3. Monitor both direct metrics (embedding quality) and downstream metrics (ranking performance)
-4. Maintain embedding version compatibility or coordinate synchronized updates
-
-The dependency graph identifies the consumers a change can affect, but a model registry cannot by itself preserve the values those consumers read. Shared features also need versioned definitions, historical correctness, and freshness guarantees. Those data contracts complete the state that a deployment pipeline must validate.
+As @fig-ecommerce-graph illustrates, a single update to the user embedding model ripples across two direct consumers and two transitive nodes before reaching the business rules layer. Managing this blast radius requires the platform to coordinate verification across multiple boundaries: evaluating every downstream consumer against proposed embeddings before release, planning simultaneous rollouts for coupled components, tracking both direct embedding fidelity and downstream ranking performance, and either maintaining backward-compatible embedding versions or executing synchronized updates across the fleet. While the dependency graph maps affected consumers, a model registry alone cannot preserve the feature values they ingest. Shared features demand versioned definitions, point-in-time correctness, and explicit freshness guarantees—contracts that complete the state validated by modern deployment pipelines.
 
 ## Feature Store Operations {#sec-ml-operations-scale-feature-store-operations-2a36}
 
@@ -3735,13 +3705,7 @@ Rollback is the final consistency test. Rolling back one region while others con
 
 #### Deployment strategies {#sec-ml-operations-scale-deployment-strategies-fc90}
 
-Multi-region coordination chooses where to spend the rollout tax: longer deployment duration, stronger synchronization, or bounded regional skew. Three architectural approaches make different trade-offs:
-
-- **Sequential regional rollout**: Regions deploy one at a time, completing the full canary progression in each region before the next begins. This maximizes safety by limiting blast radius to a single region, but extends total deployment duration proportionally to region count.
-- **Synchronized global rollout**: All regions maintain identical deployment state simultaneously. A global coordination service transitions regions between canary phases at the same logical timestamp, giving users a consistent experience but making every regional issue part of the global deployment decision.
-- **Hybrid rollout**: A deployment coordinator enforces minimum and maximum phase boundaries while allowing regions to progress independently within those bounds. Regions can accelerate through phases if local metrics are strong or pause if issues emerge, while global constraints prevent excessive version skew.
-
-The right choice depends on whether the deployment values minimum blast radius, global consistency, or bounded regional independence most.
+Multi-region coordination chooses where to spend the rollout tax: longer deployment duration, stronger synchronization, or bounded regional skew. Three architectural approaches navigate this trade-off. In a sequential regional rollout, regions deploy one at a time, completing the full canary progression in each region before the next begins. This maximizes safety by confining the blast radius to a single region, though it extends total deployment duration proportionally to the region count. Conversely, a synchronized global rollout maintains identical deployment state across all regions simultaneously, using a global coordination service to advance canary phases at identical logical timestamps; this guarantees a uniform user experience but forces every regional disturbance into the global deployment decision. Between these extremes, a hybrid rollout enforces minimum and maximum phase boundaries while allowing regions to progress independently within those envelopes. Regions can accelerate through phases when local health metrics are strong or pause if issues emerge, while global guardrails prevent excessive version skew across the fleet. The right choice depends on whether the deployment prioritizes minimum blast radius, global consistency, or bounded regional independence.
 
 For a conservative rollout across 5 regions in sequential waves, the typical progression is:
 
@@ -3754,13 +3718,7 @@ Total deployment duration: 3.5 to 7 days for a conservative rollout.
 
 #### Traffic management during transitions {#sec-ml-operations-scale-traffic-management-during-transitions-731d}
 
-Maintaining request consistency during deployment transitions requires three routing controls that keep the experiment and user experience coherent:
-
-- **Sticky routing**: A user's requests consistently route to the same region throughout the deployment window, typically through consistent hashing on user identifier. Users experience either the old version or new version consistently, never mixing within a session.
-- **Version pinning**: Clients include a model version hash in the request, and the serving infrastructure routes to replicas serving that version. This supports gradual client migration independent of server-side deployment state.
-- **Request isolation**: Cross-region traffic is disabled during critical deployment phases. During canary evaluation, this ensures metrics reflect single-region behavior rather than mixed routing patterns.
-
-These controls preserve the statistical meaning of deployment metrics while users move through a changing fleet.
+Maintaining request consistency during deployment transitions requires three routing controls that keep the experiment and user experience coherent. Sticky routing directs a user's requests consistently to the same region throughout the deployment window, typically using consistent hashing on a persistent user identifier so sessions never mix predictions from different versions. Version pinning allows clients to include a model version hash in the request header, prompting the serving infrastructure to route traffic to matching replicas and decoupling client migration from server-side rollout state. Finally, request isolation disables cross-region fallback during critical deployment phases, ensuring that canary metrics reflect isolated regional behavior rather than unpredictable cross-routing patterns. Together, these controls preserve the statistical meaning of deployment metrics while users interact with an evolving fleet.
 
 #### Consistency models for deployment {#sec-ml-operations-scale-consistency-models-deployment-4995}
 
@@ -3778,10 +3736,7 @@ For A/B testing validity, model serving typically requires strong consistency wi
 
 #### Rollback coordination {#sec-ml-operations-scale-rollback-coordination-b751}
 
-Rolling back a multi-region deployment requires careful coordination to prevent oscillation and mixed-version serving. The rollback protocol has two ordered phases:
-
-1. **Stop traffic to the new version globally**: The deployment coordinator broadcasts rollback intent, waits for every region to acknowledge that it has stopped routing new traffic to the new version, and lets in-flight requests complete. Regions that do not acknowledge before the timeout are marked unhealthy.
-2. **Restore the old version globally**: The coordinator confirms that all regions serve only the old version, re-enables normal traffic routing, clears deployment state, and prepares the system for a later re-attempt.
+Rolling back a multi-region deployment requires careful coordination to prevent oscillation and mixed-version serving. The rollback protocol executes across two ordered phases. First, the coordinator halts traffic to the new version globally by broadcasting rollback intent, waiting for every region to acknowledge that it has stopped routing new requests to the rejected version, and allowing in-flight requests to drain; any region failing to acknowledge before the timeout expires is marked unhealthy. Next, the coordinator restores the old version globally once it confirms that all healthy regions serve only the previous release, re-enabling normal traffic routing, clearing transient deployment state, and resetting the system for a future attempt.
 
 The acknowledgment barrier prevents restoration from completing while reachable regions still route new requests to the rejected version. A timeout alone cannot stop an isolated region from serving; the serving path must enforce a lease, routing exclusion, or equivalent fencing rule. The release contract must specify what happens to in-flight requests and to availability during that interval.
 
@@ -3799,13 +3754,7 @@ Consider an illustrative five-region deployment with an assumed 80 ms one-way de
 
 Minimum coordination overhead per phase transition: 320 ms for the synchronization protocol itself. For a deployment with 5 canary phases, coordination adds 1.6 seconds to total deployment time, negligible compared to the hours spent in each phase.
 
-However, the coordination service becomes a critical dependency. If the coordinator fails during a deployment, three behaviors are possible depending on the consistency model:
-
-- With strong consistency: All regions freeze in current state until coordinator recovers
-- With eventual consistency: Regions continue independent progression, potentially diverging
-- With bounded staleness: Regions continue but coordinator failure triggers alerts if staleness exceeds bounds
-
-Organizations deploying safety-critical models typically implement coordinator redundancy through consensus protocols (Raft, Paxos) that survive single-node failures while maintaining consistency guarantees.
+However, the coordination service becomes a critical dependency. If the coordinator fails mid-rollout, failure behavior depends on the chosen consistency model. Under strong consistency, all regions freeze in their current state until the coordinator recovers, halting progression to preserve fleet-wide uniformity. Under eventual consistency, regions continue their independent rollout trajectories, risking divergence across geographic zones. Under bounded staleness, regions advance locally while triggering operational alerts whenever regional version drift exceeds an acceptable window. Consequently, organizations deploying safety-critical models typically implement coordinator redundancy through consensus protocols (such as Raft or Paxos) that tolerate single-node failures while preserving global consistency guarantees.
 
 ### Production experimentation as a release gate {#sec-ml-operations-scale-production-experiment-validation}
 
@@ -4068,21 +4017,9 @@ The operational surface completes the loop. Alerting and dashboards surface stat
 
 #### Criteria for shadow deployment {#sec-ml-operations-scale-shadow-deployment-essential-8087}
 
-Shadow deployment is most valuable when the cost of duplicate infrastructure is smaller than the cost of an undetected production regression:
+Shadow deployment is most valuable when the expense of running duplicate serving infrastructure remains lower than the expected loss from an undetected production regression. This investment is justified for unproven model architectures where offline validation fails to expose production-specific edge cases, high-stakes domains (such as financial transactions, healthcare diagnostics, and safety-critical controls) where regressions carry severe liabilities, systems bound to complex real-time feature pipelines that static replays cannot emulate, latency-sensitive pipelines where throughput degradation must be detected before affecting users, and regulated environments demanding rigorous pre-exposure validation records.
 
-- New model architectures where offline validation may miss production-specific failure modes
-- High-stakes models (financial, medical, safety-critical) where production issues have severe consequences
-- Models with complex dependencies on real-time features where offline replay cannot fully validate behavior
-- Performance-sensitive deployments where latency or throughput regressions must be detected before user impact
-- Regulatory environments requiring pre-production validation evidence
-
-It is less critical when the deployment risk is bounded and rollback is cheap:
-
-- Minor model updates (retraining with same architecture) where production behavior is well-understood
-- Low-risk models where rapid rollback is acceptable
-- Resource-constrained environments where shadow infrastructure costs exceed validation benefits
-
-The decision is therefore economic as much as technical: pay for shadow validation when duplicate capacity buys risk information that offline tests and cheap rollback cannot provide.
+Conversely, shadow deployments become superfluous when deployment risks are tightly bounded and rollback mechanisms are inexpensive. Routine retraining passes on established model architectures rarely exhibit novel behavioral pathologies, low-impact consumer models can rely on immediate canary rollbacks if anomalies arise, and resource-constrained environments must avoid duplicating compute when validation yield falls short of infrastructure overhead. The decision is therefore economic as much as technical: platform teams should pay for shadow capacity only when duplicate execution buys risk reduction that offline tests and fast rollbacks cannot deliver.
 
 #### Interleaving experiments {#sec-ml-operations-scale-interleaving-experiments-519c}
 
@@ -4092,14 +4029,7 @@ Interleaving experiments[^fn-interleaving-evaluation-efficiency] were developed 
 
 The key insight is statistical efficiency. An interleaving experiment can require far fewer samples than A/B testing, and Netflix reports more than 100$\times$ fewer users for some ranking experiments [@netflix2017interleaving], because each user provides direct comparison signals rather than contributing only to aggregate statistics.
 
-Interleaving implementation:
-
-1. Both model variants score all candidates
-2. Results are interleaved using team draft or probabilistic interleaving
-3. User interactions attribute credit to the originating variant
-4. Statistical tests determine winning variant
-
-Interleaving is essential for recommendation systems where detecting small engagement changes quickly enables rapid iteration; @fig-interleaving-vs-ab contrasts this sensitivity with traditional A/B testing.
+In an interleaving workflow, both model variants score the full set of candidate items, and their ranked outputs are blended using algorithms such as team draft or probabilistic interleaving. When users interact with the combined presentation list, subsequent engagements (such as clicks, conversions, or dwell time) are attributed directly to the originating variant. Statistical hypothesis tests then compare these attributed preferences to identify the winning model. This within-subject experimental structure makes interleaving essential for recommendation systems where detecting subtle engagement differences rapidly accelerates the deployment cycle; @fig-interleaving-vs-ab contrasts this sensitivity with traditional A/B testing.
 
 ::: {#fig-interleaving-vs-ab fig-env="figure" fig-pos="htb" fig-cap="**Interleaving vs. A/B testing**: In traditional A/B testing (left), users see only one variant. In interleaving (right), users see a blended list. Clicks on items are attributed to the source ranker, providing a higher-sensitivity signal that controls for user-specific variance." fig-alt="Side-by-side comparison: A/B testing splits users between models; interleaving blends both models results for each user."}
 
@@ -4426,13 +4356,7 @@ Formally, standard A/B testing relies on SUTVA: user $i$'s outcome $Y_i(w)$ depe
 
 #### Network effect categories {#sec-ml-operations-scale-network-effect-categories-d253}
 
-Network effects manifest in three primary forms, each requiring different detection and mitigation strategies:
-
-- **Direct network effects**: User A's treatment directly influences user B's outcome through platform interactions. In a social feed ranking experiment, treatment users may share algorithmically optimized content with control users, biasing measured effects toward zero because control users partially receive the treatment through network propagation.
-- **Indirect network effects**: Market-level mechanisms affect all users regardless of their individual treatment assignment. A ride-sharing pricing experiment that increases driver compensation in the treatment group can attract more drivers overall, causing control users to experience shorter wait times and making the measured treatment effect underestimate the true benefit.
-- **Spillover effects**: Treatment effects spread across geographic or temporal boundaries. A local recommendation experiment can shift restaurant foot traffic and popularity signals in adjacent neighborhoods, changing recommendation quality for nearby control users.
-
-In all three cases, the experiment no longer measures independent user-level treatment effects.
+Network effects manifest in three primary forms, each demanding distinct detection and mitigation strategies. In direct network effects, one user's treatment assignment directly influences connected peers through platform interactions: in social feed experiments, for instance, treatment users often share algorithmically optimized content with control users, diluting measured effect sizes toward zero because the control cohort partially receives the intervention. In indirect network effects, platform-wide market mechanisms alter conditions for all participants regardless of assignment: a ridesharing incentive that increases driver supply in treatment regions can depress wait times for control users, causing the measured treatment effect to underestimate the true benefit. Finally, spillover effects cross geographic or temporal boundaries: local merchant recommendations can shift foot traffic across adjacent neighborhoods, reshaping baseline activity for neighboring control subjects. In all three cases, the fundamental premise of independent user-level treatment assignment collapses.
 
 #### Quantifying SUTVA violations {#sec-ml-operations-scale-quantifying-sutva-violations-e04e}
 
@@ -4505,35 +4429,21 @@ The arithmetic shows how a plausible spillover assumption can change the interpr
 
 #### Detection strategies {#sec-ml-operations-scale-detection-strategies-dc16}
 
-Detecting SUTVA violations requires explicit measurement of network exposure through three complementary checks:
-
-- **Ego-network analysis**: Measure each control user's exposure to treatment through their connections using $e_i = |\{j \in \mathcal{N}_i : W_j = 1\}| / |\mathcal{N}_i|$, where $\mathcal{N}_i$ is the connection set for control user $i$ and $W_j$ indicates treatment assignment for user $j$. A correlation between control outcomes and $e_i$ is an interference signal to test against baseline network differences; causal spillover estimates require an analysis matched to randomization and exposure.
-- **Interference tests**: Compare outcomes for control users with high vs. low treatment exposure. The comparison must account for baseline differences and the assignment design before attributing an outcome gap to network contamination.
-- **Temporal analysis**: Examine whether treatment effects propagate over time. A control-group trend toward treatment outcomes can motivate a spillover investigation, but shared temporal changes can produce the same pattern.
-
-Together, these checks turn spillover from a hidden assumption violation into a measurable experimental condition.
+Detecting SUTVA violations requires measuring network exposure directly through three complementary diagnostics. Ego-network analysis quantifies each control user's treatment exposure through their immediate connections as $e_i = |\{j \in \mathcal{N}_i : W_j = 1\}| / |\mathcal{N}_i|$, where $\mathcal{N}_i$ denotes the connection set for control user $i$ and $W_j$ marks the treatment assignment of peer $j$; an empirical correlation between control outcomes and $e_i$ signals potential interference that must be tested against baseline graph topology. Complementing this structural metric, interference tests contrast outcomes between control cohorts experiencing high versus low treatment exposure, taking care to adjust for pre-existing graph differences before attributing outcome divergence to contamination. Finally, temporal analysis examines whether treatment effects propagate across successive observation windows, helping distinguish true network contagion from exogenous secular trends. Together, these checks transform spillover from an untestable assumption into a measurable experimental condition.
 
 #### Mitigation approaches {#sec-ml-operations-scale-mitigation-approaches-dc04}
 
-When SUTVA violations are detected, four experimental design modifications address different interference paths. Each requires an explicit exposure model and an analysis matched to its assignment unit:
+When SUTVA violations are detected, four experimental designs modify assignment to address distinct interference paths, each demanding an exposure model tailored to its randomization unit.
 
-- **Graph cluster randomization**: Treatment is assigned at the community level rather than the individual level. Graph partitioning algorithms such as Louvain or spectral clustering divide the user graph into clusters with dense internal connections and sparse cross-cluster edges, then randomize clusters so users primarily interact with others in the same condition. The trade-off is reduced statistical power: the number of independently assigned units is $k$ clusters, and the precision of the estimate also depends on cluster sizes and within-cluster correlation.
-- **Ego-exclusion designs**: Users whose network exposure exceeds a threshold are excluded from analysis. Analyzing only control users with minimal treatment connections, for example $e_i < 0.05$, reduces measured exposure but does not guarantee an uncontaminated control. Exclusion also changes the analyzed population and can introduce selection bias.
-- **Switchback experiments**: All users alternate between treatment and control over time periods such as hours or days. Assigning one condition within each period removes simultaneous cross-arm exposure, but carryover between periods can remain. Analysis compares periods with an explicit washout and temporal-variation policy.
-- **Geo-based experiments**: Geographic boundaries can reduce interference for location-dependent services. City-level or region-level randomization still requires checking cross-boundary interactions and shared market effects rather than assuming geography eliminates spillover.
+In graph cluster randomization, treatment is assigned at the community level rather than to individual users. Graph partitioning algorithms like Louvain or spectral clustering divide the user graph into clusters with dense internal connections and sparse cross-cluster edges, ensuring users interact predominantly with peers in the same experimental arm. The operational trade-off is reduced statistical power: because the effective sample size drops to $k$ clusters, estimation precision depends heavily on cluster size variance and intra-cluster correlation.
 
-The right design is the one that removes the dominant interference path without destroying statistical power.
+Ego-exclusion designs instead filter the analyzed cohort by discarding users whose network exposure crosses a safety threshold. Restricting evaluation to control users with minimal treatment connections (such as $e_i < 0.05$) reduces measured interference, but it cannot guarantee an uncontaminated baseline. Furthermore, pruning heavily connected users alters the effective sample population and can introduce severe selection bias.
+
+For marketplace dynamics where network connections cannot be partitioned cleanly, switchback experiments alternate the entire user population between treatment and control across discrete time blocks, such as hours or days. Confining conditions to specific time windows eliminates simultaneous cross-arm exposure, though analysis must incorporate washout intervals and temporal models to control for carryover effects. Similarly, geo-based experiments leverage spatial boundaries to isolate location-dependent services. Randomizing by city or metropolitan region isolates physical interactions, but still requires monitoring cross-boundary travel and shared supply pools rather than assuming geography eliminates spillover. The optimal design is the one that neutralizes the dominant interference channel without sacrificing statistical power.
 
 #### Practical implementation {#sec-ml-operations-scale-practical-implementation-832c}
 
-Implementing network-aware A/B testing requires infrastructure investment:
-
-- Graph analysis pipelines that compute network statistics and cluster assignments
-- Exposure calculation for every user based on their connections' treatment status
-- Modified statistical tests that account for clustered randomization
-- Monitoring dashboards showing spillover indicators
-
-For recommendation systems at scale, the engineering cost is justified by the magnitude of bias that network effects introduce. A system measuring +3 percent improvement when the true effect is +6 percent may incorrectly reject valuable model changes or incorrectly prioritize inferior alternatives.
+Implementing network-aware A/B testing requires dedicated infrastructure investments across the experimentation platform. Teams must maintain graph analysis pipelines that compute network topology and cluster assignments, real-time engines that evaluate exposure levels for every user from peer treatment states, modified inference libraries that adjust test statistics for clustered variance, and monitoring dashboards that track spillover indicators throughout the rollout. For recommendation systems at scale, this engineering investment is justified by the magnitude of bias that network effects introduce: a platform measuring a +3 percent lift when the true gain is +6 percent risks rejecting transformative model architectures or prioritizing inferior alternatives.
 
 ### The end-to-end evaluation contract {#sec-ops-scale-end-to-end-evaluation-contract}
 
@@ -4579,13 +4489,7 @@ $$R_{\text{rollout}} = p_{\text{regression}} \times I_{\text{regression}} \times
 
 where $p_{\text{regression}}$ is the probability that the change causes a regression, $I_{\text{regression}}$ is the impact severity if regression occurs, and $E_{\text{exposure}}$ is the exposure level during the rollout period.
 
-The rollout risk framework suggests three mitigation strategies:
-
-- Reduce $p_{\text{regression}}$: More thorough testing before deployment
-- Reduce $I_{\text{regression}}$: Architectural patterns that limit blast radius
-- Reduce $E_{\text{exposure}}$: Slower rollouts with lower initial traffic percentages
-
-These levers turn the scalar risk formula into a rollout policy: each risk category chooses how much evidence to collect, how small the blast radius must remain, and how slowly exposure should grow.
+The rollout risk framework translates directly into three operational levers that govern deployment policy. First, platforms lower regression probability ($p_{\text{regression}}$) through comprehensive offline testing, synthetic benchmarks, and rigorous data validation before release. Second, architectural safeguards minimize impact severity ($I_{\text{regression}}$) by bounding blast radius through regional partitioning and graceful degradation fallbacks. Third, phased rollout schedules depress aggregate exposure ($E_{\text{exposure}}$) by allocating minimal initial traffic shares and enforcing strict hold periods. By adjusting these levers, platform teams map the scalar risk calculation into an actionable rollout posture, determining how much pre-release evidence to demand, how strictly to isolate blast radius, and how deliberately to expand serving traffic.
 
 #### Risk categories {#sec-ml-operations-scale-risk-categories-6247}
 
@@ -5026,13 +4930,7 @@ For a metric $X$ with established mean $\mu$ and standard deviation $\sigma$, th
 
 #### Fleet-wide correlation {#sec-ml-operations-scale-fleetwide-correlation-d928}
 
-When multiple models exhibit similar anomalies simultaneously, the root cause is likely shared infrastructure or data rather than individual model issues. Correlation analysis across models enables three operational efficiencies:
-
-- Automatic attribution of anomalies to likely causes (deployment, data issue, infrastructure)
-- Deduplication of alerts that have common causes
-- Prioritization based on breadth of impact
-
-@Lst-anomaly-attribution turns correlation into a triage rule. When the fraction of anomalous models crosses the fleet threshold, the incident changes from many local debugging tasks into one shared-cause investigation.
+When multiple models exhibit similar anomalies simultaneously, the root cause is almost invariably shared infrastructure or upstream data pipelines rather than isolated model defects. Performing correlation analysis across the fleet unlocks three vital operational efficiencies: automatically attributing anomalies to systemic triggers (such as shared deployments, upstream feature outages, or hardware degradation), deduplicating co-occurring alerts into a single incident page, and prioritizing triage based on the breadth of downstream impact. As shown in @lst-anomaly-attribution, this correlation logic turns telemetry into a decisive triage rule. When the fraction of anomalous models crosses a fleet-wide threshold, on-call workflow pivots immediately from fragmented, model-by-model debugging into a coordinated investigation of the shared failure domain.
 
 ::: {#lst-anomaly-attribution lst-cap="**Fleet Anomaly Attribution**: Detecting correlated anomalies across a model fleet and attributing them to shared infrastructure or data causes."}
 
@@ -5314,24 +5212,13 @@ cost_allocation:
 
 :::
 
-Shared infrastructure costs require allocation policies. Three common methods address this need:
-
-- **Proportional Allocation**\index{Cost allocation!proportional}: Distribute shared costs based on usage metrics (GPU-hours, storage bytes, API calls)
-- **Equal Split**\index{Cost allocation!equal split}: Divide costs equally among consuming teams (appropriate for fixed infrastructure)
-- **Marginal Cost**\index{Cost allocation!marginal cost}: Charge teams for the incremental cost their usage adds
-
-The allocation policy determines whether a dashboard can assign action rather than merely describing spend.
+Allocating shared infrastructure costs equitably requires explicit accounting policies. Platforms typically adopt one of three models: proportional allocation\index{Cost allocation!proportional} distributes shared cluster expenses according to measured consumption metrics such as GPU-hours, storage capacity, or API query volume; equal split\index{Cost allocation!equal split} divides common baseline expenses evenly across consuming teams, which is well suited for fixed foundational tooling; and marginal cost\index{Cost allocation!marginal cost} charges tenant teams strictly for the incremental compute and storage their workloads introduce. The choice of allocation policy ultimately determines whether operational dashboards can drive organizational action rather than merely describing past spend.
 
 #### Cost dashboards {#sec-ml-operations-scale-cost-dashboards-113a}
 
 Effective cost monitoring dashboards use the same attention-routing hierarchy as reliability dashboards. The executive view tracks total ML infrastructure cost, month-over-month trend, budget vs. actual, and cost efficiency metrics such as cost per prediction and cost per active user. The portfolio view then breaks cost down by domain and model type so the platform team can see whether recommendations, fraud, search, or another domain is driving the change. The service view exposes per-service cost, cost per inference, GPU utilization efficiency, and budget comparison. The investigation view adds deployment markers, operational metric correlations, and attribution detail so an anomaly can be tied to a specific change rather than treated as accounting noise.
 
-Four key metrics govern ongoing cost monitoring:
-
-- **Cost per inference**: The serving-unit economic metric formalized in the FinOps treatment in @sec-ml-operations-scale-finops-ml-platforms-ffd6; track its trend here to detect efficiency regressions.
-- **Cost per Active User**\index{Cost!per active user}: Infrastructure cost normalized by user base. Enables comparison across services with different scales.
-- **GPU Utilization Efficiency**\index{GPU Utilization!efficiency}: Revenue or value generated per GPU-hour. Connects infrastructure cost to business outcomes.
-- **Budget Burn Rate**\index{Budget!burn rate}: Current spending velocity relative to allocated budget. Enables proactive intervention before overruns.
+Continuous cost monitoring across the fleet centers on four governing metrics. Tracking cost per inference—the serving-unit economic metric formalized in @sec-ml-operations-scale-finops-ml-platforms-ffd6—exposes efficiency regressions as model architectures evolve. Normalizing total infrastructure spend by user base through cost per active user\index{Cost!per active user} enables meaningful financial comparisons across services operating at vastly different traffic scales. Connecting hardware expenditures directly to business yield, GPU utilization efficiency\index{GPU Utilization!efficiency} measures the revenue or engagement generated per accelerator-hour. Meanwhile, tracking budget burn rate\index{Budget!burn rate} provides real-time visibility into spending velocity against quarterly allocations, empowering engineering leads to intervene before projected overruns materialize.
 
 Integrating cost monitoring with the hierarchical monitoring architecture ensures that cost anomalies receive appropriate attention alongside performance and quality metrics. Building these CI/CD pipelines and hierarchical monitoring systems for every individual product team is prohibitively expensive. To make these capabilities universally available without duplicating effort, organizations must elevate them into a unified internal product, a discipline known as platform engineering.
 
@@ -5441,11 +5328,7 @@ MPG extends the fleet law into the **iron law of machine learning fleet efficien
 
 $$\text{MPG} = \text{Scheduling Efficiency} \times \text{Runtime Efficiency} \times \text{Program Efficiency}$$
 
-- **Scheduling Efficiency**\index{Efficiency!scheduling}: This measures the platform's ability to place jobs on available resources. It penalizes queuing delays and fragmentation where resources exist but cannot be assigned.
-- **Runtime Efficiency**\index{Efficiency!runtime}: This captures the hardware utilization quality during execution. It penalizes "bad put" such as restart overheads from preemption, idle time due to data loading bottlenecks, and straggler effects in distributed training.
-- **Program Efficiency**\index{Efficiency!program}: This assesses whether the code running on the hardware is optimized. It penalizes suboptimal kernels, excessive precision (FP32 where BF16 suffices), and redundant computations.
-
-Tracking the iron law components helps platform teams move beyond simple "utilization" to measuring "goodput", the rate at which valid, useful model training work is completed. This shift often reveals that high-utilization clusters may have low MPG due to frequent failures or inefficient code, guiding optimization efforts toward the highest-impact bottlenecks.
+In this decomposition, scheduling efficiency\index{Efficiency!scheduling} measures the platform's ability to place jobs on available resources without incurring queuing delays or cluster fragmentation where idle capacity cannot be assigned. Runtime efficiency\index{Efficiency!runtime} captures the execution quality on allocated accelerators, penalizing "bad put" such as restart overhead from preemption, idle stalls caused by data-loading bottlenecks, and straggler delays in distributed training. Finally, program efficiency\index{Efficiency!program} evaluates how well user code exploits underlying silicon, penalizing un-fused kernels, excessive precision (such as using FP32 where BF16 suffices), and redundant operations. Tracking these three iron law components helps platform teams move beyond simple "utilization" to measuring "goodput"—the rate at which valid, useful model training work is completed. This distinction often reveals that high-utilization clusters may suffer from low MPG due to frequent failures or inefficient user code, guiding engineering effort toward the highest-impact bottlenecks.
 
 ### Multi-tenancy and isolation {#sec-ml-operations-scale-multitenancy-isolation-c3ff}
 
@@ -5453,13 +5336,7 @@ Enterprise platforms earn their sharing dividend only if multiple teams can shar
 
 #### Isolation requirements {#sec-ml-operations-scale-isolation-requirements-19a2}
 
-Tenants need isolation at every boundary where one team's workload, data, or cost can affect another team:
-
-- **Performance isolation**: Resource limits, scheduling fairness, and network quality of service prevent one workload from degrading another during training spikes or serving bursts.
-- **Security isolation**: Access controls, network segmentation, and encryption keep teams with different sensitivity levels from sharing data paths accidentally.
-- **Cost isolation**: Metering and chargeback make each team's usage attributable.
-
-Together, the three boundaries make shared infrastructure safe enough for teams to use without negotiating every deployment by hand.
+Tenants need isolation at every boundary where one team's workload, data, or cost can affect another. Performance isolation leverages resource quotas, fair-share scheduling, and network quality-of-service rules to prevent training spikes or serving bursts from starving co-located jobs. Security isolation enforces access controls, network segmentation, and encryption so teams with different compliance profiles do not share unprotected data paths. Finally, cost isolation combines granular metering with chargeback accounting to make every team's consumption strictly attributable. Together, these three boundaries make shared infrastructure safe enough for autonomous product teams to operate without negotiating resource allocations manually.
 
 #### Namespace architecture {#sec-ml-operations-scale-namespace-architecture-190c}
 
@@ -5485,14 +5362,7 @@ Each team receives dedicated namespaces with resource quotas, while shared servi
 
 [^fn-noisy-neighbor-ml]: **Noisy Neighbor Problem**\index{Noisy Neighbor Problem!definition}\index{Noisy Neighbor!GPU multi-tenancy}: A multi-tenancy failure mode where one tenant's workload degrades performance for co-located tenants. ML workloads are particularly prone to this because training jobs allocate GPU memory greedily---a single job requesting all available HBM on a shared node can starve co-located inference services, causing latency spikes that violate SLOs. GPU memory sharing requires an explicit fit, eviction, offload, or time-sharing policy. Physical partitioning provides one isolation option; it is not the only mechanism, and shared fabric contention may remain.
 
-Four controls prevent one tenant from overwhelming shared services:
-
-- **Request limits**: Each request has a cap on the resources it can consume.
-- **Rate limiting**: Each tenant has bounded request rates so shared services are not overwhelmed.
-- **Priority classes**: Critical workloads receive resources even under contention.
-- **Burst budgets**: Temporary resource overages are allowed while long-term fairness is preserved.
-
-Together, these controls make fairness enforceable in the request path instead of relying on after-the-fact negotiation.
+To prevent any single tenant from overwhelming shared platform services, four complementary controls govern the request path. Request limits place hard caps on the compute and memory an individual invocation may consume, while rate limiting bounds aggregate query velocity across tenant boundaries. Under heavy cluster contention, priority classes ensure that mission-critical production traffic receives scheduling preference over ad-hoc or batch queries. Finally, burst budgets permit brief, temporary resource overages to accommodate legitimate spikes while preserving long-term fairness across the fleet. Together, these controls make fairness enforceable directly in the data plane rather than relying on after-the-fact operational negotiation.
 
 ### FinOps for ML platforms {#sec-ml-operations-scale-finops-ml-platforms-ffd6}
 
@@ -5530,13 +5400,7 @@ Cost optimization is a risk-allocation decision, not a catalog of discounts. Int
 
 Cloud providers offer significant discounts (60--90 percent) for interruptible compute capacity. ML training workloads are well suited for spot instances because checkpointing enables recovery from interruptions, training jobs tolerate delays better than serving, and large batch jobs amortize instance acquisition overhead.
 
-Effective spot usage requires three practices:
-
-- **Checkpoint Frequency Tuning**\index{Checkpointing!frequency tuning}: Balance checkpoint overhead against potential lost work. For a job costing \$10/hour on spot instances, hourly checkpoints losing at most one hour of work (\$10) far outweigh checkpoint storage costs.
-- **Instance Diversification**\index{Spot instance!instance diversification}: Request capacity across multiple instance types and availability zones to reduce interruption probability.
-- **Fallback Strategies**\index{Spot instance!fallback strategy}: Automatically fall back to on-demand instances for time-sensitive jobs or when spot availability is low.
-
-Together, these practices turn a cheap but unreliable resource into a bounded-risk training option.
+Effective spot instance usage requires three disciplined engineering practices. First, tuning checkpoint frequency\index{Checkpointing!frequency tuning} balances storage overhead against potential recovery loss: for a training run costing \$10 per hour on spot capacity, hourly snapshots limit lost compute to at most \$10, easily justifying minor checkpoint storage expenses. Second, instance diversification\index{Spot instance!instance diversification} requests capacity across heterogeneous accelerator types and availability zones to minimize the probability of simultaneous preemption. Third, automated fallback strategies\index{Spot instance!fallback strategy} divert workloads to on-demand instances whenever spot availability drops below operational thresholds or when deadlines loom. Together, these practices turn an unpredictable, low-cost commodity into a bounded-risk training asset.
 
 ```text
 Training Cost Comparison (100 GPU-hours):
@@ -6469,12 +6333,7 @@ Step 4: Investigate Kafka cluster
         → Root cause identified
 ```
 
-When a model's accuracy drops, the critical distinction is whether the root cause lies in the *data* or the *model*. The attribution flow separates four failure classes:
-
-- **Data Drift**\index{Incident classification!data drift}\index{Data drift!incident classification}: Input distribution shifted (new user demographics, seasonal patterns)
-- **Feature Staleness**\index{Incident classification!feature staleness}\index{Feature store!feature staleness}: Pipeline delays causing stale predictions
-- **Model Decay**\index{Incident classification!model decay}\index{Model decay!incident classification}: Concept drift where true relationships changed
-- **Upstream Model Change**\index{Incident classification!upstream model change}\index{Model dependency!upstream changes}: A model this model depends on was updated
+When a model's accuracy drops, the critical operational distinction is whether the root cause lies in the data or the model itself. The attribution workflow categorizes incidents into four primary failure classes. Data drift\index{Incident classification!data drift}\index{Data drift!incident classification} occurs when input distributions shift due to evolving user demographics or seasonal trends. Feature staleness\index{Incident classification!feature staleness}\index{Feature store!feature staleness} arises when upstream ingestion or pipeline delays starve serving infrastructure of fresh inputs, leading to outdated predictions. Model decay\index{Incident classification!model decay}\index{Model decay!incident classification} reflects true concept drift, where real-world statistical relationships shift and render previously learned parameters obsolete. Finally, upstream model changes\index{Incident classification!upstream model change}\index{Model dependency!upstream changes} occur when unannounced updates to an upstream producer invalidate representation assumptions across downstream consumers.
 
 The diagnostic sequence then tests the highest-probability shared causes before local model defects:
 
@@ -6586,23 +6445,11 @@ Rotation design determines whether the team can sustain that diagnostic burden. 
 
 : **On-call rotation design**: Industry-practice guidelines for rotation length, primary/secondary coverage, handoff overlap, and follow-the-sun handoffs in ML on-call. The recommendations balance context-switching cost (shorter rotations) against burnout risk (longer rotations) while ensuring expertise overlap for complex ML incidents. {#tbl-oncall-rotation-design}
 
-Alert fatigue poses a persistent risk to on-call effectiveness. Signs include on-call engineers ignoring alerts, assuming false positives, increasing time to acknowledge, and alerts auto-resolving without investigation. Mitigation must reduce pages that do not lead to ML-specific action:
-
-1. Tune drift, freshness, latency, and business-metric thresholds quarterly based on false positive rate.
-2. Deduplicate related model, feature-store, serving, and infrastructure alerts into one incident page.
-3. Attach runbooks that identify the likely owner and the first diagnostic query for each alert.
-4. Track alert-to-action ratio; aim for >80 percent.
+Alert fatigue poses a persistent risk to on-call effectiveness. Warning signs include engineers ignoring notifications, reflexively assuming false positives, taking longer to acknowledge pages, and letting alerts auto-resolve without investigation. To maintain responsiveness, mitigation strategies must systematically eliminate pages that do not lead to ML-specific intervention. Teams should tune drift, freshness, latency, and business-metric thresholds quarterly against empirical false positive rates, while deduplicating correlated model, feature store, serving, and infrastructure alarms into unified incident records. Every alert must attach a runbook identifying the designated owner and primary diagnostic query. Finally, platforms should track the alert-to-action ratio as a core health metric, targeting a threshold above 80 percent.
 
 Beyond general SRE skills, ML on-call requires interpreting model quality metrics, understanding data pipeline dependencies, distinguishing model bugs from data drift, and making rollback vs. investigate decisions under pressure. Toil reduction is equally critical because recurring manual tasks consume the capacity needed to improve the platform. Track time spent on recurring manual tasks, targeting less than 25 percent of on-call time on toil.
 
-Common ML toil usually accumulates at the model-platform boundary:
-
-- Manually restarting failed training jobs
-- Manually approving routine deployments
-- Investigating alerts that require no action
-- Generating recurring reports
-
-Automation is the durable response to recurring toil. An hour of automation development that saves 10 minutes per incident pays back within a quarter if the automated task would otherwise recur at least six times during that quarter. Despite these operational tools, common misconceptions consistently lead engineering teams astray when attempting to scale their ML operations.
+Common ML toil usually accumulates at the model-platform boundary, manifesting in recurring manual tasks such as restarting failed training runs, approving routine deployments, triaging non-actionable alert noise, and compiling periodic reports. Automation is the durable response to this recurring overhead. An hour of automation development that saves ten minutes per incident pays back within a single quarter if the automated task would otherwise recur at least six times during that period. Despite these operational tools, common misconceptions consistently lead engineering teams astray when attempting to scale their ML operations.
 
 ## Fallacies and Pitfalls {#sec-ml-operations-scale-fallacies-pitfalls-fe00}
 
