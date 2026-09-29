@@ -176,3 +176,28 @@ def test_h100_h200_fp32_resolves_to_cuda_core_rate_not_fp16_peak():
         assert key in pf, f"{dev}: '{key}' is not a precision_flops key"
         assert pf[key].m_as("TFLOP/s") == pytest.approx(67.0), dev
         assert pf[key].m_as("TFLOP/s") != node.compute.peak_flops.m_as("TFLOP/s"), dev
+
+
+def test_orin_fp16_roofline_is_not_aggregate_sparse_int8():
+    """2026-09-28: an FP16 roofline must not use the 275 sparse INT8 TOPS rating."""
+    orin = Hardware.Edge.JetsonAGXOrin
+    fp16 = orin.compute.precision_flops["fp16"]
+    assert fp16.to("TFLOPs/s").magnitude == pytest.approx(43)
+    assert orin.compute.precision_flops["int8"].to("TOPS").magnitude == pytest.approx(275)
+    ridge = (fp16 / orin.memory.bandwidth).to("flop/byte")
+    assert ridge.magnitude == pytest.approx(210.7843137254902)
+    assert fp16 < orin.compute.peak_flops
+
+
+def test_tpu_v3_matches_jouppi_2020_table3():
+    """TPU v3 is the per-chip figure from Jouppi et al. (2020), CACM 63(7),
+    Table 3: 123 TFLOP/s (16b), 450 W TDP, 32 GiB HBM at 900 GB/s. The old
+    105 TFLOP/s was a quarter of the 4-chip Cloud TPU v3 board rating."""
+    v3 = Hardware.Cloud.TPUv3
+    assert v3.compute.peak_flops.m_as("TFLOPs/s") == pytest.approx(123.0)
+    assert v3.compute.precision_flops["bf16"].m_as("TFLOPs/s") == pytest.approx(123.0)
+    assert v3.tdp.m_as("W") == pytest.approx(450)
+    assert v3.memory.bandwidth.m_as("GB/s") == pytest.approx(900)
+    assert v3.memory.capacity.m_as("GiB") == pytest.approx(32)
+    assert v3.ridge_point().m_as("flop/byte") == pytest.approx(136.67, rel=1e-3)
+    assert v3.metadata.provenance.url == "https://doi.org/10.1145/3360307"

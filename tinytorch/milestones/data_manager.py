@@ -11,6 +11,8 @@ Supported Datasets:
 - CIFAR-10: Natural images (32x32 RGB)
 - XOR: Synthetic non-linear problem
 - Perceptron: Synthetic linearly separable data
+- TinyShakespeare: Shakespeare plays and sonnets (1.1MB)
+- TinyPy: Curated Python functions and algorithms for code completion
 """
 
 import os
@@ -50,6 +52,27 @@ DATASET_INFO = {
         'extracted_size_mb': 1.1,
         'description': '1.1MB of William Shakespeare plays and sonnets',
         'url': 'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt'
+    },
+    'tinypy': {
+        'name': 'TinyPy',
+        'download_size_mb': 0.1,
+        'extracted_size_mb': 0.1,
+        'description': 'Curated Python functions and algorithms for code completion',
+        'url': 'https://raw.githubusercontent.com/harvard-edge/tinytorch/main/datasets/tinypy/tinypy_sample.txt'
+    },
+    'tinytalks': {
+        'name': 'TinyTalks',
+        'download_size_mb': 0.1,
+        'extracted_size_mb': 0.1,
+        'description': 'Targeted Q&A concept pairs covering TinyTorch modules and ML concepts',
+        'url': 'https://raw.githubusercontent.com/harvard-edge/tinytorch/main/datasets/tinytalks/tinytalks_tinytorch.txt'
+    },
+    'tinydigits': {
+        'name': 'TinyDigits',
+        'download_size_mb': 0.3,
+        'extracted_size_mb': 0.3,
+        'description': '1,797 handwritten 8x8 digits for fast CPU vision milestones',
+        'url': 'https://raw.githubusercontent.com/harvard-edge/tinytorch/main/datasets/tinydigits/train.pkl'
     }
 }
 
@@ -119,17 +142,17 @@ class DatasetManager:
         if available_mb > 0:
             print(f"    * Available space: {available_mb:.1f} MB")
         else:
-            print(f"    * Available space: (unable to check)")
+            print("    * Available space: (unable to check)")
         print(f"    * Required space:  ~{required_mb} MB")
 
         if not has_space:
-            print(f"    * Status: INSUFFICIENT SPACE")
+            print("    * Status: INSUFFICIENT SPACE")
             print()
             print(f"  Please free up at least {required_mb - available_mb:.0f} MB and try again.")
             print("=" * 60)
             return False
         else:
-            print(f"    * Status: Ready to download")
+            print("    * Status: Ready to download")
         print()
 
         # Auto-confirm mode (for CI/testing)
@@ -150,7 +173,7 @@ class DatasetManager:
             print("=" * 60)
             return False
         except KeyboardInterrupt:
-            print("\n  Download cancelled.")
+            print("\n  Download canceled.")
             print("=" * 60)
             return False
 
@@ -222,7 +245,7 @@ class DatasetManager:
             if not data_file.exists():
                 # Confirm download with user
                 if not self.confirm_download('cifar10'):
-                    raise RuntimeError("CIFAR-10 download cancelled by user")
+                    raise RuntimeError("CIFAR-10 download canceled by user")
 
                 url = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
                 self.download_with_progress(url, data_file)
@@ -273,7 +296,10 @@ class DatasetManager:
         if not sample_path.exists():
             sample_path = Path(__file__).parent / "05_2017_transformer" / "data" / "tinyshakespeare_sample.txt"
 
-        if sample_only and sample_path.exists():
+        if sample_only:
+            if not sample_path.exists():
+                raise FileNotFoundError(f"Offline Shakespeare sample not found at {sample_path}")
+            print(f"📖 Loaded offline Shakespeare sample: {sample_path.name}")
             with open(sample_path, 'r', encoding='utf-8') as f:
                 return f.read()
 
@@ -284,16 +310,103 @@ class DatasetManager:
         if not data_file.exists():
             if not self.confirm_download('tinyshakespeare'):
                 if sample_path.exists():
-                    print("⚠️ Falling back to bundled offline Shakespeare sample.")
+                    print(f"📖 Loaded offline Shakespeare sample: {sample_path.name}")
                     with open(sample_path, 'r', encoding='utf-8') as f:
                         return f.read()
-                raise RuntimeError("TinyShakespeare download cancelled and no offline sample found")
+                raise RuntimeError(
+                    "TinyShakespeare download canceled and no offline sample found."
+                )
 
             url = DATASET_INFO['tinyshakespeare']['url']
             self.download_with_progress(url, data_file)
 
+        print(f"📖 Loaded full TinyShakespeare dataset: {data_file.name}")
         with open(data_file, 'r', encoding='utf-8') as f:
             return f.read()
+
+    def get_tinypy(self, sample_only=False):
+        """Download and prepare TinyPy dataset for code completion milestone.
+
+        Args:
+            sample_only: If True, return the offline bundled sample (no download).
+
+        Returns:
+            str: The raw text content of Python code.
+        """
+        sample_path = Path(__file__).resolve().parent.parent / "datasets" / "tinypy" / "tinypy_sample.txt"
+        if not sample_path.exists():
+            sample_path = Path(__file__).parent / "05_2017_transformer" / "data" / "tinypy_sample.txt"
+        if not sample_path.exists():
+            sample_path = Path(__file__).parent / "05_2017_transformer" / "tinypy_sample.txt"
+
+        if sample_path.exists():
+            print(f"📖 Loaded offline TinyPy sample: {sample_path.name}")
+            with open(sample_path, 'r', encoding='utf-8') as f:
+                return f.read()
+
+        raise FileNotFoundError(f"Offline TinyPy sample not found at {sample_path}")
+
+    def get_tinytalks(self, sample_only=False, topic="tinytorch", split=None):
+        """Download and prepare TinyTalks Q&A dataset for conversational milestone.
+
+        Args:
+            sample_only: If True, return the offline bundled sample (no download).
+            topic: Either 'tinytorch' for course concepts or 'general' for general Q&A.
+            split: Optional split name ('train' or 'test').
+
+        Returns:
+            str: The raw text content of Q&A dialog pairs.
+        """
+        if split in ("train", "test"):
+            split_filename = f"{topic}_{split}.txt"
+            split_path = (
+                Path(__file__).resolve().parent.parent
+                / "datasets"
+                / "tinytalks"
+                / "splits"
+                / split_filename
+            )
+            if split_path.exists():
+                print(f"📖 Loaded offline TinyTalks split: {split_path.name}")
+                with open(split_path, "r", encoding="utf-8") as f:
+                    return f.read()
+
+        filename = "tinytalks_tinytorch.txt" if topic == "tinytorch" else "tinytalks_v1.txt"
+        sample_path = Path(__file__).resolve().parent.parent / "datasets" / "tinytalks" / filename
+        if not sample_path.exists():
+            sample_path = Path(__file__).resolve().parent.parent / "datasets" / "tinytalks" / "tinytalks_v1.txt"
+
+        if sample_path.exists():
+            print(f"📖 Loaded offline TinyTalks sample: {sample_path.name}")
+            with open(sample_path, 'r', encoding='utf-8') as f:
+                return f.read()
+
+        raise FileNotFoundError(f"Offline TinyTalks sample not found at {sample_path}")
+
+    def get_tinydigits(self):
+        """Load bundled TinyDigits dataset (1,797 samples of 8x8 digits).
+
+        Returns:
+            tuple: (train_data, train_labels), (test_data, test_labels)
+        """
+        digits_dir = Path(__file__).resolve().parent.parent / "datasets" / "tinydigits"
+        train_path = digits_dir / "train.pkl"
+        test_path = digits_dir / "test.pkl"
+        if not train_path.exists():
+            raise FileNotFoundError(f"TinyDigits train.pkl not found at {train_path}")
+
+        with open(train_path, 'rb') as f:
+            train_dict = pickle.load(f)
+        with open(test_path, 'rb') as f:
+            test_dict = pickle.load(f)
+
+        train_data = train_dict['images']
+        train_labels = train_dict['labels']
+        test_data = test_dict['images']
+        test_labels = test_dict['labels']
+
+        print(f"📊 TinyDigits loaded: {len(train_data)} training, {len(test_data)} test images")
+        return (train_data, train_labels), (test_data, test_labels)
 
     def get_xor_data(self, num_samples=1000):
         """Generate XOR problem data for non-linear milestone."""
@@ -349,6 +462,7 @@ class DatasetManager:
             # Read labels
             return np.frombuffer(f.read(), dtype=np.uint8).astype(np.int64)
 
+
 def main():
     """Test dataset manager functionality."""
     print("🧪 Testing TinyTorch Dataset Manager")
@@ -379,7 +493,36 @@ def main():
     except Exception as e:
         print(f"   CIFAR-10 download failed: {e}")
 
+    print("\n5. Testing TinyShakespeare Sample:")
+    try:
+        shake_sample = manager.get_tinyshakespeare(sample_only=True)
+        print(f"   Loaded: {len(shake_sample)} characters")
+    except Exception as e:
+        print(f"   TinyShakespeare sample failed: {e}")
+
+    print("\n6. Testing TinyPy Sample:")
+    try:
+        py_sample = manager.get_tinypy(sample_only=True)
+        print(f"   Loaded: {len(py_sample)} characters of Python code")
+    except Exception as e:
+        print(f"   TinyPy sample failed: {e}")
+
+    print("\n7. Testing TinyDigits:")
+    try:
+        (d_train_X, d_train_y), (d_test_X, d_test_y) = manager.get_tinydigits()
+        print(f"   Shape: train_X={d_train_X.shape}, test_X={d_test_X.shape}")
+    except Exception as e:
+        print(f"   TinyDigits load failed: {e}")
+
+    print("\n8. Testing TinyTalks Sample:")
+    try:
+        talks_sample = manager.get_tinytalks(sample_only=True)
+        print(f"   Loaded: {len(talks_sample)} characters of Q&A dialog")
+    except Exception as e:
+        print(f"   TinyTalks sample failed: {e}")
+
     print("\n✅ Dataset Manager test complete!")
+
 
 if __name__ == "__main__":
     main()

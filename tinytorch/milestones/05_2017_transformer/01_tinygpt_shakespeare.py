@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The Transformer Era (2017–2022) - TinyGPT & The Foundation of ChatGPT
+The Transformer Era (2017-2022) - TinyGPT & The Foundation of ChatGPT
 =============================================================================
 
 📚 HISTORICAL CONTEXT:
@@ -129,6 +129,10 @@ def press_enter_to_continue():
         console.print()
 
 
+# =============================================================================
+# 🎓 ZONE 1: STUDENT LEGO BRICKS (TinyGPT Architecture)
+# =============================================================================
+
 class TinyGPT:
     """
     Complete Decoder-Only Generative Pretrained Transformer (TinyGPT).
@@ -204,6 +208,10 @@ class TinyGPT:
         return params
 
 
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & TRAINING UX
+# =============================================================================
+
 def build_model(vocab_size, embed_dim=64, num_layers=2, num_heads=4, max_seq_len=64):
     """Instantiate TinyGPT and compute parameter statistics."""
     model = TinyGPT(
@@ -264,8 +272,8 @@ def run_milestone(args=None):
     # ─────────────────────────────────────────────────────────────────────────
     console.print()
     console.print(Panel.fit(
-        "[bold cyan]MILESTONE 05: THE TRANSFORMER ERA (2017–2022)[/bold cyan]\n\n"
-        "[yellow]Train TinyGPT from scratch on Shakespeare — the foundation of ChatGPT![/yellow]\n\n"
+        "[bold cyan]MILESTONE 05: THE TRANSFORMER ERA (2017-2022)[/bold cyan]\n\n"
+        "[yellow]Train TinyGPT from scratch on Shakespeare: the foundation of ChatGPT![/yellow]\n\n"
         "• Model: Causal Pre-LN Transformer Decoder (Vaswani et al. / GPT-2 / GPT-3)\n"
         "• Autograd: All Q, K, V projections and MLP weights receive reverse gradients\n"
         "• Systems: Parallel teacher-forcing training; foundation for KV-cache serving\n"
@@ -278,11 +286,21 @@ def run_milestone(args=None):
     # ─────────────────────────────────────────────────────────────────────────
     # 2. LOAD DATASET
     # ─────────────────────────────────────────────────────────────────────────
-    dm = DatasetManager()
-    with console.status("[bold green]Loading TinyShakespeare dataset..."):
-        text = dm.get_tinyshakespeare(sample_only=sample_only)
+    data_path = getattr(args, "data_path", None)
+    if data_path:
+        custom_file = Path(data_path)
+        if not custom_file.exists():
+            raise FileNotFoundError(f"Custom text file not found at {data_path}")
+        with open(custom_file, "r", encoding="utf-8") as f:
+            text = f.read()
+        dataset_name = custom_file.name
+    else:
+        dm = DatasetManager()
+        with console.status("[bold green]Loading TinyShakespeare dataset..."):
+            text = dm.get_tinyshakespeare(sample_only=sample_only)
+        dataset_name = "Shakespeare"
 
-    console.print(f"📖 Dataset loaded: [bold]{len(text):,} characters[/bold] of Shakespeare")
+    console.print(f"📖 Dataset loaded: [bold]{len(text):,} characters[/bold] of {dataset_name}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # 3. TOKENIZATION
@@ -427,7 +445,7 @@ def run_milestone(args=None):
             "You have constructed and trained the core generative engine of ChatGPT\n"
             "using exclusively the runtime, autograd, and neural network primitives\n"
             "you wrote from scratch in TinyTorch!\n\n"
-            "[dim]In Modules 14–19, you'll optimize this model with KV caching (Module 18),\n"
+            "[dim]In Modules 14-19, you'll optimize this model with KV caching (Module 18),\n"
             "INT8 quantization (Module 15), and hardware acceleration (Module 17).[/dim]",
             border_style="green",
             title="Success!",
@@ -446,6 +464,7 @@ def run_milestone(args=None):
 def main():
     parser = argparse.ArgumentParser(description="Milestone 05: TinyGPT on TinyShakespeare")
     parser.add_argument("--quick", "--sample", action="store_true", help="Run on offline sample dataset")
+    parser.add_argument("--data-path", type=str, default=None, help="Path to custom text file to train on")
     parser.add_argument("--prompt", type=str, default="First Citizen:", help="Seed prompt for text generation")
     parser.add_argument("--temperature", "--temp", type=float, default=0.8, help="Sampling temperature")
     parser.add_argument("--epochs", type=int, default=12, help="Number of training epochs")

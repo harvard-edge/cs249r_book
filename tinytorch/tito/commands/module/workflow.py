@@ -2001,12 +2001,12 @@ if missing:
         if completed_count >= 1:
             milestone_unlocks = self._check_milestone_readiness(completed)
             if milestone_unlocks:
-                self.console.print("[bold magenta]🏆 Milestones Unlocked:[/bold magenta]")
-                for milestone_id, milestone_name, ready in milestone_unlocks:
-                    if ready == "unlocked":
-                        self.console.print(f"  [magenta]✅ {milestone_id} - {milestone_name}[/magenta]")
-                    elif ready == "ready":
-                        self.console.print(f"  [yellow]🎯 {milestone_id} - {milestone_name} [Ready to unlock!][/yellow]")
+                self.console.print("[bold magenta]🏆 Historical Milestones:[/bold magenta]")
+                for milestone_id, milestone_name, state in milestone_unlocks:
+                    if state in ("completed", "unlocked"):
+                        self.console.print(f"  [magenta]✅ {milestone_id} - {milestone_name} [Done][/magenta]")
+                    elif state == "ready":
+                        self.console.print(f"  [yellow]🎯 {milestone_id} - {milestone_name} [Ready to run][/yellow]")
                 self.console.print()
 
         # Next steps
@@ -2057,7 +2057,7 @@ if missing:
 
             if mid in completed_milestones:
                 # Milestone has been run and completed
-                result.append((mid, name, "unlocked"))
+                result.append((mid, name, "completed"))
             elif all_modules_done:
                 # All required modules done but milestone not yet run
                 result.append((mid, name, "ready"))

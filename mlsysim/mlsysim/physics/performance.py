@@ -189,24 +189,46 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
         - ratio (float): The ratio of the bottlenecked time to the non-bottlenecked time.
         - intensity (float): The arithmetic intensity (FLOP/Byte) of the workload.
     """
+    # Arithmetic intensity is an intrinsic property of the workload (FLOP / Byte)
+    # independent of device performance:
+    ops_val = ops.m_as(ureg.flop) if hasattr(ops, "m_as") else float(ops)
+    bytes_val = model_bytes.m_as(ureg.byte) if hasattr(model_bytes, "m_as") else float(model_bytes)
+
+    if bytes_val < 1e-15:
+        intensity_val = float("inf") if ops_val >= 1e-15 else 0.0
+    elif ops_val < 1e-15:
+        intensity_val = 0.0
+    elif hasattr(ops, "to") and hasattr(model_bytes, "to"):
+        # Normalize before extracting magnitude so scaled inputs such as
+        # 1 TFLOP / 1 GB report 1000 flop/byte rather than Pint's raw magnitude.
+        intensity_val = (ops / model_bytes).to("flop/byte").magnitude
+    else:
+        intensity_val = float(ops / model_bytes)
+
     compute_time = ops / device_flops
     memory_time = model_bytes / device_bw
     t_comp_ms = compute_time.m_as(ureg.millisecond)
     t_mem_ms = memory_time.m_as(ureg.millisecond)
 
-    # Degenerate-workload guards: a zero-FLOP workload (pure data movement) is
-    # memory-bound by definition, and a zero-byte workload is compute-bound.
-    # The 1e-15 epsilon catches float-rounded zeros; either case would make the
-    # ratio/intensity divisions below blow up. The epsilon applies to MILLISECOND
-    # magnitudes (effective threshold 1e-18 s) — keep that basis in mind if the
-    # internal unit ever changes.
+    # Degenerate-workload / infinite-hardware guards:
+    # If compute or memory time vanishes (< 1e-15 ms, effective threshold 1e-18 s),
+    # the non-zero resource binds with infinite ratio.
+    if t_comp_ms < 1e-15 and t_mem_ms < 1e-15:
+        return {
+            "compute_ms": 0.0,
+            "memory_ms": 0.0,
+            "bottleneck": "Compute",
+            "ratio": 1.0,
+            "intensity": intensity_val,
+        }
+
     if t_comp_ms < 1e-15:
         return {
             "compute_ms": 0.0,
             "memory_ms": t_mem_ms,
             "bottleneck": "Memory",
             "ratio": float("inf"),
-            "intensity": 0.0,
+            "intensity": intensity_val,
         }
 
     if t_mem_ms < 1e-15:
@@ -215,7 +237,7 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
             "memory_ms": 0.0,
             "bottleneck": "Compute",
             "ratio": float("inf"),
-            "intensity": float("inf"),
+            "intensity": intensity_val,
         }
 
     # The slower of the two independent ceilings binds; the ratio reports how
@@ -225,15 +247,12 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
     # point is classified as (just barely) compute-bound by convention.
     is_memory_bound = t_mem_ms > t_comp_ms
     ratio = t_mem_ms / t_comp_ms if is_memory_bound else t_comp_ms / t_mem_ms
-    # Normalize before extracting magnitude so scaled inputs such as
-    # 1 TFLOP / 1 GB report 1000 flop/byte rather than Pint's raw magnitude.
-    intensity = (ops / model_bytes).to("flop/byte")
     return {
         "compute_ms": t_comp_ms,
         "memory_ms": t_mem_ms,
         "bottleneck": "Memory" if is_memory_bound else "Compute",
         "ratio": ratio,
-        "intensity": intensity.magnitude,
+        "intensity": intensity_val,
     }
 
 

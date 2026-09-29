@@ -18,6 +18,7 @@ from rich.tree import Tree
 from rich.columns import Columns
 from rich.cells import cell_len
 import sys
+import os
 import json
 import time
 import subprocess
@@ -41,6 +42,10 @@ MILESTONE_ALIASES = {
     "tinygpt": "05",
     "gpt": "05",
     "shakespeare": "05",
+    "code": "05",
+    "tinypy": "05",
+    "tinycopilot": "05",
+    "copilot": "05",
     "mlperf": "06",
     "olympics": "06",
     "serving": "06",
@@ -142,11 +147,23 @@ MILESTONE_SCRIPTS = {
                 "script": "milestones/05_2017_transformer/02_vaswani_attention.py",
                 "description": "Prove attention mechanism on sequence reversal and copying",
                 "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13]
+            },
+            {
+                "name": "TinyCopilot",
+                "script": "milestones/05_2017_transformer/03_tinycopilot.py",
+                "description": "Train TinyCopilot on Python code to complete functions and syntax",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
+            },
+            {
+                "name": "Conversational Q&A",
+                "script": "milestones/05_2017_transformer/04_tinygpt_chat.py",
+                "description": "Train conversational TinyGPT on TinyTorch Q&A and analyze overfitting",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
             }
         ],
         "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13],  # TinyGPT training requirements
-        "description": "Train TinyGPT from scratch on Shakespeare and generate text",
-        "historical_context": "Vaswani et al. (2017) and the Generative LLM revolution (2020–2022) proved transformers and emergent autoregressive scaling",
+        "description": "Train TinyGPT from scratch on Shakespeare, TinyCopilot code generation, and concept Q&A",
+        "historical_context": "Vaswani et al. (2017) and the Generative LLM revolution (2020-2022) proved transformers and emergent autoregressive scaling",
         "emoji": "🤖"
     },
     "06": {
@@ -635,9 +652,20 @@ class MilestoneCommand(BaseCommand):
             help='Run only a specific part (for multi-part milestones)'
         )
         run_parser.add_argument(
+            '--all',
+            action='store_true',
+            help='Run all parts sequentially (for multi-part milestones)'
+        )
+        run_parser.add_argument(
             '--skip-checks',
             action='store_true',
             help='Skip prerequisite checks (not recommended)'
+        )
+        run_parser.add_argument(
+            '--non-interactive', '-y', '--yes',
+            dest='non_interactive',
+            action='store_true',
+            help='Run non-interactively without prompting'
         )
 
         # Info subcommand (NEW)
@@ -1205,6 +1233,8 @@ class MilestoneCommand(BaseCommand):
 
     def _handle_run_command(self, args: Namespace) -> int:
         """Handle milestone run command - run a milestone with checks."""
+        if getattr(args, 'non_interactive', False):
+            os.environ["TINYTORCH_NON_INTERACTIVE"] = "1"
         console = self.console
         milestone_id = args.milestone_id
 
@@ -1235,8 +1265,13 @@ class MilestoneCommand(BaseCommand):
             all_script_configs = milestone["scripts"]
             all_scripts = [(s["name"], s["script"], s.get("description", "")) for s in all_script_configs]
 
+            # Check --all flag
+            run_all = getattr(args, "all", False)
+
             # Handle --part flag for multipart milestones
             if args.part is not None:
+                if run_all:
+                    console.print("[yellow]Notice: Both --part and --all specified; prioritizing --part[/yellow]\n")
                 if args.part < 1 or args.part > len(all_scripts):
                     console.print(Panel(
                         f"[red]Invalid part number: {args.part}[/red]\n\n"
@@ -1251,20 +1286,83 @@ class MilestoneCommand(BaseCommand):
                 scripts_to_run = [all_scripts[args.part - 1]]
                 script_configs = [all_script_configs[args.part - 1]]
                 console.print(f"[dim]Running Part {args.part} of {len(all_scripts)}[/dim]\n")
+            elif run_all:
+                scripts_to_run = all_scripts
+                script_configs = all_script_configs
+                console.print(f"[bold cyan]Running all {len(all_scripts)} parts sequentially[/bold cyan]\n")
             else:
-                # Check if milestone has a default_part (e.g., TinyDigits for CNN milestone)
-                # This allows multi-part milestones to have a "no-download" default
-                default_part = milestone.get("default_part")
-                if default_part is not None and 1 <= default_part <= len(all_scripts):
-                    scripts_to_run = [all_scripts[default_part - 1]]
-                    script_configs = [all_script_configs[default_part - 1]]
-                    console.print(f"[dim]Running Part {default_part} (default). Use --part N for other parts.[/dim]\n")
+                # Check if milestone has multiple parts and handle interactive selection
+                default_part = milestone.get("default_part", 1)
+                chosen_part = None
+                is_interactive = (
+                    sys.stdin.isatty()
+                    and sys.stdout.isatty()
+                    and os.environ.get("TINYTORCH_NON_INTERACTIVE") != "1"
+                    and os.environ.get("CI") != "true"
+                )
+
+                if is_interactive and len(all_scripts) > 1:
+                    menu_lines = []
+                    for i, s in enumerate(all_scripts):
+                        tag = " (default)" if (i + 1) == default_part else ""
+                        menu_lines.append(f"  [{i+1}] {s[0]}: {s[2]}{tag}")
+                    menu_lines.append("  [A] Run all parts sequentially")
+                    console.print(Panel(
+                        f"[bold cyan]Milestone {milestone_id} Parts Menu:[/bold cyan]\n\n"
+                        + "\n".join(menu_lines)
+                        + f"\n\n[dim]Press Enter to run default (Part {default_part})[/dim]",
+                        title="Choose Part to Run",
+                        border_style="cyan"
+                    ))
+                    try:
+                        prompt_text = f"[bold yellow]Select part (1 to {len(all_scripts)}, A for all, or Enter for {default_part}): [/bold yellow]"
+                        user_choice = console.input(prompt_text).strip()
+                        if user_choice.lower() in ("a", "all"):
+                            run_all = True
+                        elif user_choice.isdigit():
+                            val = int(user_choice)
+                            if 1 <= val <= len(all_scripts):
+                                chosen_part = val
+                            else:
+                                console.print(f"[yellow]Invalid selection '{user_choice}'; using default Part {default_part}[/yellow]\n")
+                                chosen_part = default_part
+                        elif user_choice == "":
+                            chosen_part = default_part
+                        else:
+                            console.print(f"[yellow]Invalid selection '{user_choice}'; using default Part {default_part}[/yellow]\n")
+                            chosen_part = default_part
+                    except (EOFError, KeyboardInterrupt):
+                        chosen_part = default_part
+                else:
+                    chosen_part = default_part
+
+                if run_all:
+                    scripts_to_run = all_scripts
+                    script_configs = all_script_configs
+                    console.print(f"[bold cyan]Running all {len(all_scripts)} parts sequentially[/bold cyan]\n")
+                elif chosen_part is not None and 1 <= chosen_part <= len(all_scripts):
+                    scripts_to_run = [all_scripts[chosen_part - 1]]
+                    script_configs = [all_script_configs[chosen_part - 1]]
+                    if not is_interactive:
+                        parts_overview = "\n".join(
+                            f"  {'▶' if i+1 == chosen_part else ' '} Part {i+1}: {s[0]} ({s[2]})"
+                            for i, s in enumerate(all_scripts)
+                        )
+                        console.print(
+                            f"[dim]Milestone {milestone_id} has {len(all_scripts)} parts:[/dim]\n"
+                            f"[dim]{parts_overview}[/dim]\n"
+                            f"[dim]Running Part {chosen_part} (default). Specify a part flag or the all flag to customize.[/dim]\n"
+                        )
+                    else:
+                        console.print(f"[bold green]Running Part {chosen_part}: {all_scripts[chosen_part-1][0]}[/bold green]\n")
                 else:
                     scripts_to_run = all_scripts
                     script_configs = all_script_configs
         else:
             if args.part is not None:
-                console.print(f"[yellow]⚠️ Milestone {milestone_id} has only one part, ignoring --part flag[/yellow]\n")
+                console.print(f"[yellow]Notice: Milestone {milestone_id} has only one part, ignoring --part flag[/yellow]\n")
+            if getattr(args, "all", False):
+                console.print(f"[yellow]Notice: Milestone {milestone_id} has only one part, ignoring --all flag[/yellow]\n")
             scripts_to_run = [("Main", milestone["script"], milestone.get("description", ""))]
             script_configs = [milestone]  # Single script uses milestone-level config
 
@@ -1330,8 +1428,7 @@ class MilestoneCommand(BaseCommand):
             # Test imports work
             console.print("[bold cyan]🧪 Testing YOUR implementations...[/bold cyan]\n")
 
-            import sys as _sys
-            _sys.path.insert(0, str(Path.cwd()))
+            sys.path.insert(0, str(Path.cwd()))
 
             export_failures = _validate_required_exports(required_modules)
             if export_failures:
@@ -1387,8 +1484,6 @@ class MilestoneCommand(BaseCommand):
         ))
 
         # Only prompt if in interactive terminal and not non-interactive mode
-        import sys
-        import os
         if sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get("TINYTORCH_NON_INTERACTIVE") != "1" and os.environ.get("CI") != "true":
             try:
                 console.input("\n[yellow]Press Enter to begin...[/yellow] ")
@@ -1639,7 +1734,7 @@ class MilestoneCommand(BaseCommand):
         Delegates to the shared :func:`auto_sync_after_completion` helper so the
         CI / interactivity / logged-in rules match the module-completion path.
         Crucially, this no longer skips the sync on a non-TTY shell (Git Bash /
-        IDE terminals) -- that silent skip left progress unsynced (#1849).
+        IDE terminals): that silent skip left progress unsynced (#1849).
         """
         from ..core.submission import auto_sync_after_completion
 

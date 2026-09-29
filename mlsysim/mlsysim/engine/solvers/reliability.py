@@ -58,12 +58,12 @@ class ReliabilityModel(ForwardModel):
         """
         # Series-system reliability: any single component failure stalls the
         # whole synchronous job, so failure rates ADD — first across a node's
-        # GPUs/NICs/PSUs, then across all nodes. Fleet MTBF therefore shrinks
+        # GPUs, NICs, and non-redundant PSUs, then across all nodes. Fleet MTBF therefore shrinks
         # roughly as 1/N with cluster size.
         node_mtbf = calc_mtbf_node(
             gpu_mtbf_h=Reliability.Gpu.mttf_hours, n_gpus=fleet.node.accelerators_per_node,
             nic_mtbf_h=Reliability.Nic.mttf_hours, n_nics=fleet.node.nics_per_node,
-            psu_mtbf_h=Reliability.Psu.mttf_hours, n_psus=fleet.node.psus_per_node,
+            psu_mtbf_h=Reliability.Psu.mttf_hours, n_psus=fleet.node.series_psus,
         )
         fleet_mtbf = calc_mtbf_cluster(node_mtbf, fleet.count)
 

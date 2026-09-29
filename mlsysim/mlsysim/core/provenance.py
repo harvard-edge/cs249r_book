@@ -82,6 +82,10 @@ class Sourced(float):
         ``sourced(derived_value, Provenance(kind=DERIVED, ...))``.
     """
 
+    provenance: Provenance
+    name: str
+    description: str
+
     def __new__(
         cls,
         value: Scalar,

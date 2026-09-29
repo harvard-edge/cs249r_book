@@ -25,6 +25,7 @@ from mlsysim.physics import (
     calc_bisection_bandwidth,
     calc_hop_latency,
     dTime,
+    calc_training_time_days,
     calc_amdahls_speedup,
     calc_strong_scaling_speedup,
     calc_universal_scalability_law,
@@ -51,6 +52,7 @@ from mlsysim.physics import (
     calc_pareto_conditional_survival,
     calc_pareto_mean_residual_life,
     calc_paged_kv_cache_size,
+    calc_speculative_branch_capacity,
     calc_capped_exponential_scale,
     calc_expected_paged_kv_tokens,
     calc_queue_latency_mmc,
@@ -125,6 +127,32 @@ class TestDTime:
         assert result.units == ureg.second
         assert result.magnitude == pytest.approx(1e18 / (8 * 312e12 * 0.5), rel=1e-4)
 
+
+# ======================================================================
+# calc_training_time_days
+# ======================================================================
+
+class TestTrainingTimeDays:
+    """Training duration in days."""
+
+    def test_one_day_training_budget(self):
+        # 86,400 seconds * 1e15 flop/s = 8.64e19 flop
+        total_ops = Q_("8.64e19 flop")
+        n_devices = 1
+        peak = Q_("1e15 flop/s")
+        eta = 1.0
+        days = calc_training_time_days(total_ops, n_devices, peak, eta)
+        assert days == pytest.approx(1.0, rel=1e-6)
+
+    def test_multi_device_efficiency_scaling(self):
+        total_ops = Q_("8.64e19 flop")
+        n_devices = 10
+        peak = Q_("1e15 flop/s")
+        eta = 0.5  # 50% efficiency across 10 devices = 5x single device effective speed
+        days = calc_training_time_days(total_ops, n_devices, peak, eta)
+        assert days == pytest.approx(0.2, rel=1e-6)
+
+
 # ======================================================================
 # calc_amdahls_speedup
 # ======================================================================
@@ -181,6 +209,71 @@ class TestBottleneck:
             Q_("1 GB/s"),
         )
         assert result["intensity"] == pytest.approx(1000.0)
+
+    def test_infinite_device_flops_preserves_workload_intensity(self):
+        # Even with infinite compute (t_comp_ms = 0), intrinsic arithmetic intensity
+        # is a workload property (10 TFLOP / 10 GB = 1000 FLOP/byte) and must not be zeroed out.
+        result = calc_bottleneck(
+            Q_("10 TFLOP"),
+            Q_("10 GB"),
+            Q_("inf flop/s"),
+            Q_("1 GB/s"),
+        )
+        assert result["bottleneck"] == "Memory"
+        assert result["compute_ms"] == 0.0
+        assert math.isinf(result["ratio"])
+        assert result["intensity"] == pytest.approx(1000.0)
+
+    def test_infinite_device_bw_preserves_workload_intensity(self):
+        # Even with infinite bandwidth (t_mem_ms = 0), intrinsic arithmetic intensity
+        # is a workload property (10 TFLOP / 10 GB = 1000 FLOP/byte) and must not be inf.
+        result = calc_bottleneck(
+            Q_("10 TFLOP"),
+            Q_("10 GB"),
+            Q_("1 TFLOP/s"),
+            Q_("inf byte/s"),
+        )
+        assert result["bottleneck"] == "Compute"
+        assert result["memory_ms"] == 0.0
+        assert math.isinf(result["ratio"])
+        assert result["intensity"] == pytest.approx(1000.0)
+
+    def test_zero_ops_memory_bound(self):
+        result = calc_bottleneck(
+            Q_("0 flop"),
+            Q_("1 GB"),
+            Q_("1 TFLOP/s"),
+            Q_("1 GB/s"),
+        )
+        assert result["bottleneck"] == "Memory"
+        assert result["compute_ms"] == 0.0
+        assert math.isinf(result["ratio"])
+        assert result["intensity"] == 0.0
+
+    def test_zero_bytes_compute_bound(self):
+        result = calc_bottleneck(
+            Q_("1 TFLOP"),
+            Q_("0 byte"),
+            Q_("1 TFLOP/s"),
+            Q_("1 GB/s"),
+        )
+        assert result["bottleneck"] == "Compute"
+        assert result["memory_ms"] == 0.0
+        assert math.isinf(result["ratio"])
+        assert math.isinf(result["intensity"])
+
+    def test_degenerate_zero_ops_and_bytes(self):
+        result = calc_bottleneck(
+            Q_("0 flop"),
+            Q_("0 byte"),
+            Q_("1 TFLOP/s"),
+            Q_("1 GB/s"),
+        )
+        assert result["bottleneck"] == "Compute"
+        assert result["compute_ms"] == 0.0
+        assert result["memory_ms"] == 0.0
+        assert result["ratio"] == 1.0
+        assert result["intensity"] == 0.0
 
 # ======================================================================
 # model_memory
@@ -705,6 +798,47 @@ class TestPagedKVCacheSize:
             seq_len=2050, batch_size=1, page_size_tokens=16,
         )
         assert frag == pytest.approx(14 / 2064, rel=1e-4)
+
+
+# ======================================================================
+# calc_speculative_branch_capacity
+# ======================================================================
+
+class TestSpeculativeBranchCapacity:
+    """KV cache capacity for concurrent speculative tree branches."""
+
+    def test_naive_replication(self):
+        # 16,384 MiB KV cache, 1000-token prefix, 100-token branch, 1 MiB/token
+        # Naive: each branch replicates (1000 + 100) * 1 MiB = 1100 MiB
+        # Capacity = floor(16384 / 1100) = 14 branches
+        c_kv = Q_("16384 megabyte")
+        bytes_per_tok = Q_("1 megabyte")
+        cap = calc_speculative_branch_capacity(
+            c_kv, l_prefix=1000, l_branch=100, bytes_per_token=bytes_per_tok, cow=False
+        )
+        assert cap == 14
+
+    def test_copy_on_write_prefix_sharing(self):
+        # CoW: parent prefix stored once (1000 MiB)
+        # Remaining: 16384 - 1000 = 15384 MiB
+        # Branch footprint: (100 tokens + 16 tail page tokens) * 1 MiB = 116 MiB
+        # Capacity = floor(15384 / 116) = 132 branches
+        c_kv = Q_("16384 megabyte")
+        bytes_per_tok = Q_("1 megabyte")
+        cap = calc_speculative_branch_capacity(
+            c_kv, l_prefix=1000, l_branch=100, bytes_per_token=bytes_per_tok, cow=True, page_block_tokens=16
+        )
+        assert cap == 132
+
+    def test_insufficient_memory_for_prefix(self):
+        # Memory is smaller than prefix alone: capacity should be 0
+        c_kv = Q_("500 megabyte")
+        bytes_per_tok = Q_("1 megabyte")
+        cap = calc_speculative_branch_capacity(
+            c_kv, l_prefix=1000, l_branch=100, bytes_per_token=bytes_per_tok, cow=True
+        )
+        assert cap == 0
+
 
 # ======================================================================
 # calc_capped_exponential_scale / calc_expected_paged_kv_tokens

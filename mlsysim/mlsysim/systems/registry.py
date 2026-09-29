@@ -46,10 +46,22 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
         nics_per_node=8,
+        # Power (added 2026-09-29): pc.DGX_H100_USER_GUIDE_POWER -- six 3.3 kW PSUs in
+        # 4+2 redundancy, 10.2 kW max. nics_per_node counts the eight compute
+        # ConnectX-7 IB cards; the two dual-port storage/in-band Ethernet cards are excluded.
+        psus_per_node=6,
+        psu_redundancy=2,
+        psu_rating=3.3 * kilowatt,
+        max_power=10.2 * kilowatt,
         host_memory=2 * TiB,
         host_cpu="Dual Intel Xeon Platinum 8480C",
         host_cpu_cores=112,
         host_memory_bw=614 * (GB / ureg.second),
+        # Physical composition (added 2026-09-28): pc.DGX_H100_USER_GUIDE_PHYSICAL
+        # -- four NVSwitch chips, 18 NVLink links per GPU, 287.6 lb (130.45 kg).
+        nvswitch_count=4,
+        nvlink_links_per_accelerator=18,
+        mass=130.45 * ureg.kilogram,
         metadata=Metadata(
             provenance=pc.DGX_H100_SYSTEM_SPEC,
             description="Official NVIDIA DGX H100 server: 8x H100 80GB SXM5, Dual Intel Xeon 8480C (112 cores).",
@@ -112,6 +124,17 @@ class Nodes(Registry):
             description="Kempner H100 partition server envelope: four H100 80GB GPUs per server.",
         ),
     )
+    GrandTeton_H100 = Node(
+        name="Meta Grand Teton (8x H100)",
+        accelerator=Hardware.Cloud.H100,
+        accelerators_per_node=8,
+        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
+        nics_per_node=8,
+        metadata=Metadata(
+            provenance=pc.META_GENAI_INFRA_2024,
+            description="Meta Grand Teton GPU server: eight H100 GPUs per node.",
+        ),
+    )
 
 
 class Fabrics(Registry):
@@ -155,6 +178,25 @@ class Fabrics(Registry):
     InfiniBand_GXDR = NetworkFabric(
         name="IB GXDR", bandwidth=_INFINIBAND_GXDR_BW, latency=Q_(IB_NDR_LATENCY_US, "us"),
         metadata=Metadata(provenance=_FABRIC_PROV["xdr"]),
+    )
+    # --- Added 2026-09-28 ---
+    InfiniBand_EDR = NetworkFabric(
+        name="IB EDR", bandwidth=100 * Gbps,
+        metadata=Metadata(provenance=pc.INFINIBAND_SPEC, description="EDR InfiniBand, 100 Gb/s per port (latency not modeled)."),
+    )
+    RoCE_400G = NetworkFabric(
+        name="400GbE RoCE", bandwidth=400 * Gbps, latency=Q_(ROCE_LATENCY_US, "us"),
+        metadata=Metadata(provenance=pc.META_GENAI_INFRA_2024, description="400 Gb/s RoCE v2 fabric (Meta GenAI cluster class)."),
+    )
+    InfiniBand_NDR_Oversub2to1 = NetworkFabric(
+        name="IB NDR (2:1 oversubscribed)", bandwidth=_INFINIBAND_NDR_BW,
+        latency=Q_(IB_NDR_LATENCY_US, "us"), oversubscription_ratio=2.0,
+        metadata=Metadata(provenance=pc.FABRIC_OVERSUBSCRIPTION_PROFILES),
+    )
+    InfiniBand_NDR_Oversub4to1 = NetworkFabric(
+        name="IB NDR (4:1 oversubscribed)", bandwidth=_INFINIBAND_NDR_BW,
+        latency=Q_(IB_NDR_LATENCY_US, "us"), oversubscription_ratio=4.0,
+        metadata=Metadata(provenance=pc.FABRIC_OVERSUBSCRIPTION_PROFILES),
     )
 
 
@@ -249,6 +291,54 @@ class Clusters(Registry):
         fabric=Fabrics.InfiniBand_NDR,
         metadata=Metadata(provenance=_TIER_PROV, description="Mega cluster tier (100k GPUs)."),
     )
+    # --- Added 2026-09-28 ---
+    Lab_64_A100 = Fleet(
+        name="Lab Cluster (64 A100 GPUs)",
+        node=Nodes.DGX_A100,
+        count=8,
+        fabric=Fabrics.InfiniBand_HDR,
+        metadata=Metadata(provenance=_TIER_PROV, description="Small lab tier (64 A100 GPUs)."),
+    )
+    DgxH100SuperPodSU = Fleet(
+        name="DGX SuperPOD scalable unit (32 DGX H100)",
+        node=Nodes.DGX_H100,
+        count=32,
+        fabric=Fabrics.InfiniBand_NDR,
+        metadata=Metadata(
+            provenance=pc.NVIDIA_DGX_SUPERPOD_H100_RA,
+            description="One DGX SuperPOD scalable unit: 32 DGX H100 nodes (256 GPUs) on NDR InfiniBand.",
+        ),
+    )
+    Meta_RSC_A100_16K = Fleet(
+        name="Meta AI Research SuperCluster (16,000 A100)",
+        node=Nodes.DGX_A100,
+        count=2000,
+        fabric=Fabrics.InfiniBand_HDR,
+        metadata=Metadata(
+            provenance=pc.META_RSC_2022,
+            description="Meta RSC full build-out: 2,000 DGX A100 nodes (16,000 GPUs) on 200 Gb/s InfiniBand.",
+        ),
+    )
+    Meta_GenAI_H100_24K_RoCE = Fleet(
+        name="Meta GenAI cluster (24,576 H100, RoCE)",
+        node=Nodes.GrandTeton_H100,
+        count=3072,
+        fabric=Fabrics.RoCE_400G,
+        metadata=Metadata(
+            provenance=pc.META_GENAI_INFRA_2024,
+            description="Meta 24K-GPU GenAI cluster on a 400 Gb/s RoCE fabric.",
+        ),
+    )
+    Meta_GenAI_H100_24K_IB = Fleet(
+        name="Meta GenAI cluster (24,576 H100, InfiniBand)",
+        node=Nodes.GrandTeton_H100,
+        count=3072,
+        fabric=Fabrics.InfiniBand_NDR,
+        metadata=Metadata(
+            provenance=pc.META_GENAI_INFRA_2024,
+            description="Meta 24K-GPU GenAI cluster on NVIDIA Quantum-2 400 Gb/s InfiniBand.",
+        ),
+    )
 
 
 class Pods(Registry):
@@ -263,6 +353,18 @@ class Pods(Registry):
             description="Reference TPU pod envelope for cloud-scale system models.",
         ),
     )
+    # Added 2026-09-28. Chips-only envelope: memory and power are the per-chip
+    # registry values times 8,960 (no host, network, or cooling overhead).
+    TPUv5p_8960 = PodEnvelope(
+        name="Cloud TPU v5p Pod (8960 chips)",
+        chips=8960,
+        memory=8960 * Hardware.Cloud.TPUv5p.memory.capacity,
+        power=8960 * Hardware.Cloud.TPUv5p.tdp,
+        metadata=Metadata(
+            provenance=pc.GOOGLE_TPU_V5P,
+            description="Full TPU v5p pod: 8,960 chips; memory and power are chips-only sums of per-chip registry values.",
+        ),
+    )
 
 
 class Racks(Registry):
@@ -273,6 +375,14 @@ class Racks(Registry):
         node=Nodes.DGX_H100,
         nodes_per_rack=4,
         non_accelerator_power=11.1 * kilowatt,
+        # Breakdown of the 11.1 kW (added 2026-09-28; the components already
+        # enumerated in pc.DGX_H100_RACK_REFERENCE). The schema validator
+        # guards that the five parts sum to non_accelerator_power.
+        host_power=3.2 * kilowatt,
+        switch_power=1.6 * kilowatt,
+        network_power=0.8 * kilowatt,
+        conversion_loss_power=2.8 * kilowatt,
+        cooling_allocation_power=2.7 * kilowatt,
         metadata=Metadata(
             provenance=pc.DGX_H100_RACK_REFERENCE,
             description="Reference 32-H100 rack profile for rack-level power and cooling models.",
@@ -445,6 +555,37 @@ class Storage(Registry):
         device=LocalNvmeGen5,
         devices_per_node=4,
         metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+    )
+    # --- Added 2026-09-28 ---
+    LocalNvmeGen4_7T68 = StorageSubsystem(
+        name="Local NVMe SSD (Gen4, 7.68 TB)",
+        storage_tech=Hardware.Tech.Storage.NvmeGen4,
+        capacity=7.68 * TB,
+        bandwidth=Hardware.Tech.Storage.NvmeGen4.bandwidth,
+        latency=Hardware.Tech.Storage.NvmeGen4.latency,
+        media="NVMe SSD",
+        interface="PCIe Gen4",
+        durability="local",
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Enterprise U.2 Gen4 NVMe drive at the common 7.68 TB capacity point.",
+        ),
+    )
+    LocalNvmeGen4_7T68x4 = NodeStorageConfig(
+        name="4x local Gen4 7.68 TB NVMe drives per node",
+        device=LocalNvmeGen4_7T68,
+        devices_per_node=4,
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+    )
+    PfsPerNodeShare = StorageSubsystem(
+        name="Parallel file system per-client share (uncontended)",
+        bandwidth=4 * (GB / ureg.second),
+        media="parallel file system",
+        durability="durable",
+        metadata=Metadata(
+            provenance=pc.STORAGE_TIER_CONVENTIONS,
+            description="Teaching assumption: uncontended per-client PFS read bandwidth.",
+        ),
     )
     PfsOneTbPerSecond = StorageSubsystem(
         name="Reference parallel file system (1 TB/s)",

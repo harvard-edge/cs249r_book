@@ -3,7 +3,7 @@
 from ..core.registry import Registry
 from .monitoring import Monitoring
 from .runtime import MemoryProtection, RuntimeOverheads
-from .training import TrainingRunOverheads
+from .training import Preemption, TrainingRunOverheads
 
 
 class Ops(Registry):
@@ -12,3 +12,4 @@ class Ops(Registry):
     RuntimeOverheads = RuntimeOverheads
     MemoryProtection = MemoryProtection
     TrainingRunOverheads = TrainingRunOverheads
+    Preemption = Preemption

@@ -2,7 +2,7 @@
 title: "Extending TinyTorch"
 ---
 
-TinyTorch's core—its tensor striding, autograd tape, and execution engine—is intentionally kept minimal. Across Modules 01 through 20, you built a complete, self-contained deep learning framework from bare silicon concepts up to modern generative AI:
+TinyTorch's core (its tensor striding, autograd tape, and execution engine) is intentionally kept minimal. Across Modules 01 through 20, you built a complete, self-contained deep learning framework from bare silicon concepts up to modern generative AI:
 
 - An n-dimensional array abstraction with arbitrary striding and slicing ([Module 01: Tensor](modules/01_tensor.qmd))
 - A reverse-mode automatic differentiation tape with topological backpropagation ([Module 06: Autograd](modules/06_autograd.qmd))
@@ -14,29 +14,16 @@ Every core module operates on a shared, unified contract: a `Tensor` encapsulate
 
 In modern deep learning systems, the core runtime is only the beginning. When neural networks scale to billions of parameters, or when production serving demands microsecond latencies, frameworks face an architectural dilemma:
 
-1. **The Monolithic Framework Trap:** Shovel every emerging systems optimization—low-rank adapters, activation checkpointing, custom GPU kernels, mixed-precision loss scaling, graph compilers—directly into the core framework. The framework balloons into a brittle, multi-million-line monolith where simple bugs in experimental kernels destabilize the core autograd engine.
+1. **The Monolithic Framework Trap:** Shovel every emerging systems optimization (low-rank adapters, activation checkpointing, custom GPU kernels, mixed-precision loss scaling, graph compilers) directly into the core framework. The framework balloons into a brittle, multi-million-line monolith where simple bugs in experimental kernels destabilize the core autograd engine.
 2. **The Extensibility Model:** Keep the engine core minimal, stable, and transparent, while exposing strict, first-class extension points. Every specialized optimization lives as an autonomous extension that plugs cleanly into the core contracts.
 
-TinyTorch adopts the extensibility model. The 20 core modules constitute an immutable foundation. Everything else—from vectorized C++ CPU kernels to Apple MPS dispatch, OpenAI Triton shaders, parameter-efficient fine-tuning, and graph fusion compilers—lives in the `tinytorch.extensions` ecosystem.
+TinyTorch adopts the extensibility model. The 20 core modules constitute an immutable foundation. Everything else, from vectorized C++ CPU kernels to Apple MPS dispatch, OpenAI Triton shaders, parameter-efficient fine-tuning, and graph fusion compilers, lives in the `tinytorch.extensions` ecosystem.
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     TinyTorch Extension Ecosystem                       │
-│                                                                         │
-│   • Parameter-Efficient Fine-Tuning (LoRALinear)                        │
-│   • Activation Checkpointing (checkpoint)                              │
-│   • Mixed-Precision Training (LossScaler)                               │
-│   • Graph Compilation & Operator Fusion (compile_graph)                 │
-│   • Vectorized CPU Kernels (simd_matmul, simd_fused_bias_gelu)          │
-│   • GPU Accelerator Dispatch (mps_matmul, triton_fused_gelu)            │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                 TinyTorch Core Engine (Modules 01–20)                   │
-│             Tensor  •  Autograd  •  Layer  •  Optimizer                 │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+::: {#fig-extensions-architecture fig-env="figure" fig-pos="htb" fig-cap="**The TinyTorch extension architecture.** The twenty core modules form a minimal, stable engine. Systems optimizations plug cleanly into the core contracts through four native extension points." fig-alt="Architecture diagram showing six extensions (LoRA, Checkpointing, Loss Scaler, Graph Fusion, SIMD Matmul, GPU Dispatch) connecting through a central boundary into the core engine (Tensor, Autograd, Layer, Optimizer)."}
+
+![](assets/images/diagrams/tinytorch_extensions_architecture.svg)
+
+:::
 
 ---
 
@@ -46,9 +33,9 @@ A natural question arises: *Why should you study and build systems extensions in
 
 The answer lies in the classic pedagogical tradition of operating systems education: from John Lions' legendary commentary on Unix 6th Edition, to Andrew Tanenbaum's Minix, to MIT's xv6.
 
-When Linus Torvalds wanted to understand how an operating system truly manages physical hardware, he did not begin by modifying a commercial monolith. He studied Minix—a compact microkernel operating system written by Tanenbaum specifically for teaching. Minix was small enough to be held in a single person's head, yet real enough to demonstrate preemptive scheduling, memory paging, and system calls. That tactile understanding gave Linus the foundational mental model to author the initial Linux kernel.
+When Linus Torvalds wanted to understand how an operating system truly manages physical hardware, he did not begin by modifying a commercial monolith. He studied Minix, a compact microkernel operating system written by Tanenbaum specifically for teaching. Minix was small enough to be held in a single person's head, yet real enough to demonstrate preemptive scheduling, memory paging, and system calls. That tactile understanding gave Linus the foundational mental model to author the initial Linux kernel.
 
-Years later, when MIT redesigned its operating systems curriculum (6.828 / 6.1810), it chose xv6—a modern reimplementation of Unix 6th Edition in 10,000 lines of clean ANSI C. When teaching virtual memory and process scheduling, MIT does not ask students to modify the production Linux kernel. Linux contains over 30 million lines of C, thousands of hardware drivers, lock-less read-copy-update (RCU) primitives, and deep architecture-specific macros. Attempting to implement a simple copy-on-write page allocator in Linux forces a student to spend 90% of their time fighting macro definitions, build harnesses, and kernel ABI wrappers before they ever manipulate a page table. In xv6, the abstraction boundaries are razor-sharp: a student can implement copy-on-write or a priority scheduler in 40 lines of clear C and inspect every page table manipulation directly in physical memory.
+Years later, when MIT redesigned its operating systems curriculum (6.828 / 6.1810), it chose xv6, a modern reimplementation of Unix 6th Edition in 10,000 lines of clean ANSI C. When teaching virtual memory and process scheduling, MIT does not ask students to modify the production Linux kernel. Linux contains over 30 million lines of C, thousands of hardware drivers, lock-less read-copy-update (RCU) primitives, and deep architecture-specific macros. Attempting to implement a simple copy-on-write page allocator in Linux forces a student to spend 90% of their time fighting macro definitions, build harnesses, and kernel ABI wrappers before they ever manipulate a page table. In xv6, the abstraction boundaries are razor-sharp: a student can implement copy-on-write or a priority scheduler in 40 lines of clear C and inspect every page table manipulation directly in physical memory.
 
 PyTorch is the Linux kernel of deep learning. It is an industrial engineering masterpiece, but extending it requires navigating the `TORCH_LIBRARY` dispatcher macros, pybind11 ABI translation layers, internal ATen tensor representations (`c10::TensorImpl`), CUDA stream abstractions, and massive multi-repository CMake build graphs. Writing a custom C++ operator in PyTorch requires dozens of lines of framework glue code just to deliver a tensor pointer to a loop.
 
@@ -135,40 +122,17 @@ Every extension in `tinytorch.extensions` is a complete, self-contained systems 
 
 ---
 
-## Extension Walkthroughs & Scorecards
+## Extension Walkthroughs & Systems Impact
+
+:::{.callout-tip title="Full Implementations and Mathematical Proofs: Chapter 21"}
+For the complete reference implementations, mathematical derivations, and step-by-step code traces of each extension, see **Chapter 21: Extensions** in the companion textbook [*TinyTorch: From Tensors to Transformers*](https://mlsysbook.ai/tinytorch/assets/downloads/TinyTorch-Book.pdf). For runnable hardware kernels (C++ SIMD, Apple Metal MPS, OpenAI Triton), see [Milestone 07: Custom GPU Kernels](milestones/07_kernels.qmd).
+:::
 
 ### 1. Parameter-Efficient Fine-Tuning (LoRA)
 
 **The Bottleneck:** Updating all weights in a dense layer during fine-tuning requires tracking Adam momentum and variance (8 bytes/param) plus gradients (4 bytes/param). For a 4096 × 16384 projection layer (67.1M parameters), storing Adam states alone consumes 536.9 MB.
 
-**Implementation:**
-```python
-import numpy as np
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Layer
-
-class LoRALinear(Layer):
-    def __init__(self, in_features: int, out_features: int, rank: int = 4):
-        super().__init__()
-        # 1. The frozen pre-trained weights (no gradients, no optimizer states)
-        self.weight = Tensor(
-            np.random.randn(in_features, out_features) / np.sqrt(in_features),
-            requires_grad=False
-        )
-        self.bias = Tensor(np.zeros(out_features), requires_grad=False)
-
-        # 2. Low-rank adapter matrices (trained!)
-        self.A = Tensor(
-            np.random.randn(in_features, rank) / np.sqrt(in_features),
-            requires_grad=True
-        )
-        self.B = Tensor(np.zeros((rank, out_features)), requires_grad=True)
-
-    def forward(self, x: Tensor) -> Tensor:
-        base = x.matmul(self.weight) + self.bias
-        adapter = x.matmul(self.A).matmul(self.B)
-        return base + adapter
-```
+**Architectural Strategy:** Freeze pre-trained weights ($W_0$) and inject low-rank trainable adapter matrices ($A \in \mathbb{R}^{d \times r}, B \in \mathbb{R}^{r \times k}$ with $r \ll \min(d, k)$). Forward computation evaluates $y = x W_0 + \frac{\alpha}{r} x A B$. Only $A$ and $B$ receive gradients, reducing trainable parameters and optimizer states by over 99%.
 
 **Scorecard (4096 × 16384 Projection Layer):**
 
@@ -185,33 +149,7 @@ class LoRALinear(Layer):
 
 **The Bottleneck:** Saving intermediate activations across deep networks causes memory to scale linearly with depth $O(L \cdot T \cdot D)$, triggering out-of-memory crashes on long sequences.
 
-**Implementation:**
-```python
-from tinytorch.core.tensor import Tensor, Function
-from tinytorch.core.autograd import no_grad
-
-def checkpoint(function, *args):
-    class CheckpointFunction(Function):
-        def forward(self, *numpy_arrays):
-            with no_grad():
-                out_tensor = function(*self.inputs)
-            return out_tensor.data if isinstance(out_tensor, Tensor) else out_tensor
-
-        def backward(self, grad_output):
-            detached_inputs = [
-                Tensor(t.data, requires_grad=t.requires_grad) if isinstance(t, Tensor) else t
-                for t in self.inputs
-            ]
-            recomputed_out = function(*detached_inputs)
-            grad_tensor = Tensor(grad_output) if not isinstance(grad_output, Tensor) else grad_output
-            recomputed_out.backward(grad_tensor)
-            return tuple(
-                x.grad.data if isinstance(x, Tensor) and x.grad is not None else None
-                for x in detached_inputs
-            )
-
-    return CheckpointFunction.apply(*args)
-```
+**Architectural Strategy:** Intercept the autograd tape via a custom `Function`. During the forward pass, execute activations inside a `no_grad()` context and discard intermediate layer states. During the backward pass, recompute forward activations on the fly from detached boundary tensors before calculating gradients, cutting peak activation memory by over 80%.
 
 **Scorecard (32-Layer Transformer, $T = 2048, D = 4096$):**
 
@@ -227,26 +165,7 @@ def checkpoint(function, *args):
 
 **The Bottleneck:** In FP16 training, gradient values below $2^{-24} \approx 5.96 \times 10^{-8}$ silently underflow to exact zero, extinguishing parameter updates.
 
-**Implementation:**
-```python
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.optimizers import Optimizer
-
-class LossScaler:
-    def __init__(self, scale: float = 65536.0):
-        self.scale = scale
-
-    def backward(self, loss: Tensor):
-        # Scale loss to shift gradients above the underflow threshold
-        scaled_loss = loss * self.scale
-        scaled_loss.backward()
-
-    def unscale_(self, optimizer: Optimizer):
-        # Unscale parameter gradients before optimizer step
-        for p in optimizer.params:
-            if p.grad is not None:
-                p.grad = p.grad / self.scale
-```
+**Architectural Strategy:** Multiply scalar loss by $S = 65,536$ ($2^{16}$) before initiating backpropagation. This shifts small gradient magnitudes into the normal FP16 dynamic range. Before the optimizer step, unscale parameter gradients back by dividing by $S$.
 
 **Scorecard (IEEE 754 float16 Underflow Analysis):**
 
@@ -262,26 +181,7 @@ class LossScaler:
 
 **The Bottleneck:** Eager define-by-run execution materializes intermediate tensors into DRAM after every operation. An elementwise chain $(x + \text{bias}) \cdot \text{scale}$ incurs two full round-trips to DRAM, saturating memory bandwidth.
 
-**Implementation:**
-```python
-class TracedNode:
-    def __init__(self, name):
-        self.name = name
-    def __add__(self, other):
-        other_name = other.name if isinstance(other, TracedNode) else str(other)
-        return TracedNode(f"({self.name} + {other_name})")
-    def __mul__(self, other):
-        other_name = other.name if isinstance(other, TracedNode) else str(other)
-        return TracedNode(f"({self.name} * {other_name})")
-
-def compile_graph(func, *input_names):
-    traced_inputs = [TracedNode(name) for name in input_names]
-    output = func(*traced_inputs)
-    code = f"def fused_kernel({', '.join(input_names)}):\n"
-    code += f"    # Fused by TinyTorch Compiler\n"
-    code += f"    return {output.name}\n"
-    return code
-```
+**Architectural Strategy:** Trace symbolic expressions into a lightweight computational Abstract Syntax Tree (AST). Emit a single fused loop kernel that loads input operands once, performs intermediate operations in CPU registers or GPU SRAM, and writes only the final output tensor back to DRAM.
 
 **Scorecard (Elementwise Chain on $10^7$ float32 Elements):**
 
@@ -304,8 +204,8 @@ def compile_graph(func, *input_names):
 | **GEMM (1024 × 1024):** Scalar C++ | 336 ms | 6.4 GFLOP/s | $53\times$ |
 | **GEMM (1024 × 1024):** `simd_matmul` (AVX2/NEON) | 99.4 ms | 21.6 GFLOP/s | **$170\times$** |
 | **GEMM (1024 × 1024):** `np.matmul` (Accelerate BLAS) | 1.33 ms | 1,611 GFLOP/s | $13,425\times$ |
-| **Bias + GELU (4096 × 768):** Unfused NumPy | 26.5 ms | — | $1.0\times$ (Baseline) |
-| **Bias + GELU (4096 × 768):** `simd_fused_bias_gelu` | 3.06 ms | — | **$8.6\times$** |
+| **Bias + GELU (4096 × 768):** Unfused NumPy | 26.5 ms | N/A | $1.0\times$ (Baseline) |
+| **Bias + GELU (4096 × 768):** `simd_fused_bias_gelu` | 3.06 ms | N/A | **$8.6\times$** |
 
 ---
 
@@ -480,6 +380,14 @@ Each project below takes a real systems bottleneck and demonstrates how you can 
   3. Export a ScaleSim-compatible workload topology file listing layer dimensions and dataflows (e.g., Weight Stationary `WS`, Output Stationary `OS`, or Input Stationary `IS`).
   4. Run the ScaleSim simulation from Python via `subprocess` to obtain cycle counts, buffer hit rates, and DRAM bandwidth requirements. Compare the simulated cycles and bandwidth stalls of `TinyGPT` projections across different array dimensions ($32 \times 32$ edge accelerator vs $128 \times 128$ datacenter systolic array).
 
+### The Data Systems Extension: Offline Micro-Datasets and Compiler Gating (TinyVerse)
+
+* **Systems Limitation:** Real-world training loops frequently stall on storage I/O, network deserialization, and multi-process IPC serialization overhead. Furthermore, in generative code models, traditional NLP metrics (like BLEU, ROUGE, or character cross-entropy loss) suffer from the "syntactic illusion": a generated function can achieve low cross-entropy loss while failing basic compiler parsing due to a single missing colon, unmatched delimiter, or invalid indentation.
+* **The Project:** Build an end-to-end data systems extension modeled after the TinyVerse dataset architecture:
+  1. **Contiguous Binary Layouts:** Package training samples into contiguous memory-mapped serialization buffers (`.pkl` / `.npy` / flat binary) to allow instantaneous, zero-copy batch slicing directly into `Tensor` without CPython object allocation overhead.
+  2. **Closed-World Algorithmic Curricula:** Hand-curate and programmatically generate closed-world, syntactically dense micro-corpora (such as `TinyPy` algorithms or `TinyTalks` concept Q&A) sized under 100 KB that saturate single-core CPU training in under 60 seconds without third-party network downloads.
+  3. **Compiler-in-the-Loop Evaluation:** Author a live verification hook that streams generated model tokens directly into Python's `ast.parse()` compiler, tracking the **AST Validity Rate (%)** as a strict compiler gate rather than relying solely on loss. Evaluate this data pipeline against Milestone 05 Part 3 to verify 100% syntactically valid code generation.
+
 ---
 
 ## How to Author and Test a New Extension
@@ -488,7 +396,7 @@ Adding a new extension to TinyTorch follows an explicit five-step protocol:
 
 1. **Identify the Boundary:** Map your optimization to `Function` (autograd math/recomputation), `Layer` (adapters/primitives), `Optimizer` (gradients/moments), or C-ABI `ctypes` / GPU runtime (silicon).
 2. **Copy the Template:** Duplicate `tinytorch/extensions/template.py` as your base (e.g. `tinytorch/extensions/kv_cache.py`).
-3. **Implement the Contract:** Satisfy the Golden Invariants—handle both `Tensor` and `np.ndarray`, define backward passes for differentiable operations, and fall back transparently to NumPy if hardware compilers or libraries are missing.
+3. **Implement the Contract:** Satisfy the Golden Invariants: handle both `Tensor` and `np.ndarray`, define backward passes for differentiable operations, and fall back transparently to NumPy if hardware compilers or libraries are missing.
 4. **Author Unit Tests:** Create a matching test file in `tinytorch/tests/extensions/` (e.g. `tests/extensions/test_kv_cache.py`). Verify numerical parity against an un-optimized or baseline reference (`np.allclose(out, ref, atol=1e-5)`):
    ```bash
    python -m pytest tinytorch/tests/extensions/test_kv_cache.py -v

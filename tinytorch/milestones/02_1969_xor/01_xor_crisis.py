@@ -135,13 +135,13 @@ XOR_TARGETS = np.array([
 ])
 
 
-# ============================================================================
-# SINGLE-LAYER PERCEPTRON
-# ============================================================================
+# =============================================================================
+# 🎓 ZONE 1: STUDENT CORE LEGO BRICKS (Model Architecture)
+# =============================================================================
 
 class SingleLayerPerceptron:
     """
-    Single-layer perceptron - the architecture that CANNOT solve XOR.
+    Single-layer perceptron: the architecture that CANNOT solve XOR.
 
     This is the exact architecture Minsky proved insufficient in 1969.
     Decision boundary: w1*x1 + w2*x2 + b = 0 (always a straight line)
@@ -169,6 +169,10 @@ class SingleLayerPerceptron:
         return w[0], w[1], b
 
 
+# =============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & VALIDATION UX
+# =============================================================================
+
 def evaluate_on_xor(model):
     """Evaluate model on XOR and return accuracy + predictions."""
     X = Tensor(XOR_INPUTS)
@@ -189,11 +193,14 @@ def describe_decision_boundary(w1, w2, b):
     intercept = -b/w2
     return f"Line: x2 = {slope:.2f}*x1 + {intercept:.2f}"
 
-def press_enter_to_continue() :
-    if sys.stdin.isatty() and sys.stdout.isatty() :
-        try :
+def press_enter_to_continue():
+    """Pause in interactive sessions; skip in CI or non-interactive runs."""
+    if os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true":
+        return
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
             console.input("\n[yellow]Press Enter to continue...[/yellow] ")
-        except EOFError :
+        except EOFError:
             pass
         console.print()
 
