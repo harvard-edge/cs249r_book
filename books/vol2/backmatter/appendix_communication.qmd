@@ -95,8 +95,8 @@ $$ T(n) = \alpha + \frac{n}{\beta} $$ {#eq-alpha-beta}
 
 where:
 
-- $\alpha$ is the **Startup Latency**\index{LogGP model!startup latency} (seconds)---the fixed cost of initiating a message, including software overhead, network interface card (NIC) processing, and routing setup
-- $\beta$ is the **Link Bandwidth**\index{LogGP model!link bandwidth} (bytes/s)---the sustained data rate after startup
+- $\alpha$ is the **Startup Latency**\index{LogGP model!startup latency} (seconds), the fixed cost of initiating a message, including software overhead, network interface card (NIC) processing, and routing setup
+- $\beta$ is the **Link Bandwidth**\index{LogGP model!link bandwidth} (bytes/s), the sustained data rate after startup
 - $n$ is the **Message Size**\index{LogGP model!message size} (bytes)
 
 The model decomposes every transfer into exactly two costs: a per-message tax ($\alpha$) paid regardless of size, and a per-byte tax ($n/\beta$) that scales linearly with the payload. This decomposition drives all the algorithm selection decisions in @sec-appdx-comm-foundations-algorithm-selection.
@@ -116,7 +116,7 @@ Parameterizing physical interconnects (@tbl-alpha-beta-params) provides the base
 
 ### Latency-dominated vs. bandwidth-dominated regimes {#sec-appdx-comm-foundations-regimes}
 
-The $\alpha$-$\beta$ model reveals two distinct operating regimes. For small messages, the startup latency $\alpha$ dominates---the link spends most of its time starting transfers, not sustaining them. For large messages, the bandwidth term $n/\beta$ dominates, and the startup cost becomes negligible.
+The $\alpha$-$\beta$ model reveals two distinct operating regimes. For small messages, the startup latency $\alpha$ dominates, and the link spends most of its time starting transfers rather than sustaining them. For large messages, the bandwidth term $n/\beta$ dominates, and the startup cost becomes negligible.
 
 The **Crossover Message Size**\index{LogGP model!crossover message size} $n^*$, defined by @eq-crossover, is the point where both terms contribute equally:
 
@@ -134,7 +134,7 @@ Below $n^*$, communication is **Latency-Dominated**\index{Latency-dominated comm
 
 $n^* = \alpha \times \beta =$ `{python} CommAlphaBeta.ib_ndr_alpha_us_str` $\times$ `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str` $=$ `{python} CommAlphaBeta.crossover_kb_str`
 
-**Analysis**: Messages smaller than `{python} CommAlphaBeta.crossover_kb_str` are latency-dominated on IB NDR. Gradient tensors from a single layer of a large model are typically `{python} CommAlphaBeta.grad_layer_mb_range_str`---well above this threshold. Control messages, heartbeats, and barrier synchronizations, however, are well below it.
+**Analysis**: Messages smaller than `{python} CommAlphaBeta.crossover_kb_str` are latency-dominated on IB NDR. Gradient tensors from a single layer of a large model are typically `{python} CommAlphaBeta.grad_layer_mb_range_str`, well above this threshold. Control messages, heartbeats, and barrier synchronizations, however, are well below it.
 
 **Systems insight**: This is why NCCL and Gloo batch small gradient tensors into larger "buckets" before launching AllReduce. Sending each tensor individually would pay the `{python} CommAlphaBeta.ib_ndr_alpha_us_str` startup cost hundreds of times per iteration instead of a handful.
 
@@ -152,15 +152,15 @@ $$T_{\text{long}}(n) \approx o_{\text{send}} + L_{\text{LogGP}} + (n - 1)G + o_{
 
 where $L_{\text{LogGP}}$ is the network latency, $o_{\text{send}}$ and $o_{\text{recv}}$ are sender and receiver overheads, $G$ is the gap per byte for long messages, and $g$ controls the minimum interval between consecutive message injections. Informal alpha-beta-style approximations can be useful for ML profiling, but the standard LogGP model keeps these gap parameters distinct from a simple bandwidth term.
 
-In most ML training scenarios, the $\alpha$-$\beta$ model is sufficient because gradient tensors are large enough that pipelining effects are secondary to raw bandwidth. The LogGP model becomes important when analyzing the overhead of many small control messages or when modeling the interaction between communication and computation overlap---situations that arise in fine-grained pipeline parallelism and asynchronous gradient updates.
+In most ML training scenarios, the $\alpha$-$\beta$ model is sufficient because gradient tensors are large enough that pipelining effects are secondary to raw bandwidth. The LogGP model becomes important when analyzing the overhead of many small control messages or when modeling the interaction between communication and computation overlap, situations that arise in fine-grained pipeline parallelism and asynchronous gradient updates.
 
-The $\alpha$-$\beta$ model describes point-to-point transfers. Collective operations---where all GPUs participate---compose multiple point-to-point transfers, and their cost formulas derive directly from the model above.
+The $\alpha$-$\beta$ model describes point-to-point transfers. Collective operations, in which all GPUs participate, compose multiple point-to-point transfers, and their cost formulas derive directly from the model above.
 
 ## Collective Operation Complexity {#sec-appdx-comm-foundations-collective-complexity}
 
 ::: {#psp-appendix-communication-collective-complexity-matters .callout-perspective title="Why this matters"}
 
-Every distributed training step ends with a collective synchronization. The cost of that collective---not the cost of the matrix multiplies---often determines whether scaling from 8 GPUs to 256 is feasible. Understanding the exact complexity of each collective reveals which parallelism strategy (data, tensor, pipeline, expert) will dominate wall time at a given scale.
+Every distributed training step ends with a collective synchronization. The cost of that collective, rather than the cost of the matrix multiplies, often determines whether scaling from 8 GPUs to 256 is feasible. Understanding the exact complexity of each collective reveals which parallelism strategy (data, tensor, pipeline, expert) will dominate wall time at a given scale.
 
 :::
 
@@ -232,7 +232,7 @@ $T_{\text{ring}} \approx$ `{python} CommCollectives.ring_time_ms_str`
 
 $T_{\text{tree}} \approx$ `{python} CommCollectives.tree_time_ms_str`
 
-**Analysis**: For this `{python} CommCollectives.ring_msg_gb_str` message, ring AllReduce takes `{python} CommCollectives.ring_time_ms_str`, and tree takes `{python} CommCollectives.tree_time_ms_str`---the ring is significantly faster because it distributes the bandwidth load across all links. The tree's logarithmic latency advantage is negligible compared to its bandwidth penalty for large messages.
+**Analysis**: For this `{python} CommCollectives.ring_msg_gb_str` message, ring AllReduce takes `{python} CommCollectives.ring_time_ms_str`, and tree takes `{python} CommCollectives.tree_time_ms_str`. The ring is significantly faster because it distributes the bandwidth load across all links. The tree's logarithmic latency advantage is negligible compared to its bandwidth penalty for large messages.
 
 **Systems insight**: For the large gradient tensors typical of data-parallel training, ring (or ring-based) algorithms dominate. This unsegmented tree model favors small messages. Production tree variants can pipeline or partition messages and must be evaluated with their own cost models.
 
@@ -299,7 +299,7 @@ Two patterns emerge from this table. First, the ring and pairwise-exchange model
 
 ::: {#psp-appendix-communication-algorithm-selection-matters .callout-perspective title="Why this matters"}
 
-NCCL automatically selects a collective algorithm based on message size and GPU topology, but understanding why it chooses ring for large messages and tree for small ones helps diagnose when the auto-selection is suboptimal---and how to structure communication to stay in the efficient regime.
+NCCL automatically selects a collective algorithm based on message size and GPU topology, but understanding why it chooses ring for large messages and tree for small ones helps diagnose when the auto-selection is suboptimal and how to structure communication to stay in the efficient regime.
 
 :::
 
@@ -467,7 +467,7 @@ Compression is beneficial when $T_{\text{compressed}} < T_{\text{transfer}}(M)$.
 
 $$ T_{\text{encode}} + T_{\text{decode}} < T_{\text{transfer}}(M) - T_{\text{transfer}}\!\left(\frac{M}{r_{\text{comp}}}\right) $$ {#eq-compression-breakeven}
 
-In the bandwidth-dominated regime ($M \gg n^*$), the communication time scales linearly with message size, and the right-hand side simplifies to approximately $T_{\text{transfer}}(M) \times (1 - 1/r_{\text{comp}})$. For high compression ratios ($r_{\text{comp}} \gg 1$), this approaches $T_{\text{transfer}}(M)$---meaning compression is worthwhile as long as the codec overhead is less than the uncompressed communication time.
+In the bandwidth-dominated regime ($M \gg n^*$), the communication time scales linearly with message size, and the right-hand side simplifies to approximately $T_{\text{transfer}}(M) \times (1 - 1/r_{\text{comp}})$. For high compression ratios ($r_{\text{comp}} \gg 1$), this approaches $T_{\text{transfer}}(M)$, so compression is worthwhile as long as the codec overhead is less than the uncompressed communication time.
 
 ```{python}
 #| echo: false

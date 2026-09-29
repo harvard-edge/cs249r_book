@@ -15,7 +15,7 @@ In production, "it is slow" and "it is wrong" are rarely informative symptoms. A
 - Classify single-machine bottlenecks by dominant Data, Algorithm, or Machine axis while recognizing mixed causes
 - Map optimization techniques to their D·A·M intersection zone to understand which axes they span
 - Apply the iron law equation to quantitatively diagnose performance problems
-- Distinguish between memory-bound and compute-bound workloads using arithmetic intensity
+- Distinguish between memory-bound and compute-bound workloads using arithmetic intensity and the roofline bound
 - Select appropriate profiling tools and optimization strategies for each Data, Algorithm, or Machine axis
 - Evaluate system health using D·A·M scorecard metrics (I/O overhead, active parameters, MFU)
 
@@ -32,10 +32,10 @@ When training is slow on a single GPU, check utilization, data wait time, and mo
 from mlsysim import *
 from mlsysim.core.units import *
 
-from mlsysim.fmt import check, fmt, fmt_arithmetic_intensity, fmt_frac
+from mlsysim.fmt import check, fmt, fmt_arithmetic_intensity, fmt_bandwidth, fmt_flop_rate, fmt_frac, fmt_percent, fmt_qty_int
 
 # ┌── LEGO ───────────────────────────────────────────────
-# Scenarios: GPU Utilization, Iron Law Analysis, Scaling Discrepancy
+# Scenarios: GPU Utilization, Iron Law Analysis, Roofline Bound, Scaling Discrepancy
 
 class DAMTaxonomy:
     """
@@ -78,7 +78,12 @@ class DAMTaxonomy:
     h100_ridge_q = h100_fp16_peak / h100_hbm_bandwidth
     h100_ridge_flop_per_byte = h100_ridge_q.to(flop / byte).magnitude
 
-    # Step 2: Exercise 3 logic
+    # Step 2: Roofline worked example (batch-1 decode of the same model)
+    roof_decode_intensity_q = (ex2_flops_per_pass / ex2_model_size).to(flop / byte)
+    roof_decode_attainable_q = (roof_decode_intensity_q * h100_hbm_bandwidth).to(TFLOP / second)
+    roof_decode_ratio = (roof_decode_attainable_q / h100_fp16_peak).to("").magnitude
+
+    # Step 3: Exercise 3 logic
     ex3_imp_pct = (ex3_loss_start - ex3_loss_end) / ex3_loss_start * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -86,9 +91,15 @@ class DAMTaxonomy:
 
     check(ex2_util < 10, f"Batch-1 utilization ({ex2_util:.1f}%) unexpectedly high.")
     check(290 < h100_ridge_flop_per_byte < 300, f"H100 ridge point changed: {h100_ridge_flop_per_byte:.1f}")
+    check(roof_decode_ratio < 0.01, f"Batch-1 decode roofline fraction ({roof_decode_ratio:.4f}) unexpectedly high.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_ridge_str = fmt_arithmetic_intensity(h100_ridge_q, precision=1, commas=False)
+    h100_peak_tflops_str = fmt_qty_int(h100_fp16_peak, TFLOP / second, commas=False)
+    h100_hbm_tbs_str = fmt_bandwidth(h100_hbm_bandwidth, unit=TB / second, precision=2)
+    roof_decode_intensity_str = fmt_arithmetic_intensity(roof_decode_intensity_q, precision=0)
+    roof_decode_attainable_str = fmt_flop_rate(roof_decode_attainable_q, unit=TFLOP / second, precision=2)
+    roof_decode_pct_str = fmt_percent(roof_decode_ratio, precision=1)
 ```
 
 The Data · Algorithm · Machine (D·A·M) taxonomy is the diagnostic framework for single-node ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, ask: *where is the flow blocked?* This taxonomy helps practitioners decompose bottlenecks across three diagnostic axes,[^fn-mece-v2-exclusive] while recognizing that real systems can involve mixed causes or interactions between axes.
@@ -144,6 +155,16 @@ The symptoms below are screening signals, not diagnoses. A workload whose arithm
 *   **High GPU utilization** ($>$ 95 percent): Treat this as machine bound only if compute units are busy and memory bandwidth is not saturated. If memory bandwidth is saturated, the bottleneck is still on the Data/Machine boundary.
 *   **If batch size is 1**: Treat this as a warning that latency or launch overhead may matter. For large language model (LLM) decode, batch-1 execution is often memory-bandwidth bound unless traces show dispatch gaps.
 *   **If arithmetic intensity is below the ridge point** (about `{python} DAMTaxonomy.h100_ridge_str` on H100): The workload is likely memory bound (Data/Machine boundary).
+
+### The roofline bound {#sec-appdx-dam-taxonomy-roofline}
+
+The ridge point belongs to a simple upper bound on single-device throughput, the roofline model\index{Roofline Model!single-machine recap} [@williams2009]. A kernel with arithmetic intensity $I$, running on a device with peak compute rate $R_{\text{peak}}$ and memory bandwidth $\text{BW}$, can attain at most
+
+$$ R_{\text{attain}}(I) = \min\!\left(R_{\text{peak}},\; I \times \text{BW}\right) $$ {#eq-appdx-dam-roofline}
+
+On log-log axes, the bound is a bandwidth roof of slope one ($I \times \text{BW}$) that meets a flat compute roof ($R_{\text{peak}}$) at the ridge point $I_{\text{ridge}} = R_{\text{peak}}/\text{BW}$. Left of the ridge, a kernel is memory bound, and only more bandwidth or fewer bytes per operation raises its ceiling. Right of the ridge, it is compute bound, and only a faster or better-utilized datapath helps. In D·A·M terms, the bandwidth roof belongs to the Data axis, the compute roof to the Machine axis, and the Algorithm axis decides where on the intensity axis the kernel sits. The roofline is a ceiling, not a prediction. A kernel far below both roofs is limited by something the model omits, such as launch overhead, synchronization, or low occupancy.
+
+For an H100, the book's hardware constants give a dense FP16 peak of `{python} DAMTaxonomy.h100_peak_tflops_str` and a high-bandwidth memory (HBM) bandwidth of `{python} DAMTaxonomy.h100_hbm_tbs_str`, which places the ridge at about `{python} DAMTaxonomy.h100_ridge_str`. Batch-1 decode of a 7-billion-parameter language model stored in 16-bit precision performs about two operations per parameter for each generated token (one multiply and one add) and must read every two-byte weight once, so its intensity is about `{python} DAMTaxonomy.roof_decode_intensity_str`. @Eq-appdx-dam-roofline then caps attainable throughput at `{python} DAMTaxonomy.roof_decode_attainable_str`, roughly `{python} DAMTaxonomy.roof_decode_pct_str` percent of peak, however well the kernels are written. Serving $B$ sequences in one decode step reuses each loaded weight $B$ times and raises the intensity to roughly $B$ FLOP/byte, until key-value cache traffic, which grows with batch size and context length, begins to dominate the bytes moved. That arithmetic is why batching is the first lever of every serving system, and @sec-appdx-fleet-foundations-roofline extends the same model to compare ridge points across accelerator generations.
 
 ### Bottleneck diagnostic {#sec-appdx-dam-taxonomy-bottleneck-diagnostic}
 
@@ -216,7 +237,7 @@ The D·A·M taxonomy provides the diagnostic baseline for every ML systems analy
 ::: {.callout-takeaways title="Single-machine diagnostic heuristics"}
 
 * **Identify the dominant axis**: Decide whether Data, Algorithm, or Machine is the binding constraint before proposing any optimization.
-* **Profile arithmetic intensity**: Arithmetic intensity quantitatively distinguishes between Data-bound and Machine-bound regimes.
+* **Profile arithmetic intensity**: Arithmetic intensity, read against the roofline's ridge point, quantitatively distinguishes between Data-bound and Machine-bound regimes.
 * **Use the iron law**: The iron law transforms vague symptoms into specific term-based bottlenecks.
 * **Grade with the scorecard**: The Data-Algorithm-Machine scorecard standardizes "good" performance before moving to fleet scale.
 

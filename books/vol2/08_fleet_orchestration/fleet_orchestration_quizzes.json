@@ -414,35 +414,33 @@
     },
     {
       "section_id": "#sec-fleet-orchestration-serving",
-      "section_title": "Serving Resource Management",
+      "section_title": "Serving Capacity in the Shared Fleet",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Inference autoscaling lag and queue-depth/concurrency metrics",
-            "Predictive autoscaling and SLO management under diurnal load",
+            "Serving capacity as a claim on the shared fleet: replicas as indivisible execution groups",
             "Resource isolation: MIG vs. MPS vs. software time-slicing",
-            "GPU sharing economics and packing density",
-            "Prefix-caching and KV-cache aware request routing",
-            "Harvesting diurnal idle serving GPUs for offline batch training"
+            "GPU sharing economics, packing density, and the interference that memory fit alone does not reveal",
+            "The training-serving resource boundary, mode-switching cost, and diurnal capacity harvesting"
           ],
-          "question_strategy": "Test students on the unique dynamics of real-time inference resource allocation, from cold-start mitigation to diurnal capacity harvesting.",
-          "difficulty_progression": "Progress from autoscaling metrics and GPU sharing isolation trade-offs to predictive scaling architectures and KV-cache routing dynamics.",
-          "integration": "Connects inference engine memory architectures (vLLM/continuous batching) with cluster orchestration control loops.",
-          "ranking_explanation": "Autoscaling metrics and diurnal capacity harvesting are prioritized because they govern latency SLO compliance and multi-million-dollar fleet efficiency."
+          "question_strategy": "Test students on how the fleet orchestrator sizes, places, isolates, and shares serving capacity alongside training demand.",
+          "difficulty_progression": "Progress from the replica as a schedulable unit and device-sharing isolation trade-offs to mode-switching cost, sharing economics, and dynamic training-serving boundaries.",
+          "integration": "Connects serving replicas to gang scheduling, device partitioning, and preemption policy in the shared fleet.",
+          "ranking_explanation": "The training-serving boundary and sharing economics are prioritized because they decide how much of the fleet serving can claim without starving training."
         },
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "Why is standard CPU/GPU utilization (such as reported by Kubernetes Horizontal Pod Autoscaler) an ineffective metric for autoscaling LLM inference replicas, and what metric should be used instead?",
+            "question": "Why does the fleet orchestrator schedule a 175B-parameter serving replica as an eight-GPU group rather than as eight independent GPUs?",
             "choices": [
-              "GPU utilization is strictly proprietary to NVIDIA and cannot be exported to Prometheus.",
-              "GPU utilization measures compute core occupancy rather than request latency or queue saturation; an LLM serving replica can be stalled on KV-cache memory capacity or request concurrency while reporting modest GPU SM utilization, making request concurrency or queue depth the superior scaling metric.",
-              "GPU utilization fluctuates faster than the speed of light, violating Nyquist sampling criteria in etcd.",
-              "LLM serving replicas do not use GPUs during inference, relying entirely on CPU vector instructions."
+              "Kubernetes cannot address more than one GPU per pod unless the pod is marked as a gang.",
+              "The replica's weights are sharded across a tensor-parallel group, so it can serve only when every member is placed; a partial placement delivers no serving capacity at all.",
+              "Eight independent GPUs would each need a full copy of the weights, which improves fault tolerance but wastes memory.",
+              "Grouping GPUs lets the orchestrator skip readiness checks for the replica."
             ],
-            "answer": "The correct answer is B. Standard GPU utilization metrics (SM activity) poorly reflect LLM serving load because models frequently become memory-bound (KV-cache exhaustion) or queue-bound (incoming requests waiting for iteration slots in continuous batching) while SM utilization remains moderate or spiky. Using request concurrency, pending queue depth (e.g., from vLLM/TGI), or TTFT/ITL latency metrics provides a direct, responsive signal for autoscaling. The proprietary claim, Nyquist violation, and CPU-only claim are fictitious distractors.",
-            "learning_objective": "Evaluate autoscaling metrics and cold-start latency challenges in LLM serving infrastructure."
+            "answer": "The correct answer is B. A model of this size does not fit on one accelerator, so its replica is a tensor-parallel execution group that can accept requests only when every shard is resident. The orchestrator must therefore place the group atomically, just as it places a training gang. Pod-level GPU limits, full weight copies, and readiness checks are not the reason for the grouping.",
+            "learning_objective": "Explain why serving replicas for large models are indivisible scheduling units in the shared fleet."
           },
           {
             "question_type": "MCQ",
@@ -464,21 +462,21 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Why does reactive autoscaling alone often fail to maintain P99 latency SLOs during sudden inference traffic spikes, and how does predictive autoscaling mitigate this?",
-            "answer": "Reactive autoscaling triggers only after metrics (e.g., request queue depth) exceed thresholds, after which provisioning a new GPU container entails pulling multi-gigabyte container images, loading tens of gigabytes of model weights into HBM, and warming up CUDA kernels (a cold start of 30-120 seconds). During this lag, incoming traffic overflows buffers and violates latency SLOs. Predictive autoscaling uses time-series forecasting to pre-provision GPU replicas in advance of anticipated traffic ramps.",
-            "learning_objective": "Analyze why predictive autoscaling is necessary to prevent SLO violations during inference traffic spikes."
+            "question": "Why can a shared fleet not move GPUs between training and serving in response to second-by-second traffic bursts, and how does the orchestrator use the diurnal traffic curve instead?",
+            "answer": "Repurposing a GPU requires checkpointing the training job, stopping its container, launching the inference server, loading model weights, and running warmup queries, which together take roughly 5 to 20 minutes. That switching latency is far longer than a burst, so the boundary must follow forecast demand instead. The orchestrator forecasts the daily curve, preempts low-priority training shortly before the morning ramp to warm serving replicas, and drains serving replicas back to training when traffic falls at night.",
+            "learning_objective": "Analyze how mode-switching cost determines the timescale on which the training-serving boundary can move."
           },
           {
             "question_type": "TF",
-            "question": "True or False: In a multi-replica LLM inference cluster, routing user requests randomly via round-robin DNS achieves the highest overall cluster throughput because it balances raw request counts evenly across GPUs.",
-            "answer": "False. LLM inference performance depends heavily on KV-cache reuse. Routing requests with shared system prompts or document contexts to the specific GPU replicas that already host the cached prefix in memory (prefix-aware / KV-cache-aware routing) drastically reduces time-to-first-token (TTFT) and eliminates redundant prefill compute, outperforming naive round-robin routing.",
-            "learning_objective": "Evaluate the interaction between intelligent request routing and GPU memory locality in LLM inference fleets."
+            "question": "True or False: If two serving models fit together within an 80 GB GPU's memory under MPS, co-locating them is guaranteed to halve the number of GPUs the fleet needs without affecting latency.",
+            "answer": "False. Memory fit is only the first admission condition. Co-located models under MPS share execution units and memory bandwidth, so two compute-bound models can each lose 15 to 20 percent throughput, while a compute-bound model paired with a memory-bound one may lose far less. Consolidation is justified only after load testing shows that each co-resident pair still meets its throughput and tail-latency objectives with the required headroom.",
+            "learning_objective": "Evaluate the interference conditions that must hold before GPU sharing reduces fleet size."
           },
           {
             "question_type": "FILL",
-            "question": "In LLM inference serving, while ____ measures the responsiveness before the first output token appears, Inter-Token Latency (ITL) measures the generation speed of subsequent tokens.",
-            "answer": "Time to First Token (or TTFT, Time-To-First-Token). TTFT captures prompt processing / prefill latency, which along with ITL defines the end-to-end user experience and service level objectives.",
-            "learning_objective": "Identify key performance indicators used in LLM serving autoscaling."
+            "question": "Instead of statically partitioning a serving cluster sized for peak traffic and a separate training cluster, an orchestrator that lends idle overnight serving GPUs to training and reclaims them before the morning ramp practices dynamic ____.",
+            "answer": "The correct answer is sharing (dynamic sharing). It unifies the serving and training pools, recovering idle serving capacity at the cost of mode-switching time that must be planned around the diurnal forecast.",
+            "learning_objective": "Identify the policy that replaces static training-serving partitioning in a shared fleet."
           }
         ]
       }

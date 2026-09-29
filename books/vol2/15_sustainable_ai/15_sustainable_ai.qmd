@@ -121,7 +121,7 @@ That ceiling makes sustainability a design constraint, not a reporting category.
 
 Physical feasibility establishes which fleets can run. Sustainability then compares the environmental cost of feasible designs over their useful lives. We begin with workload energy and its measurement boundary, extend the account to carbon, water, and manufacturing, and use the dominant lifecycle term to choose between efficiency, placement, and hardware reuse. In the C³ framework, communication and coordination matter because transfers, synchronization stalls, and recovery keep equipment powered even when useful computation stops.
 
-Contemporary machine learning applications operate at industrial scales, with environmental impact comparable to established heavy industries. Training a single large AI model can consume as much electricity as roughly `{python} Gpt3HouseholdEnergyAnchor.gpt3_household_years_str` US homes do in an entire year. Compute demand has grown faster than hardware efficiency [@sevilla2022]; this book calls the resulting gap the **sustainability paradox**\index{Sustainability Paradox!definition}. Sustainable AI treats that gap as a first-class systems problem rather than an externality to be managed after deployment.
+Contemporary machine learning applications operate at industrial scale, with individual campuses drawing power at the level of heavy industrial plants. Training a single large AI model can consume as much electricity as roughly `{python} Gpt3HouseholdEnergyAnchor.gpt3_household_years_str` US homes do in an entire year. Compute demand has grown faster than hardware efficiency [@sevilla2022]; this book calls the resulting gap the **sustainability paradox**\index{Sustainability Paradox!definition}. Sustainable AI treats that gap as a first-class systems problem rather than an externality to be managed after deployment.
 
 ::: {#dfn-sustainable-ai-sustainable-ai .callout-definition title="Sustainable AI"}
 
@@ -129,13 +129,13 @@ Contemporary machine learning applications operate at industrial scales, with en
 
 1.  **Significance**: Training GPT-3 consumed approximately `{python} Gpt3HouseholdEnergyAnchor.gpt3_training_mwh_str` of energy [@li2020estimating], equivalent to roughly `{python} Gpt3HouseholdEnergyAnchor.gpt3_household_years_str` US household-years of electricity. The same lifecycle logic applies after training: pretrained models can often be adapted with far less work than training from scratch, and high-volume inference can eventually dominate total energy. Sustainable AI therefore tracks both one-time training runs and recurring serving workloads rather than treating model training as the whole footprint.
 2.  **Distinction**: Unlike corporate sustainability reporting (which aggregates energy usage into annual CO~2~ disclosures), sustainable AI engineering operates at the individual workload level, selecting hardware based on FLOP/s per watt efficiency, scheduling training during periods of high renewable availability, and choosing model architectures that minimize inference FLOPs rather than simply maximizing accuracy.
-3.  **Common pitfall**: A frequent misconception is that switching to renewable energy solves the sustainability problem. For hardware-intensive ML, embodied carbon (the carbon emitted manufacturing the chips, servers, and cooling equipment before they ever run a training job) often equals or exceeds operational carbon; over 50 percent of an edge device's lifecycle carbon can come from manufacturing, making hardware longevity and utilization rate as important as energy source.
+3.  **Common pitfall**: A frequent misconception is that switching to renewable energy solves the sustainability problem. For hardware-intensive ML, embodied carbon (the carbon emitted manufacturing the chips, servers, and cooling equipment before they ever run a training job) can rival operational carbon on clean grids or at low utilization, and for battery-powered consumer devices manufacturing can account for most of the lifecycle footprint [@gupta2022chasing], making hardware longevity and utilization rate as important as energy source.
 
 :::
 
 The environmental impact of AI systems spans the complete lifecycle: from semiconductor manufacturing and data center construction to model training, inference deployment, and electronic waste [@vanwynsberghe2021sustainable; @gupta2022chasing; @luccioni2023estimating]. Treating this full lifecycle as an engineering problem rather than a corporate responsibility exercise transforms sustainability from a vague objective into a measurable engineering requirement. Optimizing this footprint requires first grounding intuition in the raw physical energy of a single large-model training run.
 
-Before calculating, we must fix what the energy measurement includes. Accelerator energy excludes host processors, host memory, networking, and storage. IT energy includes those supporting systems; facility energy additionally includes cooling and facility-side power losses. Power usage effectiveness (PUE) is the ratio of facility energy to IT energy over the same interval. Dividing useful training FLOPs by realized FLOPs per joule gives energy at the efficiency metric's stated boundary. If that boundary is IT equipment, multiplying by PUE gives facility energy; if it already includes the facility, applying PUE again double counts overhead. The opening calculations use one completed training run as their unit of work and account for operational electricity. Manufacturing and other lifecycle terms enter separately.
+Before calculating, we must fix what the energy measurement includes. This is the accounting discipline that the energy-scale invariant of @sec-introduction-energyscale-invariant-a0d6 imposes on fleet comparisons (@eq-energy-scale-invariant), applied here to a single run. Accelerator energy excludes host processors, host memory, networking, and storage. IT energy includes those supporting systems; facility energy additionally includes cooling and facility-side power losses. Power usage effectiveness (PUE) is the ratio of facility energy to IT energy over the same interval. Dividing useful training FLOPs by realized FLOPs per joule gives energy at the efficiency metric's stated boundary. If that boundary is IT equipment, multiplying by PUE gives facility energy; if it already includes the facility, applying PUE again double counts overhead. The opening calculations use one completed training run as their unit of work and account for operational electricity. Manufacturing and other lifecycle terms enter separately.
 
 ```{python}
 #| echo: false
@@ -275,7 +275,7 @@ class CarbonCostGPT3:
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
-from mlsysim.fmt import assert_qty_close, check, fmt, fmt_power
+from mlsysim.fmt import assert_qty_close, check, fmt, fmt_int, fmt_power
 from mlsysim.core.units import MW, watt
 
 class ArchetypeATdp:
@@ -285,9 +285,11 @@ class ArchetypeATdp:
     fleet = Systems.Clusters.Reference_25K_H100
     tdp = fleet.node.accelerator.tdp
     cluster_gpus = fleet.total_accelerators
+    reference_gpus = Systems.Clusters.Training_1K.total_accelerators  # book's 1,024-GPU reference cluster
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     accelerator_power = cluster_gpus * tdp
+    scale_vs_reference = cluster_gpus / reference_gpus
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(tdp.to(watt).magnitude > 500, "H100 TDP should exceed 500 W")
@@ -297,13 +299,15 @@ class ArchetypeATdp:
     h_h100_tdp_w_str = fmt_power(tdp, unit=watt, precision=0, commas=False)
     cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=True)
     cluster_accel_mw_str = fmt_power(accelerator_power, unit=MW, precision=1, commas=False)
+    reference_gpus_str = fmt(reference_gpus, precision=0, commas=True)
+    scale_vs_reference_str = fmt_int(scale_vs_reference, commas=False)  # prose says "roughly"
 ```
 
 That arithmetic shows the carbon cost of one run; at large-cluster scale, the next constraint is whether enough power can be delivered to the cluster at all.
 
 ::: {#lhs-sustainable-ai-archetype-gpt-4-llama-3-energy-wall .callout-lighthouse title="Archetype A (GPT-4/Llama-3): The energy wall"}
 
-Archetype A (GPT-4-class training) exposes the power problem most sharply. A single `{python} ArchetypeATdp.cluster_gpus_str`-GPU cluster drawing `{python} ArchetypeATdp.h_h100_tdp_w_str` per chip requires `{python} ArchetypeATdp.cluster_accel_mw_str` of accelerator power before server, network, and cooling overhead. The constraint is physical, not financial: it is a grid capacity problem. Organizations operating Archetype A workloads may need dedicated power infrastructure or regions with excess renewable energy, making carbon-aware scheduling (shifting nonurgent work toward cleaner grid hours) and geographic optimization (placing workloads where power, cooling, and carbon constraints fit the job) critical fleet decisions on the same tier as learning rate tuning.
+Archetype A (GPT-4-class training) exposes the power problem most sharply. At frontier scale, roughly `{python} ArchetypeATdp.scale_vs_reference_str` times the `{python} ArchetypeATdp.reference_gpus_str`-GPU reference cluster used throughout this book, a single `{python} ArchetypeATdp.cluster_gpus_str`-GPU cluster drawing `{python} ArchetypeATdp.h_h100_tdp_w_str` per chip requires `{python} ArchetypeATdp.cluster_accel_mw_str` of accelerator power before server, network, and cooling overhead. The constraint is physical, not financial: it is a grid capacity problem. Organizations operating Archetype A workloads may need dedicated power infrastructure or regions with excess renewable energy, making carbon-aware scheduling (shifting nonurgent work toward cleaner grid hours) and geographic optimization (placing workloads where power, cooling, and carbon constraints fit the job) critical fleet decisions on the same tier as learning rate tuning.
 
 :::
 
@@ -459,7 +463,7 @@ That geographic concentration creates environmental-justice risks that align wit
 
 ### Exponential growth vs. physical constraints {#sec-sustainable-ai-exponential-growth-vs-physical-constraints-0f4e}
 
-Growth in computational demand can outpace improvements in realized efficiency [@sevilla2022]. Larger models, longer training runs, and rising serving volume increase total work through different mechanisms, as @fig-ai-compute-growth shows. Energy per operation can fall while total fleet energy rises; the outcome depends on how much useful work the fleet performs and how efficiently it performs that work.[^fn-compute-growth-scaling]
+Growth in computational demand can outpace improvements in realized efficiency. @sevilla2022 estimate that the training compute of notable machine learning models doubled roughly every six months after 2010, far faster than the two-year cadence historically associated with transistor scaling. Larger models, longer training runs, and rising serving volume increase total work through different mechanisms, as @fig-ai-compute-growth shows. Energy per operation can fall while total fleet energy rises; the outcome depends on how much useful work the fleet performs and how efficiently it performs that work.[^fn-compute-growth-scaling]
 
 ::: {#fig-ai-compute-growth fig-env="figure" fig-pos="htb" fig-cap="**Workload Growth Drivers**: Model parameter scale, pretraining token count, and inference serving volume compound across distinct operational axes to determine aggregate computational demand. Translating algorithmic FLOPs into physical infrastructure scale requires accounting for realized accelerator efficiency and facility power envelopes rather than extrapolating compute trends alone." fig-alt="Three workload inputs feed total work, then FLOPs."}
 
@@ -473,7 +477,7 @@ Historically, computational efficiency improved with advances in semiconductor t
 
 [^fn-moores-law-sustainability]: **Moore's Law**\index{Moore's Law!sustainability limits}: Gordon Moore's 1965 observation that transistor density doubles every two years drove decades of "free" efficiency gains for the semiconductor industry. At single-digit-nanometer process nodes, physical limits make further gains harder: individual atoms become part of the constraint. For AI sustainability, the slowdown of process scaling means that additional efficiency gains must come from architectural specialization and algorithmic optimization rather than process shrinks alone.
 
-[^fn-dennard-scaling-sustainability]: **Dennard Scaling**\index{Dennard Scaling!sustainability}: Robert Dennard observed in 1974 that smaller transistors could operate at constant power density by reducing voltage proportionally. This scaling pattern ended around 2005 when leakage current made further voltage reduction impractical. The consequence for AI sustainability is direct: without Dennard scaling, each process node no longer delivers proportional power savings, which pushes efficiency work toward specialized accelerators---GPUs and Tensor Processing Units (TPUs)---that exploit architectural parallelism rather than transistor physics alone.
+[^fn-dennard-scaling-sustainability]: **Dennard Scaling**\index{Dennard Scaling!sustainability}: Robert Dennard observed in 1974 that smaller transistors could operate at constant power density by reducing voltage proportionally. This scaling pattern ended around 2005 when leakage current made further voltage reduction impractical. The consequence for AI sustainability is direct: without Dennard scaling, each process node no longer delivers proportional power savings, which pushes efficiency work toward specialized accelerators, such as GPUs and the Tensor Processing Unit (TPU), that exploit architectural parallelism rather than transistor physics alone.
 
 At a fixed accounting boundary, energy depends on total work divided by realized work per joule. @Fig-energy-wall-quantitative makes the relationship explicit: improvements in execution efficiency reduce IT energy, while PUE accounts for the additional facility energy. Algorithmic changes can also reduce the work required to meet a quality target. These effects must be measured together rather than inferred from a historical compute curve.
 
@@ -491,7 +495,7 @@ Per-job efficiency and total demand can move in opposite directions. @Fig-data-c
 
 :::
 
-### The energy wall and divergent scaling {#sec-sustainable-ai-energy-wall}
+### Power envelopes and the energy wall {#sec-sustainable-ai-energy-wall}
 
 @Fig-energy-wall-quantitative explains the energy account; physical infrastructure imposes a separate power constraint. The grid connection, electrical distribution, and cooling system limit the active fleet that can operate safely. A long run may consume substantial energy while remaining within its power envelope. Conversely, a short run may exceed available power even if its total energy is modest.
 
@@ -511,7 +515,7 @@ Sustainable AI requires looking beyond the server rack to the electrical grid in
 
 ::: {#ws-sustainable-ai-ireland-grid-constraint .callout-war-story title="When the grid became the bottleneck (2022)"}
 
-**Context**: In July 2022, the Government of Ireland published its *Government Statement on the Role of Data Centres in Ireland's Enterprise Strategy*, formalizing the country's posture toward a sector that by then consumed roughly 18 percent of Ireland's total metered electricity---concentrated almost entirely in the greater Dublin area [@ireland2022datacentres; @iea2024datacentresireland].
+**Context**: In July 2022, the Government of Ireland published its *Government Statement on the Role of Data Centres in Ireland's Enterprise Strategy*, formalizing the country's posture toward a sector that by then consumed roughly 18 percent of Ireland's total metered electricity, concentrated almost entirely in the greater Dublin area [@ireland2022datacentres; @iea2024datacentresireland].
 
 **Mechanism**: Data center connection requests outpaced electrical transmission expansion, pushing the local Dublin grid to its physical thermal and voltage capacity limits with reinforcement timelines stretching into the next decade.
 
@@ -612,7 +616,7 @@ The production of AI chips is energy-intensive, involving multiple fabrication s
 
 Alternative computing architectures expose potential sources of efficiency: selective activation, local state, and reduced communication. Comparing their energy with a dense model requires a shared task, quality threshold, latency target, and measurement boundary. Biological capability and digital FLOPs do not define interchangeable units of useful work, so their comparison cannot establish a numerical efficiency gap.
 
-The gap points to a mechanism rather than another model-scale comparison: dense silicon spends energy on continuous activation and global data movement, while sparse, event-driven computation can avoid work when signals do not change. This motivates computing paradigms that prioritize energy-aware architecture over raw throughput.
+What the comparison does expose is a mechanism. Dense silicon spends energy on continuous activation and global data movement, while sparse, event-driven computation can avoid work when signals do not change. This motivates computing paradigms that prioritize energy-aware architecture over raw throughput.
 
 #### Principles of high-efficiency computing {#sec-sustainable-ai-principles-highefficiency-computing-6a9b}
 
@@ -620,7 +624,7 @@ The sustainability lesson from high-efficiency computing exposes where dense mac
 
 [^fn-eventdriven-energy-efficiency]: **Event-driven Computing**\index{Event-driven Computing!definition}: Computation triggered by input changes can avoid periodic work on slowly changing signals. Its energy advantage depends on event rate, static power, sensing overhead, and the hardware implementation; dense batch workloads need a separate comparison.
 
-The biological model points toward promising research directions for sustainable AI. Architectures that implement **spiking neural networks (SNNs)**\index{Spiking Neural Networks!definition}, event-driven models that communicate through discrete spikes, or sparse activation patterns can achieve significant energy reductions by mimicking sparse communication models[^fn-snn-neuromorphic-efficiency] [@prakash2023tinyml]. Local learning algorithms and self-supervised approaches offer additional pathways toward more sample-efficient and energy-conscious systems.
+Event-driven and sparse computation point toward research directions for sustainable AI. Architectures that implement **spiking neural networks (SNNs)**\index{Spiking Neural Networks!definition}, event-driven models that communicate through discrete spikes, or sparse activation patterns can achieve significant energy reductions by mimicking sparse communication models[^fn-snn-neuromorphic-efficiency] [@prakash2023tinyml]. Local learning algorithms and self-supervised approaches offer additional pathways toward more sample-efficient and energy-conscious systems.
 
 [^fn-snn-neuromorphic-efficiency]: **Spiking Neural Networks (SNNs)**\index{Spiking Neural Networks!neuromorphic efficiency}: These models communicate through discrete spikes. Sparse activity can reduce communication and switching, but the complete comparison includes training, encoding, sensing, and the hardware used to execute the model. A result on one temporal task does not establish a universal saving for other workloads.
 
@@ -658,9 +662,9 @@ Carbon footprint analysis turns sustainability from a general obligation into a 
 
 The accounting model matters because it makes ethical trade-offs auditable. The pursuit of larger models can prioritize accuracy and capability over energy efficiency, increasing carbon emissions when compute growth outpaces efficiency gains. Optimizing for sustainability may introduce engineering trade-offs such as extra tuning effort, hardware constraints, or task-dependent accuracy changes, so the engineering task is to make those costs explicit against environmental benefits. Integrating environmental considerations into AI system design is therefore an engineering obligation, expressed through energy-aware training techniques, low-power hardware designs, and carbon-conscious deployment strategies [@schwartz2020; @patterson2021carbon].
 
-Traceability is the technical bridge between sustainability measurement and accountability. Transparency, fairness, and accountability act as sustainability constraints (@fig-ethical-ai): transparency gaps obscure energy and carbon costs, fairness failures distribute harms unevenly, and weak accountability makes resource consumption difficult to trace. Accountability means auditability of resource claims. A team should be able to connect a model version, training run, serving workload, region, energy source, and lifecycle estimate well enough that carbon and water claims can be checked.
+Traceability is the technical bridge between sustainability measurement and accountability. @Fig-ethical-ai groups the distributional questions that sustainability accounting must be able to answer: which communities bear the local water and grid burden, what later generations inherit from today's emissions, which other uses compete for the same land, water, and power, and which energy and carbon costs remain undisclosed. The last question is the one engineering can close directly. Accountability means auditability of resource claims. A team should be able to connect a model version, training run, serving workload, region, energy source, and lifecycle estimate well enough that carbon and water claims can be checked.
 
-::: {#fig-ethical-ai fig-env="figure" fig-pos="htb" fig-cap="**Ethical AI Concerns**: Four-quadrant layout of environmental-justice and accountability concerns in AI systems, spanning transparency, fairness, and sustainability. The quadrants make explicit how design choices in one quadrant (for example, opacity in training data) propagate into outcomes in an adjacent quadrant (for example, discriminatory predictions or untraceable resource consumption). Addressing these challenges requires proactive design choices that prioritize accountability and minimize negative societal and environmental impacts." fig-alt="Four-quadrant diagram of environmental-justice and accountability concerns in AI: transparency, fairness, accountability, and sustainability arranged in four quadrants with arrows connecting related issues across quadrants."}
+::: {#fig-ethical-ai fig-env="figure" fig-pos="htb" fig-cap="**Ethical AI Concerns**: Four-quadrant layout of the distributional concerns raised by AI infrastructure, namely environmental justice, intergenerational equity, resource competition, and gaps in energy and carbon disclosure. A siting or disclosure decision made to answer one quadrant changes the burden recorded in the others, so the four must be assessed together." fig-alt="Four-quadrant diagram of AI's environmental impact: environmental justice, intergenerational equity, resource competition, and transparency gap, each with a guiding question, a short explanation, and an impact note."}
 ![](images/svg/ethical-concerns.svg)
 
 <!--
@@ -1054,7 +1058,7 @@ Specialized accelerators can improve useful work per joule by reducing instructi
 
 #### Facility-level power metrics {#sec-sustainable-ai-facilitylevel-power-metrics-5558}
 
-Beyond chip-level power, data center infrastructure imposes additional energy overhead. @Eq-sustainable-ai-pue captures this relationship through the PUE metric\index{Power Usage Effectiveness!overhead metric}:
+Beyond chip-level power, data center infrastructure imposes additional energy overhead. @Eq-sustainable-ai-pue restates the PUE ratio of @eq-pue at this chapter's facility boundary\index{Power Usage Effectiveness!overhead metric}:
 
 $$\text{PUE} = \frac{P_{\text{total facility}}}{P_{\text{IT equipment}}}$$ {#eq-sustainable-ai-pue}
 
@@ -1110,7 +1114,7 @@ class PueEfficiency:
 
 ::: {#nbk-sustainable-ai-pue-cost-cooling .callout-notebook title="PUE: The cost of cooling"}
 
-**Problem**: A team operates a `{python} PueEfficiency.pue_it_mw_str` cluster. If the facility can be optimized from the industry average PUE (`{python} PueEfficiency.pue_old_str`) to state-of-the-art (`{python} PueEfficiency.pue_new_str`), how much energy and money does that save annually?
+**Problem**: A team operates a `{python} PueEfficiency.pue_it_mw_str` cluster. If the facility can be optimized from a legacy air-cooled PUE (`{python} PueEfficiency.pue_old_str`) to state-of-the-art (`{python} PueEfficiency.pue_new_str`), how much energy and money does that save annually?
 
 **Math**:
 Energy saved is the difference in infrastructure overhead $(\text{PUE}-1)$ across the IT load.
@@ -1121,7 +1125,7 @@ Energy saved is the difference in infrastructure overhead $(\text{PUE}-1)$ acros
 
 :::
 
-A PUE of 1.0 would mean no measured non-IT overhead, not that all electricity produces useful computation. Idle servers and stalled accelerators remain inside the IT denominator. Industry-average data centers operate at PUE of 1.5 to 2.0\index{Power Usage Effectiveness!industry average}, meaning that 50 percent to 100 percent additional energy beyond IT consumption goes to infrastructure [@davis2022uptime]. Leading hyperscale facilities achieve PUE between 1.1 and 1.2 through advanced cooling techniques including free-air cooling in cold climates, liquid cooling for high-density GPU clusters, and optimized power distribution.
+A PUE of 1.0 would mean no measured non-IT overhead, not that all electricity produces useful computation. Idle servers and stalled accelerators remain inside the IT denominator. Surveyed data centers reported an average PUE near 1.55\index{Power Usage Effectiveness!industry average} in 2022, meaning that roughly 55 percent additional energy beyond IT consumption went to infrastructure, with older air-cooled sites higher still [@davis2022uptime]. Leading hyperscale facilities achieve PUE between 1.1 and 1.2 through advanced cooling techniques including free-air cooling in cold climates, liquid cooling for high-density GPU clusters, and optimized power distribution.
 
 ::: {.column-margin}
 ![](images/svg/vol2_sustainable_ai_margin_002.svg){width="100%" fig-alt="Two horizontal PUE bars showing the same IT energy base plus infrastructure overhead: plus 58 percent at PUE 1.58 and plus 10 percent at PUE 1.10."}
@@ -1141,11 +1145,11 @@ Facility-level metrics identify where engineering intervention yields the greate
 
 Google's cooling systems illustrate why reducing PUE can require better control rather than new hardware [-@google2023cooling]. Server load, weather, and interactions among pumps and chillers make fixed operating heuristics inefficient [@buyya2010energyefficient]. Building on earlier work predicting PUE [@gao2014machine], DeepMind trained a model from facility temperature, power, and cooling-system telemetry to predict more efficient operating settings. The controller used those relationships to adapt cooling as facility conditions changed.
 
-The results demonstrated significant efficiency gains. When deployed in live data center environments, DeepMind's AI-driven cooling system reduced cooling energy consumption by 40 percent and reduced overall PUE overhead by 15 percent[^fn-pue-deepmind-cooling] [@barroso2019; @evans2016deepmind]. For a facility operating at the industry-average PUE of 1.5 from @eq-sustainable-ai-pue, reducing overhead reclaims a substantial fraction of the energy lost to cooling. These improvements were achieved without additional hardware modifications, demonstrating the potential of software-driven optimizations to reduce AI's carbon footprint.
+The results demonstrated significant efficiency gains. When deployed in live data center environments, DeepMind's AI-driven cooling system reduced cooling energy consumption by 40 percent and reduced overall PUE overhead by 15 percent[^fn-pue-deepmind-cooling] [@barroso2019; @evans2016deepmind]. By @eq-sustainable-ai-pue, a 15 percent cut in overhead removes 15 percent of the non-IT term (PUE minus 1), so the absolute saving is larger at a less efficient facility. These improvements were achieved without additional hardware modifications, demonstrating the potential of software-driven optimizations to reduce AI's carbon footprint.
 
-[^fn-pue-deepmind-cooling]: **PUE Optimization via ML**\index{PUE Optimization via ML!definition}: Google's best facilities achieve PUE 1.08, meaning only 8 percent energy overhead for cooling and power distribution. DeepMind's reinforcement-learning controller reduced cooling energy by 40 percent by exploiting nonlinear interactions between chillers, pumps, and ambient conditions that rule-based systems miss. This is a rare positive feedback loop where AI improves the efficiency of the infrastructure that powers AI.
+[^fn-pue-deepmind-cooling]: **PUE Optimization via ML**\index{PUE Optimization via ML!definition}: DeepMind's neural-network models reduced cooling energy by 40 percent by exploiting nonlinear interactions between chillers, pumps, and ambient conditions that rule-based systems miss. Machine learning here improves the efficiency of the infrastructure that powers machine learning.
 
-The DeepMind case study illustrates a rare positive feedback loop: machine learning optimizing the infrastructure that powers machine learning. The framework generalizes across facility designs and climate conditions, offering a scalable approach for global data center networks.
+The transferable lesson is that control software can reclaim facility overhead without new hardware, provided the facility exposes enough telemetry to model its pumps, chillers, and ambient conditions.
 
 #### Carbon intensity and regional variation {#sec-sustainable-ai-carbon-intensity-regional-variation-db41-regional-variation-db41}
 
@@ -1161,7 +1165,7 @@ The carbon impact attributed to electricity depends on the selected emissions fa
 
 @Fig-carbon-intensity holds facility electricity fixed and varies the grid factor. The earlier placement examples use fixed illustrative profiles; a real placement decision requires current, time-matched evidence and must account for the extra energy needed to move or resume the work.
 
-::: {#fig-carbon-intensity fig-env="figure" fig-pos="htb" fig-cap="**Comparing Regional Electricity Emissions**: Applying regional grid emission factors to a standardized facility electricity demand isolates the environmental impact of datacenter siting. Regional differences in generation mix and seasonal PUE variations produce dramatic differences in operational carbon for an identical computational workload." fig-alt="The same facility energy branches through region A and region B factors to produce separate carbon totals."}
+::: {#fig-carbon-intensity fig-env="figure" fig-pos="htb" fig-cap="**Comparing Regional Electricity Emissions**: Applying regional grid emission factors to a standardized facility electricity demand isolates the environmental impact of datacenter siting. With facility electricity held fixed, differences in regional generation mix alone produce large differences in operational carbon for an identical workload." fig-alt="The same facility energy branches through region A and region B factors to produce separate carbon totals."}
 
 ![](images/svg/regional-carbon-account.svg)
 
@@ -1239,7 +1243,7 @@ class MemoryHierarchyEnergy:
     net_pj_per_byte_str = fmt_energy_per_byte(net, precision=0, lower_bound=True)
 ```
 
-@Tbl-energy-per-byte reveals a critical insight about memory hierarchy energy costs\index{Memory Hierarchy!energy costs}: movement from DRAM\index{DRAM!energy cost} can dominate arithmetic under the modeled coefficients. The rows trace the path from registers through L1 cache\index{L1 cache!energy cost} and L2 cache\index{L2 cache!energy cost} to DRAM, Non-Volatile Memory Express (NVMe), and network transfers. Under the illustrative 10 pJ/FLOP arithmetic coefficient, accessing one FP32 operand from DRAM (4 bytes times 160 pJ/byte = 640 pJ) costs 64 times more than the computation itself. This table makes the energy hierarchy explicit.
+@Tbl-energy-per-byte reveals a critical insight about memory hierarchy energy costs\index{Memory Hierarchy!energy costs}: movement from DRAM\index{DRAM!energy cost} can dominate arithmetic under the modeled coefficients. The rows trace the path from registers through L1 cache\index{L1 cache!energy cost} and L2 cache\index{L2 cache!energy cost} to DRAM, Non-Volatile Memory Express (NVMe), and network transfers. Under the illustrative 10 pJ/FLOP arithmetic coefficient, accessing one FP32 operand from DRAM (4 bytes times 160 pJ/byte = 640 pJ) costs 64 times more than the computation itself.
 
 | **Memory Level** |             **Energy Cost** **(pJ/byte)**             |
 |:-----------------|:-----------------------------------------------------:|
@@ -1260,9 +1264,9 @@ The balance between computation and data movement determines whether energy cons
 
 $$\text{AI} = \frac{O}{D_{\text{vol}}}$$ {#eq-energy-arithmetic-intensity}
 
-Arithmetic intensity measured in FLOP/byte determines the dominant energy consumer. @Eq-energy-total expresses total energy as the sum of compute and memory contributions, while @eq-energy-roofline isolates the roofline-style dominant term:
+Arithmetic intensity measured in FLOP/byte determines the dominant energy consumer. @Eq-energy-total expresses execution energy $E_{\text{exec}}$ at the chip-and-memory boundary as the sum of compute and memory contributions (the facility total $E_{\text{total}}$ appears later in @eq-total-energy), while @eq-energy-roofline isolates the roofline-style dominant term:
 
-$$E_{\text{total}} = O \times E_{\text{compute}} + D_{\text{vol}} \times E_{\text{move}}$$ {#eq-energy-total}
+$$E_{\text{exec}} = O \times E_{\text{compute}} + D_{\text{vol}} \times E_{\text{move}}$$ {#eq-energy-total}
 
 $$E_{\text{dominant}} = \max\left(O \times E_{\text{compute}}, D_{\text{vol}} \times E_{\text{move}}\right)$$ {#eq-energy-roofline}
 
@@ -1427,7 +1431,7 @@ Edge devices and microcontrollers often lack built-in power counters and require
 
 #### Mobile platform energy profiling {#sec-sustainable-ai-mobile-platform-energy-profiling-7f9d}
 
-On mobile platforms, measurement depends on how much subsystem attribution the host operating system exposes, forcing available profilers to balance direct wattage measurements against granular diagnostic visibility. The Android PowerStats HAL provides per-component power attribution across CPU, GPU, NPU, and radio subsystems, enabling developers to identify which specific operations dominate total draw. On Snapdragon hardware, the Qualcomm Trepn Profiler\index{Qualcomm Trepn Profiler!mobile power measurement} offers millisecond-resolution power traces correlated with instruction execution to guide NPU workload tuning. In ARM environments, ARM Streamline delivers energy-annotated profiling across Cortex-A cores and Mali GPUs to expose inefficient kernel implementations and memory stalls. For iOS applications, Apple Instruments Energy Log reports thermal states and energy impact scores, providing qualitative diagnostic signals during development even without exposing raw milliwatt measurements. These mobile profiling environments integrate directly into development workflows, enabling iterative optimization of on-device inference before wide-scale deployment. @Tbl-edge-power-monitors summarizes edge power measurement instruments\index{Edge power measurement!instrument comparison} across platforms, including resolution, accuracy, and integration requirements.
+On mobile platforms, measurement depends on how much subsystem attribution the host operating system exposes. Some platforms report per-rail or per-component power for the CPU, GPU, neural processing unit, and radio, which lets a developer see which subsystem dominates total draw. Others expose only relative energy-impact scores or thermal states, which are useful for spotting regressions during development but cannot support an absolute energy claim. Vendor profilers that correlate power traces with kernel execution sit between these extremes. The design question is therefore not which tool to use but whether the reported quantity covers the electrical boundary the comparison needs; a relative score cannot be converted into joules per inference. When it cannot, external instrumentation is required. @Tbl-edge-power-monitors summarizes edge power measurement instruments\index{Edge power measurement!instrument comparison} by measurement role and the checks each role requires.
 
 | **Instrument class**             | **Measurement role**                | **Required checks**                                        |
 |:---------------------------------|:------------------------------------|:-----------------------------------------------------------|
@@ -1440,7 +1444,7 @@ On mobile platforms, measurement depends on how much subsystem attribution the h
 
 #### Edge measurement methodology {#sec-sustainable-ai-edge-measurement-methodology-c02a}
 
-Edge energy measurements are useful only when they reflect the deployed duty cycle rather than an idealized active-only inference burst. Reproducible evaluation requires four rigorous experimental controls. Simultaneous current and voltage logging must span every active and quiescent power state, ensuring rail voltage fluctuations are captured rather than inferring power from current alone. Thermal and frequency stabilization protocols require warming the device until junction temperatures, core clocks, and rail voltages reach steady state, while profiling cold starts and periodic bursts independently. Realistic duty-cycle accounting\index{Duty cycle!edge inference power} demands recording both peak inference draw and time-averaged power across typical idle intervals, reflecting how deployed devices actually spend time. Finally, rigorous hardware isolation must disable or subtract auxiliary peripherals—including radios, sensors, and display backlights—preventing non-compute background subsystems from obscuring accelerator consumption. For duty cycle accounting, @eq-edge-duty-cycle expresses this relationship between active and idle power:
+Edge energy measurements are useful only when they reflect the deployed duty cycle rather than an idealized active-only inference burst. Reproducible evaluation requires four rigorous experimental controls. Simultaneous current and voltage logging must span every active and quiescent power state, ensuring rail voltage fluctuations are captured rather than inferring power from current alone. Thermal and frequency stabilization protocols require warming the device until junction temperatures, core clocks, and rail voltages reach steady state, while profiling cold starts and periodic bursts independently. Realistic duty-cycle accounting\index{Duty cycle!edge inference power} demands recording both peak inference draw and time-averaged power across typical idle intervals, reflecting how deployed devices actually spend time. Finally, rigorous hardware isolation must disable or subtract auxiliary peripherals (radios, sensors, and display backlights), preventing non-compute background subsystems from obscuring accelerator consumption. For duty cycle accounting, @eq-edge-duty-cycle expresses this relationship between active and idle power:
 
 $$P_{\text{average}} = P_{\text{active}} \times \delta_{\text{duty}} + P_{\text{idle}} \times (1 - \delta_{\text{duty}})$$ {#eq-edge-duty-cycle}
 
@@ -1468,7 +1472,7 @@ The lifecycle notebook in @sec-sustainable-ai-carbon-footprint-analysis-ccc5 alr
 
 ### Operational carbon calculation {#sec-sustainable-ai-operational-carbon-calculation-4627-calculation-4627}
 
-Operational carbon emissions result from electricity consumption during training and inference, scaled by grid carbon intensity. @Eq-operational-carbon quantifies this as the product of energy, grid carbon intensity, and facility overhead:
+Operational carbon emissions result from electricity consumption during training and inference, scaled by grid carbon intensity. @Eq-operational-carbon quantifies this as the product of facility-level energy and grid carbon intensity:
 
 $$C_{\text{operational}} = E_{\text{total}} \times \text{CI}_{\text{grid}}$$ {#eq-operational-carbon}
 
@@ -1589,7 +1593,7 @@ class A100PowerScenario:
 2. Apply PUE & IT support: Total facility energy = `{python} TrainingEmissions.it_energy_kwh_str` $\times$ `{python} TrainingEmissions.pue_str` = `{python} TrainingEmissions.facility_energy_kwh_str`.
 3. Calculate emissions: On US average grid (`{python} TrainingEmissions.grid_ci_g_per_kwh_str` $\text{CO}_2$/kWh), emissions = `{python} TrainingEmissions.emissions_tons_str`. On Quebec hydro grid (`{python} TrainingEmissions.quebec_ci_g_per_kwh_str`), emissions = `{python} TrainingEmissions.quebec_emissions_kg_str`.
 
-**Systems insight**: The geographic choice alone produces a `{python} TrainingEmissions.emissions_ratio_mult_str` difference in training emissions. Carbon-aware placement changes the environmental cost without changing the model architecture.
+**Systems insight**: The grid factor alone produces a `{python} TrainingEmissions.emissions_ratio_mult_str` difference in training emissions for this pairing, the same placement lever quantified in notebook \ref{nbk-sustainable-ai-geography-carbon}. The model architecture is unchanged.
 
 :::
 
@@ -1853,9 +1857,9 @@ Complete lifecycle assessment combines operational and embodied emissions across
 
 $$C_{\text{lifecycle}} = C_{\text{training}} + C_{\text{inference}} + C_{\text{embodied}}$$ {#eq-lifecycle-carbon}
 
-Training dominates this single-deployment lifecycle snapshot (@fig-carbon-lifecycle), while manufacturing and inference remain significant factors.
+@Fig-carbon-lifecycle maps the three terms of @eq-lifecycle-carbon to their physical drivers; their relative sizes depend on serving volume, grid intensity, and hardware lifetime, as the inference calculation below shows.
 
-::: {#fig-carbon-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**The Carbon Lifecycle of an ML System**: Single-deployment lifecycle snapshot with training as the largest share, followed by manufacturing and inference." fig-alt="Lifecycle diagram showing carbon emissions across ML system stages from manufacturing through training, inference, and decommissioning."}
+::: {#fig-carbon-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**The Carbon Lifecycle of an ML System**: Manufacturing contributes embodied carbon, while training and inference contribute operational carbon through energy, facility overhead, and grid intensity. The relative size of each term is workload-specific: serving volume, grid factor, and hardware lifetime determine which one dominates." fig-alt="Three columns for manufacturing, training, and inference, each listing the drivers of its carbon term, above the lifecycle carbon equation that sums embodied, training, and inference emissions."}
 ![](images/svg/carbon-lifecycle.svg)
 
 <!--
@@ -2003,7 +2007,7 @@ Training dominates this single-deployment lifecycle snapshot (@fig-carbon-lifecy
 
 :::
 
-That single-deployment snapshot in @fig-carbon-lifecycle tells only part of the story. The balance changes with serving volume and duration: a model serving millions of queries per day can exceed its entire training carbon footprint within months, or within days for higher-traffic services, making inference optimization the highest-impact sustainability intervention for production systems over a model's service life.
+The balance among these terms changes with serving volume and duration: a model serving millions of queries per day can exceed its entire training carbon footprint within months, or within days for higher-traffic services, making inference optimization the highest-impact sustainability intervention for production systems over a model's service life.
 
 ::: {.column-margin}
 ```{=latex}
@@ -2107,7 +2111,7 @@ class TrainingEmissionsRecap:
 
 For models deployed at scale, inference emissions often dominate the lifecycle. Consider a model serving `{python} InferenceLifecycleExample.queries_per_day_str` queries per day at `{python} InferenceLifecycleExample.kwh_per_query_str` of attributed facility electricity per query, including its share of idle capacity and support systems. At this serving rate, daily energy consumption reaches `{python} InferenceLifecycleExample.daily_energy_kwh_str` (`{python} InferenceLifecycleExample.queries_per_day_str` queries $\times$ `{python} InferenceLifecycleExample.kwh_per_query_str`), accumulating over `{python} InferenceLifecycleExample.days_per_year_str` days to `{python} InferenceLifecycleExample.annual_energy_kwh_str` per year. Evaluated against the average US grid carbon intensity of `{python} InferenceLifecycleExample.grid_ci_kg_per_kwh_str`, this electricity demand produces `{python} InferenceLifecycleExample.annual_emissions_tonnes_str` (`{python} InferenceLifecycleExample.annual_emissions_kg_str`) of greenhouse gas emissions annually.
 
-Compared with the earlier 7B/64-A100 training example (`{python} TrainingEmissionsRecap.emissions_tons_str`), cumulative inference emissions exceed training emissions after approximately `{python} InferenceLifecycleExample.crossover_days_str` of deployment at this scale. For larger training runs, the crossover can shift to weeks or months depending on query volume, per-query energy, and grid intensity. The lifecycle perspective therefore sets the priority: optimize inference efficiency for widely-deployed models, and focus training efficiency efforts on models that undergo frequent retraining or experimental iteration.
+Compared with the earlier 7B/64-A100 training example (`{python} TrainingEmissionsRecap.emissions_tons_str`), cumulative inference emissions exceed training emissions after approximately `{python} InferenceLifecycleExample.crossover_days_str` of deployment at this scale. For larger training runs, the crossover can shift to weeks or months depending on query volume, per-query energy, and grid intensity. The lifecycle perspective therefore sets the priority: optimize inference efficiency for widely deployed models, and focus training efficiency efforts on models that undergo frequent retraining or experimental iteration.
 
 #### Regional grid intensity data sources {#sec-sustainable-ai-regional-grid-intensity-data-sources-0b88}
 
@@ -2191,111 +2195,15 @@ At facility scale, the optimization target is no longer a single model but the o
 
 #### Energy demands in data centers {#sec-sustainable-ai-energy-demands-data-centers-b7ba}
 
-The relevant facility quantity is persistent megawatt-class load, not the model name alone. Companies such as Meta operate hyperscale data centers spanning multiple football fields in size, housing large fleets of AI-optimized servers.[^fn-hyperscale-facility-footprint] Unofficial estimates have suggested GPT-4 may have used on the order of tens of thousands of A100-class GPUs for months [@semianalysisGPT4], but OpenAI has not disclosed GPT-4's hardware, training compute, model size, or training duration. These facilities rely on high-performance AI accelerators such as NVIDIA H100 GPUs, whose architecture targets high-throughput tensor workloads and improved performance per watt over prior generations [@choquette2023]. Lower-precision methods can improve compute and memory efficiency by replacing full-precision arithmetic when model accuracy permits [@gholami2022].
+The relevant facility quantity is persistent megawatt-class load, not the model name alone. Hyperscale campuses house large fleets of accelerator servers and hold loads of 100 MW or more for years at a time.[^fn-hyperscale-facility-footprint] Per-watt gains in each accelerator generation lower the energy of a given job, but they do not shrink a campus whose capacity is sized to the demand it expects to serve.
 
 [^fn-hyperscale-facility-footprint]: **Hyperscale Data Center Footprint**\index{Hyperscale Data Center Footprint!definition}: Meta's Prineville facility spans 230,000 m² and houses over 150,000 servers; major cloud fleets consume country-scale electricity annually. These physical scales matter for sustainability because each facility's power demand (100--300 MW) locks in decades of grid-dependency decisions that no algorithmic optimization can undo.
 
-AI's rapid adoption across industries drives this dramatic energy consumption. @Fig-ai-data-center-demand illustrates a high-growth scenario in which AI workloads add materially to total data center energy demand after 2024. @masanet2020energy show why this scenario should be read against the historical context: efficiency gains have previously moderated data center energy growth, but sustained demand growth can erode that offset.
-
-::: {#fig-ai-data-center-demand fig-env="figure" fig-pos="htb" fig-cap="**Projected Demand**: An illustrative high-growth scenario shows AI workloads adding materially to data center power demand by 2030. @masanet2020energy document the historical efficiency gains that previously moderated data center energy growth; the stacked values are scenario assumptions, not a direct forecast from that source." fig-alt="Stacked bar chart showing an illustrative high-growth data center power demand scenario from 2015 to 2030. Dark blue bars show non-AI demand growing from 200 to 780 TWh. Light blue shows AI demand growing from 0 to 240 TWh. Gray line shows efficiency gains declining then stabilizing."}
-
-```{python}
-#| echo: false
-#| warning: false
-#| fig-align: center
-from binder.tools.figures import style as book_style
-import matplotlib.pyplot as plt
-
-book_style.set_book_style()
-COLORS = book_style.COLORS
-
-fig, ax = plt.subplots(figsize=(10, 5.5))
-
-years = list(range(2015, 2031))
-dc_demand = [200, 200, 200, 200, 200, 210, 220, 230, 250, 290, 340, 400, 480, 570, 670, 780]
-ai_demand = [0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 20, 40, 70, 110, 170, 240]
-efficiency_gains = [20, 19, 18, 17, 15, 12, 9, 6, 3, 1.5, 2, 2.5, 3, 3.2, 3.5, 3.7]
-
-bar_width = 0.72
-
-ax.bar(
-    years,
-    dc_demand,
-    bar_width,
-    label='Data Center ex-AI',
-    color=COLORS['BlueLine'],
-    edgecolor='white',
-    linewidth=0.8,
-)
-ax.bar(
-    years,
-    ai_demand,
-    bar_width,
-    bottom=dc_demand,
-    label='AI Workloads',
-    color=COLORS['BlueL'],
-    edgecolor='white',
-    linewidth=0.8,
-)
-
-ax.set_xlabel('Year', fontsize=9.5, fontweight='bold', color=COLORS['primary'])
-ax.set_ylabel('Data Center Energy Demand (TWh)', fontsize=9.5, fontweight='bold', color=COLORS['primary'])
-ax.set_ylim(0, 1150)
-ax.tick_params(colors=COLORS['primary'], labelsize=8.5)
-ax.grid(True, linestyle='--', alpha=0.4, axis='y')
-
-ax2 = ax.twinx()
-line_eff = ax2.plot(years, efficiency_gains, color=COLORS['OrangeLine'], linewidth=2.4, marker='o', markersize=4, label='Efficiency Gains (%)')
-ax2.set_ylabel('Power Efficiency Gains (%)', fontsize=9.5, fontweight='bold', color=COLORS['OrangeLine'])
-ax2.set_ylim(0, 25)
-ax2.tick_params(colors=COLORS['OrangeLine'], labelsize=8.5)
-ax2.spines['right'].set_visible(True)
-ax2.spines['right'].set_color(COLORS['OrangeLine'])
-ax2.spines['top'].set_visible(False)
-ax2.grid(False)
-
-ax.axvline(x=2024, linestyle='--', color=COLORS['secondary'], linewidth=1.4)
-ax.text(2024.2, 1080, '2024 Inflection', fontsize=8.0, fontweight='bold', color=COLORS['secondary'], va='bottom', ha='left')
-
-# Combined legend
-lines1, labels1 = ax.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax.legend(
-    lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=8.5, frameon=True, facecolor='white', framealpha=0.95, edgecolor=COLORS['grid']
-)
-
-ax.text(
-    2028,
-    450,
-    'Power Demand\nAccelerating',
-    fontsize=8.5,
-    fontweight='bold',
-    ha='center',
-    va='center',
-    color=COLORS['primary'],
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor=COLORS['BlueLine'], lw=0.9),
-)
-ax.text(
-    2018.5,
-    880,
-    'Efficiency Gains\nDecelerating',
-    fontsize=8.5,
-    fontweight='bold',
-    ha='center',
-    va='center',
-    color=COLORS['OrangeLine'],
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor=COLORS['OrangeLine'], lw=0.9),
-)
-
-plt.tight_layout()
-plt.show()
-```
-
-:::
+Whether that demand keeps growing depends on the race between workload growth and efficiency. @masanet2020energy show that efficiency gains held global data-center energy nearly flat through the 2010s even as computing output grew several-fold; sustained AI demand growth can erode that offset, which is why the IEA projection cited earlier rises rather than remaining flat.
 
 Beyond computational demands, cooling can account for 30--40 percent of facility energy in the conventional air-cooled data-center designs surveyed by @ebrahimi2014. This is a design-regime range, not a constant for modern hyperscale or liquid-cooled facilities; @sec-sustainable-ai-cooling derives the site-specific overhead through PUE and the cooling architecture.
 
-While @fig-ai-data-center-demand projects global trends, the United States alone illustrates how cloud and AI infrastructure can reshape national energy planning. @Fig-energy-gap presents US data center electricity consumption data from the Lawrence Berkeley National Laboratory (LBNL), showing that consumption tripled from 58 TWh in 2014 to 176 TWh in 2023. LBNL's projection treats AI workloads as an important driver of further growth and projects a doubling or tripling by 2028, with the high-end scenario implying that data centers would consume approximately 12 percent of US electricity. This trajectory represents a physical constraint on AI scaling that software optimization alone cannot remove.
+The United States alone illustrates how cloud and AI infrastructure can reshape national energy planning. @Fig-energy-gap presents US data center electricity consumption data from the Lawrence Berkeley National Laboratory (LBNL), showing that consumption tripled from 58 TWh in 2014 to 176 TWh in 2023. LBNL's projection treats AI workloads as an important driver of further growth and projects a doubling or tripling by 2028, with the high-end scenario implying that data centers would consume approximately 12 percent of US electricity. This trajectory represents a physical constraint on AI scaling that software optimization alone cannot remove.
 
 ::: {#fig-energy-gap fig-env="figure" fig-pos="htb" fig-cap="**The Energy Gap**: US data center electricity consumption tripled from 58 TWh (2014) to 176 TWh (2023). LBNL projects a further doubling to 325 to 580 TWh by 2028, with AI workloads treated as an important driver of growth. At the high end, data centers would consume approximately 12 percent of US electricity, representing a physical constraint on AI scaling that software optimization alone cannot remove." fig-alt="Bar chart showing US data center electricity: 58 TWh in 2014, 176 TWh in 2023, projected 325 to 580 TWh by 2028. Bars colored blue for historical and red for projections."}
 
@@ -2392,133 +2300,29 @@ plt.show()
 
 Large-scale AI training inherently requires distributed systems coordination, creating additional energy overhead that compounds computational demands. Distributed parallelism strategies exchange gradients, parameters, or activations while synchronization stalls leave idle accelerators drawing baseline power.[^fn-parallelism-communication-overhead] The resulting energy share cannot be inferred from cluster size alone because topology, collective algorithm, message volume, overlap, and utilization determine the account. Some all-to-all patterns also increase traffic faster than aggregate useful work as the participating set grows.
 
+The Fleet Law (@eq-fleet-law in @sec-vol2-introduction-fleet-law) turns this overhead into an energy account. If the fleet draws average power $P_{\text{avg}}$ while executing one step on $N$ accelerators, the energy of that step is approximately
+
+$$E_{\text{step}} \approx P_{\text{avg}} \times T_{\text{step}}(N) = P_{\text{avg}} \left( \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}} \right)$$
+
+Only the first term retires useful arithmetic. Exposed communication and synchronization are powered time. Accelerators, hosts, and the fabric keep drawing a large share of their active power while the model makes no progress. A step that spends a quarter of its wall-clock time in unhidden communication therefore spends a comparable share of its energy on the Communication and Coordination axes of C³ rather than on Compute. Overlap, smaller messages, and fewer stragglers reduce energy for the same reason they reduce step time, which is why the parallelism choices of @sec-distributed-training-systems are also sustainability choices.
+
 ::: {.column-margin .margin-pointer}
 ↩ Data, tensor, and pipeline parallelism execution models are developed in @sec-distributed-training-systems.
 :::
 
 [^fn-parallelism-communication-overhead]: **Parallelism Energy Overhead**\index{Parallelism Energy Overhead!definition}: Data, model, and pipeline parallelism impose distinct communication and idle-power costs. Data parallelism reduces gradients, tensor parallelism exchanges partial activations, and pipeline parallelism introduces bubbles. A valid comparison holds model quality and time-to-train constant, then measures network energy and the additional powered time caused by coordination.
 
-Addressing these communication overheads, cluster-wide energy optimization requires coordinated resource management that extends beyond individual server efficiency across four primary operational levers. Dynamic workload placement consolidates compatible jobs so genuinely unused hardware can enter lower-power sleep states, with true savings verified at the facility meter rather than inferred from idle node counts. Carbon-aware scheduling shifts flexible, non-urgent workloads toward time windows or geographic regions with lower decision-relevant emissions factors, subject to data-movement overhead, completion deadlines, and reliability bounds. Multi-tenant sharing raises accelerator compute and memory occupancy across concurrent tasks, provided resource contention, memory bandwidth interference, and queueing delays do not provoke additional retraining iterations. Finally, adaptive batch processing groups compatible small requests when the resulting throughput gains outweigh queueing latency and convergence penalties. The common pattern across these levers is utilization discipline: the system saves energy by avoiding powered-on capacity that performs no useful model work.
+Beyond the communication term, cluster-wide energy optimization requires coordinated resource management across four operational levers. Dynamic workload placement consolidates compatible jobs so genuinely unused hardware can enter lower-power sleep states, with true savings verified at the facility meter rather than inferred from idle node counts. Carbon-aware scheduling shifts flexible, non-urgent workloads toward time windows or geographic regions with lower decision-relevant emissions factors, subject to data-movement overhead, completion deadlines, and reliability bounds. Multi-tenant sharing raises accelerator compute and memory occupancy across concurrent tasks, provided resource contention, memory bandwidth interference, and queueing delays do not provoke additional retraining iterations. Finally, adaptive batch processing groups compatible small requests when the resulting throughput gains outweigh queueing latency and convergence penalties. The common pattern across these levers is utilization discipline: the system saves energy by avoiding powered-on capacity that performs no useful model work.
 
 ### Carbon benchmarks across AI workloads {#sec-sustainable-ai-ai-energy-consumption-compared-industries-3d5d}
 
-The environmental impact of AI workloads has emerged as a concern, with carbon emissions approaching levels comparable to established carbon-intensive sectors. @strubell2019 made this concern concrete by estimating that development-scale training and architecture search for a large NLP model could emit as much carbon as several passenger vehicles over their lifetimes. @patterson2021carbon later showed that the most widely quoted architecture-search estimate depended strongly on proxy-task, hardware, data-center efficiency, and grid carbon-intensity assumptions. To contextualize AI's environmental footprint\index{Carbon Footprint!benchmarks}, larger and more accurate BERT-family models carry meaningfully higher per-query carbon (@fig-carbonfootprint). The scatter shows that the highest-accuracy variants sit near the top-right of the plot and that the carbon cost rises faster than the accuracy gain. The same trade-off reinforces the need for more sustainable AI practices.[^fn-nas-carbon-footprint]
+The environmental impact of AI workloads has become a measurable concern, even though the IEA estimates cited earlier place data-center electricity emissions well below those of aviation or cement. @strubell2019 made this concern concrete by estimating that development-scale training and architecture search for a large NLP model could emit as much carbon as several passenger vehicles over their lifetimes. @patterson2021carbon later showed that the most widely quoted architecture-search estimate depended strongly on proxy-task, hardware, data-center efficiency, and grid carbon-intensity assumptions. Carbon benchmarks\index{Carbon Footprint!benchmarks} are therefore only as good as the boundary behind them. Two estimates of the same search can differ by orders of magnitude when one assumes older hardware, an average facility, and a fossil-heavy grid while the other measures the deployed configuration.[^fn-nas-carbon-footprint]
 
 [^fn-nas-carbon-footprint]: **Neural Architecture Search (NAS) Carbon Cost**\index{Neural Architecture Search!carbon cost}: The ~284,000 kg CO~2~e figure from @strubell2019 represents an unoptimized Evolved Transformer search that drops sharply when accounting for TPU hardware, grid mix, and proxy tasks [@patterson2021carbon]. The systems lesson is boundary discipline: search, tuning, and failed trials belong inside the carbon accounting boundary, but reusable architecture search should be amortized across all downstream deployments. Efficient NAS techniques (weight sharing, hardware-aware search) reduce this search budget, making meta-optimization a primary sustainability lever [@elsken2019].
 
-::: {#fig-carbonfootprint fig-env="figure" fig-pos="htb" fig-cap="**Carbon Footprint Benchmarks**: Scatter plot of CO~2~ emissions per inference (vertical axis) against task accuracy (horizontal axis) for several BERT-family models. Higher-accuracy variants sit near the top-right of the plot; carbon cost rises faster than accuracy gain, emphasizing the environmental impact of pushing toward marginal accuracy improvements." fig-alt="Scatter plot of CO2 per inference vs. accuracy for BERT-family models. Higher-accuracy points sit in the top-right; carbon cost rises faster than accuracy gain."}
-```{python}
-#| echo: false
-#| warning: false
-import matplotlib.pyplot as plt
-import numpy as np
-from binder.tools.figures import style as book_style
+The GPT-3 calculation in notebook \ref{nbk-sustainable-ai-carbon-cost-training} put one training run at hundreds of trans-Atlantic passenger round trips. Such run-level comparisons convey scale, but they do not by themselves describe the footprint of a deployed service.
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(9.2, 5.2))
-
-c_dark = COLORS['primary']
-c_blue = COLORS['BlueLine']
-c_red = COLORS['RedLine']
-c_green = COLORS['GreenLine']
-c_gray = COLORS['secondary']
-c_border = COLORS['grid']
-
-small_models = [
-    (73.0, 0.20, 'MobileBERT', c_green, (-10, 5), 'right', 'bottom'),
-    (74.0, 0.26, 'TinyBERT', c_green, (10, -5), 'left', 'top'),
-    (77.0, 0.46, 'DistilBERT', c_green, (10, -5), 'left', 'top'),
-]
-
-med_models = [
-    (83.0, 1.45, 'BERT-base', c_blue, (10, -5), 'left', 'top'),
-    (85.0, 2.30, 'RoBERTa', c_blue, (10, -5), 'left', 'top'),
-    (84.0, 3.50, 'BERT-large', c_blue, (-10, 5), 'right', 'bottom'),
-]
-
-large_models = [
-    (88.0, 80.0, 'GPT-3 (175B)', c_red, (10, -5), 'left', 'top'),
-    (90.5, 250.0, 'PaLM (540B)', c_red, (10, -5), 'left', 'top'),
-    (92.5, 450.0, 'GPT-4 (est.)', c_red, (10, -12), 'left', 'top'),
-]
-
-ax.axvspan(76.5, 91.5, ymin=0, ymax=0.35, color=COLORS['GreenL'], alpha=0.4, zorder=1)
-ax.text(84.0, 0.15, 'Efficiency Zone', color=c_green, fontsize=8.5, fontweight='bold', ha='center', va='center')
-
-spline_acc = np.array([73.0, 74.0, 77.0, 83.0, 85.0, 88.0, 90.5, 92.5])
-spline_co2 = np.array([0.20, 0.26, 0.46, 1.45, 2.30, 80.0, 250.0, 450.0])
-
-poly = np.polyfit(spline_acc, np.log10(spline_co2), 3)
-smooth_acc = np.linspace(72.5, 93.0, 100)
-smooth_co2 = 10 ** np.polyval(poly, smooth_acc)
-
-ax.plot(smooth_acc, smooth_co2, color=c_red, linestyle='--', linewidth=2.0, zorder=2)
-ax.text(93.2, 700.0, 'Pareto\nFrontier', color=c_red, fontsize=8.5, fontweight='bold', va='center', ha='left')
-
-for group, col, sym, grp_lbl in [
-    (small_models, c_green, 'o', 'Small efficient models'),
-    (med_models, c_blue, 's', 'Medium models'),
-    (large_models, c_red, '^', 'Large frontier models'),
-]:
-    accs = [m[0] for m in group]
-    co2s = [m[1] for m in group]
-    ax.plot(accs, co2s, sym, color=col, markersize=7.0, markeredgecolor='#FFFFFF', markeredgewidth=1.2, label=grp_lbl, zorder=4)
-    for m in group:
-        ax.annotate(
-            m[2],
-            (m[0], m[1]),
-            xytext=m[4],
-            textcoords='offset points',
-            fontsize=7.8,
-            fontweight='bold',
-            color=col,
-            ha=m[5],
-            va=m[6],
-            bbox=dict(boxstyle='round,pad=0.2', facecolor='#FFFFFF', edgecolor=c_border, lw=0.6, alpha=0.9),
-        )
-
-ax.annotate(
-    r"10$\times$ $\mathregular{CO_2}$ for +1% accuracy",
-    xy=(88.0, 80.0),
-    xytext=(79.0, 20.0),
-    fontsize=8.0,
-    fontweight='bold',
-    color=c_red,
-    ha='center',
-    va='center',
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='#FFFFFF', edgecolor=c_red, lw=1.0),
-    arrowprops=dict(arrowstyle='->', color=c_red, lw=1.2),
-)
-
-ax.text(
-    0.98,
-    0.02,
-    'Illustrative data; relative magnitudes from Strubell et al. 2019, Patterson et al. 2021',
-    transform=ax.transAxes,
-    fontsize=7.0,
-    fontstyle='italic',
-    color=c_gray,
-    ha='right',
-    va='bottom',
-)
-
-ax.set_yscale('log')
-ax.set_xlim(70, 96)
-ax.set_ylim(0.08, 1200)
-ax.set_xlabel('Task Accuracy (%)', fontsize=9.5, fontweight='bold', color=c_dark)
-ax.set_ylabel(r'$\mathrm{CO}_2$ per Inference (mg, log scale)', fontsize=9.5, fontweight='bold', color=c_dark)
-ax.legend(loc='upper left', frameon=True, facecolor='#FFFFFF', edgecolor=c_border, fontsize=8.0)
-ax.tick_params(colors=c_dark, labelsize=8.5)
-ax.grid(True, which='major', linestyle='--', alpha=0.55)
-ax.grid(True, which='minor', linestyle=':', alpha=0.25)
-
-plt.tight_layout()
-plt.show()
-```
-:::
-
-The training phase of large natural language processing models can produce carbon dioxide emissions comparable to hundreds of transcontinental flights. At the broader industry scale, AI and data-center emissions are growing rapidly, but the IEA-scale estimates in this chapter do not yet support a direct parity claim with commercial aviation. As AI applications scale to serve billions of users globally, the cumulative emissions from continuous inference operations may ultimately exceed those generated during training.
-
-The operational lesson is that carbon estimates must separate training-only results from deployed inference. @Fig-meta-analysis provides a detailed analysis of carbon emissions\index{Carbon Footprint!operational, large-scale ML} across various large-scale machine learning tasks at Meta, illustrating the environmental impact of different AI applications and architectures. This quantitative assessment of AI's carbon footprint grounds mitigation strategies in measured environmental costs rather than estimates.
+The operational lesson is that carbon estimates must separate training-only results from deployed inference. @Fig-meta-analysis provides a detailed analysis of carbon emissions\index{Carbon Footprint!operational, large-scale ML} across various large-scale machine learning tasks at Meta, whose production recommendation models are Archetype B (DLRM at Scale) workloads (@sec-vol2-introduction-archetypes). Their footprint is dominated by inference rather than training, the reverse of the public training-only baselines. This quantitative assessment of AI's carbon footprint grounds mitigation strategies in measured environmental costs rather than estimates.
 
 ::: {#fig-meta-analysis fig-env="figure" fig-pos="htb" fig-cap="**Operational Carbon Footprint of Large-Scale ML Tasks**: Stacked bars show lifetime CO~2~e for Meta's recommendation models (RM-1 through RM-5), a language model (LM), and several open-source large models (BERT-NAS, Evolved Transformer, T5, Meena, GShard-600B, Switch Transformer, GPT-3). Recommendation models are dominated by inference (solid black), while the public open-source baselines report training-only footprints (hatched), underscoring that inference serving at scale can rival or exceed training emissions for deployed systems. Source: [@wu2022sustainable]." fig-alt="Stacked bar chart of CO2e in kilograms for 13 ML models. Facebook RM-1 is tallest near 0.85 million kg with large inference portion; GPT-3 shows a training-only footprint near 0.55 million kg."}
 ```{python}
@@ -2610,11 +2414,11 @@ Scope 3 emissions\index{Scope 3 emissions!value chain emissions}\index{Scope 3 e
 
 [^fn-euv-lithography-energy]: **Lithography and Embodied Energy**\index{EUV Lithography Energy Cost!definition}: Advanced semiconductor fabrication can use energy-intensive lithography, including extreme ultraviolet (EUV) processes. Emissions per usable chip depend on the process sequence, facility energy mix, yield, die area, and allocation method. Neither transistor count nor a nominal process-node label alone determines the number of exposure steps or manufacturing footprint.
 
-Downstream use can also enter Scope 3, including end-user smartphones, IoT devices, and edge computing[^fn-edge-intelligence-paradox]. Companywide totals do not by themselves identify the footprint of a particular AI service; that attribution still requires workload-level accounting.
+Downstream use can also enter Scope 3, including end-user smartphones, IoT devices, and edge computing.[^fn-edge-intelligence-paradox] Companywide totals do not by themselves identify the footprint of a particular AI service; that attribution still requires workload-level accounting.
 
 [^fn-edge-intelligence-paradox]: **Edge AI Energy Trade-off**\index{Edge AI Energy Paradox!definition}\index{Edge Computing!energy paradox}: Edge inference can reduce network transfers and response latency, while distributing computation across devices with different duty cycles and power states. It does not eliminate network or cloud work. Compare local compute, idle power, sensors, communications, and any remaining server work over the same service period; distributed consumption is harder to attribute, but remains part of the accounting boundary.
 
-Operational emissions capture only the production phase of AI. Software development itself adds another layer of environmental impact that is rarely accounted for.
+The operational emissions of a final training run and its deployed service omit the development that produced them, including failed experiments, hyperparameter searches, and the build and test infrastructure.
 
 ::: {#psp-sustainable-ai-hidden-carbon-cost-software .callout-perspective title="Hidden carbon cost of software"}
 
@@ -2792,7 +2596,7 @@ Categorizing these emissions into Scope 1, 2, and 3 frameworks provides a standa
 Audit the carbon footprint of a machine learning platform by classifying the following emission sources into Scope 1 (Direct), Scope 2 (Indirect Energy), or Scope 3 (Value Chain). State the reporting organization before assigning each scope:
 
 - [ ] **Backup generation**: classify diesel burned by backup generators during a grid outage at an owned facility.
-- [ ] **Leased cloud cluster**: classify the electricity for both reporting entities—the cloud operator that purchases it and the customer that purchases the compute service.
+- [ ] **Leased cloud cluster**: classify the electricity for both reporting entities, the cloud operator that purchases it and the customer that purchases the compute service.
 - [ ] **Embodied manufacturing**: classify the embodied carbon emitted during the manufacturing of the GPUs by TSMC.
 - [ ] **End-user operation**: classify emissions from the end-user's smartphone battery while running a deployed mobile inference app.
 
@@ -2802,7 +2606,7 @@ Accurately classifying these hidden emissions forces engineering teams to take r
 
 ### Power delivery {#sec-sustainable-ai-power-delivery}
 
-Capacity planning fails when engineers budget only accelerator TDP. Electricity loses energy and reliability margin at each transformation before it reaches a GPU's voltage regulators, so the delivery path identifies both the facility bottleneck and the heat that cooling must remove. The path starts outside the building: utility power arrives as high-voltage AC, typically 13.8--69 kV depending on the country and facility size, and a dedicated substation or transformer yard steps it down to medium voltage. The largest ML facilities require their own substation, which takes 18--24 months to build and requires coordination with the local utility. The grid connection is the ultimate bottleneck: no amount of engineering inside the building can deliver more power than the grid provides.
+@Sec-compute-power-wall traced the electrical path from the grid to the voltage regulator and defined PUE; this section asks where along that path energy and reliability margin are lost, and which of those losses a sustainability account must carry. Capacity planning fails when engineers budget only accelerator TDP. The first constraint sits outside the building. The largest ML facilities need a dedicated substation and a utility interconnection, and no engineering inside the building can deliver more power than that connection provides.
 
 ::: {.column-margin}
 ![](images/svg/sustainable_ai_grid_interconnection_ladder.svg){width="100%" fig-alt="Time ladder comparing a 24-month substation path with a 6-month GPU procurement path, with the fourfold lag marked as a ratio annotation."}
@@ -2854,7 +2658,6 @@ class GridQueue:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     ratio_mult_str = fmt_multiple(lead_time_ratio, precision=0, commas=False)
-    queue_gw_str = fmt_power(grid_queue_size_gw * GW, unit=GW, precision=0, commas=False)
     gpu_lead_time_months_str = fmt_time(gpu_lead_time_months, 'month', precision=0, commas=False, style='word')
     substation_lead_time_months_str = fmt_time(substation_lead_time_months, 'month', precision=0, commas=False, style='word')
     cluster_gpus_str = fmt_count(cluster_gpus, commas=True, label="GPU")
@@ -2870,9 +2673,7 @@ Deploying `{python} GridQueue.cluster_gpus_str` and deploying the electrical sub
 
 :::
 
-Inside the facility, an uninterruptible power supply (UPS)\index{Uninterruptible Power Supply!power conditioning and battery backup} conditions incoming power and provides battery backup during brief outages. Modern online double-conversion UPS systems convert AC to DC, charge a battery bank, and then convert back to AC, which ensures clean power but loses 3--5 percent efficiency. High-efficiency eco-mode designs bypass that double conversion during normal operation, achieving 98--99 percent efficiency with slightly less protection against input anomalies. The PDU\index{Power Distribution Unit!voltage step-down and rack delivery} then distributes conditioned power from the UPS to racks, often providing the final AC step-down from 480 V to 208/240 V for servers.
-
-Some ML facilities use **48 V DC distribution**\index{48 V DC Distribution!definition} to reduce current on high-power distribution paths. Delivering 5,600 W requires approximately 467 A at 12 V or 117 A at 48 V. At equal delivered power and conductor resistance, the fourfold reduction in current reduces $I^2R$ distribution losses\index{Power Distribution!distribution losses} sixteenfold. Actual savings depend on conductor design, parallel paths, and conversion losses; higher-voltage delivery is a design option, not proof that every lower-voltage implementation is infeasible.
+Inside the facility, every conversion stage turns part of the delivered power into heat. Using typical stage efficiencies, utility-to-medium-voltage transformation loses 1--2 percent; an online double-conversion uninterruptible power supply (UPS)\index{Uninterruptible Power Supply!conversion losses} loses 3--5 percent, while an eco-mode design that bypasses double conversion during normal operation loses 1--2 percent; the power distribution unit (PDU)\index{Power Distribution Unit!conversion losses} loses 2--3 percent; and voltage regulation on the baseboard loses another 5--8 percent. Compounding these stage losses, roughly 9--17 percent of the power drawn from the grid is dissipated as heat before it reaches a transistor, depending mainly on the UPS mode and the voltage regulators, and the server power supplies add their own conversion loss on top, bringing the end-to-end path close to the roughly 80 percent efficiency traced in @sec-compute-power-wall. The accounting boundary decides where each loss appears. Losses upstream of the IT boundary, such as the transformer, UPS, and facility distribution, raise PUE; server power supplies and baseboard voltage regulators sit inside the measured IT load, and their heat must be removed by the same cooling system that serves the accelerators. Higher-voltage distribution is one of the few design changes that shrinks this overhead directly. Delivering 5,600 W requires approximately 467 A at 12 V but 117 A at **48 V DC**\index{48 V DC Distribution!definition}; at equal conductor resistance the fourfold reduction in current cuts $I^2R$ distribution losses\index{Power Distribution!distribution losses} sixteenfold, although the realized saving depends on conductor design and the added conversion stages.
 
 ```{python}
 #| echo: false
@@ -2936,8 +2737,6 @@ class DistributionEfficiencySavings:
 
 At ML rack power densities, the difference between `{python} DistributionEfficiencySavings.low_eff_pct_str` and `{python} DistributionEfficiencySavings.high_eff_pct_str` distribution efficiency is meaningful. For a `{python} DistributionEfficiencySavings.rack_power_kw_str` rack, a `{python} DistributionEfficiencySavings.gain_pct_str` efficiency improvement saves approximately `{python} DistributionEfficiencySavings.per_rack_saved_kw_str` of power per rack. Across a facility with `{python} DistributionEfficiencySavings.n_racks_str` racks, this saves `{python} DistributionEfficiencySavings.facility_saved_kw_str`, enough to power roughly `{python} DistributionEfficiencySavings.additional_nodes_str` additional GPU nodes, or about `{python} DistributionEfficiencySavings.additional_racks_str` four-node racks under this rack-power mix. Over a `{python} DistributionEfficiencySavings.lifecycle_years_str`-year lifecycle at `{python} DistributionEfficiencySavings.rate_str`, the efficiency improvement saves `{python} DistributionEfficiencySavings.savings_usd_str` in electricity costs.
 
-The final conversions happen at the server and baseboard. Each server contains power supply units that convert rack-level voltage to 12 V DC or directly to the multiple voltages needed by baseboard components. A DGX H100, for example, uses multiple high-efficiency power supply units rated for 10 kW total, with N+1 redundancy so one failed unit does not take the node offline. Voltage regulator modules then convert 12 V DC to the 0.7--1.0 V required by the GPU core and the 1.1--1.2 V required by HBM. These regulators must respond to load changes within microseconds as the GPU moves between idle and full-load computation, and they operate at 90--95 percent efficiency.
-
 ```{python}
 #| echo: false
 from mlsysim.fmt import check, fmt, fmt_count, fmt_power, fmt_power_rate, fmt_qty_int, fmt_time
@@ -2960,13 +2759,12 @@ class H100TdpRackRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     tdp_w_str = fmt_power(gpu_tdp, unit=watt, precision=0, commas=False)
-    cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=False)
+    cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=True)
     comm_phase_w_str = fmt_power(comm_phase, unit=watt, precision=0, commas=False)
     power_delta_w_str = fmt_power(power_delta, unit=watt, precision=0, commas=False)
     power_delta_kw_str = fmt_qty_int(cluster_power_delta, kilowatt, commas=False)
     transition_us_str = fmt_time(transition, unit=microsecond, precision=0, commas=False)
     power_rate_gw_per_s_str = fmt_power_rate(power_rate, unit=GW / second, precision=2, commas=False)
-    node_power_budget_kw_str = fmt_power(7 * kilowatt, unit=kilowatt, precision=0, commas=False)
     node_gpus_str = fmt_count(Systems.Nodes.DGX_H100.accelerators_per_node, commas=False, label="GPU")
     node_gpu_only_kw_str = fmt_power(
         Hardware.Cloud.H100.tdp * Systems.Nodes.DGX_H100.accelerators_per_node,
@@ -2975,21 +2773,6 @@ class H100TdpRackRecap:
         commas=False,
     )
 ```
-
-::: {#chk-sustainable-ai-power-delivery-physics .callout-checkpoint title="Power delivery physics"}
-
-Verify the data center power path:
-
-- [ ] **Grid stress**: explain why synchronous ML training creates more stress on the power grid than asynchronous web traffic.
-- [ ] **Power ramp**: define the "Power Ramp" problem and explain how supercapacitor banks address it.
-- [ ] **Power budgeting**: explain why a node with `{python} H100TdpRackRecap.node_gpus_str` at `{python} H100TdpRackRecap.tdp_w_str` each is budgeted at ~`{python} H100TdpRackRecap.node_power_budget_kw_str` rather than `{python} H100TdpRackRecap.node_gpu_only_kw_str`.
-- [ ] **AC-DC conversion**: evaluate the true-or-false claim that converting high-voltage AC to low-voltage DC at the rack level is more efficient than doing it at the server level.
-
-:::
-
-At `{python} H100TdpRackRecap.tdp_w_str` per GPU, the voltage regulator module dissipates 35--70 W of heat, which must be cooled along with the GPU itself. This voltage-regulator heat is sometimes overlooked in thermal design: in a liquid-cooled system where cold plates cover the GPUs, the voltage regulators are typically still air-cooled by small fans, creating a thermal management challenge for the remaining components that do not have direct liquid cooling contact.
-
-The cumulative efficiency across all five stages is typically 85--90 percent, meaning that for every 100 W entering the delivery chain, 10--15 W is lost as heat before reaching the transistors. Facility-side conversion losses upstream of the IT boundary contribute to PUE, while baseboard voltage-regulator losses remain part of the measured IT load.
 
 To make this concrete, consider the power budget for a single rack containing four DGX H100 nodes:
 
@@ -3084,29 +2867,11 @@ class RackPowerBudget:
 
 : **Power Budget for a Four-Node DGX H100 Rack**: GPUs consume two thirds of this illustrative rack-attributed total. Host systems, networking, and equipment-side conversion losses form the remaining IT load; the final overhead row represents the scenario's non-IT allocation. The conversion row excludes facility-side losses, which belong in PUE. Applying a different facility PUE requires replacing the non-IT allocation, not multiplying the full table total. {#tbl-rack-power}
 
-Evaluating DGX H100 power allocation (@tbl-rack-power) reveals that `{python} RackPowerBudget.num_gpus_str` GPUs at `{python} RackPowerBudget.gpu_tdp_w_str` each deliver `{python} RackPowerBudget.gpu_kw_str`, but that GPU subtotal alone understates the true rack power requirement by roughly 50 percent. Infrastructure planners who size their facility based on GPU TDP alone will underestimate the electrical load and may discover during commissioning that their power capacity is insufficient.
+Evaluating DGX H100 power allocation (@tbl-rack-power) reveals that `{python} RackPowerBudget.num_gpus_str` GPUs at `{python} RackPowerBudget.gpu_tdp_w_str` each deliver `{python} RackPowerBudget.gpu_kw_str`, but the rack-attributed total runs roughly 50 percent above that GPU subtotal. Infrastructure planners who size their facility based on GPU TDP alone will underestimate the electrical load and may discover during commissioning that their power capacity is insufficient.
 
-ML training workloads can impose **synchronous transients**\index{Synchronous Transients!definition} on the power chain. Coordinated computation and communication phases can align load changes across workers. Pipeline stages, overlap, and independent jobs can reduce that correlation; the cluster need not execute entirely in lockstep.
+Synchronized training also changes the shape of the load. Coordinated computation and communication phases can align power swings across thousands of accelerators, removing the statistical smoothing that independent workloads provide; @sec-compute-power-delivery-transients analyzes how local decoupling, voltage regulators, and UPS controls filter these **synchronous transients**\index{Synchronous Transients!sustainability consequence} before they reach the utility connection.
 
-These **power ramps**\index{Power Ramps!definition} must be characterized at the electrical boundary of interest. Accelerator-side changes can occur faster than upstream equipment responds, but local capacitance and converter controls filter their propagation. Measure both the load step and the resulting voltage response before assigning a facility or grid-level consequence.
-
-::: {#exmp-sustainable-ai-power-ramp-sizing .callout-example title="Power-ramp sizing"}
-
-**Scenario**: A 512-GPU training cluster experiences intermittent node resets during synchronized training steps.
-
-**Diagnosis**: Test whether coordinated load steps cause a local voltage drop that crosses the accelerator protection threshold. Correlate reset logs with load and voltage measurements; the cluster size alone does not establish the cause.
-
-**Systems lesson**: Match the remedy to the measured electrical boundary. Local decoupling, regulator tuning, load staggering, or added ride-through capacity\index{Energy Buffering!supercapacitor ride-through} can address different parts of the transient; verify the response after the change.
-
-:::
-
-ML data centers use several layers of power conditioning. Local decoupling and voltage regulators address fast device-side changes. Rack-level storage, including supercapacitor banks\index{Energy Buffering!supercapacitor banks}, can bridge a measured energy deficit while upstream supplies respond. Required capacity follows the integral of that deficit over time, not a universal energy allowance per rack.
-
-Battery-backed UPS systems\index{Energy Buffering!battery-backed UPS} support longer disturbances and outages. Their response depends on topology, converters, controls, and operating mode; storage chemistry alone does not determine the response time seen by the load.
-
-At the facility connection, electrical design must assess loading, voltage regulation, harmonics, protection, and the response of the complete power chain. A rapid accelerator-side step does not by itself imply transformer saturation or a voltage disturbance at the utility connection.
-
-For an illustrative device-side calculation, assume `{python} H100TdpRackRecap.cluster_gpus_str` GPUs change together from `{python} H100TdpRackRecap.comm_phase_w_str` to `{python} H100TdpRackRecap.tdp_w_str` each over `{python} H100TdpRackRecap.transition_us_str`. The assumed aggregate step is `{python} H100TdpRackRecap.power_delta_kw_str`, giving a ramp rate of `{python} H100TdpRackRecap.power_rate_gw_per_s_str`. This is a load-side scenario, not a measured utility input. Local decoupling and regulator response\index{Energy Buffering!transient smoothing} determine how much of it appears upstream.
+For an illustrative device-side calculation, assume `{python} H100TdpRackRecap.cluster_gpus_str` GPUs change together from `{python} H100TdpRackRecap.comm_phase_w_str` to `{python} H100TdpRackRecap.tdp_w_str` each over `{python} H100TdpRackRecap.transition_us_str`. The assumed aggregate step is `{python} H100TdpRackRecap.power_delta_kw_str`, giving a ramp rate of `{python} H100TdpRackRecap.power_rate_gw_per_s_str`. This is a load-side scenario, not a measured utility input. Its sustainability consequence appears at the interconnection. Rack- or facility-level energy buffering (@sec-sustainable-ai-grid-dynamics)\index{Energy Buffering!transient smoothing}, sized to the measured energy deficit rather than to a fixed allowance per rack, lets the grid see a smoother load, and a well-characterized, controllable load is easier both to connect and to schedule against grid conditions.
 
 ::: {.column-margin}
 ![](images/svg/vol2_sustainable_ai_margin_003.svg){width="100%" fig-alt="Two curves over time: a blue low-amplitude load line and a red accelerating power spike."}
@@ -3114,7 +2879,16 @@ For an illustrative device-side calculation, assume `{python} H100TdpRackRecap.c
 *Coordinated phases can create abrupt load changes.*
 :::
 
-The power delivery chain itself introduces inefficiencies at each stage. Utility-to-medium-voltage transformation loses 1--2 percent. The UPS loses 3--5 percent (modern double-conversion designs) or 1--2 percent (eco-mode designs that bypass the inverter during normal operation). The PDU loses 2--3 percent. Voltage regulation on the baseboard loses another 5--8 percent. Cumulatively, 10--15 percent of the power drawn from the grid is dissipated as heat in the delivery chain before it ever reaches a transistor. Only losses upstream of the IT boundary contribute to PUE; baseboard voltage regulation is part of the IT load. A PUE of 1.10 means that all non-IT facility loads, including facility-side conversion and cooling, consume 10 percent above the IT load.
+::: {#chk-sustainable-ai-power-delivery-physics .callout-checkpoint title="Power delivery physics"}
+
+Verify the data center power path:
+
+- [ ] **Load correlation**: explain why synchronous ML training produces more correlated load changes at the facility connection than independent web traffic.
+- [ ] **Loss accounting**: identify which conversion losses in the delivery chain raise PUE and which remain inside the measured IT load.
+- [ ] **Power budgeting**: use @tbl-rack-power to explain why a node with `{python} H100TdpRackRecap.node_gpus_str` at `{python} H100TdpRackRecap.tdp_w_str` each must be budgeted well above its `{python} H100TdpRackRecap.node_gpu_only_kw_str` GPU subtotal.
+- [ ] **AC-DC conversion**: evaluate the true-or-false claim that converting high-voltage AC to low-voltage DC at the rack level is more efficient than doing it at the server level.
+
+:::
 
 ```{python}
 #| echo: false
@@ -3160,9 +2934,9 @@ class MegaClusterFacilityPower:
     facility_power_mw_str = fmt_power(facility_power, unit=MW, precision=1, commas=False)
 ```
 
-At the largest scales, the data center's power draw represents a significant fraction of the local electrical grid's capacity. A `{python} MegaClusterFacilityPower.cluster_gpus_str`-GPU cluster at `{python} MegaClusterFacilityPower.gpu_tdp_w_str` per GPU has a `{python} MegaClusterFacilityPower.accelerator_power_mw_str` accelerator subtotal, but rack-profile support power raises the IT load to `{python} MegaClusterFacilityPower.it_power_mw_str` before PUE. With PUE, the total facility draw approaches `{python} MegaClusterFacilityPower.facility_power_mw_str`. This is equivalent to powering a small city. Such installations require dedicated feeds from the electrical grid, often with purpose-built substations and transmission lines. The lead time for grid interconnection can exceed two years, making power availability one of the longest-lead-time constraints in building ML infrastructure.
+At the largest scales, the data center's power draw represents a significant fraction of the local electrical grid's capacity. A `{python} MegaClusterFacilityPower.cluster_gpus_str`-GPU cluster, roughly a hundred times the book's `{python} ArchetypeATdp.reference_gpus_str`-GPU reference cluster, at `{python} MegaClusterFacilityPower.gpu_tdp_w_str` per GPU has a `{python} MegaClusterFacilityPower.accelerator_power_mw_str` accelerator subtotal, but rack-profile support power raises the IT load to `{python} MegaClusterFacilityPower.it_power_mw_str` before PUE. With PUE, the total facility draw approaches `{python} MegaClusterFacilityPower.facility_power_mw_str`. This is equivalent to powering a small city. Such installations require dedicated feeds from the electrical grid, often with purpose-built substations and transmission lines. The lead time for grid interconnection can exceed two years, making power availability one of the longest-lead-time constraints in building ML infrastructure.
 
-At large-cluster scale, the same delivery limit becomes a grid-procurement problem rather than an electricity bill. Later large systems often lack energy disclosures comparable to the chapter's opening anchor, which is precisely why the measurement contract requires workload telemetry instead of relying on public model cards alone.
+At large-cluster scale, the same delivery limit becomes a grid-procurement problem rather than an electricity bill. Later large systems often lack energy disclosures comparable to the chapter's opening anchor, which is precisely why the measurement contract requires workload telemetry instead of relying on published model documentation alone.
 
 This grid-procurement problem worsens when model and data growth multiply each other. At fixed training tokens per parameter, doubling the model parameters also doubles the token count, so training work grows by approximately 4$\times$; energy does so only at unchanged realized efficiency. More generally, when model size and dataset size increase simultaneously, total training energy grows approximately with their product. A model with 10$\times$ the parameters, trained on 10$\times$ the data, therefore requires approximately 100$\times$ the training work; energy grows by that factor only if realized FLOPs per joule remain unchanged.
 
@@ -3210,18 +2984,9 @@ The electricity consumed by a single large-model training campaign can become no
 
 Power availability and power source therefore become the same infrastructure decision. Organizations training large models may seek to match their electricity consumption with renewable energy generation, either by locating data centers near renewable sources (hydro, wind, solar) or by purchasing renewable energy certificates (RECs) to offset their grid consumption.
 
-Direct investment in clean generation is the strongest form of this decision because it adds capacity rather than only reallocating credits. Microsoft, for example, has signed agreements to purchase nuclear energy from restarted reactors, recognizing that the scale and consistency of ML training loads require baseload power sources that renewable intermittent sources alone cannot provide. Google has similarly invested in geothermal energy projects, which provide consistent power output independent of weather conditions.
+Direct investment in clean generation is the strongest form of this decision because it adds capacity rather than only reallocating credits. Microsoft, for example, has signed an agreement to purchase power from a restarted nuclear reactor, recognizing that the scale and consistency of ML training loads require baseload power sources that renewable intermittent sources alone cannot provide. Google has similarly invested in geothermal energy projects, which provide consistent power output independent of weather conditions.
 
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierStragglerRecap8:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-The carbon intensity\index{Carbon Intensity!regional grid variance} of the energy grid dictates the true environmental cost of a training run. A facility powered by hydroelectric dams in the Pacific Northwest emits approximately 50 g CO~2~/kWh, while a gas-heavy grid produces around 400 g CO~2~/kWh and a coal-heavy one roughly twice that again. A single training run for the `{python} InfraFrontierStragglerRecap8.frontier_params_b_str` model, consuming approximately 1,287 MWh, implies a carbon impact ranging from 64 tonnes to 515 tonnes depending solely on location---an 8$\times$ variance that makes site selection a first-order decarbonization lever. This pairing of Pacific Northwest hydro against the stated gas-heavy grid sits at the conservative end of the geographic span established in @sec-sustainable-ai-scale-environmental-impact-ac9a; a cleaner hydro grid widens it further. This environmental calculus can drive infrastructure decisions: organizations that can locate training clusters in low-carbon regions may achieve both lower electricity costs (hydroelectric power is often cheaper than fossil-fuel generation) and lower carbon footprints, a rare alignment of economic and environmental incentives.
+Once power is available, its carbon intensity\index{Carbon Intensity!regional grid variance} sets the environmental cost of every megawatt-hour the facility draws. The placement comparison in notebook \ref{nbk-sustainable-ai-geography-carbon} already showed how far that factor can move one run's emissions; at facility scale the same lever becomes a siting decision that persists for the life of the building. Organizations that can locate training clusters in low-carbon regions may achieve both lower electricity costs, because hydroelectric power is often cheaper than fossil-fuel generation, and lower carbon footprints, a rare alignment of economic and environmental incentives.
 
 ### Cooling {#sec-sustainable-ai-cooling}
 
@@ -3250,7 +3015,7 @@ class SustainableCoolingRackPowerRecap:
     rack_power_kw_str = fmt_power(rack_power, unit=kilowatt, precision=1, commas=False)
 ```
 
-Every watt of electrical power delivered to a GPU is ultimately converted to heat. The first law of thermodynamics guarantees this: the electrical energy is converted to computational work (switching transistors), but the "work" product is just bit flips in memory, which themselves have negligible energy. All of the input energy exits the system as thermal energy that must be physically removed from the chip, transported out of the rack, and rejected to the environment. The fundamental physics of heat transfer establishes an unavoidable constraint: the IT electrical load inside the rack, represented by `{python} SustainableCoolingRackPowerRecap.rack_power_kw_str` must be carried away as heat at the same average rate in steady operation. Allocated non-IT facility overhead produces additional heat outside this rack boundary. If cooling falls behind even briefly, chip temperatures rise, triggering thermal throttling that reduces clock speeds and throughput. At extreme temperatures, the silicon can sustain permanent damage.
+@Sec-compute-power-wall established the thermal envelope of dense racks; the sustainability question is how much energy and water removing that heat costs, and how the choice between air and liquid cooling changes both. Every watt of electrical power delivered to a GPU is ultimately converted to heat. The first law of thermodynamics guarantees this: the electrical energy is converted to computational work (switching transistors), but the "work" product is just bit flips in memory, which themselves have negligible energy. All of the input energy exits the system as thermal energy that must be physically removed from the chip, transported out of the rack, and rejected to the environment. The fundamental physics of heat transfer establishes an unavoidable constraint: the IT electrical load inside the rack, represented by `{python} SustainableCoolingRackPowerRecap.rack_power_kw_str`, must be carried away as heat at the same average rate in steady operation. Allocated non-IT facility overhead produces additional heat outside this rack boundary. If cooling falls behind even briefly, chip temperatures rise, triggering thermal throttling that reduces clock speeds and throughput. At extreme temperatures, the silicon can sustain permanent damage.
 
 ::: {.column-margin}
 ```{=latex}
@@ -3392,7 +3157,7 @@ class PueSavings:
 
 Reducing non-IT overhead lowers facility electricity at fixed IT load; PUE captures cooling and facility-side electrical losses together. At the scale of a 10,000-GPU cluster consuming `{python} PueSavings.it_power_mw_str` of IT power after rack support load, the difference between PUE 1.5 and PUE 1.1 is `{python} PueSavings.diff_15_to_11_mw_str` of additional facility power, costing approximately `{python} PueSavings.savings_15_to_11_musd_str` per year under the stated electricity-rate assumption.
 
-[^fn-pue-facility-metric]: **PUE Cluster Savings**\index{Power Usage Effectiveness!savings}: The scenario compares fixed PUE values of 1.58 and 1.10; these inputs are not a current industry or vendor inventory. For a 10,000-GPU cluster consuming `{python} PueSavings.it_power_mw_str` of IT power after rack support load, reducing PUE from 1.58 to 1.10 saves `{python} PueSavings.diff_158_to_110_mw_str` of non-IT overhead---roughly `{python} PueSavings.savings_158_to_110_musd_str` per year in electricity and the equivalent of removing `{python} PueSavings.households_158_to_110_str` residential homes from the grid. The PUE assumption must cover all non-IT loads at the selected facility boundary.
+[^fn-pue-facility-metric]: **PUE Cluster Savings**\index{Power Usage Effectiveness!savings}: The scenario compares fixed PUE values of 1.58 and 1.10; these inputs are not a current industry or vendor inventory. For a 10,000-GPU cluster consuming `{python} PueSavings.it_power_mw_str` of IT power after rack support load, reducing PUE from 1.58 to 1.10 saves `{python} PueSavings.diff_158_to_110_mw_str` of non-IT overhead, roughly `{python} PueSavings.savings_158_to_110_musd_str` per year in electricity and the equivalent of removing `{python} PueSavings.households_158_to_110_str` residential homes from the grid. The PUE assumption must cover all non-IT loads at the selected facility boundary.
 
 ```{python}
 #| echo: false
@@ -3432,6 +3197,7 @@ class H100TdpCoolingRecap:
     annual_savings_str = fmt_usd(annual_savings_usd)
     electricity_rate_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
     three_year_savings_str = fmt_usd(three_year_savings_usd)
+    pue_liquid_str = fmt(pue_liquid, precision=2, commas=False)
 ```
 
 Water has a specific heat capacity of 4.18 kJ/kg/K, over four times that of air, and a thermal conductivity roughly 25$\times$ higher. These physical properties make water an inherently superior heat transfer medium. To appreciate the magnitude of the difference, consider how much fluid must flow to remove `{python} H100TdpCoolingRecap.tdp_w_str` from a single GPU. Air at a 15-degree temperature rise requires tens of liters per second of airflow (a small wind tunnel). Water at the same temperature rise requires only about 0.01 liters per second (a thin stream). This thousands-fold difference in volumetric flow rate is why air cooling requires massive fans and carefully designed airflow paths, while liquid cooling requires only thin pipes and small pumps.
@@ -3462,31 +3228,6 @@ The trade-off is serviceability: accessing a failed component requires draining 
 
 The architecture comparison in @fig-cooling-comparison shows why liquid cooling can support higher heat flux: it moves heat through a short thermal path into a fluid with high volumetric heat capacity. The required density and ambient conditions determine whether an air, liquid, or hybrid design meets the operating envelope.
 
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierStragglerRecap9:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class RackPowerCoolingRecap:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    rack = Systems.Racks.DGX_H100_4Node
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    rack_power_kw_str = fmt_power(
-        rack.total_power,
-        unit=kilowatt,
-        precision=1,
-        commas=False,
-    )
-```
-
 @Fig-cooling-comparison and @tbl-cooling-limits separate physical feasibility from lifecycle economics. First establish that the proposed system meets component temperature and serviceability requirements at the design load. Then compare installed capital cost, pumps and fans, heat rejection, water, maintenance, and useful lifetime under the same workload. A higher-density liquid-cooled installation may reduce operating energy, but its payback period cannot be inferred from rack power alone.
 
 ::: {#nbk-sustainable-ai-cooling-tax .callout-notebook title="The cooling tax"}
@@ -3495,9 +3236,9 @@ Consider a `{python} H100TdpCoolingRecap.n_gpus_str`-GPU cluster of H100s at `{p
 
 - IT power\index{IT power!cluster cooling calculation}: `{python} H100TdpCoolingRecap.n_gpus_str` $\times$ `{python} H100TdpCoolingRecap.tdp_w_str` = `{python} H100TdpCoolingRecap.it_power_kw_str`
 - Air cooling (PUE `{python} H100TdpCoolingRecap.pue_air_str`): Total facility power = `{python} H100TdpCoolingRecap.it_power_kw_str` $\times$ `{python} H100TdpCoolingRecap.pue_air_str` = `{python} H100TdpCoolingRecap.air_total_kw_str`. Cooling overhead = `{python} H100TdpCoolingRecap.air_cooling_kw_str`.
-- Liquid cooling (PUE 1.08): Total facility power = `{python} H100TdpCoolingRecap.it_power_kw_str` $\times$ 1.08 = `{python} H100TdpCoolingRecap.liquid_total_kw_str`. Cooling overhead = `{python} H100TdpCoolingRecap.liquid_cooling_kw_str`.
+- Liquid cooling (PUE `{python} H100TdpCoolingRecap.pue_liquid_str`): Total facility power = `{python} H100TdpCoolingRecap.it_power_kw_str` $\times$ `{python} H100TdpCoolingRecap.pue_liquid_str` = `{python} H100TdpCoolingRecap.liquid_total_kw_str`. Cooling overhead = `{python} H100TdpCoolingRecap.liquid_cooling_kw_str`.
 
-**Savings**: Liquid cooling saves `{python} H100TdpCoolingRecap.savings_kw_str` of continuous power. At `{python} H100TdpCoolingRecap.electricity_rate_str`, the annual savings are approximately `{python} H100TdpCoolingRecap.annual_savings_str`. Over a 3-year hardware lifecycle, the cooling savings alone total `{python} H100TdpCoolingRecap.three_year_savings_str`, which often exceeds the capital cost of installing the liquid cooling infrastructure.
+**Savings**: Liquid cooling saves `{python} H100TdpCoolingRecap.savings_kw_str` of continuous power. At `{python} H100TdpCoolingRecap.electricity_rate_str`, the annual savings are approximately `{python} H100TdpCoolingRecap.annual_savings_str`. Over a 3-year hardware lifecycle, the cooling savings alone total `{python} H100TdpCoolingRecap.three_year_savings_str`, which is the figure to set against the installed capital cost of the liquid-cooling system when computing its payback period.
 
 :::
 
@@ -3516,15 +3257,6 @@ Dry coolers, which use fans to blow air over a radiator without evaporation, eli
 **Waste heat reuse**\index{Waste Heat Reuse!definition} treats thermal output as a resource. A liquid-cooling loop returning water at 50--65 degrees Celsius supplies low-grade heat that may serve nearby district heating\index{District Heating!municipal heat networks}, greenhouses, or other suitable sinks. Usability depends on the required supply temperature, seasonal demand, and transport losses; a heat pump may be needed. If an illustrative 10 MW thermal stream has an 80--90 percent recovery fraction, 8--9 MW is recovered before accounting for heat-pump electricity. Heat-pump output includes that electrical input and must be accounted for separately. Crediting useful heat does not reduce PUE below 1.0; report export through energy reuse effectiveness\index{Energy Reuse Effectiveness!heat export} or a separate net-energy balance.
 
 The viability of waste heat reuse depends on the proximity of heat consumers. Urban data centers, despite their higher land and electricity costs, are often better positioned for waste heat reuse than remote facilities because they are close to residential and commercial heating loads. The result is a counterintuitive economic optimization: a data center in a Nordic city may have higher electricity costs but lower net operating costs after waste heat revenues, compared to a remote facility with cheaper electricity but no heat consumers nearby.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierRackCoolingChoiceRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
 
 For a dense training fleet, cooling is a configuration constraint. The aggregate accelerator TDP sets only part of the heat load; hosts, memory, networking, and conversion losses add to it. Rack layout and cooling capacity determine whether the intended configuration can sustain its workload or must reduce density or power. Liquid cooling is one way to expand that envelope, with its own serviceability and lifecycle costs.
 
@@ -3580,7 +3312,7 @@ class StragglerFailureCost:
     cluster_cost_str = fmt_usd(cluster_cost, precision=0, commas=True)
 ```
 
-The economics of cooling reliability shift dramatically when moving from independent inference servers to tightly coupled training clusters. In a distributed training run using synchronous parallelism, a cooling-loop failure that idles a pod-scale slice can halt the entire job. Consider a cooling failure that triggers a thermal shutdown of a `{python} StragglerFailureCost.failed_gpus_str`-GPU pod within a `{python} StragglerFailureCost.cluster_gpus_str`-GPU cluster. The direct hardware cost is negligible, but the opportunity cost is immense. If the repair time for a CDU pump is `{python} StragglerFailureCost.repair_hours_str`, the immediate loss of `{python} StragglerFailureCost.failed_gpus_str` GPUs at `{python} StragglerFailureCost.gpu_hour_rate_str` per GPU-hour is only `{python} StragglerFailureCost.direct_cost_str`. However, assuming the job cannot continue elastically after losing those workers, the remaining `{python} StragglerFailureCost.idle_gpus_str` GPUs also sit idle, burning electricity without making progress. This straggler effect inflates the cost to `{python} StragglerFailureCost.cluster_cost_str` in lost compute time. When adding the overhead of checkpoint retrieval and the rollback to the last saved state---often losing 30 to 60 minutes of computation---the illustrative lost-compute total reaches \$180,000--\$200,000 before any additional recovery delay. Compare expected outage losses and recovery behavior against the cost of N+1 cooling redundancy rather than treating redundancy as an unconditional requirement.
+The economics of cooling reliability shift dramatically when moving from independent inference servers to tightly coupled training clusters. In a distributed training run using synchronous parallelism, a cooling-loop failure that idles a pod-scale slice can halt the entire job. Consider a cooling failure that triggers a thermal shutdown of a `{python} StragglerFailureCost.failed_gpus_str`-GPU pod within a `{python} StragglerFailureCost.cluster_gpus_str`-GPU cluster, about ten times the `{python} ArchetypeATdp.reference_gpus_str`-GPU reference cluster. The direct hardware cost is negligible, but the opportunity cost is immense. If the repair time for a CDU pump is `{python} StragglerFailureCost.repair_hours_str`, the immediate loss of `{python} StragglerFailureCost.failed_gpus_str` GPUs at `{python} StragglerFailureCost.gpu_hour_rate_str` per GPU-hour is only `{python} StragglerFailureCost.direct_cost_str`. However, assuming the job cannot continue elastically after losing those workers, the remaining `{python} StragglerFailureCost.idle_gpus_str` GPUs also sit idle, burning electricity without making progress. This synchronous blast radius inflates the cost to `{python} StragglerFailureCost.cluster_cost_str` in lost compute time. When adding the overhead of checkpoint retrieval and the rollback to the last saved state (often 30 to 60 minutes of lost computation), the illustrative lost-compute total reaches \$180,000--\$200,000 before any additional recovery delay. Compare expected outage losses and recovery behavior against the cost of N+1 cooling redundancy rather than treating redundancy as an unconditional requirement.
 
 ::: {.column-margin}
 ![](images/svg/sustainable_ai_cooling_failure_blast.svg){width="100%" fig-alt="Blast-radius fan with one red cooling-failure source sending arrows to six blue affected groups, labeled to show that a pod-scale cooling failure idles the synchronized training job."}
@@ -3602,7 +3334,7 @@ Training large AI models can require computational infrastructure with hundreds 
 
 The intensive computational loads generate heat that cooling infrastructure must continuously remove, the overhead quantified for the cooling treatment in @sec-sustainable-ai-cooling. Reducing it requires co-optimization of hardware architecture, parallelism strategy, and algorithmic efficiency.
 
-Training energy costs occur once per completed run, but model development can require many runs, followed by retraining during service. Each run affects facility sizing, checkpoint storage, and carbon accounting. The primary sustainability challenge often emerges during deployment, where inference workloads continuously serve millions or billions of users and can overtake the accumulated training energy when request volume is large enough.
+Training energy costs occur once per completed run, but model development can require many runs, followed by retraining during service. Each run affects facility sizing, checkpoint storage, and carbon accounting. For high-volume services, the larger term is often the deployment that follows, as the crossover calculation in @sec-sustainable-ai-lifecycle-carbon-accounting-99a1 showed.
 
 ### Inference energy costs {#sec-sustainable-ai-inference-energy-costs-aec9}
 
@@ -3610,9 +3342,9 @@ Inference workloads execute every time an AI model responds to queries, classifi
 
 For example, AI-driven search engines handle billions of queries per day, recommendation systems provide personalized content continuously, and generative AI services such as ChatGPT or DALL-E have substantial per-query computational costs. The inference energy footprint is high in transformer-based models due to high memory and computational bandwidth requirements.
 
-Early market forecasts anticipated this shift: a 2017 McKinsey projection (@fig-mckinsey-analysis) expected the data-center inference market to roughly double from 4-5 to 9-10 billion dollars and edge inference to climb from near zero to 4-4.5 billion dollars by 2025, both outpacing the slower-growing training market. The stronger evidence is physical rather than economic. The Meta lifecycle measurements in @fig-meta-analysis show inference serving at scale rivaling or exceeding training emissions for deployed recommendation models, and the chapter's own accounting shows continuous serving overtaking a one-time training run once request volume is large enough.
+Early market forecasts anticipated this shift. A 2018 McKinsey projection (@fig-mckinsey-analysis) expected the data-center inference market to roughly double from 4-5 to 9-10 billion dollars and edge inference to climb from near zero to 4-4.5 billion dollars by 2025, so that inference would remain the larger market even as data-center training grew faster from a smaller base [@mckinsey2018ai]. The stronger evidence is physical rather than economic. The Meta lifecycle measurements in @fig-meta-analysis show inference dominating the footprint of deployed recommendation models.
 
-::: {#fig-mckinsey-analysis fig-env="figure" fig-pos="htb" fig-cap="**AI Hardware Market Growth**: McKinsey analysis comparing 2017 market estimates with then-projected 2025 data center and edge markets. Inference workloads dominated the projected growth, with edge inference treated as a significant new segment while training markets grew more gradually in the projection." fig-alt="Two grouped bar charts comparing 2017 market estimates with then-projected 2025 market projections. Data center inference doubles from 4-5 to 9-10 billion dollars. Edge inference grows from near zero to 4-4.5 billion dollars. Training markets grow more slowly."}
+::: {#fig-mckinsey-analysis fig-env="figure" fig-pos="htb" fig-cap="**AI Hardware Market Growth**: A 2018 McKinsey analysis comparing 2017 market estimates with then-projected 2025 data center and edge markets [@mckinsey2018ai]. Inference remained the larger projected market in both settings, and edge inference appeared as a significant new segment, while data-center training grew faster in relative terms from a smaller base." fig-alt="Two grouped bar charts comparing 2017 market estimates with then-projected 2025 market projections. Data center inference doubles from about 4.5 to 9.5 billion dollars while data center training grows from under 1 to 4.5 billion dollars. Edge inference grows from near zero to about 4.25 billion dollars."}
 
 ```{python}
 #| echo: false
@@ -3734,6 +3466,16 @@ plt.show()
 
 Inference workloads, like other software services, scale with demand. An always-available service consumes energy both while processing requests and while maintaining capacity for expected latency and availability. The sustainability account must include query volume, workload mix, and idle provisioned resources.
 
+::: {#chk-sustainable-ai-training-inference-flip .callout-checkpoint title="The training-inference flip"}
+
+Consider a vision model where training requires 2,000 GPU-hours at an average power draw of 300 W. Once deployed, the model serves 1 million requests per day, with each request taking 50 ms at an average draw of 100 W.
+
+- [ ] **Training energy**: calculate the total energy used for training.
+- [ ] **Inference energy**: calculate the total energy used for inference over a 2-year product lifespan.
+- [ ] **Optimization focus**: compute the ratio of lifetime inference energy to training energy and use it to select the optimization target that maximizes sustainability.
+
+:::
+
 #### The energy inefficiency of the decode phase {#sec-sustainable-ai-energy-inefficiency-decode-phase-24da}
 
 ::: {.column-margin .margin-pointer}
@@ -3766,7 +3508,7 @@ Edge deployment can be more sustainable than cloud deployment when designed corr
 
 ARM-based edge devices operate under fundamentally different power constraints than data center accelerators. The engineering choice is to match each inference workload to the smallest power tier that still satisfies latency and accuracy.
 
-Power budgets reflect the physical constraints of battery capacity, thermal dissipation, and deployment environment. @Tbl-edge-power-budgets groups edge AI power budget categories\index{Edge AI!power budget categories} and shows how these constraints propagate: TinyML devices operating from coin cells or energy harvesting cannot exceed milliwatt average power, mobile devices must balance user experience with battery life, and automotive systems face thermal constraints within enclosed vehicle compartments despite having access to vehicle power.
+Power budgets reflect the physical constraints of battery capacity, thermal dissipation, and deployment environment. @Tbl-edge-power-budgets groups edge AI power budget categories\index{Edge AI!power budget categories} and shows how these constraints propagate. TinyML\index{TinyML!definition} devices (microcontrollers that run small models in kilobytes of memory) operating from coin cells or energy harvesting cannot exceed milliwatt average power; mobile devices must balance user experience with battery life; and automotive systems face thermal constraints within enclosed vehicle compartments despite having access to vehicle power.
 
 | **Platform Category**  | **Idle Power** | **Active Power** | **Peak Power** | **Example Devices**                                                                   |
 |:-----------------------|:--------------:|:----------------:|:--------------:|:--------------------------------------------------------------------------------------|
@@ -3779,11 +3521,11 @@ Power budgets reflect the physical constraints of battery capacity, thermal diss
 
 #### TinyML power state dynamics {#sec-sustainable-ai-tinyml-power-state-dynamics-ceaf}
 
-While @sec-edge-intelligence examines TinyML from a systems architecture perspective, the energy efficiency of on-device inference is equally a sustainability consideration: each of the billions of edge inference calls aggregates into measurable carbon footprint at fleet scale. TinyML efficiency depends heavily on duty cycling, where devices alternate between deep sleep and active inference. @Eq-tinyml-duty-cycle expresses average power as a weighted sum of active and sleep power:
+TinyML devices are the smallest members of the edge fleets of @sec-edge-intelligence, sitting below the phone-class devices of Archetype C (Federated MobileNet) in both memory and power. Their energy efficiency is a sustainability concern because billions of edge inference calls add up to a measurable carbon footprint at fleet scale. TinyML efficiency depends heavily on duty cycling, where devices alternate between deep sleep and active inference. @Eq-tinyml-duty-cycle expresses average power as a weighted sum of active and sleep power:
 
 $$P_{\text{average}} = P_{\text{active}} \times \frac{t_{\text{inference}}}{T_{\text{period}}} + P_{\text{sleep}} \times \frac{T_{\text{period}} - t_{\text{inference}}}{T_{\text{period}}}$$ {#eq-tinyml-duty-cycle}
 
-Consider a keyword-spotting model running on a Cortex-M4 microcontroller in the Archetype C (Federated MobileNet) regime (@sec-vol2-introduction-archetypes). The device operates with an active inference power of 15 mW for 20 ms during each detection cycle, transitions to a deep-sleep draw of 10 microamps at 3.3 V (33 microwatts) between evaluations, and repeats on a 1-second detection period during continuous listening. Substituting these values into @eq-tinyml-duty-cycle yields the average power draw:
+Consider a keyword-spotting model running on a Cortex-M4 microcontroller, an extreme well below the 2--10 W phones of Archetype C (@sec-vol2-introduction-archetypes) but governed by the same battery arithmetic. The device operates with an active inference power of 15 mW for 20 ms during each detection cycle, transitions to a deep-sleep draw of 10 microamps at 3.3 V (33 microwatts) between evaluations, and repeats on a 1-second detection period during continuous listening. Substituting these values into @eq-tinyml-duty-cycle yields the average power draw:
 
 $$P_{\text{average}} = 15 \text{ mW} \times \frac{20 \text{ ms}}{1000 \text{ ms}} + 0.033 \text{ mW} \times \frac{980 \text{ ms}}{1000 \text{ ms}}$$
 
@@ -3974,7 +3716,7 @@ class EnergyHarvestingArea:
     kws_solar_area_cm2_str = fmt_area(kws_solar_area, unit=ureg.centimeter**2, commas=False)
 ```
 
-Consider the energy harvesting power budgets\index{Energy Harvesting!power budgets} in @tbl-energy-harvesting: a keyword spotting model optimized to 0.5 mW average power can operate indefinitely on approximately `{python} EnergyHarvestingArea.kws_solar_area_cm2_str` of indoor solar harvesting only under bright indoor conditions near the top of the listed range. Typical indoor deployments need additional area, energy storage, duty cycling, or a lower average-power model to leave margin for conversion losses and dim lighting. This perpetual operation model represents the ultimate sustainable edge AI deployment, where operational energy comes entirely from ambient sources.
+Consider the energy harvesting power budgets\index{Energy Harvesting!power budgets} in @tbl-energy-harvesting: a keyword spotting model optimized to 0.5 mW average power can operate indefinitely on approximately `{python} EnergyHarvestingArea.kws_solar_area_cm2_str` of indoor solar harvesting only under bright indoor conditions near the top of the listed range. Typical indoor deployments need additional area, energy storage, duty cycling, or a lower average-power model to leave margin for conversion losses and dim lighting. Such a device draws its operational energy entirely from ambient sources, which leaves manufacturing and disposal as its dominant lifecycle terms.
 
 | **Harvesting Source**                                                       |  **Typical Power**   | **Viable TinyML Applications** |
 |:----------------------------------------------------------------------------|:--------------------:|:-------------------------------|
@@ -3994,7 +3736,7 @@ $$E_{\text{cascade}} = E_{\text{edge}} + p_{\text{escalate}} \times (E_{\text{tr
 
 where $p_{\text{escalate}}$ is the probability of requiring cloud inference (measured on the deployment input distribution).
 
-Consider an illustrative visual inspection system where a lightweight edge model, such as MobileNet-v3 tiny, consumes 0.5 mJ per image classification, whereas a high-capacity cloud model, such as ResNet-152, requires 50 mJ per inference. Transmitting an image across a cellular uplink adds 10 mJ. If the edge model resolves routine cases locally and escalates only ambiguous inputs—yielding an escalation rate $p_{\text{escalate}}$ of 10 percent—substituting these parameters into @eq-cascade-energy gives the average cascade energy:
+Consider an illustrative visual inspection system where a lightweight edge model, such as MobileNetV3-Small, consumes 0.5 mJ per image classification, whereas a high-capacity cloud model, such as ResNet-152, requires 50 mJ per inference. Transmitting an image across a cellular uplink adds 10 mJ. If the edge model resolves routine cases locally and escalates only ambiguous inputs, for an escalation rate $p_{\text{escalate}}$ of 10 percent, substituting these parameters into @eq-cascade-energy gives the average cascade energy:
 
 $$E_{\text{cascade}} = 0.5 + 0.10 \times (10 + 50) = 0.5 + 6.0 = 6.5 \text{ mJ/image}$$
 
@@ -4060,7 +3802,7 @@ The hierarchical approach achieves `{python} WakeWordPower.avg_power_uw_str` ave
 
 #### Federated learning energy analysis {#sec-sustainable-ai-federated-learning-energy-analysis-2c07}
 
-Training at the edge keeps raw data local but replaces its transfer with repeated model downloads and client-update uploads. @Eq-federated-energy contrasts the energy trade-offs between federated and centralized approaches, where $R$ is the number of rounds and $N_{\text{clients}}$ is the number of participating clients per round:
+Training at the edge keeps raw data local but replaces its transfer with repeated model downloads and client-update uploads. This is the regime of Archetype C (Federated MobileNet), where phones train a shared model within a sustained power budget of a few watts. @Eq-federated-energy contrasts the energy trade-offs between federated and centralized approaches, where $R$ is the number of rounds and $N_{\text{clients}}$ is the number of participating clients per round:
 
 $$E_{\text{federated}} = R \left[N_{\text{clients}} \left(E_{\text{local\_train}} + E_{\text{download}} + E_{\text{upload}}\right) + E_{\text{aggregation}}\right]$$
 $$E_{\text{centralized}} = N_{\text{clients}} \times E_{\text{raw\_data\_upload}} + E_{\text{cloud\_train}}$$ {#eq-federated-energy}
@@ -4069,11 +3811,11 @@ Federated learning becomes more energy-efficient only when repeated model commun
 
 ### Water, chemicals, and critical materials {#sec-sustainable-ai-water-usage-caae}
 
-AI's environmental footprint extends beyond electricity consumption to include physical resources---water, hazardous chemicals, and critical materials---that require different assessment approaches. Comprehensive assessment requires measuring additional ecological impacts including water consumption, hazardous chemical usage, rare material extraction, and biodiversity disruption that often receive less attention despite their ecological significance. Modern semiconductor fabrication plants producing AI chips require millions of liters of water daily and use over 250 hazardous substances in their processes. In regions already facing water stress, such as Taiwan, Arizona, and Singapore, this intensive usage threatens local ecosystems and communities. AI hardware also relies heavily on scarce materials like gallium, indium, arsenic, and helium, which face both geopolitical supply risks and depletion concerns [@jha2014; @chen2006].
+AI's environmental footprint extends beyond electricity consumption to include physical resources (water, hazardous chemicals, and critical materials) that require different assessment approaches. Comprehensive assessment requires measuring additional ecological impacts including water consumption, hazardous chemical usage, rare material extraction, and biodiversity disruption that often receive less attention despite their ecological significance. Modern semiconductor fabrication plants producing AI chips require millions of liters of water daily and use over 250 hazardous substances in their processes. In regions already facing water stress, such as Taiwan, Arizona, and Singapore, this intensive usage threatens local ecosystems and communities. AI hardware also relies heavily on scarce materials like gallium, indium, arsenic, and helium, which face both geopolitical supply risks and depletion concerns [@jha2014; @chen2006].
 
 Water accounting requires more than a single WUE\index{Water Usage Effectiveness!accounting limitations} ratio. **Water withdrawal**\index{Water withdrawal!definition} measures water removed from a source, whereas **water consumption**\index{Water consumption!definition} measures the portion not returned to the same watershed in a usable form. The account must separate direct on-site cooling water from indirect water used to generate electricity and manufacture hardware, then attach each flow to its watershed, season, and local scarcity [@iso140462014; @thegreengrid2011wue]. One liter consumed during a wet season in a low-stress basin is not equivalent to one liter consumed during a drought in a stressed basin, so decision-grade comparisons report both physical volume and a stress-weighted result. Reclaimed-water percentages also need a declared denominator because recirculating water inside a facility can reduce withdrawal without eliminating evaporative consumption.
 
-Semiconductor fabrication uses water for processing, cleaning, and supporting utilities [@cooper2011]. Report gross process flow, freshwater withdrawal, recycled flow, and consumption separately. @Fig-water-cycle shows how treated water can return to processing and reduce new withdrawals; the reuse fraction alone does not establish evaporation or net consumption.
+Semiconductor fabrication uses water for processing, cleaning, and supporting utilities [@cooper2011].[^fn-fab-water-consumption] Report gross process flow, freshwater withdrawal, recycled flow, and consumption separately. @Fig-water-cycle shows how treated water can return to processing and reduce new withdrawals; the reuse fraction alone does not establish evaporation or net consumption.
 
 [^fn-fab-water-consumption]: **Semiconductor Water Scale**\index{Semiconductor Water Scale!definition}\index{Semiconductor Fabrication!water consumption}: A fab water inventory must separate intake, internal reuse, discharge, and consumption. Water per usable die depends on process flow, yield, allocation, and site conditions; a smaller process-node label does not establish a universal per-die multiplier.
 
@@ -4313,9 +4055,9 @@ Semiconductor fabrication uses water for processing, cleaning, and supporting ut
 
 The critical takeaway from @fig-water-cycle is that reuse and consumption answer different questions. A fabrication plant can recycle substantial process water while still consuming water through evaporation or other unreturned flows. Site decisions require the complete watershed account.
 
-Fabrication is also heavily reliant on hazardous chemicals for etching, doping, and cleaning. Strong acids (hydrofluoric, sulfuric), volatile organic compounds like xylene, and highly toxic gases (arsine, phosphine) are used in massive quantities---a large fab may consume over 2,000 metric tons of acids annually [@kim2018]. These substances create hazardous waste streams requiring extensive treatment to prevent ecological harm.
+Fabrication is also heavily reliant on hazardous chemicals for etching, doping, and cleaning. Strong acids (hydrofluoric, sulfuric), volatile organic compounds like xylene, and highly toxic gases (arsine, phosphine) are used in massive quantities; a large fab may consume over 2,000 metric tons of acids annually [@kim2018]. These substances create hazardous waste streams requiring extensive treatment to prevent ecological harm.
 
-AI hardware depends on a suite of scarce and geopolitically sensitive **critical materials**\index{Critical Materials!definition}\index{Critical Materials!AI hardware}. While silicon is abundant, high-performance chips require rare elements like gallium, indium, tantalum, and helium. Materials such as indium appear in critical-materials and endangered-elements analyses because supply can depend on byproduct extraction, substitution options, and recycling constraints [@rhodes2019endangered]. The geographic concentration of rare earth refining creates significant supply chain vulnerabilities. @Tbl-material_depletion quantifies the scope of this material dependency challenge.
+AI hardware depends on a suite of scarce and geopolitically sensitive **critical materials**\index{Critical Materials!definition}\index{Critical Materials!AI hardware}. While silicon is abundant, high-performance chips require rare elements like gallium, indium, tantalum, and helium. Materials such as indium appear in critical-materials and endangered-elements analyses because supply can depend on byproduct extraction, substitution options, and recycling constraints [@rhodes2019endangered]. The geographic concentration of rare earth refining creates significant supply chain vulnerabilities. @Tbl-material_depletion summarizes this material dependency.
 
 | **Material**            | **Application in AI Semiconductor Manufacturing**             | **Supply Concerns**                                                                 |
 |:------------------------|:--------------------------------------------------------------|:------------------------------------------------------------------------------------|
@@ -4326,35 +4068,23 @@ AI hardware depends on a suite of scarce and geopolitically sensitive **critical
 | **Tantalum (Ta)**       | Capacitors, stable integrated components                      | • Conflict mineral<br>• Vulnerable supply chains                                    |
 | **Rare earth elements** | Magnets, sensors, high-performance electronics                | • High geopolitical risks<br>• Environmental extraction concerns                    |
 | **Cobalt (Co)**         | Batteries for edge computing devices                          | • Human rights issues<br>• Geographical concentration (Congo)                       |
-| **Tungsten (W)**        | Interconnects, barriers, heat sinks                           | • Limited production sites<br>• Geopolitical concerns                               |
+| **Tungsten (W)**        | Contact and via plugs, diffusion barriers                     | • Limited production sites<br>• Geopolitical concerns                               |
 | **Copper (Cu)**         | Interconnects, barriers, heat sinks                           | • Limited high-purity sources<br>• Geopolitical concerns                            |
 | **Helium (He)**         | Semiconductor cooling, plasma etching, EUV lithography        | • Nonrenewable<br>• Irretrievable atmospheric loss<br>• Limited extraction capacity |
 
 : **Critical Materials for AI Hardware**: Semiconductor manufacturing relies on specific materials, including silicon, gallium, germanium, indium, tantalum, cobalt, tungsten, copper, helium, and rare earth elements, that face increasing supply constraints and geopolitical risks, potentially impacting AI hardware production and innovation. The table details these materials, their applications in AI systems, and the associated supply vulnerabilities requiring proactive mitigation strategies. {#tbl-material_depletion}
 
-The construction and operation of fabs and data centers also directly impacts natural ecosystems through habitat disruption, water stress, and pollution from chemical discharge. Semiconductor-industry effluents can contaminate nearby fluvial sediments with heavy metals and trace elements [@hsu2016]. Waste generation from fabrication---including gaseous emissions, VOC-laden air, and metal-contaminated wastewater---requires advanced treatment systems, and the end-of-life disposal of AI hardware contributes to a growing e-waste crisis, with only 17.4 percent of global e-waste properly recycled [@singh2022].
+The construction and operation of fabs and data centers also directly impacts natural ecosystems through habitat disruption, water stress, and pollution from chemical discharge. Semiconductor-industry effluents can contaminate nearby fluvial sediments with heavy metals and trace elements [@hsu2016]. Waste generation from fabrication, including gaseous emissions, VOC-laden air, and metal-contaminated wastewater, requires advanced treatment systems, and the end-of-life disposal of AI hardware contributes to a growing e-waste crisis, with only 17.4 percent of global e-waste properly recycled [@singh2022].
 
 The environmental toll of computational demand extends far beyond atmospheric carbon, manifesting as severe water stress and ecological disruption around manufacturing hubs. These supply-chain costs converge on the next design lever: how long massive, resource-intensive hardware clusters remain useful before they become waste.
 
 ## Hardware Lifecycle and E-Waste {#sec-sustainable-ai-hardware-lifecycle-environmental-assessment-66ee}
 
-The environmental cost of an AI accelerator begins long before its first FLOP is calculated [@gupta2022chasing; @luccioni2023estimating; @nvidia2025hgxh100pcf]. The per-H100 manufacturing footprint quantified in @sec-sustainable-ai-embodied-carbon-assessment-9de0 is incurred entirely at fabrication.[^fn-lca-hardware-footprint] The fleet of thousands of such processors required to train the 175B parameter model---consuming 1,287 MWh of electricity---represents a significant upfront carbon investment before any computation occurs. A comprehensive **life cycle assessment (LCA)**\index{Life Cycle Assessment!definition} quantifies the cumulative environmental impact across four key phases: design, manufacture, use, and disposal. LCA can reveal manufacturing as a major share of lifecycle impact, making it a critical sustainability lever that operational efficiency improvements alone cannot address.
+The environmental cost of an AI accelerator begins long before its first FLOP is calculated [@gupta2022chasing; @luccioni2023estimating; @nvidia2025hgxh100pcf]. The per-H100 manufacturing footprint quantified in @sec-sustainable-ai-embodied-carbon-assessment-9de0 is incurred before the device is ever powered on.[^fn-lca-hardware-footprint] A training fleet of a few thousand such accelerators therefore carries a manufacturing debt of the same order as the operational emissions of a GPT-3-scale training run on the US-average grid (about `{python} CarbonCostGPT3.total_emissions_kg_str`). A comprehensive **life cycle assessment (LCA)**\index{Life Cycle Assessment!definition} quantifies the cumulative environmental impact across four key phases: design, manufacture, use, and disposal. LCA can reveal manufacturing as a major share of lifecycle impact, making it a critical sustainability lever that operational efficiency improvements alone cannot address.
 
 These four phases organize decisions over time; the earlier training, inference, and embodied-carbon account groups the emissions those decisions create. Experimentation contributes training and infrastructure costs, deployed training and inference enter the use phase, and manufacturing and disposal enter the embodied inventory. The groupings overlap and must not be added as independent totals.
 
 [^fn-lca-hardware-footprint]: **Life Cycle Assessment (LCA)**\index{Life Cycle Assessment!ISO 14040 standard}\index{LCA|see{Life Cycle Assessment}}: Standardized by ISO 14040/14044, LCA traces environmental impact from raw material extraction through disposal [@iso140402006lca; @iso140442006lca]. For AI hardware, LCA separates embodied manufacturing emissions from operational energy use, making hardware refresh cycles and accelerator lifespan extension first-order sustainability levers that operational efficiency alone cannot substitute.
-
-Before comparing hardware lifetimes, we need the amount of service each candidate fleet must deliver. The training-inference comparison fixes that operational demand over the proposed service interval.
-
-::: {#chk-sustainable-ai-training-inference-flip .callout-checkpoint title="The training-inference flip"}
-
-Consider a vision model where training requires 2,000 GPU-hours at an average power draw of 300 W. Once deployed, the model serves 1 million requests per day, with each request taking 50 ms at an average draw of 100 W.
-
-- [ ] **Training energy**: calculate the total energy used for training.
-- [ ] **Inference energy**: calculate the total energy used for inference over a 2-year product lifespan.
-- [ ] **Optimization focus**: use the "Inference-to-Training Ratio" to select the optimization target that maximizes sustainability.
-
-:::
 
 Life Cycle Assessments can show that discarding functional hardware purely for modest efficiency gains causes more environmental harm through embodied carbon than it saves in operational power. Evaluating the tipping point where new hardware becomes environmentally justified requires estimating the intersection of training costs, inference scale, and hardware lifespans.
 
@@ -4596,21 +4326,21 @@ Addressing the design phase's sustainability challenges requires innovations in 
 
 The manufacturing footprint\index{Life Cycle Assessment!manufacturing and fabrication} combines the embodied carbon established in @sec-sustainable-ai-embodied-carbon-assessment-9de0 with the water, chemical, and material demands in @sec-sustainable-ai-water-usage-caae. Accelerator design changes how much of that resource investment produces a usable device.
 
-Two structural properties of AI accelerators amplify this manufacturing footprint relative to conventional chips. First, high-performance AI chips are typically fabricated at or near the reticle limit---the maximum die area a single lithography exposure can print. Larger dies yield fewer chips per wafer and are disproportionately vulnerable to random defects: a defect density that kills 5 percent of small dies may kill 20 percent or more of a reticle-limit die, effectively wasting the water, chemicals, and EUV energy consumed in fabricating every defective unit. Second, the memory bandwidth requirements of large-scale inference and training demand advanced 2.5D and 3D packaging---such as TSMC's Chip-on-Wafer-on-Substrate (CoWoS) process---that places high bandwidth memory stacks alongside the accelerator on an interposer within a package. This integration introduces additional fabrication stages, chemical cleaning cycles, and precision baking steps that a conventional monolithic CPU does not require. The result is that each viable AI accelerator embodies substantially more water consumption, hazardous chemical use, and process energy than its wafer area alone would suggest, making hardware longevity and high utilization first-order sustainability levers rather than secondary concerns.
+Two structural properties of AI accelerators amplify this manufacturing footprint relative to conventional chips. First, high-performance AI chips are typically fabricated at or near the reticle limit, the maximum die area a single lithography exposure can print. Larger dies yield fewer chips per wafer and are disproportionately vulnerable to random defects: a defect density that kills 5 percent of small dies may kill 20 percent or more of a reticle-limit die, effectively wasting the water, chemicals, and EUV energy consumed in fabricating every defective unit. Second, the memory bandwidth requirements of large-scale inference and training demand advanced 2.5D and 3D packaging, such as TSMC's Chip-on-Wafer-on-Substrate (CoWoS) process, that places high bandwidth memory stacks alongside the accelerator on an interposer within a package. This integration introduces additional fabrication stages, chemical cleaning cycles, and precision baking steps that a conventional monolithic CPU does not require. The result is that each viable AI accelerator embodies substantially more water consumption, hazardous chemical use, and process energy than its wafer area alone would suggest, making hardware longevity and high utilization first-order sustainability levers rather than secondary concerns.
 
 Longer useful service spreads that manufacturing investment across more work. Lower-toxicity materials, recycling, and cleaner manufacturing address the production burden itself [@cenci2021; @irimia-vladu2014].
 
 ### Use phase {#sec-sustainable-ai-use-phase-a0a1}
 
-The operational energy consumed during training and inference\index{Life Cycle Assessment!operational use phase} is detailed in @sec-sustainable-ai-training-vs-inference-energy-analysis-4cb5. What merits attention here is the pattern of this consumption and its interaction with grid infrastructure. The 1,287 MWh required to train the 175B model represents a high, continuous power draw---but the character of that draw is not uniform across workload types, and that distinction shapes what scheduling interventions are practical.
+The operational energy consumed during training and inference\index{Life Cycle Assessment!operational use phase} is detailed in @sec-sustainable-ai-training-vs-inference-energy-analysis-4cb5. What merits attention here is the pattern of this consumption and its interaction with grid infrastructure. A GPT-3-scale run spreads `{python} Gpt3HouseholdEnergyAnchor.gpt3_training_mwh_str` over weeks of sustained power draw, but the character of that draw differs across workload types, and the difference shapes which scheduling interventions are practical.
 
-A large distributed training run draws sustained aggregate power with the correlated phase transitions described in the power-delivery analysis, and is often described as inflexible. This characterization understates the scheduling flexibility that distributed training already builds in for fault tolerance. Because a single hardware failure in a thousand-node cluster can corrupt a run, production training systems checkpoint state to persistent storage every few minutes to hours. That checkpointing infrastructure is exactly the mechanism that enables carbon-aware scheduling: a training job can be paused during the late-afternoon grid peak (when solar generation drops and fossil peaker plants come online), with cluster state saved to checkpoint, and resumed when overnight wind generation raises renewable availability. The same engineering that protects against hardware failures thus doubles as a scheduling lever for grid decarbonization---a coupling of fault tolerance and sustainability. Online inference has tighter delay budgets and may support bounded preemption, while offline inference can often be deferred more freely.
+A large distributed training run draws sustained aggregate power with the correlated phase transitions described in the power-delivery analysis, and is often described as inflexible. This characterization understates the scheduling flexibility that distributed training already builds in for fault tolerance. Because a single hardware failure in a thousand-node cluster can corrupt a run, production training systems checkpoint state to persistent storage every few minutes to hours. That checkpointing infrastructure is exactly the mechanism that enables carbon-aware scheduling: a training job can be paused during the late-afternoon grid peak (when solar generation drops and fossil peaker plants come online), with cluster state saved to checkpoint, and resumed when overnight wind generation raises renewable availability. The same engineering that protects against hardware failures thus doubles as a scheduling lever for grid decarbonization, coupling fault tolerance and sustainability. Online inference has tighter delay budgets and may support bounded preemption, while offline inference can often be deferred more freely.
 
 The **duck curve**\index{Duck Curve!definition} describes the net-load ramp as solar generation falls. A constant data-center load raises the level of net demand but does not by itself increase the ramp rate. A flexible load can reduce the required ramp by curtailing during that interval\index{Duck Curve!training pause during peak ramp}. Schedule from local forecasts and marginal emissions signals; a universal daily pause window would ignore regional generation and transmission conditions.
 
 ### Disposal, e-waste, and embedded AI {#sec-sustainable-ai-disposal-phase-b4f1}
 
-The rapid pace of innovation in AI hardware creates a relentless upgrade cycle\index{Life Cycle Assessment!disposal and e-waste} [@slade2007], contributing to a growing global crisis of electronic waste (e-waste)\index{Electronic waste!AI hardware obsolescence}. Globally, humanity generates over 50 million metric tons of e-waste annually, of which only 17.4 percent is formally documented as collected and properly recycled [@singh2022]. The high-performance servers used for training large models have a typical service life of just three to five years before they are considered obsolete. Discarded AI hardware contains toxic materials---lead, mercury, cadmium, and beryllium---that can leach into soil and groundwater when disposed of in landfills or informal recycling facilities [@grossman2007high].
+The rapid pace of innovation in AI hardware creates a relentless upgrade cycle\index{Life Cycle Assessment!disposal and e-waste} [@slade2007], contributing to a growing global crisis of electronic waste (e-waste)\index{Electronic waste!AI hardware obsolescence}. Globally, humanity generates over 50 million metric tons of e-waste annually, of which only 17.4 percent is formally documented as collected and properly recycled [@singh2022]. The high-performance servers used for training large models have a typical service life of just three to five years before they are considered obsolete. Discarded AI hardware contains toxic materials (lead, mercury, cadmium, and beryllium) that can leach into soil and groundwater when disposed of in landfills or informal recycling facilities [@grossman2007high].
 
 Memory capacity, bandwidth, and interconnect compatibility can motivate replacement before accelerators physically fail. In tightly integrated systems, a new accelerator generation may require baseboard, networking, or server changes; PCIe-based designs can offer different upgrade options. Evaluate the actual compatibility boundary and reuse path. Replacement does not automatically mean disposal, and a functioning retired node may remain useful for less demanding workloads.
 
@@ -4688,7 +4418,7 @@ Short product lifecycles accelerate the cycle: limited software support windows,
 
 Countering the linear "take-make-dispose" model requires a shift toward a **circular economy**\index{Circular Economy!definition} [@stahel2016] that prioritizes reuse, refurbishment, and recycling. When embodied carbon dominates the lifecycle account, extending the functional lifespan of AI hardware\index{Circular Economy!hardware lifespan extension} is one of the largest reduction levers because it amortizes high manufacturing emissions over a longer period. Extending server life from three to five years reduces embodied carbon per year of service by 40 percent, a gain that can exceed many local software optimizations.
 
-Four lifecycle interventions extend hardware service life by making systems repairable, upgradeable, supported, and reusable. Ensuring systems remain repairable, right-to-repair\index{Right-to-Repair!hardware lifespan extension}\index{Circular Economy!right-to-repair} initiatives and legislation dismantle artificial service restrictions by guaranteeing access to replacement components, specialized tools, schematics, and diagnostic firmware [@ftc2021nixingfix]. Supporting modular upgradeability, modular design\index{Circular Economy!modular design} decouples accelerators, memory modules, and high-speed networking fabrics, preventing entire server chassis from being scrapped when only a single subsystem reaches obsolescence [@framework2022modular]. Maintaining operational viability requires extended support cycles\index{Circular Economy!extended support cycles}, where vendors provide prolonged driver updates, kernel backports, and security patches that keep functional accelerators secure and operational rather than pushing them into premature retirement [@forti2020ewaste]. Finally, structured secondary-use programs\index{Circular Economy!secondary-use programs} cascade older accelerator generations from primary latency-critical serving fleets into batch processing, internal development clusters, and academic research environments, continuing to amortize their initial embodied carbon rather than routing them to disposal.
+Four lifecycle interventions extend hardware service life by making systems repairable, upgradeable, supported, and reusable. Right-to-repair\index{Right-to-Repair!hardware lifespan extension}\index{Circular Economy!right-to-repair} initiatives and legislation keep systems repairable by dismantling artificial service restrictions and guaranteeing access to replacement components, specialized tools, schematics, and diagnostic firmware [@ftc2021nixingfix]. Modular design\index{Circular Economy!modular design} supports upgradeability by decoupling accelerators, memory modules, and high-speed networking fabrics, which prevents entire server chassis from being scrapped when only a single subsystem reaches obsolescence [@framework2022modular]. Maintaining operational viability requires extended support cycles\index{Circular Economy!extended support cycles}, where vendors provide prolonged driver updates, kernel backports, and security patches that keep functional accelerators secure and operational rather than pushing them into premature retirement [@forti2020ewaste]. Finally, structured secondary-use programs\index{Circular Economy!secondary-use programs} cascade older accelerator generations from primary latency-critical serving fleets into batch processing, internal development clusters, and academic research environments, continuing to amortize their initial embodied carbon rather than routing them to disposal.
 
 These interventions move sustainability from disposal management to lifecycle engineering. For a replacement decision, we compare two ways of delivering the same future service: continued operation of the existing fleet and operation of a replacement fleet. The original manufacturing emissions have already occurred under either choice. Replacement adds a new manufacturing burden, which must be weighed against operational savings over the remaining service interval, along with disposal and any useful second life for the retired hardware. A lower annual amortized figure alone cannot settle that decision.
 
@@ -4980,7 +4710,7 @@ Algorithmic optimizations reduce per-operation energy, but the operational envir
 
 #### Green data centers {#sec-sustainable-ai-green-data-centers-2580}
 
-A single hyperscale data center can consume over 100 MW of power---comparable to a small city.[^fn-pue-efficiency-gap] Reducing this footprint requires three complementary strategies: renewable energy integration, advanced cooling, and AI-driven optimization.
+A single hyperscale data center can consume over 100 MW of power, comparable to a small city.[^fn-pue-efficiency-gap] Reducing this footprint requires three complementary strategies: renewable energy integration, advanced cooling, and AI-driven optimization.
 
 [^fn-pue-efficiency-gap]: **PUE Gap**\index{PUE Gap!definition}\index{PUE!hyperscale efficiency gap}: The PUE model in @sec-sustainable-ai-facilitylevel-power-metrics-5558 shows that facility overhead scales with every watt of IT load. At 100 MW, even a small PUE change therefore represents megawatts of cooling and power-delivery capacity, but its carbon value still depends on the grid signal.
 
@@ -5002,13 +4732,7 @@ Grid carbon intensity varies with location, generation mix, and time. **Carbon-a
 
 Carbon-aware scheduling is fundamentally a load-shifting software problem\index{Load Shifting!software}\index{Carbon-Aware Scheduling!load shifting}. The scheduler queries grid carbon intensity APIs\index{Carbon-Aware Scheduling!grid intensity APIs} (for example, ElectricityMap, WattTime) and combines the chosen signal with workload flexibility. A feasible shift must finish before the deadline, retain access to data and accelerator capacity, and preserve the job's reliability constraints. Its net benefit must exceed checkpoint, transfer, restart, and idle-capacity emissions. Pausing useful work without reducing the cluster's powered load can erase the expected saving.
 
-Google's carbon-intelligent computing platform[^fn-scheduling-energy-results] illustrates this approach by using forecasts and virtual capacity limits to delay flexible work [@radovanovic2021carbonaware]. In @fig-carbon-scheduling, scheduling changes the emissions factor applied to workload electricity. That is a carbon intervention, not automatically an energy reduction; checkpointing, transfer, and a different runtime can also change electricity consumption.
-
-::: {#fig-carbon-scheduling fig-env="figure" fig-pos="htb" fig-cap="**Carbon Scheduling in the Lifecycle Account**: The accounting map is recalled from @fig-energy-intervention. Scheduling changes the grid factor and may also change facility energy through transfer, restart, or execution differences. Compute the resulting emissions rather than adding an assumed scheduling multiplier to energy-efficiency gains." fig-alt="Work, execution, facility, grid, and hardware interventions enter separate terms of the lifecycle account."}
-
-![](images/svg/intervention-cascade.svg)
-
-:::
+Google's carbon-intelligent computing platform[^fn-scheduling-energy-results] illustrates this approach by using forecasts and virtual capacity limits to delay flexible work [@radovanovic2021carbonaware]. In the accounting map of @fig-energy-intervention, scheduling changes the grid factor applied to workload electricity. That is a carbon intervention, not automatically an energy reduction; checkpointing, transfer, and a different runtime can also change electricity consumption.
 
 [^fn-scheduling-energy-results]: **Carbon-Aware Scheduling at Scale**\index{Carbon-Aware Scheduling at Scale!definition}\index{Carbon-Aware Scheduling!results}: Google's system forecasts carbon intensity and flexible demand, then sets virtual capacity curves that shift work within operational constraints [@radovanovic2021carbonaware]. This demonstrates a scheduling mechanism; a deployment's saving depends on its workload flexibility, grid signal, and power response.
 
@@ -5036,7 +4760,7 @@ Scheduling changes where and when work runs; the cooling interventions establish
 
 ### Google sustainability framework case study {#sec-sustainable-ai-case-study-googles-framework-e4c2}
 
-The value of Google's case study is that it decomposes mitigation across the same layers this chapter has tracked: model, machine, mechanization, and map. @Tbl-sustainable-ai-google-four-ms summarizes the "4 Ms" that Google engineers identified for reducing the carbon footprint of rapidly expanding AI workloads [@patterson2022].
+The value of Google's case study is that it groups mitigation into four levers that correspond to terms this chapter has tracked, namely the model's work, the machine's efficiency, the facility's overhead, and the grid's carbon factor. @Tbl-sustainable-ai-google-four-ms summarizes the "4 Ms" that Google engineers identified for reducing the carbon footprint of rapidly expanding AI workloads [@patterson2022].
 
 ::: {.content-visible when-format="pdf"}
 \clearpage
@@ -5049,15 +4773,15 @@ The value of Google's case study is that it decomposes mitigation across the sam
 | **Mechanization**\index{Google Sustainability Framework!mechanization} | Run optimized cloud infrastructure at high utilization                                                | 1.4--2$\times$ energy reduction compared to conventional on-premises data centers                                              | Lower facility PUE than the industry-average baseline used in the 2021 study |
 | **Map**\index{Google Sustainability Framework!map}                     | Place data centers in regions with low-carbon electricity supplies                                    | 5--10$\times$ lower gross emissions                                                                                            | Real-time monitoring of renewable energy usage across infrastructure         |
 
-: **Google's 4 Ms Sustainability Framework**: The framework combines model architecture, hardware specialization, infrastructure efficiency, and carbon-aware placement so improvements compound across the AI stack. {#tbl-sustainable-ai-google-four-ms tbl-colwidths="[18,32,30,20]"}
+: **Google's 4 Ms Sustainability Framework**: The framework combines model architecture, hardware specialization, infrastructure efficiency, and carbon-aware placement each acting on a different term of the footprint. Their combined effect must be measured end to end rather than obtained by multiplying the reported factors. {#tbl-sustainable-ai-google-four-ms tbl-colwidths="[18,32,30,20]"}
 
-The combined effect of these practices produces multiplicative efficiency gains. For instance, implementing the optimized Transformer model on TPUs in strategically located data centers reduced energy consumption by a factor of 83 and CO~2~ emissions by a factor of 747.
+@patterson2022 report that these practices compounded when measured end to end on one workload, which is the only way such a combined factor can be established. In their example, running an optimized Transformer on TPUs in a low-carbon data center reduced energy consumption by a factor of 83 and CO~2~ emissions by a factor of 747.
 
 In the period studied by @patterson2022, AI workloads represented less than 15 percent of Google's total energy consumption despite expanding deployment. That share is evidence about relative consumption; it does not by itself establish constant or declining absolute energy when the denominator also changes. Assess absolute growth from measured energy totals alongside the reported efficiency improvements.
 
 Empirical case studies demonstrate how sustainable-AI engineering can improve both capability and environmental impact. For example, @patterson2022 compare GPT-3 with Google's GLaM and report improved quality metrics alongside reduced training computation and lower-carbon energy sources, while the GLaM model paper explains the mixture-of-experts architecture behind that efficient scaling [@du2022glam].
 
-The strategy in the case study---combining systematic measurement, carbon-aware development, transparency in reporting, and renewable energy transition---is useful as a framework for sustainable AI scaling. The analysis also argues that earlier extrapolations overstated ML energy requirements by large factors because they did not account for efficiency improvements and workload measurement boundaries, underscoring the importance of empirical measurement over theoretical projections.
+The strategy in the case study, which combines systematic measurement, carbon-aware development, transparency in reporting, and renewable energy transition, is useful as a framework for sustainable AI scaling. The analysis also argues that earlier extrapolations overstated ML energy requirements by large factors because they did not account for efficiency improvements and workload measurement boundaries, underscoring the importance of empirical measurement over theoretical projections.
 
 ### Engineering guidelines for sustainable AI development {#sec-sustainable-ai-engineering-guidelines-sustainable-ai-development-309d}
 
@@ -5069,7 +4793,7 @@ Geographic and temporal siting provides an immediate operational lever. Comparin
 
 Algorithmic efficiency attacks computational volume directly. Rather than defaulting to the largest trainable parameter count, teams evaluate pruning, quantization, and knowledge distillation against target latency and accuracy thresholds. Quantization does not guarantee proportional energy savings: realized benefits depend on integer kernel support, memory bandwidth bottlenecks, data conversion overhead, and batching constraints. Similarly, avoiding training from scratch preserves significant compute: transfer learning and parameter-efficient fine-tuning reduce computational demand by orders of magnitude relative to full-scale pretraining.
 
-Finally, platform selection and lifecycle governance complete the framework. Energy-efficient accelerators, such as TPUs and specialized inference processors, lower operational draw, but their efficiency must be evaluated across the complete hardware lifecycle. Longer refresh cycles and responsible e-waste stewardship extend the amortization window of manufacturing emissions. Because embodied carbon dominates on clean grids while operational electricity dominates on fossil-heavy grids, hardware longevity remains a context-dependent trade-off rather than an automatic win.
+Finally, platform selection and lifecycle governance complete the framework. Energy-efficient accelerators, such as TPUs and specialized inference processors, lower operational draw, but their efficiency must be evaluated across the complete hardware lifecycle. Longer refresh cycles and responsible e-waste stewardship extend the amortization window of manufacturing emissions. Because embodied carbon's share rises on clean grids and at low utilization while operational electricity dominates on fossil-heavy grids, hardware longevity remains a context-dependent trade-off rather than an automatic win.
 
 The cumulative impact of individual technical choices depends on systemic, industry-wide adoption. Without external pressure, market forces prioritize speed and scale over efficiency. Policy and regulatory frameworks translate engineering possibilities into industry-wide practice by making sustainable choices a financial and legal imperative.
 
@@ -5091,11 +4815,11 @@ Policy can also impose a priced resource constraint. A hypothetical emissions ca
 
 [^fn-ets-cap-trade]: **Emissions Trading for Compute**\index{Emissions trading for compute!definition}\index{Emissions trading!compute cap}: Applying cap-and-trade to AI emissions is a policy analogy here, not a description of an established compute-allowance market. Such a design would need a declared emissions boundary, measurement method, enforcement mechanism, and rules for trading allowances.
 
-To balance these restrictions, government incentives play a proactive role. Financial support, tax benefits, and grants for Green AI research can make sustainability a competitive advantage. Governments can also use their public procurement power, mandating that vendors meet sustainability benchmarks such as operating on carbon-neutral data centers or using energy-efficient models. Broader corporate reporting frameworks---the Greenhouse Gas Protocol, Task Force on Climate-related Financial Disclosures, and International Sustainability Standards Board---scrutinize Scope 3 emissions\index{Scope 3 emissions!procurement and value chain}, encompassing the substantial embodied carbon of GPU procurement and data center construction alongside operational emissions of outsourced cloud compute.
+To balance these restrictions, government incentives play a proactive role. Financial support, tax benefits, and grants for Green AI research can make sustainability a competitive advantage. Governments can also use their public procurement power, mandating that vendors meet sustainability benchmarks such as operating on carbon-neutral data centers or using energy-efficient models. Broader corporate reporting frameworks (the Greenhouse Gas Protocol, Task Force on Climate-related Financial Disclosures, and International Sustainability Standards Board) scrutinize Scope 3 emissions\index{Scope 3 emissions!procurement and value chain}, encompassing the substantial embodied carbon of GPU procurement and data center construction alongside operational emissions of outsourced cloud compute.
 
 ### Industry self-regulation and standards {#sec-sustainable-ai-selfregulation-02df}
 
-Alongside government mandates, the AI industry is driving significant environmental improvements through self-regulation and common standards. The most visible commitments from major cloud providers---Google, Microsoft, and Amazon---focus on matching data center electricity consumption with renewable energy procurement and increasing direct clean-energy supply. Going further, the push for 24/7 carbon-free energy (CFE) aims to match every hour of energy consumption with real-time clean energy procurement, moving beyond annual averages and carbon offsets that can obscure actual emissions from fossil-fuel-reliant grids [@monyei2018].
+Alongside government mandates, the AI industry is driving significant environmental improvements through self-regulation and common standards. The most visible commitments from major cloud providers (Google, Microsoft, and Amazon) focus on matching data center electricity consumption with renewable energy procurement and increasing direct clean-energy supply. Going further, the push for 24/7 carbon-free energy (CFE) aims to match every hour of energy consumption with real-time clean energy procurement, moving beyond annual averages and carbon offsets that can obscure actual emissions from fossil-fuel-reliant grids [@monyei2018].
 
 Internal carbon pricing is another effective self-regulatory tool. Assigning a "shadow price" to carbon emissions integrates environmental costs directly into financial decision-making for AI projects, naturally prioritizing investments in energy-efficient hardware and low-emission models. Voluntary checklists and open-source tools promote accountability when they feed those same project decisions: projects like **CodeCarbon**\index{CodeCarbon!definition} and **ML CO~2~ Impact**\index{ML CO~2~ Impact!definition} provide frameworks that allow developers to estimate and track model carbon footprints directly within their workflows [@schmidt2021codecarbon; @lacoste2019quantifying].
 
@@ -5103,7 +4827,7 @@ Standardized benchmarks provide the objective data needed to validate these effo
 
 ### Public engagement and environmental justice {#sec-sustainable-ai-public-engagement-9850}
 
-Effective AI sustainability governance requires public support, which depends on transparency, clear communication, and equitable access. Currently, public understanding of AI's environmental impact is limited and often polarized between narratives of technological salvation and ecological disaster. Fostering informed discourse requires moving beyond **greenwashing**\index{Greenwashing!definition}[^fn-greenwashing-ai-reporting]---the practice of making misleading claims about environmental responsibility---toward genuine, verifiable transparency.
+Effective AI sustainability governance requires public support, which depends on transparency, clear communication, and equitable access. Currently, public understanding of AI's environmental impact is limited and often polarized between narratives of technological salvation and ecological disaster. Fostering informed discourse requires moving beyond **greenwashing**\index{Greenwashing!definition},[^fn-greenwashing-ai-reporting] the practice of making misleading claims about environmental responsibility, toward genuine, verifiable transparency.
 
 [^fn-greenwashing-ai-reporting]: **Greenwashing in AI**\index{Greenwashing in AI!definition}: Manifests as claiming "carbon neutrality" through offsets while expanding data center capacity, or highlighting per-query efficiency gains while total compute grows 10$\times$. Green-claims rules can require verifiable evidence for environmental claims. For ML engineers, the technical litmus test is whether sustainability reporting covers all three GHG Protocol scopes, or conveniently omits Scope 3 (hardware manufacturing, cloud supply chain) where much of AI's carbon can reside.
 
@@ -5131,7 +4855,7 @@ Sustainability involves counterintuitive physics where efficiency improvements c
 
 **Fallacy**: *Cloud computing automatically makes AI systems more environmentally sustainable.*
 
-Engineers assume cloud providers operate efficiently and sustainably. Cloud infrastructure can improve utilization and facility efficiency, but it transfers neither the physical footprint nor the customer's accounting responsibility out of existence. Training a 7B model on `{python} TrainingEmissions.n_gpus_str` A100s for `{python} TrainingEmissions.training_days_str` produces `{python} TrainingEmissions.emissions_tons_str` CO~2~ on the US average grid (`{python} TrainingEmissions.grid_ci_g_per_kwh_str`) but only `{python} TrainingEmissions.quebec_emissions_kg_str` CO~2~ on Quebec's hydroelectric grid (`{python} TrainingEmissions.quebec_ci_g_per_kwh_str` operational), a roughly `{python} TrainingEmissions.emissions_ratio_mult_str` difference for this US-average-versus-Quebec pairing. Coal-powered grids emit 800–1000 g CO~2~/kWh while well-managed hydroelectric sources emit 10–50 g CO~2~/kWh in operational accounting, not lifecycle-zero. As demonstrated in @sec-sustainable-ai-carbon-footprint-calculation-c2fe, cloud comparisons must disclose region, energy boundary, utilization, embodied allocation, and whether the electricity is Scope 2 for the provider or Scope 3 for the customer.
+Engineers assume cloud providers operate efficiently and sustainably. Cloud infrastructure can improve utilization and facility efficiency, but it transfers neither the physical footprint nor the customer's accounting responsibility out of existence. Training a 7B model on `{python} TrainingEmissions.n_gpus_str` A100s for `{python} TrainingEmissions.training_days_str` produces `{python} TrainingEmissions.emissions_tons_str` CO~2~ on the US average grid (`{python} TrainingEmissions.grid_ci_g_per_kwh_str`) but only `{python} TrainingEmissions.quebec_emissions_kg_str` CO~2~ on Quebec's hydroelectric grid (`{python} TrainingEmissions.quebec_ci_g_per_kwh_str` operational), a roughly `{python} TrainingEmissions.emissions_ratio_mult_str` difference for this US-average-versus-Quebec pairing. The hydroelectric figure is an operational factor, not a lifecycle-zero one. As demonstrated in @sec-sustainable-ai-carbon-footprint-calculation-c2fe, cloud comparisons must disclose region, energy boundary, utilization, embodied allocation, and whether the electricity is Scope 2 for the provider or Scope 3 for the customer.
 
 :::
 
@@ -5193,9 +4917,11 @@ A model aggressively pruned to save training energy, only to require massive com
 
 ## Summary {#sec-sustainable-ai-summary-8cec}
 
-The lifecycle boundary connects training, serving, embodied carbon, grid mix, hardware lifetime, and demand growth. Sustainable AI asks whether the Machine Learning Fleet can operate within available energy, water, and material resources even after its models and infrastructure have been optimized.
+The lifecycle boundary connects training, serving, embodied carbon, grid mix, hardware lifetime, and demand growth. Sustainable AI asks whether the machine learning fleet can operate within available energy, water, and material resources even after its models and infrastructure have been optimized.
 
 The measurement contract makes comparisons meaningful by fixing useful work, required quality, system boundaries, attribution, time, location, and uncertainty. Operational and embodied carbon accounting then identify which lifecycle term an intervention can change. Memory traffic, idle equipment, cooling, and power delivery can all consume energy beyond useful arithmetic; lower FLOP counts alone do not establish lower environmental impact.
+
+The Fleet Law gives that accounting its fleet-scale form. Because a step's energy is approximately its average power times $T_{\text{step}}(N)$, every second of exposed communication, synchronization, or recovery is paid for in joules as well as in time. Sustainability therefore spends the same C³ budget as performance. Communication and Coordination overheads that stretch the step consume energy without advancing the model, and PUE, the grid factor, and embodied carbon convert the resulting joules into the lifecycle account.
 
 Mitigation follows that diagnosis. Algorithm and hardware changes must reduce measured resource use while preserving quality, latency, and reliability; scheduling must account for grid intensity and the cost of moving work; hardware replacement must weigh operational savings against new manufacturing emissions. Water availability and the distribution of environmental burdens also matter when choosing where and how a fleet can grow.
 
@@ -5209,7 +4935,7 @@ Mitigation follows that diagnosis. Algorithm and hardware changes must reduce me
 
 :::
 
-Sustainability changes the scale at which efficiency must be judged. A reduction per query is a local result; the fleet result depends on how many queries run, where they run, and what hardware their service requires over time. The Jevons paradox of AI (principle \ref{pri-jevons-paradox}) makes the distinction consequential: efficiency creates room within a resource budget, while demand determines how much of that room is consumed. Deployment decisions therefore need both a useful-work efficiency target and an absolute resource budget.
+Sustainability changes the scale at which efficiency must be judged. A reduction per query is a local result; the fleet result depends on how many queries run, where they run, and what hardware their service requires over time. The Jevons paradox of AI (principle \ref{pri-jevons-paradox}), the sharpest form of the sustainability paradox introduced at the start of the chapter, makes the distinction consequential: efficiency creates room within a resource budget, while demand determines how much of that room is consumed. Deployment decisions therefore need both a useful-work efficiency target and an absolute resource budget.
 
 ::: {.callout-chapter-connection title="From sustainability to responsibility"}
 

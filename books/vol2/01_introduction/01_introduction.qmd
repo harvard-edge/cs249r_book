@@ -32,7 +32,7 @@ engine: jupyter
 
 _Why are single-machine engineering principles insufficient for machine learning at fleet scale?_
 
-Machine learning at scale has a physics of its own. On one node, performance is often governed by the memory wall: data must reach the accelerator fast enough to keep the math busy. In a distributed cluster, that same problem stretches across machines. Data must move through network links between racks, and the slowest shared crossing can limit the entire job. Hardware failures also change character. A failure that stops one local training run can stall a whole distributed job when thousands of workers must advance together. This discontinuity explains why mastery of single-machine ML is no longer sufficient. A faster device may finish its local work sooner yet spend the saved time waiting for other machines. Adding devices can increase capacity while creating more shared work to coordinate and more components to recover. Serving introduces another consequence: spare capacity is useful only if requests can reach it within their deadlines. The engineering decision must therefore account for the behavior of the whole fleet. That wider boundary also amplifies societal impact because these systems may serve billions of users. Bias in any model can cause harm, but bias in a widely reused foundation model can propagate across many downstream systems. In C³ terms, the discipline this book builds is the physics of distribution: compute, communication, and coordination turn algorithmic choices into questions of physical topology, fault tolerance, security, and governance.
+Machine learning at scale has a physics of its own. On one node, performance is often governed by the memory wall: data must reach the accelerator fast enough to keep the math busy. In a distributed cluster, that same problem stretches across machines. Data must move through network links between racks, and the slowest shared crossing can limit the entire job. Hardware failures also change character. A failure that stops one local training run can stall a whole distributed job when thousands of workers must advance together. This discontinuity explains why mastery of single-machine ML is no longer sufficient. A faster device may finish its local work sooner yet spend the saved time waiting for other machines. Adding devices can increase capacity while creating more shared work to coordinate and more components to recover. Serving introduces another consequence: spare capacity is useful only if requests can reach it within their deadlines. The engineering decision must therefore account for the behavior of the whole fleet. That wider boundary also amplifies societal impact because these systems may serve billions of users. Bias in any model can cause harm, but bias in a widely reused foundation model can propagate across many downstream systems. In C³ terms, the discipline this book builds is the physics of distribution, in which compute, communication, and coordination turn algorithmic choices into questions of physical topology, fault tolerance, security, and governance.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -43,7 +43,7 @@ Machine learning at scale has a physics of its own. On one node, performance is 
 ::: {.callout-learning-objectives}
 
 - Explain how Compute, Communication, and Coordination extend the Data-Algorithm-Machine lens for production fleets
-- Apply the fleet law to distinguish local compute time from communication and coordination overhead
+- Apply the Fleet Law to distinguish local compute time from communication and coordination overhead
 - Analyze how model and data allocation interact with the physical costs of scaling a fleet
 - Diagnose fleet-scale distribution risks using reliability gaps, consistency-availability trade-offs, communication intensity, and routine failure rates
 - Explain how the fleet stack connects infrastructure decisions to deployment and governance constraints
@@ -83,9 +83,9 @@ from mlsysim.fmt import check, fmt, fmt_sci
 
 Machine learning on a single accelerator is governed by local memory hierarchy and arithmetic intensity: the physics of silicon. The boundary of single-machine systems appears when that local machine is no longer the system. As models move from research prototypes to global services, the binding constraints move outward into racks, networks, power delivery, and recovery machinery. That change is not a smooth extrapolation; it is the **scale moment**\index{Scale Moment!definition}.
 
-A synchronous distributed training step gives this change a concrete form. Each worker computes part of the update, exchanges model information with other workers, and waits until the required participants can advance together. These activities give the book its C$^3$ lens: Compute is local execution, Communication moves data between workers, and Coordination keeps their progress and state consistent, including after failures. The fleet law expresses the corresponding time budget. Dividing a fixed workload across more devices can shorten local computation, but the step also pays for communication and coordination, less whatever work can overlap. Faster accelerators help only when the remaining costs allow the saved compute time to shorten the whole step.
+A synchronous distributed training step gives this change a concrete form. Each worker computes part of the update, exchanges model information with other workers, and waits until the required participants can advance together. These activities give the book its C$^3$ lens: Compute is local execution, Communication moves data between workers, and Coordination keeps their progress and state consistent, including after failures. The Fleet Law expresses the corresponding time budget. Dividing a fixed workload across more devices can shorten local computation, but the step also pays for communication and coordination, less whatever work can overlap. Faster accelerators help only when the remaining costs allow the saved compute time to shorten the whole step.
 
-This book assumes familiarity with single-machine training, inference, and accelerator memory. Its aim is to develop engineering judgment across infrastructure, distributed execution, deployment, and governance, so that a local improvement can be evaluated against the behavior of the whole fleet. This chapter begins with diagnosis. The examples first establish the pressure to distribute work, then connect scaling demand and physical limits to the C$^3$ time budget. The fleet stack locates the layers responsible for those costs; the recurring workloads test how the dominant cost changes. Named parallelism, communication, and recovery techniques are previews of later mechanisms. The immediate task is to explain the constraint each technique must address, without yet choosing or implementing it.
+This book assumes familiarity with single-machine training, inference, and accelerator memory; @sec-appdx-dam-taxonomy restates the single-machine diagnostic framework, including the iron law and the arithmetic-intensity boundary of the roofline, for readers who want a refresher. Its aim is to develop engineering judgment across infrastructure, distributed execution, deployment, and governance, so that a local improvement can be evaluated against the behavior of the whole fleet. This chapter begins with diagnosis. The examples first establish the pressure to distribute work, then connect scaling demand and physical limits to the C$^3$ time budget. The fleet stack locates the layers responsible for those costs; the recurring workloads test how the dominant cost changes. Named parallelism, communication, and recovery techniques are previews of later mechanisms. The immediate task is to explain the constraint each technique must address, without yet choosing or implementing it.
 
 The scale moment is the physical and operational transformation that occurs when models encounter three recurring walls\index{Scale Moment!canonical triad}: memory, network, and energy. They describe resource limits that the C$^3$ lens helps diagnose. On one accelerator the memory wall often binds; after distributing a communication-intensive workload across thousands of nodes, the network wall\index{Scale Moment!processor-to-network shift}\index{Network wall!bisection bandwidth bound} can replace local memory as the primary performance bottleneck. Its hard limits include bisection bandwidth, the aggregate bandwidth across the narrowest cut that splits the fleet, and speed-of-light latency. Serving billions of users can then encounter the energy wall\index{Scale Moment!output-to-impact shift}\index{Energy wall!thermodynamic limit}, making thermodynamic efficiency a first-order engineering requirement. Crossing those walls also opens a reliability gap\index{Scale Moment!failure certainty}, making hardware failure a routine event rather than a rare exception.
 
@@ -149,7 +149,7 @@ class Gpt4TrainingScenario:
 *Fleet reliability collapses as node count climbs.*
 :::
 
-Consider a GPT-4-class training scenario using a hypothetical `{python} Gpt4TrainingScenario.hw_name_str` cluster of `{python} Gpt4TrainingScenario.gpt4_gpus_str` running for `{python} Gpt4TrainingScenario.gpt4_days_str`. These values are illustrative rather than disclosed by OpenAI [@openai2023gpt4]. In a cluster of this size, the probability of at least one failure over an interval $t$ (governed by the system mean time between failures (MTBF), $\text{MTBF}_{\text{system}}$), $\Pr(\text{failure before } t) = 1 - e^{-t/\text{MTBF}_{\text{system}}}$, becomes a binding constraint. The worked example in notebook \ref{nbk-introduction-scale-reliability} establishes the arithmetic for one cluster; @sec-appdx-reliability-foundations-mtbf-cascade formalizes the MTBF cascade\index{MTBF!cascade} that governs failure rates across multi-thousand-GPU fleets, so a reader can predict the interruption cadence for any fleet size.
+Consider a GPT-4-class training scenario using a hypothetical `{python} Gpt4TrainingScenario.hw_name_str` cluster of `{python} Gpt4TrainingScenario.gpt4_gpus_str` running for `{python} Gpt4TrainingScenario.gpt4_days_str`. These values are illustrative rather than disclosed by OpenAI [@openai2023gpt4]. In a cluster of this size, the probability of at least one failure over an interval $t$ becomes a binding constraint. With independent, exponentially distributed failures and system mean time between failures (MTBF) $\text{MTBF}_{\text{system}}$, that probability is $\Pr(\text{failure before } t) = 1 - e^{-t/\text{MTBF}_{\text{system}}}$. The worked example in notebook \ref{nbk-introduction-scale-reliability} establishes the arithmetic for one cluster; @sec-appdx-reliability-foundations-mtbf-cascade formalizes the MTBF cascade\index{MTBF!cascade} that governs failure rates across multi-thousand-GPU fleets, so a reader can predict the interruption cadence for any fleet size.
 
 ::: {#nbk-introduction-scale-reliability .callout-notebook title="Scale and reliability"}
 
@@ -181,7 +181,7 @@ Meta's published Llama 3 training run illustrates the operational consequence in
 
 :::
 
-The recovery machinery that defined the Llama 3 run exists because cluster sizes exploded; to see why a run now needs hundreds of restart cycles, it helps to trace the compute trajectory that pushed fleets to this scale. The history of machine learning is defined by scale: each major capability leap has emerged from the ability to apply computation at previously impossible scales, making systems engineering central to AI advancement.
+The recovery machinery that defined the Llama 3 run exists because cluster sizes exploded; to see why a run now needs hundreds of restart cycles, it helps to trace the compute trajectory that pushed fleets to this scale. Recent capability leaps have repeatedly come from applying computation at previously impractical scales, which makes systems engineering central to AI advancement.
 
 Compute requirements have grown exponentially. AlexNet\index{AlexNet!two-GPU training} trained on two GTX 580 GPUs for approximately 5--6 days [@krizhevsky2012imagenet]. BERT\index{BERT!TPU cluster training} required 64 Tensor Processing Unit (TPU)[^fn-tpu-systolic-array] chips for 4 days, roughly 6,144 chip hours [@devlin2019].
 
@@ -286,7 +286,7 @@ GPT-3\index{GPT-3!training compute} consumed an estimated `{python} Gpt3Training
 
 @Fig-training-compute-trend places these landmarks in the broader history of training compute.
 
-::: {#fig-training-compute-trend fig-env="figure" fig-pos="htb" fig-cap="**Training compute trends (2012–2024)**: The exponential growth of training compute for landmark ML models. The training compute (measured in FLOPs) has grown by roughly seven orders of magnitude, highlighting the shift from single-node experimentation to massive-scale distributed fleets." fig-alt="Log-scale scatter of training compute in FLOPs by year from 2012 to 2024, separated into vision and language models with a fitted trend line, spanning about eight orders of magnitude."}
+::: {#fig-training-compute-trend fig-env="figure" fig-pos="htb" fig-cap="**Training compute trends (2012–2024)**: The exponential growth of training compute for landmark ML models. The training compute (measured in FLOPs) has grown by roughly seven to eight orders of magnitude, highlighting the shift from single-node experimentation to massive-scale distributed fleets." fig-alt="Log-scale scatter of training compute in FLOPs by year from 2012 to 2024, separated into vision and language models with a fitted trend line, spanning roughly seven to eight orders of magnitude."}
 
 ```{python}
 #| echo: false
@@ -474,12 +474,12 @@ plt.close()
 **Lighthouse archetypes**\index{Lighthouse archetype!definition} are the canonical workloads that keep the scale moment concrete throughout this book. At this point, their role is to show that "more machines" is not one engineering problem: the dominant constraint depends on what must cross the fleet boundary. The full roster with the C$^3$ taxonomy mapping and binding-constraint analysis appears at @sec-vol2-introduction-archetypes.
 
 - **Archetype A (GPT-4/Llama-3)**: Very large language models move from memory bounds on one device to multi-node model parallelism\index{Model parallelism!multi-node partitioning} and pipeline parallelism\index{Pipeline parallelism!multi-node partitioning}, so communication can become the bottleneck for communication-intensive partitions.
-- **Archetype B (DLRM at scale)**: Deep learning recommendation model (DLRM) workloads move from fitting embedding tables in local memory to **embedding sharding**\index{Embedding sharding!definition} across hundreds of nodes, so coordinating sparse feature routing, shard placement, and request scheduling can become the bottleneck.
-- **Archetype C (federated MobileNet)**: Mobile inference and on-device adaptation move from one device to federated learning across billions of devices, so local work must respect per-device compute and power budgets, while communication and participation can limit the federated round.
+- **Archetype B (DLRM at Scale)**: Deep learning recommendation model (DLRM) workloads move from fitting embedding tables in local memory to **embedding sharding**\index{Embedding sharding!definition} across hundreds of nodes, so coordinating sparse feature routing, shard placement, and request scheduling can become the bottleneck.
+- **Archetype C (Federated MobileNet)**: Mobile inference and on-device adaptation move from one smartphone-class device to federated learning across millions of devices, so local work must respect per-device compute and power budgets, while communication and participation can limit the federated round.
 
 :::
 
-These archetypes turn the growth curve into an engineering question. The same increase in accelerator count can produce a network wall, a sparse-routing coordination bottleneck, or a per-device compute ceiling. The fleet stack locates those constraints in the architecture, while C$^3$ identifies the execution cost they impose. Combined with the rise of federated learning (@sec-edge-intelligence) that diversity has made systems engineering central to ML at scale. A sophisticated algorithm that cannot scale often provides less practical value than a simpler algorithm deployed efficiently across scalable infrastructure.
+These archetypes turn the growth curve into an engineering question. The same increase in accelerator count can produce a network wall, a sparse-routing coordination bottleneck, or a per-device compute ceiling. The fleet stack locates those constraints in the architecture, while C$^3$ identifies the execution cost they impose. That diversity of constraint regimes, which federated learning (@sec-edge-intelligence) extends beyond the data center, has made systems engineering central to ML at scale. A sophisticated algorithm that cannot scale often provides less practical value than a simpler algorithm deployed efficiently across scalable infrastructure.
 
 The transition from single-machine to distributed training introduces qualitative changes in system behavior. @Fig-scale-moment-discontinuity contrasts the two regimes: a single-machine workload often governed by the memory wall and a fleet-scale workload in which communication can dominate, failures become routine over long runs, and governance becomes more complex.
 
@@ -549,7 +549,7 @@ The transition from single-machine to distributed training introduces qualitativ
   % Header Card
   \node[draw=mlsysbordergray, fill=mlsyslightgray, rectangle, rounded corners=3pt, line width=0.6pt,
         minimum width=7.7cm, minimum height=0.76cm] at (4.05, -0.55) {
-    {\fontsize{10.5}{13}\selectfont\textbf{\textcolor{mlsysoxford}{Single Machine (Volume I)}}}
+    {\fontsize{10.5}{13}\selectfont\textbf{\textcolor{mlsysoxford}{Single Machine}}}
   };
 
   \node[align=center, text width=7.2cm] at (4.05, -1.15) {
@@ -568,7 +568,7 @@ The transition from single-machine to distributed training introduces qualitativ
   \node[draw=mlsysteal, fill=mlsysteal!8, rectangle, rounded corners=3pt, line width=0.85pt,
         text width=6.2cm, minimum height=1.05cm] (mem_box) at (4.05, -4.10) {
     {\fontsize{9.5}{11.5}\selectfont\textbf{\textcolor{mlsysteal}{Local Memory Hierarchy}}}\\[2pt]
-    {\fontsize{7.5}{9}\selectfont\textcolor{mlsyssteel}{SRAM Registers $\;\cdot\;$ Shared HBM3e $\;\cdot\;$ Host DRAM}}
+    {\fontsize{7.5}{9}\selectfont\textcolor{mlsyssteel}{SRAM Registers $\;\cdot\;$ Shared HBM $\;\cdot\;$ Host DRAM}}
   };
 
   % Bidirectional Memory Bus with IEEE schematic badge
@@ -576,7 +576,7 @@ The transition from single-machine to distributed training introduces qualitativ
     (gpu_single.south) -- (mem_box.north);
   \node[fill=white, draw=mlsysteal!70, line width=0.5pt, rounded corners=2pt, inner xsep=5pt, inner ysep=2pt]
     at ($(gpu_single.south)!0.5!(mem_box.north)$) {
-      {\fontsize{6.8}{8}\selectfont\textbf{\textcolor{mlsysteal!90!black}{HBM3e Memory Bus [3.35 TB/s]}}}
+      {\fontsize{6.8}{8}\selectfont\textbf{\textcolor{mlsysteal!90!black}{HBM3 Memory Bus [3.35 TB/s]}}}
     };
 
   % Governing Constraint Card
@@ -598,10 +598,10 @@ The transition from single-machine to distributed training introduces qualitativ
     }
   };
 
-  % Volume I Foundation Badge
+  % Single-node regime badge
   \node[draw=mlsysbordergray, fill=mlsyslightgray, rectangle, rounded corners=3pt, line width=0.65pt,
         minimum width=5.2cm, minimum height=0.75cm] at (4.05, -10.85) {
-    {\fontsize{8.5}{10}\selectfont\textbf{\textcolor{mlsyssteel}{Volume I Foundation: Single-Node Systems}}}
+    {\fontsize{8.5}{10}\selectfont\textbf{\textcolor{mlsyssteel}{Single-Node Regime}}}
   };
 
   % Center divider with dashed line
@@ -616,7 +616,7 @@ The transition from single-machine to distributed training introduces qualitativ
   % Header Card
   \node[draw=mlsysblue!30, fill=mlsyslightblue!60, rectangle, rounded corners=3pt, line width=0.6pt,
         minimum width=7.7cm, minimum height=0.76cm] at (12.95, -0.55) {
-    {\fontsize{10.5}{13}\selectfont\textbf{\textcolor{mlsysblue}{Fleet Scale (Volume II)}}}
+    {\fontsize{10.5}{13}\selectfont\textbf{\textcolor{mlsysblue}{Fleet Scale}}}
   };
 
   \node[align=center, text width=7.2cm] at (12.95, -1.15) {
@@ -698,10 +698,10 @@ The transition from single-machine to distributed training introduces qualitativ
     }
   };
 
-  % Volume II Focus Badge
+  % Fleet regime badge
   \node[draw=mlsysblue, fill=mlsysblue, rectangle, rounded corners=3pt, line width=0.65pt,
         minimum width=5.2cm, minimum height=0.75cm] at (12.95, -10.85) {
-    {\fontsize{8.5}{10}\selectfont\textbf{\textcolor{white}{Volume II Focus: $C^3$ Fleet Architecture}}}
+    {\fontsize{8.5}{10}\selectfont\textbf{\textcolor{white}{Fleet Regime: $C^3$ Costs}}}
   };
 
 \end{tikzpicture}%
@@ -723,11 +723,11 @@ The discontinuity captured in @fig-scale-moment-discontinuity is qualitative as 
 
 :::
 
-As systems scale beyond a single node, a fundamental physical constraint emerges: the **bisection bandwidth wall**\index{Bisection bandwidth wall!definition},[^fn-bisection-bandwidth-etymology] which limits how fast data can cross the network midpoint. At fleet scale, networking often determines model throughput more than compute does.
+As systems scale beyond a single node, the network wall introduced above takes a concrete physical form, the **bisection bandwidth wall**\index{Bisection bandwidth wall!definition},[^fn-bisection-bandwidth-etymology] which limits how fast data can cross the network midpoint. At fleet scale, networking often determines model throughput more than compute does.
 
-[^fn-bisection-bandwidth-etymology]: **Bisection bandwidth**\index{Bisection bandwidth!etymology} (from graph theory): The minimum aggregate bandwidth of all links that, if cut, would partition the network into two equal-sized sets of nodes. In distributed ML, this "worst-case" cut determines the cluster's synchronization bottleneck: an AllReduce synchronization can move no faster than the bisection bandwidth, regardless of how many GPUs are added.
+[^fn-bisection-bandwidth-etymology]: **Bisection bandwidth**\index{Bisection bandwidth!etymology} (from graph theory): The minimum aggregate bandwidth of all links that, if cut, would partition the network into two equal-sized sets of nodes. In distributed ML, this "worst-case" cut bounds any collective whose traffic must cross it, such as a gradient exchange among all workers, and adding workers on either side does not raise that bound.
 
-On a single GPU, reproducible training requires deterministic kernels and execution settings in addition to fixed code, data, and random seeds. At the scale of thousands of GPUs, new phenomena emerge. Network partitions can split clusters into groups that train independently, causing model divergence. Stragglers\index{Straggler!thermal throttling} (workers that process data slower than peers due to hardware variation or thermal throttling) can bottleneck entire training runs. Even infrequent component failures accumulate across a large fleet, so long training jobs must expect interruptions.[^fn-failure-rates-fleet] Systems must preserve recoverable state frequently enough to bound the work lost at each interruption.
+On a single GPU, reproducible training requires deterministic kernels and execution settings in addition to fixed code, data, and random seeds. At the scale of thousands of GPUs, new phenomena emerge. A network partition can leave a synchronous job hung at a collective until a timeout aborts it, and in loosely synchronized designs it can let groups of workers drift apart. Stragglers\index{Straggler!thermal throttling} (workers that process data slower than peers due to hardware variation or thermal throttling) can bottleneck entire training runs. Even infrequent component failures accumulate across a large fleet, so long training jobs must expect interruptions.[^fn-failure-rates-fleet] Systems must preserve recoverable state frequently enough to bound the work lost at each interruption.
 
 [^fn-failure-rates-fleet]: **Hardware failure rates at scale**\index{Failure rate!fleet scale}: The opening notebook uses an assumed per-GPU MTBF and independent failures to illustrate how interruption frequency grows with fleet size. Production job interruptions include software, networking, and maintenance as well as accelerator faults. Meta's Llama 3 report provides an observed example of this broader interruption category [@dubey2024llama]; it does not establish a universal annual GPU failure rate.
 
@@ -769,19 +769,19 @@ class InfiniBandScenario:
     ib_ndr_gb_per_s_str = fmt_bandwidth(ndr, unit=GB / second, precision=0, commas=False)
 ```
 
-These scale-induced challenges have driven infrastructure investment by large AI organizations. Meta's Research SuperCluster, announced in 2022, contained 16,000 NVIDIA A100 GPUs connected by `{python} InfiniBandScenario.ib_hdr_gbit_per_s_str` InfiniBand[^fn-infiniband-rdma-v2] networking [@meta2022rsc]. Google's TPU v4 pods contain `{python} TpuV4PodScenario.tpuv4_pod_chips_str` with `{python} TpuV4PodScenario.tpuv4_pod_peak_str` of aggregate compute capacity [@zu2024tpuv4]. Microsoft's Azure supercomputer for OpenAI reached more than 10,000 GPUs in 2020, and later Azure AI data center announcements describe tens-of-thousands-GPU training fabrics [@microsoft2020openaiSupercomputer; @microsoft2025fairwater]. The scale of the models dictates the scale of the infrastructure. @Sec-appdx-comm-foundations-alpha-beta catalogs these interconnect bandwidth constants and feeds them into the $\alpha$-$\beta$ communication model, which lets a reader turn a link's bandwidth and latency into a predicted transfer cost.
+These scale-induced challenges have driven infrastructure investment by large AI organizations. Meta's Research SuperCluster, announced in 2022, was designed to reach 16,000 NVIDIA A100 GPUs connected by `{python} InfiniBandScenario.ib_hdr_gbit_per_s_str` InfiniBand[^fn-infiniband-rdma-v2] networking [@meta2022rsc]. Google's TPU v4 pods contain `{python} TpuV4PodScenario.tpuv4_pod_chips_str` with `{python} TpuV4PodScenario.tpuv4_pod_peak_str` of aggregate compute capacity [@zu2024tpuv4]. Microsoft's Azure supercomputer for OpenAI reached more than 10,000 GPUs in 2020, and later Azure AI data center announcements describe tens-of-thousands-GPU training fabrics [@microsoft2020openaiSupercomputer; @microsoft2025fairwater]. The scale of the models dictates the scale of the infrastructure. @Sec-appdx-comm-foundations-alpha-beta catalogs these interconnect bandwidth constants and feeds them into the $\alpha$-$\beta$ communication model, which lets a reader turn a link's bandwidth and latency into a predicted transfer cost.
 
-[^fn-infiniband-rdma-v2]: **InfiniBand**: Born in 1999 from the merger of Intel's NGIO and the Compaq/IBM Future I/O initiatives, InfiniBand was originally designed to replace the PCI bus; its defining feature for ML is remote direct memory access (RDMA)\index{InfiniBand!RDMA}, which bypasses the OS kernel to transfer data directly between application memory on different machines at microsecond-scale latency. HDR InfiniBand provides about `{python} InfiniBandScenario.ib_hdr_gb_per_s_str` line-rate bandwidth per link; NDR reaches about `{python} InfiniBandScenario.ib_ndr_gb_per_s_str`. This bandwidth gap compared with common Ethernet links determines whether large-model training is compute-bound or communication-bound.
+[^fn-infiniband-rdma-v2]: **InfiniBand**: Born in 1999 from the merger of Intel's NGIO and the Compaq/IBM Future I/O initiatives, InfiniBand was originally designed to replace the PCI bus; its defining feature for ML is remote direct memory access (RDMA)\index{InfiniBand!RDMA}, which bypasses the OS kernel to transfer data directly between application memory on different machines at microsecond-scale latency. HDR InfiniBand provides about `{python} InfiniBandScenario.ib_hdr_gb_per_s_str` line-rate bandwidth per link; NDR reaches about `{python} InfiniBandScenario.ib_ndr_gb_per_s_str`. Whether large-model training is compute-bound or communication-bound depends on this per-link bandwidth relative to the computation each worker performs between exchanges, and RDMA-capable Ethernet (RoCE) now offers comparable line rates.
 
 The scale moment establishes why exponential growth in compute demand forces some ML systems beyond any single machine, making communication a potential bottleneck, component failure routine over long runs, and governance obligations more consequential. The next question is how to organize the engineering response. Established distributed-systems techniques remain essential, but global barriers and large shared model state change their costs and determine which recovery and consistency mechanisms apply. A fleet-scale architectural hierarchy makes those dependencies explicit.
 
 ## The Fleet Stack Architectural Hierarchy {#sec-vol2-introduction-engineering-crux}
 
-Apache Spark [@zaharia2016] commonly processes data-parallel tasks with explicit shuffle boundaries; a web microservice commonly handles requests whose failures can be isolated. Large synchronous training workloads instead update shared model state across thousands of accelerators every few hundred milliseconds. Global barriers and large state make stragglers, recovery, and communication more tightly coupled than in those examples, even though the fleet still relies on established distributed-systems mechanisms. The four-layer fleet stack connects raw cluster resources to global-scale AI applications. It identifies where a design decision belongs; C$^3$ identifies how that decision affects execution time. The layer names are an architectural map, while the implementation names below are examples to revisit as their mechanisms are developed.
+Apache Spark [@zaharia2016] commonly processes data-parallel tasks with explicit shuffle boundaries; a web microservice commonly handles requests whose failures can be isolated. Large synchronous training workloads instead update shared model state across thousands of accelerators every few hundred milliseconds. Global barriers and large state make stragglers, recovery, and communication more tightly coupled than in those examples, even though the fleet still relies on established distributed-systems mechanisms. The fleet stack connects raw cluster resources to global-scale AI applications through four bands, one for each part of this book. It identifies where a design decision belongs; C$^3$ identifies how that decision affects execution time. The band names are an architectural map, while the implementation names below are examples to revisit as their mechanisms are developed.
 
 @Fig-vol2-system-scaling-regimes visualizes the transition from single-node to fleet. The left side summarizes a single-node regime of 1–8 accelerators, where local memory can set the binding constraint\index{Memory wall!intra-node bound}. The scaling arrow crosses into a distributed regime where thousands of nodes coordinate across a high-speed switch fabric. For communication-intensive synchronous workloads, the bottleneck can then shift to the bisection bandwidth wall as network congestion and message-passing latency consume an increasing share of step time.
 
-::: {#fig-vol2-system-scaling-regimes fig-env="figure" fig-pos="htb" fig-cap="**The scaling regimes of ML systems**: Scaling extends a single-node stack into a distributed fleet stack. Local memory bandwidth often limits single-node workloads; bisection bandwidth can limit communication-intensive distributed workloads. Mastery of intra-node data movement remains a prerequisite for distributed scaling." fig-alt="Diagram comparing a single-node stack (application, ML framework, system software, hardware) with a distributed fleet stack (governance, serving/ops, distribution, infrastructure), separated by a scaling arrow."}
+::: {#fig-vol2-system-scaling-regimes fig-env="figure" fig-pos="htb" fig-cap="**The scaling regimes of ML systems**: Scaling extends a single-node stack into a distributed fleet stack. Local memory bandwidth often limits single-node workloads; bisection bandwidth can limit communication-intensive distributed workloads. Mastery of intra-node data movement remains a prerequisite for distributed scaling." fig-alt="Diagram comparing a single-node stack (application, ML framework, system software, hardware) with the four bands of the distributed fleet stack (governance, serving, distribution, infrastructure), separated by a scaling arrow."}
 
 ```{.tikz}
 \providecolor{mlsysoxford}{HTML}{1E293B}
@@ -858,7 +858,7 @@ Apache Spark [@zaharia2016] commonly processes data-parallel tasks with explicit
   \node[layer_card, draw=mlsysblue, fill=mlsyslightblue!50] (L1_hw) at (0, 0.10) {
     {\fontsize{9}{11}\selectfont\textbf{\textcolor{mlsysblue}{Hardware Substrate}}}\\[2pt]
     {\fontsize{7.5}{9.5}\selectfont\textcolor{mlsysoxford}{NVLink Intra-Chassis Fabric (900 GB/s)}}\\[1pt]
-    {\fontsize{6.8}{8.5}\selectfont\textcolor{mlsysgray}{Tensor Cores $\;\cdot\;$ Local HBM3e ($3.35\text{ TB/s}$) $\;\cdot\;$ SRAM}}
+    {\fontsize{6.8}{8.5}\selectfont\textcolor{mlsysgray}{Tensor Cores $\;\cdot\;$ Local HBM3 ($3.35\text{ TB/s}$) $\;\cdot\;$ SRAM}}
   };
 
   % Bottleneck 1: Memory Wall
@@ -878,29 +878,29 @@ Apache Spark [@zaharia2016] commonly processes data-parallel tasks with explicit
 
   % Layer 1: Governance (Top)
   \node[layer_card, draw=mlsysgreen, fill=mlsyslightgreen!25] (L2_gov) at (11.2, 4.60) {
-    {\fontsize{9}{11}\selectfont\textbf{\textcolor{mlsysdeepgreen}{Governance Layer (Part IV)}}}\\[2pt]
+    {\fontsize{9}{11}\selectfont\textbf{\textcolor{mlsysdeepgreen}{Governance Band (Part IV)}}}\\[2pt]
     {\fontsize{7.5}{9.5}\selectfont\textcolor{mlsysoxford}{Responsible AI $\;\cdot\;$ Differential Privacy $\;\cdot\;$ Robustness}}\\[1pt]
     {\fontsize{6.8}{8.5}\selectfont\textcolor{mlsysgray}{Societal audit $\;\cdot\;$ Safety verification $\;\cdot\;$ Carbon tracking}}
   };
 
   % Layer 2: Serving / Ops
   \node[layer_card, draw=mlsyspurple, fill=mlsyslightpurple!20] (L2_serv) at (11.2, 3.10) {
-    {\fontsize{9}{11}\selectfont\textbf{\textcolor{mlsyspurple}{Serving \& Orchestration Layer (Part III)}}}\\[2pt]
-    {\fontsize{7.5}{9.5}\selectfont\textcolor{mlsysoxford}{Gang Schedulers (Slurm, Ray) $\;\cdot\;$ Production MLOps}}\\[1pt]
-    {\fontsize{6.8}{8.5}\selectfont\textcolor{mlsysgray}{Continuous serving $\;\cdot\;$ PagedAttention $\;\cdot\;$ Edge fleet}}
+    {\fontsize{9}{11}\selectfont\textbf{\textcolor{mlsyspurple}{Serving Band (Part III)}}}\\[2pt]
+    {\fontsize{7.5}{9.5}\selectfont\textcolor{mlsysoxford}{Runtime \& Serving $\;\cdot\;$ Operations}}\\[1pt]
+    {\fontsize{6.8}{8.5}\selectfont\textcolor{mlsysgray}{Batching \& routing $\;\cdot\;$ Model rollout $\;\cdot\;$ Edge fleet}}
   };
 
   % Layer 3: Distribution
   \node[layer_card, draw=mlsysamber, fill=mlsyslightamber!20] (L2_dist) at (11.2, 1.60) {
-    {\fontsize{9}{11}\selectfont\textbf{\textcolor{mlsysdeepamber}{Distribution Layer (Part II)}}}\\[2pt]
-    {\fontsize{7.5}{9.5}\selectfont\textcolor{mlsysoxford}{NCCL Collectives $\;\cdot\;$ 4D Parallelism (DP/TP/PP/EP)}}\\[1pt]
-    {\fontsize{6.8}{8.5}\selectfont\textcolor{mlsysgray}{AllReduce barriers $\;\cdot\;$ Checkpointing $\;\cdot\;$ Fault recovery}}
+    {\fontsize{9}{11}\selectfont\textbf{\textcolor{mlsysdeepamber}{Distribution Band (Part II)}}}\\[2pt]
+    {\fontsize{7.5}{9.5}\selectfont\textcolor{mlsysoxford}{Distributed Execution $\;\cdot\;$ Reliability \& Control}}\\[1pt]
+    {\fontsize{6.8}{8.5}\selectfont\textcolor{mlsysgray}{Collectives $\;\cdot\;$ Job scheduling $\;\cdot\;$ Fault recovery}}
   };
 
   % Layer 4: Infrastructure
   \node[layer_card, draw=mlsysblue, fill=mlsyslightblue!50] (L2_infra) at (11.2, 0.10) {
-    {\fontsize{9}{11}\selectfont\textbf{\textcolor{mlsysblue}{Fleet Infrastructure Substrate (Part I)}}}\\[2pt]
-    {\fontsize{7.5}{9.5}\selectfont\textcolor{mlsysoxford}{InfiniBand NDR / RoCEv2 Fabric (800 Gbps)}}\\[1pt]
+    {\fontsize{9}{11}\selectfont\textbf{\textcolor{mlsysblue}{Infrastructure Band (Part I)}}}\\[2pt]
+    {\fontsize{7.5}{9.5}\selectfont\textcolor{mlsysoxford}{InfiniBand NDR / RoCEv2 Fabric (400 Gbps)}}\\[1pt]
     {\fontsize{6.8}{8.5}\selectfont\textcolor{mlsysgray}{Multi-tier Fat-Tree $\;\cdot\;$ Rail-optimized optical network}}
   };
 
@@ -939,7 +939,7 @@ Apache Spark [@zaharia2016] commonly processes data-parallel tasks with explicit
   % Bottom takeaway rule and text
   \draw[line width=0.6pt, color=mlsysbordergray] (-3.4, -2.30) -- (14.6, -2.30);
   \node[font=\fontsize{8}{10.5}\selectfont\itshape, text=mlsyssteel] at (5.6, -2.65) {
-    Mastery of intra-node data movement (Volume I) is a mandatory prerequisite for fleet-scale distributed scaling (Volume II).
+    Mastery of intra-node data movement remains a prerequisite for fleet-scale distributed scaling.
   };
 
 \end{tikzpicture}%
@@ -966,16 +966,11 @@ class InfiniBandStackRecap:
     ib_ndr_gbit_per_s_str = fmt_bandwidth(ndr, unit=Gbps, precision=0, commas=False)
 ```
 
-The stack architecture in @fig-vol2-system-scaling-regimes does not change across scale: every ML system still has hardware, a system envelope, a workload, and a mission. What changes is the physics at each layer. Read the figure from bottom to top. At the bottom row, Hardware (NVLink at `{python} InfiniBandStackRecap.nvlink_h100_gb_per_s_str` within one node) becomes Infrastructure (InfiniBand RDMA fabric spanning racks at `{python} InfiniBandStackRecap.ib_ndr_gbit_per_s_str` per link), and the bottleneck shifts from the memory wall to the bisection bandwidth wall. One row up, System Software (a single CUDA runtime managing PCIe direct memory access (DMA)) becomes Distribution (the NVIDIA Collective Communications Library [NCCL] and RDMA libraries coordinating thousands of processes across the fabric).
+The layered structure in @fig-vol2-system-scaling-regimes persists across scale; what changes is the physics at each level. Read the figure from bottom to top. At the bottom, the hardware substrate (NVLink at `{python} InfiniBandStackRecap.nvlink_h100_gb_per_s_str` within one node) becomes the Infrastructure band (an InfiniBand RDMA fabric spanning racks at `{python} InfiniBandStackRecap.ib_ndr_gbit_per_s_str` per link), and the bottleneck shifts from the memory wall to the bisection bandwidth wall. One level up, system software (a single CUDA runtime managing PCIe direct memory access (DMA)) becomes the Distribution band: the NVIDIA Collective Communications Library (NCCL) and RDMA libraries that coordinate thousands of processes across the fabric, together with the schedulers that place distributed jobs and the recovery machinery that restarts them.
 
-The upper two layers also change. ML Framework\index{ML framework!single-node stack} (PyTorch or JAX executing a training loop on one node) becomes Serving/Ops (orchestration and continuous integration/continuous deployment (CI/CD) pipelines that schedule distributed jobs and manage rolling deployments). At the top, Application (a single training script or inference service) becomes Governance (responsible AI policy, security auditing, and multi-tenant access control), because fleet-scale deployment expands organizational concerns beyond those of a single machine. Four layers compose the fleet stack:
+The upper two levels also change. The ML framework\index{ML framework!single-node stack} (PyTorch or JAX executing a training loop on one node) becomes the Serving band, where serving systems answer production requests and deployment pipelines manage rolling releases. At the top, the application (a single training script or inference service) becomes the Governance band (security, robustness, sustainability, and responsible AI policy), because fleet-scale deployment expands organizational concerns beyond those of a single machine. @Sec-vol2-introduction-foundational-concepts defines these four bands, and the two rows within each, as the fleet stack that organizes the rest of this book.
 
-1.  **Infrastructure** (Hardware, the Engine): The physical foundation. This layer defines the fleet's raw capabilities: per-node $R_{\text{peak}}$ and $\text{BW}$, interconnected by InfiniBand RDMA fabric. The recurring hardware anchor for this introduction is the NVIDIA H100, which serves as a concrete reference accelerator rather than an abstract placeholder.
-2.  **Distribution** (Systems, the Car): The communication substrate. This layer defines the cluster envelope: NCCL, the collective library that implements reductions and broadcasts on GPU fabrics; RDMA collectives that coordinate thousands of accelerators; bisection bandwidth; power usage effectiveness, the facility-energy overhead above IT load; and failure rates (MTBF).
-3.  **Serving/Ops** (Workloads, the Route): The orchestration layer. This layer manages the mathematical workload sharded across the cluster $(O, D_{\text{vol}}, \text{CI})$ through deployment pipelines and scheduling, where $O$ is local operation count, $D_{\text{vol}}$ is data volume, and $\text{CI}$ previews communication intensity (CI): network bytes per local FLOP. Representative workloads include GPT-4 and DLRM.
-4.  **Governance** (Missions, the Destination): The mission context. This is the top of the stack, where responsible AI policy, security, and multi-tenant access control shape fleet-wide behavior. A mission (such as Frontier Model Training) introduces high-level requirements (for example, "99.99 percent service availability") that dictate the configuration of every layer below.
-
-This hierarchy ensures that every distributed engineering decision is grounded in its mission context. For example, the Frontier Training mission instantiates Archetype A (GPT-4/Llama-3)\index{Archetype!A (GPT-4/Llama-3)} from the volume's canonical roster (@sec-vol2-introduction-archetypes), and operates on a cluster of H100 hardware. Reusing these protagonists where they clarify a chapter's constraint keeps the physics of scale traceable without forcing every workload into every chapter.
+Each band constrains the one above it, and every decision in the stack is ultimately judged against the workload it must serve. Archetype A (GPT-4/Llama-3)\index{Archetype!A (GPT-4/Llama-3)} from the book's canonical roster (@sec-vol2-introduction-archetypes), for example, runs on a reference cluster of NVIDIA H100 accelerators, the recurring hardware anchor for this book and a concrete reference point rather than an abstract placeholder. Reusing these protagonists where they clarify a chapter's constraint keeps the physics of scale traceable without forcing every workload into every chapter.
 
 ### Independent tasks vs. synchronous fleet dynamics {#sec-introduction-traditional-vs-ml-fleet-dynamics-c43e}
 
@@ -983,7 +978,7 @@ Many distributed systems isolate work into tasks or requests so that one failure
 
 Large synchronous training jobs operate under **synchronous tight coupling**\index{Synchronous tight coupling!definition}. Parameter-server architectures [@li2014] and collective runtimes manage distributed state, but synchronous optimization repeatedly updates a large shared model state rather than completing independent one-shot tasks. At each synchronization point\index{Barrier synchronization!slowest worker dependence}, progress can depend on the slowest participating worker, so a persistent 10 percent slowdown on one worker can approach a 10 percent step-time penalty when that worker lies on the critical path. Communication-heavy partitions can also become bisection-bandwidth bound because large gradient or activation tensors cross the network every step. These properties do not invalidate established recovery techniques; they increase recovery cost and restrict which replication, re-execution, and consistency strategies preserve useful training progress.
 
-@Fig-traditional-vs-ml-fleet contrasts independently retryable map tasks with a synchronous training step. A slow map task can delay downstream reduction and job completion, but other map tasks can finish without it. In synchronous training, the shared update requires every participating worker's contribution at each AllReduce synchronization point\index{Barrier synchronization!vs. independent tasks}.
+@Fig-traditional-vs-ml-fleet contrasts independently retryable map tasks with a synchronous training step. A slow map task can delay downstream reduction and job completion, but other map tasks can finish without it. In synchronous training, the shared update waits on an AllReduce, the collective operation that combines all workers' gradients and returns the result to each. Because that result needs every participating worker's contribution, each AllReduce is a synchronization point\index{Barrier synchronization!vs. independent tasks}.
 
 ::: {#fig-traditional-vs-ml-fleet fig-env="figure" fig-pos="htb" fig-cap="**Retryable tasks vs. shared training steps**: Map tasks (left) can complete and be retried separately, although missing outputs delay downstream reduction and job completion. Synchronous data-parallel training (right) requires all gradient contributions before completing a shared update. A straggler on the critical path delays that step; its effect depends on overlap and other costs." fig-alt="Left panel shows separately retryable map tasks producing intermediate outputs needed by reducers. Right panel shows synchronous GPU workers contributing to AllReduce, whose completion depends on a straggler."}
 ![](images/svg/traditional-vs-ml-fleet.svg)
@@ -1257,7 +1252,7 @@ class Gpt3CommunicationScenario:
     gpt3_gradient_gb_str = fmt_memory(gradient_q, unit=GB, precision=0, commas=False)
 ```
 
-At large scale, communication can dominate communication-intensive partitions. Distributed data-parallel training synchronizes gradients across workers after each batch. For a model with `{python} Gpt3CommunicationScenario.gpt3_params_b_str` parameters, FP32 gradients occupy about `{python} Gpt3CommunicationScenario.gpt3_gradient_gb_str` before any collective algorithm is applied. An AllReduce combines contributions from all workers and returns the combined result to each. Ring All-Reduce arranges that exchange among neighbors in a logical ring; each worker sends and receives roughly $2(N-1)/N$ times the gradient tensor size, because each gradient byte makes about two trips around the ring, one to reduce and one to broadcast back; @sec-collective-communication derives this factor. Network traffic therefore depends on precision, worker count, collective implementation, and partitioning. On slower interconnects or partitions with little computation per communicated byte, it can consume a large fraction of each iteration rather than a negligible one.
+At large scale, communication can dominate communication-intensive partitions. Distributed data-parallel training synchronizes gradients across workers after each batch. For a model with `{python} Gpt3CommunicationScenario.gpt3_params_b_str` parameters, FP32 gradients occupy about `{python} Gpt3CommunicationScenario.gpt3_gradient_gb_str` before any collective algorithm is applied. Ring All-Reduce arranges the AllReduce exchange among neighbors in a logical ring; each worker sends and receives roughly $2(N-1)/N$ times the gradient tensor size, because each gradient byte makes about two trips around the ring, one to reduce and one to broadcast back; @sec-collective-communication derives this factor. Network traffic therefore depends on precision, worker count, collective implementation, and partitioning. On slower interconnects or partitions with little computation per communicated byte, it can consume a large fraction of each iteration rather than a negligible one.
 
 This ratio explains why distributed training systems optimize communication so aggressively. Horovod\index{Horovod!collective communication} uses Ring All-Reduce, NCCL integration, and Tensor Fusion to improve collective communication [@sergeev2018horovod]; Megatron-LM\index{Megatron-LM!model parallelism} applies model parallelism [@shoeybi2019megatron]; and ZeRO\index{ZeRO!memory redundancy reduction} reduces memory redundancy [@rajbhandari2020]. For the present argument, the important mapping is role-based: Horovod represents the collective runtime, NCCL the GPU communication backend, Tensor Fusion the gradient-fusion path, Megatron-LM model partitioning, and ZeRO optimizer-state sharding. Their names identify different responses to the same problem: distributing work also distributes state that must move or be kept consistent. The design decision at this stage is which cost prevents progress; selecting a particular mechanism requires the workload and fabric models developed later.
 
@@ -1269,7 +1264,7 @@ Communication dominance and routine failure are consequences of the scale moment
 
 ## AI Scaling Laws {#sec-vol2-intro-ai-scaling-laws-a043}
 
-Training GPT-3 consumed roughly $3 \times 10^{23}$ floating-point operations [@brown2020language]. Public GPT-4-class training estimates are often on the order of $10^{25}$ FLOPs, although OpenAI did not disclose the actual training compute or hardware configuration [@openai2023gpt4; @semianalysisGPT4]. These estimates matter here because each order-of-magnitude increase in compute demanded a corresponding expansion of the machine learning fleet.
+Training GPT-3 consumed about `{python} Gpt3TrainingScenario.gpt3_training_ops_str` [@brown2020language]. Public GPT-4-class training estimates are often on the order of $10^{25}$ FLOPs, although OpenAI did not disclose the actual training compute or hardware configuration [@openai2023gpt4; @semianalysisGPT4]. These estimates matter here because each order-of-magnitude increase in compute demanded a corresponding expansion of the machine learning fleet.
 
 This pattern is not coincidental. Rich Sutton's "bitter lesson" articulated the underlying principle: performance in machine learning is primarily driven by applying general methods at massive scale rather than encoding human knowledge into algorithms [@sutton2019bitter]. Scaling laws\index{Scaling laws!power-law formulation} formalize this observation quantitatively: model loss improves sublinearly as a power-law function of compute, dataset size, and parameters, $\mathcal{L}(X) \propto X^{-\alpha_{\text{scale}}}$ [@kaplan2020scaling; @hoffmann2022chinchilla]. Each equal-sized loss improvement therefore requires disproportionately more resources, a systems consequence this book later names as the universal scaling law\index{Universal scaling law!resource requirements}. Each scaling dimension (parameters, data, and compute) interacts with infrastructure constraints differently, making multi-dimensional efficiency optimization essential at production scale.
 
@@ -1313,11 +1308,11 @@ class Gpt3StatsScenario:
     a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_throughput_q, unit=TFLOPs / second, precision=0, commas=False)
 ```
 
-GPT-3 reached `{python} Gpt3StatsScenario.gpt3_params_b_str` parameters with a training budget of approximately $3.14 \times 10^{23}$ floating-point operations. Such investments make predicting the return on additional resources an engineering necessity.
+GPT-3 reached `{python} Gpt3StatsScenario.gpt3_params_b_str` parameters with a training budget of approximately `{python} Gpt3StatsScenario.gpt3_training_ops_str`. Such investments make predicting the return on additional resources an engineering necessity.
 
 @Fig-compute-trends places training demands\index{Training!compute trends} against the longer history of hardware improvement. Model size, data, and compute must be allocated together to make those growing budgets productive.
 
-::: {#fig-compute-trends fig-env="figure" fig-pos="htb" fig-cap="**Model training compute trends**: Training compute has grown exponentially, accelerating dramatically in the deep learning era. The fitted trends shift from roughly 1.4$\times$ per year before 2010 to roughly 4$\times$ per year inside the deep learning era, both far steeper than Moore's Law (~2 years). The fastest stretch was steeper still: within the 2012--2019 frontier subset, compute doubled approximately every 3.4 months. This trajectory explains why efficiency has become a strategic imperative rather than an optional optimization." fig-alt="Scatter plot of training compute from 1950 to 2025 on log scale. Points show exponential growth accelerating after 2012, with a fitted trend of about 1.4x per year before 2010 and about 4x per year in the deep learning era, both far steeper than Moore's Law at about 2 years per doubling."}
+::: {#fig-compute-trends fig-env="figure" fig-pos="htb" fig-cap="**Model training compute trends**: Training compute has grown exponentially, accelerating dramatically in the deep learning era. The fitted trends shift from roughly 1.4$\times$ per year before 2010, close to Moore's Law (a doubling about every 2 years), to roughly 4$\times$ per year inside the deep learning era, far steeper than Moore's Law. The fastest stretch was steeper still: within the 2012--2019 frontier subset, compute doubled approximately every 3.4 months. This trajectory explains why efficiency has become a strategic imperative rather than an optional optimization." fig-alt="Scatter plot of training compute from 1950 to 2025 on log scale. Points show exponential growth accelerating after 2012, with a fitted trend of about 1.4x per year before 2010, close to Moore's Law at about 2 years per doubling, and about 4x per year in the deep learning era, far steeper than Moore's Law."}
 
 ![](images/png/compute-trends.png)
 
@@ -1327,7 +1322,7 @@ Diminishing returns make allocation more consequential as budgets grow. The next
 
 ::: {#psp-introduction-transformer-compute-refresher .callout-perspective title="Transformer compute refresher"}
 
-Transformers process sequences using self-attention mechanisms that compute relationships between all token pairs. This architecture's computational cost scales quadratically with sequence length ($\mathcal{O}(S^2)$ where $S$ is sequence length), making resource allocation particularly critical for language models. The term "FLOPs" (floating-point operations) quantifies total computational work, while "tokens" represent the individual text units (typically subwords) that models process during training.
+Transformers process sequences using self-attention mechanisms that compute relationships between all token pairs. The attention component of this architecture's cost scales quadratically with sequence length ($\mathcal{O}(S^2)$ where $S$ is sequence length), making resource allocation particularly critical for language models. The term "FLOPs" (floating-point operations) quantifies total computational work, while "tokens" represent the individual text units (typically subwords) that models process during training.
 
 :::
 
@@ -1507,7 +1502,7 @@ plt.close()
 
 Performance improvements follow predictable patterns, but the relevant design action changes with resource availability and with the point in the ML lifecycle where compute is spent. Two further distinctions matter for system design: how performance changes with dataset size, and when in the lifecycle additional compute is applied.
 
-Dataset size passes through three phases of its own (@fig-data-scaling-regimes). With few examples, generalization error is high and erratic; as data grows it falls predictably along a power law, the regime where additional data buys the most; eventually it saturates against a noise floor where more data yields negligible gain. The systems consequence is that finite high-quality data, not compute, becomes the binding constraint once a model enters the saturation regime, which is why data efficiency complements brute-force scaling. @Sec-distributed-training-systems develops where this saturation reshapes training-data pipelines and budgets.
+Dataset size passes through three phases of its own (@fig-data-scaling-regimes). With few examples, generalization error is high and erratic; as data grows it falls predictably along a power law, the regime where additional data buys the most; eventually it saturates against a noise floor where more data yields negligible gain. The systems consequence is that finite high-quality data, not compute, becomes the binding constraint once a model enters the saturation regime, which is why data efficiency complements brute-force scaling. @Sec-storage-synthetic-fuel returns to this constraint when a fleet generates, filters, and versions synthetic training data.
 
 ::: {#fig-data-scaling-regimes fig-env="figure" fig-pos="htb" fig-cap="**Data scaling regimes**: Generalization error as a function of dataset size exhibits three distinct phases. The small-data regime shows high variance; the power-law regime demonstrates predictable error reduction; the irreducible-error regime represents the fundamental noise floor." fig-alt="Log-scale plot of generalization error vs. dataset size with three shaded regions: small data, power law, and irreducible error. Curve shows transition between regimes."}
 
@@ -1700,11 +1695,11 @@ The sharpest of these costs is environmental, and it turns on a decision the fle
 
 Scaling laws do not guarantee unbounded improvement. Each incremental performance gain must be weighed against its resource cost. As systems approach practical scaling limits, the emphasis shifts from scaling alone to efficient scaling: balancing performance, cost, energy consumption, and environmental impact.[^fn-scaling-saturation-qualifier]
 
-[^fn-scaling-saturation-qualifier]: **Scaling law saturation**\index{Scaling Laws!saturation}: While power-law relationships\index{Power-law relationship!scaling empirical basis} suggest unbounded gain, empirical evidence identifies **semantic saturation**\index{Semantic saturation!definition} points where adding data or parameters yields negligible improvement in downstream utility. This "diminishing returns" regime forces systems engineers to pivot from brute-force scale to data efficiency\index{Data efficiency!scaling saturation mitigation} and model compression to extract further value within fixed power budgets.
+[^fn-scaling-saturation-qualifier]: **Scaling law saturation**\index{Scaling Laws!saturation}: While power-law relationships\index{Power-law relationship!scaling empirical basis} suggest unbounded gain, a validated fit can still reach a regime in which adding data or parameters yields negligible improvement in downstream utility, which this book calls **semantic saturation**\index{Semantic saturation!definition}. This "diminishing returns" regime forces systems engineers to pivot from brute-force scale to data efficiency\index{Data efficiency!scaling saturation mitigation} and model compression to extract further value within fixed power budgets.
 
 ### Scaling law breakdown conditions {#sec-vol2-intro-scaling-law-breakdown-conditions-1f8c}
 
-A resource plan must also identify where its empirical fit ceases to apply.
+A resource plan must also identify where its empirical fit ceases to apply, because scaling laws are fitted within the regimes in which they were measured and need not hold beyond them.
 
 Most of these breakdowns share one root cause: growth in one dimension that outpaces the others. @hoffmann2022chinchilla show that many large language models were undertrained because model size grew faster than training-token budgets, and that compute-optimal training requires scaling parameters and tokens together. The same imbalance appears in other guises. Schedules and learning rates that are not retuned to a larger model leave it short of its potential despite the infrastructure spent on it; finite high-quality data can yield diminishing marginal utility, and larger models may memorize rather than generalize; and hardware ceilings on memory bandwidth, interconnect capacity, and I/O throughput cap how far a trillion-parameter model can be distributed at all. At the extreme, even balanced scaling reaches the limits of what a training distribution can teach: benchmark numbers keep rising while generalization does not, and models grow brittle to adversarial or out-of-distribution inputs. @Tbl-scaling-breakdown organizes these failure modes, mapping each breakdown type\index{Scaling!breakdown type} to its underlying cause and a representative scenario, so practitioners can anticipate the inefficiency before committing the budget.
 
@@ -1796,7 +1791,7 @@ class ReliabilityGap:
 
 For a single component, 99.99 percent availability corresponds to `{python} ReliabilityGap.four_nines_downtime_str` of unavailability per 365-day year. This is a time fraction, not a count of failures.
 
-If each node has `{python} ReliabilityGap.node_availability_str` availability and an unreplicated job requires every node, the probability that all 1,000 required nodes are available simultaneously is only `{python} ReliabilityGap.availability_1k_str`. Scale that job to 10,000 required nodes, and this probability drops to `{python} ReliabilityGap.availability_10k_str`. @Fig-reliability-gap-collapse traces this exponential decay for two per-node availability levels across job sizes from 1 to 10,000 GPUs.
+If each node has an illustrative `{python} ReliabilityGap.node_availability_str` availability and an unreplicated job requires every node, the probability that all 1,000 required nodes are available simultaneously is only `{python} ReliabilityGap.availability_1k_str`. Scale that job to 10,000 required nodes, and this probability drops to `{python} ReliabilityGap.availability_10k_str`. @Fig-reliability-gap-collapse traces this exponential decay for two per-node availability levels across job sizes from 1 to 10,000 GPUs.
 
 ::: {#fig-reliability-gap-collapse fig-env="figure" fig-pos="htb" fig-cap="**The reliability collapse**: The simultaneous availability of every node required by an unreplicated job, shown as a function of job size for two per-node availability levels under an independence assumption. At 99.9\% per-node availability (blue), all-node availability is only 36.8\% for a 1,000-GPU job and approaches zero for a 10,000-GPU job. Even 99.99\% per-node availability (green) yields 36.8\% at 10,000-GPU scale." fig-alt="Line chart with log-scale x-axis showing simultaneous all-node availability vs. job size from 1 to 10000 GPUs. Two curves decline from 100 percent, with the 99.9 percent per-node availability curve dropping steeply."}
 
@@ -1883,7 +1878,7 @@ The exponential decay in @fig-reliability-gap-collapse makes the architectural c
 
 ### Communication intensity (the CI ratio) {#sec-vol2-introduction-ci-ratio}
 
-If the single-machine iron law\index{Iron law!single-machine performance} governs how a system executes, **communication intensity (CI)**\index{Communication intensity!definition} governs where it stalls. On a single accelerator, the roofline model\index{Roofline model!compute vs. memory bound} determines whether a kernel is compute-bound or memory-bound. At fleet scale, this analysis elevates to the network.
+If arithmetic intensity governs where a single accelerator stalls, **communication intensity (CI)**\index{Communication intensity!definition} governs where a fleet stalls. On a single accelerator, the roofline model\index{Roofline model!compute vs. memory bound} determines whether a kernel is compute-bound or memory-bound. At fleet scale, this analysis elevates to the network.
 
 @Eq-ci-ratio defines communication intensity as the ratio of data moved across the network to the operations performed locally:
 
@@ -1947,7 +1942,7 @@ That control plane first has to defend the fleet. ML systems face unique securit
 ↪ Defenses against data poisoning, model extraction, and gradient inversion across distributed fabrics are analyzed in @sec-security-privacy.
 :::
 
-The same control plane must make the fleet auditable. Systems operating at scale attract regulatory attention. Regimes such as the **EU AI Act**\index{EU AI Act!definition} and local privacy laws make **auditability**\index{Auditability!definition} an architectural requirement for many deployments. Proving that a model trained on 10,000 GPUs did not ingest prohibited data requires end-to-end data lineage tracking. Generating a human-interpretable explanation for a sub-millisecond recommendation demands techniques designed into the serving architecture. Meeting these requirements calls for technical capabilities (audit trails, bias testing, and consent management) built into the infrastructure from day one.
+The same control plane must make the fleet auditable. Systems operating at scale attract regulatory attention. Regimes such as the **EU AI Act**\index{EU AI Act!definition} and local privacy laws make **auditability**\index{Auditability!definition} an architectural requirement for many deployments. Proving that a model trained on 10,000 GPUs did not ingest prohibited data requires end-to-end data lineage tracking. Generating a human-interpretable explanation for a recommendation served within a tail-latency budget of tens of milliseconds demands techniques designed into the serving architecture. Meeting these requirements calls for technical capabilities (audit trails, bias testing, and consent management) built into the infrastructure from day one.
 
 Beyond legal compliance, the machine learning fleet carries ethical obligations. Recommendation algorithms shape public discourse; hiring algorithms affect livelihoods. These systems do not fail loudly with a crash log; they fail silently through bias and polarization. Responsible AI\index{Responsible AI!at scale} is the engineering practice of treating fairness, transparency, and accountability as invariants\index{Invariant!responsible AI}: hard constraints that, if violated, should trigger a system-wide halt.
 
@@ -2093,7 +2088,7 @@ At the center ($C_1 \cap C_2 \cap C_3$), all three constraints converge simultan
 % --- Circle 1: Compute (Top) ---
 \node[TxtHeader,text=c1col] (NC1) at (0, 4.45) {Compute ($C_1$)};
 \node[TxtSub,below=1pt of NC1] (TC1) {The Node Substrate};
-\node[TxtBody,below=2pt of TC1] (SC1) {Accelerators \& Tensor Cores\\HBM3e Memory Wall, SRAM\\\& Local NVMe Storage Tiers};
+\node[TxtBody,below=2pt of TC1] (SC1) {Accelerators \& Tensor Cores\\HBM Memory Wall, SRAM\\\& Local NVMe Storage Tiers};
 \node[TxtChapter,below=2pt of SC1] (JC1) {Ch 2: Compute Infra $\bullet$ Ch 3: Storage};
 
 % --- Circle 2: Communication (Bottom-Left) ---
@@ -2186,30 +2181,30 @@ At the center ($C_1 \cap C_2 \cap C_3$), all three constraints converge simultan
 
 Read the Venn diagram in @fig-c3-taxonomy from the outer regions inward: first diagnose which pure dimension or pairwise intersection binds, then apply the corresponding systems intervention.
 
-Surrounding these three operational dimensions are the non-negotiable operating invariants developed across Part IV: the thermodynamic energy and cooling limits that constrain data centers (@sec-sustainable-ai), the adversarial security and differential privacy guarantees required of distributed pipelines (@sec-security-privacy), the robustness against silent corruption and distribution shift (@sec-robust-ai), and the systemic governance, auditing, and safety invariants essential when operating at societal scale (@sec-responsible-ai). Like the single-node D·A·M landscape, the C$^3$ figure is an orientation across all sixteen chapters ahead: first diagnose which intersection binds, then intervene.
+Surrounding these three operational dimensions are the non-negotiable operating invariants developed across Part IV: the thermodynamic energy and cooling limits that constrain data centers (@sec-sustainable-ai), the adversarial security and differential privacy guarantees required of distributed pipelines (@sec-security-privacy), the robustness against silent corruption and distribution shift (@sec-robust-ai), and the systemic governance, auditing, and safety invariants essential when operating at societal scale (@sec-responsible-ai). The C$^3$ figure is an orientation across all sixteen chapters ahead: first diagnose which intersection binds, then intervene.
 
 ### The fleet law {#sec-vol2-introduction-fleet-law}
 
-The C$^3$ intersection landscape defines *where* distributed execution spends time and where trade-offs bite. The fleet law turns that diagnostic map into a first estimate of distributed step time. Its terms are a simplified accounting model, so a prediction must state how work is divided and which costs overlap. On a single machine, execution time is governed by the iron law of performance, $T \approx D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}}\eta_{\text{hw}}) + L_{\text{lat}}$, decomposing into data movement, computation, and overhead. At fleet scale, that single-machine view no longer suffices. @Eq-fleet-law establishes the **fleet law**\index{Fleet law!definition}\index{Iron law of scale|see{Fleet law}}, which decomposes the idealized distributed training step into the terms of the C$^3$ engine:
+The C$^3$ intersection landscape defines *where* distributed execution spends time and where trade-offs bite. The Fleet Law turns that diagnostic map into a first estimate of distributed step time. Its terms are a simplified accounting model, so a prediction must state how work is divided and which costs overlap. On a single machine, execution time is governed by the iron law of performance, $T \approx D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}}\eta_{\text{hw}}) + L_{\text{lat}}$, decomposing into data movement, computation, and overhead. At fleet scale, that single-machine view no longer suffices. @Eq-fleet-law establishes the **Fleet Law**\index{Fleet law!definition}\index{Iron law of scale|see{Fleet law}}, which decomposes the idealized distributed training step into the terms of the C$^3$ engine:
 
 $$ T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}} $$ {#eq-fleet-law}
 
-Each term in the fleet law maps directly onto a region of the C$^3$ landscape in @fig-c3-taxonomy:
+Each term in the Fleet Law maps directly onto a region of the C$^3$ landscape in @fig-c3-taxonomy:
 
 *   $\frac{T_{\text{compute}}}{N}$ is the Compute ($C_1$) term, assuming ideally divisible local arithmetic for a fixed workload distributed across $N$ devices.
 *   $T_{\text{comm}}(N)$ is the Communication ($C_2$) term, capturing the wire transit time moving gradients, activations, and parameter shards across the network fabric.
 *   $T_{\text{sync}}(N)$ is the Coordination ($C_3$) term, capturing time consumed by barrier semantics, straggler waiting, cluster scheduling decisions, and failure recovery.
-*   $T_{\text{overlap}}$ is the Co-Design ($C_1 \cap C_2$, $C_1 \cap C_3$, $C_2 \cap C_3$) term, representing communication or coordination hidden behind useful compute via techniques like 1F1B pipelining, CUDA stream overlap, and asynchronous checkpointing.
+*   $T_{\text{overlap}}$ is the Co-Design ($C_1 \cap C_2$, $C_1 \cap C_3$, $C_2 \cap C_3$) term, representing communication or coordination hidden behind useful compute via techniques such as interleaving forward and backward work across pipeline stages, running transfers on separate execution streams, and writing checkpoints asynchronously.
 
 Weak scaling, load imbalance, memory-capacity changes, and algorithmic changes require modifying these terms rather than treating $T_{\text{compute}}/N$ as invariant. @Eq-fleet-efficiency rewrites this decomposition as the compute-time fraction, defined as the fraction of wall-clock time spent on useful math:
 
 $$ f_{\text{compute}} = \frac{T_{\text{compute}}/N}{T_{\text{step}}(N)} $$ {#eq-fleet-efficiency}
 
-This decomposition is a diagnostic instrument. When $f_{\text{compute}}$ drops below 0.5, more than half the step is spent outside useful local arithmetic. The C$^3$ taxonomy identifies where the time goes: if $T_{\text{comm}}(N)$ dominates, upgrade interconnects or overlap communication with computation; if $T_{\text{sync}}(N)$ dominates, consider asynchronous methods or reduce barrier frequency; if $T_{\text{compute}}/N$ dominates, local arithmetic sets the step time. The **displacement of overhead**\index{Displacement of overhead!definition} is a diagnostic heuristic: reducing one overhead can relocate cost among the three dimensions. Asynchronous training removes some coordination barriers but introduces gradient staleness; pipeline parallelism can reduce some communication exposure but adds bubble time.
+This decomposition is a diagnostic instrument. When $f_{\text{compute}}$ drops below 0.5, more than half the step is spent outside useful local arithmetic. The C$^3$ taxonomy identifies where the time goes: if $T_{\text{comm}}(N)$ dominates, upgrade interconnects or overlap communication with computation; if $T_{\text{sync}}(N)$ dominates, consider asynchronous methods or reduce barrier frequency; if $T_{\text{compute}}/N$ dominates, local arithmetic sets the step time. The **displacement of overhead**\index{Displacement of overhead!definition} is a diagnostic heuristic: reducing one overhead can relocate cost among the three dimensions. Asynchronous training removes some coordination barriers but introduces gradient staleness; pipeline parallelism can reduce some communication exposure but adds bubble time, the intervals in which pipeline stages sit idle waiting for work.
 
-Google's ML Productivity Goodput\index{Goodput!ML productivity metric} provides a complementary view of fleet efficiency [@wongpanich2025fleet]. This Goodput\index{Goodput!productivity decomposition} is a normalized productivity measure composed of three multiplicative factors, rather than the useful-progress rate introduced earlier. **Program goodput**\index{Program Goodput!definition} ($\eta_{\text{program}}$) measures execution efficiency during productive work; **runtime goodput**\index{Runtime Goodput!definition} ($\eta_{\text{runtime}}$) measures productive progress retained from allocated resources after runtime overhead and lost work; and **scheduling goodput**\index{Scheduling Goodput!definition} ($\eta_{\text{scheduling}}$) measures whether a workload has its required resources available together. These factors cut across C$^3$. Communication overlap can improve program goodput, while checkpointing and recovery affect runtime goodput but belong to Coordination in the fleet law. Productivity factors locate losses across the execution lifecycle; C$^3$ identifies the mechanisms responsible for them.
+Google's ML Productivity Goodput\index{Goodput!ML productivity metric} provides a complementary view of fleet efficiency [@wongpanich2025fleet]. This Goodput\index{Goodput!productivity decomposition} is a normalized productivity measure composed of three multiplicative factors, rather than the useful-progress rate introduced earlier. **Program goodput**\index{Program Goodput!definition} ($\eta_{\text{program}}$) measures execution efficiency during productive work; **runtime goodput**\index{Runtime Goodput!definition} ($\eta_{\text{runtime}}$) measures productive progress retained from allocated resources after runtime overhead and lost work; and **scheduling goodput**\index{Scheduling Goodput!definition} ($\eta_{\text{scheduling}}$) measures whether a workload has its required resources available together. These factors cut across C$^3$ rather than extending the Fleet Law. Communication overlap can improve program goodput, while checkpointing and recovery affect runtime goodput but belong to Coordination in the Fleet Law. Productivity factors locate losses across the execution lifecycle; C$^3$ identifies the mechanisms responsible for them.
 
-The fleet law is the time-side diagnostic of fleet efficiency\index{Efficiency!distributed} across time and energy\index{Energy!fleet consumption metric}\index{Efficiency!energy dimension}: it asks how much of each distributed step remains useful compute after communication, synchronization, and overlap are accounted for.
+The Fleet Law is the time-side diagnostic of fleet efficiency\index{Efficiency!distributed} across time and energy\index{Energy!fleet consumption metric}\index{Efficiency!energy dimension}: it asks how much of each distributed step remains useful compute after communication, synchronization, and overlap are accounted for.
 
 ::: {.column-margin .margin-pointer}
 ↪ The full derivation and physical term attribution of the Fleet Law are given in @sec-appdx-c3-taxonomy-fleet-law.
@@ -2217,7 +2212,7 @@ The fleet law is the time-side diagnostic of fleet efficiency\index{Efficiency!d
 
 ### The energy-scale invariant {#sec-introduction-energyscale-invariant-a0d6}
 
-While the fleet law accounts for time, the **energy-scale invariant**\index{Energy-scale invariant!definition} requires a consistent energy-accounting boundary when comparing fleet designs. The invariant is this accounting discipline, not a constant efficiency. @Eq-energy-scale-invariant defines **fleet energy productivity**\index{Fleet energy productivity!definition} ($\rho_{\text{energy}}$), measured in FLOP/J, within a simplified operational boundary:
+While the Fleet Law accounts for time, the **energy-scale invariant**\index{Energy-scale invariant!definition} requires a consistent energy-accounting boundary when comparing fleet designs. The invariant is this accounting discipline, not a constant efficiency. @Eq-energy-scale-invariant defines **fleet energy productivity**\index{Fleet energy productivity!definition} ($\rho_{\text{energy}}$), measured in FLOP/J, within a simplified operational boundary:
 
 $$ \rho_{\text{energy}} = \frac{O_{\text{useful}}}{E_{\text{compute}} + E_{\text{cooling}} + E_{\text{network}}} $$ {#eq-energy-scale-invariant}
 
@@ -2235,7 +2230,7 @@ where $T_1$ is the single-device time for the same work and $T_N = T_{\text{step
 
 ::: {#psp-introduction-amdahls-distributed-pitfall .callout-perspective title="Amdahl's distributed pitfall"}
 
-The fleet law applies Amdahl's reasoning [@amdahl1967] to a strong-scaling experiment: a fixed amount of useful work is divided across more devices while communication and coordination terms are measured for that configuration. A 5$\times$ ceiling follows only if 20 percent of the original workload remains irreducibly serial as compute is accelerated. A measured 20 percent network share at one device count is not automatically invariant; changing the partition, topology, collective algorithm, or overlap can change both its absolute time and its fraction of the step. The fleet law therefore diagnoses the scaling limit of a stated workload and configuration rather than asserting a universal network fraction.
+The Fleet Law applies Amdahl's reasoning [@amdahl1967] to a strong-scaling experiment: a fixed amount of useful work is divided across more devices while communication and coordination terms are measured for that configuration. A common shortcut reads a measured 20 percent network share as a 5$\times$ speedup ceiling, but Amdahl's bound applies only if that 20 percent of the original workload remains irreducibly serial as compute is accelerated. A network share measured at one device count is not automatically invariant; changing the partition, topology, collective algorithm, or overlap can change both its absolute time and its fraction of the step. The Fleet Law therefore diagnoses the scaling limit of a stated workload and configuration rather than asserting a universal network fraction.
 
 :::
 
@@ -2334,9 +2329,9 @@ class GPT3SyncTax:
 **Problem**: What compute-time fraction and endpoint network-energy cost result in an illustrative GPT-3 synchronization scenario using `{python} GPT3SyncTax.eth_bw_gbit_per_s_str` Ethernet versus `{python} GPT3SyncTax.ib_bw_gbit_per_s_str` InfiniBand? Assume `{python} GPT3SyncTax.t_compute_iter_str` of local computation per worker per iteration, with no communication overlap. This chosen input defines the scenario; it is not a measured GPT-3 training-step time.
 
 **Physics**:
-To synchronize `{python} GPT3SyncTax.model_params_b_str` parameters (FP16), a Ring AllReduce\index{Ring AllReduce!parameter synchronization} with many workers transmits approximately `{python} GPT3SyncTax.sync_size_gb_str` of data per participating accelerator endpoint per iteration, using the large-worker-count approximation of twice the gradient size.
+To synchronize `{python} GPT3SyncTax.model_params_b_str` parameters (FP16), a Ring AllReduce\index{Ring AllReduce!parameter synchronization} with many workers transmits approximately `{python} GPT3SyncTax.sync_size_gb_str` of data per participating accelerator endpoint per iteration, using the large-worker-count approximation of twice the FP16 gradient size (numerically equal to the FP32 gradient size quoted earlier).
 
-**Analysis**: The fleet law exposes the communication tax across interconnect choices. Over `{python} GPT3SyncTax.ib_bw_gbit_per_s_str` InfiniBand, an optimistic line-rate transfer model yields a compute-time fraction of only `{python} GPT3SyncTax.ib_compute_fraction_pct_str`, meaning accelerators compute for `{python} GPT3SyncTax.ib_productive_time_s_str` out of every `{python} GPT3SyncTax.productivity_window_s_str` while the remainder is exposed communication time. Across `{python} GPT3SyncTax.eth_bw_gbit_per_s_str` Ethernet, the lower line rate reduces the compute-time fraction further to `{python} GPT3SyncTax.eth_compute_fraction_pct_str`, leaving the devices productive for roughly `{python} GPT3SyncTax.eth_productive_time_s_str` out of every `{python} GPT3SyncTax.productivity_window_s_str`.
+**Analysis**: The Fleet Law exposes the communication tax across interconnect choices. Over `{python} GPT3SyncTax.ib_bw_gbit_per_s_str` InfiniBand, an optimistic line-rate transfer model yields a compute-time fraction of only `{python} GPT3SyncTax.ib_compute_fraction_pct_str`, meaning accelerators compute for `{python} GPT3SyncTax.ib_productive_time_s_str` out of every `{python} GPT3SyncTax.productivity_window_s_str` while the remainder is exposed communication time. Across `{python} GPT3SyncTax.eth_bw_gbit_per_s_str` Ethernet, the lower line rate reduces the compute-time fraction further to `{python} GPT3SyncTax.eth_compute_fraction_pct_str`, leaving the devices productive for roughly `{python} GPT3SyncTax.eth_productive_time_s_str` out of every `{python} GPT3SyncTax.productivity_window_s_str`.
 
 **Energy**: The energy wall is the thermodynamic cost of the same synchronization. Charging each transmitted bit once at the assumed network energy cost, each endpoint's gradient synchronization consumes approximately `{python} GPT3SyncTax.sync_energy_j_str` across the network fabric (at `{python} GPT3SyncTax.energy_per_bit_pj_per_bit_str`). In a training run of `{python} GPT3SyncTax.million_steps_str` steps, the endpoint network movement alone accounts for about `{python} GPT3SyncTax.sync_energy_mj_str` of energy before multiplying by the number of participating accelerators.
 
@@ -2346,9 +2341,9 @@ To synchronize `{python} GPT3SyncTax.model_params_b_str` parameters (FP16), a Ri
 
 ## Foundational Concepts {#sec-vol2-introduction-foundational-concepts}
 
-Three maps organize the book: the fleet stack locates architectural responsibility, C$^3$ and the Fleet Law diagnose execution cost, and the lighthouse archetypes test those costs against recurring workloads. @Fig-fleet-stack shows the **fleet stack**\index{Fleet Stack!definition}, whose lower-layer capabilities constrain upper-layer decisions. The additional maps connect these decisions to workload dependencies and operational ownership.
+Three maps organize the book: the fleet stack locates architectural responsibility, C$^3$ and the Fleet Law diagnose execution cost, and the lighthouse archetypes test those costs against recurring workloads. @Fig-fleet-stack defines the **fleet stack**\index{Fleet Stack!definition}: eight rows grouped into four bands, one band for each part of this book, in which the capabilities of lower bands constrain the decisions made in higher ones.
 
-::: {#fig-fleet-stack fig-env="figure" fig-pos="htb" fig-cap="**The Fleet Stack**: The organizing framework for this book. The architecture builds from the Infrastructure layer (compute, network, data) up through the Distribution layer (parallelism, communication, fault tolerance) and Serving layer (inference, performance, edge, operations) to the Governance layer (security, robustness, sustainability, responsible engineering). Engineering decisions at the bottom constrain possibilities at the top." fig-alt="Four-layer stack diagram. Bottom: the fleet with compute, network, and data. Lower middle: distributed ML with parallelism and communication. Upper middle: deployment at scale with inference and operations. Top: the responsible fleet with security and sustainability. Arrows show constraints flowing upward."}
+::: {#fig-fleet-stack fig-env="figure" fig-pos="htb" fig-cap="**The Fleet Stack**: The organizing framework for this book, eight rows grouped into four bands, one band per part. The Infrastructure band (Part I) holds Facility & Accelerators and Fabric & Storage. The Distribution band (Part II) holds Distributed Execution and Reliability & Control, where orchestration, scheduling, and recovery live. The Serving band (Part III) holds Runtime & Serving and Operations. The Governance band (Part IV) holds Assurance (security, privacy, robustness) and Governance & Sustainability. Engineering decisions at the bottom constrain possibilities at the top." fig-alt="Four-band stack diagram, one band per part of the book, each labeled with its two rows. Bottom: the fleet, with Facility and Accelerators and Fabric and Storage. Lower middle: distributed ML, with Distributed Execution and Reliability and Control. Upper middle: deployment at scale, with Runtime and Serving and Operations. Top: the responsible fleet, with Assurance and Governance and Sustainability. Arrows show constraints flowing upward."}
 ![](images/svg/fleet-stack.svg){width="100%"}
 
 <!--
@@ -2429,7 +2424,7 @@ Three maps organize the book: the fleet stack locates architectural responsibili
   {\fontsize{7.5}{10}\selectfont\color{slate-600} Compute accelerators, optical network fabrics, tiered data storage}
 };
 \node[StackCard,draw=c1col] (S1) at (4.3, 0) {%
-  {\color{c1col}\textbf{\fontsize{9.5}{12}\selectfont Infrastructure Layer}}\\[2.5pt]
+  {\color{c1col}\textbf{\fontsize{9.5}{12}\selectfont Infrastructure Band}}\\[2.5pt]
   {\fontsize{7.5}{10}\selectfont\color{slate-500} Accelerators, optical fabrics, I/O pipelines}
 };
 
@@ -2439,7 +2434,7 @@ Three maps organize the book: the fleet stack locates architectural responsibili
   {\fontsize{7.5}{10}\selectfont\color{slate-600} Training parallelism, collective comms, fault tolerance, orchestration}
 };
 \node[StackCard,draw=c2col] (S2) at (4.3, 2.05) {%
-  {\color{c2col}\textbf{\fontsize{9.5}{12}\selectfont Distribution Layer}}\\[2.5pt]
+  {\color{c2col}\textbf{\fontsize{9.5}{12}\selectfont Distribution Band}}\\[2.5pt]
   {\fontsize{7.5}{10}\selectfont\color{slate-500} 4D parallelism, consensus, fast node recovery}
 };
 
@@ -2449,7 +2444,7 @@ Three maps organize the book: the fleet stack locates architectural responsibili
   {\fontsize{7.5}{10}\selectfont\color{slate-600} Performance engineering, inference scale, edge intelligence, MLOps}
 };
 \node[StackCard,draw=c3col] (S3) at (4.3, 4.10) {%
-  {\color{c3col}\textbf{\fontsize{9.5}{12}\selectfont Serving Layer}}\\[2.5pt]
+  {\color{c3col}\textbf{\fontsize{9.5}{12}\selectfont Serving Band}}\\[2.5pt]
   {\fontsize{7.5}{10}\selectfont\color{slate-500} Inference serving, compilation, edge, continuous ops}
 };
 
@@ -2459,7 +2454,7 @@ Three maps organize the book: the fleet stack locates architectural responsibili
   {\fontsize{7.5}{10}\selectfont\color{slate-600} Security \& privacy, system robustness, sustainability, responsible AI}
 };
 \node[StackCard,draw=c4col] (S4) at (4.3, 6.15) {%
-  {\color{c4col}\textbf{\fontsize{9.5}{12}\selectfont Governance Layer}}\\[2.5pt]
+  {\color{c4col}\textbf{\fontsize{9.5}{12}\selectfont Governance Band}}\\[2.5pt]
   {\fontsize{7.5}{10}\selectfont\color{slate-500} Security, fault robustness, energy, societal safety}
 };
 
@@ -2496,214 +2491,9 @@ Three maps organize the book: the fleet stack locates architectural responsibili
 
 :::
 
-The four layers correspond to the physical substrate, distribution, deployment, and the responsible fleet. The chapter map at @sec-vol2-introduction-structure follows that dependency order.
+The four bands correspond to the book's four parts: the physical substrate, distribution, deployment, and the responsible fleet. The chapter map at @sec-vol2-introduction-structure follows that dependency order.
 
-The **AI triad at scale**\index{AI Triad at Scale!definition} tracks dependencies among data, algorithms, and machines within the stack. A change in model architecture changes computation and communication demand; a change in training data changes storage and delivery requirements. @Fig-vol2-ai-triad emphasizes why these choices must be made together.
-
-::: {#fig-vol2-ai-triad fig-env="figure" fig-pos="htb" fig-cap="**The AI triad at scale**: The three interdependent components of every ML system: Algorithm, Machine, and Data. At production scale, each component's requirements intensify: data pipelines must handle petabytes with consistent quality; algorithms can demand $10^{25}$ FLOPs for large-model training; and machines (the computational infrastructure) must coordinate tens of thousands of accelerators while maintaining fault tolerance. Changes to any vertex cascade through the others, creating the multi-dimensional optimization challenge that defines ML systems engineering." fig-alt="Triangle diagram with three circles at vertices labeled Algorithm, Machine, and Data. Double-headed arrows connect all three nodes, showing bidirectional dependencies with scale annotations."}
-![](images/svg/ai-triad-scale.svg){width="100%"}
-
-<!--
-```{.tikz}
-\providecolor{mlsysoxford}{HTML}{1E293B}
-\providecolor{mlsyssteel}{HTML}{334155}
-\providecolor{mlsysdeepred}{HTML}{991B1B}
-\providecolor{mlsysdeepamber}{HTML}{92400E}
-\providecolor{mlsysdeepgreen}{HTML}{166534}
-\definecolor{slate-200}{HTML}{E2E8F0}
-\definecolor{slate-300}{HTML}{CBD5E1}
-\definecolor{slate-400}{HTML}{94A3B8}
-\definecolor{slate-500}{HTML}{64748B}
-\definecolor{slate-600}{HTML}{475569}
-\definecolor{slate-700}{HTML}{334155}
-\definecolor{slate-800}{HTML}{1E293B}
-
-% Palette
-\definecolor{algocol}{HTML}{6D28D9}       % Algorithm (Purple)
-\definecolor{algobg}{HTML}{FAF5FF}
-\definecolor{infracol}{HTML}{1E40AF}      % Machine / Infrastructure (Blue)
-\definecolor{infrabg}{HTML}{EFF6FF}
-\definecolor{datacol}{HTML}{15803D}       % Data (Green)
-\definecolor{databg}{HTML}{F0FDF4}
-
-\scalebox{0.88}{%
-\begin{tikzpicture}[line join=round,line cap=round,font=\sffamily]
-
-\tikzset{
-  NodeCircle/.style={
-    circle,
-    minimum size=3.2cm,
-    line width=1.1pt,
-    drop shadow={opacity=0.06,shadow xshift=0pt,shadow yshift=-2pt}
-  },
-  TriadWire/.style={
-    line width=1.1pt,
-    color=slate-400
-  },
-  TriadArrow/.style={
-    line width=1.1pt,
-    color=slate-500,
-    -{Latex[length=4.5pt,width=4.5pt]},
-    shorten >=3pt
-  },
-  TriadBiArrow/.style={
-    line width=1.1pt,
-    color=slate-500,
-    {Latex[length=4.5pt,width=4.5pt]}-{Latex[length=4.5pt,width=4.5pt]},
-    shorten <=3pt,
-    shorten >=3pt
-  },
-  ScaleChip/.style={
-    fill=white,
-    draw=slate-300,
-    line width=0.75pt,
-    rounded corners=3pt,
-    inner xsep=8pt,
-    inner ysep=4pt,
-    font=\sffamily\bfseries\fontsize{8}{10}\selectfont,
-    text=slate-800,
-    drop shadow={opacity=0.05,shadow xshift=0pt,shadow yshift=-1pt}
-  }
-}
-
-% --- Triad Coordinates ---
-\coordinate (A) at (0, 3.5);       % Algorithm (Top)
-\coordinate (I) at (-3.6, -1.8);   % Machine (Bottom-Left)
-\coordinate (D) at (3.6, -1.8);    % Data (Bottom-Right)
-
-% --- Badges / Chips ---
-\node[ScaleChip] (pillAI) at ($(A)!0.5!(I)$) {$10^{25}\text{ FLOPs}$};
-\node[ScaleChip] (pillAD) at ($(A)!0.5!(D)$) {Petabytes};
-\node[ScaleChip] (pillID) at ($(I)!0.5!(D)$) {25,000 GPUs};
-
-% --- Connecting Edges ---
-% Algorithm -> Machine (Compute demand)
-\draw[TriadWire] ($(A)!1.65cm!(I)$) -- (pillAI);
-\draw[TriadArrow] (pillAI) -- ($(I)!1.65cm!(A)$);
-
-% Algorithm -> Data (Token volume demand)
-\draw[TriadWire] ($(A)!1.65cm!(D)$) -- (pillAD);
-\draw[TriadArrow] (pillAD) -- ($(D)!1.65cm!(A)$);
-
-% Machine <-> Data (I/O & Hardware ingestion co-design)
-\draw[TriadArrow, {Latex[length=4.5pt,width=4.5pt]}-, shorten <=3pt] ($(I)!1.65cm!(D)$) -- (pillID);
-\draw[TriadArrow] (pillID) -- ($(D)!1.65cm!(I)$);
-
-% ========================================================
-% TOP: ALGORITHM
-% ========================================================
-\node[NodeCircle, fill=algobg, draw=algocol] (nodeA) at (A) {};
-
-\begin{scope}[shift={(A)}]
-  % Neural architecture / transformer attention graph
-  \coordinate (l1) at (-0.65, 0.45);
-  \coordinate (l2) at (-0.65, -0.45);
-  \coordinate (m1) at (0, 0.70);
-  \coordinate (m2) at (0, 0.0);
-  \coordinate (m3) at (0, -0.70);
-  \coordinate (r1) at (0.65, 0.45);
-  \coordinate (r2) at (0.65, -0.45);
-
-  % Weight connections
-  \foreach \s in {l1, l2} {
-    \foreach \t in {m1, m2, m3} {
-      \draw[algocol!40, line width=0.7pt] (\s) -- (\t);
-    }
-  }
-  \foreach \s in {m1, m2, m3} {
-    \foreach \t in {r1, r2} {
-      \draw[algocol!40, line width=0.7pt] (\s) -- (\t);
-    }
-  }
-
-  % Neurons with crisp ring
-  \foreach \pt in {l1, l2, m1, m2, m3, r1, r2} {
-    \filldraw[fill=white, draw=algocol, line width=1.1pt] (\pt) circle (0.13);
-  }
-\end{scope}
-
-\node[anchor=south, align=center, inner sep=3pt] at ($(nodeA.north) + (0, 0.15)$) {
-  {\fontsize{11}{14}\selectfont\bfseries\color{algocol} Algorithm}\\[2pt]
-  {\fontsize{8.5}{11}\selectfont\color{slate-500} Model architecture, objective, optimization}
-};
-
-% ========================================================
-% BOTTOM-LEFT: MACHINE
-% ========================================================
-\node[NodeCircle, fill=infrabg, draw=infracol] (nodeI) at (I) {};
-
-\begin{scope}[shift={(I)}]
-  % Server blade / baseboard chassis
-  \draw[fill=white, draw=infracol, line width=1.0pt, rounded corners=2pt] (-0.75, -0.80) rectangle (0.75, 0.80);
-
-  % 4 Accelerator packages (SXM / OAM baseboard grid)
-  \foreach \x in {-0.38, 0.38} {
-    \foreach \y in {-0.38, 0.38} {
-      \draw[fill=infrabg, draw=infracol!80, line width=0.7pt, rounded corners=1.5pt] (\x-0.25, \y-0.25) rectangle (\x+0.25, \y+0.25);
-      \draw[fill=infracol!25, draw=infracol, line width=0.5pt] (\x-0.14, \y-0.14) rectangle (\x+0.14, \y+0.14);
-    }
-  }
-  % High-speed interconnect bus trace between dies
-  \draw[infracol!60, line width=0.9pt] (-0.13, 0.38) -- (0.13, 0.38);
-  \draw[infracol!60, line width=0.9pt] (-0.13, -0.38) -- (0.13, -0.38);
-  \draw[infracol!60, line width=0.9pt] (-0.38, -0.13) -- (-0.38, 0.13);
-  \draw[infracol!60, line width=0.9pt] (0.38, -0.13) -- (0.38, 0.13);
-\end{scope}
-
-\node[anchor=north, align=center, inner sep=3pt] at ($(nodeI.south) - (0, 0.15)$) {
-  {\fontsize{11}{14}\selectfont\bfseries\color{infracol} Machine}\\[2pt]
-  {\fontsize{8.5}{11}\selectfont\color{slate-500} Accelerators, fabrics, memory hierarchy}
-};
-
-% ========================================================
-% BOTTOM-RIGHT: DATA
-% ========================================================
-\node[NodeCircle, fill=databg, draw=datacol] (nodeD) at (D) {};
-
-\begin{scope}[shift={(D)}]
-  % Modern tiered database / cylinder platter stack
-  \draw[fill=white, draw=datacol, line width=1.0pt] (-0.72, -0.45) -- (-0.72, -0.15) arc (180:360:0.72 and 0.22) -- (0.72, -0.45) arc (0:-180:0.72 and 0.22);
-
-  \draw[fill=white, draw=datacol, line width=1.0pt] (-0.72, -0.10) -- (-0.72, 0.20) arc (180:360:0.72 and 0.22) -- (0.72, -0.10) arc (0:-180:0.72 and 0.22);
-
-  \draw[fill=white, draw=datacol, line width=1.0pt] (-0.72, 0.25) -- (-0.72, 0.55) arc (180:360:0.72 and 0.22) -- (0.72, 0.25) arc (0:-180:0.72 and 0.22);
-  \draw[fill=databg, draw=datacol, line width=1.0pt] (0, 0.55) ellipse (0.72 and 0.22);
-
-  % Data track lines
-  \draw[datacol!50, line width=0.6pt] (-0.45, 0.55) arc (180:360:0.45 and 0.13);
-  \draw[datacol!50, line width=0.6pt] (-0.57, 0.05) arc (180:360:0.57 and 0.17);
-  \draw[datacol!50, line width=0.6pt] (-0.57, -0.30) arc (180:360:0.57 and 0.17);
-\end{scope}
-
-\node[anchor=north, align=center, inner sep=3pt] at ($(nodeD.south) - (0, 0.15)$) {
-  {\fontsize{11}{14}\selectfont\bfseries\color{datacol} Data}\\[2pt]
-  {\fontsize{8.5}{11}\selectfont\color{slate-500} Token volume, sharding, I/O pipeline}
-};
-
-\end{tikzpicture}%
-}
-```
--->
-
-:::
-
-The **five-pillar framework**\index{Five-pillar framework!definition} assigns operational ownership. Data engineering\index{Data engineering!five-pillar framework} supplies what the fleet ingests and serves; model development\index{Model development!five-pillar framework} defines the learning workload. Optimization adapts that workload to resource limits, while deployment infrastructure\index{Deployment!infrastructure} provides the platforms that execute it. Operations measures whether the resulting system remains reliable and effective as conditions change.
-
-Production frameworks matter because each implements the same abstract primitives with different names and ownership boundaries. @Tbl-framework-rosetta-stone provides a cross-framework mapping as a translation aid for the primitives developed across the fleet stack, not as a tool ranking.
-
-| **Abstract Primitive** | **PyTorch (Native)** |  **DeepSpeed**   |     **Megatron-LM**      |    **JAX/XLA**    |     **Ray**      |
-|:-----------------------|:--------------------:|:----------------:|:------------------------:|:-----------------:|:----------------:|
-| **Data Parallel**      |         DDP          | DeepSpeedEngine  | DistributedDataParallel  | pmap/jit(sharded) |    Ray Train     |
-| **Sharded DP**         |         FSDP         |    ZeRO-1/2/3    | FullyShardedDataParallel |   sharding.Mesh   |  FSDP Strategy   |
-| **Tensor Parallel**    |       DTensor        |   InferenceTP    |    Column/RowParallel    |     xmap/spmd     |   Ray Train TP   |
-| **Pipeline Parallel**  |        PiPPy         |  PipelineModule  |     PipelineParallel     |       GSPMD       |   Ray Train PP   |
-| **Grad Accumulation**  | backward(accumulate) | grad_accum_steps |      grad_acc_steps      |      lax.scan     | Ray Train Config |
-| **Checkpointing**      |    torch.save/DCP    | save_checkpoint  |     save_checkpoint      |       orbax       |  ray.checkpoint  |
-| **Orchestration**      |       torchrun       |  deepspeed CLI   |     megatron_main.py     |  jax.distributed  |     Ray Core     |
-
-: **The framework Rosetta Stone**: A mapping of abstract distributed ML primitives to their implementations across major frameworks. The primitives are developed where they become binding constraints, including distributed training (@sec-distributed-training-systems), collective communication (@sec-collective-communication), inference (@sec-inference-scale), and operations (@sec-ops-scale). {#tbl-framework-rosetta-stone tbl-colwidths="[16,16,16,20,18,14]"}
-
-The table is a reference to revisit as its primitives are introduced. The **six systems engineering principles**\index{Six systems engineering principles!definition} guide decisions across these ownership boundaries: instrument first, design for 10$\times$ headroom, expect bottlenecks to migrate, treat failure as steady state, compound small efficiency gains across the fleet, and co-design hardware with algorithms. For example, faster accelerators can expose a network bottleneck; instrumentation identifies that migration, and hardware co-design\index{Hardware-software co-design!systems engineering principle} aligns the fabric with the workload. The volume closes by returning to the durable principles these practices serve.
+Six **engineering practices**\index{Engineering practices!fleet scale} guide decisions at every band of the stack: instrument first, design for 10$\times$ headroom, expect bottlenecks to migrate, treat failure as steady state, compound small efficiency gains across the fleet, and co-design hardware with algorithms. For example, faster accelerators can expose a network bottleneck; instrumentation identifies that migration, and hardware co-design\index{Hardware-software co-design!engineering practice} aligns the fabric with the workload. The book closes by returning to these practices and to the durable principles of distributed ML systems that they serve.
 
 ### Three systems archetypes {#sec-vol2-introduction-archetypes}
 
@@ -2713,21 +2503,78 @@ Abstract frameworks become concrete through specific workloads. Three lighthouse
 
 GPT-4 and Llama-3 are autoregressive transformer architectures that generate text one token at a time. At single-accelerator scale, autoregressive language models are memory-bandwidth probes; at the scale of hundreds of billions of parameters, and in some proprietary systems potentially more, training demands ExaFLOP/s of sustained compute distributed across thousands to tens of thousands of accelerators, while serving requires memory bandwidth sufficient to load billions of weights for every generated token. The fleet challenge is partitioning very large models across accelerator fleets using 3D Parallelism (data, tensor, and pipeline) without exposing enough gradient or activation traffic to make the network the binding bottleneck. Archetype A therefore probes the communication dimension of C$^3$, although its actual dominant term depends on the model, partition, topology, and degree of overlap.
 
-#### Archetype B (DLRM at scale) {#sec-introduction-archetype-b-dlrm-scale-fa6d}
+```{python}
+#| echo: false
+#| label: archetype-a-reference
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ARCHETYPE A RUNNING INSTANCE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-introduction-archetype-gpt4llama3-b02f
+# │
+# │ Goal: Fix the reference model and cluster that later chapters vary.
+# │ Show: 175B params; 16 bytes/param training state = 2.8 TB;
+# │       14 bytes/param resumable checkpoint = 2.45 TB; 1,024 H100 GPUs
+# │       as 128 nodes of 8.
+# │ How: params × bytes per parameter; nodes × accelerators per node.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_count, fmt_memory, fmt_params
 
-DLRM\index{DLRM!lighthouse archetype} is Meta's production architecture for personalized content ranking. Unlike LLMs, which are dominated by dense matrix multiplications, recommendation models derive their capacity from massive embedding tables, sparse lookup structures that map billions of user and item features into dense vectors. A single production DLRM instance may contain 10 TB or more of embedding parameters, far exceeding any single accelerator's memory. The fleet challenge is sharding these embedding tables across hundreds of nodes while processing millions of queries per second (QPS) with <100 ms tail latency, all while managing $\mathcal{O}(N^2)$ all-to-all communication contention between embedding shards and dense layers. In the C$^3$ taxonomy, Archetype B stresses coordination: sparse feature routing, shard placement, request scheduling, and embedding-update consistency determine whether the all-to-all traffic can be served within tail-latency limits.
+class ArchetypeAReference:
+    """Archetype A running instance: GPT-3-class dense transformer, mixed precision + Adam."""
 
-#### Archetype C (federated MobileNet) {#sec-introduction-archetype-c-federated-mobilenet-65a3}
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    params_q = Models.Language.GPT3.parameters
+    params = params_q.to(param).magnitude
+    bytes_weights = BYTES_FP16  # BF16 working weights (same width as FP16)
+    bytes_grads = BYTES_FP16  # BF16 gradients
+    bytes_master = BYTES_FP32  # FP32 master weights
+    bytes_adam = BYTES_ADAM_STATE  # two FP32 Adam moments
+    gpus_per_node = 8  # scenario input: reference node size
+    num_nodes = 128  # scenario input: reference cluster size
 
-MobileNet is a family of efficient convolutional neural networks designed for on-device inference under tight power and memory budgets. In a federated learning\index{Federated Learning!introduction} setting, MobileNet instances train locally on millions of heterogeneous edge devices (smartphones, IoT sensors, medical wearables) without raw data ever leaving the device. The constraint regime is qualitatively different from the data-center archetypes: compute budgets are measured in watts rather than megawatts, and privacy or policy constraints can prohibit centralized data aggregation. In the C$^3$ taxonomy, Archetype C probes the per-device compute envelope: local execution must fit within the device's power, memory, and thermal limits. That local constraint does not determine the bottleneck of a federated round. Uploading updates can expose communication limits, while selecting available participants and waiting for their results can expose coordination limits. The fleet challenge is coordinating model updates across millions of such compute-constrained, unreliable devices using federated averaging, which periodically averages device updates at a coordinator, while maintaining convergence guarantees despite data distributions that are not independent and identically distributed (i.i.d.) and intermittent connectivity.
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    state_bytes_per_param = bytes_weights + bytes_grads + bytes_master + bytes_adam
+    ckpt_bytes_per_param = bytes_weights + bytes_master + bytes_adam  # no gradients
+    train_state_q = (params * state_bytes_per_param).to(TB)
+    ckpt_q = (params * ckpt_bytes_per_param).to(TB)
+    num_gpus = gpus_per_node * num_nodes
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(state_bytes_per_param.to(byte).magnitude == 16, "Training state should be 16 bytes/param")
+    check(ckpt_bytes_per_param.to(byte).magnitude == 14, "Resumable checkpoint should be 14 bytes/param")
+    check(abs(train_state_q.magnitude - 2.8) < 0.01, f"Training state should be ~2.8 TB, got {train_state_q}")
+    check(abs(ckpt_q.magnitude - 2.45) < 0.01, f"Checkpoint should be ~2.45 TB, got {ckpt_q}")
+    check(num_gpus == 1024, f"Reference cluster should be 1,024 GPUs, got {num_gpus}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    params_b_str = fmt_params(params_q, scale="B", precision=0, commas=False)
+    state_bytes_str = fmt_count(state_bytes_per_param.to(byte).magnitude)
+    ckpt_bytes_str = fmt_count(ckpt_bytes_per_param.to(byte).magnitude)
+    train_state_tb_str = fmt_memory(train_state_q, unit=TB, precision=1)
+    ckpt_tb_str = fmt_memory(ckpt_q, unit=TB, precision=2)
+    num_gpus_str = fmt_count(num_gpus, label="H100 GPU", plural_label="H100 GPUs")
+    num_nodes_str = fmt_count(num_nodes)
+    gpus_per_node_str = fmt_count(gpus_per_node)
+```
+
+Where a chapter needs a concrete instance, Archetype A is a `{python} ArchetypeAReference.params_b_str`-parameter dense transformer of the GPT-3 class, trained with mixed precision and the Adaptive Moment Estimation (Adam) optimizer. Its training state occupies `{python} ArchetypeAReference.state_bytes_str` bytes per parameter (BF16 weights and gradients, FP32 master weights, and two FP32 Adam moments), or `{python} ArchetypeAReference.train_state_tb_str`; a resumable checkpoint omits the gradients and needs `{python} ArchetypeAReference.ckpt_bytes_str` bytes per parameter, or `{python} ArchetypeAReference.ckpt_tb_str`. The reference cluster is `{python} ArchetypeAReference.num_gpus_str`, arranged as `{python} ArchetypeAReference.num_nodes_str` nodes of `{python} ArchetypeAReference.gpus_per_node_str` accelerators each. A chapter that studies a larger cluster or a different model says explicitly how it varies this reference.
+
+#### Archetype B (DLRM at Scale) {#sec-introduction-archetype-b-dlrm-scale-fa6d}
+
+DLRM\index{DLRM!lighthouse archetype} is the deep learning recommendation model that Meta published as a reference architecture for personalized content ranking. Unlike LLMs, which are dominated by dense matrix multiplications, recommendation models derive their capacity from massive embedding tables, sparse lookup structures that map billions of user and item features into dense vectors. A single production DLRM-style model may hold 10 TB or more of embedding-table parameters, far exceeding any single accelerator's memory. The fleet challenge is sharding these embedding tables across hundreds of nodes while processing millions of queries per second (QPS) with <100 ms tail latency, all while managing $\mathcal{O}(N^2)$ all-to-all communication contention between embedding shards and dense layers. In the C$^3$ taxonomy, Archetype B stresses coordination: sparse feature routing, shard placement, request scheduling, and embedding-update consistency determine whether the all-to-all traffic can be served within tail-latency limits.
+
+#### Archetype C (Federated MobileNet) {#sec-introduction-archetype-c-federated-mobilenet-65a3}
+
+MobileNet is a family of efficient convolutional neural networks designed for on-device inference under tight power and memory budgets. In a federated learning\index{Federated Learning!introduction} setting, MobileNet instances train locally on millions of heterogeneous smartphone-class devices, whose sustained power budgets are roughly 2 to 10 W, without raw data ever leaving the device. Microcontroller-class sensors that run on hundreds of kilobytes of memory and milliwatts of power lie at an extreme below this archetype. The constraint regime is qualitatively different from the data-center archetypes: compute budgets are measured in watts rather than megawatts, and privacy or policy constraints can prohibit centralized data aggregation. In the C$^3$ taxonomy, Archetype C probes the per-device compute envelope: local execution must fit within the device's power, memory, and thermal limits. That local constraint does not determine the bottleneck of a federated round. Uploading updates can expose communication limits, while selecting available participants and waiting for their results can expose coordination limits. The fleet challenge is coordinating model updates across millions of such compute-constrained, unreliable devices using federated averaging, which periodically averages device updates at a coordinator, while maintaining convergence guarantees despite data distributions that are not independent and identically distributed (i.i.d.) and intermittent connectivity.
 
 Read the three archetypes as constraint probes, not as a catalog of model families. The LLM case asks whether dense synchronization can keep thousands of accelerators useful, the DLRM case asks whether sparse feature routing can meet tail-latency budgets, and the federated MobileNet case asks whether local device constraints can be coordinated into a statistically coherent update. @Tbl-vol2-lighthouse-archetypes summarizes the three canonical workloads tracked throughout this book.
 
-| **Archetype**                                                               | **C$^3$ Diagnostic Regime**        | **Fleet Challenge**                                                                                                                                                                                             |
+| **Archetype**                                                               | **C$^3$ Diagnostic Regime**          | **Fleet Challenge**                                                                                                                                                                                             |
 |:----------------------------------------------------------------------------|:-------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Archetype A (GPT-4/Llama-3)**\index{Llama-3!lighthouse archetype}         | Communication (fleet-wide)           | Partition hundreds of billions of parameters, and potentially larger proprietary models, across thousands to tens of thousands of GPUs using 3D Parallelism without the network becoming the bottleneck.        |
-| **Archetype B (DLRM at scale)**                                             | Coordination (routing and placement) | Shard 10 TB+ embedding tables across hundreds of nodes; process millions of QPS with <100 ms tail latency while managing sparse feature routing, shard placement, and $\mathcal{O}(N^2)$ all-to-all contention. |
-| **Archetype C (federated MobileNet)**\index{MobileNet!lighthouse archetype} | Compute (per-device envelope)        | Coordinate learning across millions of compute-constrained, unreliable edge devices using federated updates; raw data cannot leave the device.                                                                  |
+| **Archetype B (DLRM at Scale)**                                             | Coordination (routing and placement) | Shard 10 TB+ embedding tables across hundreds of nodes; process millions of QPS with <100 ms tail latency while managing sparse feature routing, shard placement, and $\mathcal{O}(N^2)$ all-to-all contention. |
+| **Archetype C (Federated MobileNet)**\index{MobileNet!lighthouse archetype} | Compute (per-device envelope)        | Coordinate learning across millions of compute-constrained, unreliable edge devices using federated updates; raw data cannot leave the device.                                                                  |
 
 : **Lighthouse archetypes at scale**: The three canonical workloads in representative diagnostic regimes, with the fleet-scale challenge each raises. These are constraint probes, not invariant bottleneck assignments; workload, partitioning, topology, and overlap determine the binding cost. The MobileNet row describes the local device envelope, not the bottleneck of a complete federated round. {#tbl-vol2-lighthouse-archetypes}
 
@@ -2735,7 +2582,7 @@ Read the three archetypes as constraint probes, not as a catalog of model famili
 
 This textbook organizes around the fleet stack\index{Fleet Stack!textbook structure}, progressing from the physical substrate through the logic of distribution to societal governance. The chapter sequence is a dependency map rather than a topic inventory: the physical constraints of silicon and cooling dictate network wiring; network limits dictate training partitioning; partitioned algorithms dictate fault tolerance and orchestration; and fleet orchestration dictates production operation, security, and governance. Each part addresses a fundamental scale impediment that prevents a single-machine solution from working at production scale (@fig-vol2-roadmap).
 
-::: {#fig-vol2-roadmap fig-env="figure" fig-pos="htb" fig-cap="**The chapter roadmap of Volume II**: The sequence of seventeen chapters across four foundational parts and concluding synthesis, progressing from physical infrastructure through distributed systems and deployment to societal governance." fig-alt="Roadmap diagram illustrating the seventeen chapters of Volume II organized across Part I Infrastructure, Part II Distributed ML, Part III Deployment at Scale, and Part IV The Responsible Fleet, flanked by the introductory foundation and concluding synthesis."}
+::: {#fig-vol2-roadmap fig-env="figure" fig-pos="htb" fig-cap="**The chapter roadmap**: The sequence of seventeen chapters across four foundational parts and concluding synthesis, progressing from physical infrastructure through distributed systems and deployment to societal governance." fig-alt="Roadmap diagram illustrating the seventeen chapters of this book organized across Part I Infrastructure, Part II Distributed ML, Part III Deployment at Scale, and Part IV The Responsible Fleet, flanked by the introductory foundation and concluding synthesis."}
 ![](images/svg/roadmap.svg){width="100%"}
 
 <!--
@@ -2957,7 +2804,7 @@ The infrastructure arc begins with the impediment no algorithm can ignore: no si
 
 The distribution arc begins once the physical fleet exists and the coordination tax becomes unavoidable. Splitting math across machines creates two new problems: replicas must exchange state fast enough to behave like one optimizer, and failures become routine rather than exceptional. @Sec-distributed-training-systems develops partitioning strategies for models with hundreds of billions to trillions of parameters, @sec-collective-communication explains the communication primitives that bind independent nodes into a coherent computer, @sec-fault-tolerance-reliability treats recovery speed as more important than individual-node uptime, and @sec-fleet-orchestration manages the multi-tenant cluster where those jobs must be placed, isolated, and rescheduled.
 
-The deployment arc shifts from training a model to serving it economically. Once a model reaches production, the binding question is no longer only time-to-train; it is whether latency, utilization, and lifetime serving cost stay inside the operating envelope. @Sec-performance-engineering closes the gap between hardware peak and actual throughput through kernel fusion and compilation, @sec-inference-scale turns those local optimizations into serving systems for millions of users, @sec-edge-intelligence moves intelligence toward devices with milliwatt power budgets, and @sec-ops-scale develops the control plane for monitoring health, drift, and performance across global deployments.
+The deployment arc shifts from training a model to serving it economically. Once a model reaches production, the binding question is no longer only time-to-train; it is whether latency, utilization, and lifetime serving cost stay inside the operating envelope. @Sec-performance-engineering measures which execution term limits a replica before applying fusion, precision, and compilation, @sec-inference-scale turns that measured envelope into admission, batching, and routing policy for millions of users, @sec-edge-intelligence moves learning onto phone-class devices whose memory, battery, and thermal budgets decide what adaptation they can afford, and @sec-ops-scale develops the shared controls (registries, release gates, monitoring, and cost ledgers) that govern hundreds of models as one fleet.
 
 The governance arc treats responsibility as an engineering layer rather than an afterword. At global scale, technical bugs become societal hazards: adversaries can poison data or extract weights, open-world inputs can break brittle models, energy use becomes a fleet constraint, and governance failures can turn technical capability into social harm. @Sec-security-privacy, @sec-robust-ai, @sec-sustainable-ai, and @sec-responsible-ai develop those obligations as system properties that must be designed, measured, and operated.
 
@@ -2967,23 +2814,57 @@ The following fallacies and pitfalls capture architectural mistakes that waste d
 
 ::: {.fallacy-pitfall}
 
-**Fallacy**: *Focusing on algorithmic efficiency while ignoring hardware-system alignment.*
+**Fallacy**: *Faster accelerators always shorten the training step.*
 
-Engineers often optimize FLOPs and parameter counts assuming these metrics predict deployment performance. Real efficiency depends on how well the math aligns with the underlying hardware. For example, unstructured pruning achieves 80 percent sparsity but delivers no speedup on dense hardware (like NVIDIA Tensor Cores), while structured pruning at 50 percent sparsity can enable up to 2$\times$ sparse-math throughput on supported hardware and kernels, but does not guarantee end-to-end speedup. A model reduced from 10B to 3B parameters (70 percent FLOPs reduction) might achieve only 20 percent latency improvement because memory bandwidth bottlenecks dominate and the pruning pattern lacks hardware-friendly structure.
+```{python}
+#| echo: false
+#| label: faster-accelerator-fallacy
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FASTER ACCELERATOR FALLACY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol2-intro-fallacies-pitfalls-f804; reuses the GPT3SyncTax
+# │          scenario from the communication and energy tax notebook.
+# │
+# │ Goal: Show that an accelerator upgrade shrinks only the compute term.
+# │ Show: 2× faster accelerators shorten the scenario step by ~2 percent.
+# │ How: step = t_compute / speedup + t_comm (no overlap).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_multiple, fmt_percent, fmt_time
 
-:::
+class FasterAcceleratorFallacy:
+    """Step-time change when only the compute term shrinks."""
 
-::: {.column-margin}
-![](images/svg/vol2_introduction_margin_004.svg){width="100%" fig-alt="Memory-bound roofline dot despite FLOP reduction."}
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    t_compute_iter = GPT3SyncTax.t_compute_iter
+    t_comm = GPT3SyncTax.t_comm_ib
+    accel_speedup = 2.0  # scenario input: accelerator generation upgrade
 
-*Cutting FLOPs alone leaves latency memory-bound.*
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    step_before = t_compute_iter + t_comm
+    step_after = t_compute_iter / accel_speedup + t_comm
+    step_reduction = 1 - (step_after / step_before).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(0 < step_reduction < 0.05, f"Step reduction should be small, got {step_reduction:.3f}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_compute_str = GPT3SyncTax.t_compute_iter_str
+    t_comm_str = fmt_time(t_comm, second, precision=0, commas=False, style='word')
+    ib_bw_str = GPT3SyncTax.ib_bw_gbit_per_s_str
+    accel_speedup_mult_str = fmt_multiple(accel_speedup, precision=0)
+    step_reduction_pct_str = fmt_percent(step_reduction, precision=1, style='prose')
+```
+
+An accelerator upgrade shrinks only the $T_{\text{compute}}/N$ term of the Fleet Law. Exposed communication and synchronization are untouched, so much of the saved compute time turns into waiting time. In the scenario of notebook \ref{nbk-introduction-coordination-energy-tax}, local computation takes `{python} FasterAcceleratorFallacy.t_compute_str` per iteration while the exposed Ring AllReduce over `{python} FasterAcceleratorFallacy.ib_bw_str` InfiniBand takes about `{python} FasterAcceleratorFallacy.t_comm_str`. Accelerators `{python} FasterAcceleratorFallacy.accel_speedup_mult_str` faster shorten that step by only `{python} FasterAcceleratorFallacy.step_reduction_pct_str`. The scenario is deliberately communication-heavy, but the direction of the effect is general: relieving the Compute axis tends to expose Communication or Coordination as the binding cost, the displacement of overhead described with the Fleet Law. An accelerator purchase must therefore be judged against the fleet's measured step decomposition, not against the datasheet ratio.
+
 :::
 
 ::: {.fallacy-pitfall}
 
-**Pitfall**: *Optimizing one metric without checking system-wide trade-offs.*
+**Pitfall**: *Assuming that reliable components make a reliable job.*
 
-The **universal efficiency fallacy**\index{Universal efficiency fallacy!definition} assumes that optimizations like quantization or distillation are "free wins." In production, each optimization introduces specific trade-offs. INT8 quantization reduces storage for quantized weights, but total memory savings and accuracy depend on the original precision, unquantized state, and quantization method. Accuracy loss is not inevitable: LLM.int8() preserved predictive performance on the large language models evaluated in its study [@dettmers2022llmint8]. Deployment still requires validation on the intended workload and kernels. Knowledge distillation can reduce model size but adds the cost of producing teacher targets and training the student. The optimal architecture requires balancing accuracy, latency, and power, not merely minimizing resource consumption.
+A per-GPU MTBF of `{python} Gpt4TrainingScenario.gpu_mtbf_hours_str` describes a part that rarely fails. A synchronous job, however, needs all of its parts at once. Notebook \ref{nbk-introduction-scale-reliability} shows that a job spanning `{python} Gpt4TrainingScenario.gpt4_gpus_str` has an MTBF of about `{python} Gpt4TrainingScenario.mtbf_hours_str`, or roughly `{python} Gpt4TrainingScenario.cluster_fail_day_str` interruptions per day. Component reliability characterizes one part; the reliability gap (@sec-vol2-introduction-reliability-gap) characterizes the job, whose availability decays exponentially with the number of parts it requires simultaneously. Recovery practices that suit a single machine, such as manual restart and infrequent checkpoints, fail at fleet scale even though no individual part has become less reliable.
 
 :::
 
@@ -3071,7 +2952,7 @@ class LinearScalingFallacy:
     realized_speedup_mult_str = fmt_multiple(realized_speedup, precision=1, commas=True)
 ```
 
-The **linear scaling fallacy**\index{Linear scaling fallacy!definition} confuses useful computational work with the time required to execute it. The empirical loss relation $\mathcal{L}(X) = A_{\mathcal{L}} X^{-\alpha_{\text{scale}}} + C_{\mathcal{L}}$ estimates model quality within a validated regime; the fleet law separately estimates the time needed to perform that work.
+The **linear scaling fallacy**\index{Linear scaling fallacy!definition} confuses useful computational work with the time required to execute it. The empirical loss relation $\mathcal{L}(X) = A_{\mathcal{L}} X^{-\alpha_{\text{scale}}} + C_{\mathcal{L}}$ estimates model quality within a validated regime; the Fleet Law separately estimates the time needed to perform that work.
 A team distributing a fixed training workload might predict a `{python} LinearScalingFallacy.ideal_speedup_mult_str` improvement but achieve only `{python} LinearScalingFallacy.realized_speedup_mult_str` if coordination and communication overhead consumes `{python} LinearScalingFallacy.coord_overhead_pct_str` of the scaled step time.
 This shortfall does not by itself invalidate a loss scaling law. It shows why a resource plan needs both a model-quality estimate and a measured execution-cost estimate.
 
@@ -3079,13 +2960,14 @@ This shortfall does not by itself invalidate a loss scaling law. It shows why a 
 
 ## Summary {#sec-vol2-intro-summary-66bb}
 
-Single-machine diagnostic skills remain necessary at scale, but the engineering boundary expands. A fleet can lose useful progress to network transfers, inconsistent shared state, or failed participants even when its local kernels are efficient. Scaling laws guide the allocation of model size, data, and useful computation; the fleet law separately accounts for the time required to execute that work. C$^3$ distinguishes compute, communication, and coordination costs, while the fleet stack locates the decisions that shape them. Together, these views connect resource planning to execution behavior, subject to the reliability, energy, and governance constraints of the mission.
+Single-machine diagnostic skills remain necessary at scale, but the engineering boundary expands. A fleet can lose useful progress to network transfers, inconsistent shared state, or failed participants even when its local kernels are efficient. Scaling laws guide the allocation of model size, data, and useful computation; the Fleet Law separately accounts for the time required to execute that work. C$^3$ distinguishes compute, communication, and coordination costs, while the fleet stack locates the decisions that shape them. Together, these views connect resource planning to execution behavior, subject to the reliability, energy, and governance constraints of the mission.
 
 ::: {.callout-takeaways title="Scale makes a new machine"}
 
 * **More devices change the engineering boundary**: Distributing work introduces shared network and failure dependencies. Local performance remains necessary, but fleet decisions must also account for synchronization, recovery, power delivery, and governance across that wider boundary.
 * **Communication can consume the speedup**: Dividing fixed work across accelerators shortens ideal local compute time while exposing communication and coordination costs. A 175B-parameter model can move hundreds of gigabytes of gradients per step, so scaling gains depend on the workload, fabric, and overlap.
 * **Failure becomes steady state**: In the modeled 25,000-GPU job, independent component failures interrupt tightly coupled training every few hours despite long per-GPU lifetimes. Checkpointing, recovery, and observability must therefore be designed into normal operation.
+* **Scaling laws set the demand; the Fleet Law sets the price**: Loss falls as a power law in compute, data, and parameters, so each equal quality gain needs disproportionately more resources, and compute-optimal plans grow parameters and tokens together. Those laws say how much work is worth buying; the Fleet Law says how long the fleet takes to deliver it.
 * **C$^3$ extends local intuition**: The Data, Algorithm, Machine lens describes the workload and substrate; Compute, Communication, and Coordination expose the costs of fleet execution. The Fleet Law connects useful local work to transfer, synchronization, and overlap costs as device count changes.
 * **Impact needs a control plane**: Foundation-scale systems amplify security, privacy, fairness, and policy failures across large user populations. Governance is not an appendix to infrastructure; it is the mechanism that decides what the fleet is permitted to optimize and deploy.
 
@@ -3095,7 +2977,7 @@ The governing principle is that scale can move the binding constraint outside th
 
 ::: {.callout-chapter-connection title="From requirements to silicon"}
 
-The requirements of scale are established: the rationale for distribution, physical costs, and principles governing the machine learning fleet are clearly defined. Requirements alone, however, do not compute gradients. The fleet needs a physical foundation (silicon, power, and cooling) capable of sustaining these workloads. @Sec-compute-infrastructure begins building that foundation, examining the accelerator architectures, memory hierarchies, and power delivery systems that form the infrastructure layer of the fleet stack.
+The rationale for distribution, the physical costs of scale, and the practices governing the machine learning fleet are now in place. Requirements alone, however, do not compute gradients. The fleet needs a physical foundation (silicon, power, and cooling) capable of sustaining these workloads. @Sec-compute-infrastructure begins building that foundation, examining the accelerator architectures, memory hierarchies, and power delivery systems that form the Infrastructure band of the fleet stack.
 
 :::
 

@@ -168,7 +168,7 @@ The assumed foundation is local model execution, memory hierarchy, training and 
 
 ## Prerequisites
 
-Volume II assumes an introductory ML systems course or equivalent experience with single-machine execution, memory hierarchy, training and inference pipelines, and hardware acceleration. It does not require reading Volume I. *Introduction to Machine Learning Systems* is an optional source for that background; this volume provides its own foundation recaps and introduces the C³ framework for reasoning about fleets.
+Volume II is a standalone book. It assumes an introductory ML systems course or equivalent experience with single-machine execution, memory hierarchy, training and inference pipelines, and hardware acceleration. No other book is required. Appendix A recaps the single-machine performance model (the iron law, arithmetic intensity, and the roofline), and the book introduces its own C³ framework for reasoning about fleets.
 
 ## Working in the Open
 
