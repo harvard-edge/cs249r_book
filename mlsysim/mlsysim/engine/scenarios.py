@@ -67,7 +67,7 @@ class Scenario(BaseModel):
         
         # Dynamic unit scaling for summary
         unit = "MB" if weights < Q_("1 GB") else "GB"
-        mem_summary = f"Model fits in memory ({weights.to(unit):.1f} / {hardware.memory.capacity.to(unit):.1f})" if mem_feasible else f"OOM: Requires {weights.to(unit):.1f} but only has {hardware.memory.capacity.to(unit):.1f}"
+        mem_summary = f"Model fits in memory ({weights.to(unit):.1f~P} / {hardware.memory.capacity.to(unit):.1f~P})" if mem_feasible else f"OOM: Requires {weights.to(unit):.1f~P} but only has {hardware.memory.capacity.to(unit):.1f~P}"
         
         l1 = EvaluationLevel(
             level_name="Feasibility", 
@@ -106,7 +106,7 @@ class Scenario(BaseModel):
         if self.sla_latency and actual_latency > self.sla_latency:
             p_status = "FAIL"
         
-        p_summary = f"Latency: {actual_latency:.2f} (Target: {self.sla_latency or 'N/A'})"
+        p_summary = f"Latency: {actual_latency:.2f~P} (Target: {self.sla_latency or 'N/A'})"
         l2 = EvaluationLevel(level_name="Performance", status=p_status, summary=p_summary, metrics=perf_metrics)
 
         # --- LEVEL 3: MACRO ---
