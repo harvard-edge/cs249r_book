@@ -141,7 +141,11 @@ class KvGeometry:
     fit_math = fmt_math(rf"\left\lfloor {kv_pool.to(GB).magnitude:.9f} / {kv_agent.to(GB).magnitude:.9f} \right\rfloor = {conc_agent}")
 ```
 
-The worked estimate uses the Llama 3 70B model geometry, with `{python} KvGeometry.params_str` parameters, and a DGX H100 node containing `{python} KvGeometry.n_acc_str` accelerators. This is a different deployment assumption from the single-device, 8-bit weight-read illustration in @sec-vol3-foundation-model-cost. Here both weights and KV use 16-bit storage, and the weights are sharded across the node. Aggregate capacity arithmetic assumes that the shards and their KV state can be balanced across devices without additional replicated copies. A real deployment must also satisfy each device's limit.
+The worked estimate uses the Llama 3 70B model geometry, with `{python} KvGeometry.params_str` parameters, and a DGX H100 node containing `{python} KvGeometry.n_acc_str` accelerators. This is a different deployment assumption from the single-device, 8-bit weight-read illustration in @sec-vol3-foundation-model-cost. Here both weights and KV use 16-bit storage, and the weights are sharded across the node. Aggregate capacity arithmetic assumes that the shards and their KV state can be balanced across devices without additional replicated copies. A real deployment must also satisfy each device's limit. @Fig-vol3-context-window-anatomy traces one agent context of this length from its logical zones through that geometry to the number of such contexts the node can hold.
+
+::: {#fig-vol3-context-window-anatomy fig-env="figure" fig-pos="htb" fig-cap="**From Agent Context to KV State**: A 32,768-token agent context, divided into system prompt, tool schemas, workspace, turn history, and the latest observation, becomes key and value tensors at every layer. The grouped-query model's per-token footprint then sets how many such contexts fit in the node's KV pool, before allocator overhead and headroom." fig-alt="Top panel divides a 32,768-token context into five labeled zones with token counts, grouped as a shared prefix, growing history, and active turn. Arrows lead to a bottom panel listing model dimensions, the per-token and per-context KV footprint, and resident counts of 195 and 48 at 8,192 and 32,768 tokens on an eight-accelerator node."}
+![](images/svg/prompt_context_window_anatomy.svg)
+:::
 
 ::: {#nbk-05-sizing-the-attention-state-for .callout-notebook title="Sizing the attention state of an agent trajectory"}
 
@@ -163,7 +167,7 @@ The memory available for KV payload is `{python} KvGeometry.pool_math`. Dividing
 
 :::
 
-The estimate separates two costs that can otherwise be confused. The model's weight storage is shared by the requests it serves; each independent sequence adds its own attention state. A single sequence need not be larger than the weights for KV capacity to matter. Across many sequences, long contexts can consume the remaining memory even when the model itself fits comfortably. Shared prefixes can reduce that total, but only when the serving system retains and safely reuses compatible state.
+The estimate separates two costs that can otherwise be confused. The model's weight storage is shared by the requests it serves; each independent sequence adds its own attention state. A single sequence need not be larger than the weights for KV capacity to matter. Across many sequences, long contexts can consume the remaining memory even when the model itself fits comfortably. Shared prefixes can reduce that total, but only when the serving system retains and safely reuses compatible state. The harness also moves each trajectory along the rows of @tbl-vol3-kv-payload-fit: keeping every call's context near its selected working set (principle \ref{pri-vol3-attention-working-set}) holds a trajectory near the shorter rows, while a harness that accumulates every observation drives it toward the last.
 
 Architecture and precision change the payload before allocation begins. A model designed to retain fewer key-value heads or latent vectors can use less state, but it is not a lossless storage transformation of an arbitrary full-attention model. Lower-precision KV storage can also reduce payload, with additional scale or format overhead and possible changes to model outputs. Its value depends on supported kernels and validation on the intended tasks. Neither choice eliminates the need to manage the lifetime and ownership of the state that remains.
 
@@ -226,7 +230,7 @@ class StaticReservation:
 
 For the Llama-3-70B model on the eight-accelerator node, retaining the same 16-bit weight and KV representation and node-wide runtime reserve leaves a KV pool of `{python} StaticReservation.pool_gb_str`. A cap of `{python} StaticReservation.s_max_str` tokens requires `{python} StaticReservation.reservation_gb_str` per reservation. Dividing the pool by that reservation and rounding down gives `{python} StaticReservation.reservations_str` resident reservations, assuming balanced sharding and no additional overhead outside the stated reserve. This is a memory-fit calculation, not a throughput prediction.
 
-Suppose a different, hypothetical request population finishes at a mean length of `{python} StaticReservation.mean_final_tokens_str` tokens. Its mean final-length utilization is `{python} StaticReservation.mean_final_tokens_str` divided by `{python} StaticReservation.s_max_str`, or `{python} StaticReservation.efficiency_str`. This comparison describes how much of each reservation is populated at completion. It does not measure utilization over time: long-lived requests and paused trajectories contribute more memory occupancy than short-lived requests, and an expanding request has not yet reached its final length.
+Suppose a different, hypothetical request population finishes at a mean length of `{python} StaticReservation.mean_final_tokens_str` tokens. Its mean final-length utilization is `{python} StaticReservation.mean_final_tokens_str` divided by `{python} StaticReservation.s_max_str`, or `{python} StaticReservation.efficiency_str`. This comparison describes how much of each reservation is populated at completion. It does not measure utilization over time: long-lived requests and paused trajectories contribute more memory occupancy than short-lived requests, and an expanding request has not yet reached its final length. Measured systems confirm the pattern. In the serving systems profiled when paged KV allocation was introduced, only 20.4 to 38.2 percent of KV memory held actual token state, with the rest lost to reservation slack and fragmentation [@kwon2023vllm].
 
 A second policy grows a contiguous allocation as tokens arrive. If adjacent capacity is unavailable, an allocate-copy-release implementation obtains a larger buffer, copies the initialized KV entries, and then releases the old buffer. During that copy, both allocations consume space. Other implementations can use different allocation or remapping mechanisms; a synchronous allocation stall is not an inevitable property of every growing tensor. Here, contiguous means a contiguous range in the allocator's address space, not necessarily adjacent physical DRAM cells. Accelerators already support virtual memory. The relevant restriction is whether this serving allocator and attention kernel require the sequence's KV tensor to occupy one such range.
 
@@ -247,7 +251,7 @@ In the repair workload, a tool wait matters only if the service retains the allo
 
 ## Paged KV Allocation {#sec-vol3-kvcache-pagedattention}
 
-When the integration-test log extends the repair context, the serving engine need not relocate the entire existing KV tensor. It can allocate additional fixed-size blocks and add their identifiers to the request's block table. The attention kernel follows that table when reading earlier token positions. PagedAttention demonstrated this combination of block allocation and attention over noncontiguous KV storage [@kwon2023vllm].
+When the integration-test log extends the repair context, the serving engine need not relocate the entire existing KV tensor. It can allocate additional fixed-size blocks and add their identifiers to the request's block table. The attention kernel follows that table when reading earlier token positions. PagedAttention demonstrated this combination of block allocation and attention over noncontiguous KV storage [@kwon2023vllm]. Its lineage is paged virtual memory, which the Atlas one-level store introduced to decouple a program's contiguous address space from scattered physical frames [@kilburn1962onelevel]. The block table applies the same indirection to token positions, so a sequence can grow without a contiguous extent.
 
 ::: {#dfn-paged-kv-cache .callout-definition title="Paged attention KV-cache block table"}
 
@@ -332,9 +336,89 @@ The maximum unused tail has one fewer slot than a full block. The smaller block 
 
 :::
 
+```{python}
+#| label: kv-paged-waste-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PAGED ALLOCATION PAYOFF
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-kvcache-pagedattention, paragraph after
+# │          nbk-05-sizing-physical-blocks-for-a.
+# │ Goal: Answer the static-reservation count with what paging admits under a
+# │       stated length distribution.
+# │ Show: 0.4 percent tail waste at 16-token blocks, 1.5 percent at 64;
+# │       780 paged sequences vs. 48 full-cap reservations (about 16x).
+# │ How: calc_expected_paged_kv_tokens over a capped-exponential length model
+# │      (modeling assumption) with StaticReservation's mean, cap, and pool.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics.memory import calc_expected_paged_kv_tokens
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_multiple
+
+class PagedWaste:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
+    block_small = PhysicalBlockSizing.small_tokens
+    block_large = PhysicalBlockSizing.large_tokens
+    mean_tokens = StaticReservation.mean_final_tokens  # same hypothetical mean final length
+    s_max = StaticReservation.s_max
+    bytes_per_token = StaticReservation.bytes_per_token
+    pool = StaticReservation.pool
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
+    alloc_small, frag_small = calc_expected_paged_kv_tokens(mean_tokens, s_max, block_small)
+    alloc_large, frag_large = calc_expected_paged_kv_tokens(mean_tokens, s_max, block_large)
+    fit_paged = int((pool / (alloc_small * bytes_per_token)).to("").magnitude)
+    gain = fit_paged / StaticReservation.reservations
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(0 < frag_small < frag_large < 0.02, "Larger blocks must waste more, and both only a few percent")
+    check(mean_tokens <= alloc_small < mean_tokens + block_small, "Expected allocation exceeds the mean by less than one block")
+    check(fit_paged == 780, "Paged fit on the canonical pool changed")
+    check(15 < gain < 17, "Prose claims about sixteen times as many sequences")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    frag_small_str = fmt_percent(frag_small, precision=1, style="prose")
+    frag_large_str = fmt_percent(frag_large, precision=1, style="prose")
+    fit_paged_str = fmt_int(fit_paged)
+    gain_mult_str = fmt_multiple(round(gain))  # prose says "roughly"
+```
+
+The tail bounds become an expected waste once a length distribution is stated. Model final lengths as exponential with the hypothetical mean of `{python} StaticReservation.mean_final_tokens_str` tokens, capped at the `{python} StaticReservation.s_max_str`-token limit used for static reservation. Under that assumption, `{python} PhysicalBlockSizing.small_tokens_str`-token blocks leave `{python} PagedWaste.frag_small_str` of allocated KV memory unused and `{python} PhysicalBlockSizing.large_tokens_str`-token blocks leave `{python} PagedWaste.frag_large_str`. Dividing the pool that admitted `{python} StaticReservation.reservations_str` full-cap reservations by the expected paged allocation gives about `{python} PagedWaste.fit_paged_str` sequences, roughly `{python} PagedWaste.gain_mult_str` as many. That is the payoff of paging. Allocation tracks the tokens a sequence has actually produced rather than the cap it might reach. The count is a mean memory-fit estimate under a modeling assumption; the resident count fluctuates with the lengths actually present, and memory fit says nothing about throughput.
+
 ### Sharing a prefix without sharing its future writes
 
-Candidate repairs can begin from the same processed prefix and then generate different continuations. Their block tables may refer to the same immutable prefix blocks if the model computation is compatible and the service permits sharing. No full-prefix tensor copy is needed when the candidates are created. The runtime still constructs or shares metadata and records ownership; copying a block table and updating its references can require work proportional to its number of entries.
+```{python}
+#| label: kv-fork-copy-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FORK COST UNDER CONTIGUOUS ALLOCATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-kvcache-pagedattention, prefix-sharing paragraph.
+# │ Goal: Size the tensor copy that block sharing avoids when candidates fork.
+# │ Show: 10.7 GB copied for four candidates of an 8,192-token prefix.
+# │ How: Registry KV geometry (PhysicalBlockSizing); scenario prefix and fan-out.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import check, fmt_int, fmt_memory
+
+class ForkCopy:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
+    prefix_tokens = 8_192  # scenario: processed prefix shared by the candidates
+    branches = 4  # scenario: sampled candidate repairs
+    bytes_per_token = PhysicalBlockSizing.bytes_per_token
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
+    copied = branches * prefix_tokens * bytes_per_token
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(branches == 4, "Prose spells out four candidates")
+    check(10 < copied.to(GB).magnitude < 11, "Prose describes roughly ten gigabytes copied")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    prefix_str = fmt_int(prefix_tokens)
+    copied_str = fmt_memory(copied, unit=GB, precision=1)
+```
+
+Deliberation that samples several candidates to buy evidence (principle \ref{pri-vol3-test-time-scaling}) makes forks routine. Candidate repairs can begin from the same processed prefix and then generate different continuations. Their block tables may refer to the same immutable prefix blocks if the model computation is compatible and the service permits sharing. No full-prefix tensor copy is needed when the candidates are created. The saving is large at agent context lengths. A contiguous allocator that deep-copies an `{python} ForkCopy.prefix_str`-token prefix into four candidates writes `{python} ForkCopy.copied_str` of KV state for the Llama-3-70B geometry, while block-table duplication copies none of that payload. The runtime still constructs or shares metadata and records ownership; copying a block table and updating its references can require work proportional to its number of entries.
 
 The partial tail needs special treatment. Two candidates cannot independently append into the same shared writable slot. In the ten-token example, both candidates initially refer to `[3, 7, 9]`. Before candidate B writes position 10, the runtime allocates block 14, copies the two initialized entries from block 9, and redirects B's last table entry. The write then occurs at slot 2 of block 14. This copy-on-write operation leaves candidate A's state unchanged. @Tbl-vol3-kv-cow-trace follows the ownership change; its counts assume these two candidates are the only owners.
 
@@ -402,9 +486,67 @@ $$H_{\text{prefix}} = \frac{\sum_{i} S_{\text{match}}^{(i)}}{\sum_{i} S_{\text{p
 
 Here $S_{\text{prompt}}^{(i)}$ is the number of prompt tokens in request $i$, and $S_{\text{match}}^{(i)}$ counts the prompt tokens whose compatible KV state the request actually reuses, after availability, permission, and boundary restrictions. The denominator includes all prompt tokens in the same request set and must be nonzero. In the full-block-only policy above, the reused count is eight, not the ten-token potential match. A service should distinguish reuse that requires restoration from reuse already resident on the accelerator.
 
+```{python}
+#| label: kv-prefix-hit-savings-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WHAT A PREFIX HIT AVOIDS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-kvcache-radix-tree, "Measuring reuse" paragraph.
+# │ Goal: Put a number on the prefill work a prefix hit avoids.
+# │ Show: 1.34 GB of state; ~578 + ~22 trillion operations; ~169 ms at the
+# │       sustained rate; ~5 ms weight-read floor for a short suffix pass.
+# │ How: Registry model/node; linear 2NS plus causal attention 2LdS^2
+# │      (@eq-appdx-prefill-long); sustained rate = node peak x MfuHigh x 0.9.
+# │ Note: ChunkedIteration and PausedStateChoice reuse sustained_rate.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_percent, MarkdownStr
+
+class PrefixHit:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
+    model = Models.Language.Llama3_70B
+    node = Systems.Nodes.DGX_H100
+    prefix_tokens = 4_096  # scenario: invariant instructions and tool schemas
+    suffix_tokens = 32  # scenario: short novel suffix appended after a hit
+    utilization = Literature.Training.MfuHigh * 0.9  # scenario: sustained prefill utilization
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
+    n_params = model.parameters.to("count").magnitude
+    bytes_per_token = PhysicalBlockSizing.bytes_per_token
+    state = prefix_tokens * bytes_per_token
+    linear_ops = 2 * n_params * prefix_tokens * flop
+    attention_ops = 2 * model.layers * model.hidden_dim * prefix_tokens**2 * flop
+    sustained_rate = node.accelerators_per_node * node.accelerator.compute.peak_flops * utilization
+    t_rebuild = ((linear_ops + attention_ops) / sustained_rate).to(ms)
+    weights = model.size_in_bytes(BYTES_FP16)
+    node_bw = node.accelerators_per_node * node.accelerator.memory.bandwidth
+    t_weight_read = (weights / node_bw).to(ms)
+    t_suffix_ops = (2 * n_params * suffix_tokens * flop / sustained_rate).to(ms)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(attention_ops < linear_ops, "Weight work must dominate at this prefix length")
+    check(t_suffix_ops < t_weight_read, "A short suffix pass must sit below the ridge (weight-read bound)")
+    check(150 < t_rebuild.magnitude < 190, "Prose describes roughly 170 ms of avoided prefill")
+    check(t_weight_read < t_rebuild / 10, "The suffix floor must be far below the avoided prefill")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    prefix_str = fmt_int(prefix_tokens)
+    suffix_str = fmt_int(suffix_tokens)
+    state_str = fmt_memory(state, unit=GB, precision=2)
+    linear_str = fmt_int(linear_ops.to(flop).magnitude / 1e12)
+    attention_str = fmt_int(attention_ops.to(flop).magnitude / 1e12)
+    utilization_str = fmt_percent(utilization, precision=0, style="prose")
+    rate_str = fmt_int(sustained_rate.to(TFLOPs / second).magnitude)
+    rebuild_str = MarkdownStr(f"{fmt_int(t_rebuild.magnitude)} ms")
+    weight_read_str = MarkdownStr(f"{fmt_int(t_weight_read.magnitude)} ms")
+```
+
+What a hit is worth follows from the same geometry. Suppose the repair agent's invariant instructions and tool schemas form a `{python} PrefixHit.prefix_str`-token prefix. Its KV state occupies `{python} PrefixHit.state_str` across the node. Reconstructing that state takes about `{python} PrefixHit.linear_str` trillion weight operations plus about `{python} PrefixHit.attention_str` trillion for causal attention (@eq-appdx-prefill-long). If the node sustains `{python} PrefixHit.utilization_str` of its peak 16-bit rate, about `{python} PrefixHit.rate_str` trillion operations per second, that is roughly `{python} PrefixHit.rebuild_str` of prefill on every turn that misses. A turn that hits and appends a `{python} PrefixHit.suffix_str`-token suffix still makes one pass over the weights, and a pass that short falls below the ridge, so one read of the weights bounds it at about `{python} PrefixHit.weight_read_str` (@eq-appdx-batched-step). Across a trajectory of many turns, the avoided prefill repeats at every turn whose prefix survives.
+
 The hit rate in @eq-hprefix measures avoided reconstruction of prompt state, not a latency speedup or a billing discount. New suffix tokens still require prefill and attend to the preceding context; output tokens still require generation. Queueing, transfers, and the work left after a hit can dominate elapsed time. A falling hit rate warrants checking both sides of the interface: changes in serialization can shorten matches, while retention pressure, placement, or a configuration change can make matching state unavailable or incompatible.
 
-For a hosted service, the caller needs an explicit reuse contract rather than assumptions about the hidden allocator. That contract should identify eligible inputs and configurations, sharing boundaries, supported cache hints or retention guarantees, and what the reported cached-token count means. Any documented expiration policy must be distinguished from a guarantee of residency. Billing categories likewise need not expose where the tensors reside or how they are indexed. The caller controls its input layout and uses the controls actually offered; it cannot infer a particular tree, eviction policy, or physical placement from a discounted input-token count.
+For a hosted service, the caller needs an explicit reuse contract rather than assumptions about the hidden allocator. That contract should identify eligible inputs and configurations, sharing boundaries, supported cache hints or retention guarantees, and what the reported cached-token count means. Any documented expiration policy must be distinguished from a guarantee of residency. Expiration also couples the contract to tool waits. If a tool runs longer than the service's idle lifetime for cached state, the next turn finds no reusable prefix and pays the full prefill, which is the hosted form of the drop policy in @sec-vol3-kvcache-swapping. A harness that knows a wait will outlast that lifetime can plan for the miss rather than discover it in latency. Billing categories likewise need not expose where the tensors reside or how they are indexed. The caller controls its input layout and uses the controls actually offered; it cannot infer a particular tree, eviction policy, or physical placement from a discounted input-token count.
 
 The application must remain correct on a cache miss: the selected context still supplies the model input, and the service computes the required state subject to the request's resource limits. Prefix caching reduces repeated work when compatible state is available. It does not remove the new work introduced by a large test log or retrieved observation. Scheduling that remaining prefill alongside ongoing generation is the next problem.
 
@@ -424,11 +566,72 @@ Thus chunking changes the execution schedule without changing the intended causa
 
 ### Choosing how much work to admit
 
-A simple scheduler gives each iteration a token budget. With ordinary autoregressive decoding, each selected decode request contributes one new token position, and each selected prefill contributes the number of positions in its next chunk. The scheduler admits a combination that fits the budget and the available memory. A request whose prompt is only partly processed retains the completed prefix state while waiting for another turn.
+A simple scheduler gives each iteration a token budget $C_{\text{budget}}$. With ordinary autoregressive decoding, each selected decode request contributes one new token position, and each selected prefill contributes the number of positions in its next chunk. An iteration that admits prefill chunks of $c_i$ tokens and a set $\mathcal{D}$ of decode requests must satisfy
+
+$$\sum_{i} c_i + |\mathcal{D}| \le C_{\text{budget}}$$ {#eq-kv-token-budget}
+
+and the admitted combination must also fit the available memory. A request whose prompt is only partly processed retains the completed prefix state while waiting for another turn.
 
 Suppose the engine first reserves room for ongoing decode requests and then uses the remaining budget for prefill chunks. An existing request can make progress without waiting for another request's entire prompt. The new request, however, may need several iterations to complete its prefill, including waits while other work runs. Giving every iteration to existing decodes would protect them at the expense of new requests; admitting large prefills can reverse that priority. A useful policy must provide both decode responsiveness and eventual progress for prefills.
 
 The budget bounds admitted token positions, not elapsed time. An iteration's duration also depends on the lengths of the contexts being attended to, the batch composition, kernel efficiency, memory traffic, and communication. Equal token counts therefore need not produce equal iteration times. A token budget alone cannot guarantee a particular gap between output tokens.
+
+```{python}
+#| label: kv-chunked-iteration-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHUNKED PREFILL: STALL VERSUS CHUNK
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-kvcache-chunked-prefill, paragraph after @eq-kv-token-budget.
+# │ Goal: Show the scale of the decode-gap vs. prompt-completion trade.
+# │ Show: ~5 ms decode-only step; ~162 ms monolithic prefill; ~22 ms per
+# │       512-token chunked iteration; ~173 ms prompt completion; ~8x smaller gap.
+# │ How: Weight-only step time max(Nb/beta, 2N tokens/pi) (@eq-appdx-batched-step)
+# │      on the node with 16-bit weights; sustained rate from PrefixHit.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import check, fmt_int, fmt_multiple, MarkdownStr
+
+class ChunkedIteration:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
+    decodes = 32  # scenario: ongoing decode requests
+    prompt_tokens = 4_096  # scenario: new uncached prefill
+    chunk_tokens = 512  # scenario: prefill chunk per iteration
+    n_params = PrefixHit.n_params
+    rate = PrefixHit.sustained_rate
+    t_weights = PrefixHit.t_weight_read
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
+    t_decode = max(t_weights, (2 * n_params * decodes * flop / rate).to(ms))
+    t_mono = max(t_weights, (2 * n_params * prompt_tokens * flop / rate).to(ms))
+    gap_mono = t_decode + t_mono
+    n_chunks = prompt_tokens // chunk_tokens
+    t_iter = max(t_weights, (2 * n_params * (chunk_tokens + decodes) * flop / rate).to(ms))
+    t_chunked_done = n_chunks * t_iter
+    gap_ratio = (gap_mono / t_iter).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(prompt_tokens % chunk_tokens == 0, "Chunks must tile the prompt")
+    check(t_decode == t_weights, "Decode-only step must sit at the weight-read floor")
+    check(t_iter > t_weights, "A 544-token iteration must be arithmetic-bound")
+    check(t_mono < t_chunked_done < 1.1 * t_mono, "Chunking must delay prompt completion only modestly")
+    check(6 < gap_ratio < 9, "Prose claims roughly an eightfold smaller worst gap")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    decodes_str = fmt_int(decodes)
+    prompt_str = fmt_int(prompt_tokens)
+    chunk_str = fmt_int(chunk_tokens)
+    iter_tokens_str = fmt_int(chunk_tokens + decodes)
+    n_chunks_str = "eight" if n_chunks == 8 else fmt_int(n_chunks)
+    t_decode_str = MarkdownStr(f"{fmt_int(t_decode.magnitude)} ms")
+    t_mono_str = MarkdownStr(f"{fmt_int(t_mono.magnitude)} ms")
+    gap_mono_str = MarkdownStr(f"{fmt_int(gap_mono.magnitude)} ms")
+    t_iter_str = MarkdownStr(f"{fmt_int(t_iter.magnitude)} ms")
+    t_done_str = MarkdownStr(f"{fmt_int(t_chunked_done.magnitude)} ms")
+    gap_ratio_mult_str = fmt_multiple(round(gap_ratio))
+```
+
+A weight-only estimate still shows the scale of the trade. Apply @eq-appdx-batched-step to the eight-accelerator node with 16-bit weights, counting the token positions that @eq-kv-token-budget admits in one iteration and using the sustained rate assumed for the prefix-hit estimate. With `{python} ChunkedIteration.decodes_str` ongoing decodes and nothing else, each step sits at the weight-read floor of about `{python} ChunkedIteration.t_decode_str`. Admitting a `{python} ChunkedIteration.prompt_str`-token prefill as one unit adds about `{python} ChunkedIteration.t_mono_str` of arithmetic before those decodes run again, so their gap between tokens grows to about `{python} ChunkedIteration.gap_mono_str`. With `{python} ChunkedIteration.chunk_str`-token chunks, each iteration carries `{python} ChunkedIteration.iter_tokens_str` positions and takes about `{python} ChunkedIteration.t_iter_str`. The decodes now advance in each of the `{python} ChunkedIteration.n_chunks_str` iterations, so their worst gap is about `{python} ChunkedIteration.gap_ratio_mult_str` smaller, while the new prompt completes after about `{python} ChunkedIteration.t_done_str` instead of `{python} ChunkedIteration.t_mono_str`. Chunking buys existing streams a much shorter gap for a modest delay in the new request's first token. The estimate omits attention traffic, which grows with each chunk's context, and per-iteration overhead, so measured iterations run longer and the budget must come from measurement.
 
 We can evaluate the trade-off by replaying the same arrival trace under different budgets. Measure time to first token for newly admitted requests, gaps between generated tokens for ongoing requests, completed useful work, and memory occupancy. Include queueing and scheduling waits in the latency measurements, and examine the slow requests rather than only the average. Client-visible streaming intervals may also include buffering and network delay, so they are not interchangeable with server iteration times.
 
@@ -446,7 +649,7 @@ Chunking determines how an active request shares compute. It does not decide whe
 
 ## Paused-State Policies {#sec-vol3-kvcache-swapping}
 
-Return to the earlier integration-test wait, before its log arrives. The serving policy stipulated at the start of this chapter retains the repair's compatible attention state on the accelerator. Neither a completed model call nor a pending tool result requires that policy. Once the request no longer needs active computation, the serving operator can keep the state, move it elsewhere, or drop it and reconstruct it when needed. The choice trades accelerator capacity against storage, transfer, and computation at resumption.
+Return to the earlier integration-test wait, before its log arrives. The serving policy stipulated at the start of this chapter retains the repair's compatible attention state on the accelerator. Neither a completed model call nor a pending tool result requires that policy. Once the request no longer needs active computation, the serving operator can keep the state, move it elsewhere, or drop it and reconstruct it when needed. The choice trades accelerator capacity against storage, transfer, and computation at resumption. The model cannot make it. Memory is a resource bound, and invariant closure places resource bounds in the runtime below the model (principle \ref{pri-invariant-closure}), so the serving system owns the pause decision.
 
 ### What can actually be reclaimed
 
@@ -478,14 +681,21 @@ Storage beyond host memory is another possible destination, not a mandatory stag
 #| label: kv-paused-state-choice-calc
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-vol3-kvcache-swapping, the bounded test-wait comparison.
-# │ Goal: Separate capacity occupancy, transfer work, and restoration delay.
-# │ Show: 10.74 GB; 483.18 GB·s held; 44.9 s on-demand release window;
-# │       0.2 s total transfer work; 44.8 s release window with perfect prefetch.
-# │ How: Registry KV geometry plus explicit hypothetical stage durations.
+# │ PAUSED-STATE CHOICE: RELOAD VERSUS RECOMPUTE DURING A TOOL WAIT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-kvcache-swapping, the bounded test-wait comparison,
+# │          @eq-kv-reload-ratio, and @fig-vol3-swapping-tradeoff.
+# │ Goal: Separate capacity occupancy, transfer work, and restoration delay,
+# │       with stage durations derived from registry rates.
+# │ Show: 10.74 GB; 21 ms each way, 42 ms round trip; ~1.3 s recompute; ~62x,
+# │       ~15x at a quarter of link bandwidth; 483.18 GB·s held;
+# │       44.98 s on-demand and 44.96 s prefetch release windows.
+# │ How: Registry KV geometry; per-accelerator host link x 8 (tensor-parallel
+# │      shards move in parallel, a scenario assumption); sustained prefill
+# │      rate shared with PrefixHit; attention term omitted (weight work only).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_qty, fmt_time
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_qty, fmt_time, fmt_bandwidth, fmt_multiple, MarkdownStr
 
 class PausedStateChoice:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────────
@@ -495,9 +705,10 @@ class PausedStateChoice:
     block_tokens = 16  # scenario allocation granularity, not a recommendation
     runtime_reserve = 20 * GB  # scenario, same aggregate-node baseline
     wait = 45 * second  # stipulated integration-test wait
-    copy_out = Q_("0.1 s")  # hypothetical end-to-end stage, not a benchmark
-    copy_in = Q_("0.1 s")  # hypothetical, includes obtaining destination blocks
-    reconstruct = Q_("2 s")  # hypothetical reconstruction of historical state
+    n_acc = node.accelerators_per_node
+    link_per_acc = node.accelerator.interconnect.bandwidth  # registry host link, per direction
+    rate = PrefixHit.sustained_rate  # scenario sustained prefill rate
+    quarter = 0.25  # scenario: links sustain a quarter of rated bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ──────────────────────────────────────────────
     blocks = (context_tokens + block_tokens - 1) // block_tokens
@@ -509,7 +720,16 @@ class PausedStateChoice:
         1,
         BYTES_FP16,
     )
-    pool = node.accelerators_per_node * node.accelerator.memory.capacity - model.size_in_bytes(BYTES_FP16) - runtime_reserve
+    bytes_per_token = state / (blocks * block_tokens)
+    pool = n_acc * node.accelerator.memory.capacity - model.size_in_bytes(BYTES_FP16) - runtime_reserve
+    n_params = model.parameters.to("count").magnitude
+    link = n_acc * link_per_acc
+    copy_out = (state / link).to(ms)
+    copy_in = (state / link).to(ms)
+    reconstruct = (2 * n_params * context_tokens * flop / rate).to(second)
+    ratio = (reconstruct / copy_in).to("").magnitude
+    ratio_quarter = ratio * quarter
+    reload_over_recompute = (bytes_per_token * rate / (2 * n_params * flop * link)).to("").magnitude
     held_occupancy = state * wait
     transfer_work = copy_out + copy_in
     released_on_demand = wait - copy_out
@@ -519,40 +739,100 @@ class PausedStateChoice:
     check(context_tokens % block_tokens == 0, "No partial-tail waste in this example")
     check(state.to(byte).magnitude == 10_737_418_240, "Registry geometry must give the stated payload")
     check(0 < state < pool, "One state must fit the aggregate pool; shard fit is separate")
-    check(wait > transfer_work > 0 * second, "The illustrative transfers fit inside the wait")
+    check(abs(reload_over_recompute * ratio - 1) < 1e-9, "Context length must cancel in the reload/recompute ratio")
+    check(55 < ratio < 70, "Prose claims reload is about sixty times faster")
+    check(ratio_quarter > 10, "Prose claims reload still wins by over ten times at a quarter of link bandwidth")
+    check(transfer_work < wait / 1000, "The round trip must be under a tenth of a percent of the wait")
     check(abs(held_occupancy.to(GB * second).magnitude - 483.1838208) < 1e-6, "Occupancy is capacity times time, not a monetary cost")
-    check(abs(released_on_demand.to(second).magnitude - 44.9) < 1e-9, "On-demand reload begins only after the wait")
-    check(abs(released_prefetch.to(second).magnitude - 44.8) < 1e-9, "Prefetch reserves the full destination for its duration")
+    check(released_prefetch < released_on_demand < wait, "Prefetch reserves the destination earlier than on-demand reload")
 
     # ┌── 4. OUTPUT (Formatting) ────────────────────────────────────────────────
     context_str = fmt_int(context_tokens)
     block_str = fmt_int(block_tokens)
     state_str = fmt_memory(state, unit=GB, precision=2)
     wait_str = fmt_time(wait, "second", precision=0)
-    out_str = fmt_time(copy_out, "second", precision=1)
-    in_str = fmt_time(copy_in, "second", precision=1)
-    reconstruct_str = fmt_time(reconstruct, "second", precision=0)
+    link_per_acc_str = fmt_bandwidth(link_per_acc, unit=GB / second, precision=0)
+    link_str = fmt_bandwidth(link, unit=GB / second, precision=0)
+    out_str = MarkdownStr(f"{fmt_int(copy_out.magnitude)} ms")
+    in_str = MarkdownStr(f"{fmt_int(copy_in.magnitude)} ms")
+    transfer_str = MarkdownStr(f"{fmt_int(transfer_work.magnitude)} ms")
+    reconstruct_str = fmt_time(reconstruct, "second", precision=1)
+    ratio_mult_str = fmt_multiple(round(ratio))
+    ratio_quarter_mult_str = fmt_multiple(round(ratio_quarter))
     held_str = fmt_qty(held_occupancy, unit=GB * second, precision=2)
-    transfer_str = fmt_time(transfer_work, "second", precision=1)
-    demand_free_str = fmt_time(released_on_demand, "second", precision=1)
-    prefetch_free_str = fmt_time(released_prefetch, "second", precision=1)
+    demand_free_str = fmt_time(released_on_demand, "second", precision=2)
+    prefetch_free_str = fmt_time(released_prefetch, "second", precision=2)
 ```
 
 Consider the chapter's `{python} PausedStateChoice.context_str`-token state during the `{python} PausedStateChoice.wait_str` integration-test wait on the same sharded node. For this comparison, all historical KV entries have been computed, the `{python} PausedStateChoice.block_str`-token blocks are full, and none is shared or in flight. The uniquely reclaimable payload is therefore `{python} PausedStateChoice.state_str`. Metadata and transfer buffers are excluded from this payload; the runtime must budget them separately.
 
-Suppose moving the complete state out takes `{python} PausedStateChoice.out_str`, restoring it takes `{python} PausedStateChoice.in_str`, and reconstructing the historical state instead takes `{python} PausedStateChoice.reconstruct_str`. These are hypothetical end-to-end stage durations, not measurements of this model or predictions from peak hardware rates. They represent the quantities an operator would measure under the intended load. All policies still need to process the new test observation, so that common work is outside the comparison.
+The stage durations follow from registry rates. Each accelerator holds one-eighth of the tensor-parallel state and reaches host memory over its own `{python} PausedStateChoice.link_per_acc_str` link, so if the eight transfers proceed in parallel the node moves state at up to $\beta_{\text{link}} =$ `{python} PausedStateChoice.link_str`. Moving the complete state out then takes about `{python} PausedStateChoice.out_str`, and restoring it takes the same. Reconstruction instead repeats the prefill. At the sustained rate assumed for the prefix-hit estimate, its $2NS$ weight operations take about `{python} PausedStateChoice.reconstruct_str`; the attention term of @eq-appdx-prefill-long, omitted here, would only lengthen it. These are sustained-rate estimates for an uncontended node, and an operator replaces them with stage durations measured under the intended load. All policies still need to process the new test observation, so that common work is outside the comparison.
+
+Both estimates grow linearly with the retained length $S$, so their ratio does not depend on it:
+
+$$\frac{T_{\text{reload}}}{T_{\text{recompute}}} = \frac{S \, m_{\text{token}} / \beta_{\text{link}}}{2 N S / \pi} = \frac{m_{\text{token}} \, \pi}{2 N \, \beta_{\text{link}}}$$ {#eq-kv-reload-ratio}
+
+Here $N$ is the parameter count and $\pi$ the sustained prefill rate. @Eq-kv-reload-ratio is the restricted comparison of @sec-vol3-appendix-inference-queueing applied to the reference node. Reload is about `{python} PausedStateChoice.ratio_mult_str` faster than reconstruction, and still about `{python} PausedStateChoice.ratio_quarter_mult_str` faster if the links sustain only a quarter of their rated bandwidth. On this node, reconstruction is the better way back only when host memory or the link, not accelerator time, is the scarce resource.
 
 Keeping the state occupies `{python} PausedStateChoice.state_str` $\times$ `{python} PausedStateChoice.wait_str` $\approx$ `{python} PausedStateChoice.held_str` during the wait, with the calculation using the unrounded payload. This memory-time product measures capacity occupancy. It is not a dollar charge or evidence that useful work was displaced.
 
-Moving it out immediately, then reloading only when the test returns, makes the blocks available after the outward copy completes. They can serve other work for `{python} PausedStateChoice.wait_str` $-$ `{python} PausedStateChoice.out_str` $=$ `{python} PausedStateChoice.demand_free_str` before the return. The policy performs `{python} PausedStateChoice.transfer_str` of transfer work in total, but only the inward stage lies after the return, adding `{python} PausedStateChoice.in_str` of restoration delay under the stipulated conditions. Dropping the state avoids that transfer work but requires the assumed `{python} PausedStateChoice.reconstruct_str` reconstruction when it is needed again. Safe release is assumed to have negligible duration in this example; a real measurement must include any outstanding operations.
+Moving it out immediately, then reloading only when the test returns, makes the blocks available after the outward copy completes. They can serve other work for `{python} PausedStateChoice.wait_str` $-$ `{python} PausedStateChoice.out_str` $=$ `{python} PausedStateChoice.demand_free_str` before the return. The policy performs `{python} PausedStateChoice.transfer_str` of transfer work in total, but only the inward stage lies after the return, adding `{python} PausedStateChoice.in_str` of restoration delay under these estimates. Dropping the state avoids that transfer work but requires about `{python} PausedStateChoice.reconstruct_str` of reconstruction when it is needed again. Safe release is assumed to have negligible duration in this example; a real measurement must include any outstanding operations.
 
 If the return time were known exactly, prefetch could finish the inward copy just as the test ends. Reserving the full destination allocation at the start of that copy leaves a release window of `{python} PausedStateChoice.wait_str` $-$ `{python} PausedStateChoice.out_str` $-$ `{python} PausedStateChoice.in_str` $=$ `{python} PausedStateChoice.prefetch_free_str`. This hides restoration delay from this particular return; it does not remove the transfers or their destination allocation. It is a conditional schedule, not a guarantee supplied by a long average wait.
+
+The same comparison applies at every context length and wait. @Fig-vol3-swapping-tradeoff places the test wait among the regimes that the reload round trip and host capacity define when accelerator memory has a competing use. Under that pressure, keeping state pays only for waits shorter than the round trip, which grows linearly with context and is `{python} PausedStateChoice.transfer_str` here. Longer waits favor moving the state, which frees accelerator memory for nearly the whole wait at a resume cost of one reload. Waits measured in minutes, such as human approvals, make the decision turn on host capacity, colder storage, or reconstruction.
+
+::: {#fig-vol3-swapping-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**Keep, Offload, or Park a Paused Trajectory**: Decision regimes over expected tool wait and context length, both on log scales, for a paused trajectory whose accelerator memory has a competing use. The diagonal is the reload round trip, twice the state size divided by host-link bandwidth, so it grows linearly with context; waits to its left end before the state could move out and back. The dashed boundary reflects host-memory pressure rather than a fixed duration, and the marked point is the 32,768-token, 45-second integration test." fig-alt="Log-log chart with expected tool wait from 1 ms to 1 hour on the horizontal axis and context length from 2,048 to 131,072 tokens on the vertical axis. A diagonal line separates a retain region on the left from an offload-to-host-memory region; a dashed vertical line near 1 minute separates a park-or-drop region on the right. A marked point at 32,768 tokens and about 45 seconds is labeled as the worked example."}
+![](images/svg/break_even_swapping_tradeoff.svg)
+:::
 
 ### Uncertain returns and competing transfers
 
 A test can finish earlier than predicted, fail quickly, or run longer. Early completion exposes unfinished restoration. An early prefetch followed by a late return occupies accelerator memory again while no generation occurs. If the trajectory never resumes, the inward copy was unnecessary. A policy therefore needs a forecast of return behavior and an acceptable restoration delay, not just a comparison between the average wait and an isolated copy time.
 
-Transfers also compete. Several paused trajectories may return together, sharing a host-memory channel, device link, or storage path. Summing nominal device-link rates is justified only if the data layout and independent paths actually sustain that aggregate rate. The operator must account for the contested path, its queue, and the accelerator capacity needed to receive the returning states. Restoration measurements without competing traffic do not establish the delay under a burst.
+Transfers also compete. Several paused trajectories may return together, sharing a host-memory channel, device link, or storage path. Summing nominal device-link rates is justified only if the data layout and independent paths actually sustain that aggregate rate.
+
+```{python}
+#| label: kv-return-burst-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CORRELATED-RETURN BURST
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-kvcache-swapping, "Uncertain returns and competing transfers".
+# │ Goal: Size the reload burst when many paused trajectories return together.
+# │ Show: 32 returns; 344 GB; >= 0.67 s at the full aggregate link rate;
+# │       the last reload waits ~32x the isolated reload.
+# │ How: PausedStateChoice state and aggregate link rate (an upper bound on the
+# │      shared path; registry host-memory bandwidth is higher, so links bind).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple, MarkdownStr
+
+class ReturnBurst:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────────
+    returns = 32  # scenario: paused repairs whose tests finish together
+    state = PausedStateChoice.state
+    link = PausedStateChoice.link
+    host_bw = PausedStateChoice.node.host_memory_bw
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
+    burst = returns * state
+    t_burst = (burst / link).to(second)
+    slowdown = (t_burst / PausedStateChoice.copy_in).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(link < host_bw, "The host links, not host memory bandwidth, must bind at the aggregate rate")
+    check(burst < PausedStateChoice.pool, "The returning states must fit the accelerator pool")
+    check(abs(slowdown - returns) < 1e-9, "Serialized reloads scale with the number of returns")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    returns_str = fmt_int(returns)
+    burst_str = MarkdownStr(f"{fmt_int(burst.to(GB).magnitude)} GB")
+    t_burst_str = fmt_time(t_burst, "second", precision=2)
+    slowdown_mult_str = fmt_multiple(round(slowdown))
+```
+
+Suppose `{python} ReturnBurst.returns_str` paused repairs on the node return within the same moment. Their states total about `{python} ReturnBurst.burst_str`, which take at least `{python} ReturnBurst.t_burst_str` to reload even at the full aggregate rate of the eight host links. The last reload in the queue therefore waits about `{python} ReturnBurst.slowdown_mult_str` as long as the isolated `{python} PausedStateChoice.in_str` reload, and any narrower shared path lengthens the burst. The operator must account for the contested path, its queue, and the accelerator capacity needed to receive the returning states. Restoration measurements without competing traffic do not establish the delay under a burst.
 
 Some transfer can overlap other work, but dependencies determine which work. In the full-attention baseline, processing new observation tokens needs access to the relevant historical keys and values. A schedule cannot simply declare all historical reload hidden behind processing that depends on it. Earlier prefetch or a supported layer- or block-wise pipeline can expose overlap; each still needs a valid dependency order and enough memory for the in-flight data.
 
@@ -560,7 +840,9 @@ Some transfer can overlap other work, but dependencies determine which work. In 
 
 Keep, move, and reconstruct compare ways to make the required state available without intentionally deleting selected historical attention entries from the chosen full-attention computation. A different policy may prune entries, use a restricted attention window, or reduce KV precision. Those choices change the computation or its numerical representation and require their own task-quality and implementation validation. They are not universally invalid, but low attention weight on earlier queries does not establish irrelevance to a future query.
 
-For the repair task, a later observation may make an earlier API restriction or test detail relevant again. An approximation must be evaluated on such dependencies, rather than accepted solely because it reduces stored bytes. Conversely, preserving KV does not guarantee a correct repair, bitwise-identical execution, or valid external actions. It preserves derived computation under its compatibility conditions; task verification remains separate.
+Attention sinks show why the simplest approximation fails. Softmax weights at each query sum to one, so later queries deposit attention mass they cannot place elsewhere on the first few positions of the sequence. A sliding window that evicts those initial tokens removes that stabilizing mass and degrades generation once the sequence outgrows the window; retaining a handful of initial tokens beside the recent window restores stable generation over long streams [@xiao2024streamingllm]. Score-based policies go further and keep the entries that have accumulated the most attention [@zhang2023h2o] or that showed importance soon after they were written [@liu2023scissorhands]. Both families assume that past attention predicts future need.
+
+Agent trajectories break that assumption in three recurring ways. A constraint stated early, such as the repair's API restriction or a read-only credential, can draw little attention through many intervening tool turns and then decide the final edit. An identifier such as a commit hash, process ID, or transaction token can stay dormant for many turns until a command must quote it exactly. Tool-schema delimiters in the prefix govern the structure of every later call, yet any single step may attend to them weakly; losing them produces malformed calls rather than a slightly worse answer. An approximation must be evaluated on such dependencies, rather than accepted solely because it reduces stored bytes. Conversely, preserving KV does not guarantee a correct repair, bitwise-identical execution, or valid external actions. It preserves derived computation under its compatibility conditions; task verification remains separate.
 
 The pause policy determines how long reclaimable blocks remain occupied and what demand returns later. Capacity planning must now combine those lifetimes with the physical allocations of all the trajectories sharing the node.
 
@@ -573,6 +855,16 @@ The distinction also changes what counts as demand. Logical contexts may overlap
 ### A resident-fit bound {#sec-vol3-kv-capacity-formulations}
 
 Consider equal-length requests with prompt length $S$ and an output allowance $K_{\max}$. The allocation estimate rounds each private region up to a whole block. Without sharing, each request pays for its entire prompt and output allowance. With an available compatible common prefix, the pool pays for that prefix once and for each request's remaining prompt and private output separately. The common prefix must end on a block boundary for this simple decomposition; a partial shared tail requires the copy-on-write accounting taught earlier.
+
+The pool is what remains of accelerator memory after the weights and runtime reserve,
+
+$$M_{\text{pool}} = M_{\text{HBM}} - M_{\text{weights}} - M_{\text{runtime}}$$ {#eq-mkv-pool}
+
+and a planner withholds a further headroom fraction $\theta$ of it. With blocks of $p$ tokens, a block-aligned common prefix of $S_{\text{common}}$ tokens, and $B$ resident requests, the blocks demanded must fit the usable blocks:
+
+$$\left\lceil \frac{S_{\text{common}}}{p} \right\rceil + B \left\lceil \frac{S + K_{\max} - S_{\text{common}}}{p} \right\rceil \le \left\lfloor \frac{(1-\theta)\, M_{\text{pool}}}{p \, m_{\text{token}}} \right\rfloor$$ {#eq-kv-demand-shared}
+
+The resident-fit bound is the largest $B$ that satisfies @eq-kv-demand-shared. Setting $S_{\text{common}} = 0$ recovers the unshared case, in which every request pays for its whole prompt. The common term is paid once, so sharing helps most when the common prefix is a large fraction of each prompt and the private region, including the output allowance, is small.
 
 The estimate in notebook \ref{nbk-05-sizing-hbm-for-multi-turn-agent} applies those rules to the same node and model used for the footprint calculation. It reserves a complete output allowance rather than predicting an average final length. The additional headroom is a hypothetical planning choice, not an empirically established safety threshold.
 
@@ -665,7 +957,7 @@ class AgentCapacity:
 
 **Problem**: How many complete request snapshots fit when a common prefix is stored once rather than copied for every request?
 
-**Variables**: The Llama-3 70B model uses `{python} AgentCapacity.precision_bits_str`-bit weights and KV state on the DGX H100 node. After weights and the stipulated `{python} AgentCapacity.reserve_str` runtime reserve, its KV pool is `{python} AgentCapacity.pool_str`. Withhold an additional `{python} AgentCapacity.headroom_str`. Each request has `{python} AgentCapacity.context_str` input tokens and an allowance of `{python} AgentCapacity.output_str` output tokens; `{python} AgentCapacity.common_str` input tokens form the common prefix. Blocks hold `{python} AgentCapacity.block_tokens_str` tokens, or `{python} AgentCapacity.block_bytes_str` of KV state across the node.
+**Variables**: The Llama-3 70B model uses `{python} AgentCapacity.precision_bits_str`-bit weights and KV state on the DGX H100 node. After weights and the stipulated `{python} AgentCapacity.reserve_str` runtime reserve, its KV pool (@eq-mkv-pool) is `{python} AgentCapacity.pool_str`. Withhold an additional `{python} AgentCapacity.headroom_str`. Each request has `{python} AgentCapacity.context_str` input tokens and an allowance of `{python} AgentCapacity.output_str` output tokens; `{python} AgentCapacity.common_str` input tokens form the common prefix. Blocks hold `{python} AgentCapacity.block_tokens_str` tokens, or `{python} AgentCapacity.block_bytes_str` of KV state across the node.
 
 **Math**: Divide the remaining pool by bytes per block and round down, giving `{python} AgentCapacity.usable_blocks_str` usable blocks. An unshared request occupies `{python} AgentCapacity.unshared_blocks_str` blocks (`{python} AgentCapacity.unshared_bytes_str`). Dividing the usable block count by that request count and rounding down gives `{python} AgentCapacity.fit_unshared_str` resident requests. With sharing, subtract the common prefix's `{python} AgentCapacity.common_blocks_str` blocks (`{python} AgentCapacity.common_bytes_str`) once, then divide by `{python} AgentCapacity.private_blocks_str` private blocks per request (`{python} AgentCapacity.private_bytes_str`). Rounding down gives `{python} AgentCapacity.fit_shared_str` resident requests.
 
@@ -677,7 +969,7 @@ Real requests have different lengths and overlap patterns. An admission policy m
 
 ### Residence time and service rate {#sec-vol3-kv-workload-dynamics}
 
-A fit bound describes simultaneous occupancy. Turning it into a rate requires a time model with the same accounting boundary. For a stable flow of requests through resident storage, Little's law relates the mean resident request count to the arrival rate multiplied by the mean time each request occupies that storage. Here each counted request is one generation-and-tool-wait cycle, not an entire repair task. In a stationary regime without accumulating unfinished work, arrivals and completed cycles have the same long-run rate.
+A fit bound describes simultaneous occupancy. Turning it into a rate requires a time model with the same accounting boundary. For a stable flow of requests through resident storage, Little's law [@little1961] states that the mean resident request count $\bar{N}$ equals the arrival rate $\lambda$ multiplied by the mean time $\bar{W}$ each request occupies that storage, $\bar{N} = \lambda \bar{W}$; rearranged as $\lambda = \bar{N} / \bar{W}$, it turns a slot count into a rate. Here each counted request is one generation-and-tool-wait cycle, not an entire repair task. In a stationary regime without accumulating unfinished work, arrivals and completed cycles have the same long-run rate.
 
 For a deliberately simplified calculation, reserve an equal unshared slot for each admitted cycle throughout its resident interval, using the preceding notebook's `{python} AgentCapacity.fit_unshared_str`-slot bound. Stipulate `{python} AgentCapacity.generation_str` of generation residence and `{python} AgentCapacity.wait_str` of tool waiting. Retaining every slot through both phases gives `{python} AgentCapacity.retained_time_str` of residence. Dividing the slot count by that residence time yields a memory-only upper constraint of `{python} AgentCapacity.retained_rate_value_str` turns/s. If the entire slot can instead be released for the wait, dividing by generation residence alone loosens the constraint to `{python} AgentCapacity.released_rate_value_str` turns/s.
 
