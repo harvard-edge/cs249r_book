@@ -38,7 +38,7 @@ An agent that works across days depends on what it kept from earlier sessions: a
 
 - Classify persistent records by their source, evidential role, and relationship to derived search representations
 - Specify a retrieval contract that bounds access, returned content, resource use, and required freshness
-- Choose between pre-staged evidence, a direct read, and model-directed search by how much of the information need the task already names
+- Choose among pre-staged evidence, a direct read, and model-directed search from how much of the need the task names
 - Select retrieval methods for an information need and estimate multi-hop evidence against a serialized-token budget
 - Design a memory write policy for admission, correction, supersession, expiry, and deletion
 - Explain version-aware exclusion and fallback without mistaking removal of stale candidates for complete fresh retrieval
@@ -1393,42 +1393,53 @@ Every quantity below is a hypothetical given chosen for round arithmetic, not a 
 (b) Find the largest rank $r$ at which a candidate appearing at rank $r$ in both lists still outscores a candidate at rank 1 in only one list, for $k_{\text{rrf}} = 60$ and for $k_{\text{rrf}} = 1$.
 (c) Candidate Q is the reproducer test the agent must read. Is there any positive $k_{\text{rrf}}$ at which Q outranks P? How does Q reach the staged set at $k_{\text{rrf}} = 60$, and what should the runtime do instead of relying on that?
 
-**4. Fitting an index in memory (Intermediate).** A research store holds $N = 50{,}000{,}000$ passage vectors of dimension $d = 768$ in FP16 on a host with 64 GB of memory available for the index. The candidate designs are an exact scan of the raw vectors, HNSW with 32 eight-byte links per vector, and IVF-PQ with $m = 96$ one-byte subcodes, $C = 10{,}000$ FP16 coarse centroids, and an 8-byte record identifier per stored code.
+**4. How much the task names (Intermediate).** Transfer the choice of retrieval policy (@sec-vol3-long-term-memory-agentic-retrieval) to the research agent (\ref{lhs-vol3-research-agent}), whose store holds notes distilled from fetched pages. Every model round takes 4 s, and retrieval operations are fast enough to ignore. Each note serializes to 600 tokens with its metadata, the retrieval allowance is 6,144 tokens, and everything retrieved stays in context until the answer. Three policies are available. A *direct read* stages exactly the records the task names, with no extra round. *Pre-staging* stages the top 8 ranked notes before the first call; when that set lacks needed evidence, the model falls back to probing for what is missing. A *model-directed probe* costs one model round and returns 2 notes. Every policy ends with one answer round. Three tasks arrive:
+
+- R1: “Reconcile pinned notes `n-4412` and `n-4413`.” The evidence is those two notes. Pre-staging captures both with probability 0.9, and a miss costs one probe round. Directed search needs one probe round.
+- R2: “What has earlier work in this project established about battery fade under fast charging?” The evidence is three unnamed notes. Pre-staging captures all three with probability 0.8, and a miss costs one probe round. Directed search needs two probe rounds.
+- R3: “Trace where the 40 percent figure in `n-4412` came from.” The evidence is `n-4412` and three further notes, each found only from a citation in the one before. Pre-staging includes `n-4412` but captures the whole chain with probability 0.1, and a miss costs three dependent probe rounds. Directed search needs four dependent probe rounds.
+
+(a) For R1, compute the expected latency and staged tokens of each policy. Which policy wins, and what does pre-staging add that the research agent's binding constraint makes costly?
+(b) For R2, compare pre-staging with directed search in expected latency, expected staged tokens, and worst-case staged tokens against the allowance. Which should the runtime choose?
+(c) For R3, compute the same quantities for pre-staging and for directed search. Why is pre-staging's lower expected latency not a reason to choose it?
+(d) Design a policy for R3 that combines two of the three, and compute its latency and staged tokens. State the selection rule the three tasks illustrate, and name the property of a returned record that stays the same whichever policy retrieves it.
+
+**5. Fitting an index in memory (Intermediate).** A research store holds $N = 50{,}000{,}000$ passage vectors of dimension $d = 768$ in FP16 on a host with 64 GB of memory available for the index. The candidate designs are an exact scan of the raw vectors, HNSW with 32 eight-byte links per vector, and IVF-PQ with $m = 96$ one-byte subcodes, $C = 10{,}000$ FP16 coarse centroids, and an 8-byte record identifier per stored code.
 
 (a) Which designs fit the memory budget? Compute the resident bytes of each.
 (b) For IVF-PQ, give the subvector dimension, the per-query lookup-table size with FP32 entries, and the compression ratio over the FP16 vectors.
 (c) With $n_{\text{probe}} = 16$ and evenly filled cells, how many bytes of codes does one query scan, and how does that compare with the bytes read to compare the query against every coarse centroid? What does the comparison suggest about the next optimization?
 (d) Full-precision re-scoring of a 100-candidate shortlist reads vectors from secondary storage. How many bytes does that fetch, and why is it the price of the design's recall rather than an avoidable overhead?
 
-**5. Synchronous re-indexing in a repair session (Intermediate).** Each edit in a repair session changes 5 files and 15 indexed chunks. Stipulated costs are 4 ms to parse a file, 2 ms to update one chunk's postings, 40 ms per local embedding batch of up to 8 chunks, 150 ms per batch on a remote service, 50 ns to write an exclusion entry per file, and 30 ns to check one of 40 candidates per query. A session performs 60 edits, and the model's next dependent query arrives 2 s after each edit.
+**6. Synchronous re-indexing in a repair session (Intermediate).** Each edit in a repair session changes 5 files and 15 indexed chunks. Stipulated costs are 4 ms to parse a file, 2 ms to update one chunk's postings, 40 ms per local embedding batch of up to 8 chunks, 150 ms per batch on a remote service, 50 ns to write an exclusion entry per file, and 30 ns to check one of 40 candidates per query. A session performs 60 edits, and the model's next dependent query arrives 2 s after each edit.
 
 (a) What write-path time does synchronous re-indexing add per edit with the local service, with the remote service, and over the whole session?
 (b) What does exclusion add to the write path and to each query?
 (c) Under background re-indexing with exclusion, is any dependent query served while replacement entries are missing?
 (d) A new runtime issues an automatic verification search 50 ms after every edit. Which queries now fall inside the rebuild interval, what does the retrieval layer return for them, and does that change justify synchronous re-indexing?
 
-**6. Deletion deadlines in a support store (Intermediate).** Transfer the invalidation analysis to the support agent (\ref{lhs-vol3-support-agent}). Its store holds 80,000,000 memory vectors under an HNSW graph, kept at constant size because inserts balance removals. Each day 2,000 customers request full deletion of their 40 records apiece, and 20,000 customers supersede one preference, tombstoning its old vector. Compaction is triggered at $\rho_{\text{dead}} = 0.10$, rebuilds the live graph at a stipulated 20,000 vectors per second, and each tombstone occupies 16 bytes of an in-memory exclusion set. Retention policy requires deleted content to be physically removed within 30 days.
+**7. Deletion deadlines in a support store (Intermediate).** Transfer the invalidation analysis to the support agent (\ref{lhs-vol3-support-agent}). Its store holds 80,000,000 memory vectors under an HNSW graph, kept at constant size because inserts balance removals. Each day 2,000 customers request full deletion of their 40 records apiece, and 20,000 customers supersede one preference, tombstoning its old vector. Compaction is triggered at $\rho_{\text{dead}} = 0.10$, rebuilds the live graph at a stipulated 20,000 vectors per second, and each tombstone occupies 16 bytes of an in-memory exclusion set. Retention policy requires deleted content to be physically removed within 30 days.
 
 (a) How many days until the $\rho_{\text{dead}}$ trigger fires, and what is $\rho_{\text{dead}}$ when the retention deadline arrives? Which constraint sets the compaction schedule?
 (b) How long does one compaction take, and how large is the exclusion set just before it?
 (c) Each superseded preference also appears in two session summaries of about 1,000 tokens each. How many summary tokens per day would regeneration cost, and what cheaper treatment does the write lifecycle allow for a summary that is only historical?
 (d) The repair agent's binding hazard is its own edits making indexed copies stale. Name the support agent's binding hazard and the mechanism in this chapter that answers it.
 
-**7. Typed edges as a budget control (Intermediate).** A structural graph around a seed function has, on average, 4 outgoing call edges and 10 import edges per node. The retrieval allowance is 8,192 tokens, each node record serializes to 200 tokens, and edges plus the envelope take 150 tokens. Treat the neighborhood as an exact tree with no repeated nodes.
+**8. Typed edges as a budget control (Intermediate).** A structural graph around a seed function has, on average, 4 outgoing call edges and 10 import edges per node. The retrieval allowance is 8,192 tokens, each node record serializes to 200 tokens, and edges plus the envelope take 150 tokens. Treat the neighborhood as an exact tree with no repeated nodes.
 
 (a) Through what depth does a traversal restricted to call edges fit, and through what depth does one that also follows imports fit?
 (b) What is the largest number of complete nodes the allowance holds?
 (c) Could trimming node records to 120 tokens let a depth-3 call-only traversal fit? What is the largest node record that would?
 (d) Why would the exact-tree count overstate the staged size of a real repository graph, and why is that no reason to drop the depth bound?
 
-**8. Does a dense index pay for itself? (Advanced).** Two memory policies serve the same repair workload with one attempt per task. Policy L, lexical plus structural retrieval, accepts 55 percent of tasks at \$0.80 per attempt. Policy D adds dense retrieval, accepts 62 percent, and stages more evidence, raising the attempt cost to \$0.84. It also re-embeds 20 chunks for each of 6 edits per task at \$0.0005 per chunk and carries \$0.01 per task of amortized vector storage. Its encoder processes 50 chunks per second.
+**9. Does a dense index pay for itself? (Advanced).** Two memory policies serve the same repair workload with one attempt per task. Policy L, lexical plus structural retrieval, accepts 55 percent of tasks at \$0.80 per attempt. Policy D adds dense retrieval, accepts 62 percent, and stages more evidence, raising the attempt cost to \$0.84. It also re-embeds 20 chunks for each of 6 edits per task at \$0.0005 per chunk and carries \$0.01 per task of amortized vector storage. Its encoder processes 50 chunks per second.
 
 (a) Compute $C_{\text{eff}}$ for both policies with @eq-vol3-cost-per-accepted-task. Which is cheaper per accepted task?
 (b) What acceptance rate must Policy D reach to break even with Policy L?
 (c) How long does each edit leave the dense index without current entries, and what must the retrieval layer do for queries in that window?
 (d) The vendor of Policy D's encoder reports that Recall@10 rose from 0.60 to 0.80 on a static snapshot. Critique the claim as evidence for adopting Policy D, and design the trial that would settle the decision.
 
-**9. Redesigning a freshness scheme (Advanced).** A team proposes to keep a repair index current with a per-file dirty flag that is set when an edit commits and cleared when a rebuild finishes, plus a five-minute age limit after which any entry is re-indexed. Every replica applies each primary update exactly 2 s after it commits there, and a publication replaces the file's current entries. Consider one timeline. At $t = -0.1$ s worker W1 begins indexing `src/pool.py` at `r17`. At $t = 0$ the agent commits `r18` and the flag is set. At $t = 0.5$ s worker W2 publishes `r18` entries and clears the flag. At $t = 0.7$ s W1 finishes and publishes its `r17` entries. The agent queries the file every 3 s from $t = 3$ s onward.
+**10. Redesigning a freshness scheme (Advanced).** A team proposes to keep a repair index current with a per-file dirty flag that is set when an edit commits and cleared when a rebuild finishes, plus a five-minute age limit after which any entry is re-indexed. Every replica applies each primary update exactly 2 s after it commits there, and a publication replaces the file's current entries. Consider one timeline. At $t = -0.1$ s worker W1 begins indexing `src/pool.py` at `r17`. At $t = 0$ the agent commits `r18` and the flag is set. At $t = 0.5$ s worker W2 publishes `r18` entries and clears the flag. At $t = 0.7$ s W1 finishes and publishes its `r17` entries. The agent queries the file every 3 s from $t = 3$ s onward.
 
 (a) Ignoring replicas, under the proposal, for how long are `r17` entries served as current, and how many of the agent's queries can receive them?
 (b) Assign generation intervals to the `r17` and `r18` entries and apply @eq-vol3-index-validity with $g_q$ = `r18`. Which entries are admitted, and what must W1's publication check do?
