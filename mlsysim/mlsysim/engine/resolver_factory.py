@@ -32,20 +32,20 @@ class ResolverFactory:
         # recursive because resolvers form a hierarchy (BaseResolver ->
         # BaseSolver/ForwardModel/BaseOptimizer -> concrete classes); "Base"-
         # prefixed intermediates are skipped as non-instantiable scaffolding.
-        from . import solver
+        from . import solvers
         def register_subclasses(base_class):
             for subclass in base_class.__subclasses__():
                 if not subclass.__name__.startswith("Base"):
                     cls._registry[subclass.__name__] = subclass
                 register_subclasses(subclass)
 
-        register_subclasses(solver.BaseResolver)
+        register_subclasses(solvers.BaseResolver)
         
         # 2. Register Third-Party Plugins
         from ..core.registry.plugin_manager import solver_registry
         plugins = solver_registry.all()
         for name, plugin_class in plugins.items():
-            if issubclass(plugin_class, solver.BaseResolver):
+            if issubclass(plugin_class, solvers.BaseResolver):
                 cls._registry[name] = plugin_class
             else:
                 logger.warning(f"Plugin '{name}' is not a subclass of BaseResolver and will be ignored.")

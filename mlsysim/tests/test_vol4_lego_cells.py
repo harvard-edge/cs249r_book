@@ -51,6 +51,7 @@ def test_vol4_ch01_tempe_idealized_constant_speed_budget():
     check(abs(d_lag.to(meter).magnitude - 19.2) < 0.1, f"Unexpected lag displacement: {d_lag}")
     check(abs(d_brake.to(meter).magnitude - 20.5) < 0.1, f"Unexpected braking distance: {d_brake}")
     check(abs(d_remaining.to(meter).magnitude - 3.6) < 0.1, f"Unexpected remaining travel: {d_remaining}")
+    check(abs(kinetic_energy.to(joule).magnitude - 387072.0) < 1.0, f"Unexpected kinetic energy: {kinetic_energy}")
     check(
         d_brake > d_remaining,
         "Idealized stopping distance should exceed remaining travel",
@@ -191,6 +192,7 @@ def test_vol4_ch14_intervention_takeover_budget():
     check(abs(d_drift_ool.magnitude - 10.0) < 0.01, f"Unexpected out-of-loop drift: {d_drift_ool}")
     check(abs(d_stop_ool.magnitude - 15.0) < 0.01, f"Unexpected out-of-loop stop: {d_stop_ool}")
     check(abs(drift_expansion_ratio.magnitude - 13.33) < 0.1, f"Unexpected drift expansion: {drift_expansion_ratio}")
+    check(abs(stop_expansion_ratio.magnitude - 2.61) < 0.05, f"Unexpected stop expansion: {stop_expansion_ratio}")
 
 
 def test_vol4_ch04_amr_watchdog_lease():

@@ -1769,3 +1769,380 @@ FRANKA_CLASS_STRAIN_WAVE_JOINT = _est(
     ),
     verified="2026-09-28",
 )
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-28 additions (vol2 registry integration). Add-only: every record
+# below is new; no existing record above was changed.
+# ---------------------------------------------------------------------------
+_V = "2026-09-28"
+
+
+def _report(id: str, ref: str, url: str, *, notes: str | None = None) -> Provenance:
+    """Creates a Provenance object for an industry / government report."""
+    return Provenance(
+        id=id,
+        kind=ProvenanceKind.INDUSTRY_REPORT,
+        ref=ref,
+        url=url,
+        verified=_V,
+        notes=notes,
+    )
+
+
+# --- Training-state accounting ---
+ZERO_MIXED_PRECISION_ADAM_ACCOUNTING = _lit(
+    "prov:rajbhandari-zero-2020",
+    "Rajbhandari et al. (2020), ZeRO: Memory Optimizations Toward Training Trillion Parameter Models",
+    url="https://arxiv.org/abs/1910.02054",
+    verified=_V,
+    notes=(
+        "Mixed-precision Adam model state = 2 (FP16 weights) + 2 (FP16 gradients) + K=12 "
+        "(FP32 master weights + Adam m and v) = 16 bytes/parameter. A resumable checkpoint "
+        "omits the gradients: 16 - 2 = 14 bytes/parameter."
+    ),
+)
+PATTERSON_CARBON_2021 = _lit(
+    "prov:patterson-carbon-2021",
+    "Patterson et al. (2021), Carbon Emissions and Large Neural Network Training",
+    url="https://arxiv.org/abs/2104.10350",
+    verified=_V,
+    notes=(
+        "GPT-3 training (Table 4 / App. A): 10,000 V100 GPUs (NVIDIA-suggested count), "
+        "24.6 TFLOP/s per GPU measured by OpenAI, ~14.8 days derived, 330 W system power "
+        "per GPU, PUE 1.10, 1,287 MWh, 552.1 tCO2e (net, metric tonnes)."
+    ),
+)
+
+# --- Model papers ---
+DUBEY_LLAMA3_2024 = _lit(
+    "prov:dubey-llama3-2024",
+    "Dubey et al. (2024), The Llama 3 Herd of Models",
+    url="https://arxiv.org/abs/2407.21783",
+    verified=_V,
+    notes=(
+        "Sec. 3.3: 405B trained on up to 16K H100 GPUs; Table 4: 43% BF16 MFU on 8,192 GPUs, "
+        "41% on 16,384 GPUs; Sec. 3.3.4: 54-day snapshot with 466 job interruptions "
+        "(47 planned, 419 unexpected), >90% effective training time, manual intervention "
+        "required only three times."
+    ),
+)
+DOSOVITSKIY_VIT_2021 = _lit(
+    "prov:dosovitskiy-vit-2021",
+    "Dosovitskiy et al. (2021), An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale",
+    url="https://arxiv.org/abs/2010.11929",
+    verified=_V,
+    notes="ViT-L/16: 307M parameters; 87.76% ImageNet top-1 after JFT-300M pre-training (Table 2).",
+)
+TAN_EFFICIENTNET_2019 = _lit(
+    "prov:tan-efficientnet-2019",
+    "Tan & Le (2019), EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks",
+    url="https://arxiv.org/abs/1905.11946",
+    verified=_V,
+    notes="EfficientNet-B4: 19M parameters, 4.2B FLOPS (paper counts multiply-adds), 82.9% ImageNet top-1 (Table 2).",
+)
+HOWARD_MOBILENETV3_2019 = _lit(
+    "prov:howard-mobilenetv3-2019",
+    "Howard et al. (2019), Searching for MobileNetV3",
+    url="https://arxiv.org/abs/1905.02244",
+    verified=_V,
+    notes="MobileNetV3-Large 1.0: 5.4M parameters, 219M multiply-adds, 75.2% ImageNet top-1 (Table 3).",
+)
+
+# --- Cited training runs (Literature.TrainingRuns) ---
+KRIZHEVSKY_ALEXNET_2012 = _lit(
+    "prov:krizhevsky-alexnet-2012",
+    "Krizhevsky, Sutskever & Hinton (2012), ImageNet Classification with Deep Convolutional Neural Networks",
+    url="https://papers.nips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html",
+    verified=_V,
+    notes="Trained for five to six days on two NVIDIA GTX 580 3GB GPUs.",
+)
+NARAYANAN_MEGATRON_2021 = _lit(
+    "prov:narayanan-megatron-2021",
+    "Narayanan et al. (2021), Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM",
+    url="https://arxiv.org/abs/2104.04473",
+    verified=_V,
+    notes="1T-parameter model on 3,072 A100 GPUs at 502 PFLOP/s aggregate, 52% of theoretical peak per GPU.",
+)
+GOYAL_IMAGENET_1HR_2017 = _lit(
+    "prov:goyal-imagenet-1hr-2017",
+    "Goyal et al. (2017), Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour",
+    url="https://arxiv.org/abs/1706.02677",
+    verified=_V,
+    notes="ResNet-50 on ImageNet in one hour on 256 GPUs with a minibatch of 8,192 images.",
+)
+ZHANG_OPT_2022 = _lit(
+    "prov:zhang-opt-2022",
+    "Zhang et al. (2022), OPT: Open Pre-trained Transformer Language Models",
+    url="https://arxiv.org/abs/2205.01068",
+    verified=_V,
+    notes=(
+        "OPT-175B trained on 992 80GB A100 GPUs at up to 147 TFLOP/s per GPU. Hardware "
+        "failures caused at least 35 manual restarts and the cycling of over 100 hosts over "
+        "2 months; the authors estimate 70+ additional automatic restarts (Sec. 2.5)."
+    ),
+)
+MICROSOFT_OPENAI_SUPERCOMPUTER_2020 = _report(
+    "prov:microsoft-openai-supercomputer-2020",
+    "Microsoft (2020), Microsoft announces new supercomputer, lays out vision for future AI work",
+    "https://news.microsoft.com/source/features/ai/openai-azure-supercomputer/",
+    notes="Azure supercomputer built for OpenAI: more than 285,000 CPU cores and 10,000 GPUs.",
+)
+TOUVRON_LLAMA_2023 = _lit(
+    "prov:touvron-llama-2023",
+    "Touvron et al. (2023), LLaMA: Open and Efficient Foundation Language Models",
+    url="https://arxiv.org/abs/2302.13971",
+    verified=_V,
+    notes="The 65B model was trained on 2,048 A100 80GB GPUs.",
+)
+DEEPSEEK_V3_TRAINING_CLUSTER = _lit(
+    "prov:deepseek-v3-training-cluster-2024",
+    "DeepSeek-AI (2024), DeepSeek-V3 Technical Report",
+    url="https://arxiv.org/abs/2412.19437",
+    verified=_V,
+    notes="DeepSeek-V3 was trained on a cluster of 2,048 NVIDIA H800 GPUs.",
+)
+
+# --- Measured fleet operations (Literature.FleetOperations) ---
+KOKOLIS_RSC_RELIABILITY_2025 = _lit(
+    "prov:kokolis-rsc-reliability-2025",
+    "Kokolis et al. (2025), Revisiting Reliability in Large-Scale Machine Learning Research Clusters",
+    url="https://arxiv.org/abs/2410.21680",
+    verified=_V,
+    notes=(
+        "Measured MTTF: 1,024-GPU jobs 7.9 hours; 8-GPU jobs 47.7 days (1,144.8 hours). "
+        "Projected MTTF: 16,384-GPU jobs 1.8 hours; 131,072-GPU jobs 0.23 hours."
+    ),
+)
+JEON_PHILLY_2019 = _lit(
+    "prov:jeon-philly-2019",
+    "Jeon et al. (2019), Analysis of Large-Scale Multi-Tenant GPU Clusters for DNN Training Workloads (USENIX ATC)",
+    url="https://arxiv.org/abs/1901.05758",
+    verified=_V,
+    notes="Hardware utilization of GPUs in use is only around 52% on average (Microsoft Philly trace).",
+)
+LI_PERLMUTTER_2023 = _lit(
+    "prov:li-perlmutter-2023",
+    "Li et al. (2023), Analyzing Resource Utilization in an HPC System: A Case Study of NERSC's Perlmutter",
+    url="https://arxiv.org/abs/2301.05145",
+    verified=_V,
+    notes="About 50% of GPU-enabled jobs used up to 25% of the GPU memory (one-month usage analysis).",
+)
+SIGLER_OPENAI_K8S_2021 = _report(
+    "prov:sigler-openai-k8s-2021",
+    "OpenAI (2021), Scaling Kubernetes to 7,500 nodes",
+    "https://openai.com/index/scaling-kubernetes-to-7500-nodes/",
+)
+
+# --- Datacenter electricity projections (Literature.DatacenterElectricity) ---
+LBNL_US_DATACENTER_ENERGY_2024 = _report(
+    "prov:lbnl-us-datacenter-energy-2024",
+    "Shehabi et al. (2024), 2024 United States Data Center Energy Usage Report (LBNL)",
+    "https://eta.lbl.gov/publications/2024-lbnl-data-center-energy-usage-report",
+    notes="US data centers: ~58 TWh (2014), ~176 TWh (2023), 325-580 TWh projected for 2028.",
+)
+IEA_ENERGY_AND_AI_2025 = _report(
+    "prov:iea-energy-and-ai-2025",
+    "IEA (2025), Energy and AI",
+    "https://www.iea.org/reports/energy-and-ai",
+    notes="Global data-center electricity projected to ~945 TWh by 2030, just under 3% of global electricity.",
+)
+
+# --- Hardware additions ---
+HOPPER_MICROBENCHMARK_LATENCY = _lit(
+    "prov:luo-hopper-microbenchmark-2024",
+    "Luo et al. (2024), Benchmarking and Dissecting the Nvidia Hopper GPU Architecture",
+    url="https://arxiv.org/abs/2402.13499",
+    verified=_V,
+    notes=(
+        "Table IV (H800 PCIe, Hopper): shared memory 29.0 cycles, L1 40.7, L2 263.0, "
+        "global 478.8 cycles; max clock 1,755 MHz (Table III). Nanosecond values are "
+        "derived as cycles / 1.755 GHz."
+    ),
+)
+LITHOGRAPHY_RETICLE_FIELD = _conv(
+    "prov:lithography-reticle-field",
+    "Standard 26 mm x 33 mm full-field exposure of 4x-reduction steppers/scanners (DUV and 0.33-NA EUV)",
+    notes="Area 858 mm^2 is derived (26 x 33). Sets the maximum single-die size without stitching.",
+)
+ST_STM32F407_DATASHEET = _ds(
+    "prov:st-stm32f407-datasheet",
+    "STMicroelectronics STM32F405xx/STM32F407xx datasheet (DS8626)",
+    "https://www.st.com/resource/en/datasheet/stm32f407vg.pdf",
+    verified=_V,
+    notes=(
+        "Arm Cortex-M4 with FPU at up to 168 MHz; up to 1 MB Flash; 192 KB SRAM including "
+        "64 KB core-coupled memory. peak_flops (1 single-precision FLOP per cycle) and "
+        "memory.bandwidth (32-bit AHB at 168 MHz) are derived, not datasheet figures."
+    ),
+)
+GOOGLE_TPU_V6E_ICI = _ds(
+    "prov:google-tpu-v6e-ici",
+    "Google Cloud TPU v6e system architecture",
+    "https://docs.cloud.google.com/tpu/docs/v6e",
+    verified=_V,
+    notes="Interchip interconnect bandwidth per chip: 800 GBps (Google quotes ICI as a bidirectional total).",
+)
+NVIDIA_HOPPER_HBM_STACKS = _ds(
+    "prov:nvidia-hopper-blackwell-hbm-stacks",
+    "NVIDIA Hopper Architecture In-Depth; NVIDIA Blackwell architecture technical brief",
+    "https://developer.nvidia.com/blog/nvidia-hopper-architecture-in-depth/",
+    verified=_V,
+    notes="H100 SXM5: five active HBM3 stacks (six sites) for 80 GB; B200: eight HBM3e stacks for 192 GB.",
+)
+DGX_H100_USER_GUIDE_PHYSICAL = _ds(
+    "prov:nvidia-dgx-h100-user-guide-physical",
+    "NVIDIA DGX H100/H200 User Guide: hardware overview and physical specifications",
+    "https://docs.nvidia.com/dgx/dgxh100-user-guide/introduction-to-dgxh100.html",
+    verified=_V,
+    notes="Four third-generation NVSwitch chips; 18 fourth-generation NVLink links per GPU; system weight 287.6 lb (130.45 kg).",
+)
+
+DGX_H100_USER_GUIDE_POWER = _ds(
+    "prov:nvidia-dgx-h100-user-guide-power",
+    "NVIDIA DGX H100/H200 User Guide: hardware overview, power supplies and networking",
+    "https://docs.nvidia.com/dgx/dgxh100-user-guide/introduction-to-dgxh100.html",
+    verified="2026-09-29",
+    notes=("Six 3.3 kW PSUs (3300 W @ 200-240 V, 16 A) in 4+2 redundancy; 10.2 kW max system power; "
+           "runs at reduced performance on three PSUs, boots only with at least three. Networking: eight "
+           "single-port ConnectX-7 InfiniBand cards (compute) plus two dual-port ConnectX-7 Ethernet cards "
+           "(storage/in-band); nics_per_node counts only the eight compute cards."),
+)
+
+# --- Composed systems ---
+NVIDIA_DGX_SUPERPOD_H100_RA = _ds(
+    "prov:nvidia-dgx-superpod-h100-ra",
+    "NVIDIA DGX SuperPOD Reference Architecture (DGX H100)",
+    "https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-h100/latest/",
+    verified=_V,
+    notes="One scalable unit (SU) = 32 DGX H100 nodes (256 GPUs) on an NDR 400 Gb/s InfiniBand compute fabric.",
+)
+META_GENAI_INFRA_2024 = _report(
+    "prov:meta-genai-infrastructure-2024",
+    "Meta Engineering (2024), Building Meta's GenAI Infrastructure",
+    "https://engineering.fb.com/2024/03/12/data-center-engineering/building-metas-genai-infrastructure/",
+    notes=(
+        "Two 24,576-GPU H100 clusters on Grand Teton (8 GPUs per server): one on a 400 Gb/s "
+        "RoCE fabric, one on NVIDIA Quantum-2 400 Gb/s InfiniBand."
+    ),
+)
+META_RSC_2022 = _report(
+    "prov:meta-rsc-2022",
+    "Meta AI (2022), Introducing the AI Research SuperCluster",
+    "https://ai.meta.com/blog/ai-rsc/",
+    notes="Full build-out: 16,000 A100 GPUs in DGX A100 systems (2,000 nodes) on a 200 Gb/s InfiniBand fabric.",
+)
+FABRIC_OVERSUBSCRIPTION_PROFILES = _est(
+    "prov:fabric-oversubscription-profiles",
+    "Reference 2:1 and 4:1 oversubscribed fat-tree profiles",
+    notes="Documented teaching profiles: an NDR fabric with 2:1 or 4:1 leaf downlink-to-uplink oversubscription; no single field source.",
+    verified=_V,
+)
+
+# --- Economics ---
+NETWORK_CABLING_PRICES_2024 = _est(
+    "prov:network-cabling-prices-2024",
+    "Illustrative 400G-class link-media prices (DAC, AOC, optical link)",
+    notes="Documented teaching assumption: ~$50 per DAC, ~$500 per AOC or per optical link; order-of-magnitude list prices, not a vendor quote.",
+    verified=_V,
+)
+ML_ENGINEER_LOADED_RATE = _est(
+    "prov:ml-engineer-loaded-rate",
+    "Illustrative fully loaded ML engineer cost per hour",
+    notes="Documented teaching assumption: $150/hour fully loaded (salary, benefits, overhead); no field source.",
+    verified=_V,
+)
+CLOUD_COMMITMENT_DISCOUNT_RANGES = _est(
+    "prov:cloud-commitment-discount-ranges",
+    "Illustrative public-cloud spot and reserved discount ranges versus on-demand",
+    notes="Documented teaching ranges: spot/preemptible 60-90% off on-demand; 1-3 year reserved/committed 40-60% off. Providers advertise 'up to' figures; realized discounts vary by region and instance.",
+    verified=_V,
+)
+CLOUD_PREEMPTION_NOTICE = _ds(
+    "prov:cloud-preemption-notice",
+    "AWS EC2 Spot Instance interruption notices; Google Cloud preemptible VM instances",
+    "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-instance-termination-notices.html",
+    verified=_V,
+    notes="AWS Spot gives a two-minute interruption notice; Google Cloud preemptible/Spot VMs give 30 seconds (https://cloud.google.com/compute/docs/instances/preemptible).",
+)
+SCHEDULER_PREEMPTION_CASE_STUDY = _est(
+    "prov:scheduler-preemption-case-study",
+    "Reference scheduler/preemption goodput loss for a shared 100K-GPU fleet case study",
+    notes="Documented teaching assumption: 17% of fleet time lost to scheduling and preemption; with the four OVERHEAD_BUDGETS fractions it sums to a 0.60 goodput ratio.",
+    verified=_V,
+)
+GPT3_TRAINING_COST_EST = _est(
+    "prov:gpt3-training-cost-estimate",
+    "Lambda Labs (2020), OpenAI's GPT-3 Language Model: A Technical Overview (~$4.6M on V100 cloud instances)",
+    url="https://lambdalabs.com/blog/demystifying-gpt-3",
+    notes="Third-party estimate at 2020 cloud prices; OpenAI did not disclose the training cost.",
+    verified=_V,
+)
+EPA_WATERSENSE_HOUSEHOLD = _est(
+    "prov:epa-watersense-household",
+    "US EPA WaterSense: average American family uses more than 300 gallons of water per day at home",
+    url="https://www.epa.gov/watersense/how-we-use-water",
+    notes="300 gal/day x 365 = ~414,000 L/year; the 380,000-450,000 L band brackets that household figure.",
+    verified=_V,
+)
+
+# --- Reusable scenario anchors (ReferenceStats) ---
+RECOMMENDER_AT_SCALE_PROFILE = _est(
+    "prov:recommender-at-scale-profile",
+    "Reference industrial recommender serving profile (DLRM-class)",
+    notes=(
+        "Documented teaching assumption: 100 ms P99 end-to-end SLO, embedding tables of at "
+        "least 10 TB, 10^7 QPS platform traffic, a 100 TB platform-wide resident embedding "
+        "footprint across many models, and a 10-trillion-identifier entity catalog. "
+        "Architecture per Naumov et al. (2019)."
+    ),
+    verified=_V,
+)
+LOCAL_COMPUTE_EFFICIENCY_ASSUMPTION = _est(
+    "prov:local-compute-efficiency-assumption",
+    "Reference per-accelerator compute efficiency for large-model training",
+    notes="Documented teaching assumption: 45% of peak achieved per accelerator before communication losses; no field source.",
+    verified=_V,
+)
+DATA_PARALLEL_SCALING_SCENARIO = _est(
+    "prov:data-parallel-scaling-scenario",
+    "Reference single-node data-parallel scaling scenario (GPT-2 class)",
+    notes="Documented teaching assumption: 1.8 s single-GPU step, 16 samples per GPU, 25 h single-GPU training time; no field source.",
+    verified=_V,
+)
+COLLECTIVE_COMMUNICATION_SCENARIO = _est(
+    "prov:collective-communication-scenario",
+    "Reference collective-communication scenario",
+    notes="Documented teaching assumption: 1 GB gradient buffer per AllReduce and a 100,000-step training run; no field source.",
+    verified=_V,
+)
+NETWORK_ECONOMICS_SCENARIO = _est(
+    "prov:network-economics-scenario",
+    "Reference cluster network-economics scenario",
+    notes="Documented teaching assumption: $300M cluster capex, 30% of step time in communication, 5 GB per-GPU gradient payload; no field source.",
+    verified=_V,
+)
+CLUSTER_TCO_SCENARIO = _est(
+    "prov:cluster-tco-scenario",
+    "Reference build-vs-buy cluster TCO scenario (1K and 10K GPU)",
+    notes="Documented teaching assumption: network, facility, opex, and staffing line items for 1K- and 10K-GPU clusters; no field source.",
+    verified=_V,
+)
+FACILITY_SCALE_ANCHORS = _est(
+    "prov:facility-scale-anchors",
+    "Reference datacenter facility scale anchors",
+    notes="Documented teaching anchors: ~100 MW hyperscale AI campus; 10 MW reference IT load; order-of-magnitude only.",
+    verified=_V,
+)
+CARBON_PLACEMENT_SCENARIO = _est(
+    "prov:carbon-placement-scenario",
+    "Reference carbon-aware placement scenario",
+    notes="Documented teaching assumption: a 10,000 MWh training run used to compare grid siting; no field source.",
+    verified=_V,
+)
+MIDSCALE_TRAINING_CARBON_SCENARIO = _est(
+    "prov:midscale-training-carbon-scenario",
+    "Reference mid-scale training carbon scenario (7B model, 64 A100s)",
+    notes="Documented teaching assumption: a 14-day run on a 64-GPU A100 lab cluster; no field source.",
+    verified=_V,
+)

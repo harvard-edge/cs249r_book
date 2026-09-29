@@ -10,7 +10,7 @@ from ..core import provenance_catalog as pc
 # --- Facility cooling tiers (PUE / WUE anchors for appendices) ---
 PUE_LIQUID_COOLED = sourced(1.06, pc.UPTIME_PUE_2022, name="PUE (Liquid-Cooled)", description="Best-in-class liquid-cooled AI datacenter PUE.")
 PUE_BEST_AIR = sourced(1.12, pc.UPTIME_PUE_2022, name="PUE (Best Air-Cooled)", description="Best-in-class air-cooled hyperscale datacenter PUE.")
-PUE_TYPICAL = sourced(1.40, pc.UPTIME_PUE_2022, name="PUE (Industry Average)", description="Industry average traditional datacenter PUE.")
+PUE_TYPICAL = sourced(1.55, pc.UPTIME_PUE_2022, name="PUE (Industry Average)", description="Global average annual data center PUE reported by the Uptime Institute 2022 survey.")
 PUE_SIMPLE_AIR = sourced(1.50, pc.UPTIME_PUE_2022, name="PUE (Simple Air)", description="Simple air-cooled datacenter PUE tier.")
 PUE_LEGACY = sourced(1.58, pc.UPTIME_PUE_2022, name="PUE (Legacy Air-Cooled)", description="Older enterprise datacenter PUE tier.")
 PUE_STATE_OF_ART = sourced(1.10, pc.UPTIME_PUE_2022, name="PUE (state of art)", description="Highly optimized modern datacenter PUE benchmark.")

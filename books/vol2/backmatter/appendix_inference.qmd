@@ -4,32 +4,34 @@ Serving a model at scale is governed by the mathematics of waiting lines and the
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is a quantitative reference for serving systems. Use the queuing model to choose a batch size or predict tail latency under a given arrival rate; use the key-value cache arithmetic to size memory or determine when the cache, rather than compute, caps throughput.
+This appendix is a quantitative reference for serving systems. Use the queuing surrogate to screen batch sizes and estimate mean delay under its stated assumptions, then validate tail latency with measurements or simulation; use the key-value cache arithmetic to size memory or determine when the cache, rather than compute, caps throughput.
 
-Reach for it from the inference and operations chapters: when those chapters cite a serving result, the derivation lives here. Read it linearly for the full argument, or consult the worked GPT-3 example and the batch-size decision framework for templates directly applicable to production systems.
+- **When a serving tier misses its latency target under load**: Use the queuing model in @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 to separate waiting, batch-formation, and service time.
+- **When choosing a batch size**: Use the worked example in @sec-appdx-inference-scale-worked-example-gpt3-serving-100-qps-edcf and the decision framework in @sec-appdx-inference-scale-decision-framework-batch-size-selection-given-sla-8e4e.
+- **When memory, not compute, caps concurrency**: Use the KV-cache sizing in @sec-appdx-inference-scale-kv-cache-fundamentals-2ccd.
 
 ## Serving Performance Analysis {#sec-appdx-appendix-inference-serving}
 
-Serving performance analysis has two coupled layers. The queue determines how requests wait, batch, and shed under stochastic arrivals; the key-value cache determines how much live state the accelerator can hold while meeting the latency budget. The subsections that follow derive the queueing model first, then connect that model to memory-capacity limits in the worked serving examples.
+Serving performance analysis has two coupled layers. The queue determines how requests wait, batch, and shed under stochastic arrivals; the key-value cache determines how much live state the accelerator can hold while meeting the latency budget. The subsections that follow derive the queuing model first, then connect that model to memory-capacity limits in the worked serving examples.
 
 ### Queuing theory for batched inference {#sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0}
 
 The batching efficiency curve provides intuition about throughput-latency trade-offs, but production systems require rigorous analysis to determine optimal batch sizes under stochastic arrival patterns. Queuing theory provides the mathematical framework to derive these optimal operating points and to understand why certain batch sizes outperform others under specific conditions.
 
-#### Queueing notation and the M/G/1 batch surrogate {#sec-appdx-inference-scale-mgck-queue-model-gpu-serving-c4c4}
+#### Queuing notation and the M/G/1 batch surrogate {#sec-appdx-inference-scale-mgck-queue-model-gpu-serving-c4c4}
 
 The **M/G/c/K notation**\index{M/G/c/K Queues} names four characteristics that a production GPU-serving model may need to represent:
 
 - **M (Markov arrivals)**: Requests arrive according to a Poisson process with rate $\lambda_{\text{arr}}$. This models the memoryless property of user requests, where arrival of one request does not predict the timing of the next.
 - **G (General service distribution)**: Service times follow a general distribution, not restricted to exponential. GPU inference times depend on batch size and exhibit deterministic components (compute) mixed with stochastic variation (memory contention, kernel scheduling).
 - **c (Number of servers)**: The system has $c$ parallel GPU workers, each capable of serving requests independently.
-- **K (Queue capacity)**: The system maintains a finite queue of capacity $K$ requests. Requests arriving to a full queue are rejected (load shedding).
+- **K (System capacity)**: At most $K$ requests may be present, including those in service. Requests arriving to a full system are rejected (load shedding).
 
 The notation comes from the same systems-performance lineage that sized telephone networks before it was applied to GPU clusters.
 
 ::: {#psp-inference-queuing-theory-performance .callout-perspective title="Queuing theory and performance"}
 
-Queuing theory, developed by Agner Krarup Erlang in 1909 for telephone network analysis, remains foundational to systems performance engineering [@erlang1909telephone]. The same mathematical framework that sized telephone exchanges now informs GPU cluster capacity. Standard systems texts develop the component queueing models and approximations on which this notation builds [@jain1991art; @kleinrock1975queueing].
+Queuing theory, developed by Agner Krarup Erlang in 1909 for telephone network analysis, remains foundational to systems performance engineering [@erlang1909telephone]. The same mathematical framework that sized telephone exchanges now informs GPU cluster capacity. Standard systems texts develop the component queuing models and approximations on which this notation builds [@jain1991art; @kleinrock1975queueing].
 
 :::
 
@@ -77,7 +79,7 @@ When batches reliably fill before timeout, this expression approaches $E[\tau_k]
 
 The optimal batch size $B$ minimizes expected response time subject to throughput requirements:
 
-$$B = \operatorname{arg\,min}_{B} E[T(B)] \quad \text{subject to} \quad \mu_{\text{eff}}(B) \geq \lambda_{\text{arr}}$$
+$$B = \operatorname{arg\,min}_{B} E[T(B)] \quad \text{subject to} \quad \mu_{\text{eff}}(B) > \lambda_{\text{arr}}$$
 
 The constraint ensures system stability (service rate exceeds arrival rate).
 
@@ -150,36 +152,133 @@ class Gpt3Scenario:
     gpt3_params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
 ```
 
-Consider serving a GPT-3 class model (`{python} Gpt3Scenario.gpt3_params_b_str` parameters) under the following system parameters:
+```{python}
+#| echo: false
+#| label: prefill-serving-scenario
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PREFILL SERVING SCENARIO (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-appdx-inference-scale-worked-example-gpt3-serving-100-qps-edcf,
+# │          @tbl-batch-size-comparison, the regime list, and the Little's Law check.
+# │
+# │ Goal: Define the scenario inputs once and derive every table cell from them.
+# │ Show: T_svc(B), throughput, utilization, E[W], accumulation delay, E[T].
+# │ How: Linear service model T_svc = T_fixed + t_req B; M/G/1 super-request
+# │      surrogate with deterministic service for E[W]; full-batch accumulation.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import Systems
+from mlsysim.fmt import check, fmt, fmt_display_math, fmt_int, fmt_math, fmt_percent
 
-- Arrival rate: $\lambda_{\text{arr}} = 100$ requests/second
-- Hardware: 8$\times$ A100 GPUs with tensor parallelism
-- Weight loading overhead: $T_{\text{fixed}} = 50$ ms (time to load attention matrices per forward pass)
-- Per-token compute: $t_{\text{req}} = 0.5$ ms per request (amortized across batch)
-- Average output length: 100 tokens per request
-- Target utilization: $\rho_{\text{target}} = 0.75$
+def _prefill_row(B, lam, t_fixed_s, t_req_s):
+    """One row of the surrogate: service time, throughput, utilization, E[W], accumulation, E[T] (seconds)."""
+    t_svc = t_fixed_s + t_req_s * B
+    rho = lam * t_svc / B
+    wait = lam * t_svc**2 / (2 * B * (1 - rho)) if rho < 1 else math.inf
+    accum = (B - 1) / (2 * lam)
+    return {"B": B, "t_svc": t_svc, "thru": B / t_svc, "rho": rho, "wait": wait, "accum": accum, "total": wait + accum + t_svc}
+
+def _ms_cell(x_s, precision=None):
+    return fmt_math("\\infty") if math.isinf(x_s) else fmt(x_s * 1e3, precision=precision, commas=False)
+
+class PrefillServing:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    lam = 100.0  # scenario assumption: request arrival rate (requests/s)
+    t_fixed_s = 0.050  # scenario assumption: fixed prefill-stage service overhead (s)
+    t_req_s = 0.0005  # scenario assumption: marginal prefill service time per request (s)
+    rho_target = 0.75  # scenario assumption: target utilization
+    table_batches = (1, 4, 8, 16, 32)  # tabulated candidate batch sizes
+    n_gpus = Systems.Nodes.DGX_A100.accelerators_per_node
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    b_target_exact = lam * t_fixed_s / (rho_target - lam * t_req_s)
+    b_stab_exact = lam * t_fixed_s / (1 - lam * t_req_s)
+    b_target = math.ceil(b_target_exact)
+    b_first_stable = math.floor(b_stab_exact) + 1
+    b_last_unstable = b_first_stable - 1
+    rows = {}
+    for _B in table_batches:
+        rows[_B] = _prefill_row(_B, lam, t_fixed_s, t_req_s)
+    b_best, _best_total = None, math.inf
+    for _B in range(b_first_stable, 257):
+        _t = _prefill_row(_B, lam, t_fixed_s, t_req_s)["total"]
+        if _t < _best_total:
+            b_best, _best_total = _B, _t
+    b_lo, b_hi, b_top = table_batches[2], table_batches[3], table_batches[4]
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(b_target == b_lo, "Regime list names the target-utilization batch as the low end of the knee band")
+    check(rows[b_target]["rho"] <= rho_target, "Target batch meets the utilization target")
+    check(b_lo < b_best < b_hi, "Mean-latency minimum must fall inside the tabulated knee band")
+    check(rows[table_batches[1]]["rho"] >= 1 and table_batches[1] <= b_last_unstable, "B=4 row is unstable")
+    check(abs(rows[b_hi]["total"] - rows[b_lo]["total"]) < 0.010, "B=16 mean latency is within a few ms of B=8")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    lam_str = fmt(lam, precision=0, commas=False)
+    t_fixed_ms_value_str = fmt(t_fixed_s * 1e3, precision=0, commas=False)
+    t_req_ms_value_str = fmt(t_req_s * 1e3, precision=1, commas=False)
+    rho_target_str = fmt(rho_target, precision=2, commas=False)
+    rho_target_pct_str = fmt_percent(rho_target, precision=0, commas=False, style="prose")
+    headroom_pct_str = fmt_percent(1 - rho_target, precision=0, commas=False, style="prose")
+    n_gpus_str = fmt_int(n_gpus)
+    b_target_str = fmt_int(b_target)
+    b_first_stable_str = fmt_int(b_first_stable)
+    b_last_unstable_str = fmt_int(b_last_unstable)
+    b_best_str = fmt_int(b_best)
+    b_lo_str = fmt_int(b_lo)
+    b_hi_str = fmt_int(b_hi)
+    b_top_str = fmt_int(b_top)
+    b_stab_str = fmt(b_stab_exact, precision=1, commas=False)
+    t_svc_eq_math = fmt_display_math(f"T_{{\\text{{svc}}}}(B) = {t_fixed_ms_value_str} + {t_req_ms_value_str} \\cdot B \\text{{ ms}}")
+    b_min_eq_math = fmt_display_math(
+        f"B_{{\\min}} \\approx \\frac{{{lam_str} \\times {fmt(t_fixed_s, precision=2, commas=False)}}}"
+        f"{{{rho_target_str} - {lam_str} \\times {fmt(t_req_s, precision=4, commas=False)}}}"
+        f" = \\frac{{{fmt(lam * t_fixed_s, precision=0, commas=False)}}}{{{fmt(rho_target - lam * t_req_s, precision=2, commas=False)}}}"
+        f" \\approx {fmt(b_target_exact, precision=2, commas=False)}"
+    )
+    cells = {}
+    for _B, _r in rows.items():
+        _stable = _r["rho"] < 1
+        cells[_B] = {
+            "svc": fmt(_r["t_svc"] * 1e3, precision=None, commas=False),
+            "thru": fmt(_r["thru"], precision=None, commas=False),
+            "rho": fmt(_r["rho"] * 100, precision=None if _stable else 0, commas=False, suffix=("%" if _stable else "% (unstable)")),
+            "wait": _ms_cell(_r["wait"]),
+            "accum": _ms_cell(_r["accum"]),
+            "total": _ms_cell(_r["total"]),
+        }
+```
+
+Consider a hypothetical prefill-stage sizing exercise for a GPT-3 class model (`{python} Gpt3Scenario.gpt3_params_b_str` parameters). The following assumed service-time coefficients illustrate the queuing calculation; they are not a measured GPT-3 benchmark:
+
+- Arrival rate: $\lambda_{\text{arr}} =$ `{python} PrefillServing.lam_str` requests/second
+- Hardware: `{python} PrefillServing.n_gpus_str`$\times$ A100 GPUs (one DGX A100 node) with tensor parallelism
+- Fixed prefill-stage service overhead: $T_{\text{fixed}} =$ `{python} PrefillServing.t_fixed_ms_value_str` ms
+- Marginal prefill-stage service time: $t_{\text{req}} =$ `{python} PrefillServing.t_req_ms_value_str` ms per request
+- Target utilization: $\rho_{\text{target}} =$ `{python} PrefillServing.rho_target_str`
 
 For the prefill phase (processing input prompt), service time follows @eq-service-time-batch:
 
-$$T_{\text{svc}}(B) = 50 + 0.5 \cdot B \text{ ms}$$
+`{python} PrefillServing.t_svc_eq_math`
 
-Applying @eq-optimal-batch-approx to compute the minimum batch size that meets the 75 percent target utilization (leaving 25 percent headroom):
+Applying @eq-optimal-batch-approx to compute the minimum batch size that meets the `{python} PrefillServing.rho_target_pct_str` target utilization (leaving `{python} PrefillServing.headroom_pct_str` headroom):
 
-$$B_{\min} \approx \frac{100 \times 0.05}{0.75 - 100 \times 0.0005} = \frac{5}{0.70} \approx 7.14$$
+`{python} PrefillServing.b_min_eq_math`
 
-Rounding up gives $B=8$ as the smallest batch size that meets the target utilization headroom. Evaluating the surrogate response-time expression under the full-batch assumption then shows how larger batches reduce utilization but add batch-accumulation delay:
+Rounding up gives $B=$ `{python} PrefillServing.b_target_str` as the smallest batch size that meets the target utilization headroom. Evaluating the surrogate response-time expression under the full-batch assumption then shows how larger batches reduce utilization but add batch-accumulation delay:
 
 Evaluating GPT-3 serving performance across batch sizes (@tbl-batch-size-comparison) exposes the trade-off between queuing delay and server utilization:
 
-| **Size $B$** | **$T_{\text{svc}}(B)$ (ms)** | **req/s** | **$\rho_{\text{serv}}$** | **E[W] (ms)** | **$(B-1)/(2\lambda_{\text{arr}})$ (ms)** | **E[T] (ms)** |
-|:-------------|:----------------------------:|:---------:|:------------------------:|:-------------:|:----------------------------------------:|:-------------:|
-| **1**        |             50.5             |    19.8   |     505% (unstable)      |    $\infty$   |                   0.0                    |    $\infty$   |
-| **4**        |             52.0             |    76.9   |     130% (unstable)      |    $\infty$   |                   15.0                   |    $\infty$   |
-| **8**        |             54.0             |   148.1   |          67.5%           |      56.1     |                   35.0                   |     145.1     |
-| **16**       |             58.0             |   275.9   |          36.3%           |      16.5     |                   75.0                   |     149.5     |
-| **32**       |             66.0             |   484.8   |          20.6%           |      8.6      |                  155.0                   |     229.6     |
+| **Size $B$** |        **$T_{\text{svc}}(B)$ (ms)**        |                  **req/s**                  |          **$\rho_{\text{serv}}$**          |                **E[W] (ms)**                |   **$(B-1)/(2\lambda_{\text{arr}})$ (ms)**   |                **E[T] (ms)**                 |
+|:-------------|:------------------------------------------:|:-------------------------------------------:|:------------------------------------------:|:-------------------------------------------:|:--------------------------------------------:|:--------------------------------------------:|
+| **1**        | `{python} PrefillServing.cells[1]["svc"]`  |  `{python} PrefillServing.cells[1]["thru"]` | `{python} PrefillServing.cells[1]["rho"]`  |  `{python} PrefillServing.cells[1]["wait"]` | `{python} PrefillServing.cells[1]["accum"]`  | `{python} PrefillServing.cells[1]["total"]`  |
+| **4**        | `{python} PrefillServing.cells[4]["svc"]`  |  `{python} PrefillServing.cells[4]["thru"]` | `{python} PrefillServing.cells[4]["rho"]`  |  `{python} PrefillServing.cells[4]["wait"]` | `{python} PrefillServing.cells[4]["accum"]`  | `{python} PrefillServing.cells[4]["total"]`  |
+| **8**        | `{python} PrefillServing.cells[8]["svc"]`  |  `{python} PrefillServing.cells[8]["thru"]` | `{python} PrefillServing.cells[8]["rho"]`  |  `{python} PrefillServing.cells[8]["wait"]` | `{python} PrefillServing.cells[8]["accum"]`  | `{python} PrefillServing.cells[8]["total"]`  |
+| **16**       | `{python} PrefillServing.cells[16]["svc"]` | `{python} PrefillServing.cells[16]["thru"]` | `{python} PrefillServing.cells[16]["rho"]` | `{python} PrefillServing.cells[16]["wait"]` | `{python} PrefillServing.cells[16]["accum"]` | `{python} PrefillServing.cells[16]["total"]` |
+| **32**       | `{python} PrefillServing.cells[32]["svc"]` | `{python} PrefillServing.cells[32]["thru"]` | `{python} PrefillServing.cells[32]["rho"]` | `{python} PrefillServing.cells[32]["wait"]` | `{python} PrefillServing.cells[32]["accum"]` | `{python} PrefillServing.cells[32]["total"]` |
 
-: **Batch Size Impact on GPT-3 Serving Performance**: Batch sizes below 8 cannot sustain 100 QPS (utilization exceeds 100 percent). After including batch-accumulation delay, the latency minimum in this simple model occurs near $B=8$; $B=16$ has nearly the same mean latency with lower utilization, while $B=32$ leaves more headroom but pays a large accumulation-delay penalty. {#tbl-batch-size-comparison}
+: **Batch Size Impact on GPT-3 Serving Performance**: Batch sizes of `{python} PrefillServing.b_last_unstable_str` or fewer cannot sustain `{python} PrefillServing.lam_str` QPS (utilization exceeds 100 percent); $B=$ `{python} PrefillServing.b_first_stable_str` is the smallest stable batch and $B=$ `{python} PrefillServing.b_target_str` the smallest that meets the `{python} PrefillServing.rho_target_pct_str` utilization target. Among the tabulated sizes, $B=$ `{python} PrefillServing.b_lo_str` has the lowest mean latency, and evaluating every integer batch size places the minimum of this model near $B=$ `{python} PrefillServing.b_best_str`. $B=$ `{python} PrefillServing.b_hi_str` has similar mean latency with lower utilization, while $B=32$ leaves more headroom but pays a large accumulation-delay penalty. {#tbl-batch-size-comparison}
 
 ```{python}
 #| echo: false
@@ -198,26 +297,15 @@ Evaluating GPT-3 serving performance across batch sizes (@tbl-batch-size-compari
 from mlsysim.fmt import check, fmt, fmt_int, fmt_percent, fmt_time
 
 class GPT3ServingResults:
-    # Batch 8 results
-    b8_service_ms = 54.0
-    b8_util_pct = 67.5
-    b8_wait_ms = 56.1
-    b8_accum_ms = 35.0
-    b8_total_ms = 145.1
-
-    # Batch 16 results
-    b16_service_ms = 58.0
-    b16_util_pct = 36.3
-    b16_wait_ms = 16.5
-    b16_accum_ms = 75.0
-    b16_total_ms = 149.5
-
-    # Batch 32 results
-    b32_service_ms = 66.0
-    b32_util_pct = 20.6
-    b32_wait_ms = 8.6
-    b32_accum_ms = 155.0
-    b32_total_ms = 229.6
+    # Derived from the PrefillServing scenario rows (no precomputed literals)
+    _r8 = PrefillServing.rows[PrefillServing.b_lo]
+    _r16 = PrefillServing.rows[PrefillServing.b_hi]
+    b8_service_ms = _r8["t_svc"] * 1e3
+    b8_util_pct = _r8["rho"] * 100
+    b8_wait_ms = _r8["wait"] * 1e3
+    b16_service_ms = _r16["t_svc"] * 1e3
+    b16_util_pct = _r16["rho"] * 100
+    b16_wait_ms = _r16["wait"] * 1e3
 
     # Prose-facing canonical strings (preserve raw floats for arithmetic above)
     b8_service_ms_str = fmt_time(b8_service_ms, 'millisecond', precision=0, commas=False)
@@ -230,10 +318,10 @@ class GPT3ServingResults:
 
 Four operational regimes emerge across these batch sizes:
 
-1. **Unstable regime (batch sizes 1--4)**\index{Batching!stability threshold}: Utilization exceeds 100 percent, meaning the system cannot keep up with arrivals. Queues grow unboundedly.
-2. **Stability threshold (batch size 8)**\index{Batching!utilization headroom}: At `{python} GPT3ServingResults.b8_util_pct_str` utilization, the system is stable but queuing delays contribute significantly to latency (`{python} GPT3ServingResults.b8_wait_ms_str`), causing queuing latency to explode near saturation (@fig-queuing-hockey-stick).
-3. **Latency knee (batch sizes 8--16)**\index{Batching!latency knee}: Batch size 8 gives the lowest mean latency in this model. Batch size 16 trades a few milliseconds of additional total latency for lower utilization and queue wait time (`{python} GPT3ServingResults.b16_wait_ms_str` vs. `{python} GPT3ServingResults.b8_wait_ms_str`), while $B=32$ leaves still more utilization headroom but pays too much batch-accumulation delay.
-4. **Diminishing returns (batch sizes beyond 32)**\index{Batching!diminishing returns}: Further batch size increases would reduce utilization, but memory constraints prevent exploration.
+1. **Unstable regime (batch sizes 1 to `{python} PrefillServing.b_last_unstable_str`)**\index{Batching!stability threshold}: Utilization exceeds 100 percent, so the system cannot keep up with arrivals and queues grow without bound. The stability boundary of @eq-stability-threshold, $B_{\min} \approx$ `{python} PrefillServing.b_stab_str`, falls inside this range.
+2. **Utilization-target threshold (batch size `{python} PrefillServing.b_target_str`)**\index{Batching!utilization headroom}: At `{python} GPT3ServingResults.b8_util_pct_str` utilization, the system meets the `{python} PrefillServing.rho_target_pct_str` target, but queuing delay still contributes substantially to latency (`{python} GPT3ServingResults.b8_wait_ms_str`). Batch sizes between the stability boundary and this threshold are stable but sit on the steep part of the queuing curve (@fig-queuing-hockey-stick).
+3. **Latency knee (batch sizes `{python} PrefillServing.b_lo_str` to `{python} PrefillServing.b_hi_str`)**\index{Batching!latency knee}: Mean latency is lowest in this range, with the model's minimum near $B=$ `{python} PrefillServing.b_best_str`. Batch size `{python} PrefillServing.b_hi_str` trades a few milliseconds of additional total latency for lower utilization and queue wait time (`{python} GPT3ServingResults.b16_wait_ms_str` vs. `{python} GPT3ServingResults.b8_wait_ms_str`), while $B=$ `{python} PrefillServing.b_top_str` leaves still more utilization headroom but pays too much batch-accumulation delay.
+4. **Diminishing returns (batch sizes beyond `{python} PrefillServing.b_top_str`)**\index{Batching!diminishing returns}: Further batch size increases reduce utilization in this surrogate but increase accumulation delay. The separate KV-cache example below supplies a decode-memory bound; it is not part of this prefill-time calculation.
 
 ::: {#fig-queuing-hockey-stick fig-env="figure" fig-pos="htb" fig-cap="**The queuing hockey stick**: For an M/M/1 queue, $\rho_{\text{serv}}/(1-\rho_{\text{serv}})$ is the expected number of requests in the system, including the request in service. Its hyperbolic rise near saturation explains why production systems retain utilization headroom; the shaded operating bands are illustrative rather than universal thresholds." fig-alt="Plot of the expected number of requests in an M/M/1 system versus serving utilization rho_serv from 0 to 1. The curve rises gradually at low utilization, bends upward through illustrative headroom and caution bands, and rises sharply as utilization approaches 1."}
 ```{python}
@@ -391,17 +479,16 @@ from mlsysim.fmt import check, fmt, fmt_int, fmt_ratio, fmt_time
 
 class LittlesLawVerify:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    arrival_rate = 100 / second  # scenario assumption: request arrival rate
-    batch_size = 16
-    batch16_total_ms = 149.5  # scenario result from the batch-size table above
-    expected_total_latency = batch16_total_ms * ms
-    utilization = 36.3 / 100
+    arrival_rate = PrefillServing.lam / second
+    batch_size = PrefillServing.b_hi
+    expected_total_latency = PrefillServing.rows[batch_size]["total"] * 1e3 * ms
+    utilization = PrefillServing.rows[batch_size]["rho"]
     # ┌── 2. EXECUTE ───────────────────────────────────────
     n_req = (arrival_rate * expected_total_latency).to("").magnitude
     in_service = batch_size * utilization
     in_queue = n_req - in_service
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(14 < n_req < 15, f"Q_req should be ~15.0, got {n_req:.2f}")
+    check(abs(in_service + in_queue - n_req) < 1e-9, "Little's Law decomposition must close")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     batch_size_str = fmt_int(batch_size, commas=False)
     expected_total_ms_str = fmt_time(expected_total_latency, 'millisecond', precision=1, commas=False)
@@ -410,22 +497,25 @@ class LittlesLawVerify:
     n_req_str = fmt(n_req, precision=2, commas=False)
     in_service_str = fmt(in_service, precision=1, commas=False)
     in_queue_str = fmt(in_queue, precision=2, commas=False)
+    lam_str = fmt(arrival_rate.to(1 / second).magnitude, precision=0, commas=False)
+    in_service_round_str = fmt_int(round(in_service))
+    in_queue_round_str = fmt_int(round(in_queue))
 ```
 
 ::: {#nbk-inference-applying-littles-law-verify .callout-notebook title="Applying Little's Law to verify"}
 
 **Verification**: By Little's Law\index{Little's Law} [@little1961], $Q_{\text{req}} = \lambda_{\text{arr}} \cdot T_{\text{lat}}$:
 
-At $B=16$ with $\lambda_{\text{arr}} = 100$ req/s and $E[T] =$ `{python} LittlesLawVerify.expected_total_ms_str`:
+At $B=$ `{python} LittlesLawVerify.batch_size_str` with $\lambda_{\text{arr}} =$ `{python} LittlesLawVerify.lam_str` req/s and $E[T] =$ `{python} LittlesLawVerify.expected_total_ms_str`:
 
-$Q_{\text{req}} = 100 \times$ `{python} LittlesLawVerify.expected_total_s_str` = `{python} LittlesLawVerify.n_req_str` requests in system
+$Q_{\text{req}} =$ `{python} LittlesLawVerify.lam_str` $\times$ `{python} LittlesLawVerify.expected_total_s_str` = `{python} LittlesLawVerify.n_req_str` requests in system
 
 With batch size `{python} LittlesLawVerify.batch_size_str` and utilization `{python} GPT3ServingResults.b16_util_pct_str`:
 
 - Expected requests in service: `{python} LittlesLawVerify.batch_size_str` $\times$ `{python} LittlesLawVerify.utilization_str` = `{python} LittlesLawVerify.in_service_str`
 - Expected requests in queue: `{python} LittlesLawVerify.n_req_str` - `{python} LittlesLawVerify.in_service_str` = `{python} LittlesLawVerify.in_queue_str`
 
-This matches the response-time decomposition: roughly 6 requests are in service and roughly 9 are waiting or accumulating into batches on average.
+This matches the response-time decomposition: roughly `{python} LittlesLawVerify.in_service_round_str` requests are in service and roughly `{python} LittlesLawVerify.in_queue_round_str` are waiting or accumulating into batches on average.
 
 :::
 
@@ -441,9 +531,9 @@ Measure $T_{\text{fixed}}$ and $t_{\text{req}}$ empirically by profiling inferen
 
 Find minimum batch size $B_{\text{min}}$ such that $\mu_{\text{eff}}(B_{\text{min}}) > \lambda_{\text{arr}}$:
 
-$$B_{\text{min}} = \frac{T_{\text{fixed}} \lambda_{\text{arr}}}{1 - t_{\text{req}} \lambda_{\text{arr}}}$$
+$$B_{\text{min}} = \frac{T_{\text{fixed}} \lambda_{\text{arr}}}{1 - t_{\text{req}} \lambda_{\text{arr}}}$$ {#eq-stability-threshold}
 
-Any batch size below $B_{\text{min}}$ results in an unstable system.
+Choose an integer batch size strictly above this boundary, assuming $\lambda_{\text{arr}}t_{\text{req}}<1$. Equality leaves no stability margin; if the denominator is nonpositive, batching alone cannot sustain the arrival rate.
 
 ##### Step 3 compute latency at candidate batch sizes {.unnumbered}
 
@@ -457,11 +547,11 @@ If measured response times are approximately Gaussian, their P99 can be estimate
 
 $$T_{\text{P99}} \approx E[T] + 2.33 \cdot \sigma_T$$
 
-where $\sigma_T$ is the standard deviation of response time. This Gaussian rule is not a general heavy-traffic approximation because queueing response times are commonly skewed. For exponential response times, P99 is $-\ln(0.01)E[T] \approx 4.6 \cdot E[T]$; use measured percentiles for production sizing.
+where $\sigma_T$ is the standard deviation of response time. This Gaussian rule is not a general heavy-traffic approximation because queuing response times are commonly skewed. For exponential response times, P99 is $-\ln(0.01)E[T] \approx 4.6 \cdot E[T]$; use measured percentiles for production sizing.
 
 ##### Step 5 select optimal batch size {.unnumbered}
 
-Choose the largest $B$ such that $T_{\text{P99}}(B) \leq \text{SLO}$:
+When the objective is maximum throughput under the increasing service-rate model, choose the largest stable, memory-feasible integer batch size whose P99 latency meets the SLO:
 
 $$B = \max\{B : T_{\text{P99}}(B) \leq \text{SLO}\}$$
 
@@ -476,128 +566,45 @@ Operating rules for batch size selection (@tbl-batch-decision-framework) balance
 
 : **Batch Size Decision Framework**: Systematic approach to selecting batch size based on stability, latency SLO, and utilization targets. {#tbl-batch-decision-framework}
 
-Applying these operating rules ensures that the serving deployment remains responsive under load while maintaining cost efficiency during low-traffic windows.
+These rules generate candidate configurations; load tests must verify their latency, capacity, and cost under the actual request distribution.
 
 #### Trade-off curves for visualizing the operating region {#sec-appdx-inference-scale-tradeoff-curves-visualizing-operating-region-9f95}
 
 Throughput and latency trade-off curves (@fig-batch-tradeoff-curves) define the viable operating envelope:
 
-::: {#fig-batch-tradeoff-curves fig-env="figure" fig-pos="htb" fig-cap="**Batch Size Trade-Off Curves**: As batch size grows on the x-axis, throughput (left y-axis, blue) grows sublinearly while latency P50 (right y-axis, red) grows near-linearly. An optimal point is marked at B=16; a shaded out-of-memory (OOM) capacity region flags batch sizes that exceed device memory. Benchmark: Llama-2 70B in FP16 tensor-parallel across four A100 80 GB GPUs." fig-alt="Chart with Batch Size on the x-axis (1 to 128). Left y-axis Throughput in tokens/s (blue, sublinear); right y-axis Latency P50 in ms (red, near-linear). Green dashed Optimal B=16 marker; shaded OOM region on the right."}
+::: {#fig-batch-tradeoff-curves fig-env="figure" fig-pos="htb" fig-cap="**Batch Size Trade-Off Curves**: Dimensionless schematic with batch service time t(B) = 1 + 0.15(B − 1) and throughput B/t(B), each normalized to its batch-1 value. Larger batches amortize fixed work but take longer to complete. These hypothetical curves are not a benchmark, exclude queuing and batch-formation delay, and establish neither a memory-capacity boundary nor an optimal batch size." fig-alt="Schematic normalized throughput and batch service time versus batch size. Throughput rises toward a ceiling while service time continues to increase. No optimal point or memory boundary is asserted."}
 
 ```{python}
 #| echo: false
 #| warning: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @fig-batch-tradeoff-curves
+# │ Goal: Show the throughput-latency trade-off without claiming a benchmark.
+# │ How: Dimensionless illustrative batch service time, t(B)=1+0.15(B-1).
+# │ Imports: numpy; book figure style. Exports: schematic figure only.
 import matplotlib.pyplot as plt
 import numpy as np
 from binder.tools.figures import style as book_style
 
 book_style.set_book_style()
 COLORS = book_style.COLORS
-
-fig, ax_tp = plt.subplots(figsize=(8.8, 5.2))
-ax_lat = ax_tp.twinx()
-
-# Batch sizes
-batch_sizes = np.array([1, 2, 4, 8, 16, 32, 64, 128])
-
-# Data points based on Llama-2 70B TP=4 A100-80GB benchmark
-throughput = np.array([125, 240, 520, 1050, 1920, 2850, 3900, 4800])
-latency = np.array([20, 32, 55, 98, 182, 345, 670, 1280])
-
-c_blue = COLORS['BlueLine']
-c_red = COLORS['RedLine']
-c_green = COLORS['GreenLine']
-c_dark = COLORS['primary']
-c_sec = COLORS['secondary']
-
-# OOM Shaded zone for B >= 128
-ax_tp.axvspan(128, 160, color=COLORS.get('RedFill', '#FEE2E2'), alpha=0.6, zorder=0)
-
-# Vertical boundary lines
-ax_tp.axvline(16, color=c_green, linestyle='--', linewidth=1.5, zorder=2)
-ax_tp.axvline(128, color=c_red, linestyle='--', linewidth=1.5, zorder=2)
-
-# Top badges for Optimal Knee and OOM Boundary with comfortable margin
-ax_tp.text(
-    16,
-    1.35e4,
-    'Optimal Knee (B=16)',
-    fontsize=8.0,
-    fontweight='bold',
-    color=c_green,
-    ha='center',
-    va='center',
-    bbox=dict(boxstyle='round,pad=0.35', facecolor='#ECFDF5', edgecolor=COLORS.get('GreenL', '#10B981'), lw=0.9),
-)
-ax_tp.text(
-    128,
-    1.35e4,
-    'KV OOM Boundary',
-    fontsize=8.0,
-    fontweight='bold',
-    color=c_red,
-    ha='center',
-    va='center',
-    bbox=dict(boxstyle='round,pad=0.35', facecolor='#FEE2E2', edgecolor=COLORS.get('RedL', '#EF4444'), lw=0.9),
-)
-
-# Plot Throughput on Left Axis
-line_tp = ax_tp.plot(batch_sizes, throughput, color=c_blue, linewidth=2.4, marker='o', markersize=6.5, label='Throughput (tokens/s)', zorder=4)
-
-# Plot Latency on Right Axis
-line_lat = ax_lat.plot(batch_sizes, latency, color=c_red, linewidth=2.4, marker='s', markersize=6.5, label='Latency P50 (ms)', zorder=4)
-
-# Green highlight rings at B=16
-ax_tp.plot(16, 1920, 'o', markersize=13, markerfacecolor='none', markeredgecolor=c_green, markeredgewidth=2.2, zorder=5)
-ax_lat.plot(16, 182, 'o', markersize=13, markerfacecolor='none', markeredgecolor=c_green, markeredgewidth=2.2, zorder=5)
-
-# Card in top-left
-card_text = (
-    r"$\mathbf{Scaling\ Characteristics}$:" + "\n"
-    r"$\bullet$ $\mathbf{Throughput}$: Sublinear (compute bound)" + "\n"
-    r"$\bullet$ $\mathbf{Latency}$: Near-linear growth with batch size"
-)
-ax_tp.text(
-    0.04,
-    0.94,
-    card_text,
-    transform=ax_tp.transAxes,
-    fontsize=8.0,
-    verticalalignment='top',
-    horizontalalignment='left',
-    bbox=dict(boxstyle='round,pad=0.45', facecolor='#FFFFFF', edgecolor=c_sec, lw=0.9),
-    color=c_dark,
-    linespacing=1.35,
-)
-
-# Combined Legend cleanly positioned on left
-lines = [line_tp[0], line_lat[0]]
-labels = ['Throughput (tokens/s, left axis)', 'Latency P50 (ms, right axis)']
-ax_tp.legend(lines, labels, loc='center left', bbox_to_anchor=(0.04, 0.72), frameon=True, facecolor='#FFFFFF', edgecolor=c_sec, fontsize=8.0)
-
-# Formatting axes
-ax_tp.set_xscale('log', base=2)
-ax_tp.set_yscale('log')
-ax_lat.set_yscale('log')
-
-ax_tp.set_xlim(0.85, 160)
-ax_tp.set_xticks(batch_sizes)
-ax_tp.set_xticklabels([str(b) for b in batch_sizes], fontsize=8.5, fontweight='bold')
-
-ax_tp.set_ylim(70, 2.5e4)
-ax_lat.set_ylim(10, 3.5e3)
-
-ax_tp.set_xlabel('Batch Size ($B$)', fontsize=9.0, fontweight='bold', color=c_dark)
-ax_tp.set_ylabel('Throughput (tokens/s)', fontsize=9.0, fontweight='bold', color=c_blue)
-ax_lat.set_ylabel('Latency P50 (ms)', fontsize=9.0, fontweight='bold', color=c_red)
-
-ax_tp.tick_params(axis='y', labelcolor=c_blue)
-ax_lat.tick_params(axis='y', labelcolor=c_red)
-
-ax_tp.grid(True, linestyle='--', linewidth=0.5, alpha=0.4, color=COLORS['grid'])
-ax_lat.grid(False)
-
-plt.tight_layout()
+batch_sizes = 2 ** np.arange(8)
+# Hypothetical dimensionless scenario, not hardware or model measurements.
+service_time = 1 + 0.15 * (batch_sizes - 1)
+throughput = batch_sizes / service_time
+assert np.all(np.diff(service_time) > 0)
+assert np.all(np.diff(throughput) > 0)
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.plot(batch_sizes, throughput, marker='o', color=COLORS['BlueLine'], label='Throughput / batch-1 throughput')
+ax.plot(batch_sizes, service_time, marker='s', color=COLORS['RedLine'], label='Batch service time / batch-1 time')
+ax.set_xscale('log', base=2)
+ax.set_xticks(batch_sizes)
+ax.set_xticklabels([str(b) for b in batch_sizes])
+ax.set_xlabel('Batch size')
+ax.set_ylabel('Normalized value')
+ax.legend(loc='upper left')
+ax.set_ylim(bottom=0)
+fig.tight_layout()
 plt.show()
 plt.close()
 ```
@@ -607,15 +614,15 @@ plt.close()
 The trade-off curve demonstrates several key insights:
 
 1. **Pareto Frontier**\index{Pareto Frontier}: An operating point is Pareto efficient when no other candidate provides at least as much throughput and no more latency, with a strict improvement in at least one objective. The frontier is the set of these nondominated points.
-2. **Knee of the Curve**\index{Knee of the Curve}: The optimal batch size often lies at the "knee" where throughput gains diminish while latency continues to increase linearly.
-3. **SLO-Constrained Optimum**\index{SLO!constrained optimum}: When an SLO bounds maximum latency, the optimal point is where the curve intersects the SLO boundary.
-4. **Diminishing Returns**\index{Diminishing Returns}: Beyond the knee, doubling batch size may increase throughput by only 10--20 percent while doubling latency.
+2. **Knee of the Curve**\index{Knee of the Curve}: A knee marks diminishing throughput gains relative to increasing service time; it does not by itself select the best operating point.
+3. **SLO-Constrained Optimum**\index{SLO!constrained optimum}: The best feasible batch size depends on the optimization objective and measured end-to-end latency, including queuing and batch formation. An SLO boundary can constrain that choice without guaranteeing an intersection or a unique optimum.
+4. **Diminishing Returns**\index{Diminishing Returns}: In the schematic, fixed work becomes a smaller fraction of each batch, so successive batch-size increases yield smaller throughput gains.
 
 The queuing-theoretic framework provides the mathematical foundation for the batching strategies introduced in @sec-inference-scale-batching-strategies-scale-6733. Where intuition might suggest "larger batches are better for throughput," stability constraints, latency targets, and diminishing returns create a well-defined optimal operating region that varies by model type and deployment requirements.
 
 ### KV cache fundamentals {#sec-appdx-inference-scale-kv-cache-fundamentals-2ccd}
 
-The formal definition of the KV cache appears in the main inference memory-management section (as introduced in @sec-inference-scale-framework-selection-criteria-6c20). This appendix expands the sizing math behind that definition: why the cache reduces per-token compute, why its memory grows with sequence length and batch size, and why unmanaged allocation can fragment HBM [@kwon2023].
+@Sec-inference-scale-framework-selection-criteria-6c20 defines the KV cache and the paged allocation that manages it, and @sec-appdx-dam-taxonomy-transformer-arithmetic gives its per-token size. This section expands the sizing math behind that definition: why the cache reduces per-token compute, why its memory grows with sequence length and batch size, and why unmanaged allocation can fragment HBM [@kwon2023].
 
 Autoregressive generation without caching requires $\mathcal{O}(t^2)$ computation per token because each transformer layer must recompute attention keys and values for all previous tokens. The KV cache stores these computed key and value vectors, reducing generation to $\mathcal{O}(t)$ per token. For serving at scale, this compute saving creates a critical memory-management challenge since KV cache memory can exceed model weights for long contexts.
 
@@ -623,7 +630,7 @@ The cache size grows with context as calculated by @eq-kv-cache-size:
 
 $$M_{\text{KV}} = 2 \times N_L \times d \times S \times B \times s_{\text{elem}}$$ {#eq-kv-cache-size}
 
-where $N_L$ is the number of layers, $d$ is the hidden dimension, $S$ is sequence length, $B$ is batch size, $s_{\text{elem}}$ is storage size per element in bytes, and the factor of 2 accounts for both keys and values.
+For standard multihead attention, where the aggregate KV width equals the hidden width, $N_L$ is the number of layers, $d$ is the hidden dimension, $S$ is sequence length, $B$ is batch size, $s_{\text{elem}}$ is storage size per element in bytes, and the factor of 2 accounts for both keys and values. Grouped-query or multiquery attention instead uses the aggregate KV-head width in place of $d$.
 
 ```{python}
 #| echo: false
@@ -634,65 +641,65 @@ where $N_L$ is the number of layers, $d$ is the hidden dimension, $S$ is sequenc
 # │ Context: @sec-appdx-inference-scale-kv-cache-fundamentals-2ccd
 # │
 # │ Goal: Compute per-request KV cache memory footprint and maximum batch size.
-# │ Show: ~9.66 GB/request and max batch size of 30 requests.
+# │ Show: Per-request KV cache and capacity-only batch bound from registry inputs.
 # │ How: 2 * N_L * d * S * s_elem for GPT-3 (96 layers, 12288 dim) on 8x A100 GPUs.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import GB, Models, byte
+from mlsysim import GB, Hardware, Models, Systems, byte, param
+from mlsysim.core.units import BYTES_FP16
 from mlsysim.fmt import check, fmt_memory
 
 class AppdxKVCacheSizing:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_layers = Models.Language.GPT3.layers  # 96
-    hidden_dim = Models.Language.GPT3.hidden_dim  # 12288
-    seq_len = 2048
-    s_elem = 2  # FP16 (2 bytes)
+    n_layers = Models.Language.GPT3.layers
+    hidden_dim = Models.Language.GPT3.hidden_dim
+    seq_len = Models.Language.GPT3.context_length
+    s_elem = int(BYTES_FP16.to(byte).magnitude)  # FP16 element width in bytes
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     kv_bytes_per_req = 2 * n_layers * hidden_dim * seq_len * s_elem
     kv_gb_per_req = (kv_bytes_per_req * byte).to(GB).magnitude
 
-    num_gpus = 8
-    gpu_mem = 80  # GB
-    total_hbm_gb = num_gpus * gpu_mem  # 640 GB
-    weights_mem_gb = 350  # GB for FP16 175B
-    remaining_mem_gb = total_hbm_gb - weights_mem_gb  # 290 GB
-    max_batch_size = int(remaining_mem_gb / kv_gb_per_req)  # 30
+    num_gpus = Systems.Nodes.DGX_A100.accelerators_per_node
+    gpu_mem = Hardware.Cloud.A100.memory.capacity.to(GB).magnitude
+    total_hbm_gb = num_gpus * gpu_mem
+    weights_mem_gb = (Models.Language.GPT3.parameters * s_elem * byte / param).to(GB).magnitude
+    remaining_mem_gb = total_hbm_gb - weights_mem_gb
+    max_batch_size = int(remaining_mem_gb / kv_gb_per_req)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(abs(kv_gb_per_req - 9.66) < 0.05, f"KV cache per req should be ~9.66 GB, got {kv_gb_per_req:.2f}")
-    check(max_batch_size == 30, f"Max batch size should be 30, got {max_batch_size}")
+    check(kv_gb_per_req > 1, f"GPT-3 KV cache per request should be several GB, got {kv_gb_per_req:.2f}")
+    check(max_batch_size * kv_gb_per_req <= remaining_mem_gb, "Cache bound must fit residual capacity")
+    check((max_batch_size + 1) * kv_gb_per_req > remaining_mem_gb, "Next batch must exceed capacity-only bound")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_display_math, fmt_int
+    from mlsysim.fmt import fmt, fmt_display_math, fmt_int, fmt_params
 
     kv_gb_per_req_str = fmt(kv_gb_per_req, precision=2)
+    n_layers_str = fmt_int(n_layers)
+    hidden_dim_str = fmt_int(hidden_dim, commas=False)
+    seq_len_str = fmt_int(seq_len, commas=False)
+    hidden_dim_prose_str = fmt_int(hidden_dim, commas=True)
+    seq_len_prose_str = fmt_int(seq_len, commas=True)
+    s_elem_str = fmt_int(s_elem)
+    gpt3_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
     kv_per_req_display_math = fmt_display_math(
-        f" M_{{\\text{{KV/req}}}} = 2 \\times 96 \\times 12288 \\times 2048 \\times 2 \\text{{ B}}"
+        f" M_{{\\text{{KV/req}}}} = 2 \\times {n_layers_str} \\times {hidden_dim_str} \\times {seq_len_str} \\times {s_elem_str} \\text{{ B}}"
         f" \\approx {kv_gb_per_req_str} \\text{{ GB/request}} "
     )
     max_batch_size_str = fmt_int(max_batch_size)
-    remaining_mem_str = fmt_memory(remaining_mem_gb * GB, unit=GB, precision=0, commas=False)
-    total_hbm_str = fmt_memory(total_hbm_gb * GB, unit=GB, precision=0, commas=False)
+    remaining_mem_str = fmt_memory(remaining_mem_gb * GB, unit=GB, precision=1, commas=False)
+    total_hbm_str = fmt_memory(total_hbm_gb * GB, unit=GB, precision=1, commas=False)
     weights_mem_str = fmt_memory(weights_mem_gb * GB, unit=GB, precision=0, commas=False)
     num_gpus_str = fmt_int(num_gpus)
 ```
 
-For the 175B GPT-3 model ($N_L=96$, $d=12288$, FP16 $s_{\text{elem}}=2$ bytes) at sequence length $S=2048$, each request requires:
+For the `{python} AppdxKVCacheSizing.gpt3_params_b_str` GPT-3 model ($N_L =$ `{python} AppdxKVCacheSizing.n_layers_str`, $d =$ `{python} AppdxKVCacheSizing.hidden_dim_prose_str`, FP16 $s_{\text{elem}} =$ `{python} AppdxKVCacheSizing.s_elem_str` bytes) at its training context length $S =$ `{python} AppdxKVCacheSizing.seq_len_prose_str`, each request requires:
 
 `{python} AppdxKVCacheSizing.kv_per_req_display_math`
 
-Across `{python} AppdxKVCacheSizing.num_gpus_str`$\times$ A100 80-GB GPUs (`{python} AppdxKVCacheSizing.total_hbm_str` total HBM), storing model weights in FP16 consumes `{python} AppdxKVCacheSizing.weights_mem_str`, leaving `{python} AppdxKVCacheSizing.remaining_mem_str` for activation and KV cache memory. Unmanaged contiguous allocation limits the maximum concurrent batch size to $B_{\text{max}} \le 290/9.66 \approx$ `{python} AppdxKVCacheSizing.max_batch_size_str` requests before running out of memory (OOM), demonstrating how KV cache capacity bounds serving throughput.
+Across `{python} AppdxKVCacheSizing.num_gpus_str`$\times$ A100 80-GB GPUs (`{python} AppdxKVCacheSizing.total_hbm_str` total HBM), storing model weights in FP16 consumes `{python} AppdxKVCacheSizing.weights_mem_str`, leaving `{python} AppdxKVCacheSizing.remaining_mem_str` for activation and KV cache memory. Dividing that residual capacity by the per-request cache gives a capacity-only upper bound of `{python} AppdxKVCacheSizing.max_batch_size_str` concurrent requests. This bound assumes balanced sharding and reserves no memory for activations, workspaces, runtime state, or allocator losses; an implementable batch must be smaller. Device nameplate capacities are converted to decimal GB before subtracting the decimal model footprint.
 
 ## Summary {.unnumbered}
 
-Serving production inference requires balancing queueing dynamics against hardware memory capacity. The quantitative relationships derived in this appendix govern batch size selection, latency budgets, and accelerator memory bounds across serving deployments:
-
-::: {.callout-takeaways title="Serving performance is bounded by queues and memory"}
-
-* **Utilization has a hard ceiling**: As utilization $\rho_{\text{serv}}$ approaches 1, queue depth and latency grow without bound. Production serving targets $\rho_{\text{serv}} \leq 0.7$ to preserve latency headroom; the remaining 30 percent is not waste but the buffer that keeps tail latency finite.
-* **Batch size has an optimum, not a maximum**: Larger batches raise throughput but add batch-accumulation delay, producing a latency knee rather than monotonic improvement. Beyond the knee, doubling the batch can buy only 10--20 percent more throughput at the cost of doubled latency.
-* **Little's Law ties the system together**: $Q_{\text{req}} = \lambda_{\text{arr}} T_{\text{lat}}$ relates the number of in-flight requests to the arrival rate and time-in-system, giving a one-line consistency check on any serving measurement.
-* **The KV cache is the binding constraint**: Cache memory scales linearly with sequence length and batch size and routinely exceeds the model weights, capping concurrent capacity (the autoregressive bottleneck, principle \ref{pri-autoregressive-bottleneck}). Naive allocation wastes 60--80 percent to fragmentation, which is why production systems manage it with a virtual-memory scheme.
-
-:::
+Serving performance is bounded by queues and by memory. As utilization $\rho_{\text{serv}}$ approaches 1, queue depth and latency grow without bound, so production systems retain headroom suited to their workload and SLO. Larger batches raise throughput but add batch-accumulation delay, which produces a latency knee rather than monotonic improvement; the best batch size depends on whether the objective is minimum mean latency, maximum SLO-compliant throughput, or cost. Little's Law, $Q_{\text{req}} = \lambda_{\text{arr}} T_{\text{lat}}$, gives a one-line consistency check on any serving measurement. The KV cache grows with sequence length, batch size, and KV-head width and can exceed the model weights (principle \ref{pri-autoregressive-bottleneck}); paging reduces fragmentation and reservation losses without removing the underlying footprint.

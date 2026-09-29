@@ -948,7 +948,7 @@ class TestDistributedModel:
         solver = DistributedModel()
         gpt3 = Models.Language.GPT3
         cluster = Systems.Clusters.Research_256
-        result = solver.solve(gpt3, cluster, batch_size=32)
+        result = solver.solve(gpt3, cluster, batch_size=256)
         assert 0 < result.scaling_efficiency <= 1.0
 
     def test_communication_latency_positive(self):
@@ -956,8 +956,17 @@ class TestDistributedModel:
         solver = DistributedModel()
         gpt3 = Models.Language.GPT3
         cluster = Systems.Clusters.Research_256
-        result = solver.solve(gpt3, cluster, batch_size=32)
+        result = solver.solve(gpt3, cluster, batch_size=256)
         assert result.communication_latency.magnitude > 0
+
+    def test_underfilled_batch_warns_idle_ranks(self):
+        """When global batch size is less than DP ranks, a UserWarning is issued."""
+        solver = DistributedModel()
+        gpt3 = Models.Language.GPT3
+        cluster = Systems.Clusters.Research_256
+        with pytest.warns(UserWarning, match="some ranks will be idle"):
+            result = solver.solve(gpt3, cluster, batch_size=32)
+        assert result.scaling_efficiency > 0
 
     def test_tp_training_step_pays_four_allreduces_per_layer(self):
         """Megatron-LM TP: 2 forward + 2 backward AllReduces per layer of one pipeline stage."""
@@ -1050,7 +1059,7 @@ class TestDistributedModel:
         solver = DistributedModel()
         gpt3 = Models.Language.GPT3
         cluster = Systems.Clusters.Research_256
-        result = solver.solve(gpt3, cluster, batch_size=32, pp_size=1)
+        result = solver.solve(gpt3, cluster, batch_size=256, pp_size=1)
         assert result.pipeline_bubble_latency.magnitude == 0
         assert result.bubble_fraction == 0
 
@@ -1091,6 +1100,12 @@ class TestReliabilityModel:
         cluster = Systems.Clusters.Frontier_8K
         result = solver.solve(cluster, job_duration_hours=100.0)
         assert result.failure_probability > 0
+
+    def test_redundant_psus_drop_out_of_series_sum(self):
+        """DGX H100 PSUs are 4+2 redundant (pc.DGX_H100_USER_GUIDE_POWER), so the node
+        MTBF is GPU 8/50k + NIC 8/150k only: 4,687.5 h, and 1/128 of that at 1,024 GPUs."""
+        result = ReliabilityModel().solve(Systems.Clusters.Training_1K, 720)
+        assert result.fleet_mtbf.m_as("hour") == pytest.approx(4687.5 / 128, rel=1e-3)
 
     def test_larger_cluster_higher_failure_prob(self):
         """Larger cluster should have higher failure probability for the same job."""

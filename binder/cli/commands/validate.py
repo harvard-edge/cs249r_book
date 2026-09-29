@@ -478,6 +478,10 @@ class ValidateCommand:
             # URLs"). Network-bound -> opt-in, not a pre-commit gate.
             Scope("links", "_run_bib_links", default=False,
                   note="DOI/URL liveness: every locator resolves (network; opt-in)"),
+            # verify: cryptographic ledger & primary database verification.
+            # Network-bound and opt-in.
+            Scope("verify", "_run_bib_verify", default=False,
+                  note="cryptographic ledger & primary database verification (opt-in)"),
         ],
         "footnotes": [
             Scope(
@@ -987,12 +991,18 @@ class ValidateCommand:
             "--log", dest="pdf_log", type=str, default=None,
             help="pdf --scope verify: optional Quarto render log to scan for crossref warnings",
         )
+        parser.add_argument(
+            "--offline", action="store_true", default=False,
+            help="bib --scope verify: skip live network calls (ledger-only check)",
+        )
 
         try:
             ns = parser.parse_args(args)
         except SystemExit:
             # argparse uses SystemExit(0) for --help and non-zero for parse errors.
             return ("-h" in args) or ("--help" in args)
+
+        self._offline = getattr(ns, "offline", False)
 
         if not ns.subcommand:
             self._print_check_help()
@@ -11817,6 +11827,255 @@ class ValidateCommand:
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
+
+    def _run_bib_verify(self, root: Path) -> ValidationRunResult:
+        """Verify BibTeX entries against the cryptographic ledger and primary databases.
+
+        Reads the verification manifest (review/bib-verification/manifest.json or
+        binder/tools/bib_verification_manifest.json). Checks sha256 hash of normalized
+        entry text to detect tampering or unverified modifications. If entries
+        lack verification or hash has drifted, flags them. For unverified entries
+        with DOIs, performs live verification against Crossref / DataCite APIs.
+        """
+        import hashlib
+        import json
+        import ssl
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        try:
+            from cli.checks import bib_lint
+        except ImportError:
+            from binder.cli.checks import bib_lint
+
+        t0 = time.time()
+        bib_files = self._bib_files(root)
+        if not bib_files:
+            return ValidationRunResult(
+                name="bib-verify",
+                description="Cryptographic ledger & primary database verification",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        # Locate manifest: check review/bib-verification/manifest.json then binder/tools/
+        issues: List[ValidationIssue] = []
+        ledger_path = self.config_manager.root_dir / "review" / "bib-verification" / "manifest.json"
+        if not ledger_path.exists():
+            fallback = self.config_manager.root_dir / "binder" / "tools" / "bib_verification_manifest.json"
+            if fallback.exists():
+                ledger_path = fallback
+
+        if not ledger_path.exists():
+            issues.append(ValidationIssue(
+                file=self._relative_file(ledger_path),
+                line=0,
+                code="bib_verify_missing_manifest",
+                message="Verification ledger not found. Run `python3 binder/tools/scripts/audit/verify_bibliography.py` to generate.",
+                severity="warning",
+                suggestion="Run verification audit to establish the cryptographic manifest.",
+            ))
+            return ValidationRunResult(
+                name="bib-verify",
+                description="Cryptographic ledger & primary database verification",
+                files_checked=len(bib_files),
+                issues=issues,
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        manifest: dict = {}
+        try:
+            manifest = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            issues.append(ValidationIssue(
+                file=self._relative_file(ledger_path),
+                line=0,
+                code="bib_verify_corrupted_manifest",
+                message=f"Verification ledger could not be read: {exc}",
+                severity="error",
+                suggestion="Regenerate the manifest using the audit tool.",
+            ))
+            return ValidationRunResult(
+                name="bib-verify",
+                description="Cryptographic ledger & primary database verification",
+                files_checked=len(bib_files),
+                issues=issues,
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        try:
+            import certifi
+            ctx = ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            ctx = ssl.create_default_context()
+
+        ua = "MLSysBook-binder-bibcheck/1.0 (mailto:jvijay@gmail.com)"
+
+        def compute_entry_hash(raw_text: str) -> str:
+            normalized = re.sub(r"\s+", " ", raw_text.strip())
+            return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+        def check_crossref(clean_doi: str) -> tuple[bool, str]:
+            url = f"https://api.crossref.org/works/{urllib.parse.quote(clean_doi)}"
+            req = urllib.request.Request(url, headers={"User-Agent": ua})
+            try:
+                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8")).get("message", {})
+                        title = (data.get("title") or [""])[0]
+                        return True, title
+            except urllib.error.HTTPError as e:
+                return False, f"HTTP {e.code}"
+            except Exception as e:
+                return False, str(e)
+            return False, "Not found"
+
+        def check_datacite(clean_doi: str) -> tuple[bool, str]:
+            url = f"https://api.datacite.org/dois/{urllib.parse.quote(clean_doi)}"
+            req = urllib.request.Request(url, headers={"User-Agent": ua})
+            try:
+                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("attributes", {})
+                        titles = data.get("titles", [])
+                        title = titles[0].get("title", "") if titles else ""
+                        return True, title
+            except urllib.error.HTTPError as e:
+                return False, f"HTTP {e.code}"
+            except Exception as e:
+                return False, str(e)
+            return False, "Not found"
+
+        unverified_doi_entries: list[tuple[str, bib_lint.Entry, str]] = []
+
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                entries, _ = bib_lint.parse_bib(text)
+            except ValueError as exc:
+                rel = self._relative_file(bib_path)
+                issues.append(ValidationIssue(
+                    file=rel,
+                    line=0,
+                    code="bib_verify_parse_error",
+                    message=f"PARSE ERROR: {exc}",
+                    severity="error",
+                ))
+                continue
+
+            rel = self._relative_file(bib_path)
+            for entry in entries:
+                current_hash = compute_entry_hash(entry.raw)
+                record = manifest.get(entry.key)
+
+                if record is None:
+                    doi_field = entry.get("doi")
+                    doi_val = doi_field.value.strip() if doi_field else ""
+                    if doi_val:
+                        unverified_doi_entries.append((rel, entry, doi_val))
+                    else:
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=entry.start_line,
+                            code="bib_unverified_entry",
+                            message=f"@{entry.entry_type}{{{entry.key}}} has not been verified against canonical sources.",
+                            severity="warning",
+                            context=f"@{entry.entry_type}{{{entry.key},",
+                            suggestion="Verify entry against primary academic sources and record in manifest.",
+                        ))
+                    continue
+
+                status = record.get("status")
+                recorded_hash = record.get("entry_hash")
+                if status == "invalid":
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=entry.start_line,
+                        code="bib_invalid_entry",
+                        message=f"@{entry.entry_type}{{{entry.key}}} is flagged as fabricated or invalid citation.",
+                        severity="error",
+                        context=f"@{entry.entry_type}{{{entry.key},",
+                        suggestion="Remove this invalid citation or replace with an authentic reference.",
+                    ))
+                elif not recorded_hash:
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=entry.start_line,
+                        code="bib_missing_sha",
+                        message=f"@{entry.entry_type}{{{entry.key}}} is missing SHA-256 hash in verification manifest.",
+                        severity="error",
+                        context=f"@{entry.entry_type}{{{entry.key},",
+                        suggestion="Run verification audit to record cryptographic SHA-256 hash.",
+                    ))
+                elif recorded_hash != current_hash:
+                    # Only flag drift if the entry is in the primary file recorded in manifest
+                    if record.get("file") == rel:
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=entry.start_line,
+                            code="bib_verification_drift",
+                            message=(
+                                f"@{entry.entry_type}{{{entry.key}}} has drifted from verified state "
+                                f"(hash mismatch: recorded {recorded_hash[:8]}... vs current {current_hash[:8]}...)."
+                            ),
+                            severity="warning",
+                            context=f"@{entry.entry_type}{{{entry.key},",
+                            suggestion="Re-verify modified entry and update manifest with audit tool.",
+                        ))
+
+        # Check unverified entries that have DOIs
+        if unverified_doi_entries:
+            offline = getattr(self, "_offline", False)
+            if offline:
+                for rel, entry, raw_doi in unverified_doi_entries:
+                    clean_doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", raw_doi, flags=re.I).strip()
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=entry.start_line,
+                        code="bib_unverified_doi_offline",
+                        message=f"@{entry.entry_type}{{{entry.key}}} DOI `{clean_doi}` has not been verified in manifest (offline mode active).",
+                        severity="warning",
+                        context=f"doi = {{{clean_doi}}}",
+                        suggestion="Run `./binder/binder check bib --scope verify` without --offline to verify against primary APIs.",
+                    ))
+            else:
+                def verify_doi_target(t):
+                    rel, entry, raw_doi = t
+                    clean_doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", raw_doi, flags=re.I).strip()
+                    if clean_doi.startswith("10.48550/arXiv."):
+                        ok, title_or_err = check_datacite(clean_doi)
+                    else:
+                        ok, title_or_err = check_crossref(clean_doi)
+                    return rel, entry, clean_doi, ok, title_or_err
+
+                with ThreadPoolExecutor(max_workers=6) as ex:
+                    for fut in as_completed([ex.submit(verify_doi_target, t) for t in unverified_doi_entries]):
+                        rel, entry, clean_doi, ok, title_or_err = fut.result()
+                        if not ok:
+                            issues.append(ValidationIssue(
+                                file=rel,
+                                line=entry.start_line,
+                                code="bib_unverified_doi",
+                                message=f"@{entry.entry_type}{{{entry.key}}} DOI `{clean_doi}` could not be verified via Crossref/DataCite: {title_or_err}",
+                                severity="warning",
+                                context=f"doi = {{{clean_doi}}}",
+                                suggestion="Check DOI correctness or confirm source in browser.",
+                            ))
+
+        issues.sort(key=lambda i: (i.file, i.line))
+        return ValidationRunResult(
+            name="bib-verify",
+            description="Cryptographic ledger & primary database verification",
+            files_checked=len(bib_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
 
     # ──────────────────────────────────────────────────────────────────────
     # Native audit-check adapters (binder/tools/audit/checks/*).

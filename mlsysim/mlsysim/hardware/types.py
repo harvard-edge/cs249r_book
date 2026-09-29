@@ -22,6 +22,10 @@ class ComputeCore(BaseModel):
     # on peak_flops. Populated where a device's clock is stated; absent (None)
     # for entries whose source gives only aggregate throughput.
     clock_rate: Optional[Quantity] = None
+    # Count of programmable compute cores for architectures that publish one
+    # (e.g. a wafer-scale engine's processing elements). Absent (None) where the
+    # vendor does not state a core count or where sm_count is the unit.
+    core_count: Optional[int] = None
 
     @field_validator("peak_flops", mode="after")
     @classmethod
@@ -73,6 +77,9 @@ class MemoryHierarchy(BaseModel):
     # one bit per transfer, so 6.4 Gb/s is 6400 MT/s). bandwidth = width x rate / 8.
     bus_width: Optional[Quantity] = None
     pin_data_rate: Optional[Quantity] = None
+    # Number of active HBM stacks on the package (HBM devices only). Per-stack
+    # bandwidth/capacity = bandwidth / hbm_stacks, capacity / hbm_stacks.
+    hbm_stacks: Optional[int] = None
 
     @field_validator("capacity", "sram_capacity", "flash_capacity", "l2_cache", "register_file_per_sm", "shared_memory_per_sm", mode="after")
     @classmethod

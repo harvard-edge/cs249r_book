@@ -40,7 +40,7 @@ def test_system_evaluation_json_contract_includes_tco():
         scenario_name="contract",
         model_obj=Models.Language.Llama3_8B,
         hardware_obj=Hardware.Cloud.H100,
-        batch_size=8,
+        batch_size=256,
         precision="fp16",
         efficiency=0.4,
         fleet_obj=Systems.Clusters.Research_256,

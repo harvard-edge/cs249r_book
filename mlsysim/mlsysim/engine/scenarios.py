@@ -67,7 +67,7 @@ class Scenario(BaseModel):
         
         # Dynamic unit scaling for summary
         unit = "MB" if weights < Q_("1 GB") else "GB"
-        mem_summary = f"Model fits in memory ({weights.to(unit):.1f} / {hardware.memory.capacity.to(unit):.1f})" if mem_feasible else f"OOM: Requires {weights.to(unit):.1f} but only has {hardware.memory.capacity.to(unit):.1f}"
+        mem_summary = f"Model fits in memory ({weights.to(unit):.1f~P} / {hardware.memory.capacity.to(unit):.1f~P})" if mem_feasible else f"OOM: Requires {weights.to(unit):.1f~P} but only has {hardware.memory.capacity.to(unit):.1f~P}"
         
         l1 = EvaluationLevel(
             level_name="Feasibility", 
@@ -106,7 +106,7 @@ class Scenario(BaseModel):
         if self.sla_latency and actual_latency > self.sla_latency:
             p_status = "FAIL"
         
-        p_summary = f"Latency: {actual_latency:.2f} (Target: {self.sla_latency or 'N/A'})"
+        p_summary = f"Latency: {actual_latency:.2f~P} (Target: {self.sla_latency or 'N/A'})"
         l2 = EvaluationLevel(level_name="Performance", status=p_status, summary=p_summary, metrics=perf_metrics)
 
         # --- LEVEL 3: MACRO ---
@@ -220,6 +220,19 @@ class Scenarios:
         sla_latency=Q_("30 ms")
     )
 
+    # Added 2026-09-28. Federated on-device vision (the book's "Archetype C"):
+    # MobileNet trained/served locally on smartphone-class devices. The
+    # sustained power budget is the registry's 3 W upper sustained anchor; the
+    # burst ceiling stays at ReferenceStats.MobilePower.MobileMlBurstHigh.
+    FederatedMobileVision = Scenario(
+        name="Federated Mobile Vision",
+        description="On-device federated training and inference of a MobileNet on smartphone-class hardware.",
+        application="Federated mobile learning",
+        workload=_Models.Vision.MobileNetV2,
+        system=_Hardware.Mobile.iPhone15Pro,
+        power_budget=_ReferenceStats.MobilePower.MobileMlSustainedHigh,
+    )
+
     MobileAssistant = Scenario(
         name="Mobile Assistant",
         description="On-device assistant with a quantized small LLM on a smartphone.",
@@ -241,13 +254,32 @@ class Scenarios:
     )
 
     # --- CLOUD WORLD ---
+    # Teaching mission, H100 era. Frontier_8K (8,192 H100, ~26K A100-equivalents
+    # of dense BF16 peak) is the H100 restatement of the GPT-4-class run;
+    # SemiAnalysis (2023) estimates the same pre-training at ~8,192 H100 for
+    # ~55 days. The historical A100 fleet lives on
+    # Models.Language.GPT4.training_*_ref.
     FrontierTraining = Scenario(
         name="Frontier LLM Training",
-        description="Pre-training a GPT-4-class frontier model on a massive fleet.",
+        description="Pre-training a GPT-4-class frontier model on an 8,192-GPU H100 fleet.",
         application="Frontier Training",
         workload=_Models.Language.GPT4,
         system=_Clusters.Frontier_8K,
         sla_latency=Q_("500 ms") # Per-step target
+    )
+
+    # Added 2026-09-28. The dense-LLM pretraining reference (the book's
+    # "Archetype A"): GPT-3-class 175B pretrained with mixed-precision Adam on
+    # the 1,024-GPU reference cluster (128 DGX H100 nodes). No SLA: it is a
+    # composition anchor. Byte policy: ReferenceStats.MixedPrecisionAdam.
+    # NOTE: Training_1K.fabric is InfiniBand_HDR (vol1 reads it; unchanged),
+    # while the book describes the reference cluster on NDR.
+    DenseLLMPretrainingReference = Scenario(
+        name="Dense LLM Pretraining (175B, 1,024 H100)",
+        description="GPT-3-class dense transformer pretrained with mixed-precision Adam on the 1,024-GPU reference cluster.",
+        application="Dense LLM pretraining",
+        workload=_Models.Language.GPT3,
+        system=_Clusters.Training_1K,
     )
 
     # --- SERVING WORLD ---

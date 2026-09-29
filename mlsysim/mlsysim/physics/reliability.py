@@ -84,8 +84,9 @@ def calc_mtbf_node(
     Assumes independent, exponentially distributed failures where any single
     component failure fails the node, so failure *rates* add:
     ``MTBF_node = 1 / (n_gpu/MTBF_gpu + n_nic/MTBF_nic + n_psu/MTBF_psu + ...)``.
-    Real PSUs are often redundant (N+1); model that by lowering ``n_psus`` or
-    raising its MTBF rather than by changing the formula.
+    Redundant PSUs (N+M, M >= 1) do not fail the node singly; pass
+    ``Node.series_psus`` (0 for a redundant supply) rather than the physical
+    PSU count.
 
     Parameters
     ----------

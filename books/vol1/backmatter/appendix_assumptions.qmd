@@ -44,6 +44,8 @@ from mlsysim.fmt import (
     fmt_power,
     fmt_time,
     fmt_arithmetic_intensity,
+    fmt_percent,
+    fmt_energy,
 )
 
 # This namespace supplies the opening napkin-math examples and one later
@@ -54,10 +56,11 @@ class NapkinMath:
     h100_flops_q = Hardware.Cloud.H100.compute.peak_flops
     h100_bw_q = Hardware.Cloud.H100.memory.bandwidth
     h100_mem_q = Hardware.Cloud.H100.memory.capacity
-    a100_tdp_q = Hardware.Cloud.A100.tdp
+    v100_tdp_q = Hardware.Cloud.V100.tdp
     gpt3_ops = Models.Language.GPT3.training_ops.magnitude
     gpt3_days = Models.Language.GPT3.training_days_ref.magnitude
     gpt3_accelerators = Models.Language.GPT3.training_accelerators_ref.to(count).magnitude
+    reported_energy_q = Models.Language.GPT3.training_energy_mwh
     elec_per_kwh = Infrastructure.Pricing.Cloud.ElectricityPerKwh.rate.magnitude
 
     gemm_n = 4096
@@ -70,12 +73,14 @@ class NapkinMath:
     ridge = (h100_flops_q / h100_bw_q).to(flop / byte).magnitude
     gemm_intensity = gemm_n / 3
     train_mem_q = memory_from_params(model_params_b * Bparam, bytes_per_param_q / param)
-    elec_energy = gpt3_days * gpt3_accelerators * hours_per_day * hour * a100_tdp_q
+    elec_energy = gpt3_days * gpt3_accelerators * hours_per_day * hour * v100_tdp_q
     elec_cost = elec_energy.to(kWh).magnitude * elec_per_kwh
+    tdp_share = round((elec_energy / reported_energy_q).to('').magnitude, 2)
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ridge > 200, f"Ridge point {ridge} too low")
     check(train_mem_q > h100_mem_q, "7B model state should exceed single GPU")
+    check(0.7 < tdp_share < 0.9, f"TDP-only energy should be most, not all, of the reported GPT-3 energy; got {tdp_share}")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_flops_q, unit=TFLOPs / second, precision=0, commas=False)
@@ -89,13 +94,16 @@ class NapkinMath:
     # Display the vendor's nominal capacity in decimal GB; the registry may retain
     # the same nameplate magnitude in GiB for internal capacity calculations.
     accel_mem_gb_str = fmt_memory(h100_mem_q.magnitude * GB, unit=GB, precision=0, commas=False)
-    a100_tdp_w_str = fmt_power(a100_tdp_q, unit=watt, precision=0, commas=False)
+    v100_tdp_w_str = fmt_power(v100_tdp_q, unit=watt, precision=0, commas=False)
     gpt3_ops_math = fmt_math(sci_latex(gpt3_ops, precision=2))
-    gpt3_days_str = fmt_time(gpt3_days, "day", precision=0, commas=False, style="word", approx=True)
+    gpt3_days_str = fmt_time(gpt3_days, "day", precision=1, commas=False, style="word", approx=True)
     gpt3_accelerators_str = fmt(gpt3_accelerators, precision=0)
     elec_rate_str = fmt_usd(elec_per_kwh, precision=2, commas=False, per="kWh")
-    a100_kw_str = fmt_power(a100_tdp_q, unit=kilowatt, precision=1, commas=False)
-    elec_cost_str = fmt_usd(elec_cost, precision=1, approx=True)
+    v100_kw_str = fmt_power(v100_tdp_q, unit=kilowatt, precision=1, commas=False)
+    elec_cost_str = fmt_usd(elec_cost, precision=0, approx=True)
+    tdp_energy_mwh_str = fmt_energy(round(elec_energy.to(MWh).magnitude) * MWh, unit=MWh, precision=0, commas=True)
+    reported_energy_mwh_str = fmt_energy(reported_energy_q, unit=MWh, precision=0, commas=True)
+    tdp_share_pct_str = fmt_percent(tdp_share, precision=0, commas=False, style="prose")
     napkin_model_b_digit_str = fmt(model_params_b, precision=0, commas=False)
 ```
 
@@ -146,16 +154,16 @@ Fitting the model in memory establishes feasibility, but not operating cost. Pow
 ::: {#nbk-appendix-assumptions-electricity-cost .callout-notebook title="Estimate accelerator electricity cost"}
 
 **Problem**:
-What is the accelerator-only electricity cost\index{Training cost!electricity} of the editorial GPT-3-scale scenario?
+What is the accelerator-only electricity cost\index{Training cost!electricity} of the GPT-3 training run?
 
 **Variables**:
-Use `{python} NapkinMath.gpt3_accelerators_str` A100s, `{python} NapkinMath.a100_tdp_w_str` per accelerator, `{python} NapkinMath.gpt3_days_str` wall-clock, and `{python} NapkinMath.elec_rate_str` electricity.
+Use `{python} NapkinMath.gpt3_accelerators_str` V100s, `{python} NapkinMath.v100_tdp_w_str` per accelerator, `{python} NapkinMath.gpt3_days_str` wall-clock, and `{python} NapkinMath.elec_rate_str` electricity [@patterson2021carbon].
 
 **Math**:
-The run requires roughly `{python} NapkinMath.gpt3_ops_math` FLOPs. The A100-equivalent electricity-cost estimate is `{python} NapkinMath.gpt3_days_str` wall-clock $\times$ `{python} NapkinMath.gpt3_accelerators_str` A100s $\times$ 24 h/day $\times$ `{python} NapkinMath.a100_kw_str` $\times$ `{python} NapkinMath.elec_rate_str` = `{python} NapkinMath.elec_cost_str`.
+The run requires roughly `{python} NapkinMath.gpt3_ops_math` FLOPs. The accelerator-only electricity-cost estimate is `{python} NapkinMath.gpt3_days_str` wall-clock $\times$ `{python} NapkinMath.gpt3_accelerators_str` V100s $\times$ 24 h/day $\times$ `{python} NapkinMath.v100_kw_str` $\times$ `{python} NapkinMath.elec_rate_str` = `{python} NapkinMath.elec_cost_str`.
 
 **Result**:
-The accelerator-only electricity cost is approximately `{python} NapkinMath.elec_cost_str`. This accelerator thermal design power (TDP)-only estimate excludes host CPUs, networking, storage, cooling, and facility overhead. The original GPT-3 run used V100-era infrastructure; this is an editorial A100-equivalent scenario, not a reported configuration or a duration derived from peak FLOP/s alone.
+The accelerator-only electricity cost is approximately `{python} NapkinMath.elec_cost_str`. This thermal design power (TDP)-only estimate excludes host CPUs, networking, storage, cooling, and facility overhead. Its `{python} NapkinMath.tdp_energy_mwh_str` covers about `{python} NapkinMath.tdp_share_pct_str` of the `{python} NapkinMath.reported_energy_mwh_str` reported for the run, which also counts host power and data center overhead. The GPU count and duration are a published reconstruction from measured per-GPU throughput, so only their product is firm [@patterson2021carbon].
 
 **Systems insight**:
 Energy is measurable from power and time, but full cost accounting must also include capital utilization, networking, storage, staffing, and failed or repeated runs.
@@ -291,7 +299,7 @@ The master accelerator matrix in @tbl-appdx-assumptions-accelerator-matrix synth
 | **NVIDIA L40S (48 GB PCIe)**  | 4nm 4N (TSMC)  |     350     | FP64: 1.4, FP32: 91.6, TF32: 183, FP16/BF16: 366, FP8: 733, INT8: 733         | 48 GB GDDR6 @ 0.86 TB/s         |      96 MB       |              423.6              |
 | **Google TPU v1**             |  28nm (TSMC)   |      75     | INT8: 92 TOPS (FP formats N/A)                                                | 8 GB DDR3 @ 0.034 TB/s          |      28 MB       |        N/A (2,705.9 INT8)       |
 | **Google TPU v2**             |  16nm (TSMC)   | 280 (board) | BF16/FP16: 45 TFLOPs                                                          | 16 GB HBM @ 0.60 TB/s           |      32 MB       |               75.0              |
-| **Google TPU v3**             |  16nm (TSMC)   | 450 (board) | BF16/FP16: 123 TFLOPs                                                         | 32 GB HBM2 @ 0.90 TB/s          |      32 MB       |              136.7              |
+| **Google TPU v3**             |  16nm (TSMC)   |     450     | BF16/FP16: 123 TFLOPs                                                         | 32 GB HBM2 @ 0.90 TB/s          |      32 MB       |              136.7              |
 | **Google TPU v4**             | 7nm N7 (TSMC)  |     170     | BF16/FP16: 275, FP32: 275, INT8: 275                                          | 32 GB HBM2 @ 1.20 TB/s          |      48 MB       |              229.2              |
 | **Google TPU v5e**            | 7nm N7 (TSMC)  |     140     | BF16/FP16: 197, FP8: 394, INT8: 394                                           | 16 GB HBM2e @ 0.82 TB/s         |      32 MB       |              240.5              |
 | **Google TPU v5p**            | 4nm 4N (TSMC)  |     450     | BF16/FP16: 459, FP8: 918, INT8: 918                                           | 95 GB HBM3 @ 2.76 TB/s          |      96 MB       |              166.3              |
@@ -464,6 +472,8 @@ class ModelConstants:
     gpt3_params_unit_str = fmt_unit(Models.Language.GPT3.parameters)
     gpt3_training_days_ref_val_str = fmt_val(Models.Language.GPT3.training_days_ref)
     gpt3_training_days_ref_unit_str = fmt_unit(Models.Language.GPT3.training_days_ref)
+    gpt3_training_accel_val_str = fmt(Models.Language.GPT3.training_accelerators_ref.to(count).magnitude, precision=0, commas=True)
+    gpt3_training_accel_unit_str = MarkdownStr(f"{Models.Language.GPT3.training_hardware_label} GPUs")
     gpt3_training_ops_val_str = fmt_val(Models.Language.GPT3.training_ops)
     gpt3_training_ops_unit_str = fmt_unit(Models.Language.GPT3.training_ops)
     gpt4_params_val_str = fmt_val(Models.Language.GPT4.parameters)
@@ -488,7 +498,7 @@ class ModelConstants:
 
 ## Model Specifications {.unnumbered}
 
-These are the **reference model assumptions**\index{Assumptions!reference models} behind training-cost, memory-footprint, and inference-workload examples: parameter counts, per-inference FLOP budgets, and published training-scale anchors. Published model sizes follow primary papers, model reports, and official model documentation [@devlin2019; @radford2019language; @brown2020language; @dubey2024llama; @he2016; @sandler2018; @ultralytics2023yolov8Docs]. The inference FLOP budgets are book-derived values: they use sequence length 128 for BERT-Base, 224 $\times$ 224 images for ResNet-50 and MobileNetV2, and 640 $\times$ 640 images for YOLOv8-Nano; the vision models count two FLOPs per multiply-add. GPT-3 training FLOPs follow [@brown2020language]; the 25-day, 1,024-A100 pairing is editorial. The GPT-4 parameter count and training GPU-days are public third-party mixture of experts (MoE) estimates [@semianalysisGPT4] because the GPT-4 technical report does not disclose architecture size. When a chapter estimates GPT-3-scale training time, it uses @tbl-assumptions-models.
+These are the **reference model assumptions**\index{Assumptions!reference models} behind training-cost, memory-footprint, and inference-workload examples: parameter counts, per-inference FLOP budgets, and published training-scale anchors. Published model sizes follow primary papers, model reports, and official model documentation [@devlin2019; @radford2019language; @brown2020language; @dubey2024llama; @he2016; @sandler2018; @ultralytics2023yolov8Docs]. The inference FLOP budgets are book-derived values: they use sequence length 128 for BERT-Base, 224 $\times$ 224 images for ResNet-50 and MobileNetV2, and 640 $\times$ 640 images for YOLOv8-Nano; the vision models count two FLOPs per multiply-add. GPT-3 training FLOPs follow [@brown2020language]; the GPT-3 training duration and accelerator count follow the published carbon accounting of the run [@patterson2021carbon]. The GPT-4 parameter count and training GPU-days are public third-party mixture of experts (MoE) estimates [@semianalysisGPT4] because the GPT-4 technical report does not disclose architecture size. When a chapter estimates GPT-3-scale training time, it uses @tbl-assumptions-models.
 
 | **Assumption**                              |                         **Value**                          |                           **Unit**                          |
 |:--------------------------------------------|:----------------------------------------------------------:|:-----------------------------------------------------------:|
@@ -499,7 +509,8 @@ These are the **reference model assumptions**\index{Assumptions!reference models
 | **Layers (GPT-2)**                          |       `{python} ModelConstants.gpt2_layers_val_str`        |        `{python} ModelConstants.gpt2_layers_unit_str`       |
 | **Parameters (GPT-2)**                      |       `{python} ModelConstants.gpt2_params_val_str`        |        `{python} ModelConstants.gpt2_params_unit_str`       |
 | **Parameters (GPT-3)**                      |       `{python} ModelConstants.gpt3_params_val_str`        |        `{python} ModelConstants.gpt3_params_unit_str`       |
-| **Scenario duration (GPT-3 scale)**         |  `{python} ModelConstants.gpt3_training_days_ref_val_str`  |  `{python} ModelConstants.gpt3_training_days_ref_unit_str`  |
+| **Reference training duration (GPT-3)**     |  `{python} ModelConstants.gpt3_training_days_ref_val_str`  |  `{python} ModelConstants.gpt3_training_days_ref_unit_str`  |
+| **Reference training accelerators (GPT-3)** |   `{python} ModelConstants.gpt3_training_accel_val_str`    |    `{python} ModelConstants.gpt3_training_accel_unit_str`   |
 | **Reference training FLOPs (GPT-3)**        |    `{python} ModelConstants.gpt3_training_ops_val_str`     |     `{python} ModelConstants.gpt3_training_ops_unit_str`    |
 | **Parameters (GPT-4, public MoE estimate)** |       `{python} ModelConstants.gpt4_params_val_str`        |        `{python} ModelConstants.gpt4_params_unit_str`       |
 | **Reference training GPU-days (GPT-4)**     |  `{python} ModelConstants.gpt4_training_gpu_days_val_str`  |  `{python} ModelConstants.gpt4_training_gpu_days_unit_str`  |
@@ -509,7 +520,7 @@ These are the **reference model assumptions**\index{Assumptions!reference models
 | **Parameters (MobileNetV2)**                |    `{python} ModelConstants.mobilenetv2_params_val_str`    |    `{python} ModelConstants.mobilenetv2_params_unit_str`    |
 | **Inference FLOPs (YOLOv8-Nano)**           |    `{python} ModelConstants.YOLOV8_NANO_FLOPs_val_str`     |     `{python} ModelConstants.YOLOV8_NANO_FLOPs_unit_str`    |
 
-: **Reference Model Specifications**: Parameter counts and FLOP budgets for worked examples. BERT, GPT-2, GPT-3, Llama, ResNet-50, MobileNetV2, and YOLOv8 rows use primary papers, model reports, or official model documentation [@devlin2019; @radford2019language; @brown2020language; @dubey2024llama; @he2016; @sandler2018; @ultralytics2023yolov8Docs]. GPT-4 rows cite [@openai2023gpt4] for the official model family and [@semianalysisGPT4] for the public MoE parameter and GPU-day estimates used in this edition. {#tbl-assumptions-models tbl-colwidths="[50,20,30]"}
+: **Reference Model Specifications**: Parameter counts and FLOP budgets for worked examples. BERT, GPT-2, GPT-3, Llama, ResNet-50, MobileNetV2, and YOLOv8 rows use primary papers, model reports, or official model documentation [@devlin2019; @radford2019language; @brown2020language; @patterson2021carbon; @dubey2024llama; @he2016; @sandler2018; @ultralytics2023yolov8Docs]. The GPT-3 duration and accelerator rows follow the run reconstruction in [@patterson2021carbon]. GPT-4 rows cite [@openai2023gpt4] for the official model family and [@semianalysisGPT4] for the public MoE parameter and GPU-day estimates used in this edition. {#tbl-assumptions-models tbl-colwidths="[50,20,30]"}
 
 ## Training Memory Conventions {.unnumbered}
 
@@ -895,7 +906,7 @@ Each assumption has a provenance record that lets readers trace the number back 
 | **Appendix section**            | **Source type**                                                                                                                              | **Primary references**                                                                                                                                                                 |
 |:--------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Accelerator specifications**  | Vendor datasheet peaks; editorial CPU/mobile anchors; Master Spec Matrix (@tbl-appdx-assumptions-accelerator-matrix)                         | [@nvidia2017gpu; @nvidia2018t4; @NVIDIA2020; @choquette2021; @choquette2023; @nvidia2024blackwell; @amd2023mi300x; @jouppi2023; @googleCloudTpuV6eDocs]; editorial for CPU/mobile rows |
-| **Model specifications**        | Published papers, model reports, and official docs; editorial GPT-3 scenario; GPT-4 size from public analysis                                | [@devlin2019; @radford2019language; @brown2020language; @dubey2024llama; @he2016; @sandler2018; @ultralytics2023yolov8Docs; @openai2023gpt4; @semianalysisGPT4]                        |
+| **Model specifications**        | Published papers, model reports, and official docs; GPT-3 run reconstruction; GPT-4 size from public analysis                                | [@devlin2019; @radford2019language; @brown2020language; @patterson2021carbon; @dubey2024llama; @he2016; @sandler2018; @ultralytics2023yolov8Docs; @openai2023gpt4; @semianalysisGPT4]  |
 | **Training memory conventions** | Book convention (mixed-precision Adam layout)                                                                                                | [@kingma2014adam; @kalamkar2019; @micikevicius2017mixed; @nvidia_tensors_fp16_2017]                                                                                                    |
 | **Energy constants**            | Published 45 nm arithmetic/DRAM estimates; VLSI synthesis node scaling; Precision Energy Hierarchy (@tbl-appdx-assumptions-energy-hierarchy) | [@horowitz2014; @dally2021] for arithmetic/DRAM; editorial for register/SRAM, MobileNetV2, and 5G rows                                                                                 |
 | **Interconnect bandwidth**      | Vendor specs; InfiniBand standard; PCIe/NVLink/CXL standards; Physical Spec Sheet (@tbl-appdx-assumptions-interconnect-matrix)               | [@nvidia2017gpu; @NVIDIA2020; @choquette2023; @infiniband2000spec; @nvidia2026quantumX800; @ethernetAlliance2025roadmap]                                                               |
