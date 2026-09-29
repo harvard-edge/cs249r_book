@@ -56,7 +56,7 @@ After completing a set of modules, you unlock the ability to run a milestone. Ea
       <td><b>Transformer</b></td>
       <td>2017</td>
       <td>01-08, 10-13</td>
-      <td>Train TinyGPT on Shakespeare and generate text autoregressively</td>
+      <td>Train TinyGPT on Shakespeare and Python code (TinyPy) for text and TinyCopilot code generation</td>
     </tr>
     <tr>
       <td>06</td>
@@ -87,6 +87,8 @@ tito milestone run 05
 # Run a specific part of a multi-part milestone
 tito milestone run 05 --part 1  # Part 1: TinyGPT (Shakespeare)
 tito milestone run 05 --part 2  # Part 2: Attention Sequence Routing
+tito milestone run 05 --part 3  # Part 3: TinyCopilot Code Generation
+tito milestone run 05 --part 4  # Part 4: Conversational Q&A & Overfitting Detective
 
 # Run Milestone 07 (Hardware Kernels)
 tito milestone run 07
@@ -103,7 +105,7 @@ milestones/
 ├── 02_1969_xor/            # Milestone 02: XOR Crisis
 ├── 03_1986_mlp/            # Milestone 03: Multilayer Perceptron
 ├── 04_1998_cnn/            # Milestone 04: Convolutional Networks
-├── 05_2017_transformer/    # Milestone 05: The Transformer (TinyGPT & Attention)
+├── 05_2017_transformer/    # Milestone 05: The Transformer (TinyGPT, Attention, TinyCopilot & Chat)
 ├── 06_2018_mlperf/         # Milestone 06: Generative Serving & MLPerf
 ├── 07_2024_kernels/        # Milestone 07: Custom GPU Kernels (C++ SIMD, Apple Metal & Triton)
 └── data_manager.py         # Shared dataset management utility
@@ -123,7 +125,7 @@ Each milestone has specific success criteria. Passing means your implementation 
 - **Milestone 02**: Demonstrates XOR is unsolvable with single layer (75% max accuracy)
 - **Milestone 03**: Part 1 solves XOR (100% accuracy), Part 2 achieves 85%+ on TinyDigits
 - **Milestone 04**: TinyDigits achieves 90%+ accuracy with CNN
-- **Milestone 05**: Part 1 trains TinyGPT on Shakespeare (loss < 2.50, generates text); Part 2 passes sequence challenges
+- **Milestone 05**: Part 1 trains TinyGPT on Shakespeare (loss < 2.50, generates text); Part 2 passes sequence challenges; Part 3 trains TinyCopilot on Python code (TinyPy) with syntactic AST verification; Part 4 trains conversational TinyTorch Q&A and illustrates the overfitting generalization gap
 - **Milestone 06**: Part 1 completes optimization pipeline, Part 2 shows KV-cache speedup on TinyGPT
 - **Milestone 07**: Compiles C++ SIMD, dispatches Apple Metal MPS or executes OpenAI Triton GPU kernels with numerical verification
 

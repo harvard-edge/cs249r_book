@@ -36,8 +36,15 @@ real-world problems. Let's recreate that breakthrough using YOUR Tiny🔥Torch!
 
     Sample 8×8 Digit Images:              What the Hidden Layer Learns:
 
-can 
-       "0"         "1"
+    ┌────────┐  ┌────────┐               • Edge detectors (horizontal, vertical)
+    │░░██░░░░│  │░░░██░░░│               • Curve patterns (loops in 0, 6, 8, 9)
+    │░██░░░░░│  │░░░██░░░│               • Stroke endings (1, 7 vs 8, 0)
+    │░██░░░░░│  │░░░██░░░│               • Intersection points (4, 8)
+    │░██░░░░░│  │░░░██░░░│
+    │░██░░░░░│  │░░░██░░░│               32 hidden units = 32 feature detectors
+    │░░██████│  │░░░██░░░│               that YOUR network learns automatically!
+    └────────┘  └────────┘
+       "1"         "7"
 
 🔍 MLP LIMITATION (Why CNNs will be better):
     MLP treats each pixel INDEPENDENTLY - no spatial awareness!
@@ -138,7 +145,7 @@ console = Console()
 
 
 # ============================================================================
-# 🎓 STUDENT CODE: Multi-Layer Perceptron
+# 🎓 ZONE 1: STUDENT LEGO BRICKS (Multi-Layer Perceptron)
 # ============================================================================
 
 class DigitMLP:
@@ -190,6 +197,10 @@ class DigitMLP:
         return [self.fc1.weight, self.fc1.bias,
                 self.fc2.weight, self.fc2.bias]
 
+
+# ============================================================================
+# 📊 ZONE 2: MILESTONE HARNESS & TRAINING UX
+# ============================================================================
 
 def load_digit_dataset():
     """Load the TinyDigits dataset (8×8 curated digits)."""
@@ -255,11 +266,13 @@ def evaluate_accuracy(model, images, labels):
 
     return accuracy, predictions
 
-def press_enter_to_continue() :
-    if sys.stdin.isatty() and sys.stdout.isatty() :
-        try :
+def press_enter_to_continue():
+    if os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1" or os.environ.get("CI") == "true":
+        return
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
             console.input("\n[yellow]Press Enter to continue...[/yellow] ")
-        except EOFError :
+        except EOFError:
             pass
         console.print()
 
@@ -632,13 +645,13 @@ def train_mlp():
 
     # Optional: Batch size experiment (skip in non-interactive mode)
     console.print("\n")
-    try:
-        run_experiment = input("\n🔬 Run batch size experiment? (y/n): ").lower().strip() == 'y'
-        if run_experiment:
-            compare_batch_sizes(train_images, train_labels, test_images, test_labels)
-    except EOFError:
-        # Non-interactive mode (e.g., tito milestone run) - skip experiment
-        pass
+    if os.environ.get("TINYTORCH_NON_INTERACTIVE") != "1" and os.environ.get("CI") != "true":
+        try:
+            run_experiment = input("\n🔬 Run batch size experiment? (y/n): ").lower().strip() == 'y'
+            if run_experiment:
+                compare_batch_sizes(train_images, train_labels, test_images, test_labels)
+        except EOFError:
+            pass
 
 
 if __name__ == "__main__":

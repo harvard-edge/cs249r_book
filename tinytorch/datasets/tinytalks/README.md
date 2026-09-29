@@ -149,6 +149,21 @@ A: Pepperoni is a popular choice!
 
 ---
 
+### **Special Edition: TinyTorch Concepts (`tinytalks_tinytorch.txt`)**
+Targeted Q&A concept pairs covering Modules 01 to 20 (Tensors, Autograd, Layers, Optimizers, Convolutions, Tokenization, Attention, Transformers, Quantization, KV Cache).
+
+```
+Q: What is a Tensor in TinyTorch?
+A: A Tensor is a multi-dimensional array with data, shape, and strides that supports autograd tracking.
+
+Q: Why divide by the square root of d_k?
+A: Dividing by square root of d_k prevents dot products from growing excessively large in high dimensions.
+```
+
+**Learning Goal:** Model learns to explain deep learning systems concepts back to the student. Supports the Overfitting Detective experiment (splits `tinytorch_train.txt` and `tinytorch_test.txt`).
+
+---
+
 ## 🚀 Quick Start
 
 ### Loading the Dataset
@@ -296,12 +311,12 @@ TinyTalks is designed as the **canonical dataset** for TinyTorch's Transformer m
 **Creative Commons Attribution 4.0 International (CC BY 4.0)**
 
 You are free to:
-- ✅ Share — copy and redistribute in any format
-- ✅ Adapt — remix, transform, and build upon the material
+- ✅ Share: copy and redistribute in any format
+- ✅ Adapt: remix, transform, and build upon the material
 - ✅ Commercial use allowed
 
 Under these terms:
-- **Attribution** — Cite TinyTalks (see below)
+- **Attribution**: Cite TinyTalks (see below)
 - **No additional restrictions**
 
 See [LICENSE](LICENSE) for full text.

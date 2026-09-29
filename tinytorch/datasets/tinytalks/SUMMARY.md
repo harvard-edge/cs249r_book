@@ -217,7 +217,7 @@ Following "Datasheets for Datasets" (Gebru et al., 2018):
 ## 🌟 Why TinyTalks Stands Out
 
 ### 1. **Pedagogical Design**
-Not just a dataset—designed specifically for the "aha!" moment when students see their first transformer learn.
+Not just a dataset: designed specifically for the "aha!" moment when students see their first transformer learn.
 
 ### 2. **Professional Quality**
 Follows industry best practices (Datasheets for Datasets, semantic versioning, comprehensive docs).
@@ -264,7 +264,7 @@ We've created a **professional, citable, educational dataset** that:
 ✅ Has a clear roadmap (v1.1, v2.0, v3.0)
 ✅ Could become a standard (others will cite it!)
 
-**TinyTalks is not just a dataset—it's a contribution to the educational AI community.**
+**TinyTalks is not just a dataset: it is a contribution to the educational AI community.**
 
 ---
 
