@@ -50,6 +50,14 @@ A team that prices an agent from its token bill misses much of what it buys. Eac
 
 A bug-fixing service can spend less on each model call and more on each accepted repair. The cheaper calls may require additional turns, each holding a sandbox and invoking tools, and more tickets may remain unresolved after assessment. The token discount is real, but it applies to only part of the account. The engineering comparison must join spending to the same task outcomes whose evidence the evaluation chapter established.
 
+::: {.column-margin}
+![](images/svg/hsa_locator_hsa.svg){width="100%" fig-alt="H·S·A locator with all three axes, Horizon, State, and Authority, highlighted."}
+
+*Horizon, state, and authority each set the closure a task must pay for.*
+:::
+
+@Sec-vol3-intro introduced cost per accepted task as one of the book's two quantitative fundamentals: the expected cost of an attempt divided by the probability that the attempt is accepted. That ratio is the quantity this chapter develops. Its numerator must hold every charge an attempt incurs, its denominator must count only outcomes accepted under one declared contract, and each lever the runtime controls (reuse, retries, acceleration, routing, capacity, and delegation) is worth buying only if it lowers the ratio or buys a deadline the objective values.
+
 Acceptance remains scoped to a declared contract, checker, and environment. A passing regression suite is evidence for the properties it checks, not an observation that the patch has no latent defects. Changing that contract while changing models would confound the economic comparison. The account also needs a population and a cutoff: which initiated tasks it covers, which results were accepted by the cutoff, and which operations, assessments, or charges remain pending.
 
 ### From an attempt to a task account
@@ -346,7 +354,7 @@ $R_{\min}$ is the first integer horizon at which compaction costs no more; equal
 
 The runtime can also purchase more deliberation within a call or more assessed attempts. A configured reasoning limit is a ceiling, not evidence that every call uses it or that more usage improves acceptance. Compare realized billed usage and task outcomes under the same assessment contract. Additional serial generation can increase latency, but a price calculation alone cannot rank end-to-end durations.
 
-For a deliberately simple retry model, assume every task in the comparison has the same per-attempt acceptance probability $p>0$. Conditional on that task's fixed input and environment, attempts are independent draws from the same configuration, each costing $c$ including assessment and other counted work. Sequential retry stops at the first accepted result or after $k$ attempts. Its acceptance probability is $q_k=1-(1-p)^k$, and its expected attempt count is $\sum_{j=0}^{k-1}(1-p)^j=q_k/p$. Consequently, expected spend divided by expected accepted tasks is $(cq_k/p)/q_k=c/p$. This is a population ratio under the stated model, not a promise to complete each task or an exact ratio in a small observed cohort.
+For a deliberately simple retry model, assume every task in the comparison has the same per-attempt acceptance probability $p>0$. Conditional on that task's fixed input and environment, attempts are independent draws from the same configuration, each costing $c$ including assessment and other counted work. Sequential retry stops at the first accepted result or after $k$ attempts. Its acceptance probability is $q_k=1-(1-p)^k$, and its expected attempt count is $\sum_{j=0}^{k-1}(1-p)^j=q_k/p$. Consequently, expected spend divided by expected accepted tasks is $(cq_k/p)/q_k=c/p$, the introduction's form of cost per accepted task, now derived for a stopping policy. This is a population ratio under the stated model, not a promise to complete each task or an exact ratio in a small observed cohort.
 
 Launching all $k$ attempts and paying for all of them instead costs $kc/q_k$ per expected accepted task, provided the same assessment can identify and return an accepted candidate. These are bounded policies with different realized spending, not a comparison requiring equal bills. Both must fit the same available resource ceilings and preserve authority and effect-settlement rules.
 
@@ -501,6 +509,18 @@ class CriticalPath:
 
 ### Shorten the path without weakening the result
 
+Once the trace names the limiting path, each kind of span on it has its own cause and its own lever. @Tbl-vol3-span-taxonomy maps the span types of @sec-vol3-evaluation-tracing to what sets their duration and what shortens them.
+
+| Span                 | What sets its duration                         | What shortens it                                                         |
+|:---------------------|:-----------------------------------------------|:-------------------------------------------------------------------------|
+| Model, reading input | Context length, prefix-cache misses, queueing  | Cache-stable layout, smaller context, less queueing                      |
+| Model, generating    | Output and reasoning tokens                    | Shorter outputs, smaller reasoning budget, speculative decoding          |
+| Sandbox and tools    | Build size, test-suite size, cold starts       | Warm pools, snapshots, build caches, test selection, parallel tool calls |
+| Network and services | Round trips, payload size, provider throttling | Response caching, prefetching, rate-limit headroom                       |
+| Runtime              | Parsing, validation, logging, snapshotting     | Streaming parsers, incremental snapshots                                 |
+
+: **Trajectory Span Types**: What bounds each kind of span on an agent's critical path and which techniques shorten it. Each lever is admissible only if the accepted result still meets the same acceptance contract and coverage. {#tbl-vol3-span-taxonomy}
+
 Independent tool calls can overlap when their dependencies, authority, and resource reservations permit it. If they start together, do not interfere, and all must finish before continuation, the join waits for the longest call rather than their sum. Shared resource contention, staggered starts, or one call consuming another's output invalidate that simple comparison. Cached builds and warm environments likewise require valid reuse and the isolation and reset conditions already established for execution and evaluation.
 
 Preparation can sometimes overlap model generation, but a partially streamed call is not an authorized request. Any speculative preparation needs its own current scope and resource admission. It must not perform the proposed external effect before complete validation and authorization. Even a file read can cross an access boundary or expose data; calling preparation read-only does not make it safe. Count discarded preparation and release its resources when the completed proposal does not use it.
@@ -511,11 +531,70 @@ Early stopping changes the observation as well as its duration. A failed mandato
 
 @Sec-vol3-foundation-model introduced speculative decoding as a serving technique whose output and performance depend on its implementation and sampling assumptions. Here its role is an economic option: does it improve the task-level objective enough to justify its resource cost?
 
-Evaluate the complete serving path, including draft generation, target verification, coordination, setup, and work discarded at rejection or early stopping. Short responses and interrupted calls can spend resources on proposals whose tokens never become usable output. Acceptance by a draft verifier is not acceptance of the repair task. A draft-token acceptance rate alone therefore establishes neither elapsed-time savings nor cost per accepted task, and output labels such as code or planning do not supply a universal ranking.
+A small draft model proposes $\gamma$ tokens per round, and the target model checks them in one pass, keeping the prefix it accepts and emitting one token of its own [@leviathan2023fast; @chen2023accelerating]. Let a draft token cost a fraction $r$ of one target decoding step, and let $\bar m$ be the mean number of draft tokens accepted per round. If verifying a round costs about one target step, each round emits $\bar m+1$ tokens in the time of $\gamma r+1$ target steps, so the decoding speedup for one stream is
+
+$$S_{\text{spec}}=\frac{\bar m+1}{\gamma r+1}.$$ {#eq-vol3-spec-speedup}
+
+Speculation shortens the call only when $\bar m>\gamma r$, that is, when accepted drafts repay the draft work; below that boundary it slows the stream it was meant to accelerate. The one-step verification assumption holds when single-stream decoding is limited by reading model state rather than by arithmetic (principle \ref{pri-vol3-memory-bandwidth-decoding}), and it weakens as batching makes the target's arithmetic busy.
+
+The boundary prices decoding steps within one call. Evaluate the complete serving path, including draft generation, target verification, coordination, setup, and work discarded at rejection or early stopping. Short responses and interrupted calls can spend resources on proposals whose tokens never become usable output. Acceptance by a draft verifier is not acceptance of the repair task. A draft-token acceptance rate alone therefore establishes neither trajectory time savings nor cost per accepted task, and output labels such as code or planning do not supply a universal ranking.
 
 Measure the candidate policy under the intended load and memory constraints. A draft model occupies resources that might otherwise serve another request; verification changes the target's work and scheduling. Those opportunity costs matter even when one call becomes faster. Neither idle arithmetic nor a long queue alone decides the policy. Compare complete-call latency, total resource use or billable charges, queueing effects, and downstream task acceptance against the same baseline workload and available ceilings.
 
-Then place the measured call-level change back into the trajectory. An acceleration on a limiting path may buy deadline headroom; one elsewhere may primarily buy capacity or cost savings. A policy can be worth purchasing despite higher expense when the time benefit is valuable, or worth rejecting despite faster token generation when contention erases that benefit. The decision is conditional on the workload and objective, not a universal model-share threshold.
+```{python}
+#| label: calc-vol3-agent-economics-spec-composition
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SPECULATIVE SPEEDUP COMPOSED WITH THE TRAJECTORY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-spec-speedup in @sec-vol3-agent-economics-speculative.
+# │ Goal: Show the call-level boundary and its bounded trajectory payoff.
+# │ Show: Speedup above and below break-even; effect on the serial episode.
+# │ How:  S = (m + 1) / (gamma * r + 1), then T' = T[(1 - f) + f / S].
+# │ Note: Reads CriticalPath (model share, episode length) from the earlier
+# │       cell. Draft length, cost ratio, and acceptance are scenario inputs.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import second
+from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_qty
+
+class SpecComposition:
+    # ┌── 1. LOAD (Scenario inputs; episode from CriticalPath) ──────────────
+    gamma = 5  # scenario: draft tokens proposed per round
+    r = 0.08  # scenario: draft token cost as a fraction of a target step
+    m_high, m_low = 3.6, 0.3  # scenario: mean accepted draft tokens per round
+    f = CriticalPath.model_fraction
+    total_s = CriticalPath.total_s
+
+    # ┌── 2. EXECUTE (Call-level speedup, then fixed-work composition) ─────
+    breakeven = gamma * r
+    s_high = (m_high + 1) / (gamma * r + 1)
+    s_low = (m_low + 1) / (gamma * r + 1)
+    t_high = total_s * ((1 - f) + f / s_high)
+    t_low = total_s * ((1 - f) + f / s_low)
+    traj_high = total_s / t_high
+    traj_bound = 1 / (1 - f)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(m_high > breakeven > m_low >= 0, "One case on each side of the break-even")
+    check(s_high > 1 > s_low, "Break-even separates speedup from slowdown")
+    check(1 < traj_high < traj_bound and t_low > total_s, "Trajectory gain is bounded; slowdown lengthens it")
+    check(abs(traj_bound - CriticalPath.limiting_speedup) < 1e-9, "Same bound as the instant-model case")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    gamma_str = fmt_int(gamma)
+    r_str = fmt(r, precision=2)
+    breakeven_str = fmt(breakeven, precision=1)
+    m_high_str, m_low_str = fmt(m_high, precision=1), fmt(m_low, precision=1)
+    s_high_mult_str = fmt_multiple(s_high, precision=2)
+    s_low_mult_str = fmt_multiple(s_low, precision=2)
+    t_high_str = fmt_qty(t_high * second, second, precision=1)
+    t_low_str = fmt_qty(t_low * second, second, precision=1)
+    traj_high_mult_str = fmt_multiple(traj_high, precision=2)
+```
+
+Then place the measured call-level change back into the trajectory. The fixed-work argument of @eq-vol3-multiagent-speedup applies with the model's share as the accelerated fraction. If model work occupies fraction $f$ of the trajectory and becomes $S_{\text{spec}}$ times faster, the trajectory runs $1/[(1-f)+f/S_{\text{spec}}]$ times faster, never more than $1/(1-f)$. Suppose each round drafts `{python} SpecComposition.gamma_str` tokens, each costing `{python} SpecComposition.r_str` of a target step, so the break-even is `{python} SpecComposition.breakeven_str` accepted tokens per round. Accepting `{python} SpecComposition.m_high_str` per round gives `{python} SpecComposition.s_high_mult_str` on the call by @eq-vol3-spec-speedup. Even granting that speedup to every model interval of the serial episode in @tbl-vol3-trace-critical-path, the episode shrinks from `{python} CriticalPath.total_str` to `{python} SpecComposition.t_high_str`, a `{python} SpecComposition.traj_high_mult_str` whole-episode speedup. A workload that accepts only `{python} SpecComposition.m_low_str` per round falls below the boundary, runs its calls at `{python} SpecComposition.s_low_mult_str`, and lengthens the episode to `{python} SpecComposition.t_low_str`.
+
+An acceleration on a limiting path may buy deadline headroom; one elsewhere may primarily buy capacity or cost savings. A policy can be worth purchasing despite higher expense when the time benefit is valuable, or worth rejecting despite faster token generation when contention erases that benefit. The rule therefore has two boundaries: speculation must clear $\bar m>\gamma r$ on the call under the intended load, and the trajectory can gain at most $1/(1-f)$ from it.
 
 ::: {#chk-18-whole-trajectory-economics .callout-checkpoint title="Cost and time per accepted task"}
 
@@ -693,6 +772,14 @@ The population and boundary must match. Rejected arrivals do not enter this popu
 
 Little's law gives a mean, not a peak concurrency limit or a buffer size that meets a latency percentile. The holding policy and observed occupancy distribution determine how much reserve to provision. Likewise, call demand follows the number of calls per admitted attempt, including retries and delegated calls within the accounting boundary. Under stable flow, its mean rate is $\lambda_{\text{call}}=\lambda_{\text{traj}}\mathbb{E}[N_{\text{call}}]$. This does not make the call arrivals independent: a cohort reaching the same tool boundary can create a burst.
 
+Acceptance couples this demand to the cost account. To deliver accepted tasks at rate $\lambda_{\text{acc}}$ when a fraction $\alpha$ of admitted attempts is accepted, the platform must admit
+
+$$\lambda_{\text{traj}}=\frac{\lambda_{\text{acc}}}{\alpha},
+\qquad
+\rho(\alpha)=\frac{\lambda_{\text{acc}}\,\mathbb{E}[N_{\text{call}}]}{\alpha\,k\mu}$$
+
+for a pool of $k$ model workers, each completing $\mu$ calls per unit time. A model change that lowers $\alpha$ therefore raises the offered load needed for the same accepted throughput, as well as the $(1-\alpha)/\alpha$ multiplier on spending, and the queueing model below shows why that added load costs disproportionately more near saturation.
+
 ```{python}
 #| label: calc-vol3-agent-economics-trajectory-capacity
 #| echo: false
@@ -806,6 +893,40 @@ class QueuePrice:
 **Systems insight**: Higher occupancy purchases more throughput from the same server while increasing delay and holding cost in this model. Neither utilization is a universal operating target. Validate the estimate and measure the required latency percentiles before choosing reserve capacity.
 
 :::
+
+```{python}
+#| label: calc-vol3-agent-economics-tail-compounding
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SERIAL TAIL COMPOUNDING ALONG A TRAJECTORY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-agent-economics-capacity, after the queue-price notebook.
+# │ Goal: Show why good per-call tails still give routinely slow trajectories.
+# │ Show: Probability that at least one of n serial calls meets a p99 delay.
+# │ How:  1 - (1 - p)^n under independent per-call tail events.
+# │ Note: Scenario call count; p is the definition of a 99th percentile.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_int
+
+class TailCompounding:
+    # ┌── 1. LOAD (Scenario inputs) ─────────────────────────────────────────
+    n_calls = 30  # scenario: serial model calls on the trajectory's path
+    p_tail = 0.01  # a call exceeds its own p99 latency with probability 0.01
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    p_hit = 1 - (1 - p_tail) ** n_calls
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(0 < p_tail < 1 and n_calls >= 1, "Valid tail probability and call count")
+    check(p_tail < p_hit < n_calls * p_tail, "Compounding exceeds one call and stays below the union bound")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_calls_str = fmt_int(n_calls)
+    p_tail_str = fmt(p_tail, precision=2)
+    p_hit_str = fmt(p_hit, precision=2)
+```
+
+Means also hide how tails compound along a trajectory. If each of $n$ serial calls independently exceeds its 99th-percentile latency with probability $p$, the trajectory meets at least one such delay with probability $1-(1-p)^n$, the horizon compounding of @sec-vol3-intro-horizon-arithmetic applied to latency. A trajectory of `{python} TailCompounding.n_calls_str` serial calls, each with tail probability `{python} TailCompounding.p_tail_str`, meets at least one tail delay with probability `{python} TailCompounding.p_hit_str`. A fleet sized for good per-call latency therefore still delivers slow trajectories routinely. This is the serial counterpart of the fan-out straggler effect in @sec-vol3-multiagent-backpressure [@dean2013tail]. Correlated delays, such as a shared queue that stays long across consecutive calls, change the probability but not the lesson: provision and schedule against trajectory-level percentiles, not per-call means (principle \ref{pri-vol3-heavy-tailed-scheduling}).
 
 This is where load enters the routing decision from @sec-vol3-agent-economics-cascades. Compare eligible *remaining paths*, including their queue and service delays, retained-resource costs, verification, and escalation. A nominally cheap tier may lose its advantage when its queue lengthens, but bypassing it is justified only by that full comparison under the same acceptance contract. Changing routing also changes arrival rates, so a delay estimate measured under the old policy need not remain valid. Separate interactive and batch capacity or priority scheduling may help a particular workload; they also change fairness and queue behavior and must be evaluated rather than assumed to improve every trajectory.
 
