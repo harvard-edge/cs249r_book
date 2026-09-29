@@ -26,7 +26,7 @@
 
 _Why does a capable model still need a precise contract around every call?_
 
-A model can propose a useful repair and still return it too late, stop before the edit is complete, or express it in a form the runtime cannot use. Fluency does not reveal which of these failures occurred. The surrounding system needs to know what information the call received, whether generation completed, and what resources it consumed before it can assess the proposal. Confusing a clean stop with a finished task or a well-formed object with a permitted action carries the error into every later turn. The call contract makes these distinctions explicit without requiring the model to enforce its own limits. Within the H·S·A lens, this boundary separates a supplied context from carried state, a generated proposal from delegated authority, and one bounded invocation from the trajectory's continuing horizon.
+Every capability an agent adds, from memory and tools to retries, evaluation, and learning from its own trajectories, is assembled from model calls, so whatever a single call leaves ambiguous is inherited by all of them. A call can produce a sound proposal and still arrive after its deadline, stop before the edit is finished, or express the change in a form the runtime cannot apply, and fluent output reveals none of these conditions. Treating the model as an oracle that either answers or fails hides the distinctions that matter most: what the call was shown, whether generation finished, what it consumed, and what it merely proposed. Taking the call seriously turns it into an interface with a contract, closer to a remote request across an unreliable boundary than to a question put to an expert. The engineering question then changes from whether the model is capable enough to what each response establishes and what must still be checked before anything in the world changes. That shift moves reliability out of the model's weights and into the surrounding system, where it can be measured, budgeted, and enforced. It moves cost there as well, because every trajectory is a sum of calls whose price depends on how each request is shaped. Within the H·S·A lens, the single call is the origin: one bounded turn, no carried state, and no authority of its own, the baseline from which every later exposure is measured.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -38,7 +38,7 @@ A model can propose a useful repair and still return it too late, stop before th
 
 - Explain the separate responsibilities of the foundation model, inference service, and agent runtime
 - Construct a token-bounded request containing task messages, advertised tools, and generation limits
-- Explain how sampling affects candidate generation without treating a greedy selection rule as an invocation replay guarantee
+- Calculate how temperature and nucleus truncation reshape the candidate distribution without establishing correctness
 - Diagnose response outcomes using completion status, structural validity, permission checks, and task evidence
 - Distinguish the guarantees of grammar-constrained decoding from learned formatting and correct task values
 - Estimate call latency and repeated-input work under explicit serving and prefix-reuse assumptions
@@ -46,7 +46,7 @@ A model can propose a useful repair and still return it too late, stop before th
 
 :::
 
-## The Model Invocation Boundary {#sec-vol3-foundation-model-role}
+## One Turn of the Repair Loop {#sec-vol3-foundation-model-introduction}
 
 ::: {.column-margin}
 ![](images/svg/hsa_locator_origin.svg){width="100%" fig-alt="H·S·A locator with all three axes gray and only the origin dot highlighted in purple."}
@@ -56,7 +56,15 @@ A model can propose a useful repair and still return it too late, stop before th
 
 The repair agent (\ref{lhs-vol3-repair-agent}) needs to inspect the connection-pool implementation before proposing a change. A model call can return `read_file("src/pool.py")`, but that response neither reads the file nor proves that the path exists. The runtime must recognize a proposed tool request, decide whether the task permits it, and supply the resulting observation to a later call. Interleaving a model's proposed actions with the observations they return is the loop that ReAct established for language-model agents [@yao2023react]; this chapter examines one turn of that loop.
 
-Three responsibilities participate in the call. The foundation model[^fn-foundation-model-term] computes a distribution over possible continuations of the supplied input. The **inference service**\index{Inference service!definition} evaluates the model, applies supported generation settings, and reports the response and invocation outcome. The agent runtime chooses the request, manages the task's remaining resources, and decides how to handle the returned candidate. The three may share one machine, one process, or one privilege domain; their interfaces still keep generated content apart from the decision to act on it.
+Experience with prompting and token generation describes that turn from the side of a person reading the reply. In a chat window, the person notices a reply cut off mid-sentence, judges whether a suggested command is sensible, and waits as long as the answer takes. An agent removes that reader. The runtime receives the same response as data and must settle, with no judgment of its own, whether the request fit the model's input limit, whether generation finished or stopped at an output ceiling, whether a well-formed tool request names a target the task permits, and how much time and money the call consumed. The text of the reply answers none of these questions, and a runtime that infers them from the text will eventually apply a truncated patch or read a path outside its workspace.
+
+This chapter builds the call contract that answers those questions explicitly. The contract specifies the request the runtime sends (messages, advertised tools, and limits on generation), the record the service returns (what kind of payload arrived, whether generation completed, and what it consumed), the checks the runtime applies before acting on a proposal, and an estimate of what each call costs in latency and in repeated input. It assumes nothing about the model's reliability. It records what each call established, so that the runtime decides what happens next.
+
+The sections follow one call from request to price. @Sec-vol3-foundation-model-role separates the responsibilities of the model, the inference service, and the runtime, and traces the inspection request to the observation it produces. @Sec-vol3-foundation-model-tokenization counts what that request occupies in the model's input, and @sec-vol3-foundation-model-autoregressive shows how the reply is generated one token at a time and what sampling settings change. The next three sections ask what a returned candidate can be trusted for: what checks on it establish (@sec-vol3-foundation-model-continuations), how a status record reports whether a finished candidate exists at all (@sec-vol3-foundation-model-contract), and what constraining generation to a grammar guarantees (@sec-vol3-foundation-model-grammar-constrained). @Sec-vol3-foundation-model-cost then prices a call and the trajectory built from calls, and @sec-vol3-foundation-model-interface-design compares two representations of the same edit under a matched budget.
+
+## The Model Invocation Boundary {#sec-vol3-foundation-model-role}
+
+The call that returns `read_file("src/pool.py")` involves three responsibilities. The foundation model[^fn-foundation-model-term] computes a distribution over possible continuations of the supplied input. The **inference service**\index{Inference service!definition} evaluates the model, applies supported generation settings, and reports the response and invocation outcome. The agent runtime chooses the request, manages the task's remaining resources, and decides how to handle the returned candidate. The three may share one machine, one process, or one privilege domain; their interfaces still keep generated content apart from the decision to act on it.
 
 [^fn-foundation-model-term]: **Foundation Model**: @bommasani2021opportunities coined the term for a model trained on broad data at scale and then adapted to a wide range of downstream tasks, and warned that the resulting homogenization lets the model's defects pass to every system built on it. For agents the warning is concrete: every runtime that calls the same model and serving path inherits the same failure modes at once, which is why the runtime, not the model, holds the checks. \index{Foundation model!term origin}
 
