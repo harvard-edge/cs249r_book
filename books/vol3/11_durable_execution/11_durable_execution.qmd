@@ -975,6 +975,20 @@ The repair's test job can outlive the worker that submitted it. A replacement ne
 
 A compatible checkpoint and surviving log suffix reconstruct the selected record and workspace at the same boundary. Resume establishes current ownership before restoring that state, then reconciles available evidence and checks present authority and allowances before admitting new work. Replay supports a different purpose: inspecting recorded state or comparing harness behavior against captured inputs without reaching live effects. Divergence analysis identifies where available evidence differs, and retention determines which reconstruction and diagnostic promises remain supportable, at a storage price small enough that the promise, not the bill, should set it. Acceptance of the whole repair remains a separate judgment that none of these mechanisms makes.
 
+@Tbl-vol3-durable-execution-key-equations collects the relations the chapter uses to order dispatch against durability and to price checkpointing and resume.
+
+| Equation                                                                                                                       | What it bounds or decides                                                                                                                      | Where derived                        |
+|:-------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------|
+| $R_j = \text{fold}(R_0, \mathbf{e}_{1:j})$                                                                                     | Rebuilds the record at log boundary $j$ from recorded events, with no model call or tool execution                                             | @sec-vol3-persistence-event-sourcing |
+| $e_{\text{prop}} \prec e_{\text{auth}} \prec e_{\text{flush}} \prec a_{\text{ext}} \prec e_{\text{obs}}$                       | Dispatch waits for the intent's acknowledgment under the declared failure domain, which sets the latency floor of every dispatch               | @eq-vol3-wal-ordering                |
+| $L_i = t_{\text{ack}} - a_i$                                                                                                   | Each batch member waits through the whole shared flush; only storage work divides by $N_{\text{batch}}$                                        | @eq-vol3-group-commit-latency        |
+| $V_{\text{full}} = s\,k\,\frac{n(n+1)}{2}$, $V_{\text{delta}} = s\,k\,n$                                                       | Full snapshots of growing state write $(n+1)/2$ times the bytes of deltas, which pay instead in chain restore                                  | @eq-vol3-snapshot-bytes              |
+| $T^\ast_{\text{ckpt}} \approx \sqrt{2\,T_{\text{save}}\,M_{\text{MTBF}}}$                                                      | Checkpoint interval when a failure loses work that must be re-executed; overhead at the optimum is $\sqrt{2\,T_{\text{save}}/M_{\text{MTBF}}}$ | @eq-vol3-young-interval              |
+| $W(k) = N_k T_{\text{save}} + n_{\mathrm{crash}} b + r\sum_i d_i(k)$, $k^\ast = \sqrt{2T_{\text{save}}/(\lambda r)}$           | Stride for a logged trajectory, which lengthens by $\sqrt{r_{\text{exec}}/r}$ once reconstruction replaces re-execution                        | @sec-vol3-persistence-checkpointing  |
+| $T_{\text{resume}} = T_{\text{own}} + T_{\text{read}} + T_{\text{fold}} + T_{\text{ws}} + T_{\text{rec}} + T_{\text{prefill}}$ | Resume latency by stage; prefill dominates whenever no compatible prefix state survives                                                        | @eq-vol3-resume-time                 |
+
+: **Key Equations of Durable Execution**: Each relation prices one durability decision. The ordering constraint is a correctness requirement; the others are costs to measure and balance. {#tbl-vol3-durable-execution-key-equations tbl-colwidths="[40,42,18]"}
+
 ::: {.callout-takeaways title="Preserve the evidence needed to continue"}
 
 * **Construct a recoverable record of decisions and evidence**: A fixed reducer rebuilds a selected projection from complete recorded inputs and available artifacts, so recovery costs reconstruction rather than fresh model turns. Preserve delivered context, operation identities, and actual and reserved consumption; the log records evidence about the world, not every external fact.
@@ -1005,6 +1019,104 @@ For further reading, six works trace the lineage from database recovery to agent
 - @kleppmann2017designing connects event sourcing, replication, and fencing at the scale a practicing engineer builds. It is the most direct bridge from classical theory to a working trajectory store.
 - @helland2007life argues why systems at scale abandon distributed transactions for idempotent, uniquely identified messages. Its reasoning anticipates the in-doubt action and settlement before retry.
 - @burckhardt2021durable gives a formal semantics to a durable workflow model. It shows how persistent progress can be specified precisely rather than promised informally.
+
+## Exercises {#sec-vol3-durable-execution-exercises}
+
+Each problem states its constraints and ends in a decision about what to record, when to checkpoint, or how to resume. Givens are hypothetical problem inputs unless a lighthouse profile supplies them, and none describes a particular store, model, or service.
+
+```{python}
+#| label: calc-vol3-durable-exercises
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EXERCISE GIVENS FROM THE LIGHTHOUSE PROFILES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Exercises 6, 7, and 8 in "Exercises".
+# │
+# │ Goal: Display the support, research, and remediation workload values and
+# │       the storage price that the second-lighthouse problems use.
+# │ Show: Session context, shared prefix, customer reply time; research turns
+# │       and reads; approval rate, approval wait, wrong-change impact; storage
+# │       price per GB-month.
+# │ How:  Registry reads only; the exercises ask the student for every
+# │       derived value.
+# │ Note: Every other exercise given is a stated hypothetical.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Agents, Infrastructure, USD, GB, ureg
+from mlsysim.fmt import fmt, fmt_int, check
+
+class DurableExercises:
+    # ┌── 1. LOAD (registry) ──────────────────────────────────────────────
+    support = Agents.Support.CustomerOps
+    research = Agents.Research.OrchestratorWorker
+    remed = Agents.Remediation.OnCall
+    ctx_tok = support.session_context.to("token").magnitude  # policy prefix plus one customer's history
+    prefix_tok = support.shared_prefix.to("token").magnitude  # prefix shared by every session
+    think_s = support.customer_reply_time.to("second").magnitude  # customer reads and replies
+    research_turns = research.horizon_turns
+    research_reads = research.untrusted_reads_per_task
+    approvals_per_h = remed.approval_request_rate.to("1/hour").magnitude
+    approval_min = remed.approval_decision_time.to("minute").magnitude
+    impact_usd = remed.wrong_change_impact.to(USD).magnitude
+    storage = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate
+    usd_per_gb_month = storage.to(USD / (GB * ureg.month)).magnitude
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
+    # None: the exercises ask the student for every derived value.
+
+    # ┌── 3. GUARD (the problems need these shapes) ───────────────────────
+    check(0 < prefix_tok < ctx_tok, "Shared prefix is a proper part of the session context")
+    check(think_s > 5, "Customer think time must exceed the per-session resume time")
+    check(research_reads > research_turns, "Research reads more pages than it takes turns")
+    check(approvals_per_h > 0 and approval_min > 1, "Approval rate and wait are positive")
+    check(0 < usd_per_gb_month < 1, "Storage price per GB-month is a small positive rate")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────────────────────
+    ctx_str = fmt_int(ctx_tok)
+    prefix_str = fmt_int(prefix_tok)
+    think_str = fmt_int(think_s)
+    research_turns_str = fmt_int(research_turns)
+    research_reads_str = fmt_int(research_reads)
+    approvals_str = fmt_int(approvals_per_h)
+    approval_min_str = fmt_int(approval_min)
+    impact_str = fmt_int(impact_usd)
+    storage_str = fmt(usd_per_gb_month, precision=3)
+```
+
+**1. Pricing the durable acknowledgment (Basic).** A repair worker makes 40 tool dispatches over 40 turns, and each turn otherwise spends 4 s on model and tool work. Its store offers three acknowledgments: a returned `write()` after 0.02 ms, a returned `fdatasync()` after 0.4 ms, and a replicated append that a three-replica store acknowledges once two replicas hold the record durably. Measured from the append, the replicas become durable after 1.5, 2.5, and 6.5 ms, and the 1.5 ms replica keeps its copy on the worker's own volume.
+
+Give the acknowledgment latency that satisfies each of the first two rows of @tbl-vol3-durable-ack-domains. Under the chapter's failure domain, which includes permanent loss of the worker's volume, decide which replicas may count toward the quorum and compute the resulting acknowledgment latency. What fraction of the trajectory's elapsed time does that acknowledgment add? A colleague proposes counting the co-located replica to shorten every dispatch. Compute the saving and decide whether it justifies the change.
+
+**2. Write amplification of a growing record (Basic).** A repair trajectory runs 400 turns, its checkpointed record grows by 64 KB per turn, and a checkpoint is published every 8 turns.
+
+Use @eq-vol3-snapshot-bytes to compute the bytes written by full snapshots and by deltas, and their ratio. Restore reads at 200 MB/s, and each delta in a chain adds 20 ms of fetch, validation, and application beyond its bytes. Starting from an empty base, compare the time to restore the state at the final checkpoint from one full snapshot and from the chain of deltas. Which representation suits a trajectory that rarely crashes, and which mechanism bounds its weakness?
+
+**3. Checkpointing too often (Basic).** A long local analysis step inside a trajectory keeps intermediate state that the log does not capture, so a crash forces its work to be re-executed. Each checkpoint pauses execution for 3 s, including durable publication, and work-losing failures arrive on average every 30 minutes.
+
+Compute $T^\ast_{\text{ckpt}}$ and the overhead at the optimum from @eq-vol3-young-interval. The current policy checkpoints every 10 s. Compute its overhead and the factor by which it exceeds the optimum. A second proposal checkpoints every 200 s to cut pause time. Compute its overhead, decide between the two proposals, and explain from the shape of the overhead curve why the comparison depends on the ratio to $T^\ast_{\text{ckpt}}$ rather than on the direction of the error.
+
+**4. Group commit against a dispatch budget (Intermediate).** A harness admits 2,000 intents per second, arriving evenly every 0.5 ms. Its replicated store takes 5 ms per durable flush regardless of batch size. A batch starts its flush as soon as it holds its last intent and the store can accept a flush. The dispatch budget allows at most 8 ms from an intent's arrival to its acknowledgment.
+
+Without batching, with one flush at a time, what intent rate can the store sustain, and what happens to the queue? Find the smallest batch that keeps up, and use @eq-vol3-group-commit-latency to compute the steady-state waits of a batch's first and last arrivals. Does that policy meet the budget, and how much utilization margin does it leave? The store can instead keep two flushes in flight at once. Recompute the smallest batch, its first arrival's wait, and the amortized storage work per intent. A teammate suggests acknowledging from the page cache and flushing in the background. Evaluate the suggestion against the design rule that closes @sec-vol3-persistence-wal.
+
+**5. What logging buys the cadence (Intermediate).** A trajectory's checkpoint pause is $T_{\text{save}} = 0.8$ s, and crashes arrive at $\lambda = 0.01$ per completed turn. Reconstructing a logged turn costs $r = 0.05$ s, and re-executing an unlogged turn costs $r_{\text{exec}} = 12$ s.
+
+Compute $k^\ast$ for a fully logged and a fully unlogged trajectory, and their ratio. Show that the per-turn overhead at the optimum is $\sqrt{2\,T_{\text{save}}\,\lambda\,r}$ and evaluate it for the logged case. An audit then finds that 10 percent of turns write workspace files the log does not capture; in a lost suffix each such turn costs $r_{\text{exec}}$ and every other turn costs $r$. Compute the effective per-turn cost, the new $k^\ast$, and the overhead of keeping the logged stride. Which investment lowers overhead more, retuning the stride or capturing the missing workspace deltas? Justify the choice with the three overheads.
+
+**6. Second lighthouse: mass resume for the support agent (Intermediate).** The support agent (\ref{lhs-vol3-support-agent}) holds many short sessions at once. Each session's context is `{python} DurableExercises.ctx_str` tokens, of which `{python} DurableExercises.prefix_str` form a policy prefix shared by every session, and a customer takes about `{python} DurableExercises.think_str` s to read a reply and answer. A serving region fails, and 2,000 open sessions must resume on surviving workers. Per session, acquiring ownership takes 20 ms, reading and validating the checkpoint and suffix 15 ms, and folding 5 ms. There is no workspace to restore, because the customer record stays in its system of record, but 10 percent of sessions hold an in-doubt refund whose authorized lookup takes 150 ms. One request prefills at 20,000 tokens/s, and the surviving pool prefills 400,000 tokens/s in aggregate. The failover may add at most 1 s to any customer's next reply.
+
+Use @eq-vol3-resume-time to compute $T_{\text{resume}}$, excluding queueing, for a clean session and for one with an in-doubt refund, first with a cold prefill and then with the shared prefix already resident on every surviving worker. If every session resumes eagerly with a cold prefill, how long does the pool take to drain the prefill work, and with the shared prefix resident? Treat customers' next messages as arriving evenly over the following `{python} DurableExercises.think_str` s. Propose a resume policy that meets the 1 s bound, compute its prefill load as a fraction of the pool, and state what it does with the in-doubt refunds. Contrast the binding term with the one that governs the repair trajectory's resume.
+
+**7. Second lighthouse: retention for the research agent (Intermediate).** The research agent (\ref{lhs-vol3-research-agent}) runs `{python} DurableExercises.research_turns_str` turns and fetches `{python} DurableExercises.research_reads_str` external pages. Per turn it logs 4 KB of event envelopes and 40 KB of delivered, bounded observations. Each fetched page averages 300 KB raw, and the model receives only the bounded observation. Storage costs \$`{python} DurableExercises.storage_str` per GB-month, the replay promise is 12 months, and one attempt costs \$1.50.
+
+Compute a year's retention cost for the recovery and replay inputs and for the raw pages, each as a share of the attempt cost. An investigator later asks which text steered a suspicious citation. Name the retained bytes that answer the question and explain why the raw pages cannot. Propose retention lifetimes that keep raw pages for 1 month under a diagnostic policy, and compute the annual storage bill for one million trajectories under full retention and under your policy. Explain how the dominant bytes, and the reason for retaining them, differ from the repair trajectory's in notebook \ref{nbk-11-retention-cost}.
+
+**8. An asynchronous replica behind an irreversible actor (Advanced).** A fleet of 50 remediation workers (\ref{lhs-vol3-remediation-agent}) each dispatch approved changes at `{python} DurableExercises.approvals_str` per hour, at random times, after an approval wait of about `{python} DurableExercises.approval_min_str` minutes. Each worker acknowledges intents with a local `fdatasync()` and ships them to a remote store that lags by 200 ms. After a failure, the replacement reads the remote store and dispatches every approved proposal that lacks an intent. Each worker suffers 2 volume-losing failures per year, and a duplicated change costs \$`{python} DurableExercises.impact_str` in expected damage. The alternative acknowledges from a quorum outside the worker's volume at 6.5 ms per dispatch.
+
+Identify the rules of @sec-vol3-persistence-wal that the recovery procedure violates, and state the recovery state that operations in the lag window should occupy instead. Treating dispatches as a Poisson process, compute the probability that a failure follows within 200 ms of at least one dispatch, the expected number of such failures per year across the fleet, and the expected annual loss if each produces a duplicate change. Repeat for a network partition that stretches the lag to 60 s. Compute the latency the quorum alternative adds per worker per day, and per change as a fraction of the approval wait. Redesign the acknowledgment and recovery path, and defend why neither acknowledgment latency nor the small expected loss at 200 ms is the right quantity to optimize for this lighthouse.
+
+**9. Consolidating a delta chain under a resume deadline (Advanced).** A repair trajectory publishes an incremental checkpoint at every stride and, every $c$ checkpoints, consolidates the chain by writing and publishing a new base, which pauses execution for 1.0 s. The chain therefore holds between 1 and $c$ deltas. A restore reads the base in 0.2 s and spends 0.04 s on each delta in the chain. The probability that a restore is needed between two consecutive checkpoints is 0.005.
+
+Write the expected overhead per checkpoint $w(c)$ as a consolidation term plus an expected restore term, taking the chain length at a crash to average $c/2$. Find $c^\ast$ and $w(c^\ast)$ by the method of theorem \ref{thrm-11-young-checkpoint-interval}, and compute the worst-case restore time at $c^\ast$. Resume now must finish restoring within 2 s in the worst case. Find the largest admissible $c$ and the overhead the deadline costs relative to $w(c^\ast)$, and check the ratio of the $c$-dependent terms against the flat-minimum form $(x + 1/x)/2$. When a consolidation publishes a new base, which older deltas and bases may compaction delete, and what must be verified first?
 
 ::: {.callout-chapter-connection title="From reconstructing the record to repairing effects"}
 
