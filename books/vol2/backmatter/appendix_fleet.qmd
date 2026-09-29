@@ -51,13 +51,13 @@ Training workloads are synchronous and bandwidth-hungry like HPC, but long-runni
 
 ### Foundations recap {.unnumbered}
 
-The following provides a compact reference for the key foundational ideas that reappear throughout the distributed systems chapters.
+Five single-machine models reappear throughout the distributed chapters, each extended by a fleet-scale term. @Sec-appdx-dam-taxonomy states the single-machine forms; the list below records only what changes at scale.
 
-- **Iron law** ($T \approx D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}} \cdot \eta_{\text{hw}}) + L_{\text{lat}}$): Performance is bounded by data movement or compute. At fleet scale, the data movement term expands to include inter-node communication, not just memory bandwidth.
-- **Roofline model**: Distinguishes compute-bound from memory-bound workloads using arithmetic intensity. At fleet scale, a third ceiling appears: **Network-Bound**\index{Network-bound workload} workloads whose performance is limited by inter-node bandwidth.
-- **Amdahl's Law**: Caps strong-scaling speedup at $1/s$ [@amdahl1967]. At fleet scale, the "serial fraction" includes not just sequential code but also synchronization barriers, collective communication, and pipeline bubbles.
-- **Training state rule**: About 14 bytes per parameter for common mixed-precision Adaptive Moment Estimation (Adam) checkpoint state (BF16 weights, FP32 master weights, and Adam moments), before framework metadata and implementation-specific extras. At fleet scale, this determines how model state is partitioned across nodes (ZeRO, tensor parallelism, pipeline parallelism).
-- **Little's Law** ($Q_{\text{req}} = \lambda_{\text{arr}} T_{\text{lat}}$): Sizes inference infrastructure, where $\lambda_{\text{arr}}$ is the request arrival rate and $Q_{\text{req}}$ is the expected concurrent request count [@little1961]. At fleet scale, it determines how many serving replicas are needed behind a load balancer.
+- **Iron law** ($T \approx D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}} \cdot \eta_{\text{hw}}) + L_{\text{lat}}$, @sec-appdx-dam-taxonomy-iron-law-mapping): At fleet scale, the data-movement term expands to include inter-node communication, and the Fleet Law replaces the single-machine sum.
+- **Roofline model** (@sec-appdx-dam-taxonomy-roofline): At fleet scale, a third ceiling appears. **Network-bound**\index{Network-bound workload} workloads are limited by inter-node bandwidth, which the communication-computation ratio in @sec-appdx-fleet-foundations-comm-compute-ratio measures.
+- **Amdahl's Law**: Caps strong-scaling speedup at $1/s$ for serial fraction $s$ [@amdahl1967]. At fleet scale, the serial fraction includes synchronization barriers, exposed collective communication, and pipeline bubbles (@sec-appdx-fleet-foundations-amdahls-fleet).
+- **Training state rule** (@sec-appdx-dam-taxonomy-training-memory): Mixed-precision training with the Adaptive Moment Estimation (Adam) optimizer holds about 16 bytes per parameter during training and about 14 bytes per parameter in a resumable checkpoint, before activations and framework metadata. At fleet scale, this footprint determines how model state is partitioned across devices (ZeRO, tensor parallelism, pipeline parallelism).
+- **Little's Law** ($Q_{\text{req}} = \lambda_{\text{arr}} T_{\text{lat}}$) [@little1961]: Relates in-flight requests to arrival rate and time in system. At fleet scale, it sizes the number of serving replicas behind a load balancer (@sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0).
 
 The transition from single-machine to fleet-scale reasoning requires extending these models with new dimensions: network topology, failure probability, and coordination overhead. The numbers in the next section provide the quantitative foundation for that extension.
 
@@ -69,7 +69,7 @@ Just as single-machine analysis depends on a set of core numbers, fleet-scale en
 
 ::: {#psp-appendix-fleet-node-level-numbers .callout-perspective title="Node-level numbers for fleet reasoning"}
 
-Fleet reasoning depends on a few node-level numbers that directly affect fleet design: the training state rule\index{Training state rule} of about 14 bytes per parameter for common Adam checkpoint state, with larger footprints when gradients, activations, metadata, or extra optimizer buffers are included; NVLink vs. high-bandwidth memory (HBM) bandwidth for intra-node parallelism placement; and peak FLOP/s and HBM capacity for model FLOPs utilization (MFU), effective FLOP/s, batch sizing, and model sharding. @Tbl-fleet-numbers-quick-ref and the communication numbers below give inter-node and current-generation values; the memory hierarchy and roofline ridge points within a node provide the necessary baseline. Those node-level baselines make the fleet-level ratios easier to interpret.
+Fleet reasoning depends on a few node-level numbers that directly affect fleet design: the training state rule\index{Training state rule} of about 14 bytes per parameter for common Adam checkpoint state, with larger footprints when gradients, activations, metadata, or extra optimizer buffers are included; NVLink vs. high-bandwidth memory (HBM) bandwidth for intra-node parallelism placement; and peak FLOP/s and HBM capacity for model FLOPs utilization (MFU), effective FLOP/s, batch sizing, and model sharding. @Tbl-fleet-numbers-quick-ref and the communication numbers below give inter-node and current-generation values; the memory hierarchy and roofline ridge points within a node (@sec-appdx-dam-taxonomy-memory-hierarchy) provide the necessary baseline. Those node-level baselines make the fleet-level ratios easier to interpret.
 :::
 
 ```{python}
@@ -211,7 +211,7 @@ For $N$ independent components under a constant-failure-rate assumption, system 
 
 $$ \text{MTBF}_{\text{system}} = \frac{\text{MTBF}_{\text{component}}}{N} $$ {#eq-fleet-mtbf-system}
 
-This is pure arithmetic, not an approximation. Doubling the cluster size halves the time between failures. At `{python} FleetNumbersHighlights.cl_mega_str` GPUs with a per-GPU mean time to failure (MTTF) of `{python} FleetInvariantNumbers.gpu_mttf_hours_str`, the cluster experiences a GPU failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`. No fault tolerance strategy can avoid this; the question is how quickly the system recovers.
+Under this model the relation is exact rather than approximate. Doubling the cluster size halves the time between failures. At `{python} FleetNumbersHighlights.cl_mega_str` GPUs with a per-GPU mean time to failure (MTTF) of `{python} FleetInvariantNumbers.gpu_mttf_hours_str`, the cluster experiences a GPU failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`. No fault tolerance strategy can avoid this; the question is how quickly the system recovers.
 
 #### AllReduce overhead scaling {.unnumbered}
 
@@ -372,7 +372,7 @@ class FleetMtbfTable:
 | **8,192 GPUs**   | `{python} FleetMtbfTable.mtbf_8192_hours_str` | `{python} FleetMtbfTable.mtbf_8192_min_str` | `{python} FleetMtbfTable.pfail_8192_str` |
 | **100,000 GPUs** | `{python} FleetMtbfTable.mtbf_100k_hours_str` | `{python} FleetMtbfTable.mtbf_100k_min_str` | `{python} FleetMtbfTable.pfail_100k_str` |
 
-: **MTBF and Failure Probability by Cluster Size**: GPU-only failure model with per-GPU MTTF of 50,000 hours. Real clusters also include NIC, PSU, cable, and switch failures, making these estimates conservative. The probability column uses $\Pr(\geq 1\ \text{failure}) = 1 - e^{-T/\text{MTBF}}$ for $T = 24$ hours. {#tbl-fleet-mtbf}
+: **MTBF and Failure Probability by Cluster Size**: GPU-only failure model with per-GPU MTTF of 50,000 hours. Real clusters also experience NIC, PSU, cable, and switch failures, so these GPU-only intervals overstate the true cluster MTBF. The probability column uses $\Pr(\geq 1\ \text{failure}) = 1 - e^{-T/\text{MTBF}}$ for $T = 24$ hours. {#tbl-fleet-mtbf}
 
 Failure is no longer an edge case at 8,192 GPUs and above. GPU-only MTBF is about `{python} FleetMtbfTable.mtbf_8192_min_str` at 8,192 GPUs, and the probability of at least one GPU failure within 24 hours is `{python} FleetMtbfTable.pfail_8192_prose_str`. Fault tolerance is not optional at fleet scale; it is a prerequisite for completing any long-running training job. @Sec-fault-tolerance-reliability covers the mechanisms in detail.
 
@@ -575,82 +575,42 @@ For scale context, a DGX H100 SuperPOD contains 32 DGX H100 nodes (256 H100 GPUs
 
 The numbers in the previous section describe what the hardware can do. Scaling physics describes what happens when more of it is brought to bear. Reasoning starts from the ceiling on a single accelerator (the roofline) and then asks what survives as devices are added, governed by three models: Amdahl's Law extended to fleet overhead, the communication-computation ratio, and weak scaling behavior.
 
-### The single-accelerator roofline {#sec-appdx-fleet-foundations-roofline}
-
-Fleet performance rests on per-accelerator performance, and a single accelerator is bounded by one of two resources: the rate its arithmetic units sustain (peak FLOP/s) or the rate its memory delivers operands (HBM bandwidth). Which one binds a given kernel depends on its **Arithmetic Intensity**\index{Arithmetic Intensity} $I$, the number of useful operations performed per byte moved from memory, as @eq-fleet-arithmetic-intensity defines:
-
-$$ I = \frac{\text{FLOPs}}{\text{bytes moved}} $$ {#eq-fleet-arithmetic-intensity}
-
-Intensity is a property of the workload, not the hardware. A large matrix multiply has high intensity because each weight loaded from memory is reused across many multiply-accumulates; an element-wise operation, or the generation of a single token, has low intensity because each loaded value feeds only one or two operations before the next must be fetched.
-
-The **Roofline Model**\index{Roofline Model} [@williams2009] turns intensity into a performance ceiling. @Eq-fleet-roofline states that attainable throughput is the lesser of the compute ceiling and the bandwidth-limited slope:
-
-$$ R_{\text{attain}} = \min\!\left(R_{\text{peak}},\; I \times \text{BW}\right) $$ {#eq-fleet-roofline}
-
-Plotted against intensity, @eq-fleet-roofline traces a roof: a rising bandwidth-limited line on the left and a flat compute ceiling on the right. The two meet at the **Ridge Point**\index{Roofline Model!ridge point}, the intensity at which a workload first saturates the arithmetic units, defined by @eq-fleet-ridge-point:
-
-$$ I_{\text{ridge}} = \frac{R_{\text{peak}}}{\text{BW}} $$ {#eq-fleet-ridge-point}
-
-A workload with $I < I_{\text{ridge}}$ is memory bound: it sits on the slope, and faster arithmetic units change nothing because the operands cannot arrive quickly enough. A workload with $I > I_{\text{ridge}}$ is compute bound: it sits under the flat roof, limited by the arithmetic units themselves.
+### From the accelerator roofline to the fleet {#sec-appdx-fleet-foundations-roofline}
 
 ```{python}
 #| echo: false
 #| label: fleet-roofline
-from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_flop_rate, fmt_int, fmt_memory, fmt_params
+from mlsysim.fmt import check, fmt_arithmetic_intensity
 
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ SINGLE-ACCELERATOR ROOFLINE — RIDGE POINT + MEMORY-BOUND DECODE
+# │ SINGLE-ACCELERATOR RIDGE POINT (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-appdx-fleet-foundations-roofline; @eq-fleet-arithmetic-intensity,
-# │          @eq-fleet-roofline, @eq-fleet-ridge-point. In-volume single-accelerator
-# │          bound referenced from the compute-infrastructure and inference chapters.
+# │ Context: @sec-appdx-fleet-foundations-roofline bridge to the fleet ratio.
 # │
-# │ Goal: Compute the H100 ridge point and show autoregressive decode is memory-bound.
-# │ Show: Ridge point (FLOP/byte); Llama-3.1-8B decode footprint, intensity, token rate.
-# │ How: I* = peak_flops/HBM bandwidth (Tera prefixes cancel → FLOP/byte). Decode reads
-# │      all weights once per token, so intensity ≈ 1 and throughput = bandwidth/weights.
+# │ Goal: Recall the H100 ridge point that the network ratio generalizes.
+# │ Show: ~295 FLOP/byte.
+# │ How: I_ridge = peak_flops / HBM bandwidth.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_arithmetic_intensity, fmt_flops, fmt_rate
 
 class FleetRoofline:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     peak_flops = Hardware.Cloud.H100.compute.peak_flops
     hbm_bw = Hardware.Cloud.H100.memory.bandwidth
-    weight_cap = Hardware.Cloud.H100.memory.capacity
-    n_params = Models.Language.Llama3_8B.parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     ridge_q = (peak_flops / hbm_bw).to(flop / byte)
-    weight_q = (n_params * BYTES_FP16).to(byte)
-    decode_flops = 2 * n_params * flop / param
-    intensity_q = (decode_flops / weight_q).to(flop / byte)
-    tokens_q = (hbm_bw / weight_q).to(1 / second)  # weight-read rate
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    ridge = ridge_q.magnitude
-    intensity = intensity_q.magnitude
-    check(ridge > 100, "H100 ridge point should be hundreds of FLOP/byte")
-    check(intensity < ridge, "Decode must be memory-bound (intensity below ridge)")
-    check(weight_q < weight_cap, "8B BF16 weights must fit in one H100")
+    check(ridge_q.magnitude > 100, "H100 ridge point should be hundreds of FLOP/byte")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    peak_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    bw_tb_per_s_str = fmt_bandwidth(hbm_bw, unit=TB / second, precision=2, commas=False)
     ridge_str = fmt_arithmetic_intensity(ridge_q, unit=flop / byte, precision=1, commas=False)
-    rounded_params = round(n_params.to(param).magnitude / BILLION) * BILLION * param
-    params_b_str = fmt_params(rounded_params, scale='B', precision=0, commas=False)
-    weight_gb_str = fmt_memory(weight_q, unit=GB, precision=1, commas=False)
-    intensity_str = fmt_arithmetic_intensity(intensity_q, unit=flop / byte, precision=0, commas=False)
-    tokens_per_s_str = fmt_rate(tokens_q.to(1 / second).magnitude, "tokens/s", precision=1)
-    decode_flops_str = fmt_flops(decode_flops, unit=GFLOP, precision=1, commas=False)
 ```
 
-For an H100, with a BF16 peak of `{python} FleetRoofline.peak_tflop_per_s_str` and HBM bandwidth of `{python} FleetRoofline.bw_tb_per_s_str`, the ridge point is `{python} FleetRoofline.ridge_str`. A workload must perform hundreds of operations per byte fetched merely to keep the arithmetic units busy.
+Fleet performance rests on per-accelerator performance. @Sec-appdx-dam-taxonomy-roofline states the single-accelerator roofline, $R_{\text{attain}} = \min(R_{\text{peak}}, I \times \text{BW})$, and its ridge point $I_{\text{ridge}} = R_{\text{peak}}/\text{BW}$, which is about `{python} FleetRoofline.ridge_str` for an H100. A kernel below the ridge is memory bound, and a kernel above it is compute bound.
 
-For this dense, single-stream approximation, model weights are read from HBM once per generated token (`{python} FleetRoofline.weight_gb_str` for a `{python} FleetRoofline.params_b_str`-parameter model in BF16) to perform about `{python} FleetRoofline.decode_flops_str` of matrix work, an intensity of `{python} FleetRoofline.intensity_str`. That intensity sits below the ridge point, giving a weight-bandwidth throughput ceiling of about `{python} FleetRoofline.tokens_per_s_str`. KV-cache traffic, other memory accesses, kernel overhead, and communication can lower achieved throughput; batching, context length, and model architecture can change the dominant limit. Serving systems batch many requests precisely to raise this intensity, amortizing each weight read across every sequence in the batch and pushing decode back toward the compute roof.
-
-The roofline is a single-accelerator law, but its logic is what scales. At fleet level the binding bandwidth is no longer HBM but the interconnect, and the bytes moved are the gradients and activations crossing the network. That ratio of network bytes to local arithmetic is the communication-computation ratio (@sec-appdx-fleet-foundations-comm-compute-ratio): the roofline of the fleet, and the lens the rest of this section applies.
+The roofline is a single-accelerator law, but its logic is what scales. At fleet level the binding bandwidth is no longer HBM but the interconnect, and the bytes moved are the gradients and activations crossing the network. The ratio of network time to local arithmetic time is the communication-computation ratio (@sec-appdx-fleet-foundations-comm-compute-ratio), the roofline of the fleet and the lens the rest of this section applies.
 
 ```{python}
 #| echo: false
@@ -756,6 +716,12 @@ Any distributed training strategy must determine whether computation between syn
 $$ \rho = \frac{T_{\text{comm}}(N)}{T_{\text{compute}}/N} $$ {#eq-comm-compute-ratio}
 
 When $\rho < 1$, computation takes longer than communication; hiding that communication still requires independent work and sufficient resources. When $\rho > 1$, the system is **Communication-Bound**\index{Communication-bound workload}, and GPUs spend more time waiting for data than computing on it.
+
+The ratio is the time-domain form of the **communication intensity** (CI)\index{Communication intensity!appendix refresher} defined in @sec-vol2-introduction-ci-ratio, the bytes a step moves across the network per FLOP it executes locally. If each device moves $D_{\text{vol}}$ bytes across the network per step at effective network bandwidth $\text{BW}_{\text{net}}$ and executes its $O$ local FLOPs at realized rate $R$, then in the bandwidth-dominated regime
+
+$$ \rho \approx \frac{D_{\text{vol}}/\text{BW}_{\text{net}}}{O/R} = \text{CI} \times \frac{R}{\text{BW}_{\text{net}}}, \qquad \text{CI} = \frac{D_{\text{vol}}}{O} $$ {#eq-fleet-ci-rho}
+
+@Eq-fleet-ci-rho shows that exposed communication begins when CI exceeds $\text{BW}_{\text{net}}/R$, the network counterpart of the roofline ridge point. Because a device executes far more FLOP/s than its network link moves bytes per second, that threshold is a small fraction of a byte per FLOP, and a faster accelerator lowers it further. An accelerator upgrade alone can therefore turn a compute-bound job into a communication-bound one.
 
 ```{python}
 #| echo: false
@@ -1039,14 +1005,6 @@ class FleetSummaryRecap:
 
 ## Summary {.unnumbered}
 
-::: {.callout-takeaways title="Fleet scale changes every constraint"}
+Fleet scale changes every constraint a single machine imposes. ML fleets combine the tight coupling of high-performance computing for training with the elastic fault tolerance of warehouse-scale computing for serving, and they cannot adopt either tradition wholesale. NVLink provides about `{python} FleetSummaryRecap.nvlink_to_ib_ratio_mult_str` more per-direction bandwidth than an InfiniBand NDR port, which is why bandwidth-hungry parallelism stays inside the node. Cluster MTBF scales as $1/N$, so at 8,192 GPUs a GPU fails about every `{python} FleetSummaryRecap.mtbf_8192_min_str`, with `{python} FleetSummaryRecap.pfail_8192_str` probability of at least one failure in 24 hours. After disjoint factors for MFU (about `{python} FleetSummaryRecap.mfu_pct_str`), scaling efficiency (about `{python} FleetSummaryRecap.scaling_pct_str`), and operational goodput (about `{python} FleetSummaryRecap.operational_pct_str`), a 1,024-GPU cluster delivers about `{python} FleetSummaryRecap.eff_pct_str` of peak FLOP/s as useful work.
 
-* **Three paradigms, one hybrid**: ML fleets combine HPC's tight coupling (for training) with WSC's elastic fault tolerance (for inference), creating a new architectural paradigm that cannot adopt either predecessor's patterns wholesale.
-* **Bandwidth gap**: NVLink provides ~`{python} FleetSummaryRecap.nvlink_to_ib_ratio_mult_str` more per-direction bandwidth than InfiniBand NDR. This reference comparison informs parallelism placement; the actual topology and provisioned link count determine the available bandwidth.
-* **Failures become routine at scale**: Cluster MTBF scales as $1/N$. At 8,192 GPUs, expect a GPU failure about every `{python} FleetSummaryRecap.mtbf_8192_min_str`, with `{python} FleetSummaryRecap.pfail_8192_str` probability over 24 hours. Fault tolerance is a prerequisite for completing any fleet-scale training job.
-* **Compound utilization loss**: After disjoint factors for MFU (~`{python} FleetSummaryRecap.mfu_pct_str`), scaling efficiency (~`{python} FleetSummaryRecap.scaling_pct_str`), and operational goodput (~`{python} FleetSummaryRecap.operational_pct_str`) compound, a 1,024-GPU cluster delivers ~`{python} FleetSummaryRecap.eff_pct_str` of peak FLOP/s as useful work.
-* **Power density constrains cooling design**: The illustrative AI racks consume `{python} FleetSummaryRecap.rack_ratio_mult_str` the power of the traditional reference. The appropriate cooling technology follows from installed heat-removal capacity and server design, not a universal rack-power threshold.
-* **Communication-computation ratio ($\rho$) governs scaling strategy**: When $\rho > 1$, GPUs are idle waiting for data, so reduce parallelism or increase computation per step. When $\rho \ll 1$, sufficient compute time exists in principle to hide communication, provided dependencies and implementation permit it.
-* **Weak scaling is the fleet-scale paradigm**: Growing the problem with the fleet can preserve useful work per device. Strong scaling remains useful when the objective is completing fixed work sooner; either choice must respect communication, memory, and convergence constraints.
-
-:::
+Three considerations govern the design response. The communication-computation ratio $\rho$ decides whether communication can be hidden behind computation or whether the job is communication bound. Weak scaling, which grows the problem with the fleet, preserves useful work per device, while strong scaling remains the right choice when the goal is to finish fixed work sooner. Rack power density, about `{python} FleetSummaryRecap.rack_ratio_mult_str` the traditional reference for current AI racks, determines the cooling design, subject to the installed heat-removal capacity rather than a universal threshold.

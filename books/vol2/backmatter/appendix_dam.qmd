@@ -2,9 +2,9 @@
 engine: jupyter
 ---
 
-# D·A·M Foundations {#sec-appdx-dam-taxonomy}
+# Single-Machine Foundations {#sec-appdx-dam-taxonomy}
 
-In production, "it is slow" and "it is wrong" are rarely informative symptoms. A serving stack can miss its latency objective because the accelerator is idle (data starvation), because the model does unnecessary work (algorithmic overhead), or because the accelerator is saturated (machine-bound). This appendix provides a compact diagnostic framework, Data, Algorithm, and Machine, establishing the single-node performance foundation that cluster-scale compute, communication, and coordination build on.
+Every fleet is built from single machines, and this book assumes that the reader already reasons fluently about one of them. This appendix restates that single-machine foundation in reference form so that a reader who meets the prerequisites only loosely can work every calculation in the book without another text. It collects the Data, Algorithm, and Machine (D·A·M) diagnostic framework and the iron law it rests on, arithmetic intensity and the roofline bound, the accelerator memory hierarchy, the byte accounting of mixed-precision training, and the arithmetic of transformer training and inference. The chapters build the fleet-scale Compute, Communication, and Coordination (C³) framework on this base.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -16,6 +16,7 @@ In production, "it is slow" and "it is wrong" are rarely informative symptoms. A
 - Map optimization techniques to their D·A·M intersection zone to understand which axes they span
 - Apply the iron law equation to quantitatively diagnose performance problems
 - Distinguish between memory-bound and compute-bound workloads using arithmetic intensity and the roofline bound
+- Calculate the per-parameter memory of mixed-precision training and the FLOPs of transformer training and decoding
 - Select appropriate profiling tools and optimization strategies for each Data, Algorithm, or Machine axis
 - Evaluate system health using D·A·M scorecard metrics (I/O overhead, active parameters, MFU)
 
@@ -23,7 +24,13 @@ In production, "it is slow" and "it is wrong" are rarely informative symptoms. A
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is designed as a reference for single-node performance. Start with the scorecard-style metrics, form a hypothesis about which axis dominates, and then pick the tool that can confirm (or falsify) that hypothesis.
+This appendix is a reference for single-node performance and for the single-machine quantities that fleet-scale arguments take as given. Start from the symptom or the missing quantity:
+
+- **When a single accelerator is slow**: Use the iron law mapping (@sec-appdx-dam-taxonomy-iron-law-mapping) and the bottleneck diagnostic (@sec-appdx-dam-taxonomy-bottleneck-diagnostic) to decide which term binds.
+- **When deciding whether a kernel is memory bound or compute bound**: Use the roofline bound (@sec-appdx-dam-taxonomy-roofline).
+- **When a byte must cross a memory boundary**: Use the memory hierarchy (@sec-appdx-dam-taxonomy-memory-hierarchy) to see which tier sets its cost.
+- **When sizing model state**: Use the training memory accounting (@sec-appdx-dam-taxonomy-training-memory) for bytes per parameter.
+- **When estimating training compute or decode cost**: Use transformer arithmetic (@sec-appdx-dam-taxonomy-transformer-arithmetic).
 
 When training is slow on a single GPU, check utilization, data wait time, and model FLOPs utilization (MFU), then map each to its Data, Algorithm, or Machine axis. When serving misses a latency target, identify whether the regime is latency-bound (overhead), memory-bound (weight/KV movement), or compute-bound. When cost is exploding, use the D·A·M rubric to ensure that effort targets the dominant term, not a nonbottleneck.
 
@@ -35,7 +42,7 @@ from mlsysim.core.units import *
 from mlsysim.fmt import check, fmt, fmt_arithmetic_intensity, fmt_bandwidth, fmt_flop_rate, fmt_frac, fmt_percent, fmt_qty_int
 
 # ┌── LEGO ───────────────────────────────────────────────
-# Scenarios: GPU Utilization, Iron Law Analysis, Roofline Bound, Scaling Discrepancy
+# Scenarios: iron-law utilization and roofline bound for batch-1 decode
 
 class DAMTaxonomy:
     """
@@ -49,28 +56,14 @@ class DAMTaxonomy:
     m = Models.Language.Llama2_7B
     h = Hardware.Cloud.H100
 
-    # Exercise 1: Starving GPU
-    ex1_gpu_util_pct = 25
-    ex1_disk_sat_pct = 100
-
-    # Exercise 2: Iron Law
+    # Iron-law and roofline example: batch-1 decode
     ex2_params = m.parameters
     ex2_latency = 0.050 * second  # scenario assumption
     h100_fp16_peak = h.compute.peak_flops
     h100_hbm_bandwidth = h.memory.bandwidth
 
-    # Exercise 3: Scaling Law
-    ex3_loss_start = 0.45
-    ex3_loss_end = 0.42
-    ex3_chin_pred_pct = 15
-
-    # Exercise 4: Hardware Upgrade
-    ex4_gpu_old_n = 4
-    ex4_gpu_new_n = 8
-    ex4_cost_k = 200
-
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Exercise 2 logic
+    # Step 1: Iron-law utilization at an assumed batch-1 latency
     ex2_flops_per_pass = calc_transformer_decode_flops(ex2_params)
     ex2_achieved_rate = (ex2_flops_per_pass / ex2_latency).to(TFLOP / second)
     ex2_util = (ex2_achieved_rate / h100_fp16_peak).to("").magnitude * 100
@@ -82,9 +75,6 @@ class DAMTaxonomy:
     roof_decode_intensity_q = (ex2_flops_per_pass / ex2_model_size).to(flop / byte)
     roof_decode_attainable_q = (roof_decode_intensity_q * h100_hbm_bandwidth).to(TFLOP / second)
     roof_decode_ratio = (roof_decode_attainable_q / h100_fp16_peak).to("").magnitude
-
-    # Step 3: Exercise 3 logic
-    ex3_imp_pct = (ex3_loss_start - ex3_loss_end) / ex3_loss_start * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     from mlsysim.fmt import check
@@ -102,7 +92,7 @@ class DAMTaxonomy:
     roof_decode_pct_str = fmt_percent(roof_decode_ratio, precision=1)
 ```
 
-The Data · Algorithm · Machine (D·A·M) taxonomy is the diagnostic framework for single-node ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, ask: *where is the flow blocked?* This taxonomy helps practitioners decompose bottlenecks across three diagnostic axes,[^fn-mece-v2-exclusive] while recognizing that real systems can involve mixed causes or interactions between axes.
+The Data · Algorithm · Machine (D·A·M) taxonomy is the diagnostic framework for single-node ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, the first diagnostic question is where the flow is blocked. This taxonomy helps practitioners decompose bottlenecks across three diagnostic axes,[^fn-mece-v2-exclusive] while recognizing that real systems can involve mixed causes or interactions between axes.
 
 [^fn-mece-v2-exclusive]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting (popularized by McKinsey) requiring that categories do not overlap and together cover every possibility. Applied to systems engineering, it is useful as an idealized decomposition, but D·A·M bottlenecks often overlap in practice: a kernel can be simultaneously memory-bound, synchronization-heavy, and poorly matched to available hardware.
 
@@ -158,13 +148,13 @@ The symptoms below are screening signals, not diagnoses. A workload whose arithm
 
 ### The roofline bound {#sec-appdx-dam-taxonomy-roofline}
 
-The ridge point belongs to a simple upper bound on single-device throughput, the roofline model\index{Roofline Model!single-machine recap} [@williams2009]. A kernel with arithmetic intensity $I$, running on a device with peak compute rate $R_{\text{peak}}$ and memory bandwidth $\text{BW}$, can attain at most
+Arithmetic intensity is a property of the workload and its implementation, not of the hardware. A large matrix multiply reuses each weight it loads across many multiply-accumulates and so has high intensity; an element-wise operation, or the generation of a single token, uses each loaded value only once or twice. The ridge point belongs to a simple upper bound on single-device throughput, the roofline model\index{Roofline Model!single-machine recap} [@williams2009]. A kernel with arithmetic intensity $I$, running on a device with peak compute rate $R_{\text{peak}}$ and memory bandwidth $\text{BW}$, can attain at most
 
 $$ R_{\text{attain}}(I) = \min\!\left(R_{\text{peak}},\; I \times \text{BW}\right) $$ {#eq-appdx-dam-roofline}
 
 On log-log axes, the bound is a bandwidth roof of slope one ($I \times \text{BW}$) that meets a flat compute roof ($R_{\text{peak}}$) at the ridge point $I_{\text{ridge}} = R_{\text{peak}}/\text{BW}$. Left of the ridge, a kernel is memory bound, and only more bandwidth or fewer bytes per operation raises its ceiling. Right of the ridge, it is compute bound, and only a faster or better-utilized datapath helps. In D·A·M terms, the bandwidth roof belongs to the Data axis, the compute roof to the Machine axis, and the Algorithm axis decides where on the intensity axis the kernel sits. The roofline is a ceiling, not a prediction. A kernel far below both roofs is limited by something the model omits, such as launch overhead, synchronization, or low occupancy.
 
-For an H100, the book's hardware constants give a dense FP16 peak of `{python} DAMTaxonomy.h100_peak_tflops_str` and a high-bandwidth memory (HBM) bandwidth of `{python} DAMTaxonomy.h100_hbm_tbs_str`, which places the ridge at about `{python} DAMTaxonomy.h100_ridge_str`. Batch-1 decode of a 7-billion-parameter language model stored in 16-bit precision performs about two operations per parameter for each generated token (one multiply and one add) and must read every two-byte weight once, so its intensity is about `{python} DAMTaxonomy.roof_decode_intensity_str`. @Eq-appdx-dam-roofline then caps attainable throughput at `{python} DAMTaxonomy.roof_decode_attainable_str`, roughly `{python} DAMTaxonomy.roof_decode_pct_str` percent of peak, however well the kernels are written. Serving $B$ sequences in one decode step reuses each loaded weight $B$ times and raises the intensity to roughly $B$ FLOP/byte, until key-value cache traffic, which grows with batch size and context length, begins to dominate the bytes moved. That arithmetic is why batching is the first lever of every serving system, and @sec-appdx-fleet-foundations-roofline extends the same model to compare ridge points across accelerator generations.
+For an H100, the book's hardware constants give a dense FP16 peak of `{python} DAMTaxonomy.h100_peak_tflops_str` and a high-bandwidth memory (HBM) bandwidth of `{python} DAMTaxonomy.h100_hbm_tbs_str`, which places the ridge at about `{python} DAMTaxonomy.h100_ridge_str`. Batch-1 decode of a 7-billion-parameter language model stored in 16-bit precision performs about two operations per parameter for each generated token (one multiply and one add) and must read every two-byte weight once, so its intensity is about `{python} DAMTaxonomy.roof_decode_intensity_str`. @Eq-appdx-dam-roofline then caps attainable throughput at `{python} DAMTaxonomy.roof_decode_attainable_str`, roughly `{python} DAMTaxonomy.roof_decode_pct_str` percent of peak, however well the kernels are written. Serving $B$ sequences in one decode step reuses each loaded weight $B$ times and raises the intensity to roughly $B$ FLOP/byte, until key-value cache traffic, which grows with batch size and context length, begins to dominate the bytes moved. That arithmetic is why batching is the first lever of every serving system. @Sec-appdx-fleet-foundations-comm-compute-ratio carries the same reasoning to the network, where interconnect bandwidth takes the place of HBM bandwidth.
 
 ### Bottleneck diagnostic {#sec-appdx-dam-taxonomy-bottleneck-diagnostic}
 
@@ -177,6 +167,135 @@ Once the bottleneck is identified, @tbl-v2-bottleneck-actions shows which optimi
 | **Latency-Bound**         |               $L_{\text{lat}}$               | Batching requests, kernel fusion, async dispatch                        | Neither compute nor bandwidth (overhead dominates) |
 
 : **What Works vs. What Is Wasted**: Optimizing the wrong term yields limited improvement and poor cost efficiency. A memory-bound model will not speed up from more peak FLOP/s alone; it needs higher arithmetic intensity, less data movement, or a faster memory subsystem. {#tbl-v2-bottleneck-actions}
+
+## Accelerator Memory Hierarchy {#sec-appdx-dam-taxonomy-memory-hierarchy}
+
+```{python}
+#| echo: false
+#| label: appdx-dam-single-machine-recap
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SINGLE-MACHINE FOUNDATIONS RECAP (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-appdx-dam-taxonomy-memory-hierarchy,
+# │          @sec-appdx-dam-taxonomy-training-memory,
+# │          @sec-appdx-dam-taxonomy-transformer-arithmetic
+# │
+# │ Goal: Supply registry values for the prerequisite recap: H100 memory tiers,
+# │       Archetype A training-state bytes, and GPT-3 transformer arithmetic.
+# │ Show: 80 GB HBM at 3.35 TB/s; 50 MB L2; 64 GB/s PCIe; 16 and 14 bytes/param;
+# │       2.8 TB state; 2.45 TB checkpoint; 33-device floor; 12 N_L d^2;
+# │       6PD vs. registry training FLOPs; 4.72 MB KV cache per token.
+# │ How: byte widths summed per parameter; params × bytes; 6 × P × D.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+
+from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_memory, fmt_memory_capacity, fmt_multiple, fmt_params, fmt_percent, fmt_sci_flops
+
+class SingleMachineRecap:
+    """Prerequisite recap: memory tiers, training-state bytes, transformer arithmetic."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    h = Hardware.Cloud.H100
+    m = Models.Language.GPT3  # Archetype A running instance (175B dense)
+    hbm_cap = h.memory.capacity
+    hbm_bw = h.memory.bandwidth
+    l2_cap = h.memory.l2_cache
+    pcie_bw = h.interconnect.bandwidth  # per direction
+    nvlink_bw_dir = h.nvlink.bandwidth / 2  # registry value is the bidirectional total
+    params_q = m.parameters
+    tokens = m.training_tokens.magnitude
+    layers = m.layers
+    hidden = m.hidden_dim
+    seq_len = 2048  # scenario input: GPT-3 context length, as in the KV-cache example
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    params = params_q.to(param).magnitude
+    state_bpp = BYTES_FP16 + BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE
+    ckpt_bpp = BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE
+    train_state_q = (params * state_bpp).to(TB)
+    ckpt_q = (params * ckpt_bpp).to(TB)
+    weights_q = (params * BYTES_FP16).to(GB)
+    min_devices = math.ceil((train_state_q / hbm_cap).to("").magnitude)
+    hbm_pcie_ratio = (hbm_bw / pcie_bw).to("").magnitude
+    layer_params = 12 * layers * hidden**2
+    layer_params_ratio = layer_params / params
+    train_flops_q = (6 * params * tokens) * flop
+    registry_flops_q = m.training_ops
+    attn_ratio = seq_len / (6 * hidden)
+    kv_per_token_q = (2 * layers * hidden * BYTES_FP16).to(MB)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(state_bpp.to(byte).magnitude == 16, "Training state should be 16 bytes/param")
+    check(ckpt_bpp.to(byte).magnitude == 14, "Checkpoint state should be 14 bytes/param")
+    check(abs(train_state_q.magnitude - 2.8) < 0.01, "Archetype A state should be 2.8 TB")
+    check(abs(layer_params_ratio - 1) < 0.02, "12 N_L d^2 should match GPT-3 within 2 percent")
+    check(abs((train_flops_q / registry_flops_q).to("").magnitude - 1) < 0.01, "6PD should match registry training FLOPs")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    hbm_cap_str = fmt_memory_capacity(hbm_cap, precision=0)
+    hbm_cap_decimal_str = fmt_memory(hbm_cap.to(GB), unit=GB, precision=1)
+    hbm_bw_str = fmt_bandwidth(hbm_bw, unit=TB / second, precision=2)
+    l2_str = fmt_memory_capacity(l2_cap, precision=0)
+    pcie_bw_str = fmt_bandwidth(pcie_bw, unit=GB / second, precision=0)
+    nvlink_dir_str = fmt_bandwidth(nvlink_bw_dir, unit=GB / second, precision=0)
+    hbm_pcie_ratio_mult_str = fmt_multiple(round(hbm_pcie_ratio), precision=0, commas=False)
+    fp16_bytes_str = fmt_count(BYTES_FP16.to(byte).magnitude)
+    fp32_bytes_str = fmt_count(BYTES_FP32.to(byte).magnitude)
+    adam_bytes_str = fmt_count(BYTES_ADAM_STATE.to(byte).magnitude)
+    state_bpp_str = fmt_count(state_bpp.to(byte).magnitude)
+    ckpt_bpp_str = fmt_count(ckpt_bpp.to(byte).magnitude)
+    params_b_str = fmt_params(params_q, scale="B", precision=0, commas=False)
+    train_state_str = fmt_memory(train_state_q, unit=TB, precision=1)
+    ckpt_str = fmt_memory(ckpt_q, unit=TB, precision=2)
+    weights_str = fmt_memory(weights_q, unit=GB, precision=0)
+    min_devices_str = fmt_count(min_devices)
+    layers_str = fmt_count(layers)
+    hidden_str = fmt_count(hidden)
+    layer_params_b_str = fmt_params(layer_params * param, scale="B", precision=1, commas=False)
+    tokens_b_str = fmt_count(tokens / 1e9, precision=0)
+    train_flops_str = fmt_sci_flops(train_flops_q, precision=2)
+    registry_flops_str = fmt_sci_flops(registry_flops_q, precision=2)
+    seq_len_str = fmt_count(seq_len)
+    attn_pct_str = fmt_percent(attn_ratio, precision=1, commas=False, style='prose')
+    kv_per_token_str = fmt_memory(kv_per_token_q, unit=MB, precision=2)
+```
+
+An accelerator is a fast arithmetic engine surrounded by memories that trade bandwidth for capacity, and most performance arguments in this book reduce to the question of which boundary a byte must cross. Registers and on-chip shared memory (SRAM) hold the operands of the kernel that is executing. A shared on-chip L2 cache (`{python} SingleMachineRecap.l2_str` on an H100) sits behind them. HBM holds the model's working state, `{python} SingleMachineRecap.hbm_cap_str` at `{python} SingleMachineRecap.hbm_bw_str` on an H100. Host memory is reached over PCIe at `{python} SingleMachineRecap.pcie_bw_str` per direction, roughly `{python} SingleMachineRecap.hbm_pcie_ratio_mult_str` less than HBM, and local NVMe storage sits below host memory.
+
+A kernel whose working set stays on chip runs near arithmetic speed; one that streams operands from HBM is bounded by the roofline above; one that must reach host memory or storage is slower still. The **memory wall**\index{Memory wall!appendix refresher}, the widening gap between arithmetic throughput and the bandwidth that feeds it, is the single-machine form of the constraint that reappears at fleet scale as the network wall. A multi-accelerator node adds a scale-up fabric between devices (NVLink, at `{python} SingleMachineRecap.nvlink_dir_str` per direction on an H100), and the scale-out network adds tiers beyond the node; @sec-appdx-fleet-foundations-numbers-to-know tabulates those tiers.
+
+## Numeric Precision and Training Memory {#sec-appdx-dam-taxonomy-training-memory}
+
+The notation conventions at the front of the book list the number formats used throughout and their byte widths. FP32 occupies `{python} SingleMachineRecap.fp32_bytes_str` bytes, BF16 and FP16 occupy `{python} SingleMachineRecap.fp16_bytes_str`, and FP8 and INT8 occupy one. **Mixed-precision training**\index{Mixed-precision training!appendix refresher} runs the forward and backward passes in a 16-bit format for speed and memory, while it keeps an FP32 master copy of the weights so that small updates are not lost to rounding. The Adaptive Moment Estimation (Adam) optimizer adds two FP32 moment estimates per parameter. @Tbl-appdx-dam-training-state totals the resulting bytes per parameter.
+
+| **State**              | **Format** |                   **Bytes per Parameter**                    |          **In a Resumable Checkpoint**           |
+|:-----------------------|:----------:|:------------------------------------------------------------:|:------------------------------------------------:|
+| **Working weights**    |    BF16    |         `{python} SingleMachineRecap.fp16_bytes_str`         |                       Yes                        |
+| **Gradients**          |    BF16    |         `{python} SingleMachineRecap.fp16_bytes_str`         |            No (recomputed on resume)             |
+| **Master weights**     |    FP32    |         `{python} SingleMachineRecap.fp32_bytes_str`         |                       Yes                        |
+| **Adam moments (two)** |    FP32    |         `{python} SingleMachineRecap.adam_bytes_str`         |                       Yes                        |
+| **Total**              |            | `{python} SingleMachineRecap.state_bpp_str` (training state) | `{python} SingleMachineRecap.ckpt_bpp_str` bytes |
+
+: **Mixed-Precision Adam Memory per Parameter**: Persistent training state before activations, framework metadata, and communication buffers. The checkpoint omits gradients because a resumed run recomputes them in its first step. {#tbl-appdx-dam-training-state}
+
+For Archetype A, the `{python} SingleMachineRecap.params_b_str`-parameter dense model the chapters use as their running instance, the training state is `{python} SingleMachineRecap.train_state_str` and a resumable checkpoint is `{python} SingleMachineRecap.ckpt_str`. A single H100 offers `{python} SingleMachineRecap.hbm_cap_str` of HBM (a binary nameplate, about `{python} SingleMachineRecap.hbm_cap_decimal_str` in decimal units), so the persistent state alone requires at least `{python} SingleMachineRecap.min_devices_str` devices before a single activation is stored. That floor is why the model state must be partitioned across devices, which @sec-distributed-training-systems develops. Serving the same model needs only the 16-bit weights, `{python} SingleMachineRecap.weights_str`, plus the key-value cache.
+
+Activations are the other large consumer of training memory. The intermediate tensors that the backward pass needs grow with batch size, sequence length, hidden width, and depth, and for long sequences they can exceed the parameter state. **Activation checkpointing**\index{Activation checkpointing!appendix refresher} stores only selected activations and recomputes the rest during the backward pass, trading additional compute for memory.
+
+## Transformer Arithmetic {#sec-appdx-dam-taxonomy-transformer-arithmetic}
+
+Most worked examples in this book use decoder-only transformers, and three counting rules cover nearly all of their arithmetic. The symbols follow the book's deep learning notation, with $P$ parameters, $D$ training tokens, $N_L$ layers, hidden dimension $d$, and sequence length $S$.
+
+Each transformer layer holds four $d \times d$ attention projections and a feed-forward block that expands to $4d$ and back, about $12d^2$ weights in total, so a model has roughly $P \approx 12 N_L d^2$ parameters excluding embeddings. GPT-3 has $N_L =$ `{python} SingleMachineRecap.layers_str` and $d =$ `{python} SingleMachineRecap.hidden_str`, which gives `{python} SingleMachineRecap.layer_params_b_str` against its published `{python} SingleMachineRecap.params_b_str`.
+
+Every weight contributes one multiply and one add per token, so a forward pass costs about $2P$ FLOPs per token. The backward pass computes gradients with respect to both activations and weights and costs about twice the forward pass, so training costs about $6P$ FLOPs per token and
+
+$$ O_{\text{train}} \approx 6PD $$ {#eq-appdx-dam-training-flops}
+
+in total. For GPT-3, trained on `{python} SingleMachineRecap.tokens_b_str` billion tokens, @eq-appdx-dam-training-flops gives `{python} SingleMachineRecap.train_flops_str`, within 1 percent of the reported `{python} SingleMachineRecap.registry_flops_str`. The rule omits the attention-score products, which add at most about $S/(6d)$ to the weight FLOPs, or `{python} SingleMachineRecap.attn_pct_str` for GPT-3 at $S =$ `{python} SingleMachineRecap.seq_len_str`. That fraction stays small while the context is short compared with the hidden width and grows with long contexts.
+
+Serving an autoregressive model has two phases with different physics. *Prefill* processes the whole prompt at once as matrix-matrix products, so its arithmetic intensity is high and it tends to be compute bound. *Decode* generates one token per step for each sequence as matrix-vector products; at batch size 1 it reads every weight to perform two FLOPs per weight, the memory-bound regime that the roofline example above quantifies. To avoid recomputing attention over the whole prefix at every step, decode stores each layer's keys and values in a **key-value (KV) cache**\index{KV cache!appendix refresher} of $2 N_L d \, s_{\text{elem}}$ bytes per token for standard multihead attention, or `{python} SingleMachineRecap.kv_per_token_str` per token for GPT-3 in FP16. @Sec-appdx-inference-scale-kv-cache-fundamentals-2ccd sizes that cache against device memory.
 
 ## Tooling Map {#sec-appdx-dam-taxonomy-tooling-map}
 
@@ -224,21 +343,22 @@ These single-node grades become most useful when they are carried forward into d
 
 While D·A·M diagnoses the *components* of a single node, the $C^3$ taxonomy (@sec-appdx-c3-taxonomy) diagnoses the *interactions* of the fleet.
 
-1.  **Compute ($C_1$)** inherits the Algorithm and Machine axes, but adds the loss of scaling efficiency.
-2.  **Communication ($C_2$)** inherits the data axis, but is governed by the speed of light and network topology rather than just local I/O.
+1.  **Compute ($C_1$)** inherits the Algorithm and Machine axes, now evaluated per device after the work is partitioned across $N$ devices.
+2.  **Communication ($C_2$)** inherits the Data axis, but is governed by network bandwidth, topology, and, over long distances, the speed of light rather than by local I/O alone.
 3.  **Coordination ($C_3$)** makes coordination costs explicit at fleet scale. Synchronization, checkpoints, and failure recovery also occur on one node, but distribution expands their scope and couples them to other machines.
 
 This progression exposes cases where higher single-node MFU comes at the expense of scaling efficiency, so the complete fleet outcome can determine the choice. The node is optimized to serve the fleet.
 
 ## Summary {#sec-appdx-dam-taxonomy-summary}
 
-The D·A·M taxonomy provides the diagnostic baseline for every ML systems analysis. By isolating the bottleneck to Data, Algorithm, or Machine, practitioners ensure that optimization efforts target the binding constraint. This single-node discipline is the prerequisite for the fleet-scale engineering addressed throughout this book.
+The D·A·M taxonomy provides the diagnostic baseline for every ML systems analysis. By isolating the bottleneck to Data, Algorithm, or Machine, practitioners ensure that optimization efforts target the binding constraint. The memory hierarchy, the byte accounting of mixed-precision training, and the transformer counting rules supply the quantities that fleet-scale arguments take as given. This single-node discipline is the prerequisite for the fleet-scale engineering addressed throughout this book.
 
 ::: {.callout-takeaways title="Single-machine diagnostic heuristics"}
 
 * **Identify the dominant axis**: Decide whether Data, Algorithm, or Machine is the binding constraint before proposing any optimization.
 * **Profile arithmetic intensity**: Arithmetic intensity, read against the roofline's ridge point, quantitatively distinguishes between Data-bound and Machine-bound regimes.
 * **Use the iron law**: The iron law transforms vague symptoms into specific term-based bottlenecks.
+* **Count bytes and FLOPs per parameter**: Mixed-precision Adam training holds `{python} SingleMachineRecap.state_bpp_str` bytes per parameter (`{python} SingleMachineRecap.ckpt_bpp_str` in a checkpoint), and dense transformer training costs about $6PD$ FLOPs. These two rules size most memory and compute budgets in the chapters.
 * **Grade with the scorecard**: The Data-Algorithm-Machine scorecard standardizes "good" performance before moving to fleet scale.
 
 :::

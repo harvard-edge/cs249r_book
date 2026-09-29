@@ -195,6 +195,69 @@ Distributed-systems reasoning in this book builds on single-node performance bou
 
 : **Single-Node H100 Assumptions**: Peak specs from [@choquette2023] and NVIDIA H100 documentation. Provide $R_{\text{peak}}$ and $\text{BW}$ baselines for iron-law calculations. {#tbl-fleet-foundation-recap}
 
+@Sec-appdx-dam-taxonomy derives the single-machine quantities built on these specifications, including the ridge point, the memory hierarchy, and the per-parameter memory of training.
+
+```{python}
+#| echo: false
+#| label: appendix-archetype-a-reference
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ARCHETYPE A REFERENCE WORKLOAD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Reference Workload table (running instance fixed in the introduction).
+# │
+# │ Goal: Restate the Archetype A running instance for audit and substitution.
+# │ Show: 175B params; 16 and 14 bytes/param; 2.8 TB and 2.45 TB; 1,024 H100s as
+# │       128 nodes of 8.
+# │ How: params × bytes per parameter; nodes × accelerators per node.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_count, fmt_memory, fmt_params
+
+class ArchetypeARecap:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    params_q = Models.Language.GPT3.parameters
+    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    num_nodes = 128  # scenario input: reference cluster size fixed in the introduction
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    state_bpp = BYTES_FP16 + BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE
+    ckpt_bpp = BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE
+    params = params_q.to(param).magnitude
+    train_state_q = (params * state_bpp).to(TB)
+    ckpt_q = (params * ckpt_bpp).to(TB)
+    num_gpus = gpus_per_node * num_nodes
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(state_bpp.to(byte).magnitude == 16, "Training state should be 16 bytes/param")
+    check(ckpt_bpp.to(byte).magnitude == 14, "Checkpoint should be 14 bytes/param")
+    check(num_gpus == 1024, f"Reference cluster should be 1,024 GPUs, got {num_gpus}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    params_b_str = fmt_params(params_q, scale="B", precision=0, commas=False)
+    state_bpp_str = fmt_count(state_bpp.to(byte).magnitude)
+    ckpt_bpp_str = fmt_count(ckpt_bpp.to(byte).magnitude)
+    train_state_str = fmt_memory(train_state_q, unit=TB, precision=1)
+    ckpt_str = fmt_memory(ckpt_q, unit=TB, precision=2)
+    num_gpus_str = fmt_count(num_gpus)
+    num_nodes_str = fmt_count(num_nodes)
+    gpus_per_node_str = fmt_count(gpus_per_node)
+```
+
+## Reference Workload {#sec-appdx-fleet-reference-workload .unnumbered}
+
+Where a chapter needs a concrete training job, it uses the Archetype A running instance that @sec-introduction-archetype-gpt4llama3-b02f fixes. @Tbl-fleet-archetype-a restates it so that any calculation built on it can be audited or rerun with a different model or cluster. A chapter that studies a different model or cluster size says so explicitly.
+
+| **Assumption**                       |                                                                     **Value**                                                                      |
+|:-------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------:|
+| Model parameters (dense transformer) |                                                      `{python} ArchetypeARecap.params_b_str`                                                       |
+| Training state per parameter         |                                                   `{python} ArchetypeARecap.state_bpp_str` bytes                                                   |
+| Total training state                 |                                                     `{python} ArchetypeARecap.train_state_str`                                                     |
+| Resumable checkpoint per parameter   |                                                   `{python} ArchetypeARecap.ckpt_bpp_str` bytes                                                    |
+| Resumable checkpoint size            |                                                        `{python} ArchetypeARecap.ckpt_str`                                                         |
+| Reference cluster                    | `{python} ArchetypeARecap.num_gpus_str` H100 GPUs (`{python} ArchetypeARecap.num_nodes_str` nodes of `{python} ArchetypeARecap.gpus_per_node_str`) |
+
+: **Archetype A Running Instance**: Mixed-precision training with the Adam optimizer (BF16 weights and gradients, FP32 master weights, two FP32 Adam moments); the checkpoint omits gradients. @Sec-appdx-dam-taxonomy-training-memory derives the per-parameter bytes. The reference cluster is separate from the canonical cluster tiers below, which illustrate how behavior changes with scale. {#tbl-fleet-archetype-a}
+
 ```{python}
 #| echo: false
 #| label: appendix-cluster-constants
@@ -397,7 +460,8 @@ class ReliabilityConstants:
     )
     node_mttf_hours_str = fmt_time(node_mttf_hours, 'hour', precision=1)
     node_mttf_days_str = fmt_time(node_mttf_hours / HOURS_PER_DAY, 'day', precision=1, commas=False)
-    recovery_checkpoint = Models.Language.Llama2_70B.parameters.to(param).magnitude * BYTES_FP32
+    # Resumable mixed-precision Adam checkpoint: BF16 weights + FP32 master + two FP32 moments
+    recovery_checkpoint = Models.Language.Llama2_70B.parameters.to(param).magnitude * (BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE)
     recovery_time = (
         Systems.Reliability.Recovery.heartbeat_timeout_s * second
         + Systems.Reliability.Recovery.reschedule_time_s * second
@@ -442,7 +506,7 @@ Failure detection and recovery introduce downtime that compounds with cluster si
 | Job reschedule delay                   |         `{python} ReliabilityConstants.RESCHEDULE_TIME_S_str`          |       `{python} ReliabilityConstants.RESCHEDULE_TIME_S_unit_str`      |
 | Checkpoint write bandwidth (aggregate) | `{python} ReliabilityConstants.checkpoint_write_bw_gb_per_s_value_str` | `{python} ReliabilityConstants.checkpoint_write_bw_gb_per_s_unit_str` |
 
-: **Recovery Time Parameters**: Design assumptions for heartbeat, reschedule, and checkpoint-write bandwidth (Young–Daly context [@young1974; @daly2006]). Total recovery $\approx$ detect + reschedule + checkpoint size divided by write bandwidth; 70B FP32 example $\approx$ `{python} ReliabilityConstants.recovery_time_s_str` per failure. {#tbl-fleet-recovery}
+: **Recovery Time Parameters**: Design assumptions for heartbeat, reschedule, and checkpoint-write bandwidth (Young-Daly context [@young1974; @daly2006]). Recovery before replay $\approx$ detect + reschedule + checkpoint size divided by storage bandwidth; for a 70B-parameter model with a 14-byte-per-parameter checkpoint, about `{python} ReliabilityConstants.recovery_time_s_str` per failure. {#tbl-fleet-recovery}
 
 Reliability constants quantify how often failures occur and how long recovery takes. The cost of each failure depends on how much communication must be repeated. The following parameters model that communication overhead.
 
@@ -901,14 +965,15 @@ The catalog below maps each appendix section to its source category and primary 
 | **Appendix section**                | **Source type**                   | **Primary references**                                                          |
 |:------------------------------------|:----------------------------------|:--------------------------------------------------------------------------------|
 | H100 recap                          | Vendor datasheet peak             | [@choquette2023]                                                                |
+| Reference workload (Archetype A)    | Book convention                   | GPT-3-class dense model; byte widths from the notation conventions              |
 | Cluster tiers                       | Book convention                   | [@kokolis2025] (scale context)                                                  |
 | Network fabrics                     | Vendor specs; InfiniBand standard | [@nvidia2017gpu; @NVIDIA2020; @choquette2023; @infiniband2000spec]              |
 | Reliability (MTTF)                  | Fleet studies                     | [@kokolis2025; @zu2024tpuv4; @barroso2019]                                      |
 | Recovery times                      | Design assumptions                | [@young1974; @daly2006]                                                         |
-| Communication ($\alpha$–$\beta$)    | Fabric specs; training at scale   | [@infiniband2000spec; @jiang2024megascale]                                      |
+| Communication ($\alpha$-$\beta$)    | Fabric specs; training at scale   | [@infiniband2000spec; @jiang2024megascale]                                      |
 | AllReduce model                     | Algorithm identity                | [@gibiansky2017baidu]                                                           |
 | Sustainability (PUE/WUE/rack power) | Industry surveys                  | [@davis2022uptime; @thegreengrid2007pue]                                        |
-| Carbon intensity                    | Grid statistics                   | [@iea2023weo]                                                                   |
+| Carbon intensity                    | Grid statistics                   | [@iea2024emissionsFactors; @canada2026emissionFactors]                          |
 | Cloud economics                     | Illustrative rates                | Editorial (2024–2025 order of magnitude)                                        |
 | MFU and scaling efficiency          | Published LLM training            | [@chowdhery2022palm; @narayanan2021; @pope2023efficiently; @jiang2024megascale] |
 | Overhead budgets                    | Book convention                   | Editorial engineering targets                                                   |
@@ -918,16 +983,4 @@ The catalog below maps each appendix section to its source category and primary 
 
 ## Summary {.unnumbered}
 
-This appendix is the book's shared fleet-scale assumption sheet: every napkin-math estimate in this book should be traceable to a row in the tables above, and, where it matters, to the provenance sections and catalog in this appendix.
-
-::: {.callout-takeaways title="Using the fleet assumption tables"}
-
-* **One place for shared fleet numbers**: Cluster tiers, fabric bandwidths, MTTF and recovery times, $\alpha$–$\beta$ communication parameters, facility efficiency, water use, carbon intensity, cloud pricing, MFU, scaling efficiency, and overhead budgets used in worked examples are listed here to enable auditing or substitution without re-derivation from prose.
-* **Reliability assumptions set the failure clock**: MTTF and recovery-time rows determine how often failures interrupt training and how much wall time is lost. At 10,000+ GPUs, failure is steady state, not an exception; see @sec-appdx-reliability-foundations for deeper modeling.
-* **Communication assumptions determine viability**: $\alpha$–$\beta$ values determine whether synchronous distributed training is viable for a given model size and fabric. The `{python} AssumptionsSummaryRecap.tcp_ndr_latency_ratio_mult_str` latency gap between RDMA and TCP explains why training clusters favor InfiniBand.
-* **Sustainability assumptions expose location leverage**: Facility efficiency, water use, and carbon intensity show that data-center location and cooling can outweigh many algorithmic tweaks. The `{python} AssumptionsSummaryRecap.carbon_low_high_ratio_mult_str` spread between Norway and Poland grid carbon intensity is often the largest lever.
-* **Capacity assumptions quantify usable throughput**: MFU, scaling efficiency, and overhead budgets bridge peak hardware to useful throughput. At 8,192 GPUs, only about `{python} AssumptionsSummaryRecap.scaling_eff_8192_pct_str` of ideal scaling is realized, and combined overheads consume roughly `{python} AssumptionsSummaryRecap.overhead_total_pct_str` of wall time.
-* **Custom parameter substitution**: When a deployment differs in fabric, region, MFU, or cluster size, swap the `Value` column and re-evaluate the corresponding formulas.
-* **Check provenance before debating a number**: Datasheet peaks, fleet studies, illustrative rates, and book conventions are sourced differently; @tbl-fleet-assumption-provenance-catalog and section captions say which is which.
-
-:::
+This appendix is the book's shared fleet-scale assumption sheet. Every napkin-math estimate in the chapters should trace to a row in the tables above, and @tbl-fleet-assumption-provenance-catalog records whether that row comes from a datasheet, a fleet study, an illustrative rate, or a book convention. Reliability rows set the failure clock, with failure a steady-state condition at 10,000 or more GPUs (@sec-appdx-reliability-foundations models it in depth). Communication rows decide whether synchronous training is viable, and the `{python} AssumptionsSummaryRecap.tcp_ndr_latency_ratio_mult_str` latency gap between RDMA and TCP explains why training clusters favor RDMA fabrics. Sustainability rows expose location as a lever, with a `{python} AssumptionsSummaryRecap.carbon_low_high_ratio_mult_str` spread in grid carbon intensity between Norway and Poland. Capacity rows bridge peak hardware to useful throughput. At 8,192 GPUs, about `{python} AssumptionsSummaryRecap.scaling_eff_8192_pct_str` of ideal scaling is realized, and the listed overheads consume about `{python} AssumptionsSummaryRecap.overhead_total_pct_str` of wall time. When a deployment differs in fabric, region, MFU, or cluster size, substitute its values and re-evaluate the corresponding formulas.
