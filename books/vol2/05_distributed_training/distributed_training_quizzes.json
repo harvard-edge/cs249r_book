@@ -47,7 +47,7 @@
           {
             "question_type": "TF",
             "question": "True or False: If a neural network's parameters exceed a single GPU's memory capacity, tensor parallelism can be scaled across standard commodity Ethernet switches between server racks, provided the global batch size is made large enough.",
-            "answer": "False. Tensor parallelism requires per-layer AllReduce collectives on every forward and backward pass, demanding NVLink-class bandwidth (>900 GB/s) and sub-millisecond latency. Standard commodity Ethernet (10–100 Gb/s) is 20–100$\\times$ too slow, which places excessive synchronization latency on the critical path and collapses Model Flops Utilization (MFU) regardless of batch size. For cross-rack scaling, systems must use pipeline or data parallelism instead.",
+            "answer": "False. Increasing global batch size does not guarantee that frequent tensor-parallel exchanges fit within the compute window. Slow inter-rack links can dominate every layer. Tensor parallelism should use the fastest available domain; pipeline or data parallelism usually better matches slower links, subject to measured workload and topology constraints.",
             "learning_objective": "Evaluate the physical feasibility of tensor parallelism across commodity network fabrics"
           },
           {
@@ -91,14 +91,14 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "What structural requirement most fundamentally distinguishes distributed training from a stateless distributed web service that handles independent HTTP queries across multiple replicas?",
+            "question": "What structural requirement most fundamentally distinguishes synchronous data-parallel training from a stateless distributed web service that handles independent HTTP queries across multiple replicas?",
             "choices": [
               "Distributed training must run on strictly more nodes than web services because neural networks cannot execute on small clusters",
-              "Distributed training requires all workers to maintain a consistent mathematical view of mutable shared parameters via collective gradient synchronization",
+              "Synchronous data-parallel training requires all workers to maintain a consistent mathematical view of mutable shared parameters via collective gradient synchronization",
               "Distributed training is always compute-bound while web serving is strictly latency-bound, preventing the workloads from sharing cluster hardware",
               "Distributed training cannot tolerate hardware failures because synchronization protocols prevent checkpoint-based recovery"
             ],
-            "answer": "The correct answer is B. Stateless web service replicas process independent queries without needing consensus on shared internal state. In contrast, distributed training must produce a single, mathematically coherent set of updated weights after every iteration, making collective gradient synchronization and consistency barriers mandatory across all workers. The claim regarding cluster node counts is false because both small training jobs and massive serving deployments exist. The assertion that workloads are rigidly bound by distinct single constraints is a false dichotomy. Distributed training relies extensively on checkpointing to recover from frequent node failures.",
+            "answer": "The correct answer is B. Stateless web service replicas process independent queries without needing consensus on shared internal state. In contrast, synchronous data-parallel training must produce a single, mathematically coherent set of updated weights after every iteration, making collective gradient synchronization and consistency barriers mandatory across all workers. The claim regarding cluster node counts is false because both small training jobs and massive serving deployments exist. The assertion that workloads are rigidly bound by distinct single constraints is a false dichotomy. Distributed training relies extensively on checkpointing to recover from frequent node failures.",
             "learning_objective": "Distinguish distributed training execution semantics from stateless distributed service architectures"
           },
           {
@@ -128,7 +128,7 @@
           {
             "question_type": "TF",
             "question": "True or False: In a synchronous distributed training cluster using collective communication, if control-flow divergence causes worker Rank 0 to execute an AllReduce collective while Rank 1 skips it, the cluster will automatically recover by substituting stale gradients from the previous step.",
-            "answer": "False. Collective communication primitives (such as NCCL AllReduce) require every participating rank in the communicator group to execute matching collective calls in the exact same sequence with identical tensor shapes. If one rank skips a collective due to conditional execution, participating ranks will block permanently waiting for the missing peer, causing an unrecoverable collective deadlock (hang).",
+            "answer": "False. Collective communication primitives (such as NCCL AllReduce) require every participating rank in the communicator group to execute matching collective calls in the exact same sequence with identical tensor shapes. If one rank skips a collective due to conditional execution, participating ranks can hang waiting for the missing peer until a timeout or failure handler aborts the communicator. Recovery requires correcting the divergent control flow and restarting a valid group.",
             "learning_objective": "Analyze collective communication deadlocks caused by control-flow divergence across distributed workers"
           }
         ]
@@ -146,7 +146,7 @@
             "gradient accumulation vs scale-out across commodity networks",
             "throughput trade-offs of FSDP collectives vs DDP",
             "decentralized AllReduce vs centralized parameter servers",
-            "DistributedSampler deterministic non-overlapping partitioning"
+            "DistributedSampler rank-specific partitioning and remainder handling"
           ],
           "question_strategy": "Open with ZeRO-3 memory arithmetic in an MCQ, compare gradient accumulation vs scale-out in a SHORT question, order the progressive sharding stages in an ORDER question, evaluate FSDP throughput trade-offs in an MCQ, contrast AllReduce vs Parameter Server topology in an MCQ, and test DistributedSampler recall in a FILL question.",
           "difficulty_progression": "Quantitative memory arithmetic -> network trade-off comparison -> progressive sharding ordering -> communication throughput evaluation -> architectural topology contrast -> system component recall.",
@@ -163,13 +163,13 @@
               "$1.75\\text{ GB}$, because weights, gradients, and optimizer states are each partitioned equally across all 64 workers",
               "$0.25\\text{ GB}$, because INT4 quantization eliminates floating-point representation entirely"
             ],
-            "answer": "The correct answer is C. ZeRO-3 / FSDP partitions all three components of static training state—FP16 model weights (2 bytes/param), FP16 gradients (2 bytes/param), and FP32 Adam states (12 bytes/param)—across the $N=64$ ranks ($16\\text{ bytes/param} / 64 = 0.25\\text{ bytes/param}$ per device). For a 7B model ($7 \\times 10^9 \\times 0.25\\text{ bytes} = 1.75\\text{ GB}$ per GPU), this leaves substantial HBM headroom for dynamic activations. Asserting that state remains 112 GB ignores parameter and optimizer sharding. Limiting sharding to optimizer state describes ZeRO-1 ($28\\text{ GB}$ weights + grads + sharded optim). Claiming INT4 compression confuses precision quantization with state sharding.",
+            "answer": "The correct answer is C. ZeRO-3 / FSDP partitions all three components of static training state, namely FP16 model weights (2 bytes/param), FP16 gradients (2 bytes/param), and FP32 Adam states (12 bytes/param), across the $N=64$ ranks ($16\\text{ bytes/param} / 64 = 0.25\\text{ bytes/param}$ per device). For a 7B model ($7 \\times 10^9 \\times 0.25\\text{ bytes} = 1.75\\text{ GB}$ per GPU), this leaves substantial HBM headroom for dynamic activations. Asserting that state remains 112 GB ignores parameter and optimizer sharding. ZeRO-1 retains 28 GB of weights and gradients plus its optimizer shard, so its total is greater than 28 GB. Claiming INT4 compression confuses precision quantization with state sharding.",
             "learning_objective": "Calculate per-GPU static memory reduction under ZeRO-3 parameter, gradient, and optimizer state sharding"
           },
           {
             "question_type": "SHORT",
-            "question": "The chapter's GPT-2 scaling case study shows that 8 GPUs on a single NVLink-connected node using gradient accumulation achieves higher cost efficiency and throughput than naive scale-out to 32 GPUs across a 10 Gb/s commodity Ethernet network. Explain the quantitative mechanism driving this outcome.",
-            "answer": "Gradient accumulation performs multiple local forward and backward microsteps before synchronizing gradients, keeping communication inside the 8-GPU node's high-speed NVLink fabric (>600 GB/s) where AllReduce latency is negligible (<10 ms). In contrast, naive scale-out to 32 GPUs over 10 Gb/s (1.25 GB/s) Ethernet forces large gradient tensors across a slow inter-node network, causing AllReduce time to exceed compute time ($T_{\\text{comm}} \\gg T_{\\text{compute}}$). Scaling efficiency drops to ~30% on the commodity network while exceeding 95% on the single NVLink node.",
+            "question": "An 8-GPU node can use four-step gradient accumulation to match the effective batch of 32 GPUs connected by 10 Gb/s Ethernet. Explain why the smaller allocation can cost less even when the larger allocation completes the fixed-sample workload sooner.",
+            "answer": "Four accumulation microsteps synchronize once per optimizer update, keeping collective traffic inside the fast local interconnect while matching the effective global batch. The 32-GPU allocation adds arithmetic capacity but pays inter-node communication overhead and rents four nodes. Compare node-hours at the same sample budget and target quality: lower hourly capacity cost can outweigh longer elapsed time, so better cost efficiency does not imply higher throughput.",
             "learning_objective": "Compare gradient accumulation on high-speed intra-node fabrics against naive scale-out across bandwidth-constrained networks"
           },
           {
@@ -183,11 +183,11 @@
             "question": "If a model's parameters, gradients, and activations already fit comfortably within single-GPU memory with high compute utilization under standard DDP, what is the expected throughput impact of enabling ZeRO-3 / FSDP Full Sharding?",
             "choices": [
               "Throughput will increase linearly by $N\\times$ because sharding reduces per-GPU gradient memory",
-              "Throughput will decrease because FSDP introduces additional AllGather collectives before forward and backward passes and ReduceScatter on the critical path",
+              "Throughput can decrease because FSDP introduces additional AllGather collectives before forward and backward passes and ReduceScatter on the critical path",
               "Throughput will remain exactly identical because NCCL automatically hides all collective communication overhead",
               "Throughput will double because parameter sharding eliminates the backward pass entirely"
             ],
-            "answer": "The correct answer is B. ZeRO-3 / FSDP is a memory-saving technique, not a throughput accelerator: it requires an AllGather before each layer's forward pass, a second AllGather before each layer's backward pass, and a ReduceScatter after backward computation. When memory capacity is not a binding constraint, these additional collective operations add latency to the critical path and reduce training throughput by 10–25% compared to standard DDP. Claiming linear speedup confuses memory partitioning with compute scaling. Asserting zero overhead ignores physical network latency and bandwidth limits. Claiming the backward pass is eliminated is mathematically false.",
+            "answer": "The correct answer is B. With full resharding, FSDP adds parameter AllGathers before forward and backward computation and uses ReduceScatter for gradients. When memory savings do not enable a better execution configuration, exposed extra communication can reduce throughput. The penalty depends on overlap and topology; neither linear speedup nor perfect hiding follows from sharding alone.",
             "learning_objective": "Evaluate the communication throughput overhead of FSDP when device memory is not the binding constraint"
           },
           {
@@ -204,8 +204,8 @@
           },
           {
             "question_type": "FILL",
-            "question": "In standard PyTorch DistributedDataParallel, each worker uses a ____ to partition dataset indices deterministically and prevent sample overlap across ranks based on process rank and epoch seed.",
-            "answer": "DistributedSampler. The DistributedSampler ensures that each data-parallel worker processes a unique, non-overlapping subset of the dataset in each epoch, maintaining the statistical validity of the minibatch gradient estimate.",
+            "question": "In standard PyTorch DistributedDataParallel, each worker uses a ____ to partition dataset indices deterministically and assign rank-specific shards based on process rank and epoch seed.",
+            "answer": "DistributedSampler. It assigns rank-specific dataset indices using the rank and epoch seed. When the dataset size is not divisible by the worker count, padding can repeat samples unless the remainder is dropped; the sampler and loss accounting must handle that boundary explicitly.",
             "learning_objective": "Identify the component responsible for deterministic, non-overlapping dataset partitioning in data-parallel training"
           }
         ]
@@ -232,14 +232,14 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A team scales a data-parallel training run from 8 to 64 workers, increasing the effective global batch size from 512 to 4,096 samples. If the model operates comfortably below its critical batch size, which learning-rate adjustment rule is the standard default?",
+            "question": "A team scales a data-parallel training run from 8 to 64 workers, increasing the effective global batch size from 512 to 4,096 samples. If the model operates comfortably below its critical batch size, which learning-rate adjustment follows the linear scaling heuristic?",
             "choices": [
               "Keep the learning rate unchanged, because large-batch variance reduction automatically stabilizes optimization",
               "Multiply the learning rate by 64 to match the total worker count rather than the batch expansion ratio",
               "Multiply the learning rate by $\\sqrt{8}$ from step zero without a warmup schedule",
               "Multiply the learning rate by $8\\times$ (matching the batch expansion ratio) and include a gradual linear warmup schedule"
             ],
-            "answer": "The correct answer is D. Below the critical batch size, the linear scaling rule ($\\eta_{\\text{new}} = k \\cdot \\eta_{\\text{base}}$ where $k = 4096 / 512 = 8$) maintains optimization dynamics by scaling step size proportionally with gradient variance reduction. A gradual warmup schedule is necessary during initial epochs to stabilize the optimizer while moving into well-conditioned loss regions. Keeping the learning rate unchanged under-utilizes the large batch, requiring unnecessarily many steps. Scaling by worker count ($64\\times$) rather than the batch factor ($8\\times$) causes catastrophic divergence. Applying square-root scaling without warmup is heuristic and sub-optimal below the critical batch size.",
+            "answer": "The correct answer is D. The batch expansion is $4096/512=8$, so the linear scaling heuristic multiplies the learning rate by eight, with warmup to limit early instability. It is a starting configuration to validate, not a universal optimizer rule. Scaling by the total worker count uses the wrong ratio; square-root scaling is a different heuristic.",
             "learning_objective": "Apply linear learning rate scaling with warmup for large-batch data-parallel training"
           },
           {
@@ -263,7 +263,7 @@
           {
             "question_type": "FILL",
             "question": "The threshold batch size $B^* \\approx \\frac{\\text{tr}(\\Sigma)}{\\|\\nabla \\mathcal{L}(\\theta)\\|^2}$, representing the point where gradient variance equals true gradient magnitude and past which larger batches yield diminishing returns in sample efficiency, is known as the ____.",
-            "answer": "Critical Batch Size (or critical batch size). Below the critical batch size $B^*$, doubling batch size halves required optimization steps; above $B^*$, additional batch expansion provides diminishing returns in sample efficiency.",
+            "answer": "critical batch size. The gradient-noise-scale proxy estimates the crossover where larger batches give diminishing reductions in optimization steps per added sample. Below that crossover, steps can fall approximately inversely with batch size; the relationship depends on optimizer, training phase, and target quality.",
             "learning_objective": "Define critical batch size in terms of gradient covariance trace and gradient norm"
           },
           {
@@ -320,7 +320,7 @@
           },
           {
             "question_type": "MCQ",
-            "question": "In a Mixture of Experts (MoE) distributed training system, what occurs when a hot expert receives more tokens than its allocated buffer capacity determined by the Capacity Factor $C$?",
+            "question": "In a capacity-limited Mixture of Experts (MoE) system using token dropping, what occurs when a hot expert receives more tokens than its allocated buffer capacity determined by the Capacity Factor $C$?",
             "choices": [
               "Excess tokens are dropped and pass through the MoE layer unprocessed via the residual connection",
               "The expert GPU dynamically allocates host CPU memory over PCIe, halting computation on other ranks",
@@ -333,13 +333,13 @@
           {
             "question_type": "SHORT",
             "question": "Contrast the communication patterns and hardware interconnect requirements of dense LLM training (Megatron-style Tensor Parallelism) with large-scale Recommendation Systems (DLRM embedding sharding).",
-            "answer": "Dense LLM tensor parallelism performs frequent, dense AllReduce collectives inside every layer on the critical path, requiring high-bandwidth, low-latency NVLink (>900 GB/s) within GPU nodes. In contrast, DLRM recommendation models shard massive embedding tables (terabytes in size) across CPU/GPU parameter servers and communicate via sparse pull/push lookups, transferring only the embedding rows touched by a sparse batch; this workload is bound by aggregate memory capacity and random-access memory latency rather than dense bisection bandwidth.",
+            "answer": "Dense LLM tensor parallelism places frequent activation reductions on the layer critical path, favoring high-bandwidth, low-latency local fabrics. DLRM instead shards large embedding tables and exchanges the rows selected by each batch. Its memory-capacity and random-access constraints differ from dense arithmetic, but sparse lookup and redistribution traffic can still saturate network links under fan-out or skew.",
             "learning_objective": "Compare dense model tensor parallelism against sparse embedding sharding communication patterns"
           },
           {
             "question_type": "TF",
             "question": "True or False: Ring Attention scales context length beyond single-GPU memory capacity by circulating key/value blocks in an accelerator ring across $N-1$ communication rounds while overlapping transfer with block-level attention computation.",
-            "answer": "True. Ring Attention partitions the query, key, and value sequences across $N$ GPUs so each device holds only $S/N$ tokens of key/value state. In each of the $N-1$ communication rounds, each GPU computes attention on its local query block against the resident key/value block while concurrently receiving the next key/value block from its neighbor over NVLink, achieving linear context scaling.",
+            "answer": "True. Ring Attention partitions the query, key, and value sequences across $N$ GPUs so each device holds only $S/N$ tokens of key/value state. Each GPU evaluates its query block against all $N$ key/value blocks, including its local block, using $N-1$ transfers. Transfer can overlap block computation when the interconnect and compute budget permit; the distributed state capacity grows with worker count.",
             "learning_objective": "Evaluate the memory and communication mechanism of Ring Attention for long-context sequence parallelism"
           }
         ]
@@ -359,7 +359,7 @@
           "question_strategy": "Open with precision format assignment in an MCQ, explain dynamic scaling in a SHORT question, and evaluate precision reduction vs geometric partitioning in a TF question.",
           "difficulty_progression": "Format comparison -> numerical stability mechanism -> conceptual scope evaluation.",
           "integration": "Connects low-precision arithmetic hardware support with distributed communication payload reduction.",
-          "ranking_explanation": "FP8 serves as an orthogonal numerical lever that halves communication payloads across all distributed training strategies."
+          "ranking_explanation": "FP8 operand precision is distinct from stored-state and collective-wire precision; payload savings require an explicitly narrowed communication path."
         },
         "questions": [
           {
@@ -377,13 +377,13 @@
           {
             "question_type": "SHORT",
             "question": "Explain why per-tensor dynamic scaling is necessary in FP8 distributed training and describe how the scaling factor is computed during execution.",
-            "answer": "Because FP8 has a very narrow dynamic range (maximum representable value of 448 in E4M3), fixed scaling causes either gradient underflow (values rounding to zero) or overflow (values clipping to maximum). Per-tensor dynamic scaling tracks the running maximum absolute value of each tensor and dynamically computes a scale factor $S = \\text{FP8}_{\\max} / \\max(|X|)$, multiplying tensors by $S$ before casting to FP8 and dividing by $S$ after matrix operations to keep values within the representable range.",
+            "answer": "FP8 scaling maps each tensor into the limited representable range. A simple current-maximum rule uses $S=\\mathrm{FP8}_{\\max}/\\max(|X|)$ before casting, with an appropriate zero-tensor guard. For a product of independently scaled operands, the output must be divided by the product of their scales. Practical policies may use history or smaller scaling blocks; the objective is to balance rounding, underflow, and overflow.",
             "learning_objective": "Explain how dynamic scaling prevents underflow and overflow in narrow dynamic range FP8 tensors"
           },
           {
             "question_type": "TF",
             "question": "True or False: Converting training tensors to FP8 eliminates the need for tensor and pipeline parallelism when training 100B+ parameter models because FP8 changes the geometric parallelization axes.",
-            "answer": "False. FP8 halves tensor payload sizes (reducing memory traffic and communication volume relative to FP16/BF16), but it does not change the parallelization axes. A 100B+ parameter model still exceeds the single-device memory capacity of modern accelerators even in FP8 and requires tensor, pipeline, or sharded data parallelism.",
+            "answer": "False. FP8 operand formats do not change the parallelization axes. Stored parameters, master weights, optimizer state, activations, and collective payloads can use different dtypes; enabling FP8 matrix multiplication does not halve all of them. Large models can still require tensor, pipeline, or sharded data parallelism to meet the full training-state budget.",
             "learning_objective": "Distinguish numerical precision reduction from model partitioning across distributed parallelism axes"
           }
         ]
@@ -413,16 +413,16 @@
             "choices": [
               "Pipeline parallelism requires more memory bandwidth than NVLink can provide, forcing it onto InfiniBand",
               "Tensor parallelism requires only point-to-point transfers, making it insensitive to link latency",
-              "Hierarchy-aware parallelism (bandwidth matching): TP launches high-frequency per-layer AllReduce collectives demanding intra-node NVLink bandwidth (>900 GB/s), whereas PP transmits boundary activations tolerating inter-node InfiniBand",
+              "Hierarchy-aware parallelism maps frequent TP exchanges to the fastest local fabric and PP boundary transfers to slower inter-node links.",
               "Data parallelism cannot execute across nodes that use tensor parallelism internally"
             ],
-            "answer": "The correct answer is C. Hierarchy-aware parallelism maps each parallelism dimension to the interconnect tier matching its communication intensity. Tensor parallelism requires low-latency, high-frequency AllReduce operations inside every transformer layer, necessitating intra-node NVLink (>900 GB/s). Pipeline parallelism transmits only boundary activations between stages once per microbatch, tolerating slower inter-node InfiniBand links (50–100 GB/s). The claim that PP requires more bandwidth than NVLink is false. The assertion that TP is latency-insensitive contradicts its per-layer AllReduce requirement. Data parallelism routinely wraps model-parallel pipelines.",
+            "answer": "The correct answer is C. Tensor parallelism communicates inside each layer, so its exposed latency strongly favors the fastest local fabric. Pipeline parallelism exchanges boundary activations and gradients between stages and can tolerate slower links when enough compute separates transfers. Data parallelism can wrap both dimensions. This is bandwidth matching, not a universal minimum bandwidth or prohibition on inter-node tensor parallelism.",
             "learning_objective": "Apply the hierarchy-aware bandwidth matching principle to place 3D parallelism dimensions onto hardware tiers"
           },
           {
             "question_type": "SHORT",
-            "question": "A 175B-parameter model is trained using 3D hybrid parallelism with $t=8$ (tensor parallel) and $p=16$ (pipeline parallel). Using 350 GB for FP16 weights and 1,400 GB for 8-byte Adam optimizer states, calculate the static memory footprint per GPU and explain why pipeline parallelism is necessary in addition to tensor parallelism.",
-            "answer": "Total static state is $350\\text{ GB} + 1400\\text{ GB} = 1750\\text{ GB}$. If using only tensor parallelism with $t=8$, per-GPU static memory would be $1750 / 8 = 218.75\\text{ GB}$, causing out-of-memory on an 80 GB GPU. Adding 16-stage pipeline parallelism ($p=16$) reduces static memory to $1750 / (8 \\times 16) \\approx 13.67\\text{ GB}$ per GPU (budgeted ~14–15 GB), leaving ~65 GB of HBM for dynamic activation memory.",
+            "question": "A 175B-parameter model uses mixed-precision Adam with 2-byte weights, 2-byte gradients, a 4-byte master copy, and two 4-byte moments per parameter. With tensor degree $t=8$ and pipeline degree $p=16$, calculate the ideally balanced static memory per GPU before data-parallel state sharding, and explain why tensor parallelism alone cannot fit this state on 80 GB GPUs.",
+            "answer": "The 16-byte-per-parameter state totals $175\\times10^9\\times16=2{,}800$ GB. Tensor parallelism alone leaves $2{,}800/8=350$ GB per GPU, exceeding 80 GB. Adding 16 balanced pipeline stages reduces the static state to $2{,}800/(8\\times16)=21.875$ GB per GPU. Activations, temporary parameter gathers, communication buffers, and uneven layer placement require additional headroom.",
             "learning_objective": "Calculate per-GPU static memory requirements in a 3D hybrid parallelism configuration"
           },
           {
@@ -474,12 +474,12 @@
             "question_type": "MCQ",
             "question": "Why does Proximal Policy Optimization (PPO) in multi-model RLHF create an infrastructure asymmetry challenge that does not exist in standard pretraining?",
             "choices": [
-              "It combines compute-intensive training models (Policy and Value models requiring backward passes and optimizer state) with memory-bandwidth-bound inference workloads (Reference and Reward models requiring autoregressive rollout and KV cache storage)",
+              "It combines policy and value-model training with policy-generated autoregressive rollouts and forward-only scoring by frozen reference and reward models.",
               "All four models in PPO must be trained with identical optimizer hyperparameters on the same GPU",
               "PPO requires all models to be converted to INT4 precision to enable cross-node gradient synchronization",
               "PPO eliminates backward passes entirely, turning distributed training into a stateless inference service"
             ],
-            "answer": "The correct answer is A. PPO-style RLHF orchestrates four distinct models with asymmetric compute profiles: the Policy and Value models require full backward passes, gradient storage, and optimizer state (compute-intensive training), while the Reference and Reward models execute only forward passes and autoregressive token generation (memory-bandwidth-bound inference). The claim that all models share identical training updates is false because Reference and Reward models are frozen. The claim regarding INT4 conversion is incorrect. Asserting that PPO eliminates backward passes is false since policy optimization requires gradient updates.",
+            "answer": "The correct answer is A. The policy generates autoregressive rollouts, requiring a generation-time KV cache; policy and value updates require backward passes and optimizer state. Frozen reference and reward models score generated sequences without generating those sequences themselves. These phases have different memory and compute demands. Freezing scoring models does not eliminate the policy and value-model training work.",
             "learning_objective": "Analyze the infrastructure asymmetry between training and inference models in multi-model RLHF"
           },
           {
@@ -490,14 +490,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "During the autoregressive generation phase of PPO alignment for a 70B-parameter model, what resource represents the primary memory consumer and system performance bottleneck?",
+            "question": "During the autoregressive generation phase of PPO alignment for a 70B-parameter model, which growing runtime state can limit generation concurrency in accelerator memory?",
             "choices": [
               "FP32 Adam momentum and variance buffers stored on CPU hosts",
               "Key-Value (KV) cache memory in GPU HBM, bounded by memory bandwidth during token-by-token generation",
               "AllReduce gradient communication buffers across InfiniBand switches",
               "Host filesystem NVMe write bandwidth for checkpoint dumping"
             ],
-            "answer": "The correct answer is B. During autoregressive sequence rollout, the model generates tokens one by one, where every step requires loading model weights from HBM to compute a single token (memory-bandwidth bound). The accumulating Key-Value (KV) cache for hundreds of concurrent generation sequences consumes tens to hundreds of gigabytes of accelerator HBM (e.g. ~86 GB for Llama-2-70B GQA at batch 256). Adam optimizer buffers and AllReduce gradient buffers are active during the subsequent backward training phase, not the autoregressive generation phase. Filesystem checkpointing occurs periodically, not per generation token.",
+            "answer": "The correct answer is B. The KV cache grows with concurrent sequence count, context length, layer count, and KV-head width. It can limit how many rollouts fit beside model weights and other resident state. Small-batch decoding is often memory-bandwidth bound, but cache capacity and compute limits must be evaluated separately. Optimizer buffers and checkpoint I/O do not explain this per-sequence growth.",
             "learning_objective": "Identify the binding resource bottleneck during the generation phase of online RLHF"
           },
           {
@@ -568,7 +568,7 @@
           "focus_areas": [
             "framework abstraction layers (DDP vs FSDP vs Megatron placement)",
             "gradient bucketing and communication-computation overlap mechanics",
-            "collective primitive count comparison ($3N_L$ in FSDP vs 1 AllReduce in DDP)"
+            "collective count comparison (layer-wrapped full-reshard FSDP vs bucketed DDP)"
           ],
           "question_strategy": "Open with gradient bucketing in an MCQ, compare collective invocation counts in a SHORT question, and evaluate physical scaling limits in a SHORT question.",
           "difficulty_progression": "Framework optimization mechanism -> collective frequency comparison -> physical limit evaluation.",
@@ -591,7 +591,7 @@
           {
             "question_type": "SHORT",
             "question": "Contrast the collective communication primitive invocation frequency of standard DDP against full-shard FSDP with resharding for a model with $N_L$ layers during a single training step.",
-            "answer": "Standard DDP executes a single AllReduce collective (or a few bucketed AllReduces) at the end of the backward pass. In contrast, full-shard FSDP with resharding executes approximately $3N_L$ collective operations per step: an AllGather before each layer's forward pass, a second AllGather before each layer's backward pass, and a ReduceScatter after each layer's backward computation.",
+            "answer": "DDP launches one AllReduce per ready gradient bucket, often overlapping those calls with backward computation. Full-shard FSDP with layer-level wrapping and resharding after forward typically adds an AllGather before forward, another before backward, and a ReduceScatter after backward: approximately $3N_L$ calls. Actual counts depend on wrapping, bucketing, prefetch, and resharding policy.",
             "learning_objective": "Compare collective communication primitive invocations between standard DDP and full-shard FSDP"
           },
           {
@@ -611,34 +611,34 @@
         "rationale": {
           "focus_areas": [
             "Amdahl's law and linear speedup fallacy",
-            "MFU vs Scaling Efficiency goodput product ($MFU \\times \\eta_{\\text{scaling}}$)",
-            "Young-Daly checkpoint law: $\\tau_{\\text{opt}} = \\sqrt{2 \\cdot T_{\\text{write}} \\cdot \\text{MTBF}_{\\text{system}}}$",
+            "single-node MFU baseline vs measured distributed MFU and scaling efficiency",
+            "Scaling efficiency as a joint property of workload, parallelism strategy, topology, and software stack",
             "gradient accumulation latency and live memory overhead",
             "FSDP performance regression when memory is unconstrained"
           ],
-          "question_strategy": "Open with goodput calculation in an MCQ, apply Young-Daly checkpoint optimization in a SHORT question, analyze gradient accumulation trade-offs in an MCQ, recall the Young-Daly formula in a FILL question, and evaluate FSDP misapplication in a TF question.",
-          "difficulty_progression": "Metric composition calculation -> reliability optimization arithmetic -> systems trade-off analysis -> formula recall -> operational pitfall evaluation.",
+          "question_strategy": "Open with goodput calculation in an MCQ, explain why a vendor scaling-efficiency figure is not a cluster constant in a SHORT question, analyze gradient accumulation trade-offs in an MCQ, recall the critical batch size in a FILL question, and evaluate FSDP misapplication in a TF question.",
+          "difficulty_progression": "Metric composition calculation -> capacity-planning reasoning -> systems trade-off analysis -> concept recall -> operational pitfall evaluation.",
           "integration": "Synthesizes failure modes across scaling, efficiency metrics, hyperparameter tuning, and cluster reliability.",
           "ranking_explanation": "Identifies recurring high-cost engineering mistakes that degrade cluster utilization and cause project delays."
         },
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A team achieves 50 percent Model Flops Utilization (MFU) on a single node, scales to 1,024 GPUs, and measures a scaling efficiency $(\\eta_{\\text{scaling}})$ of 50 percent on their communication-heavy workload. What is the cluster's realized 'useful goodput' as a fraction of peak hardware compute?",
+            "question": "A team achieves 50 percent Model Flops Utilization (MFU) on a single node, scales to 1,024 GPUs, and measures a scaling efficiency $(\\eta_{\\text{scaling}})$ of 50 percent on their communication-heavy workload. What is the cluster's realized model-FLOP rate during distributed execution as a fraction of peak hardware compute?",
             "choices": [
-              "25 percent of peak compute (delivering 256 GPU-equivalents of useful work)",
+              "25 percent of peak compute (delivering 256 GPU-equivalents of model computation)",
               "50 percent of peak compute (delivering 512 GPU-equivalents of useful work)",
               "100 percent of peak compute (delivering 1,024 GPU-equivalents of useful work)",
               "12.5 percent of peak compute (delivering 128 GPU-equivalents of useful work)"
             ],
-            "answer": "The correct answer is A. Realized useful goodput is the multiplicative product of hardware compute efficiency (MFU) and cluster scaling efficiency: $\\text{Goodput} = \\text{MFU} \\times \\eta_{\\text{scaling}} = 0.50 \\times 0.50 = 0.25$ (25% of peak, or $0.25 \\times 1024 = 256$ GPU-equivalents). Optimizing MFU in isolation ignores communication overhead and results in a $2\\times$ overestimation of delivered cluster capacity. Claiming 50% ignores scaling efficiency loss. Claiming 100% assumes perfect linear scaling and zero hardware overhead. Claiming 12.5% introduces an extra ungrounded halving.",
+            "answer": "The correct answer is A. Starting from the single-node MFU baseline, the distributed model-FLOP rate is $0.50\\times0.50=0.25$ of fleet peak, or 256 peak-GPU equivalents. The scaling factor accounts for losses relative to that baseline. A measured distributed MFU would already include those losses and must not be multiplied by scaling efficiency again. Retained-progress goodput additionally requires accounting for replay and recovery outside this measurement.",
             "learning_objective": "Calculate cluster goodput by composing hardware MFU with scaling efficiency"
           },
           {
             "question_type": "SHORT",
-            "question": "Using the Young-Daly checkpoint formula $\\tau_{\\text{opt}} = \\sqrt{2 \\cdot T_{\\text{write}} \\cdot \\text{MTBF}_{\\text{system}}}$, explain why arbitrarily choosing a fixed 15-minute checkpoint cadence on a 1,024-GPU cluster with a 48-hour system MTBF and 5-minute write time causes severe compute waste.",
-            "answer": "With $T_{\\text{write}} = 5\\text{ min} = 0.0833\\text{ hr}$ and $\\text{MTBF}_{\\text{system}} = 48\\text{ hr}$, the optimal interval is $\\tau_{\\text{opt}} = \\sqrt{2 \\times 0.0833 \\times 48} \\approx 2.83\\text{ hours}$ (~170 minutes), incurring about 6% total checkpoint-plus-rework overhead. Checkpointing every 15 minutes wastes $5 / 15 = 33.3\\%$ of all cluster compute solely on write overhead, losing thousands of dollars per day compared to the Young-Daly optimum.",
-            "learning_objective": "Apply the Young-Daly checkpoint formula to calculate optimal checkpoint intervals and evaluate over-checkpointing losses"
+            "question": "A procurement team plans capacity for a graph neural network workload using a vendor benchmark that reports 85 percent scaling efficiency at 1,024 GPUs for large-language-model training. Explain why this figure cannot be treated as a property of the cluster and what the team should measure instead.",
+            "answer": "Scaling efficiency is a joint property of the workload's communication-to-computation ratio, the parallelism strategy, the network topology, and the software stack (collective library version, kernel fusion, overlap quality). The benchmark fixes all four for a language model; a graph neural network with irregular communication changes the first and likely the second, so the same hardware can deliver much lower efficiency. The team should measure scaling on the target workload, at the intended device count and parallelism layout, and plan capacity from that measured curve rather than from a hero benchmark.",
+            "learning_objective": "Explain why scaling efficiency must be measured on the target workload rather than inherited from vendor benchmarks."
           },
           {
             "question_type": "MCQ",
@@ -654,14 +654,14 @@
           },
           {
             "question_type": "FILL",
-            "question": "The optimal interval formula $\\tau_{\\text{opt}} = \\sqrt{2 \\cdot T_{\\text{write}} \\cdot \\text{MTBF}_{\\text{system}}}$, which balances checkpoint write overhead against rework risk following hardware failure, is known as the ____.",
-            "answer": "Young-Daly Checkpoint Law (or Young-Daly formula / Young-Daly law). The Young-Daly law determines the mathematically optimal checkpointing cadence to minimize total wasted compute in large-scale distributed clusters.",
-            "learning_objective": "Define the principle governing optimal checkpointing intervals in distributed clusters"
+            "question": "The largest global batch size beyond which adding more samples per step yields diminishing reductions in the number of steps needed to reach target quality is called the ____.",
+            "answer": "critical batch size. Beyond this workload-dependent point, larger global batches can raise hardware throughput without proportionally reducing the steps to target quality, so hardware scaling and statistical scaling must be evaluated separately.",
+            "learning_objective": "Identify the critical batch size as the statistical limit on useful data-parallel scale-out."
           },
           {
             "question_type": "TF",
             "question": "True or False: If a 7B-parameter model fits comfortably in single-GPU memory with high compute utilization under standard DDP, universally enabling ZeRO-3 / FSDP full sharding will always increase training throughput by reducing per-GPU memory consumption.",
-            "answer": "False. When model state and activations already fit in GPU memory, the memory reduction from FSDP provides no execution benefit. Instead, FSDP introduces 10–25% communication overhead by placing AllGather and ReduceScatter collectives on the critical path of every layer, causing overall training throughput to decrease (e.g. dropping from 145 to 118 samples/second).",
+            "answer": "False. FSDP trades memory capacity for parameter-gather and gradient-reduction traffic. If its memory savings do not enable a more efficient batch or layout, the exposed communication can lower throughput. The outcome depends on wrapping, resharding, overlap, and network capacity, so neither a universal gain nor a fixed percentage penalty follows from sharding.",
             "learning_objective": "Evaluate the performance pitfall of applying FSDP when memory capacity is not binding"
           }
         ]

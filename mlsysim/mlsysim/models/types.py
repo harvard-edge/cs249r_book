@@ -180,6 +180,19 @@ class TransformerWorkload(Workload):
     training_gpu_days: Optional[float] = None
     training_hardware_label: Optional[str] = None
     inference_flops: Optional[Quantity] = None
+    # Architecture facts from the model card / paper (added 2026-09-28).
+    # ``context_length`` is the pre-training / supported context window in
+    # tokens; ``vocab_size`` is the tokenizer vocabulary. Both are optional
+    # because not every source states them.
+    context_length: Optional[int] = None
+    vocab_size: Optional[int] = None
+    # Reported training emissions (mass of CO2e, e.g. metric tonnes).
+    training_co2e: Optional[Quantity] = None
+
+    @field_validator("training_co2e", mode="after")
+    @classmethod
+    def _validate_training_co2e(cls, v):
+        return require_dimensionality(v, ureg.kilogram, "training_co2e")
 
     @field_validator("training_ops", mode="after")
     @classmethod
