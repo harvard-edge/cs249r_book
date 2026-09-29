@@ -6148,7 +6148,7 @@ class InfraFrontierPodTrainingRecap:
 
 Training a `{python} InfraFrontierPodTrainingRecap.frontier_params_b_str` model on this cluster requires `{python} PodTrainingMath.pod_flops_math` total floating-point operations (assuming `{python} PodTrainingMath.gpt3_tokens_billion_str` training tokens). Assuming local compute efficiency of `{python} PodTrainingMath.local_efficiency_pct_str` before communication and pipeline losses, the aggregate compute rate is `{python} PodTrainingMath.cluster_throughput_math` FLOP/s, or about `{python} PodTrainingMath.cluster_eflop_per_s_str`, yielding a compute-only baseline of approximately `{python} PodTrainingMath.t_compute_hr_str`. This assumed local efficiency is not measured distributed MFU, because MFU over a distributed step already includes its communication and pipeline losses. In the terms of the Fleet Law (@eq-fleet-law), this baseline is the $T_{\text{compute}}/N$ term alone.
 
-In practice, communication overhead, pipeline bubbles, checkpoint I/O, hardware failures, and maintenance windows compound to extend the actual wall-clock time beyond that baseline. The first two are the Fleet Law's exposed $T_{\text{comm}}$ and $T_{\text{sync}}$ terms, and the rest are operational losses around the step. Notebook \ref{nbk-compute-infrastructure-training-time-175b} chains these factors into a scenario estimate measured in days rather than hours; production schedules can stretch further once queueing, data readiness, debugging, reruns, and site-specific operational margins enter the plan. The central theme is unchanged: at pod scale, the schedule depends on both local execution and fleet overhead. Recovering this lost time is the central challenge of distributed systems engineering, and the solutions span hardware (better networks), software (overlapped communication), and operations (proactive maintenance to minimize downtime).
+In practice, communication overhead, pipeline bubbles, checkpoint I/O, hardware failures, and maintenance windows compound to extend the actual wall-clock time beyond that baseline. The first two are the Fleet Law's exposed $T_{\text{comm}}$ and $T_{\text{sync}}$ terms, and the rest are operational losses around the step. Notebook \ref{nbk-compute-infrastructure-training-time-175b} chains these factors into a scenario estimate of wall-clock time; production schedules can stretch further once queueing, data readiness, debugging, reruns, and site-specific operational margins enter the plan. The central theme is unchanged: at pod scale, the schedule depends on both local execution and fleet overhead. Recovering this lost time is the central challenge of distributed systems engineering, and the solutions span hardware (better networks), software (overlapped communication), and operations (proactive maintenance to minimize downtime).
 
 ```{python}
 #| echo: false
@@ -6162,7 +6162,7 @@ from mlsysim.fmt import fmt_time
 # │
 # │ Goal: Derive the scenario training time from first principles,
 # │       starting from total FLOPs and aggregate cluster throughput.
-# │ Show: ~12h compute baseline → ~18h scenario estimate before site-specific operations.
+# │ Show: ~12 h compute baseline → ~26 h scenario estimate before site-specific operations.
 # │ How: Divide total training FLOPs by aggregate effective throughput; apply overhead multipliers sequentially.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -6185,9 +6185,8 @@ class TrainingTime175B:
     local_efficiency = ReferenceStats.TrainingScaleProfiles.LocalComputeEfficiency  # useful compute before distributed overhead
 
     # Scenario multipliers; each additive overhead is relative to the preceding subtotal
-    # Registered scaling-efficiency tier that matches the 8,192-GPU scenario size.
+    # Modeled scaling-efficiency tier for 8,192 GPUs (includes pipeline bubbles).
     scaling_eff = ReferenceStats.TrainingScaleProfiles.Eff8192Gpu
-    bubble_fraction = Ops.TrainingRunOverheads.PipelineBubble
     ckpt_overhead = Ops.TrainingRunOverheads.Checkpoint
     fail_overhead = Ops.TrainingRunOverheads.FailureRecovery
     maint_overhead = Ops.TrainingRunOverheads.Maintenance
@@ -6199,8 +6198,7 @@ class TrainingTime175B:
 
     # Sequential overhead accumulation; these are assumed nonoverlapping increments
     t_comm_hr = t_physics_hr / scaling_eff
-    t_bubble_hr = t_comm_hr * (1 + bubble_fraction)
-    t_ckpt_hr = t_bubble_hr * (1 + ckpt_overhead)
+    t_ckpt_hr = t_comm_hr * (1 + ckpt_overhead)
     t_fail_hr = t_ckpt_hr * (1 + fail_overhead)
     t_maint_hr = t_fail_hr * (1 + maint_overhead)
 
@@ -6218,17 +6216,14 @@ class TrainingTime175B:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     t_physics_hr_str = fmt_time(t_physics_hr, 'hour', precision=1, commas=True, style='word')
     t_comm_hr_str = fmt_time(t_comm_hr, 'hour', precision=1, commas=True, style='word')
-    t_bubble_hr_str = fmt_time(t_bubble_hr, 'hour', precision=1, commas=True, style='word')
     t_ckpt_hr_str = fmt_time(t_ckpt_hr, 'hour', precision=1, commas=True, style='word')
     t_fail_hr_str = fmt_time(t_fail_hr, 'hour', precision=1, commas=True, style='word')
     t_maint_hr_str = fmt_time(t_maint_hr, 'hour', precision=1, commas=True, style='word')
     t_total_days_str = fmt_time(t_maint_hr / 24, 'day', precision=1, commas=True, style='word')
     scaling_eff_str = fmt(scaling_eff, precision=2, commas=False)
-    bubble_pct_math = fmt_math(f"\\approx {bubble_fraction * 100:.0f}\\%")
     ckpt_pct_math = fmt_math(f"\\approx {ckpt_overhead * 100:.0f}\\%")
     fail_pct_math = fmt_math(f"\\approx {fail_overhead * 100:.0f}\\%")
     maint_pct_math = fmt_math(f"\\approx {maint_overhead * 100:.0f}\\%")
-    bubble_mult_math = fmt_math(f"\\times {1 + bubble_fraction:.2f} \\rightarrow")
     ckpt_mult_math = fmt_math(f"\\times {1 + ckpt_overhead:.2f} \\rightarrow")
     fail_mult_math = fmt_math(f"\\times {1 + fail_overhead:.2f} \\rightarrow")
     maint_mult_math = fmt_math(f"\\times {1 + maint_overhead:.2f} \\rightarrow")
@@ -6256,9 +6251,8 @@ The training time for our `{python} InfraFrontierPodTimeRecap.frontier_params_b_
 3. **Compute-only training baseline**:
    (`{python} PodTrainingMath.total_flops_math` FLOPs)/(`{python} PodTrainingMath.cluster_throughput_math` FLOP/s) $\div 3600 \approx$ `{python} TrainingTime175B.t_physics_hr_str`
 
-4. **Illustrative overhead chain**: The communication factor excludes pipeline bubbles. Each subsequent percentage adds time relative to the preceding subtotal, not to final wall time; the factors are scenario assumptions, not independent measured losses:
-   - Communication overhead (scaling efficiency `{python} TrainingTime175B.scaling_eff_str`, the registered tier for 8,192 GPUs): $\div$ `{python} TrainingTime175B.scaling_eff_str` $\rightarrow$ `{python} TrainingTime175B.t_comm_hr_str`
-   - Pipeline bubbles (`{python} TrainingTime175B.bubble_pct_math`): `{python} TrainingTime175B.bubble_mult_math` `{python} TrainingTime175B.t_bubble_hr_str`
+4. **Illustrative overhead chain**: The scaling factor already includes pipeline fill and drain, so no separate bubble step follows. Each subsequent percentage adds time relative to the preceding subtotal, not to final wall time; the factors are scenario assumptions, not independent measured losses:
+   - Distributed-step losses (scaling efficiency `{python} TrainingTime175B.scaling_eff_str`, the modeled tier for 8,192 GPUs, covering communication and pipeline bubbles): $\div$ `{python} TrainingTime175B.scaling_eff_str` $\rightarrow$ `{python} TrainingTime175B.t_comm_hr_str`
    - Checkpoint overhead (`{python} TrainingTime175B.ckpt_pct_math`): `{python} TrainingTime175B.ckpt_mult_math` `{python} TrainingTime175B.t_ckpt_hr_str`
    - Hardware failures and restarts (`{python} TrainingTime175B.fail_pct_math` of the checkpoint-adjusted subtotal): `{python} TrainingTime175B.fail_mult_math` `{python} TrainingTime175B.t_fail_hr_str`
    - Maintenance windows (`{python} TrainingTime175B.maint_pct_math`): `{python} TrainingTime175B.maint_mult_math` `{python} TrainingTime175B.t_maint_hr_str`

@@ -111,6 +111,9 @@ def test_interconnect_direction_convention():
     for dev in ("V100", "A100", "H200", "B200", "TPUv5p"):
         nv = getattr(Hardware.Cloud, dev).nvlink
         assert nv.direction == "bidirectional_total", dev
+    # TPU v3/v4 ICI come from Jouppi et al. 2023 Table 4, stored one way
+    for dev in ("TPUv3", "TPUv4"):
+        assert getattr(Hardware.Cloud, dev).nvlink.direction == "per_direction", dev
 
 
 def _all_hardware_nodes():
@@ -201,3 +204,32 @@ def test_tpu_v3_matches_jouppi_2020_table3():
     assert v3.memory.capacity.m_as("GiB") == pytest.approx(32)
     assert v3.ridge_point().m_as("flop/byte") == pytest.approx(136.67, rel=1e-3)
     assert v3.metadata.provenance.url == "https://doi.org/10.1145/3360307"
+
+
+def test_tpu_v3_ici_and_year():
+    """TPU v3 ICI is "4 links @ 70 GB/s" one way (Jouppi et al. 2023, ISCA,
+    Table 4), the same table and convention as TPU v4. Jouppi et al. 2020
+    Table 3 gives 4 x 656 Gbit/s = 328 GB/s, the raw line rate. TPU v3 was
+    announced and deployed in 2018."""
+    v3 = Hardware.Cloud.TPUv3
+    assert v3.release_year == 2018
+    assert v3.nvlink.name == "ICI"
+    assert v3.nvlink.direction == "per_direction"
+    assert v3.nvlink.bandwidth_per_direction.m_as("GB/s") == pytest.approx(280.0)
+    assert v3.nvlink.bandwidth_per_direction < Hardware.Cloud.TPUv4.nvlink.bandwidth_per_direction
+
+
+def test_tpu_v2_matches_jouppi_2020_table3():
+    """TPU v2 is the per-chip figure from Jouppi et al. (2020), CACM 63(7),
+    Table 3: 46 TFLOP/s (bf16), 280 W TDP, 16 GiB HBM at 700 GB/s. The old
+    45 TFLOP/s was the Hot Chips pod figure (11.5 PFLOP/s) divided by 256."""
+    v2 = Hardware.Cloud.TPUv2
+    assert v2.compute.peak_flops.m_as("TFLOPs/s") == pytest.approx(46.0)
+    assert v2.compute.precision_flops["bf16"].m_as("TFLOPs/s") == pytest.approx(46.0)
+    assert v2.tdp.m_as("W") == pytest.approx(280)
+    assert v2.memory.bandwidth.m_as("GB/s") == pytest.approx(700)
+    assert v2.memory.capacity.m_as("GiB") == pytest.approx(16)
+    assert v2.ridge_point().m_as("flop/byte") == pytest.approx(65.71, rel=1e-3)
+    assert v2.metadata.provenance.url == "https://doi.org/10.1145/3360307"
+    assert v2.release_year == 2017
+    assert v2.compute.peak_flops < Hardware.Cloud.TPUv3.compute.peak_flops

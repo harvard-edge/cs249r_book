@@ -1459,8 +1459,8 @@ OVERHEAD_BUDGETS = _conv(
 
 SCALING_EFFICIENCY_TIERS = _conv(
     "prov:scaling-efficiency-tiers",
-    "Illustrative scaling efficiency vs GPU count (32→1024 GPUs)",
-    notes="8192-GPU tier uses MEGASCALE literature anchor separately.",
+    "Book convention: small-job scaling efficiency (32 GPUs)",
+    notes="Only the 32-GPU tier; larger tiers are modeled (prov:scaling-efficiency-reference-job-modeled).",
 )
 
 ENERGY_HIERARCHY_CONVENTIONS = _conv(
@@ -2066,6 +2066,29 @@ DGX_H100_USER_GUIDE_POWER = _ds(
            "(storage/in-band); nics_per_node counts only the eight compute cards."),
 )
 
+DGX_A100_USER_GUIDE_POWER = _ds(
+    "prov:nvidia-dgx-a100-user-guide-power",
+    "NVIDIA DGX A100 User Guide: hardware overview, power specifications and N+N redundancy",
+    "https://docs.nvidia.com/dgx/dgxa100-user-guide/introduction-to-dgxa100.html",
+    verified="2026-09-29",
+    notes=("Six 3 kW PSUs (3000 W @ 200-240 V, 16 A) in 3+3 redundancy; full power on any three; "
+           "6.5 kW max system power (also DGX A100 datasheet 'System Power Usage 6.5kW max'); boots on "
+           "two PSUs with GPUs unavailable; NVIDIA directs a shutdown to replace faulty PSUs. "
+           "nics_per_node counts the eight single-port compute ConnectX cards; the dual-port storage "
+           "cards are excluded."),
+)
+
+DGX_B200_USER_GUIDE_POWER = _ds(
+    "prov:nvidia-dgx-b200-user-guide-power",
+    "NVIDIA DGX B200 User Guide: hardware overview, power specifications and PSU redundancy",
+    "https://docs.nvidia.com/dgx/dgxb200-user-guide/introduction-to-dgxb200.html",
+    verified="2026-09-29",
+    notes=("Six 3.3 kW PSUs (3300 W @ 200-240 V, 16 A) in 5+1 redundancy; 14.3 kW max system power; "
+           "with 5 PSUs no effect (1,000 W per GPU), with 4 or 3 PSUs reduced performance (800 W per "
+           "GPU), boots only with at least three. nics_per_node counts the eight single-port ConnectX-7 "
+           "compute cards; the two dual-port BlueField-3 DPUs are excluded."),
+)
+
 # --- Composed systems ---
 NVIDIA_DGX_SUPERPOD_H100_RA = _ds(
     "prov:nvidia-dgx-superpod-h100-ra",
@@ -2202,4 +2225,23 @@ MIDSCALE_TRAINING_CARBON_SCENARIO = _est(
     "Reference mid-scale training carbon scenario (7B model, 64 A100s)",
     notes="Documented teaching assumption: a 14-day run on a 64-GPU A100 lab cluster; no field source.",
     verified=_V,
+)
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-29 additions (scaling-efficiency tiers, registry-items-2). Add-only.
+# ---------------------------------------------------------------------------
+SCALING_EFFICIENCY_REFERENCE_JOB_MODELED = Provenance(
+    id="prov:scaling-efficiency-reference-job-modeled",
+    kind=ProvenanceKind.DERIVED,
+    ref="MLSysIM DistributedModel sweep of Scenarios.DenseLLMPretrainingReference",
+    notes=(
+        "GPT-3 175B on DGX H100 + HDR InfiniBand; TP8 x PP8 (64-GPU replica); fixed global batch "
+        "1,536 sequences (Brown et al. 2020 Table 2.1), one sequence per micro-batch, overlap_comm=True, "
+        "efficiency=LocalComputeEfficiency 0.45, fp16. Raw 0.8738 (256), 0.8293 (1,024), 0.5619 (8,192), "
+        "rounded to 2 dp. Same sweep as vol2 fig-fleet-orchestration-scaling-efficiency-curve. Published "
+        "strong-scaling retention is higher with larger batch and interleaved pipelines: MegaScale Table 2 "
+        "is 0.90 from 256 to 1,024 and 0.93 from 3,072 to 12,288 GPUs."
+    ),
+    verified="2026-09-29",
 )
