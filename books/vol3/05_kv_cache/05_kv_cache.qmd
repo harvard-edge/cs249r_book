@@ -255,7 +255,7 @@ A second policy grows a contiguous allocation as tokens arrive. When adjacent ca
 
 ### Two kinds of unused capacity
 
-Unused slots inside a reservation are **internal fragmentation**\index{Internal fragmentation!KV definition}; free capacity split into extents too small for a contiguous request is **external fragmentation**\index{External fragmentation!KV definition}. The distinction comes from storage allocation for multiprogrammed computers[^fn-fragmentation-internal-external] [@randell1969fragmentation]. @Tbl-vol3-kv-fragmentation-taxonomies separates them because each has a different remedy: releasing slack cures the first, and changing the allocation granularity cures the second.
+Unused slots inside a reservation are **internal fragmentation**\index{Internal fragmentation!definition}; free capacity split into extents too small for a contiguous request is **external fragmentation**\index{External fragmentation!definition}. The distinction comes from storage allocation for multiprogrammed computers[^fn-fragmentation-internal-external] [@randell1969fragmentation]. @Tbl-vol3-kv-fragmentation-taxonomies separates them because each has a different remedy: releasing slack cures the first, and changing the allocation granularity cures the second.
 
 | **Condition**          | **Where capacity is unavailable**                           | **Consequence**                                                               |
 |:-----------------------|:------------------------------------------------------------|:------------------------------------------------------------------------------|
@@ -276,7 +276,7 @@ When the integration-test log extends the repair context, the serving engine nee
 
 ::: {#dfn-paged-kv-cache .callout-definition title="Paged KV block table"}
 
-***Paged KV block table***\index{Paged attention!block table definition}\index{KV cache!block table definition} is a per-sequence software mapping from logical token blocks to the physical KV blocks that store their initialized key and value entries.
+***Paged KV block table***\index{Paged attention!definition}\index{Paged KV block table|see{Paged attention}}\index{KV cache!block table} is a per-sequence software mapping from logical token blocks to the physical KV blocks that store their initialized key and value entries.
 
 1. **Significance**: A sequence can grow by acquiring another block without relocating its existing blocks.
 2. **Distinction**: The table maps token positions for the attention kernel; it is not the accelerator's hardware page table.
@@ -458,7 +458,7 @@ class ForkCopy:
 
 Deliberation that samples several candidates to buy evidence (principle \ref{pri-vol3-verification-asymmetry}) makes forks routine. Candidate repairs can begin from the same processed prefix and then generate different continuations. Their block tables may refer to the same immutable prefix blocks if the model computation is compatible and the service permits sharing. The saving is large at agent context lengths. A contiguous allocator that deep-copies an `{python} ForkCopy.prefix_str`-token prefix into four candidates writes `{python} ForkCopy.copied_str` of KV state for the Llama 3 70B geometry, while block-table duplication copies none of that payload. The runtime still constructs or shares metadata and records ownership; copying a block table and updating its references can require work proportional to its number of entries.
 
-The partial tail needs special treatment. Two candidates cannot independently append into the same shared writable slot. In the ten-token example, both candidates initially refer to `[3, 7, 9]`. Before candidate B writes position 10, the runtime allocates block 14, copies the two initialized entries from block 9, and redirects B's last table entry. The write then occurs at slot 2 of block 14. This **copy-on-write**\index{Copy-on-write!KV tail definition}[^fn-cow-tenex-pages] operation leaves candidate A's state unchanged. @Tbl-vol3-kv-cow-trace follows the ownership change; its counts assume these two candidates are the only owners.
+The partial tail needs special treatment. Two candidates cannot independently append into the same shared writable slot. In the ten-token example, both candidates initially refer to `[3, 7, 9]`. Before candidate B writes position 10, the runtime allocates block 14, copies the two initialized entries from block 9, and redirects B's last table entry. The write then occurs at slot 2 of block 14. This **copy-on-write**\index{Copy-on-write!KV tail}[^fn-cow-tenex-pages] operation leaves candidate A's state unchanged. @Tbl-vol3-kv-cow-trace follows the ownership change; its counts assume these two candidates are the only owners.
 
 | **State**                     | **Candidate A table** | **Candidate B table** | **Physical ownership**                                   |
 |:------------------------------|:----------------------|:----------------------|:---------------------------------------------------------|
@@ -642,7 +642,7 @@ Chunking therefore changes the execution schedule and preserves the causal compu
 
 ### Choosing how much work to admit
 
-A simple scheduler gives each iteration a **token budget**\index{Token budget!chunked prefill definition} $C_{\text{budget}}$. With ordinary autoregressive decoding, each selected decode request contributes one new token position, and each selected prefill contributes the number of positions in its next chunk. An iteration that admits prefill chunks of $c_i$ tokens and a set $\mathcal{D}$ of decode requests must satisfy
+A simple scheduler gives each iteration a **token budget**\index{Token budget!chunked prefill} $C_{\text{budget}}$. With ordinary autoregressive decoding, each selected decode request contributes one new token position, and each selected prefill contributes the number of positions in its next chunk. An iteration that admits prefill chunks of $c_i$ tokens and a set $\mathcal{D}$ of decode requests must satisfy
 
 $$\sum_{i} c_i + |\mathcal{D}| \le C_{\text{budget}}$$ {#eq-kv-token-budget}
 
@@ -1289,6 +1289,23 @@ Dropping the `{python} PausedStateChoice.state_str` repair state costs about `{p
 
 The repair's selected context becomes a physical allocation only through the serving system's policy. Attention geometry determines the storage per token; blocks determine allocation granularity and sharing; prefix compatibility and availability determine which computation can be reused. Scheduling and paused-state policy then decide when that storage is occupied and what other work must wait. Whether the repair's evidence applies to the current source version remains the harness's question, answered by the context it sends.
 
+@Tbl-vol3-kv-cache-key-equations collects the relations the chapter uses to size, share, schedule, and release that storage.
+
+| **Equation**                                                                                                                                                        | **What it bounds or decides**                                                                  | **Where derived**                  |
+|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------|:-----------------------------------|
+| $m_{\text{token}} = 2 \cdot N_L \cdot H_{\text{KV}} \cdot d_{\text{head}} \cdot s_{\text{elem}}$, $\; M_{\text{KV}} = S \cdot m_{\text{token}}$                     | Bytes retained per token and per sequence; retained length is the capacity knob                | @eq-mem-token                      |
+| $0 \le \Delta_{\text{tail}} \le p - 1$                                                                                                                              | The only per-sequence slack of paged allocation, and so whether block size matters to capacity | @sec-vol3-kvcache-pagedattention   |
+| $\rho_{\text{prefix}} = \sum_{i} S_{\text{match}}^{(i)} / \sum_{i} S_{\text{prompt}}^{(i)}$                                                                         | Share of prompt tokens actually served from reusable state                                     | @eq-hprefix                        |
+| $\sum_{i} c_i + \lvert\mathcal{D}\rvert \le C_{\text{budget}}$                                                                                                      | Prefill admitted per iteration beside ongoing decodes, and so their gap between tokens         | @eq-kv-token-budget                |
+| $T_{\text{reload}} / T_{\text{recompute}} = m_{\text{token}} R_{\text{attain}} / (2 P \, \text{BW}_{\text{link}})$                                                  | Whether paused state returns by reload or by recomputation, at any retained length             | @eq-kv-reload-ratio                |
+| $M_{\text{pool}} = M_{\text{HBM}} - M_{\text{weights}} - M_{\text{runtime}}$                                                                                        | Memory left for attention state once the weights and runtime are paid                          | @eq-mkv-pool                       |
+| $\lceil S_{\text{common}}/p \rceil + B \lceil (S + K_{\max} - S_{\text{common}})/p \rceil \le \lfloor (1-\theta) M_{\text{pool}} / (p \, m_{\text{token}}) \rfloor$ | Resident-fit bound $B$ with block rounding, headroom, and a shared prefix                      | @eq-kv-demand-shared               |
+| $1/(1-f)$                                                                                                                                                           | Large-pool limit of the sharing gain for shared fraction $f$                                   | @sec-vol3-kv-capacity-formulations |
+| $\bar{L} = \lambda \bar{W}$                                                                                                                                         | Turn rate that a fixed number of resident slots can sustain                                    | @eq-vol3-littles-law               |
+| $1 + W_{\text{wait}}/W_{\text{gen}}$                                                                                                                                | Residency tax, the memory-bound rate lost by holding state through a wait                      | @sec-vol3-kv-workload-dynamics     |
+
+: **Key equations**: Each relation holds under the chapter's assumptions of full causal attention, uniform layer geometry, and tensor payload that excludes allocator metadata. {#tbl-vol3-kv-cache-key-equations tbl-colwidths="[46,36,18]"}
+
 ::: {.callout-takeaways title="Managing derived attention state"}
 
 * **Token state has a physical footprint**: For the chosen full-attention architecture and precision, retained length determines KV storage. A context that fits the model's interface can still exceed the deployment's available pool, and a node-wide estimate must respect per-device placement and runtime space.
@@ -1299,7 +1316,7 @@ The repair's selected context becomes a physical allocation only through the ser
 
 :::
 
-Attention state derived from the token prefix (principle \ref{pri-vol3-prefix-coherence}) creates an opportunity to reuse work, not an obligation to keep every computed tensor resident. Block ownership and residence accounting price that opportunity. Authority still stays with the source (principle \ref{pri-vol3-source-authority}); a cheaper continuation does not make an old observation evidence about a changed artifact.
+Attention state derived from the token prefix (principle \ref{pri-vol3-prefix-coherence})\index{Principle!attention state is derived from the token prefix} creates an opportunity to reuse work, not an obligation to keep every computed tensor resident. Block ownership and residence accounting price that opportunity. Authority still stays with the source (principle \ref{pri-vol3-source-authority}); a cheaper continuation does not make an old observation evidence about a changed artifact.
 
 ## Historical Perspective and Further Reading {#sec-vol3-kv-cache-history}
 
@@ -1317,6 +1334,74 @@ For further reading, six works trace the lineage from classical memory managemen
 - @kwon2023vllm carries paging, block tables, and copy-on-write into KV storage and measures the waste they remove. It is a model of transferring a classical mechanism to a new workload with evidence.
 - @zheng2024sglang treats shared prompt structure as a serving resource, indexed by a radix tree and retained under an eviction policy.
 - @abhyankar2024infercept states the tool-wait problem as a serving problem and compares keeping, moving, and discarding paused state.
+
+## Exercises {#sec-vol3-kv-cache-exercises}
+
+Unless a problem states otherwise, use the hypothetical reference deployment in @tbl-vol3-kv-cache-exercise-givens. Its values are problem inputs chosen for round arithmetic, not measurements of any system. Take GB as $10^9$ bytes, count $2P$ weight operations per processed token, and model one engine iteration over $n$ token positions with the chapter's weight-only estimate, $t(n) = \max\left(5\;\text{ms},\; 2 P n / R_{\text{attain}}\right)$.
+
+| **Quantity**                                  | **Symbol**                                | **Given**                       |
+|:----------------------------------------------|:------------------------------------------|:--------------------------------|
+| Model parameters                              | $P$                                       | $50 \times 10^{9}$              |
+| Layers, key-value heads, head dimension       | $N_L$, $H_{\text{KV}}$, $d_{\text{head}}$ | 48, 8, 128                      |
+| Bytes per stored KV element                   | $s_{\text{elem}}$                         | 2                               |
+| KV pool after weights and runtime reserve     | $M_{\text{pool}}$                         | 400 GB                          |
+| Sustained prefill rate                        | $R_{\text{attain}}$                       | $2 \times 10^{15}$ operations/s |
+| Weight-read floor of one iteration            |                                           | 5 ms                            |
+| Aggregate host-link bandwidth, each direction | $\text{BW}_{\text{link}}$                 | 400 GB/s                        |
+
+: **Reference deployment for the exercises**: Hypothetical givens shared by the problems below. {#tbl-vol3-kv-cache-exercise-givens tbl-colwidths="[46,28,26]"}
+
+**1. Sizing retained state for a session target (Basic).** An operator must hold 200 unshared sessions resident at once, each retaining 16,384 tokens.
+
+(a) Compute $m_{\text{token}}$ from @eq-mem-token, the payload $M_{\text{KV}}$ of one session, and the resident-fit bound in the pool.
+(b) A multi-head variant of the same model stores 64 key-value heads per layer instead of 8. Compute its fit, and explain why no allocator policy can recover the difference.
+(c) Two proposals would meet the target: storing KV at one byte per element, or having the harness cap retained context. Find the longest retained length that meets the target at two bytes per element. Then argue which proposal to try first and what evidence each must produce before it ships.
+
+**2. When paging pays (Basic).** Static reservation sizes every request for a cap of 8,192 tokens. The request population's mean final length is 3,072 tokens.
+
+(a) What fraction of a reservation holds state at completion, and how many reservations fit in the pool?
+(b) Paged allocation uses 32-token blocks, and final lengths have uniformly distributed remainders modulo the block size. Estimate the mean tail waste per sequence, its share of allocated KV memory, and the mean number of resident sequences implied by the mean allocation. Repeat for 256-token blocks.
+(c) If the mean final length rose to 7,000 tokens under the same cap, how much of paging's capacity advantage over static reservation would remain? Name one benefit of block allocation that does not depend on the length distribution.
+
+**3. Moving one field (Basic).** A session sends four requests of 6,000 prompt tokens each. The first 4,500 tokens are invariant instructions and tool schemas, except for a request timestamp serialized after the first 300 tokens. The service reuses only complete 256-token blocks; the first request finds nothing cached, and each later request finds the earlier state resident, compatible, and permitted.
+
+(a) Compute $\rho_{\text{prefix}}$ from @eq-hprefix over the four requests.
+(b) Recompute it after the harness moves the timestamp to follow the invariant prefix.
+(c) For layout (b), how much weight-only prefill does each hit avoid, and how much more would a service that also reuses partial tail blocks avoid? Which change should the team make first?
+
+**4. Choosing a chunk budget (Intermediate).** Forty-eight requests are decoding when an 8,000-token uncached prompt arrives.
+
+(a) If the engine runs the prompt as one unit, what gap between tokens do the ongoing decodes see?
+(b) The ongoing streams must see at most 25 ms between tokens. Using @eq-kv-token-budget with one position per decode, find the largest budget $C_{\text{budget}}$ and chunk size that meet the target, the number of iterations the prompt needs, and the time until its prefill completes.
+(c) Ignoring the smaller final chunk, show that prefill completion is approximately $\left(2 P S_{\text{new}}/R_{\text{attain}}\right) \cdot T / \left(T - 2 P \lvert\mathcal{D}\rvert / R_{\text{attain}}\right)$ for an inter-token target $T$ above the weight-read floor, where $S_{\text{new}}$ is the uncached prompt length. Find the tightest $T$ that still completes the prompt within 500 ms.
+(d) Explain why a target approaching $2 P \lvert\mathcal{D}\rvert / R_{\text{attain}}$ is unworkable, and propose a design change for a service whose streams need 8 ms between tokens while new prompts need their prefill within 500 ms.
+
+**5. Reload, recompute, and a return burst (Intermediate).**
+
+(a) Evaluate @eq-kv-reload-ratio for the reference deployment. How much faster is reload than recomputation, and why does the answer not depend on retained length?
+(b) Below what sustained link bandwidth would recomputation become the faster way back?
+(c) Forty paused sessions of 32,768 tokens each return at the same instant. Compute each session's state, its isolated reload time, the reload completion time of the last session when reloads share the full aggregate link rate, and the time to recompute all forty sequentially from weight work alone.
+(d) Each returning session must be restored within 250 ms. How many of the forty meet that target if reloads share the link fairly, and how many if they are served one at a time in arrival order at the full link rate? Propose two design changes that would serve the rest.
+
+**6. Shared prefix and residence time (Intermediate).** Requests carry 24,576 prompt tokens and an output allowance $K_{\max} = 1{,}024$. A block-aligned common prefix of 16,384 tokens is compatible and shareable across all of them. Blocks hold $p = 16$ tokens, and the planner withholds headroom $\theta = 0.10$. Each turn generates for 4 s and then waits 36 s for a tool.
+
+(a) Using @eq-kv-demand-shared, compute the usable blocks and the resident-fit bound without and with sharing. Compare the gain with $1/(1-f)$.
+(b) The operator wants memory to sustain 10 turns/s. Using the shared fit and @eq-vol3-littles-law, what rate does keeping state through the wait sustain, and how many resident slots would the target require under that policy?
+(c) Instead, each paused turn moves its private blocks to host memory and reloads them when the tool returns, while the common prefix stays resident for the other requests. Compute the memory-bound rate, the host-link traffic at 10 turns/s, and the restoration delay per turn. Is the link the binding resource?
+
+**7. Fan-out over a shared source bundle (Advanced).** The research agent (\ref{lhs-vol3-research-agent}) retrieves a 60,000-token bundle of source documents and fans the question out to 12 workers. Each worker's input is the bundle followed by a 2,000-token private instruction, and each may generate up to 3,000 tokens. A synthesis call then reads the bundle followed by all 12 worker outputs. Ignore block rounding and headroom.
+
+(a) A contiguous allocator deep-copies the bundle's state into every worker. How much KV state does it copy? Compute the KV footprint of one question with and without block sharing, and how many questions each policy keeps resident in the pool.
+(b) A developer serializes each worker's private instruction before the bundle so that the model reads its task first. What happens to the shared footprint in (a), and what layout serves both goals?
+(c) For the synthesis call, how much weight-only prefill does a hit on the bundle avoid, and how much new prefill remains? Contrast the constraint that binds this workload with the one that binds the repair agent in this chapter.
+(d) A platform team proposes reusing the bundle's KV state across different users' questions that retrieve the same documents. State the conditions under which that reuse is compatible, available, and permitted, and explain why a hit says nothing about whether the documents are current or trustworthy.
+
+**8. Paused state through a human approval (Advanced).** The remediation agent (\ref{lhs-vol3-remediation-agent}) proposes a production change and waits for human approval. During a major incident, 60 trajectories await approval at once. Each retains 20,000 tokens: an 8,000-token invariant prefix, identical and shareable across trajectories, followed by 12,000 tokens of incident-specific diagnostics. Each turn generates for 6 s, approval takes 10 minutes, and the host can hold 1 TB of parked state.
+
+(a) Under the keep policy, what share of the pool do the 60 trajectories hold without sharing and with the prefix shared, and what residency tax does the approval wait impose?
+(b) Suppose the private blocks move to host memory and the shared prefix stays resident. Compute the host footprint, and compare the time to restore 20 trajectories whose approvals arrive together by reload with the time to recompute their private regions sequentially.
+(c) Before acting on an approval, the harness must re-observe production state (principle \ref{pri-vol3-source-authority}), and the refreshed observations replace the diagnostics from token 8,000 onward. How much of the parked state remains usable? Recommend a paused-state policy, and say how the recommendation changes if refreshed observations were only appended after the existing diagnostics.
+(d) Compared with the repair agent, what binds this workload, and how large is its restoration cost relative to the wait?
 
 ::: {.callout-chapter-connection title="From reusable computation to durable information"}
 
