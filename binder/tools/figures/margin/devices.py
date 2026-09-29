@@ -34,10 +34,11 @@ Usage:
     ladder(ax, [("HBM",3350),("DRAM",100),("NVMe",7),("SSD",1),("net",0.1)])
     save(fig, "out.png")            # PNG draft; emit PDF/SVG for the real build
 
-Data devices (ladder/knee/sparkline/roofline/ironbar) must be fed by the same
-source of truth as the adjacent prose. New production figures should import or
-derive from MLSysIM/LEGO outputs where practical; legacy hard-coded constants are
-allowed only with an audit note and should be migrated in a later SSOT pass.
+Data devices (ladder/knee/sparkline/roofline/ironbar/budget_envelope) must be
+fed by the same source of truth as the adjacent prose. In Volume IV every value
+a device draws comes from the chapter's LEGO cell or MLSysIM through
+generate_margin_figures.lego(); hand-typed physical values are not allowed
+(2026-09-29, MARGIN-GEN pass).
 """
 import os
 import re
@@ -463,13 +464,18 @@ def blast(ax, n=5, style='fan'):
 # ── bounded operating budget → budget-envelope ────────────────────────────────
 def budget_envelope(ax, rows=(("used", 0.7, COMP), ("limit", 1.0, RED)), limit=1.0,
                     style='burn', limit_label=None, limit_label_offset=0.0,
-                    limit_color=None):
+                    limit_color=None, marks=(), value_fmt="{:g}"):
     """finite budget, quota, capacity, or matched-rate envelope.
 
       • 'burn'    → one or more bars on a shared denominator with a red limit
                     marker; red wash shows over-budget territory.
       • 'matched' → two equal-width resource bands; the job is matching rates or
                     capacities, not ranking magnitudes.
+
+    marks = [(value, label, color), ...] adds secondary reference lines on the
+    same axis (a second deadline, a renewal period); their labels sit BELOW the
+    bars so they never collide with the limit label above. value_fmt formats the
+    number printed on each bar (default ``{:g}``).
     """
     if style == 'matched':
         rows = rows or (("comm cap", 1.0, NET), ("storage BW", 1.0, MEM))
@@ -484,7 +490,7 @@ def budget_envelope(ax, rows=(("used", 0.7, COMP), ("limit", 1.0, RED)), limit=1
                 fontsize=5.0, fontweight="bold")
         ax.set_xlim(0, 1); ax.set_ylim(0, 1); _clean(ax); return
 
-    max_value = max([limit] + [value for _, value, _ in rows])
+    max_value = max([limit] + [value for _, value, _ in rows] + [m[0] for m in marks])
     xmax = max_value * 1.16
     x0, w, h = 0.34, 0.58, 0.13
     limit_x = x0 + w * limit / xmax
@@ -498,23 +504,31 @@ def budget_envelope(ax, rows=(("used", 0.7, COMP), ("limit", 1.0, RED)), limit=1
         bar_w = w * value / xmax
         ax.add_patch(plt.Rectangle((x0, y - h / 2), bar_w, h,
                                    facecolor=color, edgecolor="white", lw=0.35))
-        if bar_w > 0.19:
+        # a value sits inside its bar when the bar is wider than its digits
+        if bar_w > 0.045 * len(value_fmt.format(value)) + 0.04:
             if value > limit:
                 over_w = x0 + bar_w - limit_x
                 if over_w > 0.18:
                     value_x = limit_x + over_w / 2
                     ha_val = "center"
-                else:
-                    value_x = limit_x - 0.03
-                    ha_val = "right"
+                else:   # too little overrun to hold the digits: center in the in-budget part
+                    value_x = (x0 + limit_x) / 2
+                    ha_val = "center"
             else:
                 value_x = x0 + bar_w / 2
                 ha_val = "center"
-            ax.text(value_x, y, f"{value:g}", ha=ha_val, va="center",
+            ax.text(value_x, y, value_fmt.format(value), ha=ha_val, va="center",
                     color="white", fontsize=4.7)
         else:
-            ax.text(x0 + bar_w + 0.02, y, f"{value:g}", ha="left", va="center",
+            ax.text(x0 + bar_w + 0.02, y, value_fmt.format(value), ha="left", va="center",
                     color=INK, fontsize=4.7)
+    for m_value, m_label, m_color in marks:
+        m_x = x0 + w * m_value / xmax
+        ax.plot([m_x, m_x], [0.20, 0.74], color=m_color, lw=0.7, ls=(0, (1.5, 1.2)), zorder=0.5)
+        m_ha = "right" if m_x > 0.78 else "center"
+        ax.text(m_x + (0.01 if m_ha == "center" else 0.0), 0.12, m_label, ha=m_ha, va="center",
+                color=m_color, fontsize=4.6,
+                bbox=dict(boxstyle="square,pad=0.1", fc="white", ec="none"))
     label_x = limit_x
     label_ha = "center"
     if limit_x > 0.78:
@@ -532,29 +546,51 @@ def budget_envelope(ax, rows=(("used", 0.7, COMP), ("limit", 1.0, RED)), limit=1
 
 # ── short ordered window/process → sequence-strip ─────────────────────────────
 def sequence_strip(ax, steps=(("1", GRID), ("2", GRID), ("3", GRID)), bracket=None,
-                   bracket_label=None):
-    """compact ordered strip for windows or phases whose order is the concept."""
+                   bracket_label=None, bracket_color=RED, groups=(), cell_h=0.20):
+    """compact ordered strip for windows or phases whose order is the concept.
+
+    steps = [(label, color), ...] draws equal cells left to right; a color of
+    "none" draws an outlined (unfilled) cell. bracket = (first, last) cell
+    indices spans a named window above the strip; bracket_color defaults to
+    red, which is correct only when the span is a hazard or limit, so pass a
+    neutral hue (TIME) for an ordinary period or budget. groups = [(first,
+    last, text, color[, level]), ...] puts a short label under a run of cells, for strips
+    with too many cells to label each one (a 16-step action chunk)."""
     n = len(steps)
-    x0, w, gap, y, h = 0.08, 0.84, 0.015, 0.38, 0.20
+    x0, w, gap, y, h = 0.08, 0.84, 0.015 if n <= 8 else 0.006, 0.38, cell_h
     cell = (w - gap * (n - 1)) / n
     for i, (label, color) in enumerate(steps):
         x = x0 + i * (cell + gap)
-        ax.add_patch(plt.Rectangle((x, y), cell, h, facecolor=color,
-                                   edgecolor="white", lw=0.35))
-        fs = 3.2 if len(str(label)) > 5 else 4.0
-        ax.text(x + cell / 2, y + h / 2, label, ha="center", va="center",
-                color="white" if color != GRID else "#555555",
-                fontsize=fs, multialignment="center", fontweight="bold")
+        outline = color == "none"
+        ax.add_patch(plt.Rectangle((x, y), cell, h, facecolor="white" if outline else color,
+                                   edgecolor=GRID if outline else "white",
+                                   lw=0.45 if outline else 0.35))
+        if label:
+            # 4.2 pt is the floor for a dense strip cell (margin-figures.md §5);
+            # shorten or break a label rather than shrink it further.
+            fs = 4.2 if len(str(label).split("\n")[0]) > 5 else 4.6
+            ax.text(x + cell / 2, y + h / 2, label, ha="center", va="center",
+                    color=INK if (outline or color == GRID) else "white",
+                    fontsize=fs, multialignment="center", fontweight="bold")
+    for g in groups:
+        a, b, text, color = g[:4]
+        level = g[4] if len(g) > 4 else 0   # stagger adjacent short runs
+        left = x0 + a * (cell + gap)
+        right = x0 + b * (cell + gap) + cell
+        ax.plot([left + 0.004, right - 0.004], [y - 0.05, y - 0.05], color=color, lw=0.6)
+        ax.text((left + right) / 2, y - 0.09 - 0.13 * level, text, ha="center", va="top",
+                color=color, fontsize=4.6, multialignment="center")
     if bracket:
         a, b = bracket
         left = x0 + a * (cell + gap)
         right = x0 + b * (cell + gap) + cell
-        ax.plot([left, right], [0.72, 0.72], color=RED, lw=1.1)
-        ax.plot([left, left], [0.68, 0.76], color=RED, lw=0.75)
-        ax.plot([right, right], [0.68, 0.76], color=RED, lw=0.75)
+        top = y + h + 0.14
+        ax.plot([left, right], [top, top], color=bracket_color, lw=1.1)
+        ax.plot([left, left], [top - 0.04, top + 0.04], color=bracket_color, lw=0.75)
+        ax.plot([right, right], [top - 0.04, top + 0.04], color=bracket_color, lw=0.75)
         if bracket_label:
-            ax.text((left + right) / 2, 0.84, bracket_label, ha="center",
-                    va="center", color=RED, fontsize=4.8, fontweight="bold")
+            ax.text((left + right) / 2, top + 0.12, bracket_label, ha="center",
+                    va="center", color=bracket_color, fontsize=4.8, fontweight="bold")
     ax.set_xlim(0, 1); ax.set_ylim(0, 1); _clean(ax)
 
 # ── compact dependency or feedback relation → causal-chain ────────────────────
