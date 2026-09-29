@@ -410,11 +410,11 @@ $$T_{\mathrm{record}}\ge T_{\mathrm{request}}+Q_{1-\epsilon}(L)+T_{\mathrm{reser
 # │ Goal:    Hold the arm's timeline inputs in one place so the horizon bound,
 # │          the evidence-age check, the C2 arm case, and the trajectory record
 # │          read the same values.
-# │ Show:    20 ms setpoint period; 60 ms request delay vs. the 50 ms chunk
+# │ Show:    25 ms setpoint period; 60 ms request delay vs. the 50 ms chunk
 # │          renewal period; 575 ms motion-and-stop window (the 275 ms
 # │          S-curve stop after 300 ms onset); 240 ms preferred admission;
 # │          300 ms physical onset (60 ms slack); 278 ms latest admission;
-# │          320 ms nominal end (H = 16 setpoints).
+# │          400 ms nominal end (H = 16 setpoints).
 # │ How:     RM chunk step and horizon; the rest are scenario assumptions;
 # │          eq-plan-action-chunk-horizon.
 # └─────────────────────────────────────────────────────────────────────────────
@@ -450,14 +450,14 @@ class PlanningArmTimeline:
     n_window = (t_stop_end / t_period).to("dimensionless").magnitude
 
     # ┌── 3. GUARD (Invariants) ────────────────────
-    check(abs(t_period.to(millisecond).magnitude - 20.0) < 1e-9, "chunk setpoint period changed")
+    check(abs(t_period.to(millisecond).magnitude - 25.0) < 1e-9, "chunk setpoint period changed")
     check(n_horizon == 16, "chunk horizon changed")
-    check(abs(t_plan_exp.magnitude - 320.0) < 1e-9, "nominal end changed")
+    check(abs(t_plan_exp.magnitude - 400.0) < 1e-9, "nominal end changed")
     check(q_latency > PlanningReplacementLedger.t_sum > t_chunk, "design-tail target no longer beyond the stage ledger")
     check(abs(t_replace_min.to(millisecond).magnitude - 240.0) < 1e-9, "replacement deadline changed")
     check(abs(commit_slack.to(millisecond).magnitude - 60.0) < 1e-9, "commitment slack changed")
     check(abs(t_stop_end.to(millisecond).magnitude - 575.0) < 1e-9, "arm stop end changed")
-    check(abs(n_window - 28.75) < 1e-9, "authority-window duration equivalents changed")
+    check(abs(n_window - 23.0) < 1e-9, "authority-window duration equivalents changed")
     check(t_replace_min <= t_blend < t_commit < t_plan_exp < t_stop_end, "arm deadline order broken")
     check(abs(t_renew.magnitude - 50.0) < 1e-9, "chunk renewal period changed")
     check(request_slack.magnitude > 0, "request delay no longer exceeds the renewal period")
@@ -479,7 +479,7 @@ class PlanningArmTimeline:
     commit_slack_str = fmt_latency(commit_slack, unit=millisecond)
     t_plan_exp_str = fmt_latency(t_plan_exp, unit=millisecond)
     t_stop_end_str = fmt_latency(t_stop_end, unit=millisecond)
-    n_window_str = fmt(n_window, precision=2)
+    n_window_str = fmt_int(n_window)
 ```
 
 The machine's chunk policy emits a setpoint every `{python} PlanningArmTimeline.t_period_str`, `{python} PlanningArmTimeline.n_horizon_str` to a chunk, giving `{python} PlanningArmTimeline.t_plan_exp_str` of predicted nominal motion. In the running configuration, a replacement normally supersedes it after `{python} PlanningArmTimeline.t_renew_str`; loss of admission renewal expires the `{python} PlanningLeaseRule.t_lease_str` lease. The unused prediction remains a candidate continuation, not additional tracking authority.
@@ -704,8 +704,10 @@ from mlsysim.fmt import fmt_torque, fmt_multiple, fmt_angular_velocity, fmt_iner
 class PlanningSeamInertia:
     """Illustrative one-tick velocity request vs. symmetric C2 blend."""
 
-    joint = Actuators.HarmonicDrive.CSG_25_50  # category: datasheet; gear ratio and rotor inertia
-    j_reflected = joint.reflected_inertia  # category: derived; N^2 J_rotor, 0.25 kg m^2
+    joint = (
+        Actuators.PandaClassJoint.CSG_25_50_ILM70x18
+    )  # category: datasheet; CSG-25-50 gear ratio and torque limits, ILM 70x18 rotor plus gear input inertia
+    j_reflected = joint.reflected_inertia  # category: derived; N^2 J_rotor, 0.1835 kg m^2
     delta_omega = 0.2 * ureg.radian / second  # category: illustrative; reference velocity gap
     dt_tick = 1 * millisecond  # category: chosen; servo tick
     t_blend = 50 * millisecond  # category: illustrative; blend duration
@@ -718,15 +720,15 @@ class PlanningSeamInertia:
     tau_peak_rated = joint.peak_torque  # category: datasheet; repeated peak torque
     # One-tick velocity change the whole repeated peak could supply to reflected rotor inertia alone.
     dq_ceiling = (tau_peak_rated * dt_tick / j_reflected).to(ureg.radian / second)
-    check(abs(tau_step.magnitude - 50) < 0.01, "one-tick request changed")
-    check(abs(tau_blend_mean.magnitude - 1) < 0.01, "blend mean changed")
-    check(abs(tau_blend_peak.magnitude - 1.5) < 0.01, "blend peak changed")
+    check(abs(tau_step.magnitude - 36.7) < 0.01, "one-tick request changed")
+    check(abs(tau_blend_mean.magnitude - 0.734) < 0.001, "blend mean changed")
+    check(abs(tau_blend_peak.magnitude - 1.101) < 0.001, "blend peak changed")
     check(abs(peak_reduction.magnitude - 50 / 1.5) < 0.01, "peak ratio changed")
-    check(abs(dq_ceiling.magnitude - 0.508) < 1e-9, "one-tick velocity ceiling changed")
+    check(abs(dq_ceiling.magnitude - 0.6921) < 1e-4, "one-tick velocity ceiling changed")
     check(delta_omega < dq_ceiling, "notebook velocity gap no longer below the one-tick ceiling")
     check(tau_step < tau_rated, "one-tick request no longer below the rated torque")
-    tau_step_str = fmt_torque(tau_step, precision=0)
-    tau_mean_str = fmt_torque(tau_blend_mean, precision=0)
+    tau_step_str = fmt_torque(tau_step, precision=1)
+    tau_mean_str = fmt_torque(tau_blend_mean, precision=2)
     tau_peak_str = fmt_torque(tau_blend_peak, precision=1)
     reduction_mult_str = fmt_multiple(peak_reduction.magnitude, precision=1)
     j_reflected_str = fmt_inertia(j_reflected, precision=2)
@@ -739,17 +741,17 @@ class PlanningSeamInertia:
 ```
 
 ::: {#nbk-planning-seam-acceleration-jump-reflected-inertia-torque .callout-notebook title="Seam acceleration and torque requests"}
-For the registered CSG-25-50 teaching example, reflected rotor inertia is `{python} PlanningSeamInertia.j_reflected_str`. Correcting a `{python} PlanningSeamInertia.delta_omega_str` reference velocity gap in one `{python} PlanningSeamInertia.dt_tick_str` tick asks for `{python} PlanningSeamInertia.tau_step_str` of inertial torque. Datasheet ratings give `{python} PlanningSeamInertia.tau_rated_str` rated continuous and `{python} PlanningSeamInertia.tau_peak_rated_str` repeated peak torque; this one-tick **request** falls below the rated limit. A symmetric $C^2$ velocity blend over `{python} PlanningSeamInertia.t_blend_str` has `{python} PlanningSeamInertia.tau_mean_str` mean and `{python} PlanningSeamInertia.tau_peak_str` peak inertial torque, a `{python} PlanningSeamInertia.reduction_mult_str` peak-request reduction. Total torque still includes load, gravity, friction, and control response; it needs a full peak and thermal check.
+For a Panda-class strain-wave joint, a CSG-25-50 gear driven by a TQ-RoboDrive ILM 70x18 motor (Franka does not publish the Panda's joint internals, so the example pairs published parts of that torque class), reflected rotor inertia is `{python} PlanningSeamInertia.j_reflected_str`. Correcting a `{python} PlanningSeamInertia.delta_omega_str` reference velocity gap in one `{python} PlanningSeamInertia.dt_tick_str` tick asks for `{python} PlanningSeamInertia.tau_step_str` of inertial torque. Datasheet ratings give `{python} PlanningSeamInertia.tau_rated_str` rated continuous and `{python} PlanningSeamInertia.tau_peak_rated_str` repeated peak torque; this one-tick **request** falls below the rated limit. A symmetric $C^2$ velocity blend over `{python} PlanningSeamInertia.t_blend_str` has `{python} PlanningSeamInertia.tau_mean_str` mean and `{python} PlanningSeamInertia.tau_peak_str` peak inertial torque, a `{python} PlanningSeamInertia.reduction_mult_str` peak-request reduction. Total torque still includes load, gravity, friction, and control response; it needs a full peak and thermal check.
 :::
 
 <!-- The margin fig-alt and caption below hand-type values because they cannot hold inline python. Keep them in sync:
-     "50 newton-meters"   = PlanningSeamInertia.tau_step_str
+     "36.7 newton-meters" = PlanningSeamInertia.tau_step_str
      "50-millisecond"     = PlanningSeamInertia.t_blend
-     "1.5 newton-meter"   = PlanningSeamInertia.tau_peak_str
+     "1.1 newton-meter"   = PlanningSeamInertia.tau_peak_str
      "33.3x"              = PlanningSeamInertia.reduction_mult_str -->
 
 ::: {.column-margin}
-![](images/svg/margin_reflected_rotor_inertia_torque_knee.svg){width="100%" fig-alt="Illustrative one-tick velocity-step request of 50 newton-meters vs. a 50-millisecond C-squared blend with 1.5 newton-meter peak inertial torque."}
+![](images/svg/margin_reflected_rotor_inertia_torque_knee.svg){width="100%" fig-alt="Illustrative one-tick velocity-step request of 36.7 newton-meters vs. a 50-millisecond C-squared blend with 1.1 newton-meter peak inertial torque."}
 
 *In this inertia model, the $C^2$ blend cuts the peak inertial torque request by 33.3×.*
 :::
@@ -1160,7 +1162,7 @@ On this machine the chunk policy's output supplies only the nominal part of each
 # │
 # │ Goal:    Gather the worked record's field values from the cells that own
 # │          them and add the one sidecar value no earlier cell holds.
-# │ Show:    3 kg payload bound; 16 x 20 ms = 320 ms nominal end.
+# │ Show:    3 kg payload bound; 16 x 25 ms = 400 ms nominal end.
 # │ How:     RM arm payload capacity; the other fields read
 # │          PlanningLeaseRule, PlanningArmTimeline, and PlanningC2Stop.
 # └─────────────────────────────────────────────────────────────────────────────

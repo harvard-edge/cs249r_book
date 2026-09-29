@@ -890,6 +890,101 @@ def calc_action_chunk_streaming_amortization(
     }
 
 
+def calc_chunk_renewal_schedule(
+    chunk_rate,
+    chunk_step,
+    chunk_horizon: int,
+    inference_latency,
+):
+    """
+    Timing of a chunk policy that renews on a whole number of setpoint steps.
+
+    A chunk policy begins a fresh evaluation every renewal period T_r = 1/f_r
+    and emits H setpoints spaced Delta t apart. With the renewal on the setpoint
+    grid (T_r = n Delta t for a whole number n), every renewal instant falls on
+    a setpoint boundary, so a new chunk replaces its predecessor at a defined
+    setpoint index and temporal ensembling can blend chunks step by step:
+
+        n          = T_r / Delta t                  (setpoints per renewal, integer)
+        T_open     = T_r + t_infer                  (worst evidence age at replacement)
+        h_min      = ceil(T_open / Delta t)         (setpoints that bridge one renewal)
+        T_span     = H * Delta t                    (motion one chunk supplies)
+        n_overlap  = floor(H / n)                   (chunks that cover one step)
+
+    T_open is the worst sampling-phase wait plus inference, before transport
+    and admission delays. n_overlap is the number of predictions a temporal
+    ensemble blends at a step in steady state.
+
+    Source: action chunking and temporal ensembling from Zhao et al., "Learning
+    Fine-Grained Bimanual Manipulation with Low-Cost Hardware" (ACT), RSS 2023,
+    arXiv:2304.13705, which queries its policy every step (n = 1). The
+    renewal-on-the-grid requirement, the worst-case age, and the overlap count
+    are arithmetic of this package for n > 1 (Volume IV, @sec-brain-action-chunking).
+
+    Parameters
+    ----------
+    chunk_rate : Quantity
+        Renewal rate f_r of the chunk policy (Hz).
+    chunk_step : Quantity
+        Setpoint spacing Delta t within a chunk (s).
+    chunk_horizon : int
+        Setpoints per chunk H (>= 1).
+    inference_latency : Quantity
+        Time from capture to an available chunk t_infer (s), for example a P99 target.
+
+    Returns
+    -------
+    dict
+        renewal_period, setpoints_per_renewal (int), open_loop_span,
+        min_supply_setpoints (int), chunk_span, overlapping_chunks (int),
+        renewal_slack (T_r - t_infer).
+
+    Raises
+    ------
+    ValueError
+        If the renewal period is not a whole number of setpoint steps, if the
+        inference does not finish within one renewal period, or if one chunk
+        cannot bridge a renewal (H < h_min).
+    """
+    validate_positive(chunk_rate, "chunk_rate")
+    validate_positive(chunk_step, "chunk_step")
+    validate_at_least(chunk_horizon, 1, "chunk_horizon")
+    validate_positive(inference_latency, "inference_latency")
+
+    period = (1.0 / chunk_rate).to(ureg.millisecond)
+    step = chunk_step.to(ureg.millisecond)
+    ratio = (period / step).to("dimensionless").magnitude
+    n_per_renewal = round(ratio)
+    if n_per_renewal < 1 or abs(ratio - n_per_renewal) > 1e-9:
+        raise ValueError(
+            f"renewal period {period:~P} is not a whole number of {step:~P} setpoint steps "
+            f"(ratio {ratio:.4g})"
+        )
+    t_infer = inference_latency.to(ureg.millisecond)
+    if t_infer >= period:
+        raise ValueError(
+            f"inference latency {t_infer:~P} does not finish within the {period:~P} renewal period"
+        )
+
+    open_loop = (period + t_infer).to(ureg.millisecond)
+    h_min = math.ceil((open_loop / step).to("dimensionless").magnitude - 1e-12)
+    if chunk_horizon < h_min:
+        raise ValueError(
+            f"chunk horizon {chunk_horizon} is shorter than the {h_min} setpoints one renewal needs"
+        )
+    span = (chunk_horizon * step).to(ureg.millisecond)
+
+    return {
+        "renewal_period": period,
+        "setpoints_per_renewal": int(n_per_renewal),
+        "open_loop_span": open_loop,
+        "min_supply_setpoints": int(h_min),
+        "chunk_span": span,
+        "overlapping_chunks": int(chunk_horizon // n_per_renewal),
+        "renewal_slack": (period - t_infer).to(ureg.millisecond),
+    }
+
+
 def calc_watchdog_lease_bound(
     clearance_distance,
     initial_velocity,

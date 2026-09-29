@@ -607,8 +607,9 @@ The memory bound limits how often a large model can revise its proposal. A contr
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: the supply-rate paragraph in @sec-brain-action-chunking
 # │ Goal:    show why one weight sweep per setpoint cannot feed the arm
-# │ Show:    50 Hz x 14 GB = 700 GB/s, 4.9x the 142.8 GB/s sustained; H = 16
-# │          cuts demand to 43.75 GB/s, 30.6 percent of sustained
+# │ Show:    40 Hz x 14 GB = 560 GB/s, 3.9x the 142.8 GB/s sustained; H = 16
+# │          cuts demand to 35.0 GB/s, 24.5 percent of sustained (25 ms
+# │          setpoint step since M5, 2026-09-28; was 50 Hz / 700 GB/s)
 # │ How:     demand = f_supply x M_weights; chunked = demand / H
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -633,8 +634,8 @@ class ChunkSupplyDemand:
     share_chunk = (demand_chunk / b_sus).to("dimensionless").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(f_supply.magnitude - 50.0) < 1e-9, f"Setpoint rate drifted: {f_supply}")
-    check(abs(demand.magnitude - 700.0) < 1e-6, f"Single-step demand drifted: {demand}")
+    check(abs(f_supply.magnitude - 40.0) < 1e-9, f"Setpoint rate drifted: {f_supply}")
+    check(abs(demand.magnitude - 560.0) < 1e-6, f"Single-step demand drifted: {demand}")
     check(over > 1, "Single-step supply must exceed the sustained bandwidth")
     check(demand_chunk < b_sus, "Chunked supply must fit the sustained bandwidth")
 
@@ -644,8 +645,67 @@ class ChunkSupplyDemand:
     demand_str = fmt_bandwidth(demand, unit=GB / second, precision=0)
     over_str = fmt(over, precision=1)
     horizon_str = fmt_int(horizon)
-    demand_chunk_str = fmt_bandwidth(demand_chunk, unit=GB / second, precision=1)
+    demand_chunk_str = fmt_bandwidth(demand_chunk, unit=GB / second, precision=0)
     share_chunk_str = fmt_percent(share_chunk, precision=1, style="prose")
+```
+
+```{python}
+#| label: calc-brain-chunk-schedule
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE CHUNK POLICY'S RENEWAL SCHEDULE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the supply, replanning, and reaction bullets and the temporal
+# │          ensembling paragraph in @sec-brain-action-chunking
+# │ Goal:    give the three rates of the selected chunk policy and show that
+# │          its renewal falls on the setpoint grid
+# │ Show:    40 Hz supply (25 ms step); 20 Hz / 50 ms renewal = 2 setpoints;
+# │          50 + 40 = 90 ms reaction; 8 chunks cover each step (H = 16)
+# │ How:     RM.chunk_schedule (calc_chunk_renewal_schedule), 2026-09-28, M5
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_frequency, fmt_latency, fmt_int, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class ChunkSchedule:
+    """Setpoint supply, renewal, and reaction timing of the machine's chunk policy."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    step = RM.chunk_step.to(millisecond)  # category: chosen (setpoint step)
+    f_replan = RM.chunk_rate  # category: chosen (renewal rate)
+    t_infer = RM.chunk_inference_latency.to(millisecond)  # category: illustrative (P99 incl. vision)
+    horizon = RM.chunk_horizon  # category: chosen
+    sched = RM.chunk_schedule  # category: derived (calc_chunk_renewal_schedule)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    f_supply = (1 / step).to(hertz)
+    t_replan = sched["renewal_period"]
+    n_per_renewal = sched["setpoints_per_renewal"]
+    t_reaction = sched["open_loop_span"]
+    n_overlap = sched["overlapping_chunks"]
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(step.magnitude - 25.0) < 1e-9, f"Setpoint step drifted: {step}")
+    check(abs(t_replan.magnitude - 50.0) < 1e-9, f"Renewal period drifted: {t_replan}")
+    check(n_per_renewal == 2, f"Setpoints per renewal drifted: {n_per_renewal}")
+    check(abs(t_reaction.magnitude - 90.0) < 1e-9, f"Reaction latency drifted: {t_reaction}")
+    check(n_overlap == 8, f"Overlapping chunks drifted: {n_overlap}")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    f_supply_str = fmt_frequency(f_supply, unit=hertz, precision=0)
+    step_str = fmt_latency(step, unit=millisecond, precision=0)
+    step_us_str = fmt_int(step.to(microsecond).magnitude)
+    f_replan_str = fmt_frequency(f_replan, unit=hertz, precision=0)
+    t_replan_str = fmt_latency(t_replan, unit=millisecond, precision=0)
+    t_infer_str = fmt_latency(t_infer, unit=millisecond, precision=0)
+    t_reaction_str = fmt_latency(t_reaction, unit=millisecond, precision=0)
+    n_per_renewal_str = fmt_int(n_per_renewal)
+    n_overlap_str = fmt_int(n_overlap)
+    horizon_str = fmt_int(horizon)
 ```
 
 [Supply rate vs. closed-loop reaction latency]{.heading-3-inline}
@@ -657,11 +717,11 @@ Predicting a sequence also changes how a learned policy uses recent actions, but
 
 The selected smaller policy has a separate illustrative schedule. Three quantities distinguish its setpoint supply from the delay before a new observation changes a proposal:
 
-* *Setpoint supply cadence* ($f_{\text{supply}} = 1/\Delta t_{\text{step}} = 50\,\text{Hz}$): The rate at which the trajectory queue delivers discrete waypoints to the joint servo loop.
-* *Policy replanning rate* ($f_{\text{replan}} = 20\,\text{Hz}$, period $T_{\text{replan}} = 50\,\text{ms}$): The cadence at which the smaller chunk policy begins an evaluation from fresh sensory frames.
-* *Closed-loop reaction latency* ($T_{\text{reaction}} = T_{\text{replan}} + t_{\text{infer}} = 50\,\text{ms} + 40\,\text{ms} = 90\,\text{ms}$): The worst sampling-phase wait plus the assumed inference time until a revised proposal is available, excluding further admission and physical response delay.
+* *Setpoint supply cadence* ($f_{\text{supply}} = 1/\Delta t_{\text{step}} =$ `{python} ChunkSchedule.f_supply_str`, $\Delta t_{\text{step}} =$ `{python} ChunkSchedule.step_str`): The rate at which the trajectory queue delivers discrete waypoints to the joint servo loop.
+* *Policy replanning rate* ($f_{\text{replan}} =$ `{python} ChunkSchedule.f_replan_str`, period $T_{\text{replan}} =$ `{python} ChunkSchedule.t_replan_str`): The cadence at which the smaller chunk policy begins an evaluation from fresh sensory frames. The period is chosen as a whole number of setpoint steps, here `{python} ChunkSchedule.n_per_renewal_str`, so that every renewal begins on a setpoint boundary.
+* *Closed-loop reaction latency* ($T_{\text{reaction}} = T_{\text{replan}} + t_{\text{infer}} =$ `{python} ChunkSchedule.t_replan_str` $+$ `{python} ChunkSchedule.t_infer_str` $=$ `{python} ChunkSchedule.t_reaction_str`): The worst sampling-phase wait plus the assumed inference time until a revised proposal is available, excluding further admission and physical response delay.
 
-In this illustrative schedule, a disturbance immediately after capture can wait up to $90\,\text{ms}$ for a revised learned proposal, before any additional admission and actuation delay. The independent permission path need not wait for that revision: current qualified evidence can trigger a protective response while the policy computes. Its ability to detect the relevant obstacle and complete a feasible response needs its own timing and sensing evidence. Chunking keeps candidate waypoints available; it establishes neither that response nor its deadline.
+In this illustrative schedule, a disturbance immediately after capture can wait up to `{python} ChunkSchedule.t_reaction_str` for a revised learned proposal, before any additional admission and actuation delay. The independent permission path need not wait for that revision: current qualified evidence can trigger a protective response while the policy computes. Its ability to detect the relevant obstacle and complete a feasible response needs its own timing and sensing evidence. Chunking keeps candidate waypoints available; it establishes neither that response nor its deadline.
 
 Chunking policies differ in how they produce the horizon. ACT predicts a chunk directly, whereas a diffusion or flow-matching decoder can refine it iteratively. For the following alternative architecture, assume one backbone pass followed by $K = 10\text{--}16$ refinement steps; those counts are a workload choice, not a property of all chunking policies.
 
@@ -694,7 +754,7 @@ To reduce discontinuities between overlapping chunks, systems can implement **te
 
 $$\mathbf{a}_t = \frac{\sum_{k=0}^{n-1} w_k \, \mathbf{a}_t^{(k)}}{\sum_{k=0}^{n-1} w_k}, \quad w_k = \exp(-m \cdot k)$$
 
-where $\mathbf{a}_t^{(k)}$ is the action for step $t$ predicted by the $k$-th oldest of the $n$ chunks that cover step $t$ ($k = 0$ is the oldest), and $m > 0$ is a tunable weighting rate. Following ACT, the oldest prediction receives the largest weight, which favors smoothness over responsiveness; a smaller $m$ lets new observations enter the blend faster [@zhao2023learning]. The formula assumes that the policy is queried at every control step, as ACT does, so that $n = \min(t + 1, H)$. A policy that renews less often than its setpoint step, like the mobile manipulator's chunk policy, blends fewer overlapping predictions, and its renewal instants need not fall on setpoint boundaries. The permission path interpolates the blended waypoints below the proposal boundary (@sec-nervous-cadences).
+where $\mathbf{a}_t^{(k)}$ is the action for step $t$ predicted by the $k$-th oldest of the $n$ chunks that cover step $t$ ($k = 0$ is the oldest), and $m > 0$ is a tunable weighting rate. Following ACT, the oldest prediction receives the largest weight, which favors smoothness over responsiveness; a smaller $m$ lets new observations enter the blend faster [@zhao2023learning]. The formula assumes that the policy is queried at every control step, as ACT does, so that $n = \min(t + 1, H)$. The mobile manipulator's chunk policy renews every `{python} ChunkSchedule.n_per_renewal_str` setpoints instead, and because its `{python} ChunkSchedule.t_replan_str` renewal period is a whole number of `{python} ChunkSchedule.step_str` steps, each new chunk starts on a setpoint boundary. The same formula then applies with $k$ counting renewals rather than steps. A `{python} ChunkSchedule.horizon_str`-setpoint chunk renewed every `{python} ChunkSchedule.n_per_renewal_str` setpoints gives at most $n =$ `{python} ChunkSchedule.n_overlap_str` overlapping predictions at any step. A renewal period that fell between setpoints would leave each chunk's first action off the grid, and the blend would first have to interpolate every chunk onto common setpoint times. The permission path interpolates the blended waypoints below the proposal boundary (@sec-nervous-cadences).
 
 ::: {.callout-perspective title="The temporal ensembling jerk trap"}
 Exponentially weighted temporal ensembling averages overlapping predictions, but averaging sampled setpoints alone guarantees neither continuous position nor continuous velocity between samples or at chunk boundaries. A downstream interpolator determines those properties. If successive chunks disagree in slope, a controller can receive a step in commanded velocity even when position remains continuous. In joint PD tracking ($\boldsymbol{\tau} = \mathbf{K}_p \mathbf{e} + \mathbf{K}_d \dot{\mathbf{e}}$), that velocity jump produces a finite torque step. With derivative gain $K_d = 40\,\text{N}\cdot\text{m}\cdot\text{s/rad}$ and velocity discontinuity $\Delta \dot{q} = 0.5\,\text{rad/s}$, the derivative term changes by $\Delta \tau = K_d \Delta \dot{q} = 20\,\text{N}\cdot\text{m}$. Dividing by the servo period would instead describe a torque slew rate, not a torque. Abrupt torque changes can excite mechanical resonances or exceed drive limits. Interpolation must match position, velocity, and acceleration at adjoining segments to provide $C^2$ continuity, while enforcing the machine's velocity, acceleration, and torque limits. Smoothness alone does not establish that the requested motion is feasible.
@@ -868,7 +928,7 @@ class ActionChunkingLPDDR5:
     check(abs(f_single.magnitude - 10.20) < 0.05, f"Unexpected single-sweep frequency: {f_single}")
     check(chunk_horizon == 16, f"Unexpected chunk horizon: {chunk_horizon}")
     check(abs(tau_step.to(millisecond).magnitude - 6.13) < 0.01, f"Unexpected per-setpoint sweep time: {tau_step}")
-    check(abs(chunk_span.magnitude - 320.0) < 1e-9, f"Unexpected chunk span: {chunk_span}")
+    check(abs(chunk_span.magnitude - 400.0) < 1e-9, f"Unexpected chunk span: {chunk_span}")  # 16 x 25 ms (M5)
     # 2026-09-28: ACT corrected to about 80M parameters (Zhao et al. 2023); intent
     # latency now computed from prefill plus decode (decision M2).
     check(abs(chunk_t_stream.to(millisecond).magnitude - 1.1204) < 0.0005, f"Unexpected chunk sweep: {chunk_t_stream}")
@@ -949,7 +1009,7 @@ Suppose the intent model itself emitted an action chunk of $H =$ `{python} Actio
 `{python} ActionChunkingLPDDR5.tau_step_display_math`
 
 *3. The machine's split.*
-Amortization spreads one sweep across more setpoints, but it does not make a fresh proposal arrive sooner. Each new chunk from the intent model would still wait for the compute-bound prefill of its input tokens and the sweeps of its decoder. The selected design therefore divides the work between two models. With INT4 weights the intent model needs about `{python} ActionChunkingLPDDR5.intent_latency_str` per evaluation (\ref{nbk-brain-intent-model-latency}), so it revises the goal at `{python} ActionChunkingLPDDR5.intent_rate_str`. A separate `{python} ActionChunkingLPDDR5.chunk_params_str`-parameter chunk policy uses ACT as its size reference and is assumed to be adapted to the mobile manipulator. Its `{python} ActionChunkingLPDDR5.chunk_weight_mem_str` of weights sweep in `{python} ActionChunkingLPDDR5.chunk_t_stream_str`. It proposes base velocity and arm joint targets together at `{python} ActionChunkingLPDDR5.chunk_rate_str` ($50\,\text{ms}$ replanning period), emitting waypoints spaced at $\Delta t =$ `{python} ActionChunkingLPDDR5.chunk_step_str` (a $50\,\text{Hz}$ supply rate), within a `{python} ActionChunkingLPDDR5.chunk_latency_str` P99 inference target that includes vision, while the low-level motor drive interpolates and closes current loops at $10\text{--}25\,\text{kHz}$. The intent model's evaluation lasts several renewal periods; the chunk policy's weight sweep leaves room for the remaining work. That is a candidate architecture, not a measured timing result. Loaded execution must establish the inference target, and a percentile target still permits overruns. @Sec-nervous derives an execution lease whose expiration contains a missed renewal.
+Amortization spreads one sweep across more setpoints, but it does not make a fresh proposal arrive sooner. Each new chunk from the intent model would still wait for the compute-bound prefill of its input tokens and the sweeps of its decoder. The selected design therefore divides the work between two models. With INT4 weights the intent model needs about `{python} ActionChunkingLPDDR5.intent_latency_str` per evaluation (\ref{nbk-brain-intent-model-latency}), so it revises the goal at `{python} ActionChunkingLPDDR5.intent_rate_str`. A separate `{python} ActionChunkingLPDDR5.chunk_params_str`-parameter chunk policy uses ACT as its size reference and is assumed to be adapted to the mobile manipulator. Its `{python} ActionChunkingLPDDR5.chunk_weight_mem_str` of weights sweep in `{python} ActionChunkingLPDDR5.chunk_t_stream_str`. It proposes base velocity and arm joint targets together at `{python} ActionChunkingLPDDR5.chunk_rate_str` (a `{python} ChunkSchedule.t_replan_str` replanning period), emitting waypoints spaced at $\Delta t =$ `{python} ActionChunkingLPDDR5.chunk_step_str` (a `{python} ChunkSchedule.f_supply_str` supply rate), within a `{python} ActionChunkingLPDDR5.chunk_latency_str` P99 inference target that includes vision, while the low-level motor drive interpolates and closes current loops at $10\text{--}25\,\text{kHz}$. The intent model's evaluation lasts several renewal periods; the chunk policy's weight sweep leaves room for the remaining work. That is a candidate architecture, not a measured timing result. Loaded execution must establish the inference target, and a percentile target still permits overruns. @Sec-nervous derives an execution lease whose expiration contains a missed renewal.
 :::
 
 The `{python} ActionChunkingLPDDR5.t_stream_ms_str` FP16 sweep is a weight-transfer floor, and the prefill of \ref{nbk-brain-intent-model-latency} shows that it is not the only term: some computation overlaps those transfers, so the two durations are not additive. Lower weight precision and a fast action head change different terms in the budget. The machine's INT4 weights cut the footprint to `{python} ActionChunkingLPDDR5.weight_mem_int4_str` and shrink every decode sweep, but leave the compute-bound prefill unchanged; a parallel or continuous action head would remove decode sweeps instead. A single-model design could instead trade cadence for density without changing weight precision. It would evaluate the `{python} ActionChunkingLPDDR5.params_str` backbone periodically while a lightweight diffusion head denoises candidate trajectories, reusing on-chip data only when its working set fits, supplying dense candidate waypoints from each slower full-model evaluation. Its new-observation rate would still be limited by full inference latency, including vision and decoder work, which is why the mobile manipulator gives renewal to a separate chunk policy instead.
@@ -969,10 +1029,11 @@ Retained context adds to the pressure the notebook began to measure. Counting la
 # │          mug's drift on the moving conveyor
 # │ Show:    the 219 ms tracked evidence horizon; the 90 ms open-loop span
 # │          (50 ms replanning period plus 40 ms inference) inside it; the
-# │          16-step, 320 ms chunk as a supply buffer that would breach the
-# │          grasp tolerance if executed to its end
-# │ How:     tau_ev = sqrt(2 (r_tol - e_0) / a_slip); open-loop span = 1/f_chunk +
-# │          t_chunk; drift = a_slip T^2 / 2
+# │          16-step, 400 ms chunk (25 ms steps since M5, 2026-09-28) as a
+# │          supply buffer that would breach the grasp tolerance if executed
+# │          to its end
+# │ How:     tau_ev = sqrt(2 (r_tol - e_0) / a_slip); open-loop span, h_min, and
+# │          chunk span from RM.chunk_schedule; drift = a_slip T^2 / 2
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
@@ -997,10 +1058,11 @@ class ConveyorChunkSizing:
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     tau_ev = ((2 * (r_tol - e_0) / a_slip) ** 0.5).to(millisecond)
-    chunk_period = (1 / chunk_rate).to(millisecond)
-    open_loop = (chunk_period + chunk_latency).to(millisecond)
-    h_min = math.ceil((open_loop / chunk_step).to("dimensionless").magnitude)
-    chunk_span = (chunk_horizon * chunk_step).to(millisecond)
+    sched = RM.chunk_schedule  # calc_chunk_renewal_schedule
+    chunk_period = sched["renewal_period"]
+    open_loop = sched["open_loop_span"]  # renewal period + inference
+    h_min = sched["min_supply_setpoints"]  # ceil(open_loop / step)
+    chunk_span = sched["chunk_span"]  # H x step
     drift_open_loop = (0.5 * a_slip * open_loop**2).to(millimeter)
     drift_full = (0.5 * a_slip * chunk_span**2).to(millimeter)
 
@@ -1010,9 +1072,10 @@ class ConveyorChunkSizing:
     check(abs(chunk_period.magnitude - 50.0) < 1e-9, f"Chunk period drifted: {chunk_period}")
     check(abs(open_loop.magnitude - 90.0) < 1e-9, f"Open-loop span drifted: {open_loop}")
     check(open_loop < tau_ev, "The open-loop span must sit inside the evidence horizon")
-    check(h_min == 5, f"Minimum supply horizon drifted: {h_min}")
+    check(h_min == 4, f"Minimum supply horizon drifted: {h_min}")
+    check(h_min * chunk_step >= open_loop, "The minimum supply must bridge the open-loop span")
     check(chunk_horizon == 16, f"Chunk horizon drifted: {chunk_horizon}")
-    check(abs(chunk_span.magnitude - 320.0) < 1e-9, f"Chunk span drifted: {chunk_span}")
+    check(abs(chunk_span.magnitude - 400.0) < 1e-9, f"Chunk span drifted: {chunk_span}")
     check(chunk_span > tau_ev, "The full chunk must outlast the evidence horizon (buffer, not plan)")
     check(e_0 + drift_full > r_tol, "Executing the whole chunk open-loop must breach the grasp tolerance")
 
@@ -1031,7 +1094,7 @@ class ConveyorChunkSizing:
     chunk_step_str = fmt_latency(chunk_step, unit=millisecond, precision=0)
     chunk_span_str = fmt_latency(chunk_span, unit=millisecond, precision=0)
     drift_open_loop_str = fmt_length(drift_open_loop, unit=millimeter, precision=1)
-    drift_full_str = fmt_length(drift_full, unit=millimeter, precision=1)
+    drift_full_str = fmt_length(drift_full, unit=millimeter, precision=0)
 ```
 
 In the illustrative conveyor calculation, the mobile manipulator's arm takes the mug from a conveyor moving at `{python} ConveyorChunkSizing.v_conv_str`, and each chunk must be executed without letting the mug drift out of reach. Untracked, the belt's steady motion would use up the margin $r_{\text{tol}} - e_0$ between the grasp tolerance and the handle estimate's initial error $e_0$ within the freshness deadline $e_{\max}/v_{\max}$ of @sec-body-measurement-freshness, with $e_{\max} = r_{\text{tol}} - e_0$. A tracker that follows the mug removes that steady motion, but residual slip can still accelerate the target at `{python} ConveyorChunkSizing.a_slip_str`, so a segment executed open-loop for a time $T$ drifts by $\frac{1}{2} a_{\text{slip}} T^2$. Added to the `{python} ConveyorChunkSizing.e_0_str` initial error $e_0$, that drift reaches the `{python} ConveyorChunkSizing.r_tol_str` grasp tolerance after the tracked evidence horizon $\tau_{\text{ev}} = \sqrt{2 (r_{\text{tol}} - e_0) / a_{\text{slip}}} \approx$ `{python} ConveyorChunkSizing.tau_ev_str`. The chunk policy replans every `{python} ConveyorChunkSizing.chunk_period_str` and is assumed to finish within `{python} ConveyorChunkSizing.chunk_latency_str`. Before additional handoff delays, this schedule gives a maximum evidence age at replacement of `{python} ConveyorChunkSizing.open_loop_str` and residual drift of `{python} ConveyorChunkSizing.drift_open_loop_str`, within the tracked evidence horizon. An overrun ends this assumption; the independent lease limits continued execution.
@@ -1061,20 +1124,20 @@ $$\mathcal{P} = \langle t_{\text{capture}}, t_{\text{valid}}, H, \Delta t, \math
 
 The fields in @tbl-03-proposal-record-schema illustrate the information needed to interpret a candidate trajectory, rather than prescribing a second wire format. The proposer supplies trajectory and observation information. Validity claims require supporting evidence, while the receiver applies the separately established execution lease. A `lease_id` associates the request with that permission process; it does not let the proposer grant itself authority. The header and handoff contract in @sec-nervous specify delivery, admission, and expiration.
 
-| Field         | Type                        | Unit                    | Systems Semantics and Verification Rule                                                                            |
-|:--------------|:----------------------------|:------------------------|:-------------------------------------------------------------------------------------------------------------------|
-| `t_capture`   | `uint64_t`                  | $\text{ns}$             | Hardware timestamp of oldest sensory observation conditioning the proposal.                                        |
-| `t_valid`     | `uint64_t`                  | $\text{ns}$             | Monotonic time after which proposal expires ($\le t_{\text{capture}} + \tau_{\text{ev}}$).                         |
-| `horizon_H`   | `uint16_t`                  | count                   | Number of prospective trajectory setpoints ($H = 16\text{--}64$).                                                  |
-| `delta_t`     | `uint32_t`                  | $\mu\text{s}$           | Temporal interval between consecutive waypoints ($\Delta t = 20\,000\,\mu\text{s} \implies 50\text{ Hz}$).         |
-| `q_traj`      | `float32[H][D]`             | $\text{rad}$            | Candidate joint trajectory array across $D$ degrees of freedom.                                                    |
-| `q_dot_traj`  | `float32[H][D]`             | $\text{rad/s}$          | Velocity setpoints; checked for continuity when adjoining chunks meet.                                             |
-| `x_cartesian` | `position + orientation[H]` | $\text{m}, \text{quat}$ | End-effector target poses; verified against workspace keep-out boundaries.                                         |
-| `gripper_cmd` | `float32[H]`                | $[0, 1]$                | Gripper closure target; evaluated against grasp force and slip limits.                                             |
-| `model_id`    | `uint32_t`                  | identifier              | Identifier resolving to the model architecture, weights checkpoint, and calibration profile.                       |
-| `confidence`  | `float32`                   | $[0, 1]$                | Model reported confidence $\hat{p}$; interpreted using calibration evidence from observed outcomes.                |
-| `lease_id`    | `uint64_t`                  | identifier              | Identifier linking the proposal to a time-limited permission record; the handoff protocol follows in @sec-nervous. |
-| `crc32`       | `uint32_t`                  | checksum                | Integrity checksum protecting shared-memory ring buffer payload.                                                   |
+| Field         | Type                        | Unit                    | Systems Semantics and Verification Rule                                                                                                                                 |
+|:--------------|:----------------------------|:------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `t_capture`   | `uint64_t`                  | $\text{ns}$             | Hardware timestamp of oldest sensory observation conditioning the proposal.                                                                                             |
+| `t_valid`     | `uint64_t`                  | $\text{ns}$             | Monotonic time after which proposal expires ($\le t_{\text{capture}} + \tau_{\text{ev}}$).                                                                              |
+| `horizon_H`   | `uint16_t`                  | count                   | Number of prospective trajectory setpoints ($H = 16\text{--}64$).                                                                                                       |
+| `delta_t`     | `uint32_t`                  | $\mu\text{s}$           | Temporal interval between consecutive waypoints ($\Delta t =$ `{python} ChunkSchedule.step_us_str` $\mu\text{s}$, a `{python} ChunkSchedule.f_supply_str` supply rate). |
+| `q_traj`      | `float32[H][D]`             | $\text{rad}$            | Candidate joint trajectory array across $D$ degrees of freedom.                                                                                                         |
+| `q_dot_traj`  | `float32[H][D]`             | $\text{rad/s}$          | Velocity setpoints; checked for continuity when adjoining chunks meet.                                                                                                  |
+| `x_cartesian` | `position + orientation[H]` | $\text{m}, \text{quat}$ | End-effector target poses; verified against workspace keep-out boundaries.                                                                                              |
+| `gripper_cmd` | `float32[H]`                | $[0, 1]$                | Gripper closure target; evaluated against grasp force and slip limits.                                                                                                  |
+| `model_id`    | `uint32_t`                  | identifier              | Identifier resolving to the model architecture, weights checkpoint, and calibration profile.                                                                            |
+| `confidence`  | `float32`                   | $[0, 1]$                | Model reported confidence $\hat{p}$; interpreted using calibration evidence from observed outcomes.                                                                     |
+| `lease_id`    | `uint64_t`                  | identifier              | Identifier linking the proposal to a time-limited permission record; the handoff protocol follows in @sec-nervous.                                                      |
+| `crc32`       | `uint32_t`                  | checksum                | Integrity checksum protecting shared-memory ring buffer payload.                                                                                                        |
 
 : **Illustrative proposal payload fields**: Candidate-motion information and associated metadata. The execution header and handoff record are defined in @sec-nervous; this illustration adds no separate qualification record. {#tbl-03-proposal-record-schema tbl-colwidths="[18,14,14,54]"}
 

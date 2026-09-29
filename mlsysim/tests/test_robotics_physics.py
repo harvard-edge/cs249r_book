@@ -783,3 +783,45 @@ def test_scurve_ceiling_with_approaching_obstacle_and_exhausted_clearance():
     assert used == pytest.approx(1.10, rel=1e-12)
     assert v < Q_("0.5625 m/s")  # triangular regime
     assert calc_scurve_max_permitted_velocity(Q_("0.1 m"), tau, a, j, Q_("0.05 m"), Q_("0.14 m")).magnitude == 0.0
+
+
+# Chunk renewal on the setpoint grid (added 2026-09-28, M5).
+from mlsysim.physics.robotics import calc_chunk_renewal_schedule  # noqa: E402
+
+
+def test_chunk_renewal_schedule_hand_checked():
+    s = calc_chunk_renewal_schedule(Q_("20 Hz"), Q_("25 ms"), 16, Q_("40 ms"))
+    # 50 ms / 25 ms = 2; 50 + 40 = 90 ms; ceil(90/25) = 4; 16 x 25 = 400 ms; 16 // 2 = 8
+    assert s["renewal_period"].to("ms").magnitude == pytest.approx(50.0)
+    assert s["setpoints_per_renewal"] == 2
+    assert s["open_loop_span"].to("ms").magnitude == pytest.approx(90.0)
+    assert s["min_supply_setpoints"] == 4
+    assert s["chunk_span"].to("ms").magnitude == pytest.approx(400.0)
+    assert s["overlapping_chunks"] == 8
+    assert s["renewal_slack"].to("ms").magnitude == pytest.approx(10.0)
+
+
+def test_chunk_renewal_schedule_act_per_step_query():
+    # ACT queries every step at 50 Hz with k = 100: n = 1, 100 overlapping predictions.
+    s = calc_chunk_renewal_schedule(Q_("50 Hz"), Q_("20 ms"), 100, Q_("10 ms"))
+    assert s["setpoints_per_renewal"] == 1
+    assert s["overlapping_chunks"] == 100
+    assert s["min_supply_setpoints"] == 2
+
+
+def test_chunk_renewal_schedule_exact_multiple_h_min():
+    # 40 ms renewal + 20 ms inference = 60 ms = exactly 3 x 20 ms steps.
+    s = calc_chunk_renewal_schedule(Q_("25 Hz"), Q_("20 ms"), 8, Q_("20 ms"))
+    assert s["min_supply_setpoints"] == 3
+
+
+def test_chunk_renewal_schedule_rejects_off_grid():
+    with pytest.raises(ValueError, match="not a whole number"):
+        calc_chunk_renewal_schedule(Q_("20 Hz"), Q_("20 ms"), 16, Q_("40 ms"))
+
+
+def test_chunk_renewal_schedule_rejects_overrun_and_short_chunk():
+    with pytest.raises(ValueError, match="does not finish"):
+        calc_chunk_renewal_schedule(Q_("25 Hz"), Q_("20 ms"), 16, Q_("40 ms"))
+    with pytest.raises(ValueError, match="shorter than"):
+        calc_chunk_renewal_schedule(Q_("20 Hz"), Q_("25 ms"), 3, Q_("40 ms"))

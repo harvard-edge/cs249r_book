@@ -9,6 +9,7 @@ from ..core.types import Quantity, Metadata, require_dimensionality
 from ..hardware.types import HardwareNode
 from ..sensors.types import CameraSensor, LiDARSensor, IMUSensor
 from ..models.types import EmbodiedWorkload
+from ..actuators.types import WheelHubMotor
 
 
 class EmbodiedPlatform(BaseModel):
@@ -128,7 +129,90 @@ class MobileManipulatorPlatform(BaseModel):
     permission_rail_load: Quantity          # W, total load on the permission-path rail
     spring_brake_engage_min: Quantity       # ms, spring-brake engage time after coil decay (fast end)
     spring_brake_engage_max: Quantity       # ms, spring-brake engage time after coil decay (slow end)
+    # Braking drivetrain (2026-09-28, M6). The two driven wheels are direct-drive
+    # hub motors; casters carry the rest of the weight. Geometry fields that no
+    # source supplies stay None ("needs source") rather than being estimated.
+    drive_unit: Optional[WheelHubMotor] = None
+    drive_wheel_count: int = 2
+    drive_current_limit: Optional[Quantity] = None      # A, configured drive current limit
+    drive_wheel_load_share: Optional[float] = None      # needs source: weight fraction on driven wheels
+    cg_height: Optional[Quantity] = None                # needs source: loaded CoG height
+    tip_arm_stowed: Optional[Quantity] = None           # needs source: CoG to leading support, arm stowed
+    # 48 V drive bus (2026-09-28, M6): battery pack, source path, the 48-to-24 V
+    # converter's undervoltage lockout, and the regenerative clamp and switch rating.
+    drive_bus_full_charge: Optional[Quantity] = None    # V
+    drive_bus_nominal: Optional[Quantity] = None        # V
+    drive_bus_battery_low: Optional[Quantity] = None    # V
+    drive_bus_resistance: Optional[Quantity] = None     # ohm, cells + BMS switches + fuse + harness
+    drive_bus_uvlo: Optional[Quantity] = None           # V, converter input turn-off
+    drive_bus_converter_max: Optional[Quantity] = None  # V, converter continuous input maximum
+    drive_bus_converter_efficiency: Optional[float] = None
+    drive_bus_clamp: Optional[Quantity] = None          # V, brake-chopper clamp threshold
+    drive_bus_switch_rating: Optional[Quantity] = None  # V, inverter switch voltage rating
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator(
+        "drive_current_limit", mode="after",
+    )
+    @classmethod
+    def _validate_drive_current(cls, v, info):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.ampere, info.field_name)
+
+    @field_validator("cg_height", "tip_arm_stowed", mode="after")
+    @classmethod
+    def _validate_drive_geometry(cls, v, info):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.meter, info.field_name)
+
+    @field_validator(
+        "drive_bus_full_charge", "drive_bus_nominal", "drive_bus_battery_low",
+        "drive_bus_uvlo", "drive_bus_converter_max", "drive_bus_clamp",
+        "drive_bus_switch_rating", mode="after",
+    )
+    @classmethod
+    def _validate_drive_bus_voltage(cls, v, info):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.volt, info.field_name)
+
+    @field_validator("drive_bus_resistance", mode="after")
+    @classmethod
+    def _validate_drive_bus_resistance(cls, v, info):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.ohm, info.field_name)
+
+    @field_validator("drive_wheel_load_share", "drive_bus_converter_efficiency", mode="after")
+    @classmethod
+    def _validate_fraction(cls, v, info):
+        if v is None:
+            return v
+        if not 0.0 < v <= 1.0:
+            raise ValueError(f"{info.field_name} must be in (0, 1]; got {v}")
+        return v
+
+    @model_validator(mode="after")
+    def _drive_bus_ordering(self):
+        # 2026-09-28 (M6): the clamp must sit above full charge (or it fires while
+        # charging), below the converter's continuous input maximum, and the
+        # switches need at least 1.5x derating over the clamp.
+        vals = (self.drive_bus_battery_low, self.drive_bus_nominal, self.drive_bus_full_charge,
+                self.drive_bus_clamp, self.drive_bus_switch_rating)
+        if any(x is None for x in vals):
+            return self
+        low, nom, full, clamp, switch = vals
+        if not (low < nom < full < clamp):
+            raise ValueError("drive bus must satisfy battery_low < nominal < full_charge < clamp")
+        if self.drive_bus_converter_max is not None and clamp > self.drive_bus_converter_max:
+            raise ValueError("drive_bus_clamp exceeds the converter's continuous input maximum")
+        if switch < 1.5 * clamp:
+            raise ValueError("drive_bus_switch_rating must be at least 1.5x the clamp")
+        if self.drive_bus_uvlo is not None and not self.drive_bus_uvlo < low:
+            raise ValueError("drive_bus_uvlo must sit below the battery-low voltage")
+        return self
 
     @field_validator("onboard_payload_capacity", mode="after")
     @classmethod
@@ -231,6 +315,30 @@ class MobileManipulatorPlatform(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _chunk_renewal_on_setpoint_grid(self):
+        # 2026-09-28 (M5): the chunk policy renews on a whole number of setpoint
+        # steps, finishes within its renewal period, and supplies enough
+        # setpoints to bridge one renewal (calc_chunk_renewal_schedule raises
+        # otherwise). A 50 ms renewal over 20 ms steps (2.5 steps) broke the
+        # temporal-ensembling index.
+        self.chunk_schedule  # noqa: B018 -- evaluated for its validation
+        return self
+
+    @property
+    def chunk_schedule(self):
+        """Renewal timing of the chunk policy (see ``calc_chunk_renewal_schedule``)."""
+        from ..physics.robotics import calc_chunk_renewal_schedule  # avoid import cycle
+
+        return calc_chunk_renewal_schedule(
+            self.chunk_rate, self.chunk_step, self.chunk_horizon, self.chunk_inference_latency,
+        )
+
+    @property
+    def chunk_period(self):
+        """Chunk-policy renewal period, 1 / chunk_rate."""
+        return self.chunk_schedule["renewal_period"]
+
     @property
     def intent_weight_memory(self):
         """Stored intent-model weights at the deployed precision."""
@@ -280,6 +388,20 @@ class MobileManipulatorPlatform(BaseModel):
     def arm_effective_contact_mass(self):
         """Robot-side effective mass at the TCP: half the arm's moving mass plus payload."""
         return (self.arm.mass / 2 + self.arm.payload_capacity).to(ureg.kg)
+
+    @property
+    def drive_wheel_load_share_max(self):
+        """Largest weight fraction the driven wheels may carry within their load rating.
+
+        The hub motors' datasheet load rating per pair bounds the static load on
+        the two driven wheels, so the casters must carry the remainder of the
+        loaded mass: phi <= rating / m_loaded (capped at 1).
+        """
+        if self.drive_unit is None:
+            return None
+        pairs = self.drive_wheel_count / 2
+        share = (pairs * self.drive_unit.load_rating_per_pair / self.loaded_mass).to("dimensionless").magnitude
+        return min(1.0, float(share))
 
     @property
     def permission_rail_holdup_capacitance(self):

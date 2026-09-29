@@ -443,8 +443,16 @@ INDUSTRIAL_AMR = _est(
 WAREHOUSE_AMR = _est(
     "prov:warehouse-amr-300kg",
     "Representative warehouse fulfillment AMR class profile (300 kg gross mass)",
-    notes="300 kg mass, 1.5 m/s max velocity, 2.0 m/s^2 emergency braking deceleration (Chapter 4 watchdog model).",
-    verified="2026-09-18",
+    notes=(
+        "300 kg mass and 1.5 m/s max velocity are class-profile values. The 2.0 m/s^2 "
+        "max_acceleration is the illustrative credible loaded deceleration that the "
+        "stopping budget adopts; it is not measured. It is checked against the traction, "
+        "drive-torque, and tip-over ceilings by calc_braking_limits with the machine's "
+        "sourced hub-motor drive (ZLTECH_ZLLG10ASM800); the tip-over ceiling needs a "
+        "measured center of gravity. (2026-09-28, M6: previously attributed to a "
+        "'Chapter 4 watchdog model', which is not its origin.)"
+    ),
+    verified="2026-09-28",
 )
 
 HEAVY_AMR = _est(
@@ -481,8 +489,8 @@ WAREHOUSE_MOBILE_MANIPULATOR = _est(
         "records. Illustrative or chosen here: 50 kg tote-rack capacity, 1.00 m "
         "footprint width, 1 kHz permission loop, 20 kHz current loop, 1 ms EtherCAT "
         "cycle, 9 servo axes, 2 Hz intent model (latency computed, see "
-        "JETSON_AI_LAB_OPENVLA_ORIN), 20 Hz / 40 ms chunk policy, "
-        "20 ms setpoint period, chunk horizon 16, 0.70 sustained DRAM efficiency, "
+        "JETSON_AI_LAB_OPENVLA_ORIN), 20 Hz / 40 ms ACT chunk policy, "
+        "25 ms setpoint period (two per 50 ms renewal), chunk horizon 16, 0.70 sustained DRAM efficiency, "
         "1.0 m/s free-space TCP limit. The WarehouseAMR record calls 300 kg gross, so "
         "the loaded mass is an upper bound."
         " Control rail: 24 V nominal is a design choice; the 21.5 V depleted-battery "
@@ -495,8 +503,20 @@ WAREHOUSE_MOBILE_MANIPULATOR = _est(
         "a design choice; the 70 W permission-path load and the 30-80 ms spring-brake "
         "engage window are illustrative. The permission loads are assumed to share the "
         "18.0 V regulator dropout."
+        " Drive bus and drivetrain (2026-09-28, M6): the wheel drives, arm drives, and a "
+        "48-to-24 V converter share a 48 V-class drive bus whose pack envelope "
+        "(54 / 47.7 / 42 V) comes from MIR250_BATTERY; the converter's 33 V lockout, "
+        "67.2 V input maximum, and 91 percent efficiency come from MEANWELL_DDR240; the "
+        "60 mOhm source resistance is illustrative (needs a measured value); the 60 V "
+        "chopper clamp and 100 V switch rating are design choices. The driven wheels are "
+        "ZLTECH_ZLLG10ASM800 hub motors with the current limit chosen at the motor's "
+        "25 A peak. Loaded center-of-gravity height, its distance to the leading support, "
+        "and the driven wheels' load share need source (corner-scale or tilt measurement)."
+        " The 24 V control-rail fields remain for chapters that still model a 24 V "
+        "shared rail; in the 48 V architecture they describe the permission-rail store "
+        "(charged to 21.5 V, discharging to the 18 V regulator dropout)."
     ),
-    verified="2026-09-21",
+    verified="2026-09-28",
 )
 
 WAREHOUSE_AISLE_SCENARIO = _est(
@@ -1565,4 +1585,121 @@ THERMAL_CONSTANTS_ELECTROMECHANICAL = _est(
         "tau ~ 5-20 min. Values reflect typical orders of magnitude across industrial and mobile robotics."
     ),
     verified="2026-09-22",
+)
+
+
+# ---------------------------------------------------------------------------
+# Drivetrain, drive bus, and arm-joint sources (added 2026-09-28, vol4 M6).
+# ---------------------------------------------------------------------------
+
+ZLTECH_ZLLG10ASM800 = _ds(
+    "prov:zltech-zllg10asm800",
+    "Shenzhen Zhongling Technology (ZLTECH), ZLLG10ASM800-48 V1.0 robot hub motor "
+    "drawing and motor parameters (V1.00, 2022-09-26)",
+    "https://www.zlingkj.com/Data/zlingkj/upload/file/20240102/ZLLG10ASM800%20V1.0%E5%8F%8C%E5%87%BA%E8%BD%B4.pdf",
+    verified="2026-09-28",
+    notes=(
+        "10-inch direct-drive BLDC hub motor for AGV/AMR drive wheels, no gearbox. "
+        "Motor-parameter table: outer (wheel) diameter 266 +/- 2 mm; 48 VDC rated; "
+        "20 N m rated torque at 8.5 A; 60 N m peak torque at 25 A peak current; "
+        "150 rpm rated, 180 rpm peak speed; 20 pole pairs; line resistance "
+        "0.7 ohm +/- 10 percent; line inductance 1.885 mH +/- 10 percent; back-EMF "
+        "constant 0.262 V/rpm +/- 10 percent; 9.5 kg; maximum load 300 kg per two "
+        "motors; ambient -20 to +40 C. The table does not publish rotor inertia "
+        "(needs source). Torque constant is derived as 60 N m / 25 A = 2.4 N m/A. "
+        "Cross-check: 0.262 V/rpm x 180 rpm = 47.2 V, the rated bus, so the "
+        "back-EMF constant is a line-to-line value compared directly with the DC bus."
+    ),
+)
+
+ZLTECH_ZLAC8030L = _ds(
+    "prov:zltech-zlac8030l",
+    "ZLTECH ZLAC8030L hub-servo driver product page (Shenzhen Zhongling Technology)",
+    "https://www.robotmotor.com/zlac8030l-zltech-20v-60v-60a-canopen-rs485-dc-servo-motor-controller-driver-for-robot-agv-product/",
+    verified="2026-09-28",
+    notes=(
+        "Driver matched to the ZLLG10ASM800 (its wiring table names the 8030L): "
+        "24-48 VDC input, rated 30 A, maximum 60 A output current, CANopen/RS485. "
+        "The driver's 60 A exceeds the motor's 25 A peak, so the motor rating sets "
+        "the drive current limit. Overvoltage and undervoltage thresholds are not "
+        "published (needs source)."
+    ),
+)
+
+MIR250_BATTERY = _ds(
+    "prov:mir250-specifications",
+    "Mobile Industrial Robots, MiR250 Specifications (2025-04-14)",
+    "https://ai.motion.com/wp-content/uploads/2025/10/MiR250-Specifications-2.99.pdf",
+    verified="2026-09-28",
+    notes=(
+        "Reference 48 V-class AMR (94 kg robot, 250 kg payload, 2.0 m/s). Battery: "
+        "lithium-ion, 47.7 V nominal, minimum 42 V, maximum 54 V, 1.63 kWh (34.2 Ah). "
+        "Floor-to-wheel friction coefficient 0.60-0.80; clean and dry floors; design "
+        "based on ISO 3691-4 (with listed exceptions) and ISO 13849-1. Used as the "
+        "source of the running machine's drive-bus voltage envelope."
+    ),
+)
+
+MEANWELL_DDR240 = _ds(
+    "prov:meanwell-ddr-240",
+    "MEAN WELL DDR-240 series 240 W DIN-rail DC-DC converter specification (DDR-240C-24, 48 V input)",
+    "https://www.meanwell.com/Upload/PDF/DDR-240/DDR-240-spec.pdf",
+    verified="2026-09-28",
+    notes=(
+        "DDR-240C-24 (48 V in, 24 V out): continuous input 33.6-67.2 VDC; 100 ms "
+        "ride-through 28.8-33.6 VDC; input under-voltage lockout ON >= 33.6 V, "
+        "OFF <= 33 V; typical efficiency 91 percent. Used as the 48-to-24 V converter "
+        "feeding the control electronics; its 33 V turn-off is the drive bus's "
+        "undervoltage threshold and its 67.2 V continuous maximum bounds the clamp."
+    ),
+)
+
+TQ_ROBODRIVE_ILM = _ds(
+    "prov:tq-robodrive-ilm",
+    "TQ-RoboDrive ILM series frameless servo kits data sheet (Rev. 0414)",
+    "https://www.tq-group.com/filedownloads/files/products/robodrive/data-sheets/en/DRVA_DB_Servo-Kits_ILM_EN_Rev0414_Web.pdf",
+    verified="2026-09-28",
+    notes=(
+        "ILM 70x18, star-serial winding: 48 V rated, 1.25 N m rated torque, "
+        "4.05 N m peak torque (20 percent deviation from linearity), 6.7 A rated "
+        "current, torque constant 187 mNm/A, motor constant 0.266 N m/sqrt(W), "
+        "terminal resistance 660 mOhm and inductance 1,460 uH at 20 C, rotor inertia "
+        "0.321 kg cm^2, 10 pole pairs, 330 g. The rated copper loss (22.2 W) equals "
+        "(3/2) I_r^2 (R_TT / 2), so the rated current is the amplitude-invariant "
+        "(peak phase) current. The data sheet states that thermal behavior depends "
+        "strongly on the installation, so no thermal resistance or capacitance is "
+        "published (needs source). The ILM line derives from DLR drive engineering."
+    ),
+)
+
+HARMONIC_DRIVE_CSG_2UH_ENGINEERING = _ds(
+    "prov:harmonic-drive-csg-2uh-engineering-data",
+    "Harmonic Drive AG, Engineering Data CSG-2UH Units (1019642, 12/2014), Table 10.2",
+    "https://innodrive.ru/upload/iblock/387/pv21y3bafuu4i675xna8v70s8naalpa2.pdf",
+    verified="2026-09-28",
+    notes=(
+        "Distributor-hosted copy of the Harmonic Drive AG document; the torque "
+        "ratings match harmonicdrive.net's CSG-25-50-2UH product page. "
+        "CSG-25-2UH, ratio 50: repeatable peak torque 127 N m, average torque 72 N m, "
+        "rated torque 51 N m, momentary peak 242 N m; moment of inertia at the input "
+        "0.413e-4 kg m^2; 1.5 kg. Efficiency varies with load, speed, and temperature "
+        "(Section 4.4)."
+    ),
+)
+
+FRANKA_CLASS_STRAIN_WAVE_JOINT = _est(
+    "prov:franka-class-strain-wave-joint",
+    "Panda-class strain-wave joint stand-in: Harmonic Drive CSG-25-50-2UH with a "
+    "TQ-RoboDrive ILM 70x18 frameless motor",
+    notes=(
+        "Franka does not publish the Panda's joint motor or gear parameters; its "
+        "datasheet gives 87 N m peak torque on axes 1-4 and a harmonic-drive "
+        "transmission with joint torque sensing. The stand-in pairs sourced parts of "
+        "that class: the CSG-25-50 (127 N m repeatable peak covers 87 N m) and the "
+        "smallest ILM whose peak torque through 50:1 covers the gear's repeatable "
+        "peak (ILM 70x18: 4.05 N m x 50 = 202 N m; the ILM 70x10 gives 106 N m). "
+        "Rotor inertia at the motor shaft = ILM rotor 0.321e-4 + CSG-25 input "
+        "0.413e-4 = 0.734e-4 kg m^2. The pairing is a choice; each value is sourced."
+    ),
+    verified="2026-09-28",
 )

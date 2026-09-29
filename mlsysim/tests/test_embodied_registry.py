@@ -461,3 +461,41 @@ def test_takeover_redesign_rejects_the_former_speeds():
         _AISLE.t_takeover_driving_p50, _AISLE.t_takeover_driving_mean,
         _AISLE.t_takeover_driving_p90, _AISLE.t_takeover_driving_p99)]
     assert ceilings == sorted(ceilings, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Chunk-policy renewal on the setpoint grid (added 2026-09-28, M5). The
+# renewal period must be a whole number of setpoint steps so that temporal
+# ensembling indexes chunks by setpoint; ACT is the one deployed chunk policy.
+# ---------------------------------------------------------------------------
+
+
+def test_chunk_policy_is_act():
+    assert _RM.chunk_model is Models.Embodied.ACT_ALOHA
+
+
+def test_chunk_schedule_on_setpoint_grid():
+    s = _RM.chunk_schedule
+    assert s["renewal_period"].to("ms").magnitude == pytest.approx(50.0)
+    assert _RM.chunk_step.to("ms").magnitude == pytest.approx(25.0)
+    assert s["setpoints_per_renewal"] == 2
+    assert s["open_loop_span"].to("ms").magnitude == pytest.approx(90.0)
+    assert s["min_supply_setpoints"] == 4
+    assert s["chunk_span"].to("ms").magnitude == pytest.approx(400.0)
+    assert s["overlapping_chunks"] == 8
+    assert s["renewal_slack"].to("ms").magnitude == pytest.approx(10.0)
+    assert _RM.chunk_period == s["renewal_period"]
+
+
+def test_chunk_schedule_keeps_lease_and_evidence_arguments():
+    """The renewal still fits the 60 ms lease with 5 ms jitter; the chunk outlasts the conveyor horizon."""
+    assert _RM.chunk_period + 5 * ureg.millisecond < _AISLE.t_lease
+    # tracked evidence horizon under residual slip: sqrt(2 (r_tol - e_0) / a_slip)
+    tau_ev = ((2 * (_AISLE.grasp_tolerance - _AISLE.grasp_initial_error)
+               / _AISLE.a_conveyor_slip) ** 0.5).to("ms")
+    assert _RM.chunk_schedule["open_loop_span"] < tau_ev < _RM.chunk_schedule["chunk_span"]
+
+
+def test_chunk_schedule_rejects_off_grid_step():
+    with pytest.raises(ValueError, match="not a whole number"):
+        _RM.model_validate({**_RM.__dict__, "chunk_step": 20.0 * ureg.millisecond})

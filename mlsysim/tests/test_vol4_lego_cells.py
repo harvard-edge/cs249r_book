@@ -143,7 +143,8 @@ def test_vol4_ch08_sensor_information_age():
 
 
 def test_vol4_ch11_planning_seam_inertia():
-    joint = Actuators.HarmonicDrive.CSG_25_50
+    # 2026-09-28 (M6): the seam joint is the sourced Panda-class stand-in.
+    joint = Actuators.PandaClassJoint.CSG_25_50_ILM70x18
     gear_ratio = joint.gear_ratio
     rotor_inertia = joint.rotor_inertia
     delta_omega = 0.2 * (ureg.radian / second)
@@ -158,12 +159,12 @@ def test_vol4_ch11_planning_seam_inertia():
     tau_blend_peak = 1.5 * tau_blended
     torque_reduction_ratio = tau_unblended / tau_blend_peak
 
-    check(abs(j_reflected.magnitude - 0.25) < 0.001, f"Unexpected reflected inertia: {j_reflected}")
+    check(abs(j_reflected.magnitude - 0.1835) < 0.0001, f"Unexpected reflected inertia: {j_reflected}")
     check(abs(alpha_unblended.magnitude - 200.0) < 0.1, f"Unexpected unblended acceleration: {alpha_unblended}")
-    check(abs(tau_unblended.magnitude - 50.0) < 0.1, f"Unexpected unblended torque: {tau_unblended}")
+    check(abs(tau_unblended.magnitude - 36.7) < 0.01, f"Unexpected unblended torque: {tau_unblended}")
     check(abs(alpha_blended.magnitude - 4.0) < 0.01, f"Unexpected blended acceleration: {alpha_blended}")
-    check(abs(tau_blended.magnitude - 1.0) < 0.01, f"Unexpected blended torque: {tau_blended}")
-    check(abs(tau_blend_peak.magnitude - 1.5) < 0.01, f"Unexpected peak blend torque: {tau_blend_peak}")
+    check(abs(tau_blended.magnitude - 0.734) < 0.001, f"Unexpected blended torque: {tau_blended}")
+    check(abs(tau_blend_peak.magnitude - 1.101) < 0.001, f"Unexpected peak blend torque: {tau_blend_peak}")
     check(abs(torque_reduction_ratio.magnitude - 50/1.5) < 0.1, f"Unexpected peak reduction ratio: {torque_reduction_ratio}")
 
 

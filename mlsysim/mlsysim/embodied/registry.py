@@ -9,6 +9,7 @@ from .types import EmbodiedPlatform
 from ..core.provenance import sourced_qty
 from ..sensors.registry import Sensors
 from ..models.registry import Models
+from ..actuators.registry import Actuators
 from .types import MobileManipulatorPlatform, EmbodiedSiteScenario
 
 
@@ -244,9 +245,16 @@ class MobileManipulators(Registry):
             336.0 * ureg.millisecond, pc.JETSON_AI_LAB_OPENVLA_ORIN,
             name="OpenVLA-7B INT4 per-frame latency, Jetson AGX Orin 64GB",
         ),
+        # Chunk policy: the ACT architecture (chunk_model), one CVAE-decoder pass
+        # per chunk, no iterative denoising; this is the one deployed chunk
+        # policy every chapter uses (2026-09-28, M5). Its renewal period must
+        # be a whole number of setpoint steps (validated): 50 ms = 2 x 25 ms.
+        # The step was 20 ms (2.5 steps per renewal); 25 ms keeps the 50 ms
+        # renewal that the 60 ms lease rule and every lease-dependent budget
+        # use, and keeps H = 16 longer than the conveyor evidence horizon.
         chunk_rate=20.0 * ureg.Hz,                             # chosen
         chunk_inference_latency=40.0 * ureg.millisecond,       # illustrative P99 incl. vision
-        chunk_step=20.0 * ureg.millisecond,                    # chosen setpoint period
+        chunk_step=25.0 * ureg.millisecond,                    # chosen setpoint period (40 Hz)
         chunk_horizon=16,                                      # chosen
         dram_efficiency=0.70,                                  # sustained fraction of peak
         tcp_speed_limit=1.0 * (ureg.meter / ureg.second),      # chosen free-space limit
@@ -258,6 +266,33 @@ class MobileManipulators(Registry):
         permission_rail_load=70.0 * ureg.watt,                 # illustrative permission-path load
         spring_brake_engage_min=30.0 * ureg.millisecond,       # illustrative spring-brake engage, fast end
         spring_brake_engage_max=80.0 * ureg.millisecond,       # illustrative spring-brake engage, slow end
+        # Braking drivetrain (2026-09-28, M6): two driven 10-inch hub motors.
+        drive_unit=Actuators.HubMotor.ZLTECH_ZLLG10ASM800,
+        drive_wheel_count=2,
+        drive_current_limit=Actuators.HubMotor.ZLTECH_ZLLG10ASM800.peak_current,  # chosen: the motor's datasheet peak (the ZLAC8030L driver allows 60 A)
+        drive_wheel_load_share=None,   # needs source: corner-scale weighing of the loaded machine
+        cg_height=None,                # needs source: tilt-table or corner-scale CoG measurement, loaded
+        tip_arm_stowed=None,           # needs source: CoG to leading support line, arm stowed
+        # 48 V drive bus (2026-09-28, M6): MiR250-class Li-NMC pack envelope.
+        drive_bus_full_charge=sourced_qty(
+            54.0 * ureg.volt, pc.MIR250_BATTERY, name="48 V-class AMR pack, maximum voltage",
+        ),
+        drive_bus_nominal=sourced_qty(
+            47.7 * ureg.volt, pc.MIR250_BATTERY, name="48 V-class AMR pack, nominal voltage",
+        ),
+        drive_bus_battery_low=sourced_qty(
+            42.0 * ureg.volt, pc.MIR250_BATTERY, name="48 V-class AMR pack, minimum voltage",
+        ),
+        drive_bus_resistance=60.0 * ureg.milliohm,             # illustrative source path; needs a measured cell + BMS + fuse + harness value
+        drive_bus_uvlo=sourced_qty(
+            33.0 * ureg.volt, pc.MEANWELL_DDR240, name="DDR-240C-24 input under-voltage lockout, OFF",
+        ),
+        drive_bus_converter_max=sourced_qty(
+            67.2 * ureg.volt, pc.MEANWELL_DDR240, name="DDR-240C-24 continuous input maximum",
+        ),
+        drive_bus_converter_efficiency=0.91,                   # DDR-240C-24 typical efficiency (MEANWELL_DDR240)
+        drive_bus_clamp=60.0 * ureg.volt,                      # chosen: above 54 V full charge, below 67.2 V converter maximum
+        drive_bus_switch_rating=100.0 * ureg.volt,             # chosen: 100 V switch class, >= 1.5x the clamp
         metadata=Metadata(provenance=pc.WAREHOUSE_MOBILE_MANIPULATOR),
     )
 

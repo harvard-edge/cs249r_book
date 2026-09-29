@@ -186,7 +186,8 @@ A motor drive cannot wait for the next camera-based proposal before regulating w
 # │          paragraph, and the chunk-policy tier paragraph.
 # │ Goal:    Give the machine's own proposer rates and chunk horizon, and the
 # │          base's travel during one camera exposure.
-# │ Show:    chunk policy 20 Hz, intent model 2 Hz (500 ms), H = 16; 22.5 mm of base
+# │ Show:    chunk policy 20 Hz (50 ms = 2 x 25 ms setpoints, M5), intent model
+# │          2 Hz (500 ms), H = 16; 22.5 mm of base
 # │          travel in a 15 ms exposure at the 1.5 m/s drive limit.
 # │ How:     Rates and horizon from RM; travel = drive limit x exposure, with
 # │          the exposure a scenario input.
@@ -204,16 +205,21 @@ class MachineTiers:
     f_chunk = RM.chunk_rate  # category: chosen (chunk-policy renewal rate)
     f_intent = RM.intent_rate  # category: chosen (intent-model rate)
     chunk_horizon = RM.chunk_horizon  # category: chosen (setpoints per chunk)
+    chunk_step = RM.chunk_step  # category: chosen (setpoint step)
     v = RM.base.max_velocity  # category: illustrative (drive limit)
     t_exp = 15 * millisecond  # category: illustrative (exposure in a 300 lux scene; scenario assumption)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     d_exp = (v * t_exp).to(millimeter)
+    t_chunk_period = RM.chunk_period  # renewal period, a whole number of setpoint steps
+    n_per_renewal = RM.chunk_schedule["setpoints_per_renewal"]
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(f_chunk.to(hertz).magnitude - 20.0) < 1e-9, f"Chunk rate drifted: {f_chunk}")
     check(abs(f_intent.to(hertz).magnitude - 2.0) < 1e-9, f"Intent rate drifted: {f_intent}")
     check(chunk_horizon == 16, f"Chunk horizon drifted: {chunk_horizon}")
+    check(abs(chunk_step.to(millisecond).magnitude - 25.0) < 1e-9, f"Setpoint step drifted: {chunk_step}")
+    check(n_per_renewal == 2, f"Setpoints per renewal drifted: {n_per_renewal}")
     check(abs(v.to(meter / second).magnitude - 1.5) < 1e-9, f"Drive limit drifted: {v}")
     check(abs(d_exp.magnitude - 22.5) < 1e-9, f"Exposure travel drifted: {d_exp}")
 
@@ -222,6 +228,9 @@ class MachineTiers:
     f_intent_str = fmt_frequency(f_intent, unit=hertz, precision=0)
     t_intent_period_str = fmt_latency((1 / f_intent).to(millisecond), unit=millisecond, precision=0)
     chunk_horizon_str = fmt_int(chunk_horizon)
+    chunk_step_str = fmt_latency(chunk_step, unit=millisecond, precision=0)
+    t_chunk_period_str = fmt_latency(t_chunk_period, unit=millisecond, precision=0)
+    n_per_renewal_str = fmt_int(n_per_renewal)
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
     t_exp_str = fmt_latency(t_exp, unit=millisecond, precision=0)
     d_exp_str = fmt_length(d_exp, unit=millimeter, precision=1)
@@ -231,7 +240,7 @@ The mobile manipulator's motor inverters regulate winding current every $50\ \mu
 
 1. **Inner Commutation and Current Loop ($20\text{ kHz}$, $50\,\mu\text{s}$ cycle):** Governed by the stator winding electrical time constant ($\tau_e = L/R \approx 0.5\text{ ms}$). Sampling phase currents ten times per electrical time constant synchronously with PWM carrier midpoints fixes $T_s = 50\,\mu\text{s}$. Operating directly inside dedicated motor drive silicon or real-time FPGA logic, this loop executes Clarke and Park vector transforms, proportional-integral current regulation in the rotor reference frame, and space-vector PWM modulation to command electromagnetic torque within the allocated timing margin.
 2. **Permission and Position-Supervision Tick ($1\text{ kHz}$, $1000\,\mu\text{s} \pm 10\,\mu\text{s}$ cycle):** The isolated real-time microcontroller checks proposal integrity, freshness, and physical limits, evaluates the admitted trajectory, sends position setpoints to the drives, and checks measured joint position against them; the drives close the joint velocity and current loops. It requests a state-matched fallback when active authority ends. The trajectory construction in @sec-planning supplies smooth motion between waypoints; @sec-enforcement develops the command checks and response selection.
-3. **Action-Chunk Policy Stream (`{python} MachineTiers.f_chunk_str`, $50\text{ ms}$ cycle):** Bridging observation age and mechanical execution, the local policy emits receding-horizon action chunks ($H =$ `{python} MachineTiers.chunk_horizon_str` waypoints). Compact visuomotor networks (such as Action Chunking with Transformers or Diffusion Policy heads) run on an edge neural accelerator, amortizing memory bandwidth weight-streaming overhead ($f \le B/M$) across physical wall-clock execution time.
+3. **Action-Chunk Policy Stream (`{python} MachineTiers.f_chunk_str`, `{python} MachineTiers.t_chunk_period_str` cycle):** Bridging observation age and mechanical execution, the local policy emits receding-horizon action chunks ($H =$ `{python} MachineTiers.chunk_horizon_str` waypoints spaced `{python} MachineTiers.chunk_step_str` apart). The machine's chunk policy is a compact visuomotor network of the Action Chunking with Transformers (ACT) architecture, which decodes a whole chunk in one pass; iterative diffusion or flow-matching heads are the alternatives @sec-training-decoder-costs prices. It runs on the application processor's accelerator, amortizing memory bandwidth weight-streaming overhead ($f \le B/M$) across physical wall-clock execution time.
 4. **Multimodal Intent Planner (`{python} MachineTiers.f_intent_str`, `{python} MachineTiers.t_intent_period_str` cycle):** High-capacity Vision-Language-Action (VLA) foundation models evaluate camera frames, linguistic instructions, and scene affordances to emit strategic task goals and navigation targets.
 
 ::: {.column-margin .margin-pointer}
@@ -338,7 +347,7 @@ Slow control loops erode the stability margin of the feedback controller. Accumu
 
 Perception, which feeds the chunk policy, executes at an intermediate rate dictated by photon collection physics, exposure windows, and target velocity relative to the sensor field of view. In an illustrative $300\text{ lux}$ scene with a `{python} MachineTiers.t_exp_str` exposure, the base at its `{python} MachineTiers.v_str` drive limit travels $\Delta x = v\,T_{\text{exp}} =$ `{python} MachineTiers.d_exp_str` during the exposure; image-plane blur additionally depends on depth, optics, and camera motion. Exposure signal-to-noise, this displacement, and processing time jointly bound a useful perception rate for the task.
 
-The chunk-policy rate must fit the proposal-supply budget established in @sec-brain-cognitive-pipeline. On the mobile manipulator, a `{python} MachineTiers.f_chunk_str` renewal and a `{python} MachineTiers.chunk_horizon_str`-waypoint chunk, the chunk horizon $H$ of action-chunking policies [@zhao2023learning], bridge observation and actuation rates.
+The chunk-policy rate must fit the proposal-supply budget established in @sec-brain-cognitive-pipeline. On the mobile manipulator, a `{python} MachineTiers.f_chunk_str` renewal and a `{python} MachineTiers.chunk_horizon_str`-waypoint chunk, the chunk horizon $H$ of action-chunking policies [@zhao2023learning], bridge observation and actuation rates. The `{python} MachineTiers.t_chunk_period_str` renewal period spans exactly `{python} MachineTiers.n_per_renewal_str` setpoint steps of `{python} MachineTiers.chunk_step_str`, so every renewal begins on a setpoint boundary.
 
 ### Lock-free and wait-free mailbox exchanges {#sec-nervous-mailbox-exchanges}
 
