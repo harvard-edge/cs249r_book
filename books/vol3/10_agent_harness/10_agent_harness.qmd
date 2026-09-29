@@ -129,7 +129,9 @@ When the operator's pause request arrives, the transcript cannot answer what the
 
 The outstanding-obligations group is distinct from **observation eligibility**\index{Observation eligibility!definition}, the permission for a response to enter the current continuation's next model context. A call can lose that eligibility while its external outcome remains unresolved. The **operation ledger**\index{Operation ledger!definition} retains the logical operation identity, transport attempts, received evidence, and the component responsible for settlement. A `record_version` identifies each serialized record update; the **control epoch**\index{Control epoch!definition} (`control_epoch`) marks the continuation against which proposals and observations are checked. An epoch change leaves the logical operation and its repeat contract (@sec-vol3-tool-calling-idempotency) untouched, so the harness keeps those obligations reachable after the trajectory stops waiting for an observation.
 
-The same separation applies to accounting. Actual consumption records established usage; outstanding reservations account for admitted work whose final charge is not yet settled. A protected **finalization reserve**\index{Finalization reserve!definition} funds the declared final checks and cleanup and is withheld from exploration. An elapsed-time deadline is separate, because waiting consumes time even when no new model tokens are generated. @Sec-vol3-controlplane-accounting develops the admission and settlement rules; the record supplies the quantities those rules need.
+The same separation applies to accounting. Actual consumption records established usage; outstanding reservations account for admitted work whose final charge is not yet settled. A protected **finalization reserve**\index{Finalization reserve!definition} funds the declared final checks and cleanup and is withheld from exploration. An elapsed-time deadline is separate, because waiting consumes time even when no new model tokens are generated. @Sec-vol3-controlplane-accounting develops the admission test; the record supplies the quantities it needs.
+
+These two separations combine into one rule that the rest of the chapter cites by name. The *settlement rule* says that withdrawing a call's observation eligibility, whether by timeout, pause, cancellation, plan revision, or a terminal state, never removes its operation or its reservation from the ledger. Only authenticated, correlated evidence settles an outcome or releases a charge, and until that evidence arrives the obligation keeps a named owner.
 
 ### Govern updates and referenced state
 
@@ -137,7 +139,7 @@ The harness alone writes the control record. It can accept a model's proposed pl
 
 Referencing the context, plan, and workspace avoids copying their contents into every status query, although a waiting trajectory still owns more than its record. Its workspace, stored observations, open jobs, and unsettled requests may still consume resources. Serving-state retention belongs to @sec-vol3-kvcache-swapping, and workspace lifetime belongs to @sec-vol3-sandboxes-lease. The harness retains the relevant references and communicates its continuation needs to those owners.
 
-This record is the live control representation. Keeping its history through host failure, with crash-safe ordering, is the responsibility developed in @sec-vol3-durable-execution; a log reference connects the two.
+This record is the live control representation, and every rule in this chapter assumes a live host. Keeping the record through host failure, and ordering its updates against external effects so that a crash cannot separate them, is the job of @sec-vol3-durable-execution; a log reference connects the two.
 
 ### Maintain a live plan {#sec-vol3-harness-live-plan}
 
@@ -169,7 +171,19 @@ A state machine makes that admission explicit. It also prevents a scheduler from
 
 : **Guarded Trajectory States**: An edge permits consideration of a transition, not unconditional execution. Events can update accounting or evidence without changing state. {#tbl-vol3-lifecycle-states}
 
-The ordinary cycle is `READY` → `CALLING_MODEL` → `WAITING_TOOL` → `READY`, drawn with every guarded edge in @fig-vol3-harness-trajectory-states. A model response may instead produce no admissible action, request completion, or propose an action requiring approval. The normalized invocation status of @tbl-vol3-invocation-status already fixes what the runtime may do with each outcome; the harness adds where each outcome leaves the trajectory. A `COMPLETED` reply goes to candidate validation. A validated tool proposal enters `WAITING_TOOL` once its dispatch is admitted, or `AWAITING_APPROVAL` when policy requires review; a completion request enters `FINALIZING` for the task's completion check; a reply with no admissible action returns to `READY` with an observation. `TRUNCATED`, `REFUSED`, and `REJECTED` replies return to `READY` with a bounded observation unless the task's refusal policy finalizes. A `CANCELED` reply returns to `READY` under the control hold that caused it. `TRANSPORT_FAILURE` and `FAULTED` return to `READY` for bounded failure handling while the budget permits and enter `FINALIZING` otherwise; their reservations remain outstanding until usage settles. A malformed or canceled partial response cannot become a tool invocation merely because some arguments can be recovered from it.
+The ordinary cycle is `READY` → `CALLING_MODEL` → `WAITING_TOOL` → `READY`, drawn with every guarded edge in @fig-vol3-harness-trajectory-states. A model response may instead produce no admissible action, request completion, or propose an action requiring approval. The normalized invocation status of @tbl-vol3-invocation-status already fixes what the runtime may do with each outcome; @tbl-vol3-harness-status-routing adds where each outcome leaves the trajectory. Only a `COMPLETED` reply reaches candidate validation, and a malformed or canceled partial response cannot become a tool invocation merely because some arguments can be recovered from it.
+
+| Reply status and content               | Next state          | Condition or residue                                                          |
+|:---------------------------------------|:--------------------|:------------------------------------------------------------------------------|
+| `COMPLETED`, validated tool proposal   | `WAITING_TOOL`      | Once its dispatch is admitted                                                 |
+| `COMPLETED`, proposal requiring review | `AWAITING_APPROVAL` | When policy requires review of the exact action                               |
+| `COMPLETED`, completion request        | `FINALIZING`        | The task's completion check follows                                           |
+| `COMPLETED`, no admissible action      | `READY`             | With an observation saying so                                                 |
+| `TRUNCATED`, `REFUSED`, `REJECTED`     | `READY`             | With a bounded observation, unless the task's refusal policy finalizes        |
+| `CANCELED`                             | `READY`             | Under the control hold that caused the cancellation                           |
+| `TRANSPORT_FAILURE`, `FAULTED`         | `READY`             | For bounded failure handling while the budget permits, `FINALIZING` otherwise |
+
+: **Reply Status and Next State**: Every non-completed status returns to a state that admits no dispatch from the failed reply; reservations for failed or faulted calls stay outstanding until usage settles. {#tbl-vol3-harness-status-routing tbl-colwidths="[34,20,46]"}
 
 Approval adds one detour to the cycle. An approved action goes from `AWAITING_APPROVAL` to `WAITING_TOOL` only when its current dispatch guards pass; a recorded approval alone need not change the state. Denial, expiry, or withdrawal can return a refusal observation to `READY`. The approval section develops these cases.
 
@@ -181,15 +195,15 @@ Approval adds one detour to the cycle. An approved action goes from `AWAITING_AP
 
 ### Guard the transition and its admission
 
-A legal edge is only the first check. Moving from `READY` to `CALLING_MODEL` also requires no pending control hold, a current task and context, applicable grants, available service capacity, and sufficient reserved budget for the bounded invocation liability. Dispatching a tool adds checks for its complete arguments, current authority, dependencies, and any required exact-action approval. An unresolved earlier operation can block a dependent mutation even while the trajectory is `READY` for independent work. Budget admission must preserve the allowance needed for final checks and cleanup, not spend it on the next turn.
+A legal edge is only the first check. Every admission of new work, a model call or a tool dispatch, must also pass what the rest of the chapter calls the *admission check*. It requires no pending control hold, a current task and context, applicable grants and any required exact-action approval, satisfied dependencies and preconditions, available service capacity and quota, time before the deadline, and a reservation for the operation's bounded liability that fits the remaining allowance without touching the finalization reserve (@sec-vol3-controlplane-accounting). A tool dispatch adds complete arguments. An unresolved earlier operation can block a dependent mutation even while the trajectory is `READY` for independent work. The check holds only at the moment it runs; a check passed earlier, when an approval arrived or a scheduler selected the call, does not carry forward to dispatch.
 
-These checks and their local consequences form one serialized update of the runtime-owned record. Before releasing a request, the harness registers the invocation or operation attempt, reserves its liability, records its observation eligibility, and changes state. Otherwise a fast completion could arrive before the runtime knows which request it belongs to. Every supported event has an explicit guard; an absent guard is not permission. Repeated delivery of an event must not admit the same action twice.
+The check and its local consequences form one serialized update of the record. Under the record lock the harness runs the check, reserves the liability, registers the invocation or operation attempt, records its observation eligibility, and changes state. Only after releasing the lock does it send the request. This *register-before-send rule* has two halves. Registering first means a fast reply always finds the record it belongs to. Sending outside the lock means a slow model or tool service never blocks control requests, other schedulers, or arriving results.
+
+Control requests take the same lock, so every stop and every admission are ordered, and the *admission-order rule* states the consequence. A pause, cancellation, or other stop committed before an admission blocks it. An admission committed first makes the operation owned work, including a request whose transmission is still underway. A later stop can request that work's cancellation or wait for its settlement, but can never report it as unsent. Tool-side conditions still require the enforcement described in @sec-vol3-tool-calling.
 
 The `record_version` detects competing updates, and a change of `control_epoch` can make a previously eligible response obsolete. Neither replaces the logical operation ID or the transport attempt ID. A retry may create another attempt within one operation, whereas a control change can invalidate a response without undoing that operation.
 
-Serialization applies to the local decision, not the duration of network I/O. The harness releases the record lock before calling a model or tool service. If an accepted pause wins the admission race, the later dispatch is refused. If dispatch admission wins first, a subsequent pause must account for already-admitted work, including a request whose transmission is underway. Tool-side conditions still require the enforcement described in @sec-vol3-tool-calling.
-
-@Lst-vol3-guarded-transition expresses this contract as one function. The legal edges are exactly those of @tbl-vol3-lifecycle-states, and every edge has an explicit guard; an edge with no registered guard is refused rather than allowed by default. The caller passes the `record_version` it read when it made its decision, so a competing update fails the version check, and a repeated delivery of the same event fails either that check or the edge check, instead of admitting the action twice.
+@Lst-vol3-guarded-transition expresses these rules as one function. The legal edges are exactly those of @tbl-vol3-lifecycle-states, and an edge with no registered guard is refused rather than allowed by default. The caller passes the `record_version` it read when it made its decision, so a competing update fails the version check, and a repeated delivery of the same event fails either that check or the edge check, instead of admitting the action twice.
 
 ::: {#lst-vol3-guarded-transition lst-cap="**Guarded Transitions**: Every state change checks the legal edge, its explicit guard, and the record version under the record lock, then performs admission bookkeeping before the state changes; the admitted request is sent only after the lock is released."}
 ```python
@@ -221,15 +235,11 @@ def transition(rec, new_state, decision, admit=None):
 ```
 :::
 
-The guard for `READY` → `CALLING_MODEL`, for example, tests pending control, task and context currency, grants, capacity, and the budget inequality developed in @sec-vol3-controlplane-accounting. The lock is held for a few lookups and an append, negligible beside a model call, so guarding every transition costs almost nothing.
-
-This is a live-host coordination contract. Surviving a crash, and ordering a local update against an external effect, need the durable intent and recovery ordering developed in @sec-vol3-durable-execution.
+The guard registered for `READY` → `CALLING_MODEL` is the admission check, and `admit` performs the bookkeeping of the register-before-send rule. The lock is held for a few lookups and an append, negligible beside a model call, so guarding every transition costs almost nothing.
 
 ### Preserve outcomes without reviving an obsolete turn
 
-The record separates `observation_eligible_calls` from the `operation_ledger`. The first identifies responses that may advance the current wait under its declared policy. The second retains admitted attempts, known outcomes, unresolved effects, charges, and the owner responsible for settlement. Removing a call from the eligibility set therefore does not remove its operation from the ledger.
-
-On arrival, the runtime authenticates a result and correlates its task, logical operation, and attempt identity. It then records admissible outcome evidence in the ledger. A matching current response can also satisfy the wait policy and contribute an observation to the next context. A stale response cannot be appended directly to an obsolete turn, but it can still settle an outstanding operation. If that evidence matters to resumed work, the runtime revalidates its relevance and stages it during a subsequent guarded context assembly. Unknown or mismatched identities are not accepted as task evidence.
+A result's arrival is where the settlement rule does its work. On arrival, the runtime authenticates a result and correlates its task, logical operation, and attempt identity. It then records admissible outcome evidence in the ledger. A matching current response can also satisfy the wait policy and contribute an observation to the next context. A stale response cannot be appended directly to an obsolete turn, but it can still settle an outstanding operation. If that evidence matters to resumed work, the runtime revalidates its relevance and stages it during a subsequent guarded context assembly. Unknown or mismatched identities are not accepted as task evidence.
 
 @Lst-vol3-harness-on-result shows the two paths. Ledger evidence and usage settlement happen for every authenticated, correlated result; staging an observation for the waiting continuation happens only when the call is still eligible under the current `control_epoch`. When the declared **wait policy**\index{Wait policy!definition}, the rule stating which results end a wait, is satisfied, the return to `READY` goes through the ordinary guarded transition, whose guard evaluates that policy again under the lock.
 
@@ -263,11 +273,11 @@ A wait policy names one of four endings: all required results, an allowed partia
 
 ### Pause the continuation, not the operation history
 
-This machine enters `PAUSED` only from `READY`. To pause active work, the runtime first records `pending_control`, preventing new admission. It withdraws the active model response's eligibility, withdraws any held approval, and closes the current observation wait as needed. It may request cancellation of admitted work, but unconfirmed cancellation remains unresolved in the operation ledger. Partial model output is retained only if useful for diagnostics, never repaired into a dispatchable call.
+This machine enters `PAUSED` only from `READY`. To pause active work, the runtime first records `pending_control`, preventing new admission. It withdraws the active model response's eligibility, withdraws any held approval, and closes the current observation wait as needed. It may request cancellation of admitted work, which under the settlement rule stays in the ledger until evidence confirms the cancellation. Partial model output is retained only if useful for diagnostics, never repaired into a dispatchable call.
 
 With those local eligibility decisions recorded, the runtime passes through `READY` to `PAUSED` under the same admission hold. There is no runnable interval between the two transitions. Reaching this boundary means no current response or held proposal can advance the continuation; it does not mean all tools have stopped. In particular, the outstanding `r18` test can finish while the trajectory is paused. Its result updates the owned ledger without automatically restarting the model.
 
-Resume is a guarded `PAUSED` → `READY` transition. It rechecks the task, current grants, budget, context dependencies, and pending evidence. A withdrawn approval is not silently reused, and an unresolved operation still constrains dependent dispatch. Resource retention is separate; workspace leases, result buffers, reservations, or serving caches may remain under their respective lifetime policies.
+Resume is a guarded `PAUSED` → `READY` transition that reconciles pending evidence before the next admission check. It is a fresh admission, not the inverse of every action taken during the pause, so nothing withdrawn during the pause revives. Expired credentials stay expired, a withdrawn approval needs a fresh request, and an abandoned partial reply does not resume halfway through its arguments. An unresolved operation still blocks dependent mutations even when independent work is eligible. Resource retention is separate; workspace leases, result buffers, reservations, or serving caches may remain under their respective lifetime policies.
 
 ### Finalize with an explicit owner for remaining duties
 
@@ -292,13 +302,11 @@ The machine defines which changes are permitted and what each must preserve. Con
 
 The test job for candidate `r18` is still outstanding when an operator requests a pause. The harness must stop the repair's continuation without losing the job's identity, its budget reservation, or the evidence it may return. Waiting for the test to finish before recording the request leaves the operator without control. Declaring the job canceled merely because the trajectory now says `PAUSED` invents an outcome the runtime has not observed.
 
-Control separates the arrival of a request from the conditions it establishes. The harness authenticates the requester, checks authority over this trajectory, and records the requested action in `pending_control` through the same serialized control path that guards dispatch. A pause or cancellation closes admission to new model calls and tool operations before the controller acknowledges that hold. An operation already admitted remains owned work. The response to the operator must distinguish “request received,” “new admission stopped,” and any later confirmation that running work terminated.
+Control separates the arrival of a request from the conditions it establishes. The harness authenticates the requester, checks authority over this trajectory, and records the requested action in `pending_control` under the record lock, so the admission-order rule of @sec-vol3-controlplane-statemachine fixes exactly which operations the request covers. The controller acknowledges the hold only after it commits. The response to the operator must distinguish “request received,” “new admission stopped,” and any later confirmation that running work terminated.
 
 ### Admission boundaries and active generation
 
-A **turn boundary**\index{Turn boundary!definition} is a point at which the harness can decide whether continuation is still permitted before admitting its next operation. It occurs before a model invocation and before tool dispatch, including dispatch of each separately admitted call in a proposed batch. The control check and admission decision must share concurrency protection; checking a flag and then dispatching outside that protection can let a pause arrive between the two. Registering an admitted operation before dispatch also ensures that a fast reply finds its owner.
-
-The boundary is a local admission guarantee. If the control request wins the ordering, the next operation is withheld. If dispatch admission wins, the controller treats the operation as outstanding and applies the appropriate cancellation or completion policy. This distinction makes the remaining obligation inspectable instead of hiding it behind the timestamp of a stop button.
+A **turn boundary**\index{Turn boundary!definition} is a point at which the harness can decide whether continuation is still permitted before admitting its next operation. It occurs before a model invocation and before tool dispatch, including dispatch of each separately admitted call in a proposed batch. Because the admission check runs there under the record lock, a pause cannot slip between checking a flag and dispatching. The boundary is a local admission guarantee, and it makes the remaining obligation inspectable instead of hiding it behind the timestamp of a stop button.
 
 Generation need not finish before local candidate processing stops. The harness can request **streaming cancellation**\index{Streaming cancellation!definition}, which asks the serving service to stop generating a reply in progress, close the invocation's eligibility to produce an actionable candidate, and retain partial content only for bounded diagnosis. The invocation contract in @sec-vol3-foundation-model-contract governs the result. A canceled or truncated payload cannot become a dispatchable call because a parser closes its brackets, because its prefix already parses, or because a complete-looking reply arrives after its eligibility was withdrawn; the quarantining invariant (principle \ref{pri-02-quarantining-invariant}) holds regardless of how the invocation ended. Such late evidence can still settle usage or explain what the service did.
 
@@ -343,13 +351,11 @@ class BoundaryWait:
 
 Output and time limits perform different jobs. A service-enforced output allowance bounds the generated quantity under that service's accounting contract; elapsed time also depends on queueing, stalls, and generation rate. Even the most favorable case is long. At the reference output allowance of `{python} BoundaryWait.t_dec_ms_str` per generated token from @sec-vol3-foundation-model-cost, with no queueing or stall, a call admitted with a `{python} BoundaryWait.k_max_str`-token output allowance can hold the next turn boundary about `{python} BoundaryWait.t_wait_str` away. A pending cancel or pause that waited for the reply to end would wait at least that long, and the wait scales linearly with the output allowance: halving the allowance halves the worst-case delay, while streaming cancellation removes the dependence altogether. The harness therefore uses both, turn boundaries for admission and streaming cancellation for replies in flight.
 
-Stopping locally is not the same as stopping remotely. A host deadline determines when the supervisor stops waiting and initiates intervention; confirming that remote inference stopped takes evidence from the service. Reported final usage settles the reservation, and missing usage remains an outstanding liability rather than an assumed refund.
+Stopping locally is not the same as stopping remotely. A host deadline determines when the supervisor stops waiting and initiates intervention; confirming that remote inference stopped takes evidence from the service. Under the settlement rule, missing usage remains an outstanding liability rather than an assumed refund.
 
 ### Pause and resume under one policy
 
-The guarded pause path established in @sec-vol3-controlplane-statemachine holds admission while passing through `READY` to `PAUSED`. Its operator-facing meaning depends on the policy for already admitted work. For the `r18` test, the policy may allow the job to finish under its existing limits while holding the repair's continuation. A policy requiring the job to stop instead requests cancellation and records what the executor confirms. A pause that permits execution to continue leaves the workspace live, and the operator view must say so. Inspection requiring quiescence needs confirmation that the relevant writers have stopped or an isolated snapshot with a declared boundary.
-
-Resume is another guarded request, not the inverse of every action taken during pause. The harness reconciles pending evidence, checks the current task and grants, and verifies that the remaining budget and deadline permit continuation. Expired credentials do not become valid again; withdrawn approvals do not revive; an abandoned partial reply does not resume halfway through its arguments. A usable continuation returns to `READY` for ordinary admission. If unresolved effects invalidate a proposed mutation's preconditions, that mutation remains withheld even when independent work is eligible.
+The guarded pause path established in @sec-vol3-controlplane-statemachine holds admission while passing through `READY` to `PAUSED`. Its operator-facing meaning depends on the policy for already admitted work. For the `r18` test, the policy may allow the job to finish under its existing limits while holding the repair's continuation. A policy requiring the job to stop instead requests cancellation and records what the executor confirms. A pause that permits execution to continue leaves the workspace live, and the operator view must say so. Inspection requiring quiescence needs confirmation that the relevant writers have stopped or an isolated snapshot with a declared boundary. Resume follows the guarded transition of the same section, so the operator's policy governs only what ran during the pause, not what may run after it.
 
 @Tbl-vol3-signal-vocabulary compares the requested changes to continuation.
 
@@ -370,7 +376,7 @@ A new user instruction also needs this discipline. Adding “change the target f
 
 Kill requests invoke enforcement without waiting for model cooperation or a completed reply, as out-of-band preemption requires (principle \ref{pri-vol3-preemptive-interrupts}). The controller can stop local execution, revoke mediated access, or fence obsolete workers on the paths its execution boundary controls. The sandbox lifetime contract in @sec-vol3-sandboxes-pooling-reset determines which processes, descendants, channels, and resources that enforcement covers. Remote work and already open handles lie outside a local kill and need their own evidence.
 
-Finalization therefore records confirmed termination separately from unresolved effects and charges. It may wait for evidence, fail cleanup, or transfer a remaining obligation to an identified settlement owner. The operation's repeat contract, established in @sec-vol3-tool-calling-idempotency, determines whether another attempt is safe, and settlement comes before any retry (principle \ref{pri-vol3-exactly-once-settlement}); an identifier alone cannot answer what the interrupted attempt did. Even a terminal scheduling state must not cause the runtime to discard evidence that could settle that obligation.
+Finalization therefore records confirmed termination separately from unresolved effects and charges, which keep their owner under the settlement rule. The operation's repeat contract, established in @sec-vol3-tool-calling-idempotency, determines whether another attempt is safe, and settlement comes before any retry (principle \ref{pri-vol3-exactly-once-settlement}); an identifier alone cannot answer what the interrupted attempt did.
 
 Outside control makes continuation independent of the model's willingness to cooperate, and it frees workers, since none needs to stay occupied while a job or cancellation response is outstanding. The next design step is to preserve these control and evidence obligations while the trajectory waits, then admit continuation only when the appropriate event and guards allow it.
 
@@ -382,7 +388,7 @@ An asynchronous wait releases the worker to handle other work while the trajecto
 
 ### From an event to an eligible observation
 
-The job interface in @sec-vol3-tool-calling-async already distinguishes acceptance from completion. The harness composes that interface with its lifecycle. Before a dispatched job can return evidence, the runtime registers its owning trajectory, call and attempt identities, job handle when available, expected source revision, observation eligibility, and outstanding liability. Registration and dispatch bookkeeping must account for a result that arrives immediately. A notification must never outrun the record needed to interpret it.
+The job interface in @sec-vol3-tool-calling-async already distinguishes acceptance from completion. The harness composes that interface with its lifecycle. Before a dispatched job can return evidence, the runtime registers its owning trajectory, call and attempt identities, job handle when available, expected source revision, observation eligibility, and outstanding liability. The register-before-send rule guarantees that even an immediate notification never outruns the record needed to interpret it.
 
 @Tbl-vol3-event-wakeup-pipeline follows a result through the supervisor. These are logical obligations that any concurrency structure can implement.
 
@@ -395,7 +401,7 @@ The job interface in @sec-vol3-tool-calling-async already distinguishes acceptan
 
 : **Event handling before continuation**: Receiving evidence, recording its meaning, and admitting further work are separate supervisory decisions. {#tbl-vol3-event-wakeup-pipeline tbl-colwidths="[20,43,37]"}
 
-The event handler updates the record under the same concurrency discipline as the state machine, checking its `record_version` and the continuation's `control_epoch`. A repeated notification must not append the observation twice, charge reported usage twice, or enqueue duplicate continuation. Membership in `observation_eligible_calls` governs admission to the waiting continuation; the separate `operation_ledger` retains outstanding effects and liabilities. An older epoch prevents direct append to an obsolete model turn, but authenticated evidence about that operation still goes to its settlement owner. Any use in the current continuation requires fresh validation and staging. Correlation protects which record receives evidence; the tool's result contract determines what that evidence establishes.
+The event handler generalizes @lst-vol3-harness-on-result to every event source. It updates the record under the lock, checks the `record_version` and the continuation's `control_epoch`, and is idempotent, so a repeated notification appends no second observation, charges no second usage, and enqueues no duplicate continuation. Correlation protects which record receives evidence; the tool's result contract determines what that evidence establishes.
 
 The same distinction applies to streamed output. A log fragment or progress event can update a bounded observation store without ending the wait. An opening tool-call delimiter in a model stream is an incomplete proposal and triggers nothing. Model invocation completion and validation remain the adapter's responsibility, while the harness determines whether a completed proposal is still eligible under the current control state.
 
@@ -407,13 +413,11 @@ A batch needs a declared continuation policy. Under an all-results policy, the h
 
 For example, a completed lint result need not settle a concurrent test job. If the next decision requires both checks on `r18`, lint output alone leaves the wait open. If the next decision is an independent inspection, a partial-results policy can admit it under the current limits. Editing the candidate while the test reads a mutable workspace would require additional coordination; merely labeling the work parallel does not preserve the tested revision.
 
-A deadline ends the specified wait, not necessarily the operation. The harness records the timeout, requests the defined intervention, and changes observation eligibility while keeping the unresolved effect and charge in the ledger. The settlement contract in @sec-vol3-tool-calling-idempotency determines whether the evidence resolves the outcome and whether repetition is safe.
+A deadline ends the specified wait, not the operation. The harness records the timeout and requests the defined intervention, and the settlement rule keeps the unresolved effect and charge in the ledger. The settlement contract in @sec-vol3-tool-calling-idempotency determines whether later evidence resolves the outcome and whether repetition is safe.
 
 ### A result arriving during a pause
 
-Return to the test job and the operator's pause request, which the harness has applied along the guarded path of @sec-vol3-controlplane-statemachine while the record keeps the job and its charges under an explicit owner. If the test result then arrives, the supervisor can authenticate it, match it to the `r18` job, and record its outcome while leaving the trajectory `PAUSED`. A targeted `test_waiter_notified_on_return` pass remains evidence for that test and revision, not acceptance of the full repair. The operator's hold still governs. On an authorized resume, the harness rechecks current control state, grants, budget, and accumulated evidence before deciding which continuation is eligible. If the deadline or budget prevents further work, receiving a useful result does not create a fresh allowance.
-
-The event processor therefore remains active while model continuation is held. The same principle applies during finalization, where evidence can update an owned outstanding obligation without reviving a terminal trajectory. Crash-safe preservation of those obligations is the additional problem developed in @sec-vol3-durable-execution.
+Suppose the `r18` result arrives while the operator's pause holds. The supervisor authenticates it, matches it to the job, and records its outcome while the trajectory stays `PAUSED`. A targeted `test_waiter_notified_on_return` pass remains evidence for that test and revision, not acceptance of the full repair, and a useful result creates no fresh allowance. Whether the repair continues is the resume guard's decision. The event processor therefore stays active while model continuation is held, and likewise during finalization, where evidence can update an owned obligation without reviving a terminal trajectory.
 
 ### Account for what the wait retains
 
@@ -566,17 +570,15 @@ The next permitted model call can use this observation to propose a different co
 
 ### Recheck at the dispatch boundary
 
-A favorable decision may arrive while the review target has changed or the task is nearly out of budget. Before admission, the harness verifies the held artifact and decision, current grants, approval expiry, task deadline, pending controls, and relevant preconditions. It must also fit the proposed operation's bounded liability alongside actual consumption, outstanding reservations, and funded final checks or cleanup. A valid approval does not authorize an unaffordable operation. An admission refusal records its reason; a task-wide stopping condition routes to finalization. Capacity and rate-limit admission can delay execution, so checks made when the decision arrived are not sufficient for a later dispatch.
+A favorable decision may arrive while the review target has changed or the task is nearly out of budget. An approval is one input to the admission check, not a substitute for it. At dispatch the harness verifies the held artifact against its digest and the approval's expiry, then runs the full check. A valid approval does not authorize an unaffordable operation or one whose grant has lapsed, and because capacity and rate limits can delay dispatch, a check passed when the decision arrived does not carry forward. A refusal records its reason; a task-wide stopping condition routes to finalization.
 
 For example, the approved submission may depend on an unchanged target branch. An earlier read of that branch cannot exclude a change between the read and the submission, so where the action requires that condition, the endpoint enforces the expected version together with its operation, or the system provides an equivalent exclusion mechanism. The conditional-operation contract belongs to @sec-vol3-tool-calling-schemas.
 
-Concurrent approval, expiry, and control events must have a consistent admission order. Under the record's concurrency guard, the harness confirms that the held request is still eligible, commits its budget reservation, marks that request as consumed for dispatch, registers the operation and attempt identities, and enters `WAITING_TOOL`. As at every admission, registration precedes the external request, and the network operation proceeds outside the record lock.
-
-The admission boundary also determines how a competing stop request is handled. A stop recorded before admission prevents that dispatch. If admission has already committed, the runtime must treat the operation as admitted work and invoke the applicable cancellation or settlement path, not report an undispatched refusal without evidence. A transport failure after the request may have left the host preserves an unknown effect under @sec-vol3-tool-calling-idempotency. A consumed approval prevents a second local approval handler from sending again; it does not establish endpoint deduplication or settle a missing reply.
+Admission of the held request follows the register-before-send rule with one addition. Under the lock the harness also marks the request consumed, so a second approval handler finds nothing to send. Concurrent approval, expiry, and control events are then ordered by the admission-order rule. A stop that commits first withdraws the held request with an honest `not_sent`. Once admission commits, the submission is owned work, and a transport failure after the request may have left the host preserves an unknown effect under @sec-vol3-tool-calling-idempotency. A consumed approval prevents a second local send; it does not establish endpoint deduplication or settle a missing reply.
 
 ### Pause or withdraw a held request
 
-A pause must preserve the state-machine contract from @sec-vol3-controlplane-statemachine. Under the READY-boundary pause policy, the harness withdraws the still-held request, records that it was not dispatched, and reaches `READY` with new admission inhibited by the pending pause. It then enters `PAUSED` through the ordinary guard. A late approval for the withdrawn request cannot dispatch while paused or after resumption. Resuming rechecks the task's grants, deadline, budget, and retained evidence; if the action is still needed, it requires a current approval request.
+A pause follows the path of @sec-vol3-controlplane-statemachine with one added step. The harness withdraws the still-held request, records that it was not dispatched, and passes through `READY` to `PAUSED` under the pending hold. A late approval for the withdrawn request cannot dispatch while paused or after resumption; if the action is still needed after resume, it requires a current approval request.
 
 Cancellation and task expiry instead route through `FINALIZING`, which retains any obligations from earlier dispatched work. Withdrawing the held review submission does not cancel an unrelated test job, settle its charges, or reverse its effects. The record makes those distinctions visible even though the proposed submission itself never left escrow.
 
@@ -688,9 +690,9 @@ An approved tool call needs its own dispatch admission. Without a suitable tool 
 
 ### Selection is not permission to dispatch
 
-Between queue selection and admission, an operator may pause the repair, a grant may expire, or another call may consume its remaining budget. Admission must therefore recheck the record's state, version, pending controls, and current authority. It also obtains the required quota and capacity reservations and reserves the proposed call's bounded budget liability. The admission decision, reservations, invocation identity, and state transition must be coordinated so competing schedulers cannot admit the same work or spend the same allowance twice. Network submission follows that local decision, outside the record lock.
+Between queue selection and admission, an operator may pause the repair, a grant may expire, or another call may consume its remaining budget. Selection is therefore only a nomination. The chosen call still passes the admission check, now including the quota and capacity reservations of the previous subsection, under the register-before-send rule, and the `record_version` check ensures that two schedulers selecting the same trajectory admit its call once and spend its allowance once.
 
-Insufficient scheduling credit or temporarily unavailable capacity leaves a model-call candidate waiting in `READY`; it is not evidence that the task failed. A submission failure needs an outcome-aware release or settlement of reservations. An uncertain response keeps its reservation outstanding, since the provider may have received and charged the request.
+Insufficient scheduling credit or temporarily unavailable capacity leaves a model-call candidate waiting in `READY`; it is not evidence that the task failed. A submission failure needs an outcome-aware release or settlement of reservations, and under the settlement rule an uncertain response keeps its reservation outstanding, since the provider may have received and charged the request.
 
 Fair sharing answers which eligible trajectory gets service next. Quotas and capacity answer whether that work fits the shared system now. None of them limits how much one task can consume across repeated admissions. A repair can receive a fair share indefinitely without finding a correct patch; its lifetime budget supplies the next constraint.
 
@@ -740,7 +742,7 @@ $$\text{actual consumption} + \text{outstanding reservations} + \text{proposed b
 
 The test applies componentwise to the relevant counts and charges; the elapsed deadline is checked separately. Outstanding reservations cover admitted work not yet fully charged, including concurrent model calls and paid tools. The protected reserve funds the specified final checks, reporting, and cleanup rather than leaving those activities dependent on whatever exploration fails to spend. During finalization, the harness transfers an appropriate portion of that reserve into the admitted operation's reservation; it does not charge the same liability twice.
 
-Checking and reserving must be one admission decision with respect to competing dispatches. Otherwise two calls can both observe the same remaining balance and spend it. The runtime records the operation and its reservation before dispatch, together with the current state, grants, and deadline checks established earlier in this chapter. If sending fails, it releases the reservation only when the failure establishes that no charge can result. An ambiguous send remains outstanding.
+This test is the budget clause of the admission check, so it runs under the register-before-send rule, and two calls cannot both observe the same remaining balance and spend it. If sending fails, the harness releases the reservation only when the failure establishes that no charge can result; an ambiguous send remains outstanding.
 
 @Lst-vol3-harness-turn assembles one turn from these pieces. The reservation is made inside the guarded transition into `CALLING_MODEL`, so an unaffordable call is refused before any request leaves the host. Usage settles the reservation after the reply, and the reply's status decides the next state before any content can become a tool call. Admission never depends on a charge discovered after the call.
 
@@ -770,7 +772,7 @@ def run_turn(rec):
 ```
 :::
 
-The `reserve` step applies this section's admission inequality and fails the guard when the call does not fit; `route_status` applies the status mapping of @sec-vol3-controlplane-statemachine. The listing omits the per-call control check within a batch and the approval lifecycle, both of which follow the same pattern of deciding under the lock and sending after it.
+The `reserve` step applies this section's admission inequality and fails the guard when the call does not fit; `route_status` applies @tbl-vol3-harness-status-routing. The listing omits the per-call control check within a batch and the approval lifecycle, both of which follow the register-before-send rule.
 
 A positive unreserved balance can still be smaller than the next call's maximum additional charge. Checking only the already-paid bill would admit that call and discover the excess afterward. Reducing the output limit can make the call affordable only if the input charge and all other chargeable work still fit. A paid tool with no enforceable duration, unit, or charge limit supplies no finite reservation bound. The harness must reject it under a hard-ceiling policy, use a bounded alternative, or explicitly accept a stop threshold with possible overshoot. A host timeout alone does not turn that threshold into a hard financial ceiling.
 
@@ -848,7 +850,7 @@ class Admission:
 
 :::
 
-Settlement replaces reserved liability with actual consumption established by an authenticated, correlated usage report. A partial report can transfer known consumption into the actual meter while retaining the remaining possible liability. Final evidence releases the unused portion. Missing usage, stream cancellation, or a tool timeout does not establish a refund. The unresolved-operation ledger therefore retains charge obligations as well as uncertain effects, even after the trajectory stops receiving observations. A terminal scheduling state must name the owner that continues their settlement.
+Settlement replaces reserved liability with actual consumption established by an authenticated, correlated usage report. A partial report can transfer known consumption into the actual meter while retaining the remaining possible liability. Final evidence releases the unused portion. The settlement rule applies to charges as it does to effects; missing usage, stream cancellation, or a tool timeout establishes no refund.
 
 Cache discounts require the same discipline. Before dispatch, reserve at the applicable undiscounted rate unless the service contract guarantees which input will receive the discount. Afterward, use its actual usage categories. Cancellation can reduce a final charge, but admission cannot assume that reduction before the service establishes it. These conditions define the scope of the hard bound: complete mediation, bounded liabilities, and correct settlement for every included charge.
 
@@ -876,7 +878,7 @@ class HarnessBudget:
     # 1. LOAD: registry trajectory length and declared scenario inputs.
     agent = Agents.Coding.SWE_Bench_Runner
     turns = agent.max_trajectory_steps
-    s0 = 8_000
+    s_base = 8_000
     delta = 1_500  # appended output plus tool-observation tokens
     k_out = 200
     p_in, p_cache, p_out = 3.00, 0.30, 15.00  # hypothetical dollars/million tokens
@@ -885,8 +887,8 @@ class HarnessBudget:
     c_max = 3.50  # hypothetical dollar allowance
 
     # 2. EXECUTE: distinguish effective token counts from billed categories.
-    n_in = turns * s0 + delta * turns * (turns - 1) // 2
-    n_uncached = s0 + delta * (turns - 1)
+    n_in = turns * s_base + delta * turns * (turns - 1) // 2
+    n_uncached = s_base + delta * (turns - 1)
     n_cached = n_in - n_uncached
     n_out = turns * k_out
     n_total = n_in + n_out
@@ -916,7 +918,7 @@ class HarnessBudget:
     rho_wall_str = fmt_percent(rho_wall, style="prose")
     rho_dollars_str = fmt_percent(rho_dollars, style="prose")
     rho_dollars_nocache_str = fmt_percent(rho_dollars_nocache, style="prose")
-    s0_str, delta_str, k_out_str = fmt_int(s0), fmt_int(delta), fmt_int(k_out)
+    s_base_str, delta_str, k_out_str = fmt_int(s_base), fmt_int(delta), fmt_int(k_out)
     n_in_str, n_cached_str = fmt_int(n_in), fmt_int(n_cached)
     cache_ratio_str = fmt(round(c_total_nocache, 2) / round(c_total, 2), precision=1)  # ratio of displayed values
 ```
@@ -925,7 +927,7 @@ class HarnessBudget:
 
 **Problem**: The coding workload has completed `{python} HarnessBudget.turns_str` turns under hypothetical allowances of `{python} HarnessBudget.h_max_str` turns, `{python} HarnessBudget.n_max_m_str` million effective input-plus-output tokens, `{python} HarnessBudget.t_max_str` s elapsed, and `{python} HarnessBudget.c_max_str`. The clock reads `{python} HarnessBudget.t_wall_str` s. Assume all usage is settled, no paid-tool charges, and prices of `{python} HarnessBudget.p_in_str` per million uncached input tokens, `{python} HarnessBudget.p_cache_str` per million cached input tokens, and `{python} HarnessBudget.p_out_str` per million output tokens. Which allowance has the largest current used fraction in the reuse and no-reuse cases?
 
-**Math**: With a base prompt of `{python} HarnessBudget.s0_str` tokens, `{python} HarnessBudget.delta_str` tokens appended per turn, and `{python} HarnessBudget.k_out_str` output tokens per turn, @eq-vol3-trajectory-resend gives `{python} HarnessBudget.n_in_str` input tokens over the trajectory, `{python} HarnessBudget.n_total_str` with output. Under prefix reuse, every turn's earlier prefix is billed as cached input, `{python} HarnessBudget.n_cached_str` tokens, so the model charge is `{python} HarnessBudget.c_total_str`. Billed entirely as uncached input, the same tokens cost `{python} HarnessBudget.c_total_nocache_str`.
+**Math**: With a base prompt of `{python} HarnessBudget.s_base_str` tokens, `{python} HarnessBudget.delta_str` tokens appended per turn, and `{python} HarnessBudget.k_out_str` output tokens per turn, @eq-vol3-trajectory-resend gives `{python} HarnessBudget.n_in_str` input tokens over the trajectory, `{python} HarnessBudget.n_total_str` with output. Under prefix reuse, every turn's earlier prefix is billed as cached input, `{python} HarnessBudget.n_cached_str` tokens, so the model charge is `{python} HarnessBudget.c_total_str`. Billed entirely as uncached input, the same tokens cost `{python} HarnessBudget.c_total_nocache_str`.
 
 **Result**: With reuse, the trajectory has used `{python} HarnessBudget.rho_turns_str` of its turns, `{python} HarnessBudget.rho_tokens_str` of its tokens, `{python} HarnessBudget.rho_wall_str` of its time, and `{python} HarnessBudget.rho_dollars_str` of its dollars, so turns lead. Without reuse, dollars lead at `{python} HarnessBudget.rho_dollars_nocache_str`.
 
@@ -1030,7 +1032,7 @@ An incomplete or canceled invocation may leave syntactically valid fragments. Sy
 ::: {.fallacy-pitfall}
 **Pitfall**: *Treating a pause, timeout, or terminal state as settlement.*
 
-Releasing the test job's reservation when its wait times out returns `{python} Admission.reserved_str`, `{python} Admission.reserved_share_str` of the allowance in notebook \ref{nbk-10-bounded-liability-admission}, to the pool. New calls can claim it before the job's final charge arrives, and the trajectory then overshoots its ceiling by up to that amount. Remove stale observation eligibility, keep the operation's effect and charge obligations in the ledger, and route authenticated late evidence to the settlement owner rather than into an obsolete model turn.
+Releasing the test job's reservation when its wait times out returns `{python} Admission.reserved_str`, `{python} Admission.reserved_share_str` of the allowance in notebook \ref{nbk-10-bounded-liability-admission}, to the pool. New calls can claim it before the job's final charge arrives, and the trajectory then overshoots its ceiling by up to that amount. The settlement rule prevents this. Withdraw stale observation eligibility, keep the operation's effect and charge obligations in the ledger, and route authenticated late evidence to the settlement owner rather than into an obsolete model turn.
 :::
 
 ::: {.fallacy-pitfall}
