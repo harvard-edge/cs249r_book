@@ -991,12 +991,18 @@ class ValidateCommand:
             "--log", dest="pdf_log", type=str, default=None,
             help="pdf --scope verify: optional Quarto render log to scan for crossref warnings",
         )
+        parser.add_argument(
+            "--offline", action="store_true", default=False,
+            help="bib --scope verify: skip live network calls (ledger-only check)",
+        )
 
         try:
             ns = parser.parse_args(args)
         except SystemExit:
             # argparse uses SystemExit(0) for --help and non-zero for parse errors.
             return ("-h" in args) or ("--help" in args)
+
+        self._offline = getattr(ns, "offline", False)
 
         if not ns.subcommand:
             self._print_check_help()
@@ -12024,28 +12030,42 @@ class ValidateCommand:
 
         # Check unverified entries that have DOIs
         if unverified_doi_entries:
-            def verify_doi_target(t):
-                rel, entry, raw_doi = t
-                clean_doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", raw_doi, flags=re.I).strip()
-                if clean_doi.startswith("10.48550/arXiv."):
-                    ok, title_or_err = check_datacite(clean_doi)
-                else:
-                    ok, title_or_err = check_crossref(clean_doi)
-                return rel, entry, clean_doi, ok, title_or_err
+            offline = getattr(self, "_offline", False)
+            if offline:
+                for rel, entry, raw_doi in unverified_doi_entries:
+                    clean_doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", raw_doi, flags=re.I).strip()
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=entry.start_line,
+                        code="bib_unverified_doi_offline",
+                        message=f"@{entry.entry_type}{{{entry.key}}} DOI `{clean_doi}` has not been verified in manifest (offline mode active).",
+                        severity="warning",
+                        context=f"doi = {{{clean_doi}}}",
+                        suggestion="Run `./binder/binder check bib --scope verify` without --offline to verify against primary APIs.",
+                    ))
+            else:
+                def verify_doi_target(t):
+                    rel, entry, raw_doi = t
+                    clean_doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", raw_doi, flags=re.I).strip()
+                    if clean_doi.startswith("10.48550/arXiv."):
+                        ok, title_or_err = check_datacite(clean_doi)
+                    else:
+                        ok, title_or_err = check_crossref(clean_doi)
+                    return rel, entry, clean_doi, ok, title_or_err
 
-            with ThreadPoolExecutor(max_workers=6) as ex:
-                for fut in as_completed([ex.submit(verify_doi_target, t) for t in unverified_doi_entries]):
-                    rel, entry, clean_doi, ok, title_or_err = fut.result()
-                    if not ok:
-                        issues.append(ValidationIssue(
-                            file=rel,
-                            line=entry.start_line,
-                            code="bib_unverified_doi",
-                            message=f"@{entry.entry_type}{{{entry.key}}} DOI `{clean_doi}` could not be verified via Crossref/DataCite: {title_or_err}",
-                            severity="warning",
-                            context=f"doi = {{{clean_doi}}}",
-                            suggestion="Check DOI correctness or confirm source in browser.",
-                        ))
+                with ThreadPoolExecutor(max_workers=6) as ex:
+                    for fut in as_completed([ex.submit(verify_doi_target, t) for t in unverified_doi_entries]):
+                        rel, entry, clean_doi, ok, title_or_err = fut.result()
+                        if not ok:
+                            issues.append(ValidationIssue(
+                                file=rel,
+                                line=entry.start_line,
+                                code="bib_unverified_doi",
+                                message=f"@{entry.entry_type}{{{entry.key}}} DOI `{clean_doi}` could not be verified via Crossref/DataCite: {title_or_err}",
+                                severity="warning",
+                                context=f"doi = {{{clean_doi}}}",
+                                suggestion="Check DOI correctness or confirm source in browser.",
+                            ))
 
         issues.sort(key=lambda i: (i.file, i.line))
         return ValidationRunResult(
