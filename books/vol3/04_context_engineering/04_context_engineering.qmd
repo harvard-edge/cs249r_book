@@ -1118,6 +1118,23 @@ The corrections preserve a common boundary. Working context presents selected in
 
 The repair manifest follows one decision through several transformations. Selection identifies what the next call needs; staging gives that material a bounded representation; compaction shortens it; and a structured progress record preserves the supported observations, hypotheses, and unresolved work needed to continue. Invalidation then revisits support affected by relevant changes. Evaluation tests whether the resulting request enables adequate decisions, including when a required payload cannot be recovered or a check no longer describes the current candidate.
 
+@Tbl-vol3-context-engineering-key-equations collects the relations the chapter uses to budget, schedule, invalidate, and evaluate the next request.
+
+| **Equation**                                                                                                                                                                         | **What it bounds or decides**                                                                       | **Where derived**                      |
+|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|:---------------------------------------|
+| $S_{\text{system}} + S_{\text{tools}} + S_{\text{state}} + S_{\text{obs}} \le S_{\max} - K_{\max}$                                                                                   | How the input allowance left after the output reserve divides among roles, and which term to shrink | @eq-vol3-context-budget-partition      |
+| $H(S_{\text{system}} + S_{\text{tools}} + S_{\text{state}}) + \Delta S_{\text{turn}} H(H+1)/2$ against $H(S_{\text{system}} + S_{\text{tools}} + S_{\text{state}} + S_{\text{obs}})$ | Cumulative input of appending, quadratic in the horizon, against selecting, linear in it            | @sec-vol3-context-engineering-decision |
+| $\alpha_{\text{target}} = e^{z_{\text{target}}} / \left(e^{z_{\text{target}}} + \sum_{j=1}^{n} e^{z_j}\right)$                                                                       | Share of one normalizer left to the target key as staged keys accumulate                            | @eq-vol3-softmax-dilution              |
+| $n_{\text{cycle}} = \lceil (\tau_{\text{high}} - \tau_{\text{low}}) / \Delta S_{\text{turn}} \rceil$                                                                                 | Calls between compaction passes, and so how often the pass and its trunk rewrite are paid           | @eq-vol3-hysteretic-compaction-cadence |
+| $\bar{C}_{\text{turn}} = \left(\sum_{i=1}^{n_{\text{cycle}}} C_{\text{call},i} + C_{\text{comp}}\right) / n_{\text{cycle}}$                                                          | Average cost per ordinary call with the compaction pass amortized over its cycle                    | @eq-vol3-hysteretic-compaction-cost    |
+| $\lambda(o) = \langle \text{artifact}, \text{kind}, \text{revision}, \text{range}, \text{content id} \rangle$                                                                        | Which staged observations and derived entries a write invalidates                                   | @eq-vol3-observation-binding           |
+| $\eta_{\mathcal{C}}(k)$; $(1-\rho)^{k}$ under independent per-round loss                                                                                                             | Share of a constraint set retained without interruption through $k$ compaction boundaries           | @eq-vol3-constraint-retention          |
+| $\epsilon_{\text{stale}}$ = superseded-support decisions / decisions requiring current evidence                                                                                      | Rate at which historical observations are used as evidence about current state                      | @eq-vol3-stale-support                 |
+| $\hat{p}_{\text{acc}} = N_{\text{acc}}/N$, entering $C_{\text{eff}} = \mathbb{E}[C_{\text{attempt}}]/p_{\text{acc}}$                                                                 | The policy to deploy: least cost per accepted task, with every assigned trial counted               | @eq-vol3-task-acceptance               |
+| $\gamma_{\text{req}} = S_{\text{ref}} / S_{\pi}$                                                                                                                                     | Request size relative to an uncompacted reference; a representation ratio, not a quality measure    | @eq-vol3-request-compression           |
+
+: **Key equations**: Each relation counts complete serialized requests under the chapter's stated assumptions; the attention share uses fixed toy logits and bounds no accuracy. {#tbl-vol3-context-engineering-key-equations tbl-colwidths="[48,36,16]"}
+
 ::: {.callout-takeaways title="Context is selected information for the next decision"}
 
 * **Capacity admits; evidence decides**: The serialized request must fit with output headroom, and within that limit the useful input depends on the task, model, and representation. Appending every tool result overflows the reference repair window at turn `{python} UsableContextBudget.overflow_turn_str` of `{python} UsableContextBudget.horizon_str`, so size each turn's observations to the horizon and measure decision quality directly.
@@ -1144,6 +1161,118 @@ The model side began when attention made the whole input a single normalized com
 - @liu2024lost vary only the position of relevant information and measure how well it is used; the design is a model for testing placement on the intended workload rather than assuming it.
 - @hsieh2024ruler show why a simple retrieval probe overstates usable context, and their benchmark design is a template for building harder synthetic probes.
 - @maynez2020faithfulness measure, through human evaluation, what summarizers add that their sources do not support, the failure a progress-record audit exists to catch.
+
+## Exercises {#sec-vol3-context-engineering-exercises}
+
+```{python}
+#| label: calc-vol3-context-exercise-givens
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EXERCISE GIVENS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-context-engineering-exercises.
+# │ Goal: Pin the shared givens of the end-of-chapter problems.
+# │ Show: Registry window and step budget; hypothetical prices and costs.
+# │ How: Registry harness profile; input prices of calc-vol3-context-layout-price.
+# │ Note: Prices and per-task costs are hypothetical problem inputs, not any
+# │       provider's schedule.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_usd
+
+class ContextExerciseGivens:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    agent = Agents.Coding.SWE_Bench_Runner
+    window = int(agent.context_window.to(ureg.token).magnitude)  # registry window
+    horizon = agent.max_trajectory_steps  # registry step budget, turns
+    input_price = ContextLayoutPrice.input_price  # hypothetical, per token
+    cached_fraction = ContextLayoutPrice.cached_fraction
+    output_price = 15.00 * USD / Mtoken  # hypothetical output price
+    attempt_cost = 2.00 * USD  # hypothetical repair attempt cost (Problem 6)
+    correction_cost = 0.05 * USD  # hypothetical correction call (Problem 6)
+    escalation_cost = 4.00 * USD  # hypothetical human escalation (Problem 7)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    cached_price = cached_fraction * input_price
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(window == 128_000 and horizon == 30, "Worked solutions assume the registry harness profile")
+    check(0 < cached_price < input_price < output_price, "Reused input is cheapest, output dearest")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    window_str = fmt_int(window)
+    horizon_str = fmt_int(horizon)
+    input_price_str = fmt_usd(input_price * Mtoken, precision=0)
+    cached_price_str = fmt_usd(cached_price * Mtoken, precision=2)
+    cached_pct_str = fmt_percent(cached_fraction, style="symbol", precision=0)
+    output_price_str = fmt_usd(output_price * Mtoken, precision=0)
+    attempt_cost_str = fmt_usd(attempt_cost, precision=0)
+    correction_cost_str = fmt_usd(correction_cost, precision=2)
+    escalation_cost_str = fmt_usd(escalation_cost, precision=0)
+```
+
+Unless a problem states otherwise, use the reference repair harness and the hypothetical prices in @tbl-vol3-context-engineering-exercise-givens. Token counts are for complete serialized requests, prices are problem inputs rather than any provider's schedule, and a reused prefix is assumed to have compatible cached state available.
+
+| **Quantity**                         | **Symbol** | **Given**                                                                                                                          |
+|:-------------------------------------|:-----------|:-----------------------------------------------------------------------------------------------------------------------------------|
+| Context window of the repair harness | $S_{\max}$ | `{python} ContextExerciseGivens.window_str` tokens                                                                                 |
+| Step budget of the repair harness    | $H$        | `{python} ContextExerciseGivens.horizon_str` turns                                                                                 |
+| Uncached input price                 |            | `{python} ContextExerciseGivens.input_price_str` per million tokens                                                                |
+| Reused-prefix input price            |            | `{python} ContextExerciseGivens.cached_price_str` per million tokens (`{python} ContextExerciseGivens.cached_pct_str` of uncached) |
+| Output price                         |            | `{python} ContextExerciseGivens.output_price_str` per million tokens                                                               |
+
+: **Givens for the exercises**: The window and step budget come from the registry's repair-harness profile; every price is hypothetical. {#tbl-vol3-context-engineering-exercise-givens tbl-colwidths="[40,14,46]"}
+
+**1. Tool catalogs and the output reserve (Basic).** The repair harness gains a larger tool catalog and longer patch outputs. Its tool declarations grow to 30,000 tokens, and the runtime raises $K_{\max}$ to 16,000 tokens. Application instructions stay at 3,000 tokens and task state at 24,000, and every tool result is appended at 4,000 tokens.
+
+(a) Using @eq-vol3-context-budget-partition, compute the input limit, the observation budget, the number of appended turns that fit, and the largest per-turn digest that carries the full step budget $H$.
+(b) A proposal loads tool declarations on demand and keeps only 6,000 tokens of core declarations resident. Repeat (a).
+(c) Show that no tool-declaration policy lets unmodified 4,000-token results be appended for all $H$ turns under the 16,000-token reserve. Which term must the design change instead? Compare the per-turn digest each declaration policy allows, and state what the on-demand policy adds to a request whenever a turn needs a non-core tool.
+
+**2. When appending stops being cheaper (Basic).** Every request carries a fixed 39,000 tokens of instructions, declarations, and task state. The appending policy adds $\Delta S_{\text{turn}} = 4{,}000$ tokens of tool results per turn and keeps them all; the selecting policy keeps $S_{\text{obs}} = 8{,}000$ tokens of observations on every call. Assume no prefix reuse and a window large enough to admit every request.
+
+(a) Write the cumulative input tokens of each policy over $H$ turns. At which call does the appending policy's single request first exceed the selecting policy's, and at which horizon does its cumulative bill first exceed?
+(b) A longer task runs a 60-turn step budget. Compute both cumulative bills in tokens and at the uncached input price, and their ratio.
+(c) Show that the ratio of the two bills is exactly linear in $H$ and find its slope. At what horizon does appending cost three times as much as selecting? Use the result to critique a plan to "add selection later, once tasks get long."
+
+**3. Look-alike evidence versus bulk (Basic).** In the toy head of @eq-vol3-softmax-dilution, the target key has logit $z_{\text{target}} = 6$. The request holds 40,000 unrelated keys at logit $-2$ and a superseded 850-token `r17` excerpt whose keys share identifiers with the evidence, giving each a logit of 2. All logits stay fixed as keys are added or removed.
+
+(a) Compute $\alpha_{\text{target}}$ without the excerpt and with it.
+(b) How many unrelated keys contribute as much to the normalizer as the 850 excerpt keys?
+(c) The runtime can either drop half of the unrelated keys or drop the excerpt. Compute $\alpha_{\text{target}}$ for each choice, and for dropping every unrelated key while keeping the excerpt. Which removal should the runtime make first, and which measurement from @sec-vol3-context-engineering-evaluation would confirm the choice on a trained model?
+
+**4. Choosing a watermark gap (Intermediate).** A noisier test suite raises arrivals to $\Delta S_{\text{turn}} = 6{,}000$ tokens. Compaction returns the request to $\tau_{\text{low}} = 47{,}000$ tokens: a 15,000-token root, a 24,000-token trunk, and an 8,000-token leaf. The output reserve is $K_{\max} = 8{,}000$. Two triggers are proposed, $\tau_{\text{high}} = 92{,}000$ and $\tau_{\text{high}} = 68{,}000$. Model each cycle as $n_{\text{cycle}}$ ordinary calls at request lengths $\tau_{\text{low}} + i \, \Delta S_{\text{turn}}$ for $i = 1, \ldots, n_{\text{cycle}}$, the last of which triggers a compaction pass over the same request. The first ordinary call after a pass reuses only the root, because the pass rewrote the trunk; every later call reuses the whole previous request. Each ordinary call generates 1,000 output tokens. The compaction pass processes its entire input uncached and generates a 6,000-token record.
+
+(a) For each trigger, compute $n_{\text{cycle}}$ from @eq-vol3-hysteretic-compaction-cadence, the trigger length and overshoot, whether the trigger request plus $K_{\max}$ fits the window, and the number of passes within $H$.
+(b) Compute $C_{\text{comp}}$, the mean ordinary-call cost, and $\bar{C}_{\text{turn}}$ from @eq-vol3-hysteretic-compaction-cost for each trigger.
+(c) Each pass independently loses each of 10 unprotected constraints with probability 0.02. Compute the probability that all 10 survive every pass of the step budget under each trigger.
+(d) Choose a trigger and explain why the narrow gap loses on both cost and retention even though each of its passes is cheaper. What measured property of the workload would justify the narrow gap anyway?
+
+**5. Replace now, or ride the next rewrite? (Intermediate).** Start from the request of \ref{nbk-04-invalidation-tokens}: 47,000 tokens behind a 15,000-token root, with an 850-token `r17` excerpt opening the trunk, a 24-token replacement marker, and a 128-token appended notice. Twenty calls remain, and each later call reuses the whole previous request; the new leaf content is the same under both policies and can be ignored.
+
+(a) Compute the input cost of the next call under replacement and under an appended notice.
+(b) How many more tokens does the appended policy keep resident on every later call, what do they cost per call at the reused-prefix price, and after how many calls would the two policies break even on price alone?
+(c) A compaction pass is scheduled six calls from now and will rewrite the trunk regardless. Propose an invalidation policy that uses this fact, and state the condition under which it must replace the excerpt immediately anyway. Using @eq-vol3-stale-support, identify which of the next six decisions belong in the denominator and how the policy keeps the numerator at zero.
+
+**6. Paying for a protected-field check (Intermediate).** A model-written progress record loses each of 12 required constraints independently with probability $\rho = 0.03$ per compaction round, and the trajectory runs 3 rounds. A lost constraint makes the task unacceptable; with every constraint intact, $p_{\text{acc}} = 0.6$. An attempt costs `{python} ContextExerciseGivens.attempt_cost_str`. A protected-field check in the style of @lst-vol3-progress-audit detects 90 percent of losses and repairs each detected loss; budget it as one `{python} ContextExerciseGivens.correction_cost_str` correction call per round.
+
+(a) Without the check, compute the probability that all 12 constraints survive, the resulting $p_{\text{acc}}$, and $C_{\text{eff}}$.
+(b) Repeat with the check, treating undetected losses as the new per-round loss.
+(c) What per-round loss would an unchecked summarizer need to keep all-constraint survival at or above 95 percent over 3 rounds?
+(d) With the check in place, after how many rounds does all-constraint survival first fall below 50 percent? The runtime in @sec-vol3-context-engineering-summarization copies contract constraints directly from the task contract. What does that change, and which protected fields remain exposed to $\rho$?
+
+**7. A stable root for short sessions (Advanced).** The support agent (\ref{lhs-vol3-support-agent}) serves 50,000 sessions a day. Each request carries a 20,000-token root of policy instructions and tool declarations and a 2,000-token customer record. A session makes 6 calls; before call $t$ the request has grown by 1,500 tokens per turn to $22{,}000 + 1{,}500\,t$ tokens, and each call generates 300 output tokens. Sessions arrive often enough that compatible root state is always resident. Layout A places the customer record and a session timestamp ahead of the root; Layout B places the root first. Within a session, every call after the first reuses the whole previous request under either layout.
+
+(a) Compute the input and output cost per session, the daily bill, and the token-weighted prefix hit rate under each layout.
+(b) Show that the entire difference arises on the first call of each session. Which term of @eq-vol3-context-budget-partition binds here, and how does that differ from what binds the repair agent over its step budget?
+(c) A developer templates the customer's name into the first line of the policy instructions to personalize the tone. Which layout does that recreate, and what does it cost per day?
+(d) A cost review proposes cutting the root to 10,000 tokens by removing policy text. Under Layout B, compute the saving per session. With a 90 percent resolution rate at the full root, and each unresolved session escalating to a human at `{python} ContextExerciseGivens.escalation_cost_str`, how many percentage points of resolution can the cut lose before it costs more than it saves? What evidence should the proposal present before it ships?
+
+**8. Freshness through a human approval (Advanced).** The remediation agent (\ref{lhs-vol3-remediation-agent}) decides on a production change from 5 observations of shared state. Other actors change each observed resource independently, as a Poisson process with mean rate $r_{\text{chg}}$ of one change per 20 minutes. The runtime refreshes an observation only when it is older than a 10-minute time-to-live, so at decision time each observation's age is uniformly distributed between 0 and 10 minutes.
+
+(a) Compute the probability that one observation still describes its resource at decision time and the probability that all 5 do. If every decision requires current evidence for all 5, estimate $\epsilon_{\text{stale}}$ from @eq-vol3-stale-support.
+(b) A teammate proposes refreshing all 5 observations immediately before each model call. The call takes 30 seconds, and the action executes after a human approval that takes 10 minutes. Compute the probability that at least one of the 5 resources changes between refresh and execution, first ignoring the approval and then including it. What does the result show about the limit of any context-refresh policy for this workload?
+(c) Only one observation, the configuration version the change edits, determines whether the action is safe; the other four were diagnostic. Redesign the policy around the binding $\lambda(o)$ of @eq-vol3-observation-binding and an action-time precondition at the tool boundary that re-observes and re-requests approval when the precondition fails. Compute the probability that the precondition holds at execution and the expected number of approval rounds, and compare with a precondition on all 5 observations. Contrast the change signal available here with the one the repair agent uses after its own patch.
 
 ::: {.callout-chapter-connection title="From selected tokens to physical attention state"}
 
