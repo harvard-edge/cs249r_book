@@ -373,7 +373,7 @@ The third row of @tbl-vol3-action-invertibility needs a name, because the recove
 
 :::
 
-A **commitment region**\index{Commitment region!definition} is the span of a plan that ends in one pivot: preparatory work that compensation can still undo, the pivot itself, and the follow-up duties that remain afterward. Planning in commitment regions is the pivot boundary of principle \ref{pri-vol3-reversibility-sagas}.
+A **commitment region**\index{Commitment region!definition} is the span of a plan that ends in one pivot: preparatory work that compensation can still undo, the pivot itself, and the follow-up duties that remain afterward. Planning in commitment regions is the pivot boundary of principle \ref{pri-vol3-intent-before-effect}.
 
 Within such a region, perform every check that can legitimately precede commitment before releasing the irreversible action. Preserve the necessary artifacts, validate their versions and dependencies, and record the authorized intent, reservation, recovery metadata, and follow-up obligations durably under the failure-domain contract of @sec-vol3-persistence-wal. The pivot itself then faces the admission check at its final dispatch boundary like any other operation.
 
@@ -419,16 +419,25 @@ A check placed before the pivot moves a wrong change from $\rho_a = 0$ to the ca
 # EXPECTED IRREVERSIBLE LOSS AROUND A PIVOT (LEGO)
 # Goal: Price reordering canary checks ahead of a fleet rollout.
 # Show: L_A for rollout-first and canary-first plans; sensitivity to catch rate.
-# Scope: Hypothetical remediation scenario inputs, not measured incident data.
+# Scope: Agents.Remediation.OnCall workload profile (teaching assumptions,
+#        not measured incident data); attempt cost uses the same terms as
+#        the cost-per-accepted-task table in @sec-vol3-agent-economics.
+from mlsysim import Agents, USD
 from mlsysim.fmt import fmt_usd, fmt_percent, fmt_multiple, fmt_int, check
 
 class PivotLoss:
-    # 1. LOAD: remediation-agent scenario assumptions (documented, not measured).
-    p_bad = 0.04  # probability a proposed fleet change is wrong
-    consequence = 12_000  # USD impact when a wrong change fully commits
-    v_catch = 0.80  # fraction of wrong changes caught by canary checks pre-pivot
-    r_canary = 0.90  # fraction of a caught change's impact avoided by canary revert
-    c_attempt = 3.00  # USD model, telemetry, and review cost per attempt
+    # 1. LOAD: remediation-agent workload profile.
+    remed = Agents.Remediation.OnCall
+    p_bad = remed.wrong_change_probability  # probability a proposed fleet change is wrong
+    consequence = remed.wrong_change_impact.to(USD).magnitude  # impact when a wrong change fully commits
+    v_catch = remed.canary_catch_rate  # fraction of wrong changes caught by canary checks pre-pivot
+    r_canary = remed.canary_recovery_fraction  # fraction of a caught change's impact avoided by revert
+    # Model calls, telemetry and change tools, health check, and approver review per attempt.
+    c_attempt = (
+        (remed.model_cost_per_attempt + remed.environment_cost_per_attempt + remed.assessment_cost_per_attempt + remed.approval_cost_per_attempt)
+        .to(USD)
+        .magnitude
+    )
     dv = 0.10  # catch-rate increment for the sensitivity
 
     # 2. EXECUTE: L_A = sum P(bad) * consequence * (1 - r).
@@ -446,7 +455,8 @@ class PivotLoss:
     check(abs(loss_first - 480) < 1e-9, "Rollout-first loss")
     check(abs(loss_canary - p_bad * consequence * (1 - v_catch * r_canary)) < 1e-9, "Closed form")
     check(abs(loss_canary - 134.4) < 1e-9, "Canary-first loss")
-    check(loss_canary > 10 * c_attempt, "Loss term dominates attempt cost")
+    check(loss_canary > 5 * c_attempt, "Loss term dominates attempt cost")
+    check(per_dv > c_attempt, "Ten catch-rate points must be worth more than one attempt")
 
     # 4. OUTPUT: every export is used below.
     p_bad_str = fmt_percent(p_bad, precision=0, style="prose")
@@ -470,7 +480,7 @@ class PivotLoss:
 
 **Problem**: For the remediation agent, how much expected irreversible loss per task does moving the canary checks ahead of the fleet rollout remove, and which knob moves the remainder most?
 
-**Variables**: A proposed fleet change is wrong with probability $p_{\text{bad}}$ = `{python} PivotLoss.p_bad_str`. A wrong change that commits at the pivot causes impact $I$ = `{python} PivotLoss.consequence_str`. Canary checks catch $v$ = `{python} PivotLoss.v_str` of wrong changes before the pivot, and reverting the canary avoids $\rho$ = `{python} PivotLoss.r_str` of a caught change's impact. The attempt itself costs `{python} PivotLoss.c_attempt_str` in model calls, telemetry queries, and review. All values are scenario assumptions.
+**Variables**: A proposed fleet change is wrong with probability $p_{\text{bad}}$ = `{python} PivotLoss.p_bad_str`. A wrong change that commits at the pivot causes impact $I$ = `{python} PivotLoss.consequence_str`. Canary checks catch $v$ = `{python} PivotLoss.v_str` of wrong changes before the pivot, and reverting the canary avoids $\rho$ = `{python} PivotLoss.r_str` of a caught change's impact. The attempt itself costs `{python} PivotLoss.c_attempt_str` in model calls, telemetry queries, a post-change health check, and on-call review, most of it the reviewer's time. All values are scenario assumptions.
 
 **Math**: Rollout first, nothing is recoverable, so @eq-vol3-expected-irreversible-loss gives $p_{\text{bad}} I$ = `{python} PivotLoss.loss_first_str`. Canary first, caught changes cost $p_{\text{bad}} v I (1-\rho)$ = `{python} PivotLoss.loss_caught_str` and missed changes cost $p_{\text{bad}}(1-v) I$ = `{python} PivotLoss.loss_missed_str`, a total of `{python} PivotLoss.loss_canary_str`. The two terms collapse to $L_A = p_{\text{bad}} I (1 - v\rho)$.
 
@@ -1090,7 +1100,7 @@ Compensation establishes declared postconditions without erasing history. Forwar
 
 :::
 
-Scoped compensation and commitment boundaries (principle \ref{pri-vol3-reversibility-sagas}) become an ordering rule that registers corrective obligations before dispatch, checks the designated commitment, and preserves the duties that remain. Out-of-band preemption and progress watchdogs (principle \ref{pri-vol3-preemptive-interrupts}) add enforced intervention when evidence suggests nonprogress. Neither promises that every effect is reversible or every task recoverable.
+Intent before effect (principle \ref{pri-vol3-intent-before-effect}) becomes, for compensation, an ordering rule that registers corrective obligations before dispatch, checks the designated commitment, and preserves the duties that remain. Trajectory-level encapsulation (principle \ref{pri-vol3-trajectory-encapsulation}) adds enforced intervention when progress checks suggest nonprogress. Neither promises that every effect is reversible or every task recoverable.
 
 ::: {.callout-chapter-connection title="From recovery behavior to evaluation evidence"}
 

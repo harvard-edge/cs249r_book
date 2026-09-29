@@ -308,7 +308,7 @@ Control separates the arrival of a request from the conditions it establishes. T
 
 A **turn boundary**\index{Turn boundary!definition} is a point at which the harness can decide whether continuation is still permitted before admitting its next operation. It occurs before a model invocation and before tool dispatch, including dispatch of each separately admitted call in a proposed batch. Because the admission check runs there under the record lock, a pause cannot slip between checking a flag and dispatching. The boundary is a local admission guarantee, and it makes the remaining obligation inspectable instead of hiding it behind the timestamp of a stop button.
 
-Generation need not finish before local candidate processing stops. The harness can request **streaming cancellation**\index{Streaming cancellation!definition}, which asks the serving service to stop generating a reply in progress, close the invocation's eligibility to produce an actionable candidate, and retain partial content only for bounded diagnosis. The invocation contract in @sec-vol3-foundation-model-contract governs the result. A canceled or truncated payload cannot become a dispatchable call because a parser closes its brackets, because its prefix already parses, or because a complete-looking reply arrives after its eligibility was withdrawn; the quarantining invariant (principle \ref{pri-02-quarantining-invariant}) holds regardless of how the invocation ended. Such late evidence can still settle usage or explain what the service did.
+Generation need not finish before local candidate processing stops. The harness can request **streaming cancellation**\index{Streaming cancellation!definition}, which asks the serving service to stop generating a reply in progress, close the invocation's eligibility to produce an actionable candidate, and retain partial content only for bounded diagnosis. The invocation contract in @sec-vol3-foundation-model-contract governs the result. A canceled or truncated payload cannot become a dispatchable call because a parser closes its brackets, because its prefix already parses, or because a complete-looking reply arrives after its eligibility was withdrawn; the quarantining rule of invariant closure (principle \ref{pri-invariant-closure}) holds regardless of how the invocation ended. Such late evidence can still settle usage or explain what the service did.
 
 ```{python}
 #| label: calc-vol3-harness-boundary-wait
@@ -374,7 +374,7 @@ A new user instruction also needs this discipline. Adding “change the target f
 
 ### Termination and remaining obligations
 
-Kill requests invoke enforcement without waiting for model cooperation or a completed reply, as out-of-band preemption requires (principle \ref{pri-vol3-preemptive-interrupts}). The controller can stop local execution, revoke mediated access, or fence obsolete workers on the paths its execution boundary controls. The sandbox lifetime contract in @sec-vol3-sandboxes-pooling-reset determines which processes, descendants, channels, and resources that enforcement covers. Remote work and already open handles lie outside a local kill and need their own evidence.
+Kill requests invoke enforcement without waiting for model cooperation or a completed reply, as trajectory-level encapsulation requires (principle \ref{pri-vol3-trajectory-encapsulation}). The controller can stop local execution, revoke mediated access, or fence obsolete workers on the paths its execution boundary controls. The sandbox lifetime contract in @sec-vol3-sandboxes-pooling-reset determines which processes, descendants, channels, and resources that enforcement covers. Remote work and already open handles lie outside a local kill and need their own evidence.
 
 Finalization therefore records confirmed termination separately from unresolved effects and charges, which keep their owner under the settlement rule. The operation's repeat contract, established in @sec-vol3-tool-calling-idempotency, determines whether another attempt is safe, and settlement comes before any retry (principle \ref{pri-vol3-exactly-once-settlement}); an identifier alone cannot answer what the interrupted attempt did.
 
@@ -491,7 +491,8 @@ Under stable flow, Little's law (@sec-vol3-kv-workload-dynamics) makes the mean 
 # │ Show: Little's law held count, retained sandbox memory, approval share of
 # │       time to mitigate.
 # │ How:  L = lambda * W; registry sandbox footprint per held repair trajectory.
-# │ Note: Arrival rates and times are scenario inputs, not measurements.
+# │ Note: Arrival rates and times are scenario inputs, not measurements; the
+# │       remediation ones come from the Agents.Remediation.OnCall profile.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_percent
@@ -499,13 +500,14 @@ from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_percent
 class EscrowByWorkload:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     agent = Agents.Coding.SWE_Bench_Runner
+    remed = Agents.Remediation.OnCall
     lease_mem = agent.sandbox_memory_footprint
     lam_repair = 6  # scenario: review requests per hour
     w_repair = 2  # scenario: mean hours to a review decision
-    lam_remed = 2  # scenario: remediation approval requests per hour
-    t_diag = 6  # scenario: minutes of diagnosis before the proposal
-    w_remed = 15  # scenario: mean minutes to an on-call decision
-    t_apply = 9  # scenario: minutes to apply and verify the change
+    lam_remed = remed.approval_request_rate.to("1/hour").magnitude  # approval requests per hour
+    t_diag = remed.diagnosis_time.to("minute").magnitude  # minutes of diagnosis before the proposal
+    w_remed = remed.approval_decision_time.to("minute").magnitude  # mean minutes to an on-call decision
+    t_apply = remed.apply_verify_time.to("minute").magnitude  # minutes to apply and verify the change
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     l_repair = lam_repair * w_repair
@@ -704,7 +706,7 @@ The repair trajectory's measured bill is close to its task allowance, and the te
 
 The need for a lifetime bound shows most clearly in a **runaway retry loop**\index{Runaway retry loop!definition}. Suppose a later candidate of the repair fails its targeted test. The model proposes a variant, then another, then a broader diagnostic that also fails. Each failure appends an error observation to the context, and each new proposal is a well-formed tool call inside every per-call limit. The trajectory waits correctly at every tool boundary, receives its fair share of service, and passes every per-call admission check. Many turns later it has consumed real resources and moved the repair no closer to acceptance. @Fig-vol3-epistemic-attractor-cycle traces this cycle and the harness budget that ends it.
 
-Ending this loop is the harness's job. As failures accumulate, they dilute the task instructions that framed the work, a cost established in @sec-vol3-context-engineering, and a reply that ends the turn becomes less likely rather than more. A remaining-budget notice or an instruction to stay under a stated limit lowers the probability of overspending; it does not bound it, and it weakens as the context fills with failures. A looping model stays live, well formed, and inside every per-call limit while advancing nothing, so the bound on the whole trajectory sits outside the model with the other controls (principle \ref{pri-vol3-preemptive-interrupts}). Recognizing that the loop has stalled is a separate judgment; the budget guarantees only that the loop ends.
+Ending this loop is the harness's job. As failures accumulate, they dilute the task instructions that framed the work, a cost established in @sec-vol3-context-engineering, and a reply that ends the turn becomes less likely rather than more. A remaining-budget notice or an instruction to stay under a stated limit lowers the probability of overspending; it does not bound it, and it weakens as the context fills with failures. A looping model stays live, well formed, and inside every per-call limit while advancing nothing, so the bound on the whole trajectory sits outside the model with the other controls (principle \ref{pri-vol3-trajectory-encapsulation}). Recognizing that the loop has stalled is a separate judgment; the budget guarantees only that the loop ends.
 
 ::: {#fig-vol3-epistemic-attractor-cycle fig-env="figure" fig-pos="htb" fig-cap="**A Runaway Loop and the Budget That Ends It**: A failing targeted test appends error observations to the context, completion requests become rare, and each retry is well formed and within per-call limits, so the loop continues without progress. The harness budget, kept outside the context, applies the reservation test at every admission. When a call does not fit or the deadline has passed, admission is refused and the trajectory enters FINALIZING, which settles or transfers its outstanding work." fig-alt="Four boxes in a cycle: model proposes an action, error observations accumulate, ending the turn becomes rare, and runaway loop, connected by arrows labeled targeted test fails and another retry. The return arrow from runaway loop to model is crossed out and marked loop stopped. A harness budget region at the bottom contains an admission test reading actual plus reserved plus proposed plus finalization reserve at most allowance, with an arrow to a box reading FINALIZING, budget or deadline stop. An arrow labeled admission refused runs from the budget region to the crossed-out return arrow."}
 
@@ -1026,7 +1028,7 @@ In notebook \ref{nbk-10-bounded-liability-admission}, the settled bill leaves `{
 ::: {.fallacy-pitfall}
 **Fallacy**: *A parseable reply is dispatchable after cancellation.*
 
-An incomplete or canceled invocation may leave syntactically valid fragments. Syntax does not restore the invocation's completion status or current authority. Under the quarantining invariant (principle \ref{pri-02-quarantining-invariant}), those fragments remain diagnostic data; a new proposal must pass the ordinary status and admission checks.
+An incomplete or canceled invocation may leave syntactically valid fragments. Syntax does not restore the invocation's completion status or current authority. Under the quarantining rule of invariant closure (principle \ref{pri-invariant-closure}), those fragments remain diagnostic data; a new proposal must pass the ordinary status and admission checks.
 :::
 
 ::: {.fallacy-pitfall}
@@ -1060,7 +1062,7 @@ The mechanisms work together at admission. A ready trajectory still needs curren
 
 :::
 
-Trajectory-level encapsulation (principle \ref{pri-vol3-trajectory-encapsulation}) makes the runtime-owned record the basis of supervision, holding references to the state it does not contain. Out-of-band preemption (principle \ref{pri-vol3-preemptive-interrupts}) places control and admission outside model cooperation. Both hold inside explicit resource and evidence boundaries, which is why every stop in this chapter left an owner for the effects already in flight.
+Trajectory-level encapsulation (principle \ref{pri-vol3-trajectory-encapsulation}) makes the runtime-owned record the basis of supervision, holding references to the state it does not contain, and it places control and admission outside model cooperation. Both roles hold inside explicit resource and evidence boundaries, which is why every stop in this chapter left an owner for the effects already in flight.
 
 ::: {.callout-chapter-connection title="From a live record to a durable one"}
 

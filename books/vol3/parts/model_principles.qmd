@@ -6,29 +6,23 @@ A request can include a long source excerpt and ask for a short edit, or ask the
 
 ::: {#pri-vol3-memory-bandwidth-decoding .callout-principle title="Output-bound latency"}
 
-**Invariant**: Under a fixed serving configuration with approximately stable generation time per token, output-generation latency grows approximately with output length. For unbatched dense-model decoding whose weight reads dominate, memory bandwidth supplies a lower bound on that step time. This bound does not describe every serving configuration or the whole call's latency.
+**Invariant**: Under a fixed serving configuration with approximately stable generation time per token, output-generation latency grows approximately with output length. For unbatched decoding of a dense model with $P$ parameters stored at $b$ bytes each, where weight reads dominate, memory bandwidth $\text{BW}$ bounds each output token's step time from below:
+$$ t_{\text{decode}} \ge \frac{P\,b}{\text{BW}} $$
+The bound describes neither every serving configuration nor the whole call's latency, which also includes preparation, queueing, prefill, and postprocessing.
 
-**Implication**: When generation dominates the call, an interface that expresses the same useful proposal in fewer tokens can reduce latency. Input processing, queueing, and checks must still fit the task's deadline. Compare interfaces at a matched task budget rather than assuming that shorter output is always better. @Sec-vol3-foundation-model-cost prices a concrete call; @sec-vol3-appendix-inference-roofline derives the hardware estimate and its assumptions.
-
-:::
-
-The runtime must also distinguish time spent from work completed. A call interrupted by a limit, a cancellation, or a lost connection may leave a partial payload, even if that payload parses. Completion status therefore precedes handling the output as a finished candidate. @Sec-vol3-foundation-model-contract develops this gate without treating a completed generation as evidence that the task succeeded. Additional inference then raises two separate questions: whether a useful candidate is available and whether the system can identify it.
-
-::: {#pri-vol3-test-time-scaling .callout-principle title="Evidence-bounded deliberation"}
-
-**Invariant**: Producing a valid candidate and selecting a valid candidate are different events. Additional sampling can increase the chance that a candidate set contains a useful result; that increase alone does not establish which result should be accepted. The reliability of the selected result depends on the generation process, the selection rule, and the evidence available to that rule.
-
-**Implication**: Allocate a task's budget across generation, candidate assessment, and feedback, and measure the outcome of the complete policy. Compare against a single-candidate baseline under the same limits, including unsuccessful attempts and checks in the cost. Stop or escalate when the remaining budget cannot support the required evidence, rather than treating more generated text as evidence by itself.
+**Implication**: When generation dominates the call, an interface that expresses the same useful proposal in fewer tokens can reduce latency. Input processing, queueing, and checks must still fit the task's deadline. Compare interfaces at a matched task budget rather than assuming that shorter output is always better. @Sec-vol3-foundation-model-cost develops the bound (@eq-vol3-fm-token-floors) and prices a concrete call; @sec-vol3-appendix-inference-roofline derives the hardware estimate and its assumptions.
 
 :::
 
-For the repair, generating several patches may expose alternatives that one call missed. A compiler can reject some of them, and a regression test can distinguish others. Neither check establishes every property of the intended repair. Selection can exploit a weak check as well as a useful one, making the scope of the check part of the design.
+The runtime must also distinguish time spent from work completed. A call interrupted by a limit, a cancellation, or a lost connection may leave a partial payload, even if that payload parses. Completion status therefore precedes handling the output as a finished candidate, a mechanical gate that invariant closure (principle \ref{pri-invariant-closure}) places below the model. @Sec-vol3-foundation-model-contract develops this gate without treating a completed generation as evidence that the task succeeded. Additional inference then raises two separate questions: whether a useful candidate is available and whether the system can identify it. For the repair, generating several patches may expose alternatives that one call missed. A compiler can reject some of them, and a regression test can distinguish others. Neither check establishes every property of the intended repair, and selection can exploit a weak check as well as a useful one, making the scope of the check part of the design.
 
 ::: {#pri-vol3-verification-asymmetry .callout-principle title="The verification asymmetry"}
 
-**Invariant**: Checking a stated property and establishing that the property captures the task are different obligations. A checker can be exact for a specified property under explicit assumptions, while tests and judgments provide evidence with limited coverage. Repeatable verdicts and protection from modification do not, by themselves, establish task-level correctness.
+**Invariant**: Producing a valid candidate, selecting it, and establishing that it satisfies the task are different events. Additional sampling can raise the chance that a candidate set contains a valid result; the check that selects from the set bounds how far a pass can be trusted. For a valid-candidate rate $p$, a false-reject rate $\epsilon_{\text{FR}}$, and a false-accept rate $\epsilon_{\text{FA}}$, the precision of a passing verdict is
+$$ \Pi_V = \frac{p(1-\epsilon_{\text{FR}})}{p(1-\epsilon_{\text{FR}})+(1-p)\,\epsilon_{\text{FA}}} $$
+A checker can be exact for a stated property and still leave open whether that property captures the task.
 
-**Implication**: State what each check supports, protect its criteria and observations from the actions it judges, and preserve unresolved requirements in the acceptance decision. Learned assessments can help rank or revise candidates, but do not supply permission to act or an independent guarantee of correctness. Acceptance applies the task contract's evidence standard; insufficient evidence calls for an unresolved outcome or escalation.
+**Implication**: At a low valid rate, a small false-accept rate fills the passing set with invalid candidates, and the effect grows when a check becomes an optimization target, whether a selection rule over many samples or a training reward. Allocate a task's budget across generation, assessment, and feedback; compare the complete policy against a single-candidate baseline at matched cost, counting unsuccessful attempts and checks; and stop when marginal acceptance per unit cost falls below a threshold. State what each check supports, protect its criteria and observations from the actions it judges, and preserve unresolved requirements in the acceptance decision. Learned assessments can rank or revise candidates but supply neither permission to act nor an independent guarantee. @Sec-vol3-test-time-compute develops the precision (@eq-vol3-verifier-precision) and the stopping rule (@eq-vol3-marginal-stopping).
 
 :::
 

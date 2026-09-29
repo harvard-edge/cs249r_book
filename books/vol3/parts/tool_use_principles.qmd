@@ -6,7 +6,7 @@ Part II separated the information selected for each call, reusable attention com
 
 **Invariant**: A tool call reaches the environment only after the runtime validates the proposal against its declared interface, checks applicable action preconditions, and authorizes it under the session's grants and resource limits. A server's advertisement supplies a tool description, not permission for this session to invoke it. The full treatment appears in @sec-vol3-tool-calling-schemas and @sec-vol3-tool-calling-mcp.
 
-**Implication**: The runtime binds a discovered interface to the policy it enforces; the endpoint still enforces its own access boundary. Constrained decoding can restrict supported output structure, but it replaces neither host validation nor authorization. A mutation that depends on an unchanged source version needs that precondition enforced with the mutation, not merely checked during an earlier read. Rejected proposals return structured diagnostics, and returning observations preserve outcome and omission information within their payload bounds.
+**Implication**: The runtime binds a discovered interface to the policy it enforces; the endpoint still enforces its own access boundary. Constrained decoding can restrict supported output structure, but it replaces neither host validation nor authorization. A mutation that depends on an unchanged source version needs that precondition enforced with the mutation, not merely checked during an earlier read: a read-then-write race stays open until the endpoint checks the expected version at application. Rejected proposals return structured diagnostics, and returning observations preserve outcome and omission information within their payload bounds.
 
 :::
 
@@ -14,29 +14,23 @@ Validation and authorization decide whether a call may be dispatched. They say n
 
 ::: {#pri-vol3-exactly-once-settlement .callout-principle title="Settlement before retry"}
 
-**Invariant**: A timeout alone does not establish whether a mutating effect occurred or whether an earlier attempt can still commit. The request may be lost, delayed, still executing, partially applied, or completed without a delivered reply. The full treatment appears in @sec-vol3-tool-calling-idempotency.
+**Invariant**: A timeout alone does not establish whether a mutating effect occurred or whether an earlier attempt can still commit. The request may be lost, delayed, still executing, partially applied, or completed without a delivered reply. If requests are lost with probability $q_{\text{req}}$ and replies with probability $q_{\text{rep}}$, one blind retry of a non-idempotent operation without deduplication duplicates its effect with probability
+$$ P_{\text{dup}} = (1-q_{\text{req}})\, q_{\text{rep}}\, (1-q_{\text{req}}) $$
+so the duplicate rate tracks the reply-loss rate almost one for one.
 
-**Implication**: Before repeating an action, establish that repetition is safe under its operation semantics or the endpoint's deduplication contract. A stable logical-operation identity must be bound to the actual effect and retained result; a token or host-side lease alone supplies no such guarantee. An unchanged-state probe cannot exclude a delayed first attempt. Without sufficient evidence or enforcement, the effect remains unresolved and the runtime withholds a blind retry, preserving the uncertainty for reconciliation or escalation.
+**Implication**: Before repeating an action, establish that repetition is safe under its operation semantics or the endpoint's deduplication contract. A stable logical-operation identity must be bound to the actual effect and retained result; a token or host-side lease alone supplies no such guarantee. An unchanged-state probe cannot exclude a delayed first attempt. Without sufficient evidence or enforcement, the effect remains unresolved and the runtime withholds a blind retry, preserving the uncertainty for reconciliation or escalation. @Sec-vol3-tool-calling-idempotency develops the settlement rules, and notebook \ref{nbk-07-settlement-budget} prices the duplicate path.
 
 :::
 
-Even an authorized call with a sound retry contract can execute faulty or untrusted code, including code proposed by the model.
+Even an authorized call with a sound retry contract can execute faulty or untrusted code, including code proposed by the model, and untrusted input can redirect an operation within whatever reach the call is given.
 
 ::: {#pri-vol3-zero-trust-sandboxing .callout-principle title="Containment beneath the model"}
 
-**Invariant**: Permission to invoke a tool does not bound the resources its implementation can reach or consume. The runtime must enforce the task's execution envelope independently of the model's compliance, including permitted interfaces to host resources, other tenants, and external services. The full treatment appears in @sec-vol3-sandboxes-blast-radius.
+**Invariant**: Permission to invoke a tool does not bound the resources its implementation can reach or consume, and text from an observation, a reader model, or stored memory cannot grant authority or establish its own trust. The runtime enforces the task's execution envelope and information-flow policy with metadata and decisions outside the model's control. For a grant $\Gamma=(R,O,P,E)$ of rights $R$, objects $O$, conditions $P$, and expiry $E$, a proposed access $a$ is admitted at time $t$ only if
+$$ \text{admit}(a, \Gamma, t) \iff \text{authentic}(\Gamma) \land a.\text{op} \in R \land a.\text{target} \sqsubseteq O \land P(a) \land t < E $$
+and an operation that sends data onward is dispatched only if the confidentiality and integrity labels joined from its inputs permit that recipient and use, whatever the text says.
 
-**Implication**: Choose an envelope by the code and interfaces it must support, the components it shares and trusts, the task's authority, and measured resource costs. Scoped grants need enforcement; deriving a narrower grant does not revoke a broader one still held. Brokering can withhold selected credentials while authorizing bounded use of them. A workspace can preserve task-local changes across turns, but reuse requires supervised teardown and restoration of the declared mutable state, including associated host-side work and identities. Ending an environment does not undo external effects or establish task acceptance.
-
-:::
-
-Untrusted input may still redirect an operation within the envelope's permitted reach.
-
-::: {#pri-vol3-adversarial-isolation .callout-principle title="Adversarial invariant isolation"}
-
-**Invariant**: Text from an observation, a reader model, or stored memory cannot grant authority or establish its own trust. Before a proposed operation reaches a protected resource or disclosure destination, the runtime enforces the applicable task, requester, and information-flow policy using metadata and decisions outside the model's control. The full treatment appears in @sec-vol3-security.
-
-**Implication**: Track integrity provenance separately from confidentiality and preserve relevant dependencies through extraction, summarization, and reuse. Reader separation can limit raw exposure, but typed output is not evidence of truth or permission to release data. Endorsement for a protected use and declassification for an authorized release require their own policy and evidence. Approval binds a represented action and its scope, while outcome uncertainty remains governed by the tool contract. Evaluate these controls under a stated threat model, including useful task completion and false blocks.
+**Implication**: Reach is bounded by the envelope rather than by what the model complies with. Choose an envelope by the code and interfaces it must support, the components it shares and trusts, the task's authority, and measured resource costs. Deriving a narrower grant does not revoke a broader one still held. Track integrity provenance separately from confidentiality and preserve dependencies through extraction, summarization, and reuse; endorsement for a protected use and declassification for an authorized release require their own policy and evidence. A workspace can preserve task-local changes across turns, but reuse requires supervised teardown and restoration of the declared mutable state. Ending an environment does not undo external effects or establish task acceptance. Evaluate these controls under a stated threat model, including useful task completion and false blocks. @Sec-vol3-sandboxes-least-privilege develops the grant verdict (@eq-vol3-capability-verdict), @sec-vol3-sandboxes-blast-radius the envelope, and @sec-vol3-security the information-flow form (@eq-vol3-flow-dispatch).
 
 :::
 

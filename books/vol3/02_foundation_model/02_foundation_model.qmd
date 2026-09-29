@@ -579,13 +579,7 @@ The adapter maps service-specific signals to the seven statuses in @tbl-vol3-inv
 
 For our `read_file` artifact, `kind="tool_request"` tells the runtime which candidate representation to validate, while `status="COMPLETED"` says that generation finished under the interface contract. Neither field reports that the file was read.
 
-::: {#pri-02-quarantining-invariant .callout-principle title="The quarantining invariant"}
-
-**Invariant**: A payload whose invocation envelope reports any status other than `COMPLETED` may not be released as a completed candidate for action or task acceptance.
-
-**Implication**: The runtime checks status before admitting content to the candidate path. It may retain or inspect incomplete content for bounded diagnosis, but that inspection cannot authorize execution or silently reclassify the fragment as complete. Search branches stopped by a token quota inherit the same rule.
-
-:::
+Invariant closure (principle \ref{pri-invariant-closure}) gives the status field its first mechanical bound, the **quarantining rule**\index{Quarantining rule!definition}: a payload whose invocation envelope reports any status other than `COMPLETED` may not be released as a completed candidate for action or task acceptance. The runtime checks status before admitting content to the candidate path. It may retain or inspect incomplete content for bounded diagnosis, but that inspection cannot authorize execution or silently reclassify the fragment as complete, and search branches stopped by a token quota inherit the same rule. A truncated payload thereby becomes a diagnosable rejection, never a partial action.
 
 The cleanup example demonstrates why syntax cannot replace this gate. A possible complete command is
 
@@ -711,7 +705,7 @@ Illegal tokens receive zero probability, while the remaining scores determine wh
 
 Completion requires an additional condition. The parser must reach an accepting state, meaning that the generated text satisfies the whole required structure, and termination must obey the interface's completion rule. An end-of-sequence token cannot be accepted as successful structural completion while a required field remains unfinished. Maintaining legal prefixes therefore establishes a conditional guarantee about completed outputs; it does not guarantee that every call finishes within its budget. @Sec-vol3-appendix-math-dfa formalizes the token-to-parser transitions and the accepting-state argument for readers implementing this constraint.
 
-Suppose the service reaches its output ceiling while generating the arguments, after `{"path":"src/po`. The prefix remains compatible with the schema, but the envelope has `status: TRUNCATED`, and `payload` contains only the unfinished proposal. The runtime cannot dispatch it as a completed `tool_request`, even if a repair parser could add quotes and braces. Those inserted characters would create a different candidate without completing the original invocation. A fragment may still be retained for diagnosis under the status-first handling rule. Grammar constraints do not override the quarantining invariant (principle \ref{pri-02-quarantining-invariant}).
+Suppose the service reaches its output ceiling while generating the arguments, after `{"path":"src/po`. The prefix remains compatible with the schema, but the envelope has `status: TRUNCATED`, and `payload` contains only the unfinished proposal. The runtime cannot dispatch it as a completed `tool_request`, even if a repair parser could add quotes and braces. Those inserted characters would create a different candidate without completing the original invocation. A fragment may still be retained for diagnosis under the status-first handling rule. Grammar constraints do not override the quarantining rule of invariant closure (principle \ref{pri-invariant-closure}).
 
 ### What the structural guarantee covers
 
@@ -958,7 +952,8 @@ That conclusion belongs to the repair agent, whose consumer is a program that ca
 # │ Show: Support prefill and reply time, streaming token rate, fresh prefill
 # │       with a shared policy prefix; repair first-turn output share.
 # │ How: Reuse CallPrice's per-token floors (registry model and accelerator);
-# │      support-turn lengths are documented scenario inputs, not measurements.
+# │      support-turn lengths come from the Agents.Support.CustomerOps
+# │      workload profile (teaching assumptions, not measurements).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.fmt import check, fmt_count, fmt_time
@@ -967,9 +962,10 @@ class LatencyByArchetype:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     t_pre = CallPrice.t_pre  # registry-derived prefill floor per prompt token
     t_dec = CallPrice.t_dec  # registry-derived decode floor per output token
-    sup_prompt = 6_000  # scenario: policy excerpts, customer record, and conversation
-    sup_shared = 5_000  # scenario: policy prefix identical across sessions
-    sup_reply = 150  # scenario: support reply tokens
+    support = Agents.Support.CustomerOps
+    sup_prompt = support.session_context.to("token").magnitude  # policy, customer record, conversation
+    sup_shared = support.shared_prefix.to("token").magnitude  # prefix identical across sessions
+    sup_reply = support.reply_tokens.to("token").magnitude  # support reply tokens
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     sup_prefill = (sup_prompt * t_pre).to(second)
@@ -980,7 +976,7 @@ class LatencyByArchetype:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(sup_prefill < 1 * second < sup_reply_t, "Prefill well under a second; full reply takes seconds")
-    check(sup_prefill_cached < sup_prefill / 5, "Shared-prefix reuse removes most support prefill")
+    check(sup_prefill_cached < sup_prefill / 3, "Shared-prefix reuse removes most support prefill")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     sup_prompt_str = fmt_count(sup_prompt)
@@ -995,7 +991,7 @@ class LatencyByArchetype:
 
 ::: {#lhs-02-call-latency-by-archetype .callout-lighthouse title="Call latency for two lighthouses"}
 
-**Support agent**: A customer-operations turn sends a `{python} LatencyByArchetype.sup_prompt_str`-token prompt (policy excerpts, the customer record, and the conversation) and returns a `{python} LatencyByArchetype.sup_reply_str`-token reply to a person at a chat window. At the reference floors, prefill takes `{python} LatencyByArchetype.sup_prefill_str` and the full reply `{python} LatencyByArchetype.sup_reply_t_str`, but streaming shows the first words after queueing and prefill, and the rest arrive at about `{python} LatencyByArchetype.stream_rate_str` tokens per second, faster than a person reads. The binding term is TTFT. When `{python} LatencyByArchetype.sup_shared_str` of the prompt's tokens form a policy prefix shared by every session, prefix reuse leaves `{python} LatencyByArchetype.sup_fresh_str` tokens of fresh prefill, about `{python} LatencyByArchetype.sup_prefill_cached_str`, and under concurrency the queue sets the first-token time.
+**Support agent**: A customer-operations turn sends an `{python} LatencyByArchetype.sup_prompt_str`-token prompt (policy excerpts, the customer record, and the conversation) and returns a `{python} LatencyByArchetype.sup_reply_str`-token reply to a person at a chat window. At the reference floors, prefill takes `{python} LatencyByArchetype.sup_prefill_str` and the full reply `{python} LatencyByArchetype.sup_reply_t_str`, but streaming shows the first words after queueing and prefill, and the rest arrive at about `{python} LatencyByArchetype.stream_rate_str` tokens per second, faster than a person reads. The binding term is TTFT. When `{python} LatencyByArchetype.sup_shared_str` of the prompt's tokens form a prefix of system instructions, policy, and tool declarations shared by every session, prefix reuse leaves `{python} LatencyByArchetype.sup_fresh_str` tokens of fresh prefill, about `{python} LatencyByArchetype.sup_prefill_cached_str`, and under concurrency the queue sets the first-token time.
 
 **Repair agent**: The first repair turn spends `{python} CallPrice.call1_out_pct_str` of its estimated work generating a `{python} CallPrice.k_turn_str`-token reply, and the runtime can parse, authorize, or dispatch it only once it is complete. The binding term is decode time, and the lever is the length of the requested representation.
 

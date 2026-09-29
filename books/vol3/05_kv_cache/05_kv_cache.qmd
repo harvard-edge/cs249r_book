@@ -442,7 +442,7 @@ class ForkCopy:
     copied_str = fmt_memory(copied, unit=GB, precision=1)
 ```
 
-Deliberation that samples several candidates to buy evidence (principle \ref{pri-vol3-test-time-scaling}) makes forks routine. Candidate repairs can begin from the same processed prefix and then generate different continuations. Their block tables may refer to the same immutable prefix blocks if the model computation is compatible and the service permits sharing. The saving is large at agent context lengths. A contiguous allocator that deep-copies an `{python} ForkCopy.prefix_str`-token prefix into four candidates writes `{python} ForkCopy.copied_str` of KV state for the Llama 3 70B geometry, while block-table duplication copies none of that payload. The runtime still constructs or shares metadata and records ownership; copying a block table and updating its references can require work proportional to its number of entries.
+Deliberation that samples several candidates to buy evidence (principle \ref{pri-vol3-verification-asymmetry}) makes forks routine. Candidate repairs can begin from the same processed prefix and then generate different continuations. Their block tables may refer to the same immutable prefix blocks if the model computation is compatible and the service permits sharing. The saving is large at agent context lengths. A contiguous allocator that deep-copies an `{python} ForkCopy.prefix_str`-token prefix into four candidates writes `{python} ForkCopy.copied_str` of KV state for the Llama 3 70B geometry, while block-table duplication copies none of that payload. The runtime still constructs or shares metadata and records ownership; copying a block table and updating its references can require work proportional to its number of entries.
 
 The partial tail needs special treatment. Two candidates cannot independently append into the same shared writable slot. In the ten-token example, both candidates initially refer to `[3, 7, 9]`. Before candidate B writes position 10, the runtime allocates block 14, copies the two initialized entries from block 9, and redirects B's last table entry. The write then occurs at slot 2 of block 14. This **copy-on-write**\index{Copy-on-write!KV tail definition} operation leaves candidate A's state unchanged. @Tbl-vol3-kv-cow-trace follows the ownership change; its counts assume these two candidates are the only owners.
 
@@ -1085,8 +1085,8 @@ The repair agent is one regime: few long contexts, each parked behind a long too
 # │ Show: fit 48 -> 60 (repair) vs. 195 -> 780 (support); 10x vs. 11x tax;
 # │       1.3 s vs. 0.33 s recompute against 21 ms vs. 5 ms reload.
 # │ How: KvGeometry pool and m_token; PausedStateChoice link and sustained
-# │      rate; AgentCapacity repair residence. Support inputs are scenario
-# │      values (no registry profile yet), not measurements.
+# │      rate; AgentCapacity repair residence. Support inputs come from the
+# │      Agents.Support.CustomerOps workload profile (teaching assumptions).
 # └─────────────────────────────────────────────────────────────────────────────
 from math import floor
 from mlsysim import *
@@ -1104,13 +1104,16 @@ class ResidencyByArchetype:
     link = PausedStateChoice.link
     rate = PausedStateChoice.rate
     n_params = PausedStateChoice.n_params
-    common = 6_144  # scenario: system prompt and tool schemas shared by every session
+    support = Agents.Support.CustomerOps
+    # Shared system prompt and tool schemas; scenario: the repair deployment's
+    # prefix is taken to be the same length as the support profile's.
+    common = support.shared_prefix.to("token").magnitude
     repair_ctx = KvGeometry.ctx_agent
     repair_gen = AgentCapacity.generation
     repair_wait = AgentCapacity.wait  # integration test
-    support_ctx = KvGeometry.ctx_short  # scenario: policy prefix plus one customer's history
-    support_gen = 2 * second  # scenario: generation residence per support turn
-    support_wait = 20 * second  # scenario: customer reads and replies between turns
+    support_ctx = support.session_context.to("token").magnitude  # policy prefix plus one customer's history
+    support_gen = support.generation_residence  # generation residence per support turn
+    support_wait = support.customer_reply_time  # customer reads and replies between turns
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────────
     r_fit_unshared, r_fit_shared = _kv_fit(repair_ctx, 0), _kv_fit(repair_ctx, common)
@@ -1125,6 +1128,7 @@ class ResidencyByArchetype:
     r_recompute_share = (r_recompute / (repair_gen + repair_wait)).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(support_ctx == KvGeometry.ctx_short, "Support session must match the footprint table's short row")
     check((r_fit_unshared, s_fit_unshared) == (KvGeometry.conc_agent, KvGeometry.conc_short), "Unshared fits must match the footprint table")
     check(s_fit_shared / s_fit_unshared > 3.5 and r_fit_shared / r_fit_unshared < 1.5, "Sharing must pay for support, barely for repair")
     check(abs(r_tax - s_tax) < 2, "Both workloads pay a similar residency tax")

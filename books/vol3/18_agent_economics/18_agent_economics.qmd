@@ -998,7 +998,7 @@ class TailCompounding:
     p_hit_str = fmt(p_hit, precision=2)
 ```
 
-Means also hide how tails compound along a trajectory. If each of $n$ serial calls independently exceeds its 99th-percentile latency with probability $p_{\text{tail}}$, the trajectory meets at least one such delay with probability $1-(1-p_{\text{tail}})^n$, the horizon compounding of @sec-vol3-intro-horizon-arithmetic applied to latency. A trajectory of `{python} TailCompounding.n_calls_str` serial calls, each with tail probability `{python} TailCompounding.p_tail_str`, meets at least one tail delay with probability `{python} TailCompounding.p_hit_str`. A fleet sized for good per-call latency therefore still delivers slow trajectories routinely. This is the serial counterpart of the fan-out straggler effect in @sec-vol3-multiagent-backpressure [@dean2013tail]. Correlated delays, such as a shared queue that stays long across consecutive calls, change the probability but not the lesson: provision and schedule against trajectory-level percentiles, not per-call means (principle \ref{pri-vol3-heavy-tailed-scheduling}).
+Means also hide how tails compound along a trajectory. If each of $n$ serial calls independently exceeds its 99th-percentile latency with probability $p_{\text{tail}}$, the trajectory meets at least one such delay with probability $1-(1-p_{\text{tail}})^n$, the horizon compounding of @sec-vol3-intro-horizon-arithmetic applied to latency. A trajectory of `{python} TailCompounding.n_calls_str` serial calls, each with tail probability `{python} TailCompounding.p_tail_str`, meets at least one tail delay with probability `{python} TailCompounding.p_hit_str`. A fleet sized for good per-call latency therefore still delivers slow trajectories routinely. This is the serial counterpart of the fan-out straggler effect in @sec-vol3-multiagent-backpressure [@dean2013tail]. Correlated delays, such as a shared queue that stays long across consecutive calls, change the probability but not the lesson: provision and schedule against trajectory-level percentiles, not per-call means (principle \ref{pri-vol3-trajectory-goodput}).
 
 The queueing model completes the routing rule of @sec-vol3-agent-economics-cascades. The router compares eligible *remaining paths*, including their queue and service delays, retained-resource costs, verification, and escalation, under the same acceptance contract. Rerouting changes the arrival rates that produced the delay estimate, so the estimate is refreshed after each routing change. Separating interactive and batch capacity, or scheduling by priority, protects latency-bound work at a cost in fairness and utilization that is measured like any other.
 
@@ -1456,11 +1456,17 @@ The dependency-upgrade comparison priced three designs for one workload. The fou
 # │ Show: C_eff per workload and its response to three levers.
 # │ How:  C_eff = C_attempt / p_acc; the support handoff scales with (1 - p_acc).
 # │ Note: Repair horizon from the registry harness and repair token bill from
-# │       PrefixCacheCost; research fan-out multiple from the cited report.
-# │       Every other input is a documented scenario value, not a measurement.
+# │       PrefixCacheCost. Research, remediation, and support inputs come from
+# │       the Agents.Research/Remediation/Support workload profiles; only the
+# │       research fan-out multiple is sourced (anthropic2025multiagent), and
+# │       every other input is a documented teaching value, not a measurement.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Agents, USD
 from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_percent, fmt_usd
+
+def _usd(q):
+    """Magnitude in USD of a registry currency quantity."""
+    return q.to(USD).magnitude
 
 class LighthouseEconomics:
     # ┌── 1. LOAD (Registry, cross-cell, cited, and scenario inputs) ─────────
@@ -1472,34 +1478,36 @@ class LighthouseEconomics:
     repair_assess = 0.10  # scenario USD: sealed regression suite per attempt
     repair_p = 0.40  # scenario acceptance probability
     # Research agent: orchestrator-worker fan-out over web sources.
-    research_turns = 20  # scenario turns per attempt
-    chat_in, chat_out = 16_000, 800  # scenario tokens for one single-chat answer
-    fanout_multiple = 15  # multi-agent research uses ~15x chat tokens (anthropic2025multiagent)
-    research_env = 0.10  # scenario USD: search and fetch fees
-    research_assess = 0.05  # scenario USD: rubric grader per report
-    research_p = 0.60
+    research = Agents.Research.OrchestratorWorker
+    research_turns = research.horizon_turns
+    chat_in = research.chat_input_tokens.to("token").magnitude  # one single-chat answer
+    chat_out = research.chat_output_tokens.to("token").magnitude
+    fanout_multiple = research.fanout_token_multiple  # ~15x chat tokens (anthropic2025multiagent)
+    research_env = _usd(research.environment_cost_per_attempt)  # search and fetch fees
+    research_assess = _usd(research.assessment_cost_per_attempt)  # rubric grader per report
+    research_p = research.acceptance_probability
     # Remediation agent: one approved production change per attempt.
-    remediation_turns = 10
-    remediation_model = 0.15  # scenario USD
-    remediation_env = 0.10  # scenario USD: observability queries and change tools
-    remediation_assess = 0.20  # scenario USD: post-change health-check window
-    approval_minutes = 10  # scenario on-call reviewer time per approval
-    approver_per_hour = 120.0  # scenario USD per reviewer hour
-    remediation_p = 0.70
+    remediation = Agents.Remediation.OnCall
+    remediation_turns = remediation.horizon_turns
+    remediation_model = _usd(remediation.model_cost_per_attempt)
+    remediation_env = _usd(remediation.environment_cost_per_attempt)  # observability queries, change tools
+    remediation_assess = _usd(remediation.assessment_cost_per_attempt)  # post-change health-check window
+    remediation_p = remediation.acceptance_probability
     # Support agent: one customer session per attempt.
-    support_turns = 6
-    support_model = 0.03  # scenario USD
-    support_env = 0.01  # scenario USD: customer-record lookups
-    support_assess = 0.01  # scenario USD: policy-grounding check
-    handoff = 4.00  # scenario USD: human pick-up cost per rejected session
-    support_p = 0.85
+    support = Agents.Support.CustomerOps
+    support_turns = support.horizon_turns
+    support_model = _usd(support.model_cost_per_attempt)
+    support_env = _usd(support.environment_cost_per_attempt)  # customer-record lookups
+    support_assess = _usd(support.assessment_cost_per_attempt)  # policy-grounding check
+    handoff = _usd(support.handoff_cost)  # human pick-up cost per rejected session
+    support_p = support.acceptance_probability
     dp = 0.10  # acceptance lever: absolute gain in acceptance probability
 
     # ┌── 2. EXECUTE (Attempt cost, C_eff, and three levers) ────────────────
     chat_cost = ((chat_in * PrefixCacheCost.p_in + chat_out * PrefixCacheCost.p_out) / 1_000_000).to(USD).magnitude
     research_model = fanout_multiple * chat_cost
     repair_env = repair_turns * repair_env_per_turn
-    remediation_human = approval_minutes / 60 * approver_per_hour
+    remediation_human = _usd(remediation.approval_cost_per_attempt)  # reviewer time x hourly rate
     support_human = (1 - support_p) * handoff
     model = (repair_model, research_model, remediation_model, support_model)
     env = (repair_env, research_env, remediation_env, support_env)
@@ -1689,7 +1697,7 @@ The chapter's decisions build on that account. Caching, compaction, and retry po
 
 :::
 
-Trajectory goodput and the accepted task (principle \ref{pri-vol3-trajectory-goodput}) acquire an explicit financial account, $C_{\text{eff}}$, and its reciprocal, goodput per dollar. Trajectory-lifetime capacity and tail-aware scheduling (principle \ref{pri-vol3-heavy-tailed-scheduling}) require the account to include resource residence and waiting, not just active generation. Monotonic delegation (principle \ref{pri-vol3-monotonic-delegation}) preserves spending responsibility across children through reservations and settlement, while leaving reusable permissions distinct from consumable funds.
+Trajectory goodput and the accepted task (principle \ref{pri-vol3-trajectory-goodput}) acquire an explicit financial account, $C_{\text{eff}}$, and its reciprocal, goodput per dollar, and the same principle requires the account to include resource residence and waiting, not just active generation. Trajectory-level encapsulation (principle \ref{pri-vol3-trajectory-encapsulation}) preserves spending responsibility across children through reservations and settlement, while leaving reusable permissions distinct from consumable funds.
 
 ::: {.column-margin .margin-pointer}
 ↪ End-to-end integration, trajectory ownership, and specification boundaries are synthesized in @sec-vol3-conclusion.
