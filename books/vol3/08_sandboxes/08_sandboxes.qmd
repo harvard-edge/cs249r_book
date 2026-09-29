@@ -168,11 +168,11 @@ Availability needs an enforced boundary as well. Code can consume CPU indefinite
 
 The design therefore needs accounting and controls appropriate to the workload: CPU and elapsed-time limits, memory bounds, and limits on process creation, storage, and output where those operations are available. The controller must remain able to observe and intervene when the worker stops cooperating. Enforcement throttles, rejects further work, or terminates execution, and the result reports what actually happened; termination leaves effects already issued in place (@sec-vol3-tool-calling-idempotency).
 
-For arbitrary tool code, the runtime should choose an execution boundary that protects its control state and enforces the task's resource and access limits. @Sec-vol3-sandboxes-microvms compares the available envelopes and their assumptions. First, the design states which authority may cross that boundary: a separate worker with the supervisor's full credentials is a separate process, not yet a task-scoped grant.
+For arbitrary tool code, the runtime should choose an execution boundary that protects its control state and enforces the task's resource and access limits. @Sec-vol3-sandboxes-microvms compares the available envelopes and their assumptions. Before that comparison, the design must state which authority may cross the boundary, because a worker holding the supervisor's full credentials is a separate process, not yet a task-scoped grant.
 
 ## Capabilities and Credentials {#sec-vol3-sandboxes-least-privilege}
 
-A separate process, as the previous section showed, still carries its identity's authority. In the README attack the task needs repository access, not the developer's credentials, and the runtime must carry that distinction into the resources the executing code can reach.
+In the README attack the task needs repository access, not the developer's credentials, and the runtime must carry that distinction into the resources the executing code can reach.
 
 A privileged service that uses its own authority to fulfill an insufficiently scoped request can become a *confused deputy*\index{Confused deputy} [@hardy1988confused]. Identity-based access control can express narrow permissions through an access control list; the failure is letting the request exercise the service's broader authority instead of the authority delegated for this task. That failure comes naturally under **ambient authority**\index{Ambient authority!definition}, the identity-derived reach that ordinary processes run with. Capabilities make the delegation explicit instead [@saltzer1975; @miller2006robust].
 
@@ -232,8 +232,6 @@ The executing code must then be unable to bypass the policy by opening another p
 
 On Linux, the supervisor can act as a policy compiler. It verifies the grant, then translates the permitted paths and operations into kernel-enforced rules before it starts the worker. Landlock [@linux2024landlock], a Linux security module, lets an unprivileged process irreversibly restrict the filesystem hierarchies and network ports it and its descendants can access; a `seccomp-bpf` filter restricts which system calls the process may make and with which scalar arguments. The supervisor installs both, together with restricted mounts and an unprivileged identity, and then calls `execve` on the tool. The worker runs under limits the kernel enforces on every open and connect, without knowing the grant's format and without being able to remove the rules it inherited. Filtering on system-call numbers cannot inspect the contents of pointer arguments safely, which is why path restrictions belong to a mechanism that resolves paths inside the kernel rather than to the system-call filter.
 
-Admission also cannot know every resource cost in advance. An input-size check can reject an oversized request before execution, but CPU time, memory, output, and storage consumption require accounting while work runs. The corresponding limits need defined responses, such as denying further allocation, throttling, or requesting termination.
-
 ### Attenuate delegated authority
 
 **Attenuation**\index{Attenuation!definition} derives a grant that permits no more than its parent. Writing $\mathcal{A}(C)$ for the accesses allowed by a grant, the relation requires
@@ -256,7 +254,7 @@ $$
 
 The test grant fails even though its lifetime is shorter, because it asks for a right the parent never held. Execution needs an appropriate parent grant or a separately authorized grant from the controller. A runtime that intends to support a test phase therefore includes execute in the grant it issues at the start, or issues a new grant for that phase, and then actively withdraws write authority when testing begins. Withdrawing write authority during testing is what keeps a candidate from modifying the fixtures and checks that grade it, the property sealed evaluation depends on (@sec-vol3-evaluation).
 
-Attenuation can also happen without contacting the issuer. Chained-caveat tokens such as macaroons [@birgisson2014macaroons] let any holder append a restriction and pass on the narrower token. The issuer mints a root token with a message authentication code $\sigma_0$ computed under a secret key only it holds. A holder adds caveat $c_i$ (a path prefix, a rights subset, a turn limit, an earlier expiry) and replaces the code with
+Attenuation can also happen without contacting the issuer. Chained-caveat tokens such as macaroons [@birgisson2014macaroons] let any holder append a restriction and pass on the narrower token. The issuer mints a root token with a message authentication code $\sigma_0$ computed under a secret key only it holds. A holder adds caveat $c_i$ (a path prefix, a rights subset, a turn limit, an earlier expiry) and replaces the code with a keyed hash (HMAC) of the previous code and the caveat,
 
 $$
 \sigma_i = \text{HMAC}(\sigma_{i-1},\, c_i).
@@ -305,7 +303,7 @@ Capabilities and brokering specify the resources the runtime intends to expose. 
 
 ## Choosing an Isolation Envelope {#sec-vol3-sandboxes-microvms}
 
-Capabilities and credential brokering specify what authority the runtime issues. The next question is what enforces that scope when the executing code does not cooperate. A short log parser, the connection-pool repair's compiler and tests, and a customer-uploaded binary need different execution interfaces. Choosing their envelope begins with those requirements and the resources that must remain protected, not with a preferred packaging format.
+A short log parser, the connection-pool repair's compiler and tests, and a customer-uploaded binary need different execution interfaces. Choosing their envelope begins with those requirements and the resources that must remain protected, not with a preferred packaging format.
 
 ::: {#dfn-isolation-envelope .callout-definition title="Isolation envelope"}
 
@@ -389,7 +387,9 @@ Applied to the three workloads, the rule gives three answers. The parser runs in
 
 Every option also needs resource governance. A program can exhaust CPU time, memory, process slots, storage, or output capacity without escaping. Limits cover the resources charged to the workload, host-side helpers included, as the host measures them rather than as the guest reports them, and the supervisor stays able to observe and intervene. A quota bounds a specified quantity; contention on shared caches, devices, and services remains and needs its own measurement. Tests should include excessive allocation and runaway output alongside denied resource access, with the expected disposition recorded.
 
-On Linux, cgroups v2 [@linux2024cgroupv2] supplies these controls for a whole process tree, whether that tree is a container's workload or a microVM's monitor and helper threads. `cpu.max` grants a quota of CPU time per period, and the kernel throttles the group for the rest of a period once the quota is spent. `pids.max` bounds process creation. Memory has graduated limits. Above `memory.high` the kernel throttles allocating threads and forces reclaim rather than killing anything, while reaching `memory.max` without successful reclaim invokes the out-of-memory killer inside the group. The graduation matters because a kill destroys the task's in-memory state without a chance to record it. Pressure stall information (PSI) [@linux2024psi] reports the share of time in which some or all of the group's threads were stalled waiting for memory, CPU, or I/O, and a supervisor can register a threshold and be woken when it is crossed. The supervisor can then compact, checkpoint, or deliberately terminate the task and report a resource failure, instead of learning about the problem from a process that has already disappeared.
+On Linux, cgroups v2 [@linux2024cgroupv2] supplies these controls for a whole process tree, whether that tree is a container's workload or a microVM's monitor and helper threads. `cpu.max` grants a quota of CPU time per period, and the kernel throttles the group for the rest of a period once the quota is spent. `pids.max` bounds process creation. Memory has graduated limits. Above `memory.high` the kernel throttles allocating threads and forces reclaim rather than killing anything, while reaching `memory.max` without successful reclaim invokes the out-of-memory killer inside the group. The graduation matters because a kill destroys the task's in-memory state without a chance to record it.
+
+A supervisor also needs warning before a limit is reached. Pressure stall information (PSI) [@linux2024psi] reports the share of time in which some or all of the group's threads were stalled waiting for memory, CPU, or I/O, and a supervisor can register a threshold and be woken when it is crossed. The supervisor can then compact, checkpoint, or deliberately terminate the task and report a resource failure, instead of learning about the problem from a process that has already disappeared.
 
 Measure cost from admission to first useful work, as well as steady execution and teardown, under representative concurrency. A fast “ready” acknowledgment can omit deferred initialization. A syscall-heavy build and an in-memory parser need not rank two envelopes the same way. Startup can also be paid at different lifetimes, which is a separate decision from the mechanism itself.
 
@@ -421,7 +421,7 @@ class EnvelopeAmortization:
     reuse_speedup = (per_call_total / per_trajectory_total).to("dimensionless").magnitude
     setup_share = (setup / (setup + work_per_call)).to("dimensionless").magnitude
     overhead_cap = 0.10  # decision threshold: setup at most this share of a fresh call
-    work_for_cap = setup * (1 - overhead_cap) / overhead_cap  # W >= S(1-c)/c
+    work_for_cap = setup * (1 - overhead_cap) / overhead_cap  # W >= T_setup(1-phi)/phi
 
     # 3. GUARD: equal-work ledger and independently checked totals.
     check(useful_work == Q_(300, "ms"), "Same useful work in both designs")
@@ -429,7 +429,7 @@ class EnvelopeAmortization:
     check(per_trajectory_total == Q_(315, "ms"), "One setup plus useful work")
     check(setup_saved == per_call_total - per_trajectory_total, "Only setup differs")
     check(setup_share > 0.5, "Setup dominates each fresh call at these inputs")
-    check(abs(work_for_cap.to("ms").magnitude - 135) < 1e-9, "Cap work is S(1-c)/c")
+    check(abs(work_for_cap.to("ms").magnitude - 135) < 1e-9, "Cap work is T_setup(1-phi)/phi")
 
     # 4. OUTPUT: unit-aware displays for all numerical inputs and results.
     calls_str = fmt_int(calls)
@@ -450,9 +450,9 @@ class EnvelopeAmortization:
 
 **Problem**: A hypothetical trajectory performs `{python} EnvelopeAmortization.calls_str` sequential parser calls, each requiring `{python} EnvelopeAmortization.work_per_call_str` of useful execution, and preparing the envelope through readiness for useful work costs `{python} EnvelopeAmortization.setup_str` in the chapter's illustrative sandbox profile. How much elapsed time does a fresh envelope per call add over one envelope retained for the trajectory, and at what per-call work does the fresh envelope become affordable?
 
-**Math**: For $N$ calls, setup time $S$, and useful work $W$ per call, fresh-per-call execution takes $N(S+W)$ and trajectory reuse takes $S+NW$. Both perform `{python} EnvelopeAmortization.useful_work_str` of useful work. Fresh-per-call execution adds `{python} EnvelopeAmortization.per_call_setup_str` of setup, totaling `{python} EnvelopeAmortization.per_call_total_str`; reuse adds one `{python} EnvelopeAmortization.setup_str` setup, totaling `{python} EnvelopeAmortization.per_trajectory_total_str`, a `{python} EnvelopeAmortization.reuse_speedup_mult_str` difference. Setup is $S/(S+W)$ = `{python} EnvelopeAmortization.setup_share_str` of every fresh call. Holding setup to at most `{python} EnvelopeAmortization.overhead_cap_str` of a fresh call requires $W \ge S(1-c)/c$ for a cap $c$, here `{python} EnvelopeAmortization.work_for_cap_str` of work per call.
+**Math**: For $N$ calls, setup time $T_{\text{setup}}$, and useful work $W$ per call, fresh-per-call execution takes $N(T_{\text{setup}}+W)$ and trajectory reuse takes $T_{\text{setup}}+NW$. Both perform `{python} EnvelopeAmortization.useful_work_str` of useful work. Fresh-per-call execution adds `{python} EnvelopeAmortization.per_call_setup_str` of setup, totaling `{python} EnvelopeAmortization.per_call_total_str`; reuse adds one `{python} EnvelopeAmortization.setup_str` setup, totaling `{python} EnvelopeAmortization.per_trajectory_total_str`, a `{python} EnvelopeAmortization.reuse_speedup_mult_str` difference. Setup is $T_{\text{setup}}/(T_{\text{setup}}+W)$ = `{python} EnvelopeAmortization.setup_share_str` of every fresh call. Holding setup to at most `{python} EnvelopeAmortization.overhead_cap_str` of a fresh call requires $W \ge T_{\text{setup}}(1-\phi)/\phi$ for a cap $\phi$, here `{python} EnvelopeAmortization.work_for_cap_str` of work per call.
 
-**Systems insight**: The ratio $W/S$ decides the envelope's lifetime. Calls with at least `{python} EnvelopeAmortization.work_for_cap_str` of useful work can afford a fresh envelope each; below that, retain one envelope for the trajectory and pay setup once. The price of reuse is a within-task trust policy, since state from earlier calls reaches later ones. Reuse never crosses tenants: ready capacity for the next task comes from pooling and verified reset (@sec-vol3-sandboxes-pooling). The comparison counts setup and useful work only, excluding model calls, queueing, and teardown.
+**Systems insight**: The ratio $W/T_{\text{setup}}$ decides the envelope's lifetime. Calls with at least `{python} EnvelopeAmortization.work_for_cap_str` of useful work can afford a fresh envelope each; below that, retain one envelope for the trajectory and pay setup once. The price of reuse is a within-task trust policy, since state from earlier calls reaches later ones. Reuse never crosses tenants: ready capacity for the next task comes from pooling and verified reset (@sec-vol3-sandboxes-pooling). The comparison counts setup and useful work only, excluding model calls, queueing, and teardown.
 
 :::
 
@@ -678,18 +678,18 @@ $$ {#eq-vol3-pool-active}
 
 Because a lease lasts for the whole trajectory, horizon rather than tool latency sets the size of the fleet. An environment stays held while its model deliberates and while its tests run. This is a mean, not a hard concurrency bound or a guarantee that a new arrival finds standby available. Bursts, variable durations, and delayed reclamation require an admission limit and a queueing, rejection, or deferral policy in addition to that average.
 
-The standby reserve covers a different interval, the replenishment time $T_{\text{init}}$ needed to prepare one clean instance, and that time depends on how an instance is built. A cold start pays monitor setup, guest kernel boot, and user-space initialization in sequence, $T_{\text{cold}} = T_{\text{vmm}} + T_{\text{kernel}} + T_{\text{user}}$. For agent images the last term, which starts interpreters and loads dependencies, usually dominates. Restoring from a snapshot replaces the kernel and user-space terms with restoring saved memory mappings, processor state, and device state, so $T_{\text{init}}$ shrinks to the restore time. The substitution also changes memory traffic under a burst. $N$ cold starts must populate $N \cdot M_{\text{guest}}$ bytes within $T_{\text{cold}}$, while $N$ restored instances allocate only the $N \cdot M_{\text{dirty}}$ bytes they write, spread across the time they run rather than concentrated at startup.
+The standby reserve covers a different interval, the replenishment time $T_{\text{init}}$ needed to prepare one clean instance, and that time depends on how an instance is built. A cold start pays monitor setup, guest kernel boot, and user-space initialization in sequence, $T_{\text{cold}} = T_{\text{vmm}} + T_{\text{kernel}} + T_{\text{user}}$. For agent images the last term, which starts interpreters and loads dependencies, usually dominates. Restoring from a snapshot replaces the kernel and user-space terms with restoring saved memory mappings, processor state, and device state, so $T_{\text{init}}$ shrinks to the restore time. The substitution also changes memory traffic under a burst. $N_{\text{burst}}$ cold starts must populate $N_{\text{burst}} M_{\text{guest}}$ bytes within $T_{\text{cold}}$, while the same number of restored instances allocate only the $N_{\text{burst}} M_{\text{dirty}}$ bytes they write, spread across the time they run rather than concentrated at startup.
 
-Suppose each admission triggers one replenishment and arrivals within a replenishment interval are approximately Poisson with mean $\lambda T_{\text{init}}$. A reserve of $S$ then runs dry roughly when more than $S$ arrivals fall within one interval. For a target probability $\epsilon$ of finding standby empty, the normal approximation to that tail gives
+Suppose each admission triggers one replenishment and arrivals within a replenishment interval are approximately Poisson with mean $\lambda T_{\text{init}}$. A reserve of $N_{\text{reserve}}$ standby instances then runs dry roughly when more than $N_{\text{reserve}}$ arrivals fall within one interval. For a target probability $\epsilon$ of finding standby empty, the normal approximation to that tail gives
 
 $$
-S_{\min} \ge \lambda T_{\text{init}} + z_{1-\epsilon}\sqrt{\lambda T_{\text{init}}}
+N_{\text{reserve}} \ge \lambda T_{\text{init}} + z_{1-\epsilon}\sqrt{\lambda T_{\text{init}}}
 $$ {#eq-vol3-pool-reserve}
 
 where $z_{1-\epsilon}$ is the standard normal quantile. The approximation holds when the mean is large; when it is small, the Poisson tail is read directly. Resident memory follows from copy-on-write sharing, with one template, private pages for each active lease, and small state for each standby:
 
 $$
-M_{\text{pool}} = M_{\text{template}} + N_{\text{active}} \, M_{\text{dirty}} + S \, M_{\text{standby}}
+M_{\text{pool}} = M_{\text{template}} + N_{\text{active}} \, M_{\text{dirty}} + N_{\text{reserve}} \, M_{\text{standby}}
 $$ {#eq-vol3-pool-memory}
 
 Notebook \ref{nbk-08-reserve-from-arrival-rate} applies these three equations to steady arrivals.
@@ -872,7 +872,7 @@ For an illustrative memory allowance at that final state, suppose immutable resi
 
 The private-state terms include resident writable workspace pages, so the workspace is charged once. The total is a pool-residency allowance: host and broker services, storage caches, disk, and accelerator memory sit outside it, transient restore buffers must fit the stated headroom, and enforcement uses exact byte counts rather than the rounded display.
 
-**Systems insight**: The reserve decides how many tasks start at once; restore concurrency decides how fast the rest drain. The last admission waits $\lceil (B - S)/w \rceil \, T_{\text{restore}}$ for a burst $B$, reserve $S$, and $w$ workers, so `{python} SandboxPoolSizing.workers_doubled_str` workers instead of `{python} SandboxPoolSizing.workers_str` cut the wait from `{python} SandboxPoolSizing.last_admission_str` to `{python} SandboxPoolSizing.last_admission_doubled_str`, provided restores do not slow under the added concurrency. Each added standby admits one more task immediately and costs `{python} SandboxPoolSizing.standby_private_str` of idle private memory. The trace is deterministic; a different arrival pattern needs its own calculation.
+**Systems insight**: The reserve decides how many tasks start at once; restore concurrency decides how fast the rest drain. The last admission waits $\lceil (N_{\text{burst}} - N_{\text{reserve}})/w \rceil \, T_{\text{init}}$ for a burst of $N_{\text{burst}}$ tasks, a reserve of $N_{\text{reserve}}$, and $w$ restore workers, so `{python} SandboxPoolSizing.workers_doubled_str` workers instead of `{python} SandboxPoolSizing.workers_str` cut the wait from `{python} SandboxPoolSizing.last_admission_str` to `{python} SandboxPoolSizing.last_admission_doubled_str`, provided restores do not slow under the added concurrency. Each added standby admits one more task immediately and costs `{python} SandboxPoolSizing.standby_private_str` of idle private memory. The trace is deterministic; a different arrival pattern needs its own calculation.
 
 :::
 
@@ -938,7 +938,7 @@ The reserve depends on $\lambda T_{\text{init}}$ through a steep Poisson tail. I
 
 The README attack exposed the gap between admitting a tool call and bounding the code it runs. A containment design must specify the resources that code may reach, the components trusted to enforce the restriction, and the limits on resource consumption. Scoped grants and credential brokers constrain access; the execution envelope enforces a boundary around running code; and the workspace preserves permitted changes across turns. Egress policy and the reset contract extend that boundary to communication and to the next lease. Startup, residency, and replenishment costs then determine how the design can be provisioned under its stated workload.
 
-For the connection-pool repair, this means retaining the candidate edits and test artifacts without giving the task the developer's entire account or another task's mutable state. Protected checks can remain outside the editable candidate while the test process has bounded scratch space. These choices preserve the conditions under which evidence is gathered; accepting the whole repair still takes more than the targeted r18 pass (@sec-vol3-evaluation).
+For the connection-pool repair, this means retaining the candidate edits and test artifacts without giving the task the developer's entire account or another task's mutable state. Protected checks can remain outside the editable candidate while the test process has bounded scratch space. These choices preserve the conditions under which evidence is gathered; accepting the whole repair still takes more than the targeted `r18` pass (@sec-vol3-evaluation).
 
 ::: {.callout-takeaways title="Containment includes reach and lifetime"}
 
