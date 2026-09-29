@@ -101,13 +101,25 @@ The schema identifies what reconstruction needs. It does not yet establish that 
 
 The repair's next operation submits a targeted test of the fixed candidate snapshot `ws_r18`. If the harness sends that request and then crashes before recording it, a replacement worker can recover a plan that still says “run the test” while the original job is already running and accruing charges. Recording only the eventual result leaves this gap open. The runtime must preserve the admitted request and its outstanding liability before the request can leave its control.
 
-This is **write-ahead logging**\index{Write-ahead logging!agent invariants} applied to trajectory dispatch. The durable history identifies an operation that might have executed even if its reply never reaches the worker. An effect without a recoverable intent is a **phantom effect**\index{Phantom effect} under the runtime's declared failure model. Preventing that missing-history failure requires both correct ordering and storage that survives the failure the design claims to tolerate.
+This is **write-ahead logging**\index{Write-ahead logging!agent invariants} applied to trajectory dispatch; @sec-vol3-appendix-systems-transactions reviews the database form of the protocol. The durable history identifies an operation that might have executed even if its reply never reaches the worker. An effect without a recoverable intent is a **phantom effect**\index{Phantom effect} under the runtime's declared failure model. Preventing that missing-history failure requires both correct ordering and storage that survives the failure the design claims to tolerate.
 
 ### State what the acknowledgment survives
 
 Durability has a failure domain. A design that survives process death while its disk remains intact need not survive permanent loss of that disk. Worker replacement can recover from reattachable storage only if the replacement can obtain the required acknowledged history and artifacts. If the contract includes permanent loss of the worker's volume, the authoritative acknowledgment must depend on storage that survives that loss. An asynchronously updated monitoring copy does not provide that guarantee merely because it is remote. The shared crash worksheet assumes that the authoritative acknowledged history and required artifacts survive loss of the worker and its local volume.
 
-The dispatch gate therefore waits for an acknowledgment from the authoritative store under the selected contract. Enqueuing an event in volatile memory is not this acknowledgment. Nor is a successful local write sufficient for every failure domain. The implementation must specify which failures its persistence operation covers, how errors are reported, and how a replacement identifies the complete acknowledged history. Storage technology is a way to implement that contract, not a substitute for stating it. @Sec-vol3-appendix-systems-boundaries compares atomicity, isolation, and durability and supplies a boundary test for separating one store's commitment from effects at other endpoints.
+The dispatch gate therefore waits for an acknowledgment from the authoritative store under the selected contract. Enqueuing an event in volatile memory is not this acknowledgment. Nor is a successful local write sufficient for every failure domain.
+
+The operating system shows why. A returned `write()` means only that the kernel has copied the bytes into its page cache. Those dirty pages outlive the process, but they vanish if the host loses power or crashes before writeback. The barrier for that failure is `fsync()` or `fdatasync()`, which returns only after the device reports the data durable. The two calls differ in metadata. `fsync()` also flushes attributes such as modification time, while `fdatasync()` flushes only the metadata needed to read the data back, which spares a log that preallocates its file an extra write per barrier. Even then, a drive with a volatile write cache must honor the flush command, or the write must use force unit access, before its acknowledgment covers power loss. A local barrier still dies with the volume. Surviving permanent volume loss requires a replicated store that acknowledges only after enough replicas, placed outside the lost domain, have made the record durable. @Tbl-vol3-durable-ack-domains pairs each failure with the acknowledgment that survives it.
+
+| Failure the contract tolerates          | Acknowledgment that survives it                                                                                        | Acknowledgment that does not                                      |
+|:----------------------------------------|:-----------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------|
+| Process crash; host and volume intact   | Returned `write()`, which places the bytes in the kernel page cache that outlives the process                          | An event queued only in the runtime's own memory                  |
+| Power loss or host crash; volume intact | Returned `fdatasync()` or `fsync()`, with the device write cache flushed or bypassed                                   | Returned `write()` alone, whose dirty pages were volatile         |
+| Permanent loss of the worker's volume   | Acknowledgment from a replicated store after a quorum of replicas outside that volume's failure domain made it durable | Local barrier plus an asynchronous copy that may not have arrived |
+
+: **Durable Acknowledgment by Failure Domain**: Each row names the weakest acknowledgment that survives its failure. Moving down the table adds a wait, first for the storage device and then for network round trips to the slowest replica in the quorum, so the declared failure domain sets the latency floor of every dispatch. {#tbl-vol3-durable-ack-domains}
+
+The implementation must specify which failures its persistence operation covers, how errors are reported, and how a replacement identifies the complete acknowledged history. Storage technology is a way to implement that contract, not a substitute for stating it. @Sec-vol3-appendix-systems-boundaries compares atomicity, isolation, and durability and supplies a boundary test for separating one store's commitment from effects at other endpoints.
 
 If the acknowledgment fails or its status is uncertain, the runtime does not dispatch on the assumption that the write probably succeeded. It retains or resolves the uncertain append through the store's contract. This can delay useful work when storage is unavailable, but sending first would remove the evidence needed to govern that work after a failure.
 
@@ -141,13 +153,13 @@ After the crash, the worker must first establish that it has the complete author
 
 In the worksheet, the test may not have reached the service, may still be running, or may have finished before the crash. A lost acknowledgment can also mean that the returned job handle was never recorded. Recovery cannot assume that it has `job_tests_18` merely because the service might have created that job. A supported lookup by the recorded operation identity can supply new evidence; the runtime authenticates and correlates that evidence before durably updating the ledger. A targeted pass still establishes only the check of `ws_r18`, not acceptance of the entire repair.
 
-An **in-doubt action**\index{In-doubt action} is explicit uncertainty, not a synonym for failure. @Sec-vol3-tool-calling-idempotency supplies the endpoint requirements for a safe repeat: identity scope, payload binding, retention, handling of an in-flight request, and coordination between the effect and the returned result. Supplying the same key does not establish those properties on an endpoint that lacks them. A same-name resource can belong to another operation, and an absent resource does not exclude a delayed first attempt. Neither observation alone justifies retrying a creation request whenever the named resource is absent.
+An **in-doubt action**\index{In-doubt action} is explicit uncertainty, not a synonym for failure. @Sec-vol3-tool-calling-idempotency supplies the endpoint requirements for a safe repeat: identity scope, payload binding, retention, handling of an in-flight request, and coordination between the effect and the returned result. Supplying the same key does not establish those properties on an endpoint that lacks them. A same-name resource can belong to another operation, and an absent resource does not exclude a delayed first attempt. Neither observation alone justifies retrying a creation request whenever the named resource is absent. Settlement before retry (principle \ref{pri-vol3-exactly-once-settlement}) states the rule, and @sec-vol3-appendix-systems-retries reviews the classical idempotence and deduplication contracts behind it.
 
-Durable intent also does not enlist the endpoint in a transaction with the runtime's store. Logging the request cannot commit, roll back, or deduplicate the endpoint's effect. When evidence remains insufficient, the ledger retains an owner for reconciliation or an authorized handoff. A timeout, pause, or terminal continuation does not discard that duty. Independent work may proceed under its guards, while dependent mutations remain withheld. Failure recovery develops how to respond to established effects that need repair.
+Durable intent also does not enlist the endpoint in a transaction with the runtime's store. The runtime's durable intent is a unilateral commit decision, because the endpoint has no prepare phase in which it could vote on the request or hold its effect tentatively; @sec-vol3-failure-recovery develops why a two-phase commit protocol therefore cannot close the gap. Logging the request cannot commit, roll back, or deduplicate the endpoint's effect. When evidence remains insufficient, the ledger retains an owner for reconciliation or an authorized handoff. A timeout, pause, or terminal continuation does not discard that duty. Independent work may proceed under its guards, while dependent mutations remain withheld. Failure recovery develops how to respond to established effects that need repair.
 
 ### Share a barrier without dividing its latency
 
-**Group commit**\index{Group commit!trajectory logging} lets several ready records share one durable acknowledgment. The coordinator gathers a batch, performs the storage operation required by the failure contract, and releases only the records covered by its successful acknowledgment. Each trajectory still satisfies the same intent-before-dispatch ordering.
+**Group commit**\index{Group commit!trajectory logging} lets several ready records share one durable acknowledgment [@dewitt1984]. The coordinator gathers a batch, performs the storage operation required by the failure contract, and releases only the records covered by its successful acknowledgment. Each trajectory still satisfies the same intent-before-dispatch ordering.
 
 For a successful batch, let $a_i$ be the time event $i$ enters the batching queue, $s$ the start of the batch's storage operation, and $d$ the time its durable acknowledgment becomes available. If notification delay is excluded, event $i$ waits
 
@@ -195,6 +207,64 @@ For a different suffix that changes workspace files, the recovery data must incl
 
 A full snapshot and an incremental representation can satisfy the same contract while spending resources differently. @Tbl-vol3-snapshot-models identifies the measurements that matter. Neither representation implies constant-time restore, and a chain of small deltas can be expensive to retrieve and validate.
 
+Write volume separates the two when the checkpointed state only grows, as a record that accumulates delivered context and observations does. Suppose the state grows by about $s$ bytes per turn and a checkpoint is published every $k$ turns. The $j$th full snapshot writes $j\,s\,k$ bytes, so $n$ checkpoints write
+
+$$B_{\text{full}} = \sum_{j=1}^{n} j\,s\,k = s\,k\,\frac{n(n+1)}{2}, \qquad B_{\text{delta}} = s\,k\,n.$$ {#eq-vol3-snapshot-bytes}
+
+@Eq-vol3-snapshot-bytes shows full snapshots growing quadratically with trajectory length while deltas grow linearly. Their ratio, $(n+1)/2$, is the write amplification of serializing unchanged state again at every checkpoint.
+
+```{python}
+#| label: calc-vol3-durable-snapshot-bytes
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FULL VERSUS INCREMENTAL SNAPSHOT BYTES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-snapshot-bytes and the prose immediately below it in
+# │          "Choose the snapshot representation".
+# │
+# │ Goal: Make the quadratic-versus-linear write volume of @eq-vol3-snapshot-bytes
+# │       concrete for one hypothetical monotonically growing trajectory.
+# │ Show: Total bytes written by full snapshots and by deltas, and their ratio.
+# │ How:  Direct evaluation of the closed forms; all inputs are scenario values.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import byte, GB
+from mlsysim.fmt import fmt, fmt_int, fmt_memory, check
+
+class SnapshotBytes:
+    # ┌── 1. LOAD (scenario inputs, not measurements) ─────────────────────
+    turns = 500  # hypothetical trajectory length
+    stride = 5  # checkpoint every stride turns
+    growth_kb = 128  # state growth per turn, decimal kilobytes
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
+    n = turns // stride
+    growth_bytes = growth_kb * 1e3
+    full_bytes = growth_bytes * stride * n * (n + 1) / 2
+    delta_bytes = growth_bytes * stride * n
+    ratio = full_bytes / delta_bytes
+
+    # ┌── 3. GUARD (prose claims) ─────────────────────────────────────────
+    check(n == 100, "One hundred checkpoints")
+    summed_bytes = 0.0
+    for j in range(1, n + 1):
+        summed_bytes += j * growth_bytes * stride
+    check(abs(summed_bytes - full_bytes) < 1, "Closed form matches the sum")
+    check(abs(ratio - (n + 1) / 2) < 1e-9, "Ratio equals (n+1)/2")
+    check(3.0e9 < full_bytes < 3.5e9, "Full snapshots write about 3.2 GB")
+    check(abs(delta_bytes - 64e6) < 1, "Deltas write 64 MB")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────────────────────
+    turns_str = fmt_int(turns)
+    stride_str = fmt_int(stride)
+    growth_str = fmt_int(growth_kb)
+    n_str = fmt_int(n)
+    full_gb_str = fmt_memory(full_bytes * byte, unit=GB, precision=1)
+    delta_mb_str = fmt_int(delta_bytes / 1e6)
+    ratio_str = fmt(ratio, precision=1)
+```
+
+For a hypothetical `{python} SnapshotBytes.turns_str`-turn trajectory whose state grows by `{python} SnapshotBytes.growth_str` KB per turn, checkpointing every `{python} SnapshotBytes.stride_str` turns publishes `{python} SnapshotBytes.n_str` checkpoints. Full snapshots write `{python} SnapshotBytes.full_gb_str`, while deltas write `{python} SnapshotBytes.delta_mb_str` MB, a factor of `{python} SnapshotBytes.ratio_str`. The saving moves cost rather than removing it, because restore must now retrieve and apply the delta chain.
+
 | Choice               | What must remain available                                                     | Cost to measure                                                                    |
 |:---------------------|:-------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------|
 | Full snapshot        | The complete selected record/workspace state and required referenced artifacts | Capture pause, bytes written, transfer and restore time for the actual state size  |
@@ -207,6 +277,12 @@ Periodic consolidation can shorten an incremental chain, but the replacement bas
 ### Price reconstruction rather than lost model turns
 
 Checkpoint cadence trades capture overhead against work needed to reconstruct the suffix. When the required events and workspace deltas survive, the suffix is not lost model work. Its cost is reading, validating, folding, and restoring recorded state. New model calls begin only after reconstruction and guarded resume; their cost is not a charge for resampling the recorded past.
+
+The classical cadence rule governs a different regime, in which a failure loses work that must be executed again. That happens when workspace changes were not logged, when a model call or local step was in flight, or when a local effect left no recoverable record. Each failure then repeats, on average, half an interval of execution, and Young's first-order balance of that loss against checkpoint pauses [@young1974] gives the interval
+
+$$\tau^\ast \approx \sqrt{2\,T_{\text{save}}\,M_{\text{MTBF}}}$$ {#eq-vol3-young-interval}
+
+where $T_{\text{save}}$ is the pause per checkpoint and $M_{\text{MTBF}}$ is the mean time between failures. @Sec-vol3-appendix-math-daly derives @eq-vol3-young-interval and states its assumptions, including Poisson failures and a checkpoint cost small relative to the interval. The trajectory log changes the lost-work term, not the pause term. A turn whose events and workspace changes are durable leaves the re-execution regime, because its cost after a crash is reconstruction rather than repeated model calls and tool work. Substituting that smaller cost into the same balance lengthens the interval, and only work the log does not cover, such as an interrupted model call, still follows @eq-vol3-young-interval. For the logged part of the trajectory, the decision reduces to pricing reconstruction directly.
 
 The following finite worksheet compares three cadences on one stipulated failure trace. It is deliberately a retrospective comparison, not a failure-rate estimate or an optimal policy for future tasks. Let $N_k$ count checkpoints at stride $k$, let $c$ be the pause per checkpoint, let $b$ be the base restore time per crash, and let $r$ be reconstruction time per completed turn's recorded suffix. If crash $i$ leaves $d_i(k)$ completed turns after its latest published checkpoint, the included time is
 
@@ -306,7 +382,7 @@ The worker first identifies the authoritative committed log prefix and the check
 
 Reading that history does not make the worker its current owner. The coordinator must authenticate the claimant and issue the trajectory's current ownership grant. An `owner_epoch` distinguishes this grant from earlier ownership. It is separate from `record_version`, which identifies serialized record updates, and `control_epoch`, which identifies continuation eligibility. None of these changes the logical identity of an operation already admitted.
 
-The old worker may have been partitioned rather than destroyed. Lease expiry alone does not prevent it from resuming and attempting a write. A **fencing token**\index{Fencing token!distributed lease} lets an enforcing resource reject obsolete ownership, but requires the resource to participate in the check [@kleppmann2017designing]. The new owner needs the authoritative ownership transition installed or verifiable at the relevant log, dispatch, and resource boundaries before relying on exclusion. An arbitrary larger integer supplied by a caller is not an authenticated grant. A boundary that cannot establish current ownership must withhold the protected operation.
+The old worker may have been partitioned rather than destroyed. Lease expiry alone does not prevent it from resuming and attempting a write. A **fencing token**\index{Fencing token!distributed lease} lets an enforcing resource reject obsolete ownership, but requires the resource to participate in the check [@kleppmann2017designing]; @sec-vol3-appendix-systems-fencing traces the handoff in which a delayed write meets the new fence. The new owner needs the authoritative ownership transition installed or verifiable at the relevant log, dispatch, and resource boundaries before relying on exclusion. An arbitrary larger integer supplied by a caller is not an authenticated grant. A boundary that cannot establish current ownership must withhold the protected operation.
 
 Fencing has a narrower scope than effect settlement. A gateway can reject a new dispatch from the old owner while a request it previously forwarded remains in flight. The new worker must therefore preserve `operation_id=test_r18` and the earlier attempt's evidence. Passing the new ownership check does not authorize repeating that operation. A gateway's local pending/complete map cannot, by itself, make its record atomic with an independent endpoint's effect.
 
@@ -338,7 +414,49 @@ Context assembly must distinguish historical reconstruction from future continua
 
 Configuration changes also require an explicit decision. The runtime can retain available recorded versions, validate a transition to new model, prompt, or tool configurations, or withhold continuation when compatibility cannot be established. A stable hosted-model label may not identify unchanged internals. An in-doubt intent retains its original operation and payload semantics; a new schema cannot reinterpret it retrospectively. Record the change and its provenance limits so later comparisons do not mistake it for identical execution.
 
-A new model call requires compatible serving state, not necessarily a cold start. Prefix state may remain available, be partially reusable, or require reconstruction under the rules of @sec-vol3-kvcache-radix-tree. No prefill is needed merely to inspect a record or keep a trajectory paused. End-to-end resumption can instead be limited by ownership establishment, storage access, workspace restoration, or external reconciliation. Measure those intervals before attributing recovery time to model serving.
+A new model call requires compatible serving state, not necessarily a cold start. Prefix state may remain available, be partially reusable, or require reconstruction under the rules of @sec-vol3-kvcache-radix-tree. No prefill is needed merely to inspect a record or keep a trajectory paused. End-to-end resumption can instead be limited by ownership establishment, storage access, workspace restoration, or external reconciliation. Resume time is the sum of these stages,
+
+$$T_{\text{resume}} = T_{\text{own}} + T_{\text{read}} + T_{\text{fold}} + T_{\text{ws}} + T_{\text{rec}} + T_{\text{prefill}},$$ {#eq-vol3-resume-time}
+
+covering ownership acquisition, reading and validating the checkpoint and suffix, folding the suffix, restoring the workspace, reconciling outstanding operations, and rebuilding serving state for the next call.
+
+```{python}
+#| label: calc-vol3-durable-resume-prefill
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COLD PREFILL FLOOR ON RESUME (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-resume-time and the prose immediately below it in
+# │          "Admit the next continuation".
+# │
+# │ Goal: Show the scale of the prefill term when no prefix state survives.
+# │ Show: Arithmetic floor, in seconds, for prefilling a long agent context.
+# │ How:  2 * params / peak 8-bit rate per prompt token, times the context
+# │       length; same model, accelerator, and context length as the
+# │       reference serving quantities in @sec-vol3-appendix-inference-roofline.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+class ResumePrefill:
+    # ┌── 1. LOAD ─────────────────────────────────────────────────────────
+    model = Models.Language.Llama3_70B
+    accel = Hardware.Cloud.H100
+    context_tokens = 32_768  # scenario: recovered context of a long trajectory
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
+    params = model.parameters.to(ureg.count).magnitude
+    peak = accel.compute.precision_flops["fp8"].to(ureg.flop / ureg.second).magnitude
+    t_prefill_s = 2 * params * context_tokens / peak
+
+    # ┌── 3. GUARD (prose claims) ─────────────────────────────────────────
+    check(2.0 < t_prefill_s < 2.7, f"Prefill floor should be about 2.3 s, got {t_prefill_s:.2f}")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────────────────────
+    context_str = fmt_int(context_tokens)
+    t_prefill_str = fmt(t_prefill_s, precision=1)
+```
+
+The last term is where agent recovery departs from classical database recovery, which is dominated by reading the log and repairing pages [@mohan1992aries]. Folding reads recorded events and runs deterministic harness code with no model call. Prefill, by contrast, must recompute the attention state for the entire recovered context whenever no compatible prefix state survived. At the reference model and accelerator of @sec-vol3-appendix-inference-roofline, the arithmetic floor alone for a `{python} ResumePrefill.context_str`-token context is about `{python} ResumePrefill.t_prefill_str` s of one accelerator's peak 8-bit throughput, before queueing or any inefficiency. Attention state is derived from the token prefix (principle \ref{pri-vol3-prefix-coherence}), so losing it loses reusable computation, not task knowledge. Placing the resumed trajectory where its prefix is still cached, and keeping the next context's prefix identical to the last delivered one, can remove most of this term. Measure each interval of @eq-vol3-resume-time before attributing recovery time to one of them.
 
 Resume turns surviving evidence into a currently permitted continuation without converting unknown outcomes into failures or permission to retry. The same reconstructed state also supports a different operation: examining recorded behavior without admitting new model or tool work. That distinction leads to replay.
 
@@ -355,6 +473,12 @@ Resuming the repair admits new work under current conditions. Debugging its hist
 | Counterfactual branch     | Restore compatible starting state, change a declared condition, and obtain valid observations for the new path | What happened in this new experiment                        |
 
 : **Three uses of a recorded trajectory**: Reconstructing history, testing code, and exploring an alternative answer different questions. None establishes an unobserved external outcome. {#tbl-vol3-replay-comparison}
+
+The first two modes share one structural change from live execution, shown in @fig-vol3-replay-mode. Both sources of new information are cut off, and recorded events flow into the harness in their place.
+
+::: {#fig-vol3-replay-mode fig-env="figure" fig-pos="htb" fig-cap="**Live Execution versus Replay**: In live execution (top), each turn samples the model, passes its proposal through the authorization gate, dispatches the tool, and appends every step to the log. In replay (bottom), the model client is stubbed and tool dispatch is disconnected, so recorded replies and results stream into the harness and any request the log does not account for stops the replay. Folding those events reconstructs the recorded projection, and running harness logic against them is regression replay. A counterfactual branch differs from both, because after restoring its starting state it obtains new observations from compatible fixtures or isolated execution." fig-alt="Two panels. Top: live execution with harness record, foundation model, authorization gate, tools and environment, and trajectory log connected in a loop. Bottom: replay mode with the model and tool dispatch boxes crossed out, a recorded-results box, and the trajectory log streaming recorded events into the replaying harness."}
+![](images/svg/fig-vol3-replay-mode.svg)
+:::
 
 ### Inspect the recorded projection
 
@@ -376,7 +500,7 @@ A hash can verify a retrieved payload but cannot replace a missing one. When ret
 
 ### Test the harness against captured inputs
 
-A regression test exercises the harness code rather than merely folding its recorded decisions. The test supplies captured model replies, tool observations, control events, and the other inputs that the tested logic consumes. At its declared boundary, this includes relevant clock values, generated identifiers, configuration, policy, and event scheduling. The capture need not model an entire machine, but omitted inputs limit the comparison.
+A regression test exercises the harness code rather than merely folding its recorded decisions. The test supplies captured model replies, tool observations, control events, and the other inputs that the tested logic consumes. At its declared boundary, this includes relevant clock values, generated identifiers, configuration, policy, and event scheduling. The capture need not model an entire machine, but omitted inputs limit the comparison. Operating-system debuggers rest on the same idea, logging the nondeterministic inputs of a run so that it can be replayed and stepped backward [@king2005debugging].
 
 The replay adapter must match a request before returning its recorded response. A model reply belongs to its recorded invocation and delivered inputs. A tool observation belongs to a logical operation and attempt, with the expected operation name and arguments. Matching uses exact representations or an explicitly defined normalization, together with the recorded order or declared concurrency relationships. Simply taking the next result from a queue could give the `r18` test result to a different test or candidate. A mismatch stops that comparison; it never silently falls back to a live call.
 
@@ -472,7 +596,7 @@ The storage engine must preserve these relationships under append, retry, migrat
 
 For example, a worker-local log asynchronously copied elsewhere is not sufficient for recovery from permanent loss of the local volume if dispatch can precede the required remote acknowledgment. A circular buffer likewise cannot overwrite the last authoritative copy of a still-required event. If storage cannot safely accept required records, hold new admissions that depend on those records rather than dispatching without them. Analytical copies may lag only when another retained copy already satisfies the recovery promise. During tier migration, verify the destination's completeness and required artifacts before retiring the source copy; a successfully copied index is not proof that every referenced body arrived.
 
-An append-only event model does not mandate a particular physical index. An engine using sorted keys can store immutable events under trajectory and sequence keys. Storage-level compaction may reorganize their physical representation while preserving the required logical records. Overwriting earlier events with a newer value is a different, application-level change: it is permitted only when the declared retention contract allows that information to disappear. The order of recorded decisions remains part of their meaning.
+An append-only event model does not mandate a particular physical index. An engine using sorted keys, such as a log-structured merge tree [@oneil1996log], can store immutable events under trajectory and sequence keys. Storage-level compaction may reorganize their physical representation while preserving the required logical records. Overwriting earlier events with a newer value is a different, application-level change: it is permitted only when the declared retention contract allows that information to disappear. The order of recorded decisions remains part of their meaning.
 
 Repeated ingestion also needs more than a uniqueness constraint. If `(trajectory_id, sequence_number)` or an `event_id` already exists, compare the immutable envelope and payload with the stored event under the declared encoding. An identical retry can acknowledge the existing record. A conflicting payload is an integrity or coordination error, not a duplicate to ignore. For example, a timeout `ToolResult` and later success evidence cannot occupy the same event identity with different contents; the later evidence is a new event whose meaning is checked against the operation ledger.
 
@@ -492,6 +616,18 @@ Retention completes the reconstruction contract by keeping the evidence and arti
 ## Fallacies and Pitfalls {#sec-vol3-durable-execution-fallacies}
 
 The most consequential mistakes confuse a surviving record with evidence that it does not contain.
+
+::: {.fallacy-pitfall}
+**Fallacy**: *Saving the final context window is enough to audit or recover a trajectory.*
+
+The final context is what the last model call read, assembled under compaction and bounded observation. It does not record which proposals were admitted, which intents became durable, or which results arrived and were later summarized away. Suppose a tool returned a credential at turn 7 and compaction replaced that observation with a summary by turn 12. The final context then shows no trace of the exposure. Audit and recovery need the log of @tbl-vol3-durable-log-schema, from which a context can be assembled; the context cannot rebuild the log.
+:::
+
+::: {.fallacy-pitfall}
+**Fallacy**: *Rerunning the model at temperature zero reproduces a trajectory.*
+
+Greedy decoding fixes the selection rule at a given logit vector, not the served computation that produces the logits. As @sec-vol3-foundation-model-autoregressive shows, a changed numerical implementation or model revision behind a stable name can flip a closely ranked token, and one early difference changes all later conditioning. Clocks, identifiers, and tool environments also differ on the second run. A rerun is therefore a new trajectory with its own effects. Reproducing recorded behavior requires replaying the recorded model replies and tool results, and divergence analysis then locates where two executions first differ.
+:::
 
 ::: {.fallacy-pitfall}
 **Fallacy**: *A durable intent proves that the endpoint committed the operation.*
@@ -535,7 +671,7 @@ A compatible checkpoint and surviving log suffix reconstruct the selected record
 
 :::
 
-Intent before effect (principle \ref{pri-vol3-intent-before-effect}) requires a durable record before admitted dispatch, with durability defined against the failure the runtime claims to survive. Checkpoints and retained artifacts make the recorded state reconstructible, while unresolved external outcomes remain explicit. The principle preserves the evidence needed for a recovery decision; it does not make that decision or certify its result.
+Intent before effect (principle \ref{pri-vol3-intent-before-effect}) requires a durable record before admitted dispatch, with durability defined against the failure the runtime claims to survive. Checkpoints and retained artifacts make the recorded state reconstructible, while unresolved external outcomes remain explicit. The principle preserves the evidence needed for a recovery decision; it does not make that decision or certify its result. That boundary also marks where the mechanical half of invariant closure (principle \ref{pri-invariant-closure}) ends for durability. The runtime can guarantee that no admitted effect goes unrecorded and that no settled effect is repeated without an established repeat contract. It cannot decide from the log alone whether an in-doubt effect took place, or whether a recorded effect was the right one.
 
 ::: {.callout-chapter-connection title="From reconstructing the record to repairing effects"}
 
