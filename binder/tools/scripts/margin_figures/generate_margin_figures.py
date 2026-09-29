@@ -97,25 +97,34 @@ def gen_ch01():
 
 def gen_ch02():
     chap = "02_body"
-    # Fig 02-M1: Reflected Rotor Inertia Knee (N*)
+    # Fig 02-M1: Reflected rotor inertia knee (N*).
+    # Values come from the chapter's ReflectedInertia LEGO cell: the shape is
+    # joint acceleration per unit motor torque, N / (J_load + N^2 J_rotor),
+    # normalized to its peak at N* = sqrt(J_load / J_rotor). The rising branch
+    # is neutral; red marks only the post-knee regime where gearing costs
+    # acceleration.
+    RI = lego(chap, "ReflectedInertia")
+    j_load = float(RI.j_load.to("kilogram * meter ** 2").magnitude)
+    j_rotor = float(RI.j_rotor.to("kilogram * meter ** 2").magnitude)
+    N_star = float(RI.n_star)
+    n_gear = float(RI.n_gear)
     fig, ax = new_fig('scale-anchor')
-    N = np.linspace(5, 100, 200)
-    tau_m = 6.5
-    J_rotor = 1.2e-4
-    J_load = 0.18
-    alpha = (N * tau_m) / (J_load + (N**2) * J_rotor)
-    N_star = np.sqrt(J_load / J_rotor) # 38.73
-    peak_alpha = (N_star * tau_m) / (J_load + (N_star**2) * J_rotor) # ~699 rad/s^2
-    
+    N = np.linspace(5, 110, 300)
+    acc = N / (j_load + N**2 * j_rotor)
+    acc = acc / acc.max()
     m = N <= N_star
-    ax.plot(N[m], alpha[m], color=MECHANICAL, lw=1.35)
-    ax.plot(N[~m], alpha[~m], color=RED, lw=1.35)
-    ax.axvspan(N_star, 100, color=REDFILL, alpha=0.25)
-    ax.plot(N_star, peak_alpha, "o", color=MECHANICAL, ms=3.5)
+    ax.axvspan(N_star, 110, color=REDFILL, alpha=0.25, lw=0)
+    ax.plot(N[m], acc[m], color=TIME, lw=1.35)
+    ax.plot(N[~m], acc[~m], color=RED, lw=1.35)
+    ax.plot(N_star, 1.0, "o", color=TIME, ms=3.5, zorder=5)
     ax.axvline(N_star, color=GRID, ls="--", lw=0.6)
-    ax.text(N_star - 2, 715, "N*=39\nPeak", color=MECHANICAL, fontsize=4.8, fontweight="bold", ha="right", multialignment="right")
-    ax.text(75, 420, "rotor\ndominated", color=RED, fontsize=4.6, ha="center", multialignment="center")
-    ax.set_xlim(5, 100); ax.set_ylim(0, 800)
+    ax.text(N_star + 3, 0.84, f"N* ≈ {N_star:.0f}", color=INK, fontsize=4.8, fontweight="bold",
+            ha="left", va="top")
+    share = n_gear / (j_load + n_gear**2 * j_rotor) / (N_star / (j_load + N_star**2 * j_rotor))
+    ax.plot(n_gear, share, "o", color=RED, ms=3.0, zorder=5)
+    ax.text(n_gear, share + 0.07, f"{n_gear:.0f}:1", color=RED, fontsize=4.6, ha="center", va="bottom")
+    ax.text(84, 0.30, "rotor\ndominated", color=RED, fontsize=4.6, ha="center", multialignment="center")
+    ax.set_xlim(5, 110); ax.set_ylim(0, 1.12)
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
     for s in ("left", "bottom"):
@@ -154,27 +163,46 @@ def gen_ch03():
 
 def gen_ch04():
     chap = "04_nervous"
-    # Fig 04-M1: Fieldbus 1.0 ms Control Cycle Budget Envelope
+    # Fig 04-M1: Fieldbus occupancy against the bus cycle, nine servo axes.
+    # Values come from the chapter's FieldbusSchedulability LEGO cell; both
+    # buses are network (violet), and red marks only the cycle limit and the
+    # occupancy past it.
+    F = lego(chap, "FieldbusSchedulability")
+    us = lambda q: round(float(q.to("microsecond").magnitude), 1)
+    t_ecat, t_can, t_cycle = us(F.t_total_ethercat), us(F.t_total_one), us(F.cycle_time)
     fig, ax = new_fig('budget-envelope')
     rows = [
-        ("EtherCAT", 30.4, DATA),
-        ("CAN-FD", 1123.2, RED)
+        ("EtherCAT, \u00b5s", t_ecat, NET),
+        ("CAN FD, \u00b5s", t_can, NET),
     ]
-    budget_envelope(ax, rows=rows, limit=1000.0, style='burn', limit_label="1.0 ms Tick")
+    budget_envelope(ax, rows=rows, limit=t_cycle, style='burn',
+                    limit_label=f"{t_cycle:g} \u00b5s cycle", limit_label_offset=-0.03)
     save(fig, out_path(chap, "margin_fieldbus_cycle_budget_envelope"))
 
-    # Fig 04-M2: Substrate Fault Blast Radius
+    # Fig 04-M2: A transient on the shared 48 V drive bus. Every load behind
+    # the shared converter sees it; the permission rail is isolated and held
+    # up, so the fan stops there. Voltages from the PermissionRail LEGO cell.
+    P = lego(chap, "PermissionRail")
+    v_bus = float(P.v_bus_nom.to("volt").magnitude)
+    v_uvlo = float(P.v_uvlo.to("volt").magnitude)
     fig, ax = new_fig('blast-radius')
     ax.plot(0.08, 0.52, "s", color=RED, ms=10)
-    ax.text(0.08, 0.28, "NPU 50A", color=RED, fontsize=4.8, fontweight="bold", ha="center")
-    victims = ["Voltage droop", "Thermal sag", "DMA starvation", "Clock jitter"]
-    ys = np.linspace(0.12, 0.90, 4)
+    ax.text(0.02, 1.0, f"{v_bus:.0f} V bus\ntransient", color=RED, fontsize=4.6,
+            fontweight="bold", ha="left", va="top")
+    victims = [f"host lockout {v_uvlo:.0f} V", "thermal coupling", "DMA starvation", "clock jitter"]
+    ys = np.linspace(0.30, 0.86, 4)
     for y, label in zip(ys, victims):
-        ax.annotate("", xy=(0.58, y), xytext=(0.14, 0.52),
+        ax.annotate("", xy=(0.56, y), xytext=(0.14, 0.52),
                     arrowprops=dict(arrowstyle="->", color="#aaa", lw=0.65))
-        ax.plot(0.58, y, "o", color=MEM, ms=5)
+        ax.plot(0.58, y, "o", color=RED, ms=4.5)
         ax.text(0.66, y, label, color=INK, fontsize=4.4, va="center", ha="left")
-    ax.set_xlim(0, 1.35); ax.set_ylim(0, 1.0)
+    # blocked branch: the isolated, held-up permission rail
+    ax.annotate("", xy=(0.40, 0.08), xytext=(0.14, 0.50),
+                arrowprops=dict(arrowstyle="-", color="#aaa", lw=0.65, ls=(0, (2, 1.5))))
+    ax.plot([0.40, 0.40], [0.02, 0.14], color=DATA, lw=1.4)
+    ax.plot(0.58, 0.08, "o", color=DATA, ms=4.5)
+    ax.text(0.66, 0.08, "permission rail", color=INK, fontsize=4.4, va="center", ha="left")
+    ax.set_xlim(0, 1.35); ax.set_ylim(-0.02, 1.02)
     for s in ("top", "right", "left", "bottom"):
         ax.spines[s].set_visible(False)
     ax.set_xticks([]); ax.set_yticks([])

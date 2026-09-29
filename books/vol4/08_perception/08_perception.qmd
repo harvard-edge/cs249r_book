@@ -232,6 +232,82 @@ Consider the mobile manipulator's navigation camera while the base passes a vert
 
 That skew lies along the direction of travel. The bottom rows see the upright from a camera position `{python} RollingShutterSkew.skew_str` farther down the aisle than the top rows did, so an image treated as an instantaneous rigid projection places the upright's lower half nearer than its upper half. The error therefore belongs with the stopping budget's localization allowance $\delta_{\text{loc}}$, which that budget holds along the direction of travel, and uncorrected it would spend about half of the `{python} RollingShutterSkew.delta_loc_str` allowance. The allowance assumes the skew has been removed before the estimator sees the frame. The side clearance faces a different term. A lateral rolling-shutter error comes from yaw: while the base turns at an illustrative `{python} RollingShutterSkew.omega_yaw_str` rad/s, the camera's bearing rotates by $\omega\,t_{\text{readout}}$ during readout, which at the `{python} RollingShutterSkew.z_upright_str` rack-end distance moves the upright sideways by $z\,\omega\,t_{\text{readout}} =$ `{python} RollingShutterSkew.lateral_str`, about `{python} RollingShutterSkew.lateral_pct_str` percent of the `{python} RollingShutterSkew.side_clearance_str` side clearance. Both terms scale with readout time. A global-shutter sensor, such as the machine's wrist camera, removes them at the cost of pixel area, so shutter type is a selection decision for any camera whose geometry feeds a clearance claim; this machine keeps the rolling-shutter navigation camera as the harder teaching case. Correcting this distortion requires **rolling-shutter motion compensation**\index{Rolling-shutter motion compensation!definition}, geometric unwarping using a camera pose for each scanline. The IMU supplies high-rate (`{python} RollingShutterSkew.f_imu_str`) angular-rate and specific-force measurements, not linear velocity. A state estimator combines those measurements with its initial state, bias and gravity estimates, and other available motion evidence to estimate body pose and velocity. Applying the calibrated body-to-camera extrinsics gives the instantaneous camera pose for each row, which permits scanline rectification before triangulation within the pose estimate's error bounds.
 
+@Fig-08-rolling-shutter-rows plots that sampling against the row index: each row sees the upright from its own camera position, and each row's exposure smears the scene over its own interval.
+
+::: {#fig-08-rolling-shutter-rows fig-env="figure" fig-pos="t" fig-cap="**Row-by-row sampling on the navigation camera**: At the `{python} RollingShutterSkew.v_str` drive limit, each of the `{python} RollingShutterSkew.rows_str` rows is read `{python} RollingShutterSkew.t_row_str` after the one above it, so the bottom row sees the rack upright from a camera position `{python} RollingShutterSkew.skew_str` farther down the aisle than the top row (solid line; upper axis gives the read time). The shaded band is each row's own motion blur, `{python} RollingShutterSkew.blur_str` over the `{python} RollingShutterSkew.t_exp_str` exposure. Uncorrected, the skew alone spends about half of the `{python} RollingShutterSkew.delta_loc_str` localization allowance (dashed line)." fig-alt="Line plot with image row on the vertical axis, zero at the top, and camera position along the direction of travel in millimeters on the horizontal axis, with read time in milliseconds on a second axis above. A straight line runs from zero at the top row to about 25 millimeters at the bottom row, inside a shaded band about 24 millimeters wide. A dashed vertical line at 50 millimeters marks the localization allowance."}
+
+```{python}
+#| label: plot-perception-rolling-shutter-rows
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ROLLING-SHUTTER ROW SAMPLING (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-08-rolling-shutter-rows in
+# │          @sec-perception-transduction-calibration.
+# │
+# │ Goal:    Make the along-travel skew physical: row index against the camera
+# │          position at which that row was read, with per-row blur and the
+# │          localization allowance it spends.
+# │ Show:    0 -> 24.9 mm over 3,040 rows (16.6 ms); 24 mm blur band; 50 mm
+# │          delta_loc line.
+# │ How:     Reads RollingShutterSkew only; the plotted endpoint is guarded
+# │          against its skew.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+import matplotlib.pyplot as plt
+from mlsysim import viz
+from mlsysim.fmt import check
+
+RS = RollingShutterSkew
+PETROL, PINE, SOFT = "#007A87", "#1A4D3E", "#4A5568"  # measured, structural, neutral (theme-colors.tex)
+
+# ┌── 1. LOAD ─────────────────────────────────────────────────────────────────
+n_rows = RS.rows
+v_mm_per_ms = RS.v.to(ureg.millimeter / millisecond).magnitude
+t_row_ms = RS.t_row.to(millisecond).magnitude
+blur_mm = RS.blur.to(ureg.millimeter).magnitude
+dloc_mm = RS.delta_loc.to(ureg.millimeter).magnitude
+
+# ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
+rows_axis = np.array([0.0, n_rows - 1.0])
+x_cam = v_mm_per_ms * t_row_ms * rows_axis
+
+# ┌── 3. GUARD ────────────────────────────────────────────────────────────────
+check(abs(v_mm_per_ms * t_row_ms * n_rows - RS.skew.to(ureg.millimeter).magnitude) < 1e-6, "The plotted skew must equal v * t_readout.")
+check(RS.skew.to(ureg.millimeter).magnitude < dloc_mm, "The skew must sit inside the drawn allowance.")
+
+# ┌── 4. PLOT ─────────────────────────────────────────────────────────────────
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(5.2, 2.7))
+ax.fill_betweenx(rows_axis, x_cam - blur_mm / 2, x_cam + blur_mm / 2, color=PETROL, alpha=0.14, lw=0)
+ax.plot(x_cam, rows_axis, color=PETROL, lw=2.0)
+ax.axvline(dloc_mm, color=PINE, lw=1.1, ls=(0, (4, 3)))
+ax.text(dloc_mm - 1, n_rows * 0.08, rf"$\delta_{{\mathrm{{loc}}}}$ = {RS.delta_loc_str}", ha="right", va="center", fontsize=8, color=PINE)
+ax.annotate(
+    f"skew {RS.skew_str}",
+    xy=(x_cam[-1], rows_axis[-1]),
+    xytext=(x_cam[-1] + 6, n_rows * 0.72),
+    fontsize=8,
+    color=PETROL,
+    va="center",
+    arrowprops=dict(arrowstyle="-", color=SOFT, lw=0.6),
+)
+ax.text(-blur_mm / 2 + 0.5, n_rows * 0.18, f"blur {RS.blur_str}", ha="left", va="center", fontsize=8, color=SOFT)
+ax.set_xlim(-blur_mm / 2 - 2, dloc_mm + 6)
+ax.set_ylim(n_rows * 1.03, -n_rows * 0.03)
+ax.set_xlabel("camera position along travel when the row is read (mm)", fontsize=9)
+ax.set_ylabel("image row", fontsize=9)
+ax.tick_params(labelsize=8)
+top = ax.secondary_xaxis("top", functions=(lambda x: x / v_mm_per_ms, lambda t: t * v_mm_per_ms))
+top.set_xlabel("read time after the top row (ms)", fontsize=9)
+top.tick_params(labelsize=8)
+plt.tight_layout()
+plt.show()
+```
+
+:::
+
 ::: {#fig-rolling-shutter-skew fig-env="figure" fig-pos="t" fig-cap="**Rolling shutter distortion geometry**: A phone camera's rolling shutter photographs a turning aircraft propeller. Because scanlines are exposed and read sequentially from top to bottom rather than simultaneously, blades that move appreciably during the frame's readout are recorded as curved, disconnected arcs; each row samples the blade at a later instant. On a moving robot the same row-by-row sampling shears straight structures and biases the geometry downstream estimators triangulate. (Credit: [Dick Lyon](https://commons.wikimedia.org/wiki/File:Propellor_with_rolling-shutter_artifact.jpg) / Wikimedia Commons, CC BY-SA 4.0)." fig-alt="Photograph from an aircraft window of a propeller and engine nacelle in flight, with sky and ground below. The blades appear as bent, curved shapes, some detached from the hub, instead of straight radial blades."}
 ![](images/jpg/fig08_real_rolling_shutter_skew.jpg){width="85%"}
 :::
@@ -893,10 +969,10 @@ This is a **partial delay ledger**, not yet the capture-to-response bound. The o
 
 @Fig-08-capture-to-brake-strip draws this partial ledger on one clock, with the base travel each interval consumes.
 
-::: {#fig-08-capture-to-brake-strip fig-env="figure" fig-pos="t" fig-cap="**Capture-to-brake timing strip**: The navigation camera's serial stages (top row, with link, DMA, and ISP drawn as one segment) reach dispatch at `{python} SensorInformationAge.tau_age_str`, and the stalled-proposer response path (bottom row) adds the lease, tick, bus, and actuator onset to reach `{python} SensorInformationAge.tau_delay_str`. The upper axis converts time to base travel at the `{python} SensorInformationAge.v_str` drive limit. The hatched gap marks the dispatch-to-admission interval $\Delta_{\text{da}}$, which this chapter does not bound; every later event shifts right by its measured value." fig-alt="Horizontal timing strip with a time axis in milliseconds below and a travel axis in millimeters above. The top row shows five consecutive perception segments from exposure to dispatch: exposure, readout, a combined link, DMA, and ISP segment, backbone, and IPC, with the backbone and readout longest. A hatched gap at dispatch is labeled as unbounded dispatch-to-admission time. The bottom row starts at dispatch and shows the lease window, a short tick and bus interval, and the actuator onset, ending at the total delay."}
+::: {#fig-08-capture-to-brake-strip fig-env="figure" fig-pos="t" fig-cap="**Capture-to-brake timing strip**: Time runs from the exposure midpoint of the frame that first shows the hazard. The camera and host lanes carry the navigation camera's serial stages, with link, DMA, and ISP drawn as one segment, to dispatch at `{python} SensorInformationAge.tau_age_str`; the response lane adds the lease, tick, bus, and actuator onset of a stalled proposer to reach `{python} SensorInformationAge.tau_delay_str`. The row beneath reads the same axis as base travel at the `{python} SensorInformationAge.v_str` drive limit. The dashed line at dispatch marks where the dispatch-to-admission interval $\Delta_{\text{da}}$ enters; this chapter does not bound it, so every later event shifts right by its measured value." fig-alt="Horizontal timing strip with three lanes labeled camera, host, and response over a time axis in milliseconds. The camera lane shows a solid exposure bar centered on the capture line and a readout bar after it. The host lane shows a combined link, DMA, and ISP bar, a longer backbone bar, and a thin IPC bar ending at a dispatch line. A dashed line at dispatch is labeled as the point where unbounded dispatch-to-admission time enters. The response lane starts at dispatch with a long lease bar, a thin tick and bus bar, and an onset bar ending at a brake-onset line. A bracket over the strip spans capture to brake onset. A travel row beneath marks millimeters of base travel and the travel before and after dispatch."}
 
 ```{python}
-#| label: fig-08-capture-to-brake-strip
+#| label: plot-perception-capture-to-brake
 #| echo: false
 #| warning: false
 #| message: false
@@ -907,116 +983,40 @@ This is a **partial delay ledger**, not yet the capture-to-response bound. The o
 # │
 # │ Goal:    Put the navigation camera's dispatch age and the stalled-proposer
 # │          response path on one clock, with the travel each consumes.
-# │ Show:    seven stages to t_age; lease, tick, bus, and onset to tau_delay;
-# │          the unbounded dispatch-to-admission gap; travel at the drive limit.
-# │ How:     Every segment reads SensorInformationAge (no literals); the travel
-# │          axis is v * t.
+# │ Show:    exposure and readout; link, DMA, ISP, backbone, IPC to t_age; the
+# │          point where the unbounded Delta_da enters; lease, tick, bus, and
+# │          onset to tau_delay; travel at the drive limit.
+# │ How:     viz.perception_age_strip (the shared timing-strip family) reads
+# │          every duration from AISLE; the guards tie its drawn events to
+# │          SensorInformationAge.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import viz
-from matplotlib.patches import Rectangle
+from mlsysim.fmt import check
+import matplotlib.pyplot as plt
 
 SIA = SensorInformationAge
-_ms = lambda q: q.to(millisecond).magnitude
-PETROL, PETROL_L = "#007A87", "#CCE4E7"  # measured (theme-colors.tex)
-PURPLE, PURPLE_L = "#5B4B8A", "#DED9EA"  # authority: permission path (theme-colors.tex)
-INK, SOFT, PALE = "#1A202C", "#4A5568", "#A0AEC0"
-t_link = (SIA.t_transport + SIA.t_dma + SIA.t_isp).to(millisecond)
-t_tb = (SIA.t_tick + SIA.t_bus).to(millisecond)
 
-# (label, duration in ms, value string, label placement: in / above-left / above-right)
-sense = [
-    ("exposure", _ms(SIA.t_exp_half), SIA.t_exp_half_str, ("up", 0.18)),
-    ("readout", _ms(SIA.t_readout), SIA.t_readout_str, "in"),
-    ("link, DMA, ISP", _ms(t_link), fmt_latency(t_link, unit=millisecond, precision=1), ("up", 0.5)),
-    ("backbone", _ms(SIA.t_backbone), SIA.t_backbone_str, "in"),
-    ("IPC", _ms(SIA.t_ipc), SIA.t_ipc_str, ("up", 0.18)),
-]
-respond = [
-    ("lease window", _ms(SIA.t_lease), SIA.t_lease_str, "in"),
-    ("tick + bus", _ms(t_tb), fmt_latency(t_tb, unit=millisecond, precision=0), ("down", 0.3)),
-    ("actuator onset", _ms(SIA.t_act), SIA.t_act_str, ("up", 0.18)),
-]
-t_age, t_delay = _ms(SIA.tau_age), _ms(SIA.tau_delay)
-v_mm_per_ms = SIA.v.to(ureg.millimeter / millisecond).magnitude
+# ┌── 1. LOAD ─────────────────────────────────────────────────────────────────
+v_strip = SIA.v  # category: illustrative (drive limit)
 
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(5.4, 2.7))
-ax.grid(False)
-for s in ("left", "right", "top"):
-    ax.spines[s].set_visible(False)
-ax.set_yticks([])
-y_s, y_r, h = 1.0, 0.0, 0.5
+# ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
+strip_08 = viz.perception_age_strip(AISLE, v_strip)
+t_dispatch_drawn = next(e.t for e in strip_08.events if e.label.startswith("dispatch"))
+t_onset_drawn = next(e.t for e in strip_08.events if e.label == "brake onset")
 
-def draw_row(stages, t0, y, fill, edge):
-    t = t0
-    for name, dur, lab, where in stages:
-        ax.add_patch(Rectangle((t, y - h / 2), dur, h, facecolor=fill, edgecolor=edge, lw=0.8))
-        mid = t + dur / 2
-        if where == "in":
-            ax.text(mid, y, f"{name}\n{lab}", ha="center", va="center", fontsize=7, color=INK)
-        else:
-            side, dy = where
-            y0 = y + h / 2 if side == "up" else y - h / 2
-            y1 = y0 + dy if side == "up" else y0 - dy
-            ax.annotate(
-                f"{name} {lab}",
-                xy=(mid, y0),
-                xytext=(mid, y1),
-                ha="center",
-                va="bottom" if side == "up" else "top",
-                fontsize=7,
-                color=SOFT,
-                arrowprops=dict(arrowstyle="-", color=PALE, lw=0.6),
-            )
-        t += dur
-
-draw_row(sense, 0.0, y_s, PETROL_L, PETROL)
-draw_row(respond, t_age, y_r, PURPLE_L, PURPLE)
-
-# Dispatch marker between the rows only, labeled clear of the stage labels
-ax.plot([t_age, t_age], [y_r + h / 2, y_s - h / 2], color=SOFT, lw=0.8, ls="--")
-ax.annotate(
-    rf"dispatch, $t_{{\mathrm{{age}}}}$ = {SIA.tau_age_str}",
-    xy=(t_age, y_s - h / 2),
-    xytext=(t_age + 6, y_s - 0.05),
-    ha="left",
-    va="center",
-    fontsize=7,
-    color=INK,
-    arrowprops=dict(arrowstyle="-", color=PALE, lw=0.6),
+# ┌── 3. GUARD ────────────────────────────────────────────────────────────────
+check(abs(t_dispatch_drawn - SIA.tau_age.to(millisecond).magnitude) < 1e-9, "The strip's dispatch must equal t_age.")
+check(abs(t_onset_drawn - SIA.tau_delay.to(millisecond).magnitude) < 1e-9, "The strip's brake onset must equal tau_delay.")
+check(
+    abs(strip_08.speed_mm_per_unit * t_dispatch_drawn - SIA.row_age.to(ureg.millimeter).magnitude) < 1e-6,
+    "The travel to dispatch must equal the observation-age row.",
 )
 
-# Unbounded dispatch-to-admission gap (width is schematic)
-gap_w = 6.0
-ax.add_patch(Rectangle((t_age - gap_w, y_r - h / 2 - 0.4), gap_w, 0.26, facecolor="white", edgecolor=SOFT, hatch="////", lw=0.6))
-ax.text(t_age - gap_w - 1.5, y_r - h / 2 - 0.27, r"$\Delta_{\mathrm{da}}$, not bounded here", ha="right", va="center", fontsize=7, color=SOFT)
-
-# Total partial delay
-yb = y_r - h / 2 - 0.62
-ax.annotate("", xy=(t_delay, yb), xytext=(0, yb), arrowprops=dict(arrowstyle="<->", color=INK, lw=0.8))
-ax.text(
-    t_delay * 0.72,
-    yb - 0.08,
-    rf"$\tau_{{\mathrm{{delay}}}}$ = {SIA.tau_delay_str} + $\Delta_{{\mathrm{{da}}}}$",
-    ha="center",
-    va="top",
-    fontsize=7,
-    color=INK,
-)
-
-ax.text(-2, y_s, "perception", ha="right", va="center", fontsize=7.5, color=PETROL, fontweight="bold")
-ax.text(-2, y_r, "response", ha="right", va="center", fontsize=7.5, color=PURPLE, fontweight="bold")
-
-ax.set_xlim(0, t_delay * 1.02)
-ax.set_ylim(yb - 0.5, y_s + h / 2 + 0.85)
-ax.set_xlabel("time since exposure midpoint (ms)", fontsize=8)
-ax.tick_params(axis="x", labelsize=7)
-top = ax.secondary_xaxis("top", functions=(lambda t: t * v_mm_per_ms, lambda d: d / v_mm_per_ms))
-top.set_xlabel(f"base travel at {SIA.v_str} (mm)", fontsize=8)
-top.tick_params(axis="x", labelsize=7)
-plt.tight_layout()
+# ┌── 4. PLOT ─────────────────────────────────────────────────────────────────
+fig, ax, axd = viz.plot_timing_strip(strip_08)
 plt.show()
-plt.close()
 ```
+
 :::
 
 The permission path never reads the image, so it cannot retroactively remove this pipeline age; the age reaches it only through the proposal's evidence epoch. At the `{python} SensorInformationAge.v_str` drive limit, the observation-age term $v\,t_{\text{age}}$ adds `{python} SensorInformationAge.row_age_str` of unmodeled travel to the stopping distance of @eq-body-stopping-distance:
@@ -1200,10 +1200,61 @@ class TemporalBatching:
 
 Batching improves accelerator throughput by amortizing work across images, but collecting a batch across successive capture times ages its earliest member. At the navigation camera's `{python} TemporalBatching.f_frame_str` cadence ($T_{\text{sample}} \approx$ `{python} TemporalBatching.t_period_str`), a batch of four consecutive frames holds the first for `{python} TemporalBatching.wait_1_str`, the second and third for `{python} TemporalBatching.wait_2_str` and `{python} TemporalBatching.wait_3_str`, and the last not at all. Adding the oldest frame's wait to the `{python} RackEndOpeningAge.t_age_str` observation age roughly doubles it, to `{python} TemporalBatching.t_age_batched_str`. That exceeds the dispatch-local threshold in @sec-perception-observation-contract, so the frame fails the selected pipeline budget before downstream admission is considered. Images captured together by several cameras may instead be batched only when the batch adds no age beyond the budgeted stages and meets its deadline.
 
-Delay can also make a correction arrive after the motion it was meant to oppose has reversed, so feedback can reinforce the disturbance. Phase margin measures how much additional lag a stable loop can tolerate before that happens. In supporting loop analysis, age spends this margin because a pure delay $t_{\text{age}}$ adds phase lag $\omega t_{\text{age}}$ at frequency $\omega$ without changing gain. Feedback control relies on timely negative feedback to oppose tracking error; when transport and compute latency delay an observation by half an oscillation period, corrective actions arrive in phase with the disturbance rather than opposing it. This phase inversion transforms stabilizing negative feedback into destabilizing positive feedback, driving the robot to chatter, weave across aisles, or oscillate into mechanical resonance. A loop with nominal margin $\text{PM}_{\text{nom}}$ at gain crossover $\omega_c$ therefore exhausts its stability margin once $t_{\text{age}} \ge \text{PM}_{\text{nom}}/\omega_c$, and exposure, processing, transport, permission, and actuator delay all draw on that single ceiling (@sec-appendix-control-zoh). For example, a visual-servoing tracking loop operating at crossover frequency $\omega_c = 10\,\text{rad/s}$ ($\approx 1.6\,\text{Hz}$) with nominal phase margin $\text{PM}_{\text{nom}} = 45^\circ$ ($0.785\,\text{rad}$) has a maximum permissible latency ceiling of $\tau_{\max} = 0.785 / 10 = 78.5\,\text{ms}$. If sensor exposure, transport, and neural inference consume $60\,\text{ms}$, the system depletes over 76 percent of its stability margin before motor commands are dispatched, risking underdamped resonance or boundary chatter.
+```{python}
+#| label: calc-perception-phase-margin-age
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PHASE MARGIN SPENT BY OBSERVATION AGE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The phase-margin paragraph of @sec-perception-photons-to-claims
+# │          and its margin figure.
+# │
+# │ Goal:    Turn a nominal phase margin at crossover into the delay ceiling
+# │          a pure age may spend, and show how much of it a 60 ms age uses.
+# │ Show:    45 deg at 10 rad/s -> 78.5 ms ceiling; 60 ms uses 76.4 percent.
+# │ How:     A pure delay tau removes phase omega_c * tau, so the ceiling is
+# │          PM_nom / omega_c (@sec-appendix-control-zoh).
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_latency, fmt_percent, check
+
+class PhaseMarginAge:
+    """Delay ceiling set by a nominal phase margin at crossover."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    omega_c = 10.0  # category: illustrative (gain crossover, rad/s)
+    pm_nom_deg = 45.0  # category: illustrative (nominal phase margin, degrees)
+    t_used = 60.0 * millisecond  # category: illustrative (exposure, transport, and inference)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    pm_nom_rad = math.radians(pm_nom_deg)
+    f_c = omega_c / (2 * math.pi)
+    tau_max = (pm_nom_rad / omega_c * second).to(millisecond)
+    frac_used = (t_used / tau_max).to(ureg.dimensionless).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(tau_max.magnitude - 78.54) < 0.01, f"Unexpected delay ceiling: {tau_max}")
+    check(0.76 < frac_used < 0.77, f"Unexpected share of margin used: {frac_used}")
+    check(t_used < tau_max, "The example age must sit below the ceiling")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    omega_c_str = fmt(omega_c, precision=0)
+    f_c_str = fmt(f_c, precision=1)
+    pm_nom_deg_str = fmt(pm_nom_deg, precision=0)
+    pm_nom_rad_str = fmt(pm_nom_rad, precision=3)
+    tau_max_str = fmt_latency(tau_max, unit=millisecond, precision=1)
+    t_used_str = fmt_latency(t_used, unit=millisecond, precision=0)
+    frac_used_str = fmt(frac_used * 100, precision=1)
+```
+
+Delay can also make a correction arrive after the motion it was meant to oppose has reversed, so feedback can reinforce the disturbance. Phase margin measures how much additional lag a stable loop can tolerate before that happens. In supporting loop analysis, age spends this margin because a pure delay $t_{\text{age}}$ adds phase lag $\omega t_{\text{age}}$ at frequency $\omega$ without changing gain. Feedback control relies on timely negative feedback to oppose tracking error; when transport and compute latency delay an observation by half an oscillation period, corrective actions arrive in phase with the disturbance rather than opposing it. This phase inversion transforms stabilizing negative feedback into destabilizing positive feedback, driving the robot to chatter, weave across aisles, or oscillate into mechanical resonance. A loop with nominal margin $\text{PM}_{\text{nom}}$ at gain crossover $\omega_c$ therefore exhausts its stability margin once $t_{\text{age}} \ge \text{PM}_{\text{nom}}/\omega_c$, and exposure, processing, transport, permission, and actuator delay all draw on that single ceiling (@sec-appendix-control-zoh). For example, a visual-servoing tracking loop operating at crossover frequency $\omega_c =$ `{python} PhaseMarginAge.omega_c_str` rad/s (about `{python} PhaseMarginAge.f_c_str` Hz) with nominal phase margin $\text{PM}_{\text{nom}} =$ `{python} PhaseMarginAge.pm_nom_deg_str`$^\circ$ (`{python} PhaseMarginAge.pm_nom_rad_str` rad) has a maximum permissible latency ceiling of $\tau_{\max} = \text{PM}_{\text{nom}}/\omega_c =$ `{python} PhaseMarginAge.tau_max_str`. If sensor exposure, transport, and neural inference consume `{python} PhaseMarginAge.t_used_str`, the system depletes `{python} PhaseMarginAge.frac_used_str` percent of its stability margin before motor commands are dispatched, risking underdamped resonance or boundary chatter.
 
 ::: {.column-margin}
-![](images/svg/margin_phase_margin_erosion_knee.svg){width="100%" fig-alt="Knee curve showing phase margin falling linearly with perception age and crossing a dashed horizontal threshold at 78.5 milliseconds, marked by a dotted vertical line; beyond it the line is labeled chatter."}
+![](images/svg/margin_phase_margin_erosion_knee.svg){width="100%" fig-alt="Line labeled PM 45 degrees falling linearly with age, with a dot marked 60 milliseconds, crossing a dashed zero line at a red dot marked 78.5 milliseconds; beyond it the line turns red in a light red region labeled chatter."}
 *Past critical perception age, phase margin erodes to zero, triggering closed-loop instability and chatter.*
 :::
 
@@ -1281,6 +1332,7 @@ class HostContentionAllowance:
     check(abs(t_jitter.to(millisecond).magnitude - 5.0) < 1e-9, f"Unexpected renewal-jitter allowance: {t_jitter}")
     check(t_period + t_jitter < t_lease, "Lease rule: chunk period plus jitter must be shorter than the lease")
     check(abs(t_lapse.magnitude - 10.0) < 1e-9, f"Unexpected lapse point: {t_lapse}")
+    check(abs(t_lease.magnitude - 60.0) < 1e-9, f"Margin figure draws a 60 ms lease: {t_lease}")
     check(t_infer < t_period, "Chunk inference must fit inside one chunk period")
     check(abs(stretch - 0.125) < 1e-9, f"Unexpected inference stretch: {stretch}")
 
@@ -1299,8 +1351,8 @@ Average bandwidth does not determine the latency of one read. On edge robotics S
 On the mobile manipulator, this burst lands only on the application processor. The permission path runs on its own microcontroller and reads its state from its own isolated SRAM, so a memory burst cannot stretch its safety tick\index{Bus jitter}, and the shared-die placement that would expose those reads is the one @sec-placement-resource-contention rejects. The burst reaches the permission path only as the age of the frame a proposal is built on or the lateness of the renewal the chunk policy sends, and the two have different allowances. A frame that waits behind camera and accelerator traffic reaches dispatch older than the budgeted stages, and the refusal threshold of @sec-perception-observation-contract leaves no slack above them, so every proposal built on that frame is refused.
 
 ::: {.column-margin}
-![](images/svg/margin_dma_ingress_slack_envelope.svg){width="100%" fig-alt="Budget envelope showing four-camera 4K DMA burst exhausting 850-microsecond timing slack."}
-*A rejected shared-memory placement: camera bursts can exhaust a control loop's slack when both compete for the same memory. The running machine isolates its permission loop.*
+![](images/svg/margin_renewal_jitter_lease_envelope.svg){width="100%" fig-alt="Two gray horizontal bars labeled renewal due at 50 and latest at 55, both ending left of a dashed red vertical line labeled lease 60 milliseconds, with a light red wash beyond it."}
+*Host contention spends the lease's renewal jitter: a renewal due every `{python} HostContentionAllowance.t_period_str` may arrive `{python} HostContentionAllowance.t_jitter_str` late, and one `{python} HostContentionAllowance.t_lapse_str` late lets the lease lapse.*
 :::
 
 A chunk whose inference waits behind the same traffic renews the lease late, and there the lease rule of @sec-nervous-coupled-budget leaves `{python} HostContentionAllowance.t_jitter_str` of renewal jitter above the `{python} HostContentionAllowance.t_period_str` chunk period. Host contention may therefore stretch the chunk policy's `{python} HostContentionAllowance.t_infer_str` inference by at most `{python} HostContentionAllowance.stretch_pct_str` percent, and by less in practice, because the same allowance also holds the proposer's own jitter and the jitter of the board-level link to the microcontroller (@sec-placement-isolation-decisions). A renewal `{python} HostContentionAllowance.t_lapse_str` late lets the lease lapse and stops the machine. With the stated isolation, age checks, and feasible fallback intact, excess contention costs availability: the permission path refuses delay outside the qualified budget. That conclusion depends on those premises, including continued access to valid local evidence.
@@ -1416,8 +1468,136 @@ For a validated 99th-percentile norm-error quantile, the permission path can cho
 $$C_{\text{inset}} = C_{\text{safe}} + \|\boldsymbol{\epsilon}_{\text{spatial}}\|_{P_{99}}$$ {#eq-percep-clearance-inset}
 Here $C_{\text{safe}}$ is the physical clearance the motion must keep, such as the base's side clearance, and the quantile must come from a specified, checked residual distribution for the full spatial error, including calibration bias. Even then it leaves a 1 percent tail under the test distribution; only a justified hard bound on the relevant error, a feasible stopping path, and a permission response within the remaining delay budget would close it. @Fig-08-depth-uncertainty-clearance shows how stereo's growing depth-error scale can require a larger inset at longer range.
 
-::: {#fig-08-depth-uncertainty-clearance fig-env="figure" fig-pos="t" fig-cap="**Depth error scale and clearance insets**: (A) A stereo one-standard-deviation depth scale grows with squared range for fixed disparity spread; a qualified time-of-flight sensor can be flatter. (B) A validated 99th-percentile *norm-error* quantile enlarges the nominal clearance inset and leaves a residual tail and bias risk. Attribution: Book geometric error analysis, CC BY 4.0." fig-alt="Panel (a) compares a stereo depth standard deviation that rises quadratically with range with a flatter qualified time-of-flight error curve. Panel (b) shows a robot, obstacle, and an inset based on a separately validated 99th-percentile spatial-error quantile, with a residual tail beyond it."}
-![](images/svg/fig08_depth_uncertainty_clearance.svg){width="95%"}
+::: {#fig-08-depth-uncertainty-clearance fig-env="figure" fig-pos="t" fig-cap="**Depth error scale and clearance inset**: (a) For the illustrative stereo rig, the one-standard-deviation depth scale grows with squared range, from `{python} StereoDepthError.sigma_z_near_str` at `{python} StereoDepthError.z_near_str` to `{python} StereoDepthError.sigma_z_far_str` at `{python} StereoDepthError.z_far_str`; the gray band is the machine LiDAR's datasheet range precision, which stays flat beyond 1 m. (b) A schematic error distribution along the viewing ray. Holding the estimate at $C_{\text{inset}} = C_{\text{safe}} + \|\boldsymbol{\epsilon}\|_{P_{99}}$ keeps the true surface beyond $C_{\text{safe}}$ except in the shaded residual tail, which the quantile leaves and which bias can enlarge." fig-alt="Two panels. Left: a line plot of one-sigma depth error in millimeters against range in meters, a curve rising quadratically with two marked points at 2 and 10 meters, above a flat gray band for the LiDAR precision. Right: a schematic bell-shaped distribution with heavy tails along a distance axis with ticks for body, C safe, and C inset; the estimate sits at the dashed C inset line, an arrow between C safe and C inset is labeled with the 99th-percentile error norm, and the small part of the distribution closer than C safe is shaded red and labeled residual tail and bias."}
+
+```{python}
+#| label: plot-perception-depth-clearance
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DEPTH ERROR SCALE AND CLEARANCE INSET (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-08-depth-uncertainty-clearance in
+# │          @sec-perception-error-clearance.
+# │
+# │ Goal:    Contrast a stereo depth scale that grows with squared range with
+# │          the machine LiDAR's flat datasheet precision, then show what a
+# │          validated quantile inset buys and what it leaves.
+# │ Show:    (a) sigma_z(z) for the illustrative stereo rig with its two quoted
+# │          points, and the OS1-64 precision band; (b) a schematic error
+# │          density along the viewing ray with C_safe, the P99 inset, and the
+# │          residual tail.
+# │ How:     (a) reads StereoDepthError and LidarSweep (no literals); (b) is a
+# │          schematic with symbolic ticks only (no plotted numbers).
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+import matplotlib.pyplot as plt
+from mlsysim import viz
+from mlsysim.fmt import check
+
+SDE, LS = StereoDepthError, LidarSweep
+PETROL, INK, SOFT, PALE = "#007A87", "#1A202C", "#4A5568", "#A0AEC0"
+PINE, CRIMSON = "#1A4D3E", "#A51C30"  # structural, consequence (theme-colors.tex)
+
+# ┌── 1. LOAD ─────────────────────────────────────────────────────────────────
+k_mm_per_m2 = (SDE.sigma_d_px / (SDE.f_px * SDE.b)).to(ureg.millimeter / meter**2).magnitude  # category: derived
+z_far_m = SDE.z_far.to(meter).magnitude
+z_near_m = SDE.z_near.to(meter).magnitude
+lid_lo = LS.sigma_r_min.to(ureg.millimeter).magnitude  # category: datasheet
+lid_hi = LS.sigma_r_max.to(ureg.millimeter).magnitude  # category: datasheet
+
+# ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
+z = np.linspace(0.0, 1.2 * z_far_m, 200)
+sig = k_mm_per_m2 * z**2
+
+# ┌── 3. GUARD ────────────────────────────────────────────────────────────────
+check(abs(k_mm_per_m2 * z_far_m**2 - SDE.sigma_z_far.to(ureg.millimeter).magnitude) < 1e-9, "Plotted stereo curve must pass through sigma_z_far.")
+check(abs(k_mm_per_m2 * z_near_m**2 - SDE.sigma_z_near.to(ureg.millimeter).magnitude) < 1e-9, "Plotted stereo curve must pass through sigma_z_near.")
+
+# ┌── 4. PLOT ─────────────────────────────────────────────────────────────────
+viz.set_book_style()
+fig, (ax, bx) = plt.subplots(1, 2, figsize=(6.6, 2.7), gridspec_kw=dict(width_ratios=[1.0, 1.15], wspace=0.28))
+
+# (a) depth error scale
+ax.axhspan(lid_lo, lid_hi, xmin=1.0 / (1.2 * z_far_m), color=PALE, alpha=0.45, lw=0)
+ax.text(
+    1.2 * z_far_m * 0.98,
+    lid_hi + 10,
+    f"LiDAR $\\sigma_R$, {LS.sigma_r_min_str} to {LS.sigma_r_max_str}",
+    ha="right",
+    va="bottom",
+    fontsize=7.5,
+    color=SOFT,
+)
+ax.plot(z, sig, color=PETROL, lw=1.8)
+for zz, s_str in ((z_near_m, SDE.sigma_z_near_str), (z_far_m, SDE.sigma_z_far_str)):
+    ax.plot([zz], [k_mm_per_m2 * zz**2], "o", color=PETROL, ms=4)
+ax.annotate(
+    f"{SDE.sigma_z_far_str} at {SDE.z_far_str}",
+    xy=(z_far_m, k_mm_per_m2 * z_far_m**2),
+    xytext=(z_far_m * 0.18, k_mm_per_m2 * z_far_m**2 * 1.05),
+    fontsize=7.5,
+    color=PETROL,
+    va="center",
+    arrowprops=dict(arrowstyle="-", color=PALE, lw=0.6),
+)
+ax.annotate(
+    f"{SDE.sigma_z_near_str} at {SDE.z_near_str}",
+    xy=(z_near_m, k_mm_per_m2 * z_near_m**2),
+    xytext=(z_near_m * 0.55, k_mm_per_m2 * z_far_m**2 * 0.42),
+    fontsize=7.5,
+    color=PETROL,
+    va="center",
+    arrowprops=dict(arrowstyle="-", color=PALE, lw=0.6),
+)
+ax.text(z_far_m * 0.62, k_mm_per_m2 * (z_far_m * 1.1) ** 2, r"stereo $\sigma_z \propto z^2$", fontsize=8, color=PETROL, ha="right", va="center")
+ax.set_xlim(0, 1.2 * z_far_m)
+ax.set_ylim(0, k_mm_per_m2 * (1.2 * z_far_m) ** 2 * 1.02)
+ax.set_xlabel("range $z$ (m)", fontsize=8.5)
+ax.set_ylabel("one-sigma depth error (mm)", fontsize=8.5)
+ax.tick_params(labelsize=7.5)
+ax.set_title("(a)", fontsize=9, loc="left", fontweight="bold")
+for s in ("top", "right"):
+    ax.spines[s].set_visible(False)
+
+# (b) schematic: error density along the viewing ray, heavy tailed
+x = np.linspace(0, 10, 600)
+c_safe, c_inset = 3.4, 6.0
+dens = (1 + ((x - c_inset) / 0.8) ** 2 / 2.0) ** (-1.5)
+bx.fill_between(x, 0, dens, where=x >= c_safe, color=PETROL, alpha=0.18, lw=0)
+bx.fill_between(x, 0, dens, where=x <= c_safe, color=CRIMSON, alpha=0.35, lw=0)
+bx.plot(x, dens, color=PETROL, lw=1.3)
+bx.axvline(c_safe, color=PINE, lw=1.2)
+bx.axvline(c_inset, color=PINE, lw=1.2, ls=(0, (4, 3)))
+bx.text(c_inset + 0.1, 1.1, "estimate held\nat the inset", ha="left", va="bottom", fontsize=7.5, color=SOFT)
+bx.annotate("", xy=(c_safe, 0.86), xytext=(c_inset, 0.86), arrowprops=dict(arrowstyle="<->", color=PINE, lw=0.9))
+bx.text((c_safe + c_inset) / 2, 0.9, "$\\|\\,\\epsilon\\,\\|_{P_{99}}$", ha="center", va="bottom", fontsize=8, color=PINE)
+bx.annotate("", xy=(0, 0.62), xytext=(c_safe, 0.62), arrowprops=dict(arrowstyle="<->", color=PINE, lw=0.9))
+bx.text(c_safe / 2, 0.66, "$C_{\\mathrm{safe}}$", ha="center", va="bottom", fontsize=8, color=PINE)
+bx.annotate(
+    "residual tail\nand bias",
+    xy=(c_safe - 0.5, 0.05),
+    xytext=(c_safe - 0.4, 0.34),
+    ha="right",
+    va="center",
+    fontsize=7.5,
+    color=CRIMSON,
+    arrowprops=dict(arrowstyle="-", color=CRIMSON, lw=0.6),
+)
+bx.set_xticks([0, c_safe, c_inset])
+bx.set_xticklabels(["body", "$C_{\\mathrm{safe}}$", "$C_{\\mathrm{inset}}$"], fontsize=8)
+bx.set_yticks([])
+bx.set_xlim(0, 10)
+bx.set_ylim(0, 1.3)
+bx.set_xlabel("distance along the viewing ray", fontsize=8.5)
+bx.grid(False)
+bx.set_title("(b)", fontsize=9, loc="left", fontweight="bold")
+for s in ("top", "right", "left"):
+    bx.spines[s].set_visible(False)
+plt.show()
+```
+
 :::
 
 Because clearance depends on propagated error, downstream planners and the permission path cannot consume raw coordinate tuples. A covariance $\mathbf{\Sigma}\in\mathbb{R}^{3\times3}$ alone does not say whether a $10\text{ mm}$ or $500\text{ mm}$ clearance inset is warranted; that takes an independently validated tail or hard bound.

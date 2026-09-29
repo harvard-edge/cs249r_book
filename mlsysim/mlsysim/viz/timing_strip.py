@@ -27,6 +27,7 @@ __all__ = [
     "permission_tick_strip",
     "chunk_renewal_strip",
     "takeover_strip",
+    "perception_age_strip",
 ]
 
 # Volume IV diagram semantic roles, mirrored from books/vol4/tex/theme-colors.tex
@@ -273,7 +274,9 @@ def plot_timing_strip(strip, ax=None):
 
     # distance row: the same axis, relabeled as travel v * (t - origin)
     v = strip.speed_mm_per_unit
-    axd.set_ylim(0, 1)
+    n_dist_levels = max([b.level for b in strip.brackets if b.row == "distance"] + [0])
+    # each extra distance-bracket level sits 0.3 lower; leave room for its label
+    axd.set_ylim(-0.3 * n_dist_levels, 1)
     axd.set_yticks([0.5])
     axd.set_yticklabels([strip.speed_label or "travel"], fontsize=9)
     axd.tick_params(axis="y", length=0)
@@ -289,7 +292,7 @@ def plot_timing_strip(strip, ax=None):
         t = strip.distance_origin + k * step / v
         if t >= x0 - 1e-9:
             axd.plot([t, t], [0.62, 0.9], color=VOL4_ROLES["neutral"], lw=0.7, zorder=2)
-            axd.text(t, 0.93, f"{k * step:g}", ha="center", va="bottom", fontsize=8, color=VOL4_ROLES["neutral"],
+            axd.text(t, 0.93, f"{k * step:g}" + (" mm" if k == 0 else ""), ha="center", va="bottom", fontsize=8, color=VOL4_ROLES["neutral"],
                      zorder=4, bbox=dict(boxstyle="square,pad=0.15", fc="white", ec="none"))
         k += 1
     for (ta, tb, text) in strip.distance_notes:
@@ -350,8 +353,10 @@ def capture_to_onset_strip(scenario, speed, t_allowance=None, spare=None, delta_
         Span(f"lease {t_lease:.0f} ms", t_adm, t_exp_lease, "structural", 3),
         Span(f"tick + bus {t_tick + t_bus:.0f} ms", t_exp_lease, t_exp_lease + t_tick + t_bus,
              "structural", 3, label_pos="above", solid=True),
-        Span(f"onset {t_act:.0f} ms", t_exp_lease + t_tick + t_bus, t_onset, "consequence", 4,
-             label_pos="below"),
+        # The onset label sits inside its bar: below it, the lease-expiry and
+        # brake-onset lines would cross the text.
+        Span(f"onset {t_act:.0f}", t_exp_lease + t_tick + t_bus, t_onset, "consequence", 4,
+             label_pos="in"),
     ]
     events = [
         Event(0, "capture (exposure midpoint)", "measured", 1, ha="left"),
@@ -404,57 +409,91 @@ def permission_tick_strip(scenario, speed):
     c_w = float(scenario.enforcer_wcet.to("microsecond").magnitude)
     dl = float(scenario.enforcer_deadline.to("microsecond").magnitude)
     v = _mps(speed) / 1000.0  # mm per microsecond
+    # Lane 0 is what a stress-free run measures; lane 1 is what the schedule
+    # must assume. Every label sits right of its bar, clear of the lane edges.
     spans = [
-        Span(f"unloaded run {c_u:.0f} µs", 0, c_u, "measured", 0, label_pos="below"),
-        Span(f"declared WCET {c_w:.0f} µs", 0, c_w, "structural", 1, outline_only=True, label_pos="right"),
-        Span(f"gap to justify {c_w - c_u:.0f} µs", c_u, c_w, "structural", 0, hatch="///", label_pos="above"),
+        Span(f"unloaded run {c_u:.0f} µs", 0, c_u, "measured", 0, label_pos="right"),
+        Span("", 0, c_u, "structural", 1),
+        Span(f"declared WCET {c_w:.0f} µs, {c_w - c_u:.0f} µs to justify", c_u, c_w, "structural", 1,
+             hatch="///", label_pos="right", label_dx=(dl - c_w) + 10.0),
+        Span(f"slack {dl - c_w:.0f} µs", c_w, dl, "structural", 1, outline_only=True, label_pos="in"),
     ]
     events = [
-        Event(0, "release", "structural", 0),
+        Event(0, "release", "structural", 0, ha="left"),
         Event(dl, f"deadline {dl:.0f} µs", "consequence", 0, "dashed"),
         Event(T, f"next release {T:.0f} µs", "structural", 0, ha="right"),
     ]
     brackets = [Bracket(0, T, f"period {T / 1000:.0f} ms", "structural", "time", 0),
                 Bracket(0, T, f"{v * T:.1f} mm per tick", "neutral", "distance", 0)]
     return TimingStrip(
-        spans=spans, lanes=["execution", "bound"], events=events, brackets=brackets,
-        xlim=(-40, T + 60), time_unit="µs", speed_mm_per_unit=v,
+        spans=spans, lanes=["measured", "declared"], events=events, brackets=brackets,
+        xlim=(-30, T + 30), time_unit="µs", speed_mm_per_unit=v,
         speed_label=f"travel at {_mps(speed):.1f} m/s (mm)", distance_step_mm=0.25,
-        figsize=(9, 3.4),
+        figsize=(9, 3.4), xlabel="Time from the tick's release (µs)",
     )
 
 
-def chunk_renewal_strip(machine, horizon_ms=400.0, n_renewals=4):
-    """Chunk renewal schedule (Ch3 instance): captures, inference, setpoints, renewals.
+def chunk_renewal_strip(machine, evidence_horizon=None, n_renewals=4):
+    """Chunk renewal schedule (Ch3 instance): what a chunk supplies vs. what its evidence covers.
 
-    Reads machine.chunk_step (setpoint step), machine.chunk_period (renewal),
-    machine.chunk_inference_latency, and machine.chunk_schedule (open-loop span,
-    chunk span, renewal slack). No distance row.
+    Time zero is the capture that the first chunk is computed from. Reads
+    machine.chunk_step (setpoint step), machine.chunk_period (renewal period),
+    machine.chunk_inference_latency, machine.chunk_horizon, and
+    machine.chunk_schedule (open-loop span = age at replacement, chunk span).
+    evidence_horizon (optional Quantity, measured from capture) splits the
+    first chunk's unexecuted tail into the part its evidence still covers and
+    the part that is supply buffer only (hatched). No distance row.
+
+    Lanes, top to bottom: capture, inference, chunk in force (which chunk is
+    feeding setpoints), first chunk (its whole predicted span), setpoints.
     """
     step = _ms(machine.chunk_step)
     period = _ms(machine.chunk_period)
     infer = _ms(machine.chunk_inference_latency)
     sched = machine.chunk_schedule
     span = _ms(sched["chunk_span"])
-    spans, events = [], []
+    age = _ms(sched["open_loop_span"])          # age of the evidence when the successor takes over
+    horizon_n = machine.chunk_horizon
+    t_end = infer + span
+    spans = []
+    # capture instants and inference bars
+    for k in range(n_renewals + 1):
+        spans.append(Span("", k * period - 0.8, k * period + 0.8, "measured", 0, solid=True))
     for k in range(n_renewals):
         t0 = k * period
-        spans.append(Span(f"infer {infer:.0f}" if k == 0 else "", t0, t0 + infer, "proposal", 1))
-    spans.append(Span(f"chunk span {span:.0f} ms (H = {machine.chunk_horizon})", period * 0 + infer,
-                      infer + span, "proposal", 2, outline_only=True))
+        spans.append(Span(f"{infer:.0f} ms" if k == 0 else "", t0, t0 + infer, "proposal", 1, label_pos="in"))
+    # which chunk is in force: chunk k drives setpoints from its availability to its successor's
+    for k in range(n_renewals):
+        a = k * period + infer
+        spans.append(Span(f"chunk {k}", a, a + period, "proposal", 2, solid=(k % 2 == 0),
+                          label_pos="in"))
+    # the first chunk's whole predicted span
+    replaced = period + infer                     # successor available
+    spans.append(Span("executed", infer, replaced, "proposal", 3, solid=True, label_pos="in"))
+    if evidence_horizon is not None:
+        t_ev = _ms(evidence_horizon)
+        spans.append(Span("evidence still valid", replaced, t_ev, "proposal", 3, label_pos="in"))
+        spans.append(Span("buffer, not permission", t_ev, t_end, "neutral", 3, hatch="///", label_pos="in"))
+    else:
+        spans.append(Span("unexecuted tail", replaced, t_end, "proposal", 3, outline_only=True, label_pos="in"))
+    # setpoint grid
     t = 0.0
-    while t <= horizon_ms + 1e-9:
-        spans.append(Span("", t, t + 0.9, "structural", 3, solid=True))
+    while t <= t_end + 1e-9:
+        spans.append(Span("", t - 0.6, t + 0.6, "structural", 4, solid=True))
         t += step
-    for k in range(n_renewals + 1):
-        spans.append(Span("", k * period, k * period + 1.5, "measured", 0, solid=True))
-    events = [Event(k * period + infer, "renewal" if k == 0 else "", "structural", 0, "dotted")
-              for k in range(n_renewals)]
+    events = [Event(infer, "first chunk available", "proposal", 0, "dotted", ha="left"),
+              Event(replaced, "successor available", "proposal", 1, "dotted", ha="left")]
+    if evidence_horizon is not None:
+        events.append(Event(t_ev, f"evidence horizon {t_ev:.0f} ms", "consequence", 0, "dashed", ha="left"))
+    events.append(Event(t_end, f"end of chunk, H = {horizon_n}", "neutral", 1, "dotted", ha="right"))
     brackets = [Bracket(0, step, f"step {step:.0f} ms", "structural", "time", 0),
-                Bracket(0, period, f"replan {period:.0f} ms", "proposal", "time", 1)]
+                Bracket(0, period, f"renewal {period:.0f} ms", "proposal", "time", 1),
+                Bracket(0, age, f"age at replacement {age:.0f} ms", "measured", "time", 2)]
     return TimingStrip(
-        spans=spans, lanes=["capture", "inference", "chunk", "setpoints"], events=events,
-        brackets=brackets, xlim=(-10, max(horizon_ms, infer + span) + 10), figsize=(10, 3.8),
+        spans=spans,
+        lanes=["capture", "inference", "chunk in force", "first chunk", "setpoints"],
+        events=events, brackets=brackets, xlim=(-8, t_end + 8), figsize=(10, 4.6),
+        xlabel="Time from the first chunk's capture (ms)",
     )
 
 
@@ -486,4 +525,70 @@ def takeover_strip(scenario, speed=None):
         spans=spans, lanes=["console", "operator", "permission"], events=events,
         brackets=brackets, xlim=(-15, total + 25), speed_mm_per_unit=v,
         speed_label=f"travel at {v:.2f} m/s (mm)", distance_step_mm=100.0, figsize=(10, 3.6),
+    )
+
+
+def perception_age_strip(scenario, speed):
+    """Capture-to-brake strip for the perception chapter (Ch8 instance).
+
+    Same clock as capture_to_onset_strip: t = 0 is the exposure midpoint. The
+    camera lane carries the second half of the exposure and the rolling
+    readout; the host lane carries link + DMA + ISP, the vision backbone, and
+    the hand-off, ending at dispatch (scenario.perception_age). The response
+    lane then adds lease, tick + bus, and brake onset with Delta_da taken as
+    zero: the perception chapter does not bound Delta_da, so the strip marks
+    where it enters instead of drawing it at an invented width. Every
+    duration is read from scenario (an EmbodiedSiteScenario); travel is
+    counted at `speed`.
+    """
+    cam = scenario.machine.nav_camera
+    t_exp = _ms(cam.exposure_time)
+    t_read = _ms(cam.readout_time)
+    t_link = _ms(scenario.t_transport) + _ms(scenario.t_dma) + _ms(scenario.t_isp)
+    t_bb, t_ipc = _ms(scenario.t_backbone), _ms(scenario.t_ipc)
+    t_age = _ms(scenario.perception_age)
+    t_lease, t_tb, t_act = (_ms(scenario.t_lease), _ms(scenario.t_tick) + _ms(scenario.t_bus),
+                            _ms(scenario.t_brake_onset))
+    v = _mps(speed)
+
+    a = t_exp / 2
+    b = a + t_read
+    c = b + t_link
+    d = c + t_bb
+    t_disp = d + t_ipc
+    t_exp_lease = t_disp + t_lease
+    t_onset = t_exp_lease + t_tb + t_act
+    spans = [
+        Span(f"exposure {t_exp:.0f} ms", -a, a, "measured", 0, solid=True, label_pos="above"),
+        Span(f"readout {t_read:.1f} ms", a, b, "measured", 0, label_pos="right"),
+        Span(f"link, DMA, ISP {t_link:.1f} ms", b, c, "measured", 1, label_pos="below",
+             label_dx=-6.0),
+        Span(f"backbone {t_bb:.0f} ms", c, d, "measured", 1, label_pos="above"),
+        Span(f"IPC {t_ipc:.1f} ms", d, t_disp, "measured", 1, label_pos="below", label_dx=5.0),
+        Span(f"lease {t_lease:.0f} ms", t_disp, t_exp_lease, "structural", 2, label_pos="in"),
+        Span(f"tick + bus {t_tb:.0f} ms", t_exp_lease, t_exp_lease + t_tb, "structural", 2, solid=True,
+             label_pos="below"),
+        Span(f"onset {t_act:.0f} ms", t_exp_lease + t_tb, t_onset, "consequence", 2, label_pos="in"),
+    ]
+    events = [
+        Event(0, "capture", "measured", 1, ha="left"),
+        Event(t_disp, f"dispatch, $t_{{\\mathrm{{age}}}}$ = {t_age:.1f} ms", "measured", 0),
+        Event(t_disp, "$+\\,\\Delta_{\\mathrm{da}}$ enters here, not bounded", "proposal", 1, "dashed", ha="left"),
+        Event(t_onset, "brake onset", "consequence", 0, ha="right"),
+    ]
+    brackets = [Bracket(0, t_onset, f"$\\tau_{{\\mathrm{{delay}}}}$ = {t_onset:.1f} ms + $\\Delta_{{\\mathrm{{da}}}}$",
+                        "neutral", "time", 0)]
+    dnotes = [(0, t_disp, f"{v * t_disp:.1f} mm"), (t_disp, t_onset, f"{v * (t_onset - t_disp):.1f} mm")]
+    return TimingStrip(
+        spans=spans,
+        lanes=["camera", "host", "response"],
+        events=events,
+        brackets=brackets,
+        xlim=(-a - 3, t_onset + 4),
+        speed_mm_per_unit=v,
+        speed_label=f"travel at {v:.1f} m/s (mm)",
+        distance_step_mm=50.0,
+        distance_notes=dnotes,
+        figsize=(7.0, 3.5),
+        xlabel="Time from the exposure midpoint (ms)",
     )

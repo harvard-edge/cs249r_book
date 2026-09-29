@@ -1003,9 +1003,11 @@ A fixed-sample zero-failure protocol may reject a candidate at the first failure
 :::
 
 <!-- fig-alt below hand-types the door-cycle values because fig-alt cannot hold inline python. Keep them in sync:
-     "33.3 hours" = DoorCycle.t_target_str; "40 seconds" = DoorCycle.t_cycle_str (guards in calc-evaluation-door-cycle). -->
+     "33.3 hours" = DoorCycle.t_target_str; "40 seconds" = DoorCycle.t_cycle_str (guards in calc-evaluation-door-cycle).
+     "29", "299", "2,995 trials" = runs_for(0.9/0.99/0.999, 0.95) in the figure cell, which checks 2,995 against
+     ClopperPearsonZeroFailure.n_req_999. -->
 
-::: {#fig-07-confidence-bounds fig-env="figure" fig-pos="t" fig-cap="**Confidence bounds and testing budgets**: One-sided Clopper-Pearson success lower limits after zero failures at 90, 95, and 99 percent confidence. At 95 percent, `{python} ClopperPearsonZeroFailure.n_runs_str` iid runs give `{python} ClopperPearsonZeroFailure.p_lower_pct_str` percent; 99.9 percent needs `{python} ClopperPearsonZeroFailure.n_req_999_str` runs, or `{python} DoorCycle.t_target_str` at the `{python} DoorCycle.t_cycle_str` door cycle." fig-alt="Success lower confidence limits rise with zero-failure trial count. The 95 percent curve is 86.1 percent at 20 trials and 99.9 percent at 2,995 trials; its complementary failure upper limits are 13.9 and 0.1 percent. The 2,995-trial annotation converts to 33.3 hours at 40 seconds per door run."}
+::: {#fig-07-confidence-bounds fig-env="figure" fig-pos="t" fig-cap="**Confidence bounds and testing budgets**: (a) One-sided Clopper-Pearson success lower limits after zero failures at 90, 95, and 99 percent confidence; at 95 percent, `{python} ClopperPearsonZeroFailure.n_runs_str` iid runs give `{python} ClopperPearsonZeroFailure.p_lower_pct_str` percent, and the curves then crowd under the target. (b) The same limits read as failure upper limits on log axes fall one decade per decade of runs, so each further nine costs ten times the trials: 99.9 percent needs `{python} ClopperPearsonZeroFailure.n_req_999_str` runs, or `{python} DoorCycle.t_target_str` at the `{python} DoorCycle.t_cycle_str` door cycle." fig-alt="Two panels sharing a log-scale axis of zero-failure trial count from 10 to about 4,000, each with dotted, solid, and dashed curves for 90, 95, and 99 percent confidence. Panel (a) plots the success lower confidence limit in percent: the curves rise steeply, the 95 percent curve is marked at 86.1 percent success lower and 13.9 percent failure upper for 20 trials, and all three curves bunch together below a dashed 99.9 percent target line. Panel (b) plots the failure upper confidence limit on a log axis as three parallel falling straight lines, with the 95 percent line marked at 10 percent for 29 trials, 1 percent for 299 trials, and 0.1 percent for 2,995 trials, the last annotated as 33.3 hours at 40 seconds per run."}
 
 ```{python}
 #| echo: false
@@ -1015,56 +1017,95 @@ A fixed-sample zero-failure protocol may reject a candidate at the first failure
 # │ CLOPPER-PEARSON SUCCESS LOWER LIMITS AFTER ZERO FAILURES (FIGURE)
 # │ Context: @fig-07-confidence-bounds
 # │ Goal:    show what a clean run of n physical trials can and cannot certify
-# │ Show:    the lower limit against trial count, at three confidence levels
+# │ Show:    (a) the lower limit against trial count, at three confidence
+# │          levels; (b) the failure upper limit on log axes, where each
+# │          further nine costs ten times the trials
 # │ How:     p_lower = (1 - c)**(1/n); every annotated value is derived here
 # ├─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from mlsysim import viz
 
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 4.2))
+_fig, _ax, COLORS, plt = viz.setup_plot(figsize=(8, 4.2))
+plt.close(_fig)
+fig, (ax, ax_f) = plt.subplots(1, 2, figsize=(9.6, 4.2))
 
 # ┌── 1. LOAD (Scenario parameters) ────────────────────────────────────────────
 CONFIDENCES = (0.90, 0.95, 0.99)  # category: chosen; plotted confidence levels
 TARGET = 0.999  # category: chosen; the success lower limit the chapter argues toward
 CYCLE_SECONDS = DoorCycle.t_cycle.to(ureg.second).magnitude  # category: illustrative; door cycle from calc-evaluation-door-cycle
 REFERENCE_CONFIDENCE = 0.95  # category: chosen; the level both annotations read off
+NINES = (0.9, 0.99, 0.999)  # category: chosen; success lower limits marked on panel (b)
 
 # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
 def lower_limit(n, confidence):
     """One-sided Clopper-Pearson lower limit on success given zero failures."""
     return 100.0 * (1.0 - confidence) ** (1.0 / n)
 
+def runs_for(target, confidence):
+    """Zero-failure runs needed for a success lower limit of target."""
+    return int(np.ceil(np.log(1.0 - confidence) / np.log(target)))
+
 n = np.logspace(1, np.log10(4200), 600)
 small_n = 20
-big_n = int(np.ceil(np.log(1.0 - REFERENCE_CONFIDENCE) / np.log(TARGET)))
+big_n = runs_for(TARGET, REFERENCE_CONFIDENCE)
+nine_runs = [runs_for(t, REFERENCE_CONFIDENCE) for t in NINES]
+check(big_n == ClopperPearsonZeroFailure.n_req_999, "figure and LEGO cell must agree on the 99.9 percent run count")
+check(all(9 < b / a < 11 for a, b in zip(nine_runs, nine_runs[1:])), "each further nine must cost about ten times the runs")
 
 # ┌── 3. PLOT ──────────────────────────────────────────────────────────────────
 # Ordered categories, not resources: one hue, distinguished by dash pattern.
-for confidence, dash in zip(CONFIDENCES, [(0, (1, 2)), (0, ()), (0, (6, 3))]):
-    ax.plot(n, lower_limit(n, confidence), color=COLORS["BlueLine"], lw=2.0, linestyle=dash, label=f"{confidence:.0%} success lower limit")
+DASHES = [(0, (1, 2)), (0, ()), (0, (6, 3))]
+for confidence, dash in zip(CONFIDENCES, DASHES):
+    ax.plot(n, lower_limit(n, confidence), color=COLORS["BlueLine"], lw=2.0, linestyle=dash, label=f"{confidence:.0%} confidence")
+    ax_f.plot(n, 100.0 - lower_limit(n, confidence), color=COLORS["BlueLine"], lw=2.0, linestyle=dash)
 
+# (a) Success lower limit on a linear axis: the fast early gain.
 ax.axhline(100.0 * TARGET, color=COLORS["primary"], lw=1.0, linestyle=(0, (5, 4)))
 ax.text(10.6, 99.1, f"{100 * TARGET:.1f}% statistical target", fontsize=8.5, color=COLORS["primary"], va="top")
-
 box = dict(boxstyle="round,pad=0.4", fc="white", ec=COLORS["grid"], lw=1.0)
 arrow = dict(arrowstyle="-|>", color=COLORS["primary"], lw=0.9, shrinkA=0, shrinkB=4)
-for n_pt, xy_text in ((small_n, (46, 76.5)), (big_n, (330, 93.2))):
-    y_pt = lower_limit(n_pt, REFERENCE_CONFIDENCE)
-    ax.plot([n_pt], [y_pt], "o", ms=6, color=COLORS["BlueLine"], zorder=5)
-    if n_pt == small_n:
-        label = f"{n_pt:,} trials\n{y_pt:.1f}% success lower\n" f"{100 - y_pt:.1f}% failure upper"
-    else:
-        label = f"{n_pt:,} trials\n{y_pt:.1f}% success lower\n" f"{n_pt * CYCLE_SECONDS / 3600:.1f} h at {CYCLE_SECONDS:.0f} s/run"
-    ax.annotate(label, xy=(n_pt, y_pt), xytext=xy_text, textcoords="data", fontsize=8.5, bbox=box, arrowprops=arrow, va="center", ha="left")
-
+y_small = lower_limit(small_n, REFERENCE_CONFIDENCE)
+ax.plot([small_n], [y_small], "o", ms=6, color=COLORS["BlueLine"], zorder=5)
+ax.annotate(
+    f"{small_n:,} trials\n{y_small:.1f}% success lower\n{100 - y_small:.1f}% failure upper",
+    xy=(small_n, y_small),
+    xytext=(48, 74),
+    textcoords="data",
+    fontsize=8.5,
+    bbox=box,
+    arrowprops=arrow,
+    va="center",
+    ha="left",
+)
 ax.set_xscale("log")
 ax.set_xlim(10, 4200)
 ax.set_ylim(60, 100.4)
 ax.set_yticks(range(60, 101, 5))
 ax.set_xlabel("Zero-failure trial count n (log scale)")
 ax.set_ylabel("Success lower confidence limit (%)")
+ax.set_title("(a) Success lower limit", loc="left", fontsize=10)
 ax.legend(loc="lower right", fontsize=8.5)
-plt.tight_layout()
+
+# (b) Failure upper limit on log axes: each nine is one decade of trials.
+for target, n_pt in zip(NINES, nine_runs):
+    f_pt = 100.0 * (1.0 - target)
+    ax_f.plot([10, n_pt], [f_pt, f_pt], color=COLORS["grid"], lw=0.9, zorder=1)
+    ax_f.plot([n_pt, n_pt], [0.03, f_pt], color=COLORS["grid"], lw=0.9, zorder=1)
+    ax_f.plot([n_pt], [f_pt], "o", ms=6, color=COLORS["BlueLine"], zorder=5)
+    label = f"{n_pt:,} trials"
+    if n_pt == big_n:
+        label += f"\n{n_pt * CYCLE_SECONDS / 3600:.1f} h at {CYCLE_SECONDS:.0f} s/run"
+    ax_f.text(n_pt * 0.9, f_pt * 0.55, label, fontsize=8.5, color=COLORS["primary"], ha="right", va="top")
+ax_f.set_xscale("log")
+ax_f.set_yscale("log")
+ax_f.set_xlim(10, 4200)
+ax_f.set_ylim(0.03, 40)
+ax_f.set_yticks([0.1, 1, 10])
+ax_f.set_yticklabels(["0.1", "1", "10"])
+ax_f.set_xlabel("Zero-failure trial count n (log scale)")
+ax_f.set_ylabel("Failure upper confidence limit (%, log scale)")
+ax_f.set_title("(b) Failure upper limit, 95% confidence marked", loc="left", fontsize=10)
+fig.tight_layout()
 plt.show()
 ```
 

@@ -15,11 +15,11 @@ format:
 
 ::: {.content-visible when-format="pdf"}
 \noindent
-![](images/png/cover_body_blueprint_labeled_print.png){fig-alt="Isometric blueprint showing the physical body architecture: Brushless DC (BLDC) motor stator coils, rotor inertia, planetary gearset, optical encoder, output drive flange, and thermal heatsink."}
+![](images/png/cover_body_blueprint_labeled_print.png){fig-alt="Isometric cutaway blueprint of a robot arm on a square base plate, with labels for the stator windings, planetary gearset, harmonic drive transmission, optical encoder disc, kinematic arm linkage, and parallel jaw gripper; orange contact friction cones sit at the gripper jaws and a red stopping envelope arcs around the gripper."}
 :::
 
 ::: {.content-visible unless-format="pdf"}
-![](images/webp/cover_body_blueprint_labeled.webp){fig-alt="Isometric blueprint showing the physical body architecture: BLDC stator coils, rotor inertia, planetary gearset, optical encoder, output drive flange, and thermal heatsink."}
+![](images/webp/cover_body_blueprint_labeled.webp){fig-alt="Isometric cutaway blueprint of a robot arm showing stator windings, planetary gearset, harmonic drive transmission, optical encoder disc, arm linkage, parallel jaw gripper, contact friction cones, and a stopping envelope."}
 :::
 
 :::
@@ -154,14 +154,154 @@ Sensor selection spends both error tolerance and time. A sensor must resolve the
 
 ### The end-to-end sense-to-actuation latency pipeline {#sec-body-latency-pipeline}
 
-::: {#fig-02-latency-waterfall fig-env="figure" fig-pos="t" fig-cap="**Sense-to-actuation latency waterfall and silicon dataflow pipeline**: The eight-stage causal chain from exposure to motor current rise (panel a) and an illustrative latency profile (panel b). The parcel sorter's $24\text{ mm}$ tolerance at $1.2\text{ m/s}$ sets a $20\text{ ms}$ age deadline, because unguided travel converts elapsed time into displacement at the carriage speed. Both the $35.0\text{ ms}$ median and the $68.4\text{ ms}$ $P_{99.9}$ tail exceed it, corresponding to $4.2\text{ cm}$ and $8.2\text{ cm}$ of motion, respectively." fig-alt="Two-panel diagram. Panel (a) shows eight stages from sensor exposure through transport, inference, command transfer, and motor current rise. Panel (b) shows illustrative 35.0 and 68.4 millisecond timelines, both crossing a 20 millisecond freshness deadline; at 1.2 meters per second they correspond to 4.2 and 8.2 centimeters of parcel motion."}
-![](images/svg/fig02_canonical_latency_waterfall.svg){width="100%"}
+```{python}
+#| label: body-latency-profile-calc
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE PARCEL SORTER'S SENSE-TO-ACTUATION PROFILE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-02-latency-waterfall, @tbl-02-latency-breakdown, and the
+# │          freshness-deadline paragraph of @sec-body-measurement-freshness.
+# │ Goal:    Hold the illustrative stage profile in one place so the figure,
+# │          the table, and the caption cannot disagree.
+# │ Show:    20 ms deadline (24 mm at 1.2 m/s); stage P50 sum 35.0 ms, P99 sum
+# │          50.0 ms, max sum 80.7 ms; system P99 46.2 ms and P99.9 68.4 ms;
+# │          4.2 cm and 8.2 cm of parcel travel.
+# │ How:     Stage sums; travel = v_max * age. Every stage value is
+# │          illustrative: a measured profile of the integrated machine
+# │          replaces it.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_latency, fmt_length, check
+
+class ParcelLatencyProfile:
+    """Illustrative stage and end-to-end ages for the parcel-sorter picker."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    e_max = 24.0 * millimeter  # category: illustrative (grasp tolerance)
+    v_max = 1.2 * meter / second  # category: illustrative (parcel speed)
+    # (name, P50, P99, max) in ms; category: illustrative (not a measured profile)
+    stages = [
+        ("1–2. Exposure and readout", 11.2, 16.6, 16.7),
+        ("3–4. Transport and DMA", 1.4, 3.2, 6.8),
+        ("5. Backbone and policy", 18.5, 24.1, 38.4),
+        ("6. Scheduling and IPC", 0.6, 2.1, 12.3),
+        ("7. Fieldbus", 1.0, 1.0, 2.0),
+        ("8. Current rise", 2.3, 3.0, 4.5),
+    ]
+    sys_p99 = 46.2 * millisecond  # category: illustrative (system-level profile)
+    sys_p999 = 68.4 * millisecond  # category: illustrative (system-level tail)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_fresh = (e_max / v_max).to(millisecond)
+    sum_p50 = sum(s[1] for s in stages) * millisecond
+    sum_p99 = sum(s[2] for s in stages) * millisecond
+    sum_max = sum(s[3] for s in stages) * millisecond
+    travel_p50 = (v_max * sum_p50).to(millimeter)
+    travel_p999 = (v_max * sys_p999).to(millimeter)
+    excess_p50 = (travel_p50 - e_max).to(millimeter)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_fresh.magnitude - 20.0) < 1e-9, f"Freshness deadline drifted: {t_fresh}")
+    check(abs(sum_p50.magnitude - 35.0) < 1e-9, f"P50 stage sum drifted: {sum_p50}")
+    check(abs(sum_p99.magnitude - 50.0) < 1e-9, f"P99 stage sum drifted: {sum_p99}")
+    check(abs(sum_max.magnitude - 80.7) < 1e-9, f"Max stage sum drifted: {sum_max}")
+    check(sys_p99 < sum_p99, "The system P99 must differ from (here, sit below) the stage-P99 sum.")
+    check(
+        abs(travel_p50.magnitude - 42.0) < 1e-9 and abs(excess_p50.magnitude - 18.0) < 1e-9,
+        "The freshness paragraph states 42 mm of travel, 18 mm past the tolerance.",
+    )
+    check(abs(travel_p999.magnitude - 82.08) < 1e-9, f"Tail travel drifted: {travel_p999}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_fresh_str = fmt_latency(t_fresh, unit=millisecond, precision=0)
+    sum_p50_str = fmt_latency(sum_p50, unit=millisecond, precision=0)
+    sum_p99_str = fmt_latency(sum_p99, unit=millisecond, precision=0)
+    sys_p99_str = fmt_latency(sys_p99, unit=millisecond, precision=1)
+    sys_p999_str = fmt_latency(sys_p999, unit=millisecond, precision=1)
+    t_backbone_str = fmt_latency(stages[2][1] * millisecond, unit=millisecond, precision=1)
+    travel_p50_cm_str = fmt_length(travel_p50, unit=ureg.centimeter, precision=1)
+    travel_p999_cm_str = fmt_length(travel_p999, unit=ureg.centimeter, precision=1)
+```
+
+::: {#fig-02-latency-waterfall fig-env="figure" fig-pos="t" fig-cap="**Where a measurement's age comes from**: (a) The illustrative stages of @tbl-02-latency-breakdown laid end to end at their medians, with each stage's $P_{99}$ as a thin extension. The backbone's `{python} ParcelLatencyProfile.t_backbone_str` alone fits the parcel sorter's `{python} ParcelLatencyProfile.t_fresh_str` deadline; the stages around it do not. (b) The end-to-end age at the median, `{python} ParcelLatencyProfile.sum_p50_str`, and at $P_{99.9}$, `{python} ParcelLatencyProfile.sys_p999_str`, against that deadline; the shaded part of each bar is the overrun. At the parcel's speed they correspond to `{python} ParcelLatencyProfile.travel_p50_cm_str` and `{python} ParcelLatencyProfile.travel_p999_cm_str` of unguided motion." fig-alt="Two panels sharing a time axis in milliseconds from 0 to 85. Panel a: six horizontal bars, one per stage, placed end to end: exposure and readout, transport and DMA, backbone and policy, scheduling and IPC, fieldbus, and current rise, each with a thin extension to its 99th percentile. A red vertical line marks the 20 millisecond deadline; the median chain ends at 35 milliseconds. Panel b: two bars labeled median 35.0 milliseconds and 99.9th percentile 68.4 milliseconds, each shaded red beyond the 20 millisecond line, annotated 4.2 centimeters and 8.2 centimeters of travel."}
+
+```{python}
+#| label: fig-02-latency-waterfall
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SENSE-TO-ACTUATION WATERFALL (FIGURE)
+# │ Context: @fig-02-latency-waterfall
+# │ Goal:    show that the compute stage is a minority of the measurement's age
+# │ Show:    six stages end to end at P50 with P99 extensions; P50 and P99.9
+# │          end-to-end ages against the 20 ms deadline, overrun shaded
+# │ How:     values from ParcelLatencyProfile (body-latency-profile-calc)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+import matplotlib.pyplot as plt
+
+P = ParcelLatencyProfile
+R = viz.VOL4_ROLES
+viz.set_book_style()
+fig, (ax, bx) = plt.subplots(2, 1, figsize=(10, 5.0), sharex=True, gridspec_kw=dict(height_ratios=[3.2, 1.5], hspace=0.28))
+roles = ["measured", "measured", "proposal", "structural", "structural", "neutral"]
+dl = P.t_fresh.magnitude
+t0 = 0.0
+n = len(P.stages)
+for k, ((name, p50, p99, _), role) in enumerate(zip(P.stages, roles)):
+    y = n - 1 - k
+    c = R[role]
+    ax.barh(y, p50, left=t0, height=0.56, color=c, alpha=0.28, edgecolor=c, lw=1.0, zorder=3)
+    ax.plot([t0 + p50, t0 + p99], [y, y], color=c, lw=1.4, zorder=3)
+    ax.plot([t0 + p99, t0 + p99], [y - 0.14, y + 0.14], color=c, lw=1.4, zorder=3)
+    ax.text(-1.0, y, name, ha="right", va="center", fontsize=9, color=R["neutral"])
+    lab_x = t0 + max(p99, p50) + 1.0
+    if lab_x > P.sum_p50.magnitude - 6:  # keep labels clear of the median-chain line
+        lab_x = max(lab_x, P.sum_p50.magnitude + 0.8)
+    ax.text(lab_x, y, f"{p50:.1f}", ha="left", va="center", fontsize=8.5, color=c)
+    t0 += p50
+ax.axvline(dl, color=R["consequence"], lw=1.2, zorder=2)
+ax.text(dl + 0.6, n - 0.45, f"deadline {dl:.0f} ms", color=R["consequence"], fontsize=8.5, va="bottom")
+ax.axvline(t0, color=R["neutral"], lw=0.9, ls="--", zorder=2)
+ax.text(t0 + 0.6, n - 0.45, f"median chain {t0:g} ms", color=R["neutral"], fontsize=8.5, va="bottom")
+ax.set_yticks([])
+ax.set_ylim(-0.6, n + 0.1)
+ax.grid(axis="y", visible=False)
+for side in ("left", "right", "top"):
+    ax.spines[side].set_visible(False)
+ax.text(-0.26, 1.0, "(a)", transform=ax.transAxes, fontsize=10.5, fontweight="bold", va="top")
+
+rows = [
+    (f"median {P.sum_p50.magnitude:g} ms", P.sum_p50.magnitude, P.travel_p50_cm_str),
+    (f"$P_{{99.9}}$ {P.sys_p999.magnitude:.1f} ms", P.sys_p999.magnitude, P.travel_p999_cm_str),
+]
+for k, (name, age, travel) in enumerate(rows):
+    y = 1 - k
+    bx.barh(y, dl, left=0, height=0.55, color=R["neutral"], alpha=0.18, edgecolor=R["neutral"], lw=1.0, zorder=3)
+    bx.barh(y, age - dl, left=dl, height=0.55, color=R["consequence"], alpha=0.22, edgecolor=R["consequence"], hatch="///", lw=1.0, zorder=3)
+    bx.text(-1.0, y, name, ha="right", va="center", fontsize=9, color=R["neutral"])
+    bx.text(age + 1.0, y, f"{travel} of travel", ha="left", va="center", fontsize=8.5, color=R["consequence"])
+bx.axvline(dl, color=R["consequence"], lw=1.2, zorder=4)
+bx.set_yticks([])
+bx.set_ylim(-0.6, 1.6)
+bx.grid(axis="y", visible=False)
+for side in ("left", "right", "top"):
+    bx.spines[side].set_visible(False)
+bx.set_xlim(0, 85)
+bx.set_xlabel("Age of the measurement (ms)")
+bx.text(-0.26, 1.0, "(b)", transform=bx.transAxes, fontsize=10.5, fontweight="bold", va="top")
+plt.show()
+```
 :::
 
 A guided walkthrough of @fig-02-latency-waterfall illustrates how physical latency accumulates across the end-to-end silicon pipeline:
 
-* **Panel (a) Pipeline stages:** The signal path traverses eight distinct hardware and software domains: (1) sensor photon exposure midpoint, (2) serial readout over MIPI CSI-2, (3) direct memory access (DMA) transport into host memory, (4) kernel buffering into user space, (5) neural model deliberation on the accelerator, (6) inter-process communication (IPC) dispatch across processor boundaries, (7) deterministic fieldbus packet transmission over EtherCAT, and (8) power MOSFET gate drive switching to establish stator flux.
-* **Panel (b) Latency timelines vs. freshness deadline:** Evaluating these stages against the $20\text{ ms}$ freshness deadline demonstrates why nominal benchmark compute times mislead. While neural inference alone requires only $18.5\text{ ms}$ ($P_{50}$), upstream readout and downstream fieldbus dispatch push the median end-to-end age to $35.0\text{ ms}$, creating $4.2\text{ cm}$ of unguided parcel slip. Under queue congestion and memory bus contention, the $P_{99.9}$ tail swells to $68.4\text{ ms}$ ($8.2\text{ cm}$ of slip), blowing through the physical tolerance budget by more than a factor of three.
+* **Panel (a) Pipeline stages:** The signal path traverses eight hardware and software stages, grouped into six bars as in @tbl-02-latency-breakdown: (1) sensor photon exposure midpoint, (2) serial readout over MIPI CSI-2, (3) direct memory access (DMA) transport into host memory, (4) kernel buffering into user space, (5) neural model deliberation on the accelerator, (6) inter-process communication (IPC) dispatch across processor boundaries, (7) deterministic fieldbus packet transmission over EtherCAT, and (8) power MOSFET gate drive switching to establish stator flux.
+* **Panel (b) End-to-end age vs. freshness deadline:** Evaluating the chain against the `{python} ParcelLatencyProfile.t_fresh_str` freshness deadline shows why nominal benchmark compute times mislead. Neural inference alone takes only `{python} ParcelLatencyProfile.t_backbone_str` at the median, yet readout before it and dispatch after it push the median end-to-end age to `{python} ParcelLatencyProfile.sum_p50_str`, `{python} ParcelLatencyProfile.travel_p50_cm_str` of unguided parcel motion. Under queue congestion and memory bus contention, the $P_{99.9}$ tail reaches `{python} ParcelLatencyProfile.sys_p999_str`, `{python} ParcelLatencyProfile.travel_p999_cm_str` of motion, more than three times the tolerance budget.
 
 Engineers often compute total latency by summing the $P_{99}$ values of individual stages, but the percentile of a sum is not the sum of the percentiles.[^fn-math-quantile-convolution] In embedded system-on-chip (SoC) architectures, shared system bus contention (such as PCIe DMA bursts saturating memory controllers during camera readout), memory bandwidth throttling on edge accelerators, and kernel thread preemption correlate stage delays. The distribution of complete sense-to-torque age must therefore be profiled empirically on the integrated machine under declared multi-tenant compute loads, and even that measured percentile is not the analyzed bound a hard safety deadline demands (@sec-nervous-deterministic-fieldbuses).
 
@@ -182,7 +322,7 @@ To see how stage timing differs from end-to-end age, consider a timing profile f
 
 : **Illustrative sense-to-actuation latency decomposition**: Stage and system-level timings show why the arithmetic sum of stage percentiles is not the end-to-end tail. The example's $P_{99.9} = 68.4\text{ ms}$ exceeds the $20\text{ ms}$ freshness deadline of the parcel sorter. {#tbl-02-latency-breakdown tbl-colwidths="[26,38,12,12,12]"}
 
-The $50.0\text{ ms}$ sum of stage $P_{99}$ values differs from the $46.2\text{ ms}$ system percentile, and against the $20\text{ ms}$ deadline even the $35.0\text{ ms}$ median would be late.
+The `{python} ParcelLatencyProfile.sum_p99_str` sum of stage $P_{99}$ values differs from the `{python} ParcelLatencyProfile.sys_p99_str` system percentile, and against the `{python} ParcelLatencyProfile.t_fresh_str` deadline even the `{python} ParcelLatencyProfile.sum_p50_str` median would be late.
 
 Late feedback can also reinforce a tracking error instead of correcting it,[^fn-math-bode-delay] but the freshness calculation needs no frequency-domain model: the parcel has already moved beyond the allowed tolerance. The architecture must preserve the observation's physical capture time. Hardware timestamps synchronized through **IEEE 802.1AS**\index{IEEE 802.1AS!hardware timestamping}, the generalized Precision Time Protocol (gPTP),[^fn-hw-gptp-timestamp] or capture strobes associated with the **MIPI CSI-2**\index{MIPI CSI-2!sensor readout interface}[^fn-hw-mipi-capture] interface provide a timing reference; the sensor's exposure and readout behavior determine how that reference maps to the measurement. The timestamp then travels with the observation through computation.
 
@@ -510,7 +650,53 @@ Dividing by effective mass yields the kinematic braking travel:
 $$d_{\text{brake}} = \frac{v^2}{2 a_{\text{brake}}}$$
 If an engineer evaluates braking capacity using bare chassis mass alone ($a_{\text{nominal}} = F_{\text{brake}} / m$), they ignore the kinetic energy stored in the spinning motor rotors, overestimating deceleration by the factor $m_{\text{eff}} / m$ and underestimating stopping travel by $\frac{m_{\text{eff}} - m}{m} = \sum_i \frac{N_i^2 J_{\text{rotor}, i}}{m r_{\text{wheel}}^2}$. On the running machine the correction is small. Its two driven wheels are direct-drive hub motors ($N_i = 1$), and although their datasheet omits rotor inertia, no part of a hub motor lies outside its tire, so each $J_i/r_{\text{wheel}}^2$ cannot exceed the motor's `{python} BrakingLimits.m_rot_wheel_str` mass. The rotating parts add at most `{python} BrakingLimits.rot_pct_str` to the `{python} BrakingLimits.m_str` loaded mass. Because the correction grows with $N_i^2$, it matters most on light platforms driven through high-ratio gearboxes.
 
-The parameter $a_{\text{brake}}$ is the credible sustained deceleration the physical plant can exert against the environment, not an idealized rating copied from an actuator datasheet. The retarding force $F_{\text{brake}} = m_{\text{eff}} a_{\text{brake}}$ must fit under three independent ceilings. Traction bounds it at the floor. Only the braked wheels push against the floor, and friction there can reach at most $\mu$ times the normal force they carry, $\phi_{\text{drive}} m g$, so $a_{\text{brake}} \le \mu g \phi_{\text{drive}}$, where $\mu$ is the tire-floor friction coefficient and $\phi_{\text{drive}}$ is the fraction of the weight those wheels carry. Tip-over bounds it through the mass distribution. The braking force acts at the floor while inertia acts at the center of gravity, a height $h_{\text{cg}}$ above it. Taking moments about the leading support, a horizontal distance $d$ ahead of the center of gravity, the inertial moment $m a_{\text{brake}} h_{\text{cg}}$ tries to pitch the body forward and the weight's moment $m g d$ holds it down, so the body stays on its wheels only while $a_{\text{brake}} \le g\,d/h_{\text{cg}}$. Raising or extending the arm changes both terms, so this ceiling depends on the machine's state. The drives bound it through the largest torque their current limit allows, a ceiling that @sec-body-electrical-time-constants derives from the motor's torque per ampere. If an engineer restricts inverter current limits, or if back-EMF, the voltage a spinning motor generates against its own supply, leaves the inverter too little headroom to control current, the drive cannot deliver the required braking torque, silently degrading $a_{\text{brake}}$ and expanding braking travel without software notification. The rotor's own inertia is already counted in $m_{\text{eff}}$ and must not be charged a second time. \ref{nbk-body-braking-drive-limits} checks all three ceilings on the running machine.
+The parameter $a_{\text{brake}}$ is the credible sustained deceleration the physical plant can exert against the environment, not an idealized rating copied from an actuator datasheet. The retarding force $F_{\text{brake}} = m_{\text{eff}} a_{\text{brake}}$ must fit under three independent ceilings. Traction bounds it at the floor. Only the braked wheels push against the floor, and friction there can reach at most $\mu$ times the normal force they carry, $\phi_{\text{drive}} m g$, so $a_{\text{brake}} \le \mu g \phi_{\text{drive}}$, where $\mu$ is the tire-floor friction coefficient and $\phi_{\text{drive}}$ is the fraction of the weight those wheels carry. Tip-over bounds it through the mass distribution. The braking force acts at the floor while inertia acts at the center of gravity, a height $h_{\text{cg}}$ above it. Taking moments about the leading support, a horizontal distance $d$ ahead of the center of gravity, the inertial moment $m a_{\text{brake}} h_{\text{cg}}$ tries to pitch the body forward and the weight's moment $m g d$ holds it down, so the body stays on its wheels only while $a_{\text{brake}} \le g\,d/h_{\text{cg}}$. Raising or extending the arm changes both terms, so this ceiling depends on the machine's state. The drives bound it through the largest torque their current limit allows, a ceiling that @sec-body-electrical-time-constants derives from the motor's torque per ampere. If an engineer restricts inverter current limits, or if back-EMF, the voltage a spinning motor generates against its own supply, leaves the inverter too little headroom to control current, the drive cannot deliver the required braking torque, silently degrading $a_{\text{brake}}$ and expanding braking travel without software notification. The rotor's own inertia is already counted in $m_{\text{eff}}$ and must not be charged a second time. @Fig-02-braking-fbd draws the three ceilings on the loaded base, and \ref{nbk-body-braking-drive-limits} checks them on the running machine.
+
+```{python}
+#| label: body-braking-fbd-guard
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BRAKING FREE-BODY DIAGRAM (LEGO GUARD FOR A HAND-DRAWN FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-02-braking-fbd (fig02_braking_fbd.svg) in
+# │          @sec-body-stopping-distance-prebrake.
+# │ Goal:    Keep the numbers drawn in the SVG equal to BrakingLimits.
+# │ Show:    mu >= 0.204 (phi = 1), 0.250 (phi = 0.815); h_cg/d <= 4.90;
+# │          60 N m per wheel, r = 133 mm, 451 N per wheel, 902 N for two;
+# │          m_eff <= 387 kg; torque ceiling >= 2.33 m/s^2.
+# │ How:     Read BrakingLimits; check() fails the build if a registry change
+# │          leaves the SVG labels stale. Nothing prints.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import *
+from mlsysim.fmt import check
+
+class BrakingFbdLabels:
+    """Values that fig02_braking_fbd.svg draws as text."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    B = BrakingLimits
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(f"{B.mu_min:.3f}" == "0.204", f"SVG draws mu >= 0.204; cell says {B.mu_min}.")
+    check(f"{B.mu_min_rated:.3f}" == "0.250", f"SVG draws mu >= 0.250; cell says {B.mu_min_rated}.")
+    check(f"{B.phi_max:.3f}" == "0.815", f"SVG draws phi = 0.815; cell says {B.phi_max}.")
+    check(f"{B.cg_ratio_max:.2f}" == "4.90", f"SVG draws h_cg/d > 4.90; cell says {B.cg_ratio_max}.")
+    check(round(B.tau_wheel.to(ureg.newton * meter).magnitude) == 60, f"SVG draws 60 N m; cell says {B.tau_wheel}.")
+    check(round(B.r_wheel.to(ureg.millimeter).magnitude) == 133, f"SVG draws r = 133 mm; cell says {B.r_wheel}.")
+    check(round((B.force / B.n_wheels).to(ureg.newton).magnitude) == 451, f"SVG draws 451 N per wheel; cell says {B.force}.")
+    check(round(B.force.to(ureg.newton).magnitude) == 902, f"SVG draws 902 N; cell says {B.force}.")
+    check(round(B.m_eff.to(kilogram).magnitude) == 387, f"SVG draws m_eff <= 387 kg; cell says {B.m_eff}.")
+    check(f"{B.a_torque.to(meter / second**2).magnitude:.2f}" == "2.33", f"SVG draws 2.33 m/s^2; cell says {B.a_torque}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    # Guard-only class: the caption reads BrakingLimits directly.
+```
+
+::: {#fig-02-braking-fbd fig-env="figure" fig-pos="t" fig-cap="**Three ceilings on the braking base**: (a) Only the driven wheels brake against the floor, so friction there caps the retarding force at $\mu \phi_{\text{drive}} m g$; the credible `{python} BrakingLimits.a_req_str` needs $\mu \ge$ `{python} BrakingLimits.mu_min_str` with all the weight on those wheels and `{python} BrakingLimits.mu_min_rated_str` at their rated load share. The inertial load $m a_{\text{brake}}$ acts at the center of gravity, a height $h_{\text{cg}}$ above the floor, and pitches the body about its leading support unless $h_{\text{cg}}/d \le$ `{python} BrakingLimits.cg_ratio_max_str`; neither length has been measured. (b) Each direct-drive hub wheel turns its `{python} BrakingLimits.tau_wheel_str` current-limited torque into a floor force $\tau/r$, `{python} BrakingLimits.force_str` for the pair, and the spinning parts are already counted in $m_{\text{eff}}$. The layout is schematic, not to scale." fig-alt="Two panels. Panel a: side view of a mobile base with a tote rack and an arm, a driven wheel between two casters, and a center of gravity marker. Arrows show the weight m g downward and the inertial load m a brake forward at the center of gravity, normal loads phi m g on the driven wheel and on the casters, and a friction force F at most mu phi m g at the driven wheel pointing against travel. Dimension lines mark the unmeasured height h cg and the distance d to the front caster. A red curved arrow at the front caster reads tips if h cg over d exceeds 4.90. A line below reads mu at least 0.204 at phi equals 1 and at least 0.250 at the rated phi of 0.815. Panel b: one hub wheel with a hub motor of ratio 1, a braking torque tau equals 60 newton meters, radius 133 millimeters, and a floor force of 451 newtons; notes read two wheels 902 newtons, m eff at most 387 kilograms, and a ceiling of at least 2.33 meters per second squared."}
+![](images/svg/fig02_braking_fbd.svg){width="100%"}
+:::
 
 Reflected rotor energy also matters during contact. The transmission and contact compliance determine how that energy reaches the obstacle and gear teeth. The stopping calculation therefore cannot substitute for a contact-load assessment; @sec-body-actuator-limits develops the corresponding transmission trade-off.
 
@@ -565,7 +751,7 @@ A_BRAKE = S.a_brake  # category: illustrative (loaded, dry floor)
 OVERHEAD = S.overhead.to(MM).magnitude  # category: derived (illustrative delta_loc plus chosen delta_margin)
 D_CLEAR = S.d_clear.to(MM).magnitude  # category: illustrative (rack-end clear distance)
 CASES = [  # category: illustrative and derived (drive-limit and speed-scaling cases from the budget cell)
-    ("Case 1", "Body terms", S.v, S.t_act),
+    ("Case 1", "Partial budget:\nbody terms only", S.v, S.t_act),
     ("Case 2", "Full delay", S.v, S.tau_full),
     ("Case 3", "Full delay, faster", S.v_fast, S.tau_full),
 ]
@@ -636,7 +822,7 @@ for side in ("left", "top", "right"):
     ax.spines[side].set_visible(False)
 handles, labels = ax.get_legend_handles_labels()
 seen = dict(zip(labels, handles))
-ax.legend(seen.values(), seen.keys(), loc="upper center", bbox_to_anchor=(0.5, -0.30), ncol=5, frameon=False, fontsize=8.5)
+ax.legend(seen.values(), seen.keys(), loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=5, frameon=False, fontsize=8.5)
 plt.tight_layout()
 plt.show()
 ```
@@ -949,7 +1135,7 @@ Below $N^*$, joint acceleration is torque-limited: increasing $N$ leverages moto
 The same ratio also increases the effort needed for an external contact to move the joint. That resistance to imposed motion is mechanical impedance. Inertia, damping, stiffness, and friction all contribute, so a ratio alone cannot establish contact force or a fracture threshold. The transmission choice must consider those effects alongside delivered acceleration.
 
 ::: {.column-margin}
-![](images/svg/margin_reflected_rotor_inertia_knee.svg){width="100%" fig-alt="Two-tone curve of joint acceleration versus gear ratio peaking at thirty-nine then dropping sharply into a shaded red rotor-inertia-dominated regime."}
+![](images/svg/margin_reflected_rotor_inertia_knee.svg){width="100%" fig-alt="Curve of joint acceleration versus gear ratio that rises in gray to a peak marked N star about 39, then falls in red through a shaded rotor-dominated region, with a red dot marking a 100 to 1 ratio."}
 
 *Past the inertia-matching ratio, gearing chokes delivered joint acceleration.*
 :::
@@ -1018,14 +1204,14 @@ $$F_{\text{contact}} = K_p (x_{\text{des}} - x) + K_d (\dot{x}_{\text{des}} - \d
 The joint's programmed stiffness $K_p$ and damping $K_d$ make it yield under position error. This can reduce contact loading, but the response still depends on actuator bandwidth, saturation, and contact dynamics; the equation alone does not cap impact force. The allowable approach speed must therefore come from the qualified contact response.
 :::
 
-::: {#fig-02-real-strain-wave-gear fig-env="figure" fig-pos="t" fig-cap="**Strain wave gear assembly**: Robotic strain wave transmission component set: (1) elliptical wave generator with flexible ball bearings, (2) flexible cup flexspline with external teeth, (3) rigid circular spline with internal teeth, and (4) transmission systems invariant governing reflected rotor inertia ($J_{\text{ref}} = N^2 J_{\text{rotor}}$). Elastic deformation enables zero initial backlash at high reduction ratios ($50:1$ to $160:1$), but introduces torsional compliance, hysteresis, and tooth fatigue vulnerability under sudden shock loads." fig-alt="Annotated component set of a robotic strain wave gear transmission, highlighting the wave generator, flexspline, circular spline, and reflected inertia invariant."}
-![](images/jpg/fig02_real_strain_wave_gear_annotated.jpg){width="70%"}
+::: {#fig-02-real-strain-wave-gear fig-env="figure" fig-pos="t" fig-cap="**Strain wave gear set**: The three parts of a Harmonic Drive strain wave gear, disassembled: the elliptical wave generator with its thin-race ball bearing (top left), the flexspline cup with external teeth on its open rim (top right), and the rigid circular spline ring with internal teeth (bottom). The wave generator bends the flexspline so that its teeth mesh with the circular spline at two opposite zones; because the flexspline carries slightly fewer teeth, each turn of the wave generator advances it by only that difference, which gives a high reduction with little backlash. (Credit: Pieceofmetalwork, Wikimedia Commons, CC BY-SA 4.0.)" fig-alt="Photograph of three machined steel parts on a white surface: a round ball bearing assembly at top left, a cylindrical cup with fine teeth around its rim at top right, and a flat ring with fine internal teeth and bolt holes at the bottom."}
+![](images/jpg/fig02_real_strain_wave_gear.jpg){width="70%"}
 :::
 
 The strain wave assembly in @fig-02-real-strain-wave-gear obtains its reduction through repeated elastic deformation of the flexspline. That compliance allows the motor and link to move differently under load, so motor-side tracking alone cannot establish the output motion.
 
-::: {#fig-02-real-broken-gear-tooth fig-env="figure" fig-pos="t" fig-cap="**Gear tooth fatigue fracture**: A high-torque transmission gear tooth broken during cyclic load testing at NASA Glenn Research Center: [①] intact gear tooth flank supporting continuous drive contact; [②] tooth root fillet, where bending stress concentrates and the fatigue crack starts; [③] fracture surface of the broken tooth, where the crack grew under repeated loading until the remaining section gave way; and [④] reflected rotor inertia ($J_{\text{ref}} = N^2 J_{\text{rotor}}$). Impacts transmitted through a high gear ratio add to the cyclic bending stress at the root; compliance and the contact path determine how much energy reaches any one tooth." fig-alt="Annotated macro photograph of a fractured transmission gear tooth, identifying the intact flank, the root fillet where the crack started, the fracture surface of the broken tooth, and the reflected rotor inertia formula."}
-![](images/jpg/fig02_real_broken_gear_tooth_annotated.jpg){width="65%"}
+::: {#fig-02-real-broken-gear-tooth fig-env="figure" fig-pos="t" fig-cap="**Broken gear tooth**: A spur gear from gear research at the NASA Lewis (now Glenn) Research Center, photographed in 1974, with one tooth broken away at its root and the fragment lying in the gap. The root is where a tooth's bending stress concentrates, so repeated or impulsive loading that the transmission passes to the teeth ends here. (Credit: Martin Brown, NASA Glenn Research Center, via the U.S. National Archives, NARA 17417956, public domain.)" fig-alt="Black-and-white close-up of the edge of a spur gear showing several teeth; the middle tooth has broken off at its base, and the broken piece sits in the gap next to a curved fragment of the root."}
+![](images/jpg/fig02_real_broken_gear_tooth.jpg){width="65%"}
 :::
 
 The damaged tooth in @fig-02-real-broken-gear-tooth illustrates why repeated contact loads belong in actuator qualification. A transmission that meets static torque requirements may still accumulate damage under reversals and impacts. Smooth proposals reduce excitation, but their admissibility still depends on measured output response and the qualified load envelope.
@@ -1217,8 +1403,8 @@ Reducing motor current to shed heat also reduces holding torque. A loaded arm th
 
 The winding and housing respond on different timescales. Copper heats rapidly under current, while the larger core and housing absorb and reject heat more slowly. A case temperature measurement can therefore lag the winding hotspot during a torque burst.
 
-::: {#fig-02-real-burnt-motor-stator fig-env="figure" fig-pos="t" fig-cap="**Stator winding insulation breakdown**: Cutaway view of a damaged electric motor stator showing critical thermal subsystems: (1) copper phase windings (primary $I^2 R$ heat source), (2) dielectric slot liners, whose thermal class ($155^\circ\text{C}$ for Class F) is a rated-life temperature rather than a breakdown threshold, (3) laminated iron stator core ($C_{\text{th}}$ and dissipation path $\theta_{JA}$), and (4) rotor bore air gap and permanent magnets, whose temperature limit depends on the magnet grade. (Source: Industrial Electromechanical Diagnostics Archive, CC BY 4.0)." fig-alt="Annotated photograph of a damaged motor stator with callout badges highlighting copper phase windings, dielectric slot liners, laminated stator core, and rotor bore."}
-![](images/jpg/fig02_real_burnt_motor_stator_annotated.jpg){width="85%"}
+::: {#fig-02-real-burnt-motor-stator fig-env="figure" fig-pos="t" fig-cap="**Motor stator damaged by overheating**: The opened stator of an electric motor that failed from overheating, showing the copper phase windings bound with tape at left, the insulating slot liners where the windings leave the laminated iron core, and the end bell with its bearing seat at right. The windings are where $I^2 R$ heat is generated, and the insulation between them is what accumulated heat ages. (Credit: K. Kudelina, Wikimedia Commons, CC BY 4.0.)" fig-alt="Color photograph looking into an opened electric motor stator: dark copper wire windings bound with fabric tape on the left, pale insulation paper protruding from slots in a laminated steel core that recedes toward the right, and a round end bell with a bearing seat at the far right."}
+![](images/jpg/fig02_real_burnt_motor_stator.jpg){width="85%"}
 :::
 
 A thermal model follows the same energy accounting as the stopping calculation: energy accumulates where the rate entering exceeds the rate leaving. Here the winding receives electrical losses and transfers heat to the core; the core transfers heat to the surroundings. Thermal capacitance measures how much energy raises a component's temperature, while thermal resistance measures how strongly the heat-flow path resists that transfer. Representing the winding and core separately gives the two-node lumped-parameter thermal ordinary differential equation (ODE) system:
@@ -1444,8 +1630,161 @@ which here is `{python} ThermalBurst.duty_pct_str`, so a `{python} ThermalBurst.
 
 The burst calculation limits duration, while the back-EMF relation in @sec-body-electrical-time-constants limits torque at speed. A feasible maneuver must satisfy both. At low speed, the drive can supply the current needed for a burst, but the winding temperature limits how long it may do so. At higher speed, back-EMF consumes voltage headroom and can prevent that current from appearing at all. The torque-speed envelope in @fig-02-motor-torque-speed-envelope combines these constraints instead of treating peak torque as available at every speed and duration.
 
-::: {#fig-02-motor-torque-speed-envelope fig-env="figure" fig-pos="t" fig-cap="**Motor torque-speed operating region**: The permanent magnet synchronous motor torque-speed plane, separating continuous duty $S_1$ at thermal equilibrium from intermittent periodic duty $S_3$ at peak acceleration, alongside the exponential thermal accumulation trajectory during peak bursts and conductive cooling during recovery. Winding thermal limits constrain sustainable duty cycle rather than peak inverter current." fig-alt="Torque-speed characteristic curve for a permanent magnet synchronous motor, contrasting the continuous thermal rating zone with the intermittent peak acceleration region, with an adjacent graph showing temperature rise during active bursts and cooling decay."}
-![](images/svg/fig02_motor_torque_speed_envelope.svg){width="100%"}
+```{python}
+#| label: body-torque-speed-envelope-calc
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TORQUE-SPEED ENVELOPE OF THE ARM'S JOINT MOTOR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-02-motor-torque-speed-envelope in
+# │          @sec-body-torque-speed-envelopes.
+# │ Goal:    Show that torque is bounded by duty (S1 vs S3), by speed (back-EMF
+# │          plus resistive drop), and by thermal history (burst horizon).
+# │ Show:    (a) 1.25 / 4.05 N m, no-load 2,110 rpm, 1,942 rpm at rated and
+# │          1,566 rpm at peak current; (b) cold 78.4 s and hot 43.1 s to 155 C.
+# │ How:     Line-to-line voltage limit V = K_e,LL w + (sqrt(3)/2) R_TT i with
+# │          K_e,LL = V_r / w_0 from the data sheet's no-load speed, i = tau/K_t
+# │          (amplitude-invariant current, so the line drop is sqrt(3) i R_TT/2);
+# │          inductance neglected. Panel (b) is ThermalBurst's first-order
+# │          T(t) = T_inf - (T_inf - T_0) exp(-t/tau).
+# │ Note:    The no-load speed is read here from the data sheet; promote it to
+# │          Actuators.FramelessMotor.TQ_ILM70x18 (no_load_speed) when the
+# │          registry next changes.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+import numpy as np
+from mlsysim import *
+from mlsysim import viz
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_torque, fmt_voltage, fmt_int, check
+import matplotlib.pyplot as plt
+
+class TorqueSpeedEnvelope:
+    """Duty and voltage bounds on the TQ ILM 70x18 torque-speed plane."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    motor = Actuators.FramelessMotor.TQ_ILM70x18  # category: sourced (TQ-RoboDrive data sheet)
+    tau_rated = motor.rated_torque  # category: sourced
+    tau_peak = motor.peak_torque  # category: sourced (20 percent deviation from linearity)
+    k_t = motor.torque_constant  # category: sourced
+    r_tt = motor.terminal_resistance  # category: sourced (at 20 C)
+    v_bus = motor.rated_voltage  # category: sourced
+    n0 = 2110.0 * ureg.rpm  # category: sourced (data sheet Rev. 0414, star-serial no-load speed at U_r; theoretical)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    w0 = n0.to(radian / second)
+    k_e = (v_bus / w0).to(volt * second / radian)  # line-to-line peak back-EMF constant
+
+    def n_limit(tau, k_t=k_t, r_tt=r_tt, v_bus=v_bus, k_e=k_e):
+        i = (tau / k_t).to(ureg.ampere)
+        drop = (math.sqrt(3) / 2 * r_tt * i).to(volt)
+        return ((v_bus - drop) / k_e).to(ureg.rpm)
+
+    n_rated = n_limit(tau_rated)
+    n_peak = n_limit(tau_peak)
+    # Consistency: amplitude-invariant K_t implies K_e,LL = (2/sqrt(3)) K_t in SI
+    k_e_from_kt = 2 / math.sqrt(3) * k_t.to(ureg.newton * meter / ureg.ampere).magnitude  # N m/A = V s/rad
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(k_e.magnitude - k_e_from_kt) / k_e_from_kt < 0.01, f"Data-sheet no-load speed and K_t disagree: K_e {k_e} vs {k_e_from_kt:.4f}")
+    check(abs(n_rated.magnitude - 1942) < 1, f"Rated-current speed limit drifted: {n_rated}")
+    check(abs(n_peak.magnitude - 1566) < 1, f"Peak-current speed limit drifted: {n_peak}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    tau_rated_str = fmt_torque(tau_rated, precision=2)
+    tau_peak_str = fmt_torque(tau_peak, precision=2)
+    v_bus_str = fmt_voltage(v_bus, unit=volt, precision=0)
+    n0_str = f"{fmt_int(n0.magnitude)} rpm"
+    n_peak_str = f"{fmt_int(round(n_peak.magnitude, -1))} rpm"
+```
+
+::: {#fig-02-motor-torque-speed-envelope fig-env="figure" fig-pos="t" fig-cap="**Torque, speed, and time on one joint motor**: (a) The TQ-RoboDrive ILM 70x18 of the arm's stand-in joint on its `{python} TorqueSpeedEnvelope.v_bus_str` supply. Continuous duty $S_1$ extends up to the `{python} TorqueSpeedEnvelope.tau_rated_str` rated torque; intermittent duty $S_3$ extends to the `{python} TorqueSpeedEnvelope.tau_peak_str` peak. Both end where back-EMF plus the resistive drop uses up the supply, from the `{python} TorqueSpeedEnvelope.n0_str` no-load speed down to `{python} TorqueSpeedEnvelope.n_peak_str` at peak torque; winding inductance, neglected here, pulls that boundary lower. (b) The winding temperature of the threefold-current burst of \ref{nbk-body-thermal-burst-limits}, a first-order rise toward `{python} ThermalBurst.t_inf_str` with $\tau_{\text{th}} =$ `{python} ThermalBurst.tau_str`. From ambient the burst reaches the `{python} ThermalBurst.t_limit_str` insulation class after `{python} ThermalBurst.t_cold_str`; from the continuous-duty equilibrium it gets there after `{python} ThermalBurst.t_hot_str`. The thermal values are illustrative, because the data sheet leaves them to the installation." fig-alt="Two panels. Panel a: torque against speed in revolutions per minute. A gray region below 1.25 newton meters is labeled S1 continuous, and an amber band from 1.25 to 4.05 newton meters is labeled S3 intermittent. A sloping line labeled voltage limit bounds both regions on the right, running from 2,110 revolutions per minute at zero torque down to about 1,570 at 4.05 newton meters. Panel b: winding temperature against time from 0 to 100 seconds. Two rising curves that bend over, one starting at 40 degrees Celsius and one at about 96 degrees, cross a red horizontal line at 155 degrees at about 78 and 43 seconds, marked with dots. A dashed gray line marks 140 degrees."}
+
+```{python}
+#| label: fig-02-motor-torque-speed-envelope
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TORQUE-SPEED ENVELOPE AND BURST HEATING (FIGURE)
+# │ Context: @fig-02-motor-torque-speed-envelope
+# │ Goal:    draw duty, voltage, and thermal-history bounds on one joint motor
+# │ Show:    (a) S1/S3 regions under the voltage limit; (b) cold and hot bursts
+# │ How:     TorqueSpeedEnvelope (body-torque-speed-envelope-calc) and
+# │          ThermalBurst (body-thermal-burst-calc)
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import viz
+from mlsysim.core.units import *
+import matplotlib.pyplot as plt
+
+# ┌── 5. PLOT ──────────────────────────────────────────────────────────────────
+E, T = TorqueSpeedEnvelope, ThermalBurst
+R = viz.VOL4_ROLES
+AMBER = "#D97706"
+viz.set_book_style()
+fig, (ax, bx) = plt.subplots(1, 2, figsize=(10, 4.2), gridspec_kw=dict(wspace=0.32))
+
+# (a) torque-speed plane
+tr, tp = E.tau_rated.to(ureg.newton * meter).magnitude, E.tau_peak.to(ureg.newton * meter).magnitude
+taus = np.linspace(0, tp, 50)
+ns = np.array([E.n_limit(t * ureg.newton * meter).magnitude for t in taus])
+n0, nr, npk = E.n0.magnitude, E.n_rated.magnitude, E.n_peak.magnitude
+m1 = taus <= tr
+ax.fill_betweenx(taus[m1], 0, ns[m1], color="#E2E8F0", lw=0)
+ax.fill_betweenx(taus[~m1], 0, ns[~m1], color=AMBER, alpha=0.22, lw=0)
+ax.plot(ns, taus, color=R["neutral"], lw=1.8)
+ax.plot([0, nr], [tr, tr], color=R["neutral"], lw=1.0, ls="--")
+ax.plot([0, npk], [tp, tp], color=AMBER, lw=1.4)
+ax.text(nr * 0.42, tr * 0.45, "$S_1$ continuous", ha="center", va="center", fontsize=9.5, color=R["neutral"])
+ax.text(npk * 0.45, (tr + tp) / 2, "$S_3$ intermittent", ha="center", va="center", fontsize=9.5, color="#9A4F06")
+ax.annotate(
+    "voltage limit",
+    xy=(E.n_limit(2.6 * ureg.newton * meter).magnitude, 2.6),
+    xytext=(1900, 3.3),
+    fontsize=8.5,
+    color=R["neutral"],
+    ha="left",
+    arrowprops=dict(arrowstyle="-", color=R["neutral"], lw=0.7),
+)
+for n, t, lab, ha in [(n0, 0, f"{n0:,.0f} rpm", "right"), (npk, tp, f"{npk:,.0f} rpm", "left")]:
+    ax.plot(n, t, "o", color=R["neutral"], ms=4, zorder=5)
+    ax.text(n + (-110 if ha == "right" else 40), t + 0.12, lab, ha=ha, va="bottom", fontsize=8.5, color=R["neutral"])
+ax.set_xlim(0, 2500)
+ax.set_ylim(0, tp * 1.15)
+ax.set_yticks([0, 1, tr, 2, 3, 4, tp])
+ax.set_yticklabels(["0", "1", f"{tr:.2f}", "2", "3", "", f"{tp:.2f}"])
+ax.set_xlabel("Speed (rpm)")
+ax.set_ylabel("Torque (N·m)")
+ax.text(0.0, 1.03, "(a)", transform=ax.transAxes, fontsize=10.5, fontweight="bold", ha="left", va="bottom")
+
+# (b) burst heating, first-order
+tau_s = T.tau.to(second).magnitude
+t_inf = T.t_inf.to(ureg.degC).magnitude
+t = np.linspace(0, 100, 400)
+for T0, t_hit, lab, xy in [(T.t_amb, T.t_cold, "from ambient", (3, 30)), (T.t_equil, T.t_hot, "from $S_1$ equilibrium", (12, 92))]:
+    T0c = T0.to(ureg.degC).magnitude
+    curve = t_inf - (t_inf - T0c) * np.exp(-t / tau_s)
+    bx.plot(t, curve, color=R["measured"], lw=1.8, ls="-" if xy[0] < 10 else (0, (5, 2)))
+    th = t_hit.to(second).magnitude
+    bx.plot(th, T.t_limit.to(ureg.degC).magnitude, "o", color=R["consequence"], ms=5, zorder=5)
+    bx.text(th + 2, T.t_limit.to(ureg.degC).magnitude - 4, f"{th:.1f} s", fontsize=8.5, color=R["consequence"], va="top", ha="left")
+    bx.text(xy[0], xy[1], lab, fontsize=8.5, color=R["measured"], va="center")
+tl = T.t_limit.to(ureg.degC).magnitude
+tc = T.t_ceiling.to(ureg.degC).magnitude
+bx.axhline(tl, color=R["consequence"], lw=1.2)
+bx.text(1, tl + 3, f"insulation class {tl:.0f} °C", ha="left", va="bottom", fontsize=8.5, color=R["consequence"])
+bx.axhline(tc, color=R["neutral"], lw=0.9, ls="--")
+bx.text(99, tc - 3, f"ceiling {tc:.0f} °C", ha="right", va="top", fontsize=8.5, color=R["neutral"])
+bx.set_xlim(0, 100)
+bx.set_ylim(20, 185)
+bx.set_xlabel("Time into the burst (s)")
+bx.set_ylabel("Winding temperature (°C)")
+bx.text(0.0, 1.03, "(b)", transform=bx.transAxes, fontsize=10.5, fontweight="bold", ha="left", va="bottom")
+plt.show()
+```
 :::
 
 The continuous-duty region ($S_1$) permits sustained operation under the declared cooling conditions. The larger intermittent region ($S_3$) permits periodic bursts only with the starting temperature, duration, and recovery interval established above. Both regions narrow when speed consumes the drive's voltage headroom. Their intersection with the current thermal state, rather than the catalog peak, gives the available torque for the next maneuver.
@@ -1958,7 +2297,7 @@ Before measuring these limits on an assembled machine, verify your understanding
 
 ## Measuring a Machine's Own Limits {#sec-body-measuring-limits}
 
-A brake that stops an unloaded base on a cool laboratory floor has not established how the loaded mobile manipulator stops after repeated maneuvers. Characterization must connect each calculation to measurements under the conditions in which the machine will use it. A dynamometer, a test stand that applies a controlled mechanical load, isolates actuator behavior (@fig-02-real-motor-dyno-bench); integrated trials then establish what changes when the actuator shares a chassis, cooling path, and power supply with the rest of the machine. A defensible limit states what was measured, how uncertain the result is, and which conditions must remain true for a later decision to rely on it.
+A brake that stops an unloaded base on a cool laboratory floor has not established how the loaded mobile manipulator stops after repeated maneuvers. Characterization must connect each calculation to measurements under the conditions in which the machine will use it. A dynamometer, a test stand that applies a controlled mechanical load, isolates actuator behavior; a propulsion stand does the same with a propeller as the load (@fig-02-real-motor-dyno-bench). Integrated trials then establish what changes when the actuator shares a chassis, cooling path, and power supply with the rest of the machine. A defensible limit states what was measured, how uncertain the result is, and which conditions must remain true for a later decision to rely on it.
 
 ### Empirical dynamometer characterization and probe intrusion {#sec-body-dynamometer-characterization}
 
@@ -1980,7 +2319,7 @@ On a dynamometer, a controlled load machine resists the actuator while torque, s
   $$\tau_{\text{ext}} = N^2 J_{\text{rotor}} \ddot{q} + \tau_{\text{fric}}$$
   The measured response establishes whether the transmission can yield under the intended external load and maps the friction term that @sec-body-actuation-regimes shows is not a constant. Contact qualification must additionally exercise the relevant compliance and impact conditions; the backdrive model alone does not predict tooth failure.
 
-::: {#fig-02-real-motor-dyno-bench fig-env="figure" fig-pos="t" fig-cap="**Electric motor dynamometer testbed**: High-bandwidth actuator characterization stand at NASA Armstrong Flight Research Center. Direct empirical measurement of peak torque saturation, electrical time constants ($\tau_e = L/R$), continuous thermal rise ($\Delta T = P_{\text{loss}} \theta_{JA}$), and regenerative power feedback requires synchronizing multi-channel load cells, optical encoders, and isolated current probes on a shared hardware timebase rather than trusting manufacturer catalog ratings. (Source: NASA, Public Domain)." fig-alt="Photograph of an instrumented electric motor mounted on an optical dynamometer test bench at NASA Armstrong Flight Research Center, showing coupled torque transducers and sensor wiring."}
+::: {#fig-02-real-motor-dyno-bench fig-env="figure" fig-pos="t" fig-cap="**An instrumented propulsion test stand**: An electric motor with its propeller, speed controller, and wiring secured at the top of the Airvolt test stand at the NASA Armstrong Flight Research Center in 2016, instrumented to collect data on the propulsion system under load. A stand like this measures what a data sheet only asserts, on the assembled drive under stated conditions. (Credit: Lauren Hughes, NASA Armstrong Flight Research Center, AFRC2016-0100-05, public domain.)" fig-alt="Photograph against a blue sky of a white angled pylon carrying a mounting plate at its top, with a two-blade propeller, an electric motor, a finned electronics box, and bundled orange and red wiring."}
 ![](images/jpg/fig02_real_motor_dyno_bench.jpg){width="85%"}
 :::
 

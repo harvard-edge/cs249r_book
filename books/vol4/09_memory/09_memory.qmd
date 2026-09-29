@@ -159,7 +159,63 @@ class MemoryEpochAlignment:
     gap_str = fmt_latency(gap, unit=millisecond, precision=1)
 ```
 
-Physical systems often combine asynchronously acquired signals, even though hardware triggers can align selected sensors. In an illustrative asynchronous cycle, a tactile array might latch normal force readings at $t_1 =$ `{python} MemoryEpochAlignment.t1_str`, an optical tracking camera might have its exposure midpoint at $t_2 =$ `{python} MemoryEpochAlignment.t2_str`, and joint optical encoders might sample angular positions at $t_3 =$ `{python} MemoryEpochAlignment.t3_str`. These observations occur at different epochs and cannot be combined through direct tensor concatenation or algebraic operations. In multimodal foundation models and vision-language-action (VLA) backbones, visual tokens, proprioceptive vectors, and tactile embeddings are frequently packed into a single attention sequence under the implicit assumption that all tokens capture a simultaneous physical snapshot. Nothing in that packing records that the hand position came from $t_2$ and the joint reading from $t_3$, so whatever the model infers from their combination carries no bound on the error the mismatch introduces. Fusing a camera observation at $t_2$ with an encoder observation at $t_3$ requires the consumer to project one state across the temporal gap $\Delta t = |t_3 - t_2| =$ `{python} MemoryEpochAlignment.gap_str` using explicit kinematic models and bounded velocities (for example, propagating the historical camera observation along the joint velocity vector to reconcile it with the instantaneous encoder reading). Without the true acquisition epoch for each individual signal, the alignment calculation cannot determine the sign or magnitude of $\Delta t$, compounding geometric errors across every inference cycle.
+Physical systems often combine asynchronously acquired signals, even though hardware triggers can align selected sensors. In an illustrative asynchronous cycle, a tactile array might latch normal force readings at $t_1 =$ `{python} MemoryEpochAlignment.t1_str`, an optical tracking camera might have its exposure midpoint at $t_2 =$ `{python} MemoryEpochAlignment.t2_str`, and joint optical encoders might sample angular positions at $t_3 =$ `{python} MemoryEpochAlignment.t3_str`. These observations occur at different epochs and cannot be combined through direct tensor concatenation or algebraic operations. In multimodal foundation models and vision-language-action (VLA) backbones, visual tokens, proprioceptive vectors, and tactile embeddings are frequently packed into a single attention sequence under the implicit assumption that all tokens capture a simultaneous physical snapshot. Nothing in that packing records that the hand position came from $t_2$ and the joint reading from $t_3$, so whatever the model infers from their combination carries no bound on the error the mismatch introduces. Fusing a camera observation at $t_2$ with an encoder observation at $t_3$ requires the consumer to project one state across the temporal gap $\Delta t = |t_3 - t_2| =$ `{python} MemoryEpochAlignment.gap_str` using explicit kinematic models and bounded velocities (for example, propagating the historical camera observation along the joint velocity vector to reconcile it with the instantaneous encoder reading). Without the true acquisition epoch for each individual signal, the alignment calculation cannot determine the sign or magnitude of $\Delta t$, compounding geometric errors across every inference cycle (@fig-09-epoch-alignment).
+
+::: {#fig-09-epoch-alignment fig-env="figure" fig-pos="t" fig-cap="**Three evidence epochs in one cycle**: The tactile array, the camera's exposure midpoint, and the joint encoders each date their evidence on one clock, at `{python} MemoryEpochAlignment.t1_str`, `{python} MemoryEpochAlignment.t2_str`, and `{python} MemoryEpochAlignment.t3_str` in this illustrative cycle. A fused state dated to the encoder epoch must carry the camera's evidence across the `{python} MemoryEpochAlignment.gap_str` gap with a kinematic model and a bounded velocity; packing the three readings into one token sequence records none of these epochs." fig-alt="Timing strip with three lanes labeled tactile, camera, and encoders over a time axis in milliseconds. Each lane has one short sample mark at its own time, with vertical event lines labeled tactile latch, camera exposure midpoint, and encoder sample. A bracket above the strip spans the interval between the camera and encoder marks and is labeled with the gap to project across."}
+
+```{python}
+#| label: plot-memory-epoch-alignment
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THREE EVIDENCE EPOCHS ON ONE CLOCK (TIMING STRIP FIGURE)
+# │ Context: @fig-09-epoch-alignment in @sec-memory-state-epoch
+# │ Goal:    show that each sensor dates its evidence at its own epoch and that
+# │          fusion must project across the gap between them
+# │ Show:    the tactile, camera, and encoder epochs; the camera-to-encoder gap
+# │ How:     viz.TimingStrip / plot_timing_strip; every time from the
+# │          MemoryEpochAlignment cell; sample marks have a nominal drawing
+# │          width only
+# ├─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+import matplotlib.pyplot as plt
+
+# ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────────
+MEA = MemoryEpochAlignment
+t1 = MEA.t1.to(millisecond).magnitude  # category: illustrative (from the cell)
+t2 = MEA.t2.to(millisecond).magnitude  # category: illustrative (from the cell)
+t3 = MEA.t3.to(millisecond).magnitude  # category: illustrative (from the cell)
+w = 0.25  # drawing width of a sample mark (ms); not a physical duration
+
+# ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
+strip = viz.TimingStrip(
+    spans=[
+        viz.Span("", t1 - w / 2, t1 + w / 2, "measured", 0, solid=True),
+        viz.Span("", t2 - w / 2, t2 + w / 2, "measured", 1, solid=True),
+        viz.Span("", t3 - w / 2, t3 + w / 2, "measured", 2, solid=True),
+    ],
+    lanes=["tactile", "camera", "encoders"],
+    events=[
+        viz.Event(t1, f"tactile latch {MEA.t1_str}", "measured", 1),
+        viz.Event(t2, f"exposure midpoint {MEA.t2_str}", "measured", 0, ha="right"),
+        viz.Event(t3, f"encoder sample {MEA.t3_str}", "measured", 0, ha="left"),
+    ],
+    brackets=[viz.Bracket(t2, t3, f"project across {MEA.gap_str}", "neutral", "time", 0)],
+    xlim=(t1 - 3, t3 + 5),
+    figsize=(6.2, 2.4),
+    xlabel="Time in the cycle (ms)",
+)
+
+# ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────────
+check(abs((t3 - t2) - MEA.gap.to(millisecond).magnitude) < 1e-9, "The bracket must span the cell's camera-to-encoder gap.")
+
+# ┌── 4. PLOT ──────────────────────────────────────────────────────────────────
+fig, ax, _ = viz.plot_timing_strip(strip)
+plt.show()
+```
+
+:::
 
 With these epochs and the clock-synchronization bound carried in the record of @sec-memory-handoff, the consumer computes the elapsed duration between the evidence epoch and the execution deadline, evaluates the worst-case expansion of the error bound, and determines whether the state remains within task tolerances. Handing over a state without its acquisition epoch leaves the consumer blind to transport delays and scheduling jitter, turning deterministic control into open-loop guesswork. Because physical geometry also changes as bodies move through space, spatial transforms between reference frames are subject to the same temporal decay, carrying their own distinct evidence epochs.
 
@@ -245,7 +301,7 @@ class LatchTransformStaleness:
 How little staleness it takes to spend a task's tolerance shows at the latch-release slot, while the wrist camera can still see it. Each wrist-camera frame, one every `{python} LatchTransformStaleness.dt_str`, renews the slot's pose in the camera frame and with it the slot-to-finger edge the controller aligns on, and the finger must stay within the slot tolerance $E_{\max}$ of `{python} LatchTransformStaleness.e_max_str`. To isolate the effect of one frame period, suppose the supporting observation is available at its capture epoch, with ingestion delay idealized as zero, and the edge then ages by one frame period. A deployed edge is already older when ingestion completes; its consumer must qualify and charge the full capture-to-use age, including processing, transport, and any additional missed frames. Starting from an initial error of `{python} LatchTransformStaleness.e0_str`, the finger's lateral offset drifts at most $e_{\text{trans}} = v_{\text{drift}}\,\Delta t$ under an illustrative `{python} LatchTransformStaleness.v_drift_str` bound on its unobserved lateral velocity, validated for the arm's operating region, or `{python} LatchTransformStaleness.e_trans_str`. With the fingertip an illustrative $\ell$ = `{python} LatchTransformStaleness.lever_str` beyond the wrist and the wrist turning at an illustrative $\omega$ = `{python} LatchTransformStaleness.omega_str` as it aligns the finger, the lever arm adds $e_{\text{rot}} \approx \ell\,\omega\,\Delta t$, or `{python} LatchTransformStaleness.e_rot_str`. The joint encoders measure that turn, but an application that composes the cached slot edge, dated to the previous frame, with the current wrist pose obtains a hybrid pose, a finger position the arm never held. Only chaining the slot against the wrist pose of its own capture epoch, which a same-time lookup does, or expiring the edge, removes that arc. Left in the chain, the stale edge misplaces the finger by `{python} LatchTransformStaleness.e_tool_str`, `{python} LatchTransformStaleness.ratio_pct_str` more than the slot allows, and more of that error comes from the lever arm than from the drift. Because the hand-composed product evaluates without error, nothing flags the stale pose, and the controller keeps aligning the finger on a slot position that is off by more than the clearance, which on an unfavorable approach puts the finger against the strike plate beside the slot.
 
 ::: {#fig-frame-staleness-error fig-env="figure" fig-pos="t" fig-cap="**Transform staleness and lever-arm error at the latch-release slot**: Illustrative finger error over one frame period, with zero ingestion delay assumed to isolate this contribution. A deployed calculation must use full capture-to-use age. The slot-to-finger edge ages by duration $\\Delta t$. Lateral drift at the velocity bound $v_{\\text{drift}}$ moves the finger by $e_{\\text{trans}} = v_{\\text{drift}}\\,\\Delta t$, while the wrist turning at $\\omega$ swings the fingertip, a lever arm $\\ell$ beyond it, by $e_{\\text{rot}} \\approx \\ell\\,\\omega\\,\\Delta t$. Composing the stale edge with the current wrist pose adds both to the initial error $E_0$, so the finger error $e_{\\text{tool}} \\approx E_0 + e_{\\text{trans}} + \\ell\\,\\Delta\\theta$ exceeds the slot tolerance $E_{\\max}$." fig-alt="Transform staleness at the latch-release slot. A dashed ghost arm shows the wrist and finger as dated by the stale edge at t0, with a dashed circle marking the slot tolerance E_max around the finger. The current arm at t0 + Δt shows the wrist shifted laterally by e_trans = v_drift Δt and the link of length ℓ turned by Δθ = ω Δt, which swings the finger by e_rot ≈ ℓ Δθ. A red vector from the stale finger position to the current finger, labeled e_tool ≈ E_0 + e_trans + ℓ Δθ, ends well outside the E_max circle."}
-![](images/svg/fig09_frame_staleness_error.svg){width="100%"}
+![](images/svg/fig09_frame_staleness_error.svg){width="62%"}
 :::
 
 The red vector in @fig-frame-staleness-error crosses the tolerance boundary even though every matrix multiplication remains valid. The worked calculation locates the dominant error in the wrist's lever arm, so increasing timestamp precision alone would not repair the chain. The consumer must compose compatible epochs or reject the expired edge.
@@ -343,9 +399,81 @@ class OdometryDrift:
     speed_ratio_mult_str = fmt_multiple(speed_ratio, precision=1)
 ```
 
-A measured number shows why $\delta_{\text{loc}}$ is a premise about corrections rather than a property of the base. The classic measurement of odometry error is Borenstein and Feng's University of Michigan Benchmark (UMBmark): a differential-drive base drives a `{python} OdometryDrift.square_side_str` square, `{python} OdometryDrift.path_length_str` of travel, five times clockwise and five times counterclockwise, and the benchmark records how far the pose that odometry reports on return lies from the pose an external sensor measures. Its figure of merit is the larger of the two directions' average return errors, which isolates the systematic error from run-to-run scatter. Running both directions separates the two dominant systematic errors, unequal wheel diameters and an uncertain effective wheelbase, which would partly cancel on a single-direction run [@borenstein1996measurement]. On their laboratory base the uncalibrated return error was `{python} OdometryDrift.e_uncal_str`, and after calibrating the wheel-diameter ratio and wheelbase it fell to `{python} OdometryDrift.e_cal_str`, a `{python} OdometryDrift.cal_gain_mult_str` improvement. Dividing by the path length gives about `{python} OdometryDrift.eps_uncal_pct_str` and `{python} OdometryDrift.eps_cal_pct_str` of distance traveled. Charged at the uncalibrated rate, the `{python} OdometryDrift.delta_loc_str` bound is spent after `{python} OdometryDrift.d_uncal_str`, `{python} OdometryDrift.t_uncal_str` at the `{python} OdometryDrift.v_aisle_str` aisle speed, and one `{python} OdometryDrift.aisle_length_str` aisle accumulates `{python} OdometryDrift.e_aisle_uncal_str`, `{python} OdometryDrift.aisle_ratio_uncal_mult_str` the bound. Even the calibrated rate spends the bound after `{python} OdometryDrift.d_cal_str`, `{python} OdometryDrift.t_cal_str`, just over one aisle, which on its own accumulates `{python} OdometryDrift.e_aisle_cal_str`.
+A measured number shows why $\delta_{\text{loc}}$ is a premise about corrections rather than a property of the base (@fig-09-odometry-drift). The classic measurement of odometry error is Borenstein and Feng's University of Michigan Benchmark (UMBmark): a differential-drive base drives a `{python} OdometryDrift.square_side_str` square, `{python} OdometryDrift.path_length_str` of travel, five times clockwise and five times counterclockwise, and the benchmark records how far the pose that odometry reports on return lies from the pose an external sensor measures. Its figure of merit is the larger of the two directions' average return errors, which isolates the systematic error from run-to-run scatter. Running both directions separates the two dominant systematic errors, unequal wheel diameters and an uncertain effective wheelbase, which would partly cancel on a single-direction run [@borenstein1996measurement]. On their laboratory base the uncalibrated return error was `{python} OdometryDrift.e_uncal_str`, and after calibrating the wheel-diameter ratio and wheelbase it fell to `{python} OdometryDrift.e_cal_str`, a `{python} OdometryDrift.cal_gain_mult_str` improvement. Dividing by the path length gives about `{python} OdometryDrift.eps_uncal_pct_str` and `{python} OdometryDrift.eps_cal_pct_str` of distance traveled. Charged at the uncalibrated rate, the `{python} OdometryDrift.delta_loc_str` bound is spent after `{python} OdometryDrift.d_uncal_str`, `{python} OdometryDrift.t_uncal_str` at the `{python} OdometryDrift.v_aisle_str` aisle speed, and one `{python} OdometryDrift.aisle_length_str` aisle accumulates `{python} OdometryDrift.e_aisle_uncal_str`, `{python} OdometryDrift.aisle_ratio_uncal_mult_str` the bound. Even the calibrated rate spends the bound after `{python} OdometryDrift.d_cal_str`, `{python} OdometryDrift.t_cal_str`, just over one aisle, which on its own accumulates `{python} OdometryDrift.e_aisle_cal_str`.
 
 Three facts make the calibrated figure a best case rather than a design value. The benchmark ran at `{python} OdometryDrift.v_test_str` on its straight legs, slowly enough to avoid wheel slip, and stopped at each corner to turn in place; the loaded base runs `{python} OdometryDrift.speed_ratio_mult_str` faster on a warehouse floor. Calibration removes only the systematic part. The run-to-run spread, a standard deviation of about `{python} OdometryDrift.sigma_run_str`, already exceeds the `{python} OdometryDrift.e_cal_str` that calibration leaves, and that random part keeps growing with distance. Finally, a per-meter rate is a first-order summary. A small heading error $\delta\theta$ displaces the base sideways by about $\delta\theta\,d$ after a straight run of length $d$. Wheel-diameter mismatch makes the heading error itself grow with distance, $\delta\theta \approx \kappa d$ for a heading drift of $\kappa$ radians per meter, so the lateral error grows as about $\tfrac{1}{2}\kappa d^2$ and quadruples each time the straight run doubles. The budget's localization row therefore holds only while map corrections arrive well within one aisle. The site value comes from the same kind of measurement on the deployed base: a ground-truth drive past surveyed markers, at operating speed and payload over the floor conditions the site permits, reporting error per meter at a stated percentile.
+
+::: {#fig-09-odometry-drift fig-env="figure" fig-pos="t" fig-cap="**Odometry drift against the localization bound**: The UMBmark return error, scaled per meter of path, grows linearly with distance driven. Uncalibrated, it spends the `{python} OdometryDrift.delta_loc_str` localization bound after `{python} OdometryDrift.d_uncal_str`; calibrated, after `{python} OdometryDrift.d_cal_str`, only just beyond one `{python} OdometryDrift.aisle_length_str` aisle. Both lines are best cases from a slow laboratory run, so the distance between map corrections, not the base, sets whether $\\delta_{\\text{loc}}$ holds." fig-alt="Line plot of accumulated odometry error in millimeters against distance driven in meters, from 0 to 60 m. A steep line for uncalibrated odometry leaves the top of the plot within a few meters, and a shallow line for calibrated odometry rises slowly. A red dashed horizontal line marks the localization bound, and markers show where each line crosses it. A gray dashed vertical line marks the length of one aisle."}
+
+```{python}
+#| label: plot-memory-odometry-drift
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ODOMETRY DRIFT AGAINST THE LOCALIZATION BOUND (FIGURE)
+# │ Context: @fig-09-odometry-drift in @sec-memory-localization-slam
+# │ Goal:    show that delta_loc is a premise about how often corrections
+# │          arrive, not a property of the base
+# │ Show:    error vs distance for uncalibrated and calibrated odometry,
+# │          the delta_loc line, the crossings, one aisle length
+# │ How:     e(d) = eps * d with eps from the OdometryDrift cell
+# ├─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import viz
+import matplotlib.pyplot as plt
+
+# ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────────
+OD = OdometryDrift
+DLOC = OD.delta_loc.to(ureg.millimeter).magnitude  # category: illustrative (from the cell)
+EU, EC = OD.eps_uncal, OD.eps_cal  # category: literature-derived (from the cell)
+DU = OD.d_uncal.to(ureg.meter).magnitude
+DC = OD.d_cal.to(ureg.meter).magnitude
+LA = OD.aisle_length.to(ureg.meter).magnitude  # category: illustrative (from the cell)
+
+# ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
+d = np.linspace(0, 2 * LA, 400)
+check(abs(EU * DU * 1000 - DLOC) < 1e-6 and abs(EC * DC * 1000 - DLOC) < 1e-6, "Crossings must spend delta_loc exactly.")
+
+# ┌── 3. PLOT ──────────────────────────────────────────────────────────────────
+viz.set_book_style()
+C = viz.COLORS
+fig, ax = plt.subplots(figsize=(6.0, 3.0))
+ax.plot(d, EU * d * 1000, color=C["OrangeLine"], lw=1.8, label="uncalibrated odometry")
+ax.plot(d, EC * d * 1000, color=C["BlueLine"], lw=1.8, label="calibrated odometry")
+ax.axhline(DLOC, color=C["RedLine"], lw=1.2, ls=(0, (5, 4)))
+ax.text(12, DLOC + 3, rf"localization bound $\delta_{{loc}}$ = {OD.delta_loc_str}", ha="left", va="bottom", fontsize=7.5, color=C["RedLine"])
+ax.axvline(LA, color="#A0AEC0", lw=0.9, ls=(0, (3, 3)))
+ax.text(LA + 0.6, 112, f"one aisle, {OD.aisle_length_str}", ha="left", va="top", fontsize=7.5, color="#4A5568")
+for x, c in ((DU, C["OrangeLine"]), (DC, C["BlueLine"])):
+    ax.plot([x], [DLOC], "o", ms=5, color=c, zorder=5)
+ax.annotate(
+    OD.d_uncal_str,
+    xy=(DU, DLOC),
+    xytext=(DU + 3.5, DLOC + 30),
+    fontsize=7.5,
+    color=C["OrangeLine"],
+    arrowprops=dict(arrowstyle="-", lw=0.7, color=C["OrangeLine"]),
+)
+ax.annotate(
+    OD.d_cal_str,
+    xy=(DC, DLOC),
+    xytext=(DC + 3, DLOC - 25),
+    fontsize=7.5,
+    color=C["BlueLine"],
+    arrowprops=dict(arrowstyle="-", lw=0.7, color=C["BlueLine"]),
+)
+ax.set_xlim(0, 2 * LA)
+ax.set_ylim(0, 120)
+ax.set_xlabel("Distance driven (m)", fontsize=8.5)
+ax.set_ylabel("Odometry error (mm)", fontsize=8.5)
+ax.tick_params(labelsize=7.5)
+ax.legend(loc="upper right", bbox_to_anchor=(1.0, 0.86), fontsize=7.5, frameon=False)
+plt.tight_layout()
+plt.show()
+```
+
+:::
 
 Loop closure raises a problem that no single-epoch record anticipates. A map cell stored in the map frame keeps its evidence epoch, because the photons that observed it are exactly as old as they were, yet its position changes when the graph re-solves the pose it hangs from. The cell's evidence is not renewed, and its location is suddenly different. A snapshot copied before the closure therefore places that cell wrong by up to the size of the correction, while every timestamp in it still passes an age check. A map belief must carry the revision of the pose graph that placed it alongside its cell epochs, and a closure that moves the supporting poses must either re-anchor the dependent snapshots or expire them.
 
@@ -488,6 +616,7 @@ A time allocation becomes a design constraint once it is expressed in the unit t
 ::: {#fig-09-memory-3d-representation-pareto fig-env="figure" fig-pos="htb" fig-cap="**Clearance query cost and snapshot storage by representation family**: (a) Memory reads to certify one sphere hull's clearance, computed from voxel pitch, hull radius plus protective clearance, and tree depth, against the per-query read budget that the 2 µs allocation and the permission controller's SRAM bandwidth allow. Occupancy scans grow with the cube of the inverse pitch and fit only at the coarsest pitch; an ESDF answers with one interpolated lookup at every pitch. (b) Storage for a dense snapshot of the stopping corridor (aisle width by clear distance by a chosen 2 m height) against the controller's SRAM. Counts, not measured latencies; rendering representations are absent because they do not answer a clearance query." fig-alt="Two log-scale panels against voxel pitch of 2, 5, and 10 cm. Panel a, memory reads per sphere-hull clearance query: worst-case octree scan from about 200,000 to about 1,300 reads, dense occupancy scan from about 22,000 to 180 reads, and ESDF lookup flat at 8 reads, with a dashed red read budget at 800 per query, shaded above, that only the ESDF clears at every pitch and the occupancy scan clears only at 10 cm. Panel b, snapshot storage in kilobytes: ESDF at 8 bytes per cell falls from about 2,900 kB to 23 kB and occupancy at 4 bytes per cell from about 1,400 kB to 11 kB, with a dashed red line at the permission MCU SRAM of about 1 MB, shaded above, that both snapshots exceed at 2 cm and fit under at 5 and 10 cm."}
 
 ```{python}
+#| label: plot-memory-representation-pareto
 #| echo: false
 #| warning: false
 #| message: false
@@ -519,36 +648,39 @@ viz.set_book_style()
 C = viz.COLORS
 import matplotlib.pyplot as plt
 
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.5))
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.6, 3.3))
+FS = 7.5
 
-ax1.plot(PITCH, OCT, marker="s", lw=2, color=C["OrangeLine"], label="octree occupancy scan (worst case)")
-ax1.plot(PITCH, OCC, marker="o", lw=2, color=C["primary"], label="dense occupancy scan")
-ax1.plot(PITCH, ESDF, marker="^", lw=2, color=C["BlueLine"], label="ESDF lookup (trilinear)")
+ax1.plot(PITCH, OCT, marker="s", ms=4, lw=1.6, color=C["OrangeLine"], label="octree occupancy scan (worst case)")
+ax1.plot(PITCH, OCC, marker="o", ms=4, lw=1.6, color=C["primary"], label="dense occupancy scan")
+ax1.plot(PITCH, ESDF, marker="^", ms=4, lw=1.6, color=C["BlueLine"], label="ESDF lookup (trilinear)")
 ax1.axhline(BUDGET, color=C["RedLine"], lw=1.2, ls=(0, (5, 4)))
-ax1.axhspan(BUDGET, 1e6, color=C["RedFill"], alpha=0.35, lw=0, zorder=0)
-ax1.text(1.7, BUDGET * 0.6, f"read budget: {BUDGET:.0f} per query", ha="left", va="top", fontsize=9, color=C["RedLine"])
+ax1.axhspan(BUDGET, 3e6, color=C["RedFill"], alpha=0.35, lw=0, zorder=0)
+ax1.text(1.7, BUDGET * 0.6, f"read budget: {BUDGET:.0f} per query", ha="left", va="top", fontsize=FS, color=C["RedLine"])
 ax1.set_yscale("log")
 ax1.set_xticks(PITCH)
 ax1.set_xlim(1.5, 10.5)
-ax1.set_ylim(3, 1e6)
-ax1.set_xlabel("Voxel pitch (cm)")
-ax1.set_ylabel("Memory reads per sphere-hull query")
-ax1.set_title("(a) Clearance query cost", loc="left", fontsize=11)
-ax1.legend(loc="upper right", fontsize=8.5)
+ax1.set_ylim(3, 3e6)
+ax1.set_xlabel("Voxel pitch (cm)", fontsize=8)
+ax1.set_ylabel("Memory reads per sphere-hull query", fontsize=8)
+ax1.set_title("(a) Clearance query cost", loc="left", fontsize=9)
+ax1.legend(loc="upper right", fontsize=6.5)
+ax1.tick_params(labelsize=FS)
 
-ax2.plot(PITCH, ESDF_KB, marker="^", lw=2, color=C["BlueLine"], label="ESDF snapshot, 8 B per cell")
-ax2.plot(PITCH, OCC_KB, marker="o", lw=2, color=C["primary"], ls=(0, (6, 3)), label="occupancy snapshot, 4 B per cell")
+ax2.plot(PITCH, ESDF_KB, marker="^", ms=4, lw=1.6, color=C["BlueLine"], label="ESDF snapshot, 8 B per cell")
+ax2.plot(PITCH, OCC_KB, marker="o", ms=4, lw=1.6, color=C["primary"], ls=(0, (6, 3)), label="occupancy snapshot, 4 B per cell")
 ax2.axhline(SRAM_KB, color=C["RedLine"], lw=1.2, ls=(0, (5, 4)))
-ax2.axhspan(SRAM_KB, 2e4, color=C["RedFill"], alpha=0.35, lw=0, zorder=0)
-ax2.text(10.1, SRAM_KB * 1.25, "permission MCU SRAM", ha="right", va="bottom", fontsize=9, color=C["RedLine"])
+ax2.axhspan(SRAM_KB, 6e4, color=C["RedFill"], alpha=0.35, lw=0, zorder=0)
+ax2.text(10.1, SRAM_KB * 1.25, "permission MCU SRAM", ha="right", va="bottom", fontsize=FS, color=C["RedLine"])
 ax2.set_yscale("log")
 ax2.set_xticks(PITCH)
 ax2.set_xlim(1.5, 10.5)
-ax2.set_ylim(5, 2e4)
-ax2.set_xlabel("Voxel pitch (cm)")
-ax2.set_ylabel("Snapshot storage (kB)")
-ax2.set_title("(b) Stopping-corridor snapshot", loc="left", fontsize=11)
-ax2.legend(loc="upper right", fontsize=8.5)
+ax2.set_ylim(5, 6e4)
+ax2.set_xlabel("Voxel pitch (cm)", fontsize=8)
+ax2.set_ylabel("Snapshot storage (kB)", fontsize=8)
+ax2.set_title("(b) Stopping-corridor snapshot", loc="left", fontsize=9)
+ax2.legend(loc="upper right", fontsize=6.5)
+ax2.tick_params(labelsize=FS)
 
 plt.tight_layout()
 plt.show()
@@ -713,13 +845,11 @@ For an illustrative VGA depth stream of `{python} RaymarchBandwidth.n_rays_str` 
 
 What a map can certify comes from how a range return updates it. Traversing the ray from the sensor to the return [@amanatides1987fast], the map asserts **negative evidence**\index{Negative evidence} in every cell the ray crossed and positive evidence in the cell where it ended; @sec-appendix-ml-voxels gives the log-odds update. A valid empty ray can retire a phantom obstacle, but it says nothing about the volume behind a return. A new scan down the aisle therefore cannot renew cells hidden behind the rack. Sparse allocation saves capacity without eliminating ray traversal, and any resulting processing delay adds to evidence age (@sec-placement-resource-contention).
 
-::: {.column-margin}
-![](images/svg/margin_active_negative_evidence_chain.svg){width="100%" fig-alt="Causal chain showing raycast through free space to surface hit, evicting ghost obstacles."}
-
-*Active negative evidence along sightlines clears phantom obstacles without waiting for timeout decay.*
+::: {#fig-09-ray-update-epochs fig-env="figure" fig-pos="t" fig-cap="**One range return updates only the cells it touched**: The cells the ray crosses become free and take the capture epoch $t_1$ of the return, which also retires a phantom obstacle left on that line; the cell holding the return becomes occupied at $t_1$. Cells behind the return and every cell off the ray keep whatever epoch their own last evidence gave them, here $t_0$, so the map's publication time dates none of them." fig-alt="A grid of square cells with a sensor at the left. An arrow runs from the sensor along one row of cells, which are tinted and labeled t1. One of them holds a dashed square labeled phantom retired. The arrow ends at a black cell labeled return, occupied, t1. The four cells beyond it in the same row are hatched and labeled t0, with a note reading behind return, not renewed. The other rows are blank."}
+![](images/svg/fig09_ray_update_cell_epochs.svg){width="100%"}
 :::
 
-Because negative evidence renews only the cells a ray crossed, a map's publication time dates none of its cells. The manifest in @tbl-09-schema-volumetric-belief therefore carries cell evidence epochs alongside occupancy. For the worked local snapshot, checking a hull includes the supporting cells' evidence and unknown-space status within the allocated query time. A freshly copied distance value with expired source cells cannot establish clearance. The manifest travels with the bounded snapshot as well as the host map; the isolated controller does not traverse the full host store.
+Because negative evidence renews only the cells a ray crossed (@fig-09-ray-update-epochs), a map's publication time dates none of its cells. The manifest in @tbl-09-schema-volumetric-belief therefore carries cell evidence epochs alongside occupancy. For the worked local snapshot, checking a hull includes the supporting cells' evidence and unknown-space status within the allocated query time. A freshly copied distance value with expired source cells cannot establish clearance. The manifest travels with the bounded snapshot as well as the host map; the isolated controller does not traverse the full host store.
 
 These pieces combine into the one quantity the permission path needs from a map. Build the snapshot ESDF with every occupied, unknown, or expired cell treated as an obstacle. Its value at a hull center, minus the hull radius, is then the **free-space depth**\index{Free-space depth} $d_{\text{free}}$: the distance from the hull's surface to the nearest place that no live evidence vouches for. A person, a tote, or anything else the sensors cannot currently see can only be beyond that boundary, so $d_{\text{free}}$ is exactly what motion may spend. For a candidate aisle advance, the consumer subtracts the geometric error, including quantization and localization, and the protective clearance from $d_{\text{free}}$; if the remainder is positive the query passes. When the nearest boundary is the occluded cross aisle, $d_{\text{free}}$ is small however fast the lookup, and a small numerical query latency cannot rescue the claim. How quickly the remainder shrinks while the sensors cannot see that boundary is the subject of @sec-memory-belief-through-occlusion.
 
@@ -759,7 +889,7 @@ Each of these is a rate model: it states how an unobserved cell is expected to c
 
 Semantic memory sits above the metric layer and inherits its limits. @Sec-perception-error-clearance introduced the object-centric 3D scene graph as something perception produces; memory has to keep one. The structure descends from the 3D scene graph of @armeni20193d, which organized a building into layers of objects, rooms, and cameras, and the 3D dynamic scene graph of @rosinol20203d, which added places, agents, and their motion; Kimera and Hydra build such graphs incrementally from a robot's sensor stream [@rosinol2021kimera; @hughes2022hydra]. @Fig-09-dynamic-scene-graph shows the layers, from a metric mesh through objects and agents, places, and rooms to the building.
 
-::: {#fig-09-dynamic-scene-graph fig-env="figure" fig-pos="t" fig-cap="**Hierarchical 3D dynamic scene graph architecture**: Five-layer spatio-temporal memory organization bridging continuous 3D-indexed metric state stores to symbolic foundation reasoning. Layer 1 captures triangular metric mesh geometry; Layer 2 extracts 3D objects and dynamic agents; Layer 3 models topological places via Voronoi freespace clearance spheres ($p_i$); Layer 4 structures architectural rooms and portals; and Layer 5 establishes global building mission topology. Vertical inter-layer edges coordinate upward abstraction (compressing metric surfaces into symbolic entities) and downward grounding (translating task tokens into metric coordinates) (adapted from Rosinol et al. [@rosinol20203d; @rosinol2021kimera] and Hughes et al. [@hughes2022hydra])." fig-alt="Hierarchical five-layer 3D Dynamic Scene Graph architecture. From bottom to top: Layer 1 Metric Mesh surface geometry, Layer 2 Objects and Agents with support relations, Layer 3 Places with Voronoi freespace clearance spheres, Layer 4 Rooms connected by portals, and Layer 5 Buildings with global topology. Side arrows depict upward Abstraction and downward Grounding across tiers."}
+::: {#fig-09-dynamic-scene-graph fig-env="figure" fig-pos="t" fig-cap="**Hierarchical 3D dynamic scene graph architecture**: Five-layer spatio-temporal memory organization bridging continuous 3D-indexed metric state stores to symbolic foundation reasoning. Drawn for the warehouse, Layer 1 captures triangular metric mesh geometry; Layer 2 extracts 3D objects and dynamic agents such as a walking person; Layer 3 models topological places via Voronoi freespace clearance spheres ($p_i$); Layer 4 structures architectural rooms and portals; and Layer 5 establishes global building mission topology. Vertical inter-layer edges coordinate upward abstraction (compressing metric surfaces into symbolic entities) and downward grounding (translating task tokens into metric coordinates) (adapted from Rosinol et al. [@rosinol20203d; @rosinol2021kimera] and Hughes et al. [@hughes2022hydra])." fig-alt="Five stacked horizontal bands. From bottom to top: layer 1, a triangle mesh; layer 2, boxes for mug, tote, cage door, and a dashed box for person; layer 3, four places p1 to p4 drawn as dashed circles joined in a chain; layer 4, rooms aisle 12, cross aisle, and dock bay joined in a row; layer 5, buildings warehouse and loading dock. Thin lines connect each node to its parent in the band above, and the mesh to three of the objects. An upward arrow labeled abstraction and a downward arrow labeled grounding run beside the bands."}
 ![](images/svg/fig09_dynamic_scene_graph_hierarchy.svg){width="100%"}
 :::
 
@@ -892,6 +1022,7 @@ The law gives two very different answers on the same aisle (@fig-09-rack-end-ero
 ::: {#fig-09-rack-end-erosion fig-env="figure" fig-pos="t" fig-cap="**Free-space erosion at the rack end**: (a) Top view. The navigation camera's sightline passes the rack end, so the cross aisle behind the rack is unknown from the moment of capture. A person hidden there can advance at $v_h$ = `{python} RackEndBelief.v_h_str`; the dashed disc is the region that person may occupy when the claim lapses, which stops $\\delta_{\\text{loc}} + \\delta_{\\text{margin}}$ short of the hull's front. (b) The depth memory still certifies, $d_{\\text{free}} - \\delta_{\\text{loc}} - \\delta_{\\text{margin}} - v_h t$. For the hull's current position it falls from the `{python} RackEndBelief.d_clear_str` clear distance to zero at `{python} RackEndBelief.t_exp_ahead_str`, and the frame's `{python} RackEndBelief.t_age_str` age at dispatch is spent before memory receives it; abreast of the rack end, the `{python} RackEndBelief.side_clearance_str` side clearance certifies nothing even at capture." fig-alt="Two panels. Panel a, a top view: a hull in an aisle between two racks, the upper rack ending 1.10 m ahead of the hull's front where a cross aisle opens. A dashed teal sightline runs from a camera on the hull's front past the rack end, and the cross aisle above the sightline is hatched and labeled unknown, hidden cross aisle. A pink dashed disc centered on the rack end, clipped to the floor, is labeled reach at T_inv, 0.95 m, and a small ring at its center is labeled at dispatch, 83 mm. Dimensions show D_clear 1.10 m ahead and a side gap of 150 mm between hull and rack. Panel b: certified free depth in millimeters against time since the frame, 0 to 700 ms. A solid blue line falls from 950 mm to zero at 593.75 ms, marked with a red dot. A dashed gray line for the hull abreast of the rack end lies at zero, with a red dot at 0 ms. A gray band covers the first 51.6 ms, labeled frame age at dispatch."}
 
 ```{python}
+#| label: plot-memory-rack-end-erosion
 #| echo: false
 #| warning: false
 #| message: false
@@ -955,7 +1086,7 @@ ax.set_title("(a) Top view at the rack end", loc="left", fontsize=9)
 rack_kw = dict(facecolor="#E2E8F0", edgecolor="#A0AEC0", lw=0.8)
 ax.add_patch(Rectangle((X0, half), D_CLEAR - X0, 0.4, **rack_kw))  # upper rack ends at the cross aisle
 ax.add_patch(Rectangle((X0, -half - 0.4), X1 - X0, 0.4, **rack_kw))  # lower rack continues
-ax.text(-0.75, half + 0.2, "rack", ha="center", va="center", fontsize=FS, color="#4A5568")
+ax.text(0.55, half + 0.2, "rack", ha="center", va="center", fontsize=FS, color="#4A5568")
 # occluded part of the cross aisle: beyond the rack end and above the sightline
 slope = half / D_CLEAR
 occl = Polygon([corner, (X1, slope * X1), (X1, YT), (D_CLEAR, YT)], closed=True, facecolor="white", edgecolor="#A0AEC0", hatch="////", lw=0)
@@ -992,8 +1123,9 @@ ax.annotate("", xy=(D_CLEAR, -0.42), xytext=(0, -0.42), arrowprops=dict(arrowsty
 ax.plot([D_CLEAR, D_CLEAR], [-0.5, half], color="#A0AEC0", lw=0.6, ls=(0, (2, 2)))
 ax.text(D_CLEAR / 2, -0.46, f"$D_{{clear}}$ = {D_CLEAR:.2f} m", ha="center", va="top", fontsize=FS, color="#1A202C")
 # side clearance
-ax.annotate("", xy=(-0.25, half), xytext=(-0.25, hull_half), arrowprops=dict(arrowstyle="<->", lw=0.7, color="#1A202C", shrinkA=0, shrinkB=0))
-ax.text(-0.3, (half + hull_half) / 2 - 0.02, f"side {SIDE*1000:.0f} mm", ha="right", va="center", fontsize=FS - 0.5, color="#1A202C")
+ax.plot([-0.25, -0.25], [hull_half, half], color="#1A202C", lw=0.8)
+ax.plot([-0.25, -0.25], [half, half + 0.12], color="#1A202C", lw=0.6)
+ax.text(-0.3, half + 0.2, f"side {SIDE*1000:.0f} mm", ha="right", va="center", fontsize=FS - 0.5, color="#1A202C")
 # reach radius and the leftover localization + margin band
 ax.annotate(
     "", xy=(D_CLEAR - r_inv, 0.58), xytext=(D_CLEAR, 0.58), arrowprops=dict(arrowstyle="->", lw=0.8, color=C["RedLine"], shrinkA=0, shrinkB=0)
@@ -1153,9 +1285,10 @@ At the cage door, the finger now enters the slot blind. In the final approach th
 
 Evaluating this growth bound with the stated parameters yields `{python} LatchSlotBelief.growth_math`, with $\Delta t$ in seconds and $E(\Delta t)$ in millimeters. Setting $E(\Delta t) = E_{\max}$ gives the quadratic equation `{python} LatchSlotBelief.quad_math`. Its single positive real root is `{python} LatchSlotBelief.t_exp_str`, so dependent motion must cease relying on this belief by then, with any necessary response initiated earlier. If the slot were machined to a clearance of `{python} LatchSlotBelief.e_max_tight_str`, the allowable unobserved duration shrinks to `{python} LatchSlotBelief.t_exp_tight_str` (`{python} LatchSlotBelief.quad_tight_math`). Tightening mechanical tolerance by `{python} LatchSlotBelief.tol_ratio_mult_str` shrinks the allowable unobserved duration by `{python} LatchSlotBelief.horizon_ratio_mult_str`, requiring sensor re-acquisition or compliant impedance holding within that shorter window. In contrast, if an estimator naively assumes constant velocity ($a_{\text{dist}} = 0$), it predicts a valid horizon of $(E_{\max} - E_0)/v_{\text{drift}}$, or `{python} LatchSlotBelief.t_linear_str`. At that elapsed time the modeled bound reaches `{python} LatchSlotBelief.e_linear_str`, exceeding the clearance by `{python} LatchSlotBelief.overshoot_str`. A constant-velocity-only admission rule would keep accepting the estimate for `{python} LatchSlotBelief.t_extra_str` beyond the bounded-model deadline; whether contact occurs depends on the path and geometry.
 
-::: {#fig-uncertainty-growth fig-env="figure" fig-pos="t" fig-cap="**Belief uncertainty and invalidation horizon**: Illustrative spatial error bound $E(\\Delta t)$ of a gripper finger entering the cage door's latch-release slot, expanding quadratically under unobserved forward propagation until intersecting the slot clearance $E_{\\max} = 1\\text{ mm}$ at invalidation horizon $T_{\\text{inv}} = 66\\text{ ms}$. A dashed constant-velocity estimate grows more slowly, and the red marker shows that estimate still admitting the belief after the bounded error has passed the clearance. Belief has a shelf life governed by physical disturbance dynamics, and only qualified new evidence can renew the relevant state claim." fig-alt="Belief uncertainty growth and invalidation horizon plot. Spatial error bound E(Δt) plotted against elapsed time Δt since last measurement. The quadratic curve expands from E0 = 0.1 mm to intersect task clearance E_max = 1 mm at invalidation horizon T_inv = 66 ms. A dashed constant-velocity line rises more slowly, and a red marker on the bounded curve shows the belief that estimate still admits after the curve has crossed the clearance."}
+::: {#fig-uncertainty-growth fig-env="figure" fig-pos="t" fig-cap="**Belief uncertainty and invalidation horizon**: Illustrative spatial error bound $E(\\Delta t)$ of a gripper finger entering the cage door's latch-release slot, expanding quadratically under unobserved forward propagation until intersecting the slot clearance $E_{\\max}$ = `{python} LatchSlotBelief.e_max_str` at invalidation horizon $T_{\\text{inv}}$ = `{python} LatchSlotBelief.t_exp_str`; the shaded region beyond it is elapsed time for which the belief no longer supports motion. A dashed constant-velocity estimate grows more slowly, and the red marker shows that estimate still admitting the belief at `{python} LatchSlotBelief.t_linear_str`, after the bounded error has passed the clearance. Belief has a shelf life governed by physical disturbance dynamics, and only qualified new evidence can renew the relevant state claim." fig-alt="Belief uncertainty growth and invalidation horizon plot. Spatial error bound E(Δt) plotted against elapsed time Δt since last measurement. The quadratic curve expands from E0 = 0.1 mm to intersect task clearance E_max = 1 mm at invalidation horizon T_inv = 66 ms, beyond which the plot is shaded light red. A dashed constant-velocity line rises more slowly, and a red marker on the bounded curve shows the belief that estimate still admits after the curve has crossed the clearance."}
 
 ```{python}
+#| label: plot-memory-uncertainty-growth
 #| echo: false
 #| warning: false
 #| message: false
@@ -1194,11 +1327,14 @@ overshoot = bounded(t_linear) / E_MAX - 1.0  # by how much that overruns
 dt = np.linspace(0, 0.120, 400)
 
 # ┌── 3. PLOT ──────────────────────────────────────────────────────────────────
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 4.2))
+check(abs(t_exp - LatchSlotBelief.t_exp.to(ureg.second).magnitude) < 1e-9, "The plotted horizon must match the LatchSlotBelief root.")
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(6.2, 3.3))
+ax.axvspan(t_exp * 1000, 120, color=COLORS["RedFill"], alpha=0.35, lw=0, zorder=0)
+ax.text(118, 0.08, "belief expired", ha="right", va="bottom", fontsize=7.5, color=COLORS["RedLine"])
 ax.plot(dt * 1000, bounded(dt), color=COLORS["BlueLine"], lw=2.4, label="bounded growth  $E(\\Delta t)$", zorder=4)
 ax.plot(dt * 1000, linear(dt), color=COLORS["primary"], lw=1.6, ls=(0, (6, 3)), label="constant-velocity estimate", zorder=3)
 ax.axhline(E_MAX, color=COLORS["RedLine"], lw=1.4, ls=(0, (5, 4)), zorder=3)
-ax.text(2, E_MAX * 1.03, f"task clearance $E_{{\\max}}$ = {E_MAX:.0f} mm", color=COLORS["RedLine"], fontsize=9, va="bottom")
+ax.text(2, E_MAX * 1.03, f"task clearance $E_{{\\max}}$ = {E_MAX:.0f} mm", color=COLORS["RedLine"], fontsize=8, va="bottom")
 
 ax.plot([t_exp * 1000], [E_MAX], "o", ms=7, color=COLORS["BlueLine"], zorder=6)
 ax.vlines(t_exp * 1000, 0, E_MAX, color=COLORS["BlueLine"], lw=1.0, ls=(0, (1, 2)), zorder=3)
@@ -1206,7 +1342,7 @@ ax.annotate(
     f"invalidation horizon\n$T_{{inv}}$ = {t_exp*1000:.0f} ms",
     xy=(t_exp * 1000, E_MAX),
     xytext=(t_exp * 1000 - 8, E_MAX * 1.55),
-    fontsize=9,
+    fontsize=8,
     color=COLORS["BlueLine"],
     ha="right",
     zorder=6,
@@ -1217,8 +1353,8 @@ ax.plot([t_linear * 1000], [bounded(t_linear)], "o", ms=7, color=COLORS["RedLine
 ax.annotate(
     f"still admitted at {t_linear*1000:.0f} ms:\n" f"{bounded(t_linear):.3f} mm, {overshoot*100:.1f}% over clearance",
     xy=(t_linear * 1000, bounded(t_linear)),
-    xytext=(84, 0.52),
-    fontsize=8.5,
+    xytext=(84, 0.42),
+    fontsize=7.5,
     color=COLORS["RedLine"],
     ha="left",
     zorder=6,
@@ -1227,9 +1363,10 @@ ax.annotate(
 
 ax.set_xlim(0, 120)
 ax.set_ylim(0, 2.1)
-ax.set_xlabel("Elapsed time since last observation, $\\Delta t$ (ms)")
-ax.set_ylabel("Spatial error bound, $E(\\Delta t)$ (mm)")
-ax.legend(loc="upper left", fontsize=9)
+ax.set_xlabel("Elapsed time since last observation, $\\Delta t$ (ms)", fontsize=8.5)
+ax.set_ylabel("Spatial error bound, $E(\\Delta t)$ (mm)", fontsize=8.5)
+ax.tick_params(labelsize=7.5)
+ax.legend(loc="upper left", fontsize=7.5)
 plt.tight_layout()
 plt.show()
 ```
@@ -1472,7 +1609,7 @@ Frozen transforms, phantom tracks, misassigned frames, and overconfident predict
 
 The belief about the latch-slot finger in @sec-memory-belief-through-occlusion now carries everything a consumer needs to judge it, and the **spatial belief record** of \ref{dfn-memory-spatial-belief-contract}, the seventh record of the book's fifteen-record chain, is the formal cyber-physical contract in which these quantities travel together. It covers discrete tracked entities and continuous volumetric representations (@tbl-09-schema-volumetric-belief) under a common temporal and physical accounting framework, serving host planning and bounded local permission queries through the same evidence semantics. From the observation contracts of @sec-perception-observation-contract the record inherits each observation's capture epoch, clock identifier, and conversion bound, so the permission controller can convert the capture clock to its own monotonic clock with a bounded error before it evaluates age. Memory contributes five fields of its own: an estimate epoch that dates the represented state without renewing physical evidence; an uncertainty-growth bound that projects error expansion across blind intervals; a validity region that states where that bound holds; a physical invalidation deadline; and a query-work allocation, at most $2\ \mu\text{s}$ per local collision query in the worked design. The allocation becomes a justified execution bound only after qualification on the chosen hardware. A record's lifecycle follows the deterministic four-state machine in @fig-09-spatial-belief-state-machine:
 
-::: {#fig-09-spatial-belief-state-machine fig-env="figure" fig-pos="tb" fig-cap="**Spatial belief state machine and transition invariants**: Deterministic four-state machine governing the lifecycle of a spatial belief record. Transitions from VALID to DEGRADED or EXPIRED model bounded error growth during occlusion; transitions back to VALID require fresh, checked physical evidence. Return from UNOBSERVABLE also requires restoration of the missing physical constraint; innovation gating alone is insufficient." fig-alt="Deterministic four-state machine governing the lifecycle of a spatial belief record. States include VALID, DEGRADED, EXPIRED, and UNOBSERVABLE, connected by transitions for sensor occlusion, staleness timeout, observability loss, and return transitions requiring fresh evidence and restored constraints for unobservable states."}
+::: {#fig-09-spatial-belief-state-machine fig-env="figure" fig-pos="tb" fig-cap="**Spatial belief state machine and transition invariants**: Each state carries its invariant inside the box and each edge its guard. Occlusion moves a record from VALID to DEGRADED, where the error bound grows under the declared law, and the bound reaching $E_{\\max}$ or a breach of the validity region moves it to EXPIRED. Every edge back to VALID passes the same evidence guard, so freshness alone cannot restore observability and extrapolation cannot renew validity; leaving UNOBSERVABLE also needs the missing constraint restored." fig-alt="State diagram with four boxes. VALID, labeled measured, E at most E max, leads by an occlusion arrow to DEGRADED, labeled predicted, E of delta t at most E max, which leads by an arrow labeled E of delta t equals E max or region breach to EXPIRED, labeled supports no motion. Two rails above return from DEGRADED and EXPIRED to VALID under the guard fresh evidence and innovation gate and model revalidated. A bus from all three states, labeled observability lost from any state, leads to UNOBSERVABLE, labeled rank-deficient state, below VALID, and an arrow labeled constraint restored plus same guard returns from UNOBSERVABLE to VALID."}
 ![](images/svg/fig09_spatial_belief_state_machine.svg){width=95%}
 :::
 

@@ -117,6 +117,8 @@ class EnforcementLeaseStop:
     check(abs(renewal_to_onset.magnitude - 82.0) < 1e-9, "Brake onset comes 82 ms after the last valid renewal.")
     check(abs(t_age.to(millisecond).magnitude - 51.6) < 0.05, "The budgeted observation age is 51.6 ms.")
     check(abs(age_threshold.magnitude - 51.8) < 0.05, "The dispatch-age qualification threshold is 51.8 ms.")
+    # fig12_canonical_fallback_ladder.svg and parts/images/svg/fig_part3_record_chain.svg draw 1 kHz, 60 ms, and 51.6 ms from these guards.
+    check(abs(tick.to(millisecond).magnitude - 1.0) < 1e-9, "The hand-drawn figures label the MCU tick 1 kHz.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     chunk_rate_hz_str = fmt(chunk_rate.to(hertz).magnitude, precision=0)
@@ -780,7 +782,7 @@ check(ceilings["walking"] < ceilings["inspected"] < ceilings["dry"] < v_drive, "
 check(np.all(ramps >= -1e-9), "The jerk-limited stop never travels less than constant-deceleration braking.")
 
 # ┌── 4. PLOT ─────────────────────────────────────────────────────────────────
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 4.6))
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 4.6))
 base = np.full_like(v, fixed)
 ax.fill_between(v, 0, base, color=COLORS["grid"], alpha=0.7, lw=0, label="fixed allowances", zorder=2)
 ax.fill_between(v, base, base + delay, color=COLORS["BrownL"], lw=0, label="pre-brake delay travel", zorder=2)
@@ -790,28 +792,41 @@ ax.plot(v, total, color=COLORS["primary"], lw=1.6, label="total, dry floor", zor
 ax.plot(v, total_inspected, color=COLORS["primary"], lw=1.4, ls=(0, (5, 3)), label="total, inspected floor", zorder=4)
 ax.plot(v, total_walking, color=COLORS["primary"], lw=1.4, ls=(0, (1, 1.6)), label="total, person walking in", zorder=4)
 ax.axhline(d_clear, color=COLORS["RedLine"], lw=1.3, ls=(0, (6, 3)), zorder=3)
-ax.text(0.02, d_clear + 25, f"clear distance {d_clear / 1000:.2f} m", color=COLORS["RedLine"], fontsize=9, va="bottom")
+ax.text(
+    0.62,
+    d_clear - 25,
+    f"clear distance {d_clear / 1000:.2f} m",
+    color=COLORS["RedLine"],
+    fontsize=9,
+    va="top",
+    bbox=dict(boxstyle="square,pad=0.1", fc="white", ec="none"),
+    zorder=5,
+)
 
-offsets = {"walking": (0.10, 180), "inspected": (-0.36, 200), "dry": (0.03, 200)}
+# label offsets (dx in m/s, dy in mm, alignment): kept inside the axes and off the legend
+offsets = {"walking": (0.08, 180, "left"), "inspected": (-0.08, 220, "right"), "dry": (0.12, 620, "right")}
 for case, vc in ceilings.items():
     ax.plot([vc], [d_clear], "o", ms=6, mfc="white", mec=COLORS["RedLine"], mew=1.5, zorder=6)
     ax.vlines(vc, 0, d_clear, color=COLORS["RedLine"], lw=0.8, ls=(0, (1, 2)), zorder=3)
-    dx, dy = offsets[case]
+    dx, dy, ha = offsets[case]
     ax.annotate(
         f"{case}: {vc:.2f} m/s",
         xy=(vc, d_clear),
         xytext=(vc + dx, d_clear + dy),
         fontsize=9,
+        ha=ha,
         color=COLORS["RedLine"],
         arrowprops=dict(arrowstyle="-", color=COLORS["RedLine"], lw=0.8),
+        bbox=dict(boxstyle="square,pad=0.1", fc="white", ec="none"),
         zorder=6,
     )
 
 ax.set_xlim(0, 1.6)
-ax.set_ylim(0, 1700)
+ax.set_ylim(0, 1800)
 ax.set_xlabel("Speed at the start of the delay, $v$ (m/s)")
 ax.set_ylabel("Stopping distance (mm)")
-ax.legend(loc="upper left", fontsize=8.5, frameon=True, framealpha=0.95, edgecolor="none")
+# legend outside the axes: inside, the walking-person curve and the clear-distance label run under it
+ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8.5, frameon=False)
 plt.tight_layout()
 plt.show()
 ```
@@ -822,7 +837,7 @@ A stalled proposer would spend more than the whole remainder. Were the chunk lea
 
 An independent protective scanner needs its own event-to-stop ledger. Its detection, safety-output, controller, communication, and drive-onset delays replace the vision-dispatch and proposal-lease intervals when its protective response bypasses them. The response still reserves the appropriate braking travel, tracking error, localization uncertainty, and protective margin; only intervals actually traversed belong in its sum. A mobile base can use a risk-assessed protective field under applicable vehicle and machinery standards, including ISO 3691-4 [@iso3691part4] and ISO 13849-1 [@iso13849part1], such as the scanner in @fig-12-real-laser-scanner. The field length follows that scanner path's qualified ledger, not an automatic reuse of the proposal path's lease and vision delays. The scanner is a certified safety device in its own right, separate from the perception LiDAR, whose range feeds the proposal and admission paths but carries no safety rating. On a certified machine this scanner path, not the vision path, carries the claim for a person at the rack end: ISO 3691-4 requires detection of persons in the path and control of the braking system at performance level d, and it specifies that detection for a person who is standing in the path [@tuv2021iso3691]. The static-obstacle convention of @eq-enforce-stopping-envelope is therefore the same one the vehicle standard tests against, and a person still approaching during the stop is outside what that function claims. @Sec-enforcement-certified-functions places the vision-path budget above this certified floor.
 
-::: {#fig-12-real-laser-scanner fig-env="figure" fig-pos="t" fig-cap="**Industrial safety laser scanner**: A scanner can provide an early warning field and a protective field. The warning field requests earlier deceleration; the protective field's safety output feeds a controller that selects a risk-assessed stop. Protective-field length must include scanner response, controller and drive delay, braking travel, and uncertainty. A moving AMR does not become safe merely because motor torque is removed." fig-alt="Industrial safety laser scanner with outer warning and inner protective fields. The protective field initiates a safety-controller response whose total sensing, control, drive, braking, and uncertainty budget determines the required field length; drive torque removal alone may allow coasting."}
+::: {#fig-12-real-laser-scanner fig-env="figure" fig-pos="t" fig-cap="**Planar laser scanner**: A rotating mirror sweeps a time-of-flight beam across a horizontal fan, so the device reports range over one plane around the base. A safety-rated scanner of this form adds an early warning field and a protective field. The warning field requests earlier deceleration; the protective field's safety output feeds a controller that selects a risk-assessed stop. Protective-field length must include scanner response, controller and drive delay, braking travel, and uncertainty; a moving base does not become safe merely because motor torque is removed. (Photograph: [Björn Heller](https://commons.wikimedia.org/wiki/File:Sick_laserscanner.jpg) / Wikimedia Commons, [CC BY-SA 3.0 DE](https://creativecommons.org/licenses/by-sa/3.0/de/deed.en).)" fig-alt="Photograph of a blue industrial laser scanner on an office desk beside a keyboard and mouse. A boxy upper housing carries a small status window and the maker's label; below it a black cylindrical window wraps around the base, behind which the beam sweeps."}
 ![](images/jpg/fig12_real_laser_scanner.jpg){width="85%"}
 :::
 
@@ -1723,7 +1738,7 @@ The rungs trade response time, available authority, and recovery cost. The arbit
 
 :::
 
-::: {#fig-12-fallback-ladder fig-env="figure" fig-pos="t" fig-cap="**Dynamic fallback ladder and deterministic arbiter multiplexer**: A deterministic arbiter routes actuator authority among four state-matched responses (active safety shield projection, powered position hold, controlled dynamic stop, or hardware torque inhibit) based on fault type and measured plant velocity. The responses are independent alternative paths selected by physical state, not a vertical escalation ladder where descending implies greater safety: invoking drive torque inhibit (STO) on a moving machine removes electromagnetic braking and incurs dangerous unbraked coasting." fig-alt="Deterministic arbiter multiplexer routing policy proposals and fault triggers among four state-matched responses: feasible CBF-QP projection, powered position hold, controlled C2 braking stop, and drive torque inhibit. A warning highlights that torque inhibit removes motor braking and risks coasting if moving."}
+::: {#fig-12-fallback-ladder fig-env="figure" fig-pos="t" fig-cap="**Fallback responses and the paths that run them**: The plant state and the failed check select one response directly; the four are alternatives, not steps of an escalation. PROJECT, HOLD, and STOP run in the safety MCU's firmware and reach the drives through its arbiter, which here passes the projected command. INHIBIT is the one response that survives loss of the MCU itself, so it bypasses the arbiter on a hardware path that removes gate-drive supply and lets the spring brakes set. On a moving machine that path also removes motor braking, and the machine coasts until the separately qualified brakes take hold." fig-alt="Four rows, each with a condition card on the left joined by an arrow to a response card. The first three responses, PROJECT, HOLD, and STOP, sit inside a dashed box labeled safety MCU firmware, 1 kHz, and feed a multiplexer whose selected input, PROJECT, connects to an output arrow labeled u act entering a tall box labeled drives and brakes. The fourth response, INHIBIT, sits in a separate dashed box labeled hardware interlock and connects directly to the drives box by an arrow labeled STO, brake supply. The PROJECT condition, proposal u nom admitted, is drawn dashed in bronze."}
 ![](images/svg/fig12_canonical_fallback_ladder.svg){width="100%"}
 :::
 

@@ -201,7 +201,7 @@ An erroneous action can therefore move the machine into states poorly represente
 
 A moving base needs distance both before braking begins and while braking brings it to rest. For a steady initial speed, constant deceleration after onset, and a stationary obstacle, the elementary stopping budget is:
 $$d_{\text{stop}} = \underbrace{v \tau_{\text{delay}}}_{\text{travel during response delay}} + \underbrace{\frac{v^2}{2 a_{\text{brake}}}}_{\text{mechanical dissipation}} \le D_{\text{clear}}$$
-Here $v$ is the initial speed (m/s), $\tau_{\text{delay}}$ is the full interval (s) from the relevant observation to the onset of retarding force, $a_{\text{brake}}$ is the braking deceleration (m/s²) assumed for this calculation, and $D_{\text{clear}}$ is the usable observed clearance (m). The first term is travel during the delay; the second is travel while shedding kinetic energy. Setting $v \tau_{\text{delay}} = v^2/(2 a_{\text{brake}})$ and dividing by $v$ shows that the two terms are equal at the crossover speed $v^{*} = 2 a_{\text{brake}} \tau_{\text{delay}}$. Below $v^{*}$ the delay dominates the stop; above it braking dominates, and because braking grows with the square of speed, slowing down pays off faster than shortening the delay. Solving the inequality for $v$ gives the fastest speed the clearance allows, which @sec-body-kinetic-momentum derives.
+Here $v$ is the initial speed (m/s), $\tau_{\text{delay}}$ is the full interval (s) from the relevant observation to the onset of retarding force, $a_{\text{brake}}$ is the braking deceleration (m/s²) assumed for this calculation, and $D_{\text{clear}}$ is the usable observed clearance (m). The first term is travel during the delay; the second is travel while shedding kinetic energy. Setting $v \tau_{\text{delay}} = v^2/(2 a_{\text{brake}})$ and dividing by $v$ shows that the two terms are equal at the crossover speed $v^{*} = 2 a_{\text{brake}} \tau_{\text{delay}}$. Below $v^{*}$ the delay dominates the stop; above it braking dominates, and because braking grows with the square of speed, slowing down pays off faster than shortening the delay (@fig-01-kinematic-roofline). Solving the inequality for $v$ gives the fastest speed the clearance allows, which @sec-body-kinetic-momentum derives.
 
 ```{python}
 #| label: boundary-stopping-budget
@@ -350,6 +350,83 @@ For the illustrative warehouse base, the machine card in @sec-boundary-running-m
 
 **Systems insight**: The learned model's backbone accounts for `{python} StoppingBudget.t_backbone_str` of the delay, or `{python} StoppingBudget.d_backbone_str` of travel; the chunk lease alone costs `{python} StoppingBudget.d_lease_str`. Each added millisecond of delay anywhere in the chain costs `{python} StoppingBudget.d_per_ms_str` at this speed, so a slower but more accurate model is a distance cost the budget must absorb. The spare is not yet a safety margin. @Sec-enforcement-composite-budget adds the localization bound, a protective margin, tracking error, and the longer stop of a jerk-limited brake; together they exceed the clear distance at the drive limit, which is why the card sets the aisle speed at `{python} StoppingBudget.v_aisle_str`.
 
+:::
+
+::: {#fig-01-kinematic-roofline fig-env="figure" fig-pos="htb" fig-cap="**Delay travel and braking travel against speed**: The elementary stopping budget of the loaded base, split into travel during the `{python} StoppingBudget.tau_delay_str` pre-brake delay, which grows linearly with speed, and braking travel at `{python} StoppingBudget.a_brake_str`, which grows with its square. The two terms are equal at the crossover speed $v^{*}$; above it braking dominates. At the `{python} StoppingBudget.v_str` drive limit the elementary stop fits inside the `{python} StoppingBudget.d_clear_str` clear distance, before the allowances that later chapters add." fig-alt="Plot of distance in millimeters against speed from 0 to 2 meters per second. A straight line for travel during the delay and a rising parabola for braking travel cross at a marked crossover speed near 0.5 meters per second. Their sum rises more steeply and meets a dashed horizontal line marking the clear distance. A marked point at the drive limit of 1.5 meters per second sits on the sum curve below the line."}
+
+```{python}
+#| label: fig-01-kinematic-roofline
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DELAY TRAVEL AND BRAKING TRAVEL AGAINST SPEED (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-01-kinematic-roofline in @sec-boundary-kinematic-roofline
+# │ Goal:    show the two terms of the elementary budget crossing at v*, and the
+# │          drive-limit stop against the clear distance
+# │ Show:    v tau_delay (133.6 ms), v^2/(2 a_brake) (2.0 m/s^2), their sum,
+# │          D_clear 1.10 m, v* = 0.53 m/s, the 1.5 m/s point at 762.9 mm
+# │ How:     StoppingBudget inputs over a speed grid; no value is retyped
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import viz
+from mlsysim.fmt import check
+
+SB = StoppingBudget
+MPS = meter / second
+
+# ┌── 1. LOAD (from boundary-stopping-budget) ─────────────────────────────────
+tau = SB.tau_delay.to(second).magnitude
+a = SB.a_brake.to(MPS / second).magnitude
+d_clear = SB.d_clear.to(millimeter).magnitude
+v_op = SB.v.to(MPS).magnitude
+v_star = SB.v_star.to(MPS).magnitude
+d_op = SB.d_stop.to(millimeter).magnitude
+
+# ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
+v = np.linspace(0.0, 2.0, 401)
+delay = v * tau * 1000.0
+braking = v**2 / (2 * a) * 1000.0
+total = delay + braking
+
+# ┌── 3. GUARD ────────────────────────────────────────────────────────────────
+check(abs(v_op * tau * 1000.0 + v_op**2 / (2 * a) * 1000.0 - d_op) < 1e-6, "The plotted point must equal the notebook's stop.")
+check(abs(v_star * tau - v_star**2 / (2 * a)) < 1e-9, "The two terms must be equal at v*.")
+check(d_op < d_clear, "The drive-limit point must sit below the clear distance.")
+
+# ┌── 4. PLOT ─────────────────────────────────────────────────────────────────
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 4.4))
+ax.plot(v, delay, color=COLORS["BrownLine"], lw=1.8, label=r"travel during the delay, $v\,\tau_{\mathrm{delay}}$")
+ax.plot(v, braking, color=COLORS["BlueLine"], lw=1.8, label=r"braking travel, $v^2/(2a_{\mathrm{brake}})$")
+ax.plot(v, total, color=COLORS["primary"], lw=2.0, label=r"elementary stop, $d_{\mathrm{stop}}$")
+ax.axhline(d_clear, color=COLORS["RedLine"], lw=1.3, ls=(0, (6, 3)))
+ax.text(0.04, d_clear + 30, f"clear distance {d_clear / 1000:.2f} m", color=COLORS["RedLine"], fontsize=9, va="bottom")
+ax.plot([v_star], [v_star * tau * 1000.0], "o", ms=6, mfc="white", mec=COLORS["primary"], mew=1.4, zorder=5)
+ax.annotate(
+    f"$v^*$ = {v_star:.2f} m/s",
+    xy=(v_star, v_star * tau * 1000.0),
+    xytext=(v_star + 0.12, 25),
+    fontsize=9,
+    arrowprops=dict(arrowstyle="-", color=COLORS["primary"], lw=0.8),
+)
+ax.plot([v_op], [d_op], "o", ms=7, color=COLORS["primary"], zorder=5)
+ax.annotate(
+    f"drive limit {v_op:.1f} m/s: {d_op:.1f} mm",
+    xy=(v_op, d_op),
+    xytext=(v_op - 0.62, d_op + 170),
+    fontsize=9,
+    arrowprops=dict(arrowstyle="-", color=COLORS["primary"], lw=0.8),
+    bbox=dict(boxstyle="square,pad=0.1", fc="white", ec="none"),
+)
+ax.set_xlim(0, 2.0)
+ax.set_ylim(0, 1600)
+ax.set_xlabel("Initial speed, $v$ (m/s)")
+ax.set_ylabel("Distance (mm)")
+ax.legend(loc="upper left", bbox_to_anchor=(0.0, 0.93), fontsize=8.5, frameon=False)
+plt.tight_layout()
+plt.show()
+```
 :::
 
 These are illustrative inputs and a derived delay, so the distances are illustrative too; none is measured stopping performance.

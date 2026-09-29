@@ -222,10 +222,110 @@ The drives track joint angles, but clearance is measured in the task space where
 
 $$x = l_1\cos q_1 + l_2\cos(q_1+q_2), \qquad y = l_1\sin q_1 + l_2\sin(q_1+q_2)$$ {#eq-plan-two-link-kinematics}
 
-Differentiating @eq-plan-two-link-kinematics gives tool velocity $\dot{\mathbf{x}} = \mathbf{J}(\mathbf{q})\,\dot{\mathbf{q}}$, where the **Jacobian**\index{Jacobian!manipulator} $\mathbf{J} = \partial\mathbf{x}/\partial\mathbf{q}$ changes with configuration. For the two-link arm its determinant is $l_1 l_2 \sin q_2$, which vanishes when the elbow straightens, the singular pose at which no joint motion moves the tool along the arm. Taking the link lengths from the arm's published kinematic chain, `{python} PlanningTwoLinkArm.l1_str` and `{python} PlanningTwoLinkArm.l2_str` for a `{python} PlanningTwoLinkArm.reach_str` planar reach [@franka2023robot], moving the tool at the `{python} PlanningTwoLinkArm.v_tool_str` TCP limit in the arm's weakest direction, the tool direction that a unit of joint rate moves least (the smallest singular value $\sigma_{\min}$ of $\mathbf{J}$, so that $\|\dot{\mathbf{q}}\| = v/\sigma_{\min}$), needs a joint-rate vector of magnitude `{python} PlanningTwoLinkArm.qd_norm_good_str` at a `{python} PlanningTwoLinkArm.q2_good_str`° elbow. At least one joint must then turn at `{python} PlanningTwoLinkArm.qd_one_good_str`, above the published `{python} PlanningTwoLinkArm.qd_max_str` limit of the shoulder and elbow joints. At a `{python} PlanningTwoLinkArm.q2_bad_str`° elbow the requirement grows to `{python} PlanningTwoLinkArm.qd_norm_bad_str`. A tool-speed limit therefore bounds no joint speed near a singularity. Every tool-space quantity this chapter checks, the TCP limit, the stopping distance, and the swept clearance, must be mapped back through $\mathbf{J}$ to the joint limits the drives enforce. The seven-joint arm has redundant joints that let a planner avoid such poses, which this planar abstraction omits.
+Differentiating @eq-plan-two-link-kinematics gives tool velocity $\dot{\mathbf{x}} = \mathbf{J}(\mathbf{q})\,\dot{\mathbf{q}}$, where the **Jacobian**\index{Jacobian!manipulator} $\mathbf{J} = \partial\mathbf{x}/\partial\mathbf{q}$ changes with configuration. For the two-link arm its determinant is $l_1 l_2 \sin q_2$, which vanishes when the elbow straightens, the singular pose at which no joint motion moves the tool along the arm. Taking the link lengths from the arm's published kinematic chain, `{python} PlanningTwoLinkArm.l1_str` and `{python} PlanningTwoLinkArm.l2_str` for a `{python} PlanningTwoLinkArm.reach_str` planar reach [@franka2023robot], moving the tool at the `{python} PlanningTwoLinkArm.v_tool_str` TCP limit in the arm's weakest direction, the tool direction that a unit of joint rate moves least (the smallest singular value $\sigma_{\min}$ of $\mathbf{J}$, so that $\|\dot{\mathbf{q}}\| = v/\sigma_{\min}$), needs a joint-rate vector of magnitude `{python} PlanningTwoLinkArm.qd_norm_good_str` at a `{python} PlanningTwoLinkArm.q2_good_str`° elbow. At least one joint must then turn at `{python} PlanningTwoLinkArm.qd_one_good_str`, above the published `{python} PlanningTwoLinkArm.qd_max_str` limit of the shoulder and elbow joints. At a `{python} PlanningTwoLinkArm.q2_bad_str`° elbow the requirement grows to `{python} PlanningTwoLinkArm.qd_norm_bad_str` (@fig-11-two-link-singularity). A tool-speed limit therefore bounds no joint speed near a singularity. Every tool-space quantity this chapter checks, the TCP limit, the stopping distance, and the swept clearance, must be mapped back through $\mathbf{J}$ to the joint limits the drives enforce. The seven-joint arm has redundant joints that let a planner avoid such poses, which this planar abstraction omits.
 
 ::: {.column-margin .margin-pointer}
 ↪ Forward kinematics, the manipulator Jacobian, and singularities are developed in @sec-appendix-control-kinematics.
+:::
+
+::: {#fig-11-two-link-singularity fig-env="figure" fig-pos="t" fig-cap="**The same tool speed, two elbows**: The planar two-link arm drawn to scale with its `{python} PlanningTwoLinkArm.l1_str` and `{python} PlanningTwoLinkArm.l2_str` links. Each ellipse is the set of tool velocities that a unit joint-rate vector can produce, drawn at one scale in both panels; its short axis is the weakest direction (arrow). At a right-angle elbow the ellipse is round enough that `{python} PlanningTwoLinkArm.v_tool_str` in that direction needs `{python} PlanningTwoLinkArm.qd_norm_good_str` of joint rate. Near the straight elbow the ellipse collapses toward a line across the arm, and the same tool speed along the arm needs `{python} PlanningTwoLinkArm.qd_norm_bad_str`." fig-alt="Two panels, each showing a two-link arm drawn from a shoulder joint through an elbow joint to a tool point, with a dashed arc marking the arm's reach. In the left panel the elbow is bent at a right angle and a wide shaded ellipse surrounds the tool point, with a double arrow along its short axis. In the right panel the arm is nearly straight, the tool sits near the reach arc, and the ellipse is a thin sliver across the arm with the double arrow pointing along the arm. Text in each panel gives the joint rate needed for 1 meter per second along the arrow: 4.9 and 37.8 radians per second."}
+
+```{python}
+#| label: plot-planning-two-link-singularity
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TWO-LINK ARM AT TWO ELBOW ANGLES (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-11-two-link-singularity in @sec-planning-continuous-trajectories.
+# │
+# │ Goal:    Make the Jacobian's conditioning visible: the same tool speed costs
+# │          little joint rate at a right-angle elbow and much more near straight.
+# │ Show:    the arm to scale at q2 = 90 and 10 degrees; the tool-velocity
+# │          ellipse J * (unit joint-rate circle); the weakest direction.
+# │ How:     PlanningTwoLinkArm link lengths, elbow angles, TCP limit, and
+# │          joint-rate norms; the guard ties the drawn ellipses to the cell.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+import numpy as np
+
+TL = PlanningTwoLinkArm
+R = viz.VOL4_ROLES
+l1, l2 = TL.l1.to(ureg.meter).magnitude, TL.l2.to(ureg.meter).magnitude
+v_tool = TL.v_tool.to(ureg.meter / ureg.second).magnitude
+k_ell = 0.25  # drawing scale: meters of page per (m/s) of tool speed
+
+def _jac(q1, q2):
+    return np.array(
+        [[-l1 * np.sin(q1) - l2 * np.sin(q1 + q2), -l2 * np.sin(q1 + q2)], [l1 * np.cos(q1) + l2 * np.cos(q1 + q2), l2 * np.cos(q1 + q2)]]
+    )
+
+cases = [(TL.q2_good_deg, TL.qd_norm_good), (TL.q2_bad_deg, TL.qd_norm_bad)]
+viz.set_book_style()
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(1, 2, figsize=(6.4, 3.1))
+drawn = []
+for ax, tag, (q2d, qd_need) in zip(axes, ("a", "b"), cases):
+    q2 = np.radians(q2d)
+    q1 = np.radians(45) - np.arctan2(l2 * np.sin(q2), l1 + l2 * np.cos(q2))  # tool direction at 45 degrees
+    elbow = np.array([l1 * np.cos(q1), l1 * np.sin(q1)])
+    tool = elbow + l2 * np.array([np.cos(q1 + q2), np.sin(q1 + q2)])
+    # reach circle
+    arc = np.radians(np.linspace(-14, 80, 120))
+    th = np.linspace(0, 2 * np.pi, 200)
+    ax.plot(TL.reach.magnitude * np.cos(arc), TL.reach.magnitude * np.sin(arc), color=R["neutral"], lw=0.6, ls=(0, (3, 3)))
+    # links
+    ax.plot([0, elbow[0], tool[0]], [0, elbow[1], tool[1]], color=R["structural"], lw=3.2, solid_capstyle="round", zorder=3)
+    for p in ((0, 0), elbow):
+        ax.plot(*p, "o", ms=6.5, mfc="white", mec=R["structural"], mew=1.4, zorder=4)
+    ax.plot(*tool, "o", ms=3.5, color=R["structural"], zorder=4)
+    # velocity ellipse: image of the unit joint-rate circle, scaled so the tool speed per (rad/s)
+    J = _jac(q1, q2)
+    U, s, Vt = np.linalg.svd(J)
+    circ = np.vstack([np.cos(th), np.sin(th)])
+    ell = (J @ circ) * k_ell
+    ax.fill(tool[0] + ell[0], tool[1] + ell[1], color=R["measured"], alpha=0.14, lw=0, zorder=2)
+    ax.plot(tool[0] + ell[0], tool[1] + ell[1], color=R["measured"], lw=1.0, zorder=2)
+    # weakest direction
+    u_min = U[:, 1]
+    ax.annotate("", xy=tool + u_min * 0.13, xytext=tool - u_min * 0.13, arrowprops=dict(arrowstyle="<->", color=R["proposal"], lw=1.2), zorder=5)
+    drawn.append((s[1], qd_need.magnitude))
+    ax.text(0.0, 1.0, f"({tag}) elbow {q2d}°", transform=ax.transAxes, ha="left", va="bottom", fontsize=9, fontweight="bold", color=R["neutral"])
+    ax.text(
+        0.97,
+        0.03,
+        f"weakest direction:\n{v_tool:g} m/s needs {qd_need.magnitude:.1f} rad/s",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=8.5,
+        color=R["proposal"],
+        bbox=dict(boxstyle="square,pad=0.1", fc="white", ec="none"),
+    )
+    ax.set_aspect("equal")
+    ax.set_xlim(-0.12, 0.82)
+    ax.set_ylim(-0.22, 0.74)
+    ax.axis("off")
+    ax.text(0.03, -0.035, "shoulder", fontsize=8, color=R["neutral"], ha="left", va="top")
+axes[0].text(
+    TL.reach.magnitude * np.cos(np.radians(12)) + 0.035,
+    TL.reach.magnitude * np.sin(np.radians(12)),
+    f"reach\n{TL.reach.magnitude:.2f} m",
+    fontsize=8,
+    color=R["neutral"],
+    ha="left",
+    va="center",
+)
+check(
+    abs(drawn[0][1] - v_tool / drawn[0][0]) < 1e-6 and abs(drawn[1][1] - v_tool / drawn[1][0]) < 1e-6,
+    "Two-link figure: drawn ellipse minor axes must give the cell's joint-rate norms.",
+)
+plt.tight_layout()
+plt.show()
+```
+
 :::
 
 ```{python}
@@ -457,6 +557,9 @@ class PlanningMissionExposure:
     check(abs(n_late - 30) < 1e-9, "expected late handoffs changed")
     check(7e-14 < p_all < 9e-14, "all-on-time probability changed")
     check(abs(eps_handoff - eps_mission / 3000) < 1e-15, "per-handoff target changed")
+    # margin_action_chunk_latency_tail_strip.svg and its margin note draw these labels.
+    check(round(n_late) == 30 and abs(n_handoff * eps_handoff - 1e-3) < 1e-12, "tail-ladder margin labels (30, 0.001) out of date")
+    check(f"{q_pct:.5f}" == "99.99997", "tail-ladder margin label P99.99997 out of date")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
     f_replan_str = fmt_frequency(f_replan)
@@ -471,9 +574,9 @@ class PlanningMissionExposure:
 The component sum in @eq-plan-replacement-latency is an elapsed replacement path, not an absolute timestamp. Consider a generic replanner, slower than this machine's chunk renewal, that makes `{python} PlanningMissionExposure.k_math` handoffs in a ten-minute mission at `{python} PlanningMissionExposure.f_replan_str`. If each handoff independently has a $0.01$ chance of exceeding a $P_{99}$ budget, the expected number of late handoffs is `{python} PlanningMissionExposure.n_late_str` and the probability that *all* arrive on time is `{python} PlanningMissionExposure.p_all_math`. Correlated contention clusters misses, which breaks the independence this arithmetic assumes. Allocating a mission exceedance target $\epsilon_{\mathrm{mission}}=10^{-3}$ equally gives a per-handoff target `{python} PlanningMissionExposure.eps_math` by the union bound. The corresponding `{python} PlanningMissionExposure.q_math` is a **design quantile target**, a risk allocation rather than an observed latency. A deployment either supports it with representative load testing and a conservative bound, or accepts a higher fallback rate.
 
 ::: {.column-margin}
-![](images/svg/margin_action_chunk_latency_tail_strip.svg){width="100%" fig-alt="Conceptual strip comparing a P99 latency allowance with a much rarer design-tail target. The rarer percentile is a risk allocation."}
+![](images/svg/margin_action_chunk_latency_tail_strip.svg){width="100%" fig-alt="Two horizontal bars on a log scale. The upper bar, labeled P99 30, is long; the lower bar, labeled P99.99997 0.001, is a short stub."}
 
-*The tail target allocates replacement risk; observed latency and confidence determine whether the chosen deadline is credible.*
+*Expected late handoffs per ten-minute mission: a $P_{99}$ budget leaves `{python} PlanningMissionExposure.n_late_str`, the union-bound target 0.001. The target allocates risk; load testing must show the deadline meets it.*
 :::
 
 The next request leaves no later than $T_{\mathrm{request}}$ after the active chunk starts. Admission must finish before the decision cutoff that precedes $t_{\mathrm{commit}}$ by the physical response allowance, not merely before the last nominal setpoint. With a replacement-latency target $Q_{1-\epsilon}(L)$ and reserve $T_{\mathrm{reserve}}$, require $t_{\mathrm{commit}}-t_{\mathrm{start}}\ge T_{\mathrm{request}}+Q_{1-\epsilon}(L)+T_{\mathrm{reserve}}$. Here $T_{\mathrm{reserve}}$ must cover the decision-to-onset allowance as well as any scheduling reserve. The admitted stop then needs another $T_{\mathrm{stop}}$ under MCU authority. The complete **time horizon** $T_{\mathrm{record}}$ that the record must cover, regardless of encoding, has the lower bound:
@@ -1882,7 +1985,91 @@ The base proposes motion under a constraint the arm does not have. Its two drive
 
 $$\dot x = v\cos\theta, \qquad \dot y = v\sin\theta, \qquad \dot\theta = \omega, \qquad \dot x\sin\theta - \dot y\cos\theta = 0$$ {#eq-plan-unicycle}
 
-The last relation in @eq-plan-unicycle is a **nonholonomic constraint**\index{Nonholonomic constraint!differential drive}, one that restricts velocity without restricting reachable position [@siciliano2009robotics]. The base can reach any pose in the aisle, but a sideways offset costs a maneuver of turning, driving, and turning back, so its planner searches over feasible motions rather than straight configuration-space steps. Each wheel's speed is $v \pm \omega b/2$ for track width $b$, so each wheel's drive limit bounds a combination of forward and turning speed.
+The last relation in @eq-plan-unicycle is a **nonholonomic constraint**\index{Nonholonomic constraint!differential drive}, one that restricts velocity without restricting reachable position [@siciliano2009robotics]. The base can reach any pose in the aisle, but a sideways offset costs a maneuver of turning, driving, and turning back, so its planner searches over feasible motions rather than straight configuration-space steps (@fig-11-nonholonomic-base). Each wheel's speed is $v \pm \omega b/2$ for track width $b$, so each wheel's drive limit bounds a combination of forward and turning speed.
+
+::: {#fig-11-nonholonomic-base fig-env="figure" fig-pos="t" fig-cap="**What the wheels allow**: (a) A differential-drive base with track width $b$ can move forward at $v$ and turn at $\omega$ about the center of its axle, but its wheels cannot roll sideways. (b) A pure sideways offset is still reachable, as a maneuver rather than a step: turn in place, drive, and turn back. Proportions are schematic." fig-alt="Two top-view panels of a rectangular base with a drive wheel on each side. In the left panel, a solid arrow points forward along the heading, a curved arrow shows turning, a bracket marks the track width, and a dashed arrow pointing sideways is crossed out. In the right panel, a dashed sideways arrow between a start and a goal pose is crossed out, and a second path shows the base turned a quarter turn in place at the start, driving straight to the goal, and turning back, with the three steps numbered."}
+
+```{python}
+#| label: plot-planning-nonholonomic-base
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NONHOLONOMIC BASE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-11-nonholonomic-base in @sec-planning-mobile-base.
+# │
+# │ Goal:    Make the rolling constraint of @eq-plan-unicycle physical: the base
+# │          has two velocity inputs and cannot translate along its axle.
+# │ Show:    admissible v and omega, the forbidden sideways velocity, and the
+# │          turn-drive-turn maneuver that reaches a sideways offset.
+# │ How:     Schematic geometry; no physical values are drawn.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+import numpy as np
+from matplotlib.patches import Rectangle, FancyArrowPatch, Polygon
+from matplotlib.transforms import Affine2D
+
+R = viz.VOL4_ROLES
+viz.set_book_style()
+import matplotlib.pyplot as plt
+
+def _footprint(ax, x, y, th, ghost=False):
+    """Base outline, drive wheels on the axle, and heading tick (schematic proportions)."""
+    L, W, wl, ww = 0.9, 0.6, 0.26, 0.09
+    tr = Affine2D().rotate(th).translate(x, y) + ax.transData
+    ec = R["neutral"] if ghost else R["structural"]
+    ax.add_patch(
+        Rectangle((-L / 2, -W / 2), L, W, fc="none" if ghost else "#EEF3F1", ec=ec, lw=1.0, ls=(0, (3, 2)) if ghost else "-", transform=tr, zorder=3)
+    )
+    if not ghost:
+        for s in (1, -1):
+            ax.add_patch(Rectangle((-wl / 2, s * W / 2 - ww / 2), wl, ww, fc=R["structural"], ec="none", transform=tr, zorder=4))
+    ax.add_patch(Polygon([[L / 2 - 0.16, 0.1], [L / 2 - 0.02, 0], [L / 2 - 0.16, -0.1]], closed=True, fc=ec, ec="none", transform=tr, zorder=4))
+
+fig, ax = plt.subplots(figsize=(6.4, 3.8))
+ax.set_aspect("equal")
+ax.axis("off")
+_footprint(ax, 0, 0, 0)
+# allowed: forward speed along the heading, turn rate about the axle center
+ax.add_patch(FancyArrowPatch((0.5, 0), (1.25, 0), arrowstyle="-|>", mutation_scale=11, color=R["structural"], lw=1.4, zorder=5))
+ax.text(1.28, 0, r"$v$", ha="left", va="center", fontsize=10, color=R["structural"])
+ax.add_patch(
+    FancyArrowPatch(
+        (0.28, -0.52), (-0.28, -0.52), connectionstyle="arc3,rad=-0.45", arrowstyle="-|>", mutation_scale=10, color=R["structural"], lw=1.1, zorder=5
+    )
+)
+ax.text(0, -0.8, r"$\omega$", ha="center", va="top", fontsize=10, color=R["structural"])
+# forbidden: translation along the axle
+ax.add_patch(FancyArrowPatch((0, 0.33), (0, 0.95), arrowstyle="-|>", mutation_scale=11, color=R["neutral"], lw=1.2, ls=(0, (3, 2)), zorder=5))
+ax.plot([-0.09, 0.09], [0.55, 0.73], color=R["neutral"], lw=1.6, zorder=6)
+ax.plot([-0.09, 0.09], [0.73, 0.55], color=R["neutral"], lw=1.6, zorder=6)
+ax.text(0.14, 0.95, "no sideways velocity", ha="left", va="center", fontsize=8.5, color=R["neutral"])
+ax.annotate("", xy=(-0.55, 0.3), xytext=(-0.55, -0.3), arrowprops=dict(arrowstyle="<->", color=R["neutral"], lw=0.8))
+ax.text(-0.6, 0, r"$b$", ha="right", va="center", fontsize=10, color=R["neutral"])
+# a sideways offset: the direct step is inadmissible; turn in place, drive, turn back
+x0, dy = 2.9, 1.7
+_footprint(ax, x0, 0, 0)
+_footprint(ax, x0, 0, np.pi / 2, ghost=True)
+_footprint(ax, x0, dy, np.pi / 2, ghost=True)
+_footprint(ax, x0, dy, 0)
+ax.add_patch(FancyArrowPatch((x0, 0.5), (x0, dy - 0.5), arrowstyle="-|>", mutation_scale=11, color=R["proposal"], lw=1.4, ls=(0, (4, 2)), zorder=5))
+for yy, lab in ((0, "1  turn in place"), (dy / 2, "2  drive"), (dy, "3  turn back")):
+    ax.text(x0 + 0.62, yy, lab, ha="left", va="center", fontsize=8.5, color=R["proposal"])
+xs = x0 - 1.0
+ax.add_patch(FancyArrowPatch((xs, 0), (xs, dy), arrowstyle="-|>", mutation_scale=11, color=R["neutral"], lw=1.2, ls=(0, (3, 2)), zorder=5))
+ax.plot([xs - 0.09, xs + 0.09], [dy / 2 - 0.09, dy / 2 + 0.09], color=R["neutral"], lw=1.6, zorder=6)
+ax.plot([xs - 0.09, xs + 0.09], [dy / 2 + 0.09, dy / 2 - 0.09], color=R["neutral"], lw=1.6, zorder=6)
+ax.text(xs - 0.14, dy / 2, "direct\nsideways\nstep", ha="right", va="center", fontsize=8.5, color=R["neutral"])
+ax.text(0, 2.2, "(a) admissible velocities", ha="center", va="bottom", fontsize=9, fontweight="bold", color=R["neutral"])
+ax.text(x0, 2.2, "(b) a sideways offset", ha="center", va="bottom", fontsize=9, fontweight="bold", color=R["neutral"])
+ax.set_xlim(-0.9, 4.6)
+ax.set_ylim(-0.95, 2.45)
+plt.tight_layout()
+plt.show()
+```
+
+:::
 
 Local planners enforce these limits by planning in velocity space over a short horizon. The dynamic window approach [@fox1997dynamic] treats each pair $(v,\omega)$ as a circular arc and keeps only two kinds. Reachable pairs lie within the next interval's acceleration limits; with the base's `{python} PlanningMobileBase.a_base_str` limit and the `{python} PlanningMobileBase.t_renew_str` chunk renewal, that window spans `{python} PlanningMobileBase.dv_window_str` either side of the current forward speed. Admissible pairs are those from which the base can stop before the nearest obstacle on the arc, $v \le \sqrt{2\,d_{\text{arc}}(v,\omega)\,a_{\text{brake}}}$. Among the survivors, the planner maximizes a weighted score of heading toward the goal, clearance, and speed. Model predictive path integral control (MPPI) [@williams2017information] replaces that grid with many randomly perturbed control sequences rolled forward through the model and weighted by cost, and the ROS 2 navigation stack ships both families [@macenski2023desks].
 
