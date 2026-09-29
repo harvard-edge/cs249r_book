@@ -56,21 +56,26 @@ A single accelerator can perform trillions of operations per second, but distrib
 from mlsysim import *
 from mlsysim.core.units import *
 
-from mlsysim.fmt import MarkdownStr, check, fmt, fmt_int, fmt_math, fmt_memory
+from mlsysim.fmt import MarkdownStr, check, fmt, fmt_int, fmt_math, fmt_memory, fmt_params
 
 # ┌── LEGO ───────────────────────────────────────────────
 class NetworkRunningExampleCluster:
-    """Mid-scale training cluster (`Systems.Clusters.Training_1K`) for the 175B running example."""
+    """Archetype A reference (`Scenarios.DenseLLMPretrainingReference`): GPT-3 on Training_1K."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _cluster = Systems.Clusters.Training_1K
-    n_gpus = _cluster.total_accelerators
-    _model = Models.Language.GPT3
-    params = _model.parameters
-    grad_bytes = params * (2 * byte / param)
+    _scn = Scenarios.DenseLLMPretrainingReference
+    n_gpus = _scn.system.total_accelerators
+    params = _scn.workload.parameters
+    grad_bytes = _scn.workload.size_in_bytes(BYTES_FP16)
+
+    # ┌── 3. GUARD ────────────────────────────────────────────────────────────
+    # The static TikZ/SVG figures in the transport section label 350 GB / 700 GB.
+    check(abs(grad_bytes.to(GB).magnitude - 350) < 1e-6, "Static figures assume a 350 GB FP16 gradient")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    params_str = fmt_params(params)
     n_gpus_str = fmt_count(n_gpus, commas=True, label="GPU")
+    n_gpus_value_str = fmt(n_gpus, precision=0, commas=True)
     peer_gpus_str = fmt(n_gpus - 1, precision=0, commas=False)
     grad_gb_str = fmt_memory(grad_bytes, unit=GB, precision=0, commas=False)
 ```
@@ -83,7 +88,7 @@ class NetworkRunningExampleCluster:
 *One slow link stalls every peer that waits on it.*
 :::
 
-Consider the running instance of Archetype A (GPT-4/Llama-3), a 175-billion-parameter dense transformer partitioned across the `{python} NetworkRunningExampleCluster.n_gpus_str` of the reference cluster, where dense accelerator nodes are no longer useful unless they synchronize as one machine. Each training step must combine gradient contributions from the workers so that corresponding model replicas apply the same update. This operation, called AllReduce, returns the combined result to every participating worker. The model has `{python} NetworkRunningExampleCluster.grad_gb_str` of gradient data at two bytes per parameter; how much each GPU transfers depends on how the model is partitioned and which workers synchronize together. If even one link in the fabric is slow, all `{python} NetworkRunningExampleCluster.peer_gpus_str` other GPUs wait. The network fabric is not auxiliary infrastructure; it is the synchronization backbone that determines whether this cluster trains efficiently or leaves its accelerators idle.
+Consider the running instance of Archetype A (GPT-4/Llama-3), a `{python} NetworkRunningExampleCluster.params_str`-parameter dense transformer partitioned across the `{python} NetworkRunningExampleCluster.n_gpus_str` of the reference cluster, where dense accelerator nodes are no longer useful unless they synchronize as one machine. Each training step must combine gradient contributions from the workers so that corresponding model replicas apply the same update. This operation, called AllReduce, returns the combined result to every participating worker. The model has `{python} NetworkRunningExampleCluster.grad_gb_str` of gradient data at two bytes per parameter; how much each GPU transfers depends on how the model is partitioned and which workers synchronize together. If even one link in the fabric is slow, all `{python} NetworkRunningExampleCluster.peer_gpus_str` other GPUs wait. The network fabric is not auxiliary infrastructure; it is the synchronization backbone that determines whether this cluster trains efficiently or leaves its accelerators idle.
 
 In the fleet stack (@fig-fleet-stack), the fabric turns isolated accelerator nodes into a coherent training system. Accelerators, power delivery, cooling, racks, and pods define what each node can compute in isolation; the fabric determines whether the nodes can act together before communication cost overwhelms computation. @Fig-network-five-level-model organizes that design space into five co-dependent levels, from physical signaling to cluster-scale orchestration. The acronyms in the figure are a roadmap: each mechanism is defined when it becomes the binding constraint.
 
@@ -856,18 +861,6 @@ This signaling shift highlights a key architectural rule: doubling line rate wit
 
 \index{Direct attach copper|see{DAC}}\index{Active optical cable|see{AOC}}The choice of physical medium determines how far a link can reach before latency, power, and cost reshape the cluster geometry. @Tbl-network-fabrics-link-media compares the recurring cable and optics options by the attributes that decide where each one belongs.
 
-| **Medium**                                              | **Reach**                                   | **Cost profile**                                                      | **Latency impact**                                                                             | **Typical placement**            |
-|:--------------------------------------------------------|:--------------------------------------------|:----------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------|:---------------------------------|
-| **DAC (direct attach copper)**\index{DAC!definition}    | 1 to 3 meters, shrinking as lane rate rises | Lowest cost (~\$50) and no optical module power                       | Lowest media latency; passive copper avoids optical conversion                                 | Within a rack                    |
-| **AOC (active optical cable)**\index{AOC!definition}    | 3 to 30 meters                              | Higher cost (~\$500) from permanently attached transceivers           | Electrical/optical conversion plus forward error correction (FEC) adds hundreds of nanoseconds | Rack-to-rack or row-scale links  |
-| **Pluggable optics**\index{Pluggable optics!definition} | More than 30 meters                         | Highest module and power cost, but replaceable optics and fiber cords | Optical conversion and FEC add latency; distance enables topology reach                        | Network core and pod-scale links |
-
-: **Cable and optics placement trade-offs**: Common interconnect media occupy different reach, latency, and cost points, so cluster designers use copper inside racks and optics as distance begins to dominate placement. {#tbl-network-fabrics-link-media tbl-colwidths="[18,20,20,20,22]"}
-
-At PAM4 line rates, FEC[^fn-fec-link-latency]\index{FEC!optical latency budget} runs on copper and optical links alike. The media choice therefore changes conversion latency and power but leaves the FEC budget in place, and reach becomes a topology decision rather than a simple cable choice. The comparison in @tbl-network-fabrics-link-media is the cluster-geometry trade-off in miniature: copper is cheap and low latency but keeps accelerators close together, optical interconnects\index{Optical interconnect!reach and latency} extend a row or pod at higher power and latency, and pluggable optics\index{Pluggable optics!reach and cost} reaches the core only when the topology needs distance more than it needs minimum per-hop cost.
-
-[^fn-fec-link-latency]: [offset=-29mm] **FEC (forward error correction)**\index{FEC!latency tax}: At 400G and 800G speeds, signal integrity is fragile enough that Ethernet PHY designs rely on FEC to reconstruct corrupted bits [@anslow2016rsFec; @ethernetAlliance2025roadmap]. The exact latency depends on the PHY and module architecture; for ML fabric modeling, treating FEC as a per-hop latency budget is the conservative point, because a multi-hop path accumulates that budget before software can hide it.
-
 ```{python}
 #| echo: false
 #| label: network-fabrics-spine-optics-cost
@@ -883,9 +876,10 @@ At PAM4 line rates, FEC[^fn-fec-link-latency]\index{FEC!optical latency budget} 
 # │       CPO value — and derived 200 kW where the registry 20 W gives 400 kW,
 # │       contradicting the OpticalDividend cell later in this chapter).
 # │ Show: Link count, per-link power, total cabling cost, total optics power.
-# │ How: Derive the spine link count from the 10K training cluster; $500/link
-# │      is a scenario assumption (optical-link unit cost is a registry gap,
-# │      noted 2026-06 audit); power per link is Systems.SwitchFabric.OpticsPluggable400G.
+# │ How: Derive the spine link count from the 10K training cluster; per-link
+# │      optics, DAC, and AOC prices come from Infrastructure.Pricing.Network;
+# │      power per link is Systems.SwitchFabric.OpticsPluggable400G; rack power
+# │      bounds come from Infrastructure.Racks.AI_Standard / AI_High.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_count, fmt_power, fmt_qty_range, fmt_usd
@@ -894,10 +888,12 @@ class SpineOpticsCost:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     cluster_gpus = Systems.Clusters.Training_10K.total_accelerators
     n_links = 2 * cluster_gpus  # scenario assumption: two spine-layer optical links per accelerator
-    link_cost = 500 * USD  # scenario assumption: per-link optics cost (registry gap)
+    link_cost = Infrastructure.Pricing.Network.OpticsPerLinkUsd.rate  # per-link optics cost
+    dac_cost = Infrastructure.Pricing.Network.DacCableUsd.rate  # passive copper cable
+    aoc_cost = Infrastructure.Pricing.Network.AocCableUsd.rate  # active optical cable
     link_power = Systems.SwitchFabric.OpticsPluggable400G
-    rack_power_low = 70 * kW  # scenario assumption: dense AI rack lower bound
-    rack_power_high = 100 * kW  # scenario assumption: dense AI rack upper bound
+    rack_power_low = Infrastructure.Racks.AI_Standard.power_kw * kW  # dense AI rack lower bound
+    rack_power_high = Infrastructure.Racks.AI_High.power_kw * kW  # dense AI rack upper bound
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_cost = n_links * link_cost
@@ -910,11 +906,25 @@ class SpineOpticsCost:
     cluster_gpus_str = fmt_count(cluster_gpus, label="GPU", commas=True)
     n_links_str = fmt(n_links, precision=0, commas=True)
     link_cost_usd_str = fmt_usd(link_cost, precision=0, commas=False)
+    dac_cost_usd_str = fmt_usd(dac_cost, precision=0, commas=False)
+    aoc_cost_usd_str = fmt_usd(aoc_cost, precision=0, commas=False)
     link_power_w_str = fmt_power(link_power, unit=watt, precision=0, commas=False)
     total_cost_musd_str = fmt_usd(total_cost, precision=0, commas=False, scale="million")
     total_power_kw_str = fmt_power(total_power, unit=kW, precision=0, commas=False)
     rack_power_range_str = fmt_qty_range(rack_power_low, rack_power_high, kW, precision=0, commas=False)
 ```
+
+| **Medium**                                              | **Reach**                                   | **Cost profile**                                                                                  | **Latency impact**                                                                             | **Typical placement**            |
+|:--------------------------------------------------------|:--------------------------------------------|:--------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------|:---------------------------------|
+| **DAC (direct attach copper)**\index{DAC!definition}    | 1 to 3 meters, shrinking as lane rate rises | Lowest cost (~`{python} SpineOpticsCost.dac_cost_usd_str`) and no optical module power            | Lowest media latency; passive copper avoids optical conversion                                 | Within a rack                    |
+| **AOC (active optical cable)**\index{AOC!definition}    | 3 to 30 meters                              | Higher cost (~`{python} SpineOpticsCost.aoc_cost_usd_str`) from permanently attached transceivers | Electrical/optical conversion plus forward error correction (FEC) adds hundreds of nanoseconds | Rack-to-rack or row-scale links  |
+| **Pluggable optics**\index{Pluggable optics!definition} | More than 30 meters                         | Highest module and power cost, but replaceable optics and fiber cords                             | Optical conversion and FEC add latency; distance enables topology reach                        | Network core and pod-scale links |
+
+: **Cable and optics placement trade-offs**: Common interconnect media occupy different reach, latency, and cost points, so cluster designers use copper inside racks and optics as distance begins to dominate placement. {#tbl-network-fabrics-link-media tbl-colwidths="[18,20,20,20,22]"}
+
+At PAM4 line rates, FEC[^fn-fec-link-latency]\index{FEC!optical latency budget} runs on copper and optical links alike. The media choice therefore changes conversion latency and power but leaves the FEC budget in place, and reach becomes a topology decision rather than a simple cable choice. The comparison in @tbl-network-fabrics-link-media is the cluster-geometry trade-off in miniature: copper is cheap and low latency but keeps accelerators close together, optical interconnects\index{Optical interconnect!reach and latency} extend a row or pod at higher power and latency, and pluggable optics\index{Pluggable optics!reach and cost} reaches the core only when the topology needs distance more than it needs minimum per-hop cost.
+
+[^fn-fec-link-latency]: [offset=-29mm] **FEC (forward error correction)**\index{FEC!latency tax}: At 400G and 800G speeds, signal integrity is fragile enough that Ethernet PHY designs rely on FEC to reconstruct corrupted bits [@anslow2016rsFec; @ethernetAlliance2025roadmap]. The exact latency depends on the PHY and module architecture; for ML fabric modeling, treating FEC as a per-hop latency budget is the conservative point, because a multi-hop path accumulates that budget before software can hide it.
 
 ```{=latex}
 \Needspace{30\baselineskip}
@@ -1954,10 +1964,36 @@ The $\alpha$-$\beta$ model quantifies the speed of a single link, but the 175B-p
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Topology section — rack-scale cluster GPU count
+# │ Context: Topology section — rack-scale cluster GPU count and the NDR
+# │          switch radix (Systems.SwitchFabric) behind the radix paragraph,
+# │          the fat-tree definition, and the switch-radix footnote.
 class NetworkTopologyRadixRecap:
+    # ┌── 1. LOAD ─────────────────────────────────────────────────────────────
+    n_gpus = Systems.Clusters.Training_1K.total_accelerators
+    radix = int(Systems.SwitchFabric.NdrSwitchPorts)
+    downlinks = int(Systems.SwitchFabric.NdrLeafDownlinkPorts)
+    uplinks = int(Systems.SwitchFabric.NdrLeafUplinkPorts)
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────
+    two_tier_hosts = radix**2 // 2
+    three_tier_hosts = radix**3 // 4
+    n_leaf_groups = n_gpus // downlinks
+
+    # ┌── 3. GUARD ────────────────────────────────────────────────────────────
+    check(downlinks + uplinks == radix, "Leaf downlinks plus uplinks must use every switch port")
+    check(downlinks == uplinks, "Prose calls the leaf split 1:1 (non-blocking)")
+    # The ToR paragraph hard-codes 4 DGX nodes × 8 GPUs = 32 GPUs per rack; the
+    # downlink count doubles as that rack GPU count and as the rack divisor.
+    check(downlinks == 4 * Systems.Nodes.DGX_H100.accelerators_per_node, "Leaf downlinks must equal the 32-GPU rack the ToR paragraph describes")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    n_gpus_str = fmt_count(Systems.Clusters.Training_1K.total_accelerators, commas=True, label="GPU")
+    n_gpus_str = fmt_count(n_gpus, commas=True, label="GPU")
+    radix_str = fmt(radix, precision=0, commas=False)
+    downlinks_str = fmt(downlinks, precision=0, commas=False)
+    uplinks_str = fmt(uplinks, precision=0, commas=False)
+    two_tier_hosts_str = fmt(two_tier_hosts, precision=0, commas=True)
+    three_tier_hosts_str = fmt(three_tier_hosts, precision=0, commas=True)
+    n_leaf_groups_str = fmt(n_leaf_groups, precision=0, commas=False)
 ```
 
 The physical arrangement of switches determines the bisection bandwidth $\text{BW}_{\text{bisect}}$ and whether the fabric is non-blocking. These two properties govern how well the network supports the global communication patterns that dominate distributed training, a constraint captured by the bisection bandwidth theorem (principle \ref{pri-bisection-bandwidth}).
@@ -1973,14 +2009,14 @@ The physical arrangement of switches determines the bisection bandwidth $\text{B
 # │       oversubscription ratio.
 # │ How: relative_throughput = 1 / ((1 - f_comm) + f_comm × oversub_ratio).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt
+from mlsysim.fmt import check, fmt, fmt_percent
 
 class NonBlockingOversubscription:
     """Throughput loss from a 2:1 oversubscribed spine."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    comm_fraction = 0.30
-    oversubscription_ratio = 2.0
+    comm_fraction = ReferenceStats.NetworkEconomicsProfile.CommunicationFraction
+    oversubscription_ratio = Systems.Fabrics.InfiniBand_NDR_Oversub2to1.oversubscription_ratio
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     relative_throughput, throughput_loss = calc_oversubscription_effect(
@@ -1991,8 +2027,10 @@ class NonBlockingOversubscription:
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs(throughput_loss_pct - 23.0769230769) < 1e-6, f"Expected about 23.1%, got {throughput_loss_pct}")
+    check(oversubscription_ratio == 2.0, "Prose says the 2:1 spine 'halves' bisection and 'doubles' comm time")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    oversub_ratio_str = fmt(oversubscription_ratio, precision=0, commas=False)
     comm_pct_str = fmt_percent(comm_fraction, precision=0, commas=False, style='prose')
     throughput_loss_pct_str = fmt_percent(throughput_loss_pct / 100, precision=1, commas=False, style='prose')
 ```
@@ -2013,7 +2051,7 @@ The first property, bisection bandwidth, quantifies the worst-case throughput ce
 # │ How: BW_bisect = (N/2) × beta / oversub_ratio via calc_bisection_bandwidth.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_math, fmt_multiple
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_count, fmt_math, fmt_multiple
 from mlsysim.physics import calc_bisection_bandwidth
 
 class BisectionDefinitionExample:
@@ -2022,7 +2060,7 @@ class BisectionDefinitionExample:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 400 Gb/s (50 GB/s) per port
-    oversub_ratio = 4.0  # scenario assumption: oversubscribed spine ratio
+    oversub_ratio = Systems.Fabrics.InfiniBand_NDR_Oversub4to1.oversubscription_ratio
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     gpus_per_side = n_gpus // 2
@@ -2036,7 +2074,7 @@ class BisectionDefinitionExample:
     check(round(slowdown, 3) == 4.0, "Slowdown must match the oversubscription ratio")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    gpus_str = fmt_count(n_gpus, commas=True, label="GPU")
+    gpus_value_str = fmt(n_gpus, precision=0, commas=True)
     link_gbit_per_s_str = fmt_bandwidth(beta, unit=Gbps, precision=0, commas=False)
     bisect_1_1_math = fmt_math(
         rf"\text{{BW}}_{{\text{{bisect}}}} = {gpus_per_side} \times {beta.to(GB / second).magnitude:.0f}\,\text{{GB/s}} "
@@ -2044,13 +2082,14 @@ class BisectionDefinitionExample:
     )
     bisect_4_1_tb_per_s_str = fmt_bandwidth(bisect_4_1, unit=TB / second, precision=1, commas=False)
     slowdown_mult_str = fmt_multiple(slowdown, precision=0, commas=False)
+    oversub_ratio_str = fmt(oversub_ratio, precision=0, commas=False)
 ```
 
 ::: {#dfn-network-fabrics-bisection-bandwidth .callout-definition title="Bisection bandwidth"}
 
 ***Bisection bandwidth***\index{Bisection bandwidth!definition} is a network topology metric defined as the minimum aggregate link capacity crossing any partition that divides the cluster into two equal halves, representing the worst-case throughput ceiling for traffic that must cross that partition, including global collectives.
 
-1.  **Significance**: Bisection bandwidth $\text{BW}_{\text{bisect}}$ directly sets the cluster-scale bandwidth ceiling for global synchronization. A `{python} BisectionDefinitionExample.gpus_str` fat-tree with `{python} BisectionDefinitionExample.link_gbit_per_s_str` links at 1:1 subscription provides `{python} BisectionDefinitionExample.bisect_1_1_math` per direction; a 4:1 oversubscribed spine reduces this to `{python} BisectionDefinitionExample.bisect_4_1_tb_per_s_str`, increasing the transfer-time lower bound for a fixed cut-crossing payload by `{python} BisectionDefinitionExample.slowdown_mult_str`. Actual AllReduce slowdown depends on rank placement, the collective schedule, and which links are saturated.
+1.  **Significance**: Bisection bandwidth $\text{BW}_{\text{bisect}}$ directly sets the cluster-scale bandwidth ceiling for global synchronization. A `{python} BisectionDefinitionExample.gpus_value_str`-GPU fat-tree with `{python} BisectionDefinitionExample.link_gbit_per_s_str` links at 1:1 subscription provides `{python} BisectionDefinitionExample.bisect_1_1_math` per direction; a `{python} BisectionDefinitionExample.oversub_ratio_str`:1 oversubscribed spine reduces this to `{python} BisectionDefinitionExample.bisect_4_1_tb_per_s_str`, increasing the transfer-time lower bound for a fixed cut-crossing payload by `{python} BisectionDefinitionExample.slowdown_mult_str`. Actual AllReduce slowdown depends on rank placement, the collective schedule, and which links are saturated.
 2.  **Distinction**: Unlike aggregate bandwidth (the sum of all edge link speeds, which can be high even in a poorly connected topology), $\text{BW}_{\text{bisect}}$ measures global connectivity. A star topology with 1,000 edge links all meeting at one central switch has high aggregate bandwidth but $\text{BW}_{\text{bisect}}$ limited by that switch's backplane capacity.
 3.  **Common pitfall**: A frequent misconception is that adding more leaf switches always increases $\text{BW}_{\text{bisect}}$. In a three-tier fat-tree, oversubscribing the spine layer (using fewer uplinks than downlinks per pod switch) reduces $\text{BW}_{\text{bisect}}$ below the edge-link total regardless of how many leaf switches are present.
 
@@ -2064,7 +2103,7 @@ Bisection bandwidth is a metric; the topology property that delivers full $\text
 
 ***Non-blocking fabric***\index{Non-blocking fabric!definition} is an ML cluster network topology in which any permutation of input-output port pairs can communicate simultaneously at full line rate without internal contention, achieved by ensuring that uplink capacity at every switch tier equals or exceeds downlink capacity.
 
-1.  **Significance**: In ML fleets, a non-blocking fabric can support full-rate permutation traffic with suitable routing, preserving the available $\text{BW}_{\text{bisect}}$ term for global collectives. A 2:1 oversubscribed spine halves the effective $\text{BW}_{\text{bisect}}$, doubling the communication time when that cut is the saturated bottleneck and dropping scaling efficiency $\eta_{\text{scaling}}$ accordingly. In a `{python} NonBlockingOversubscription.comm_pct_str`-communication workload, this costs roughly `{python} NonBlockingOversubscription.throughput_loss_pct_str` of total cluster throughput.
+1.  **Significance**: In ML fleets, a non-blocking fabric can support full-rate permutation traffic with suitable routing, preserving the available $\text{BW}_{\text{bisect}}$ term for global collectives. A `{python} NonBlockingOversubscription.oversub_ratio_str`:1 oversubscribed spine halves the effective $\text{BW}_{\text{bisect}}$, doubling the communication time when that cut is the saturated bottleneck and dropping scaling efficiency $\eta_{\text{scaling}}$ accordingly. In a `{python} NonBlockingOversubscription.comm_pct_str`-communication workload, this costs roughly `{python} NonBlockingOversubscription.throughput_loss_pct_str` of total cluster throughput.
 2.  **Distinction**: Unlike oversubscribed fabrics common in web data centers, where upper-tier links are shared among many lower-tier nodes, a non-blocking fabric provides dedicated path capacity for every possible pairing of senders and receivers simultaneously.
 3.  **Common pitfall**: A frequent misconception is that non-blocking means zero congestion. Endpoint congestion (incast) can still occur if multiple senders simultaneously target the same receiver port, regardless of how much internal fabric capacity is available.
 
@@ -2076,7 +2115,7 @@ Fat-trees build on Clos-style non-blocking network principles to supply full $\t
 
 The top-of-rack (ToR)\index{Top-of-rack switch!failure domain}\index{ToR switch|see{Top-of-rack switch}} switch serves as the fundamental physical aggregation point, defining both bandwidth limits and the minimum **failure domain**\index{Failure domain!definition} for the cluster. In a high-density AI configuration using standard DGX nodes, a single rack typically houses 4 nodes, each containing 8 GPUs, for a total of 32 accelerators. The ToR switch unites these devices but also creates a critical vulnerability: if the ToR fails, it instantly partitions 32 GPUs from the training job, forcing the global scheduler to halt and recover from the last checkpoint.
 
-To mitigate congestion at this edge, network architects maximize the switch **radix**\index{Radix!definition}, the number of ports available. A high-radix switch with 64 ports allocates 32 ports downlink to the servers (ensuring full bandwidth for the 32 GPUs) and 32 ports uplink to the spine. This 1:1 subscription ratio guarantees non-blocking performance at the rack level. For a cluster of `{python} NetworkTopologyRadixRecap.n_gpus_str`, the physical topology comprises approximately 32 such racks.
+To mitigate congestion at this edge, network architects maximize the switch **radix**\index{Radix!definition}, the number of ports available. A high-radix switch with `{python} NetworkTopologyRadixRecap.radix_str` ports allocates `{python} NetworkTopologyRadixRecap.downlinks_str` ports downlink to the servers (ensuring full bandwidth for the `{python} NetworkTopologyRadixRecap.downlinks_str` GPUs) and `{python} NetworkTopologyRadixRecap.uplinks_str` ports uplink to the spine. This 1:1 subscription ratio guarantees non-blocking performance at the rack level. For a cluster of `{python} NetworkTopologyRadixRecap.n_gpus_str`, the physical topology comprises approximately `{python} NetworkTopologyRadixRecap.n_leaf_groups_str` such racks.
 
 The same rack boundary also shapes recovery. The job scheduler must be topology-aware for performance, while reliable replica placement must keep redundant state and replacement capacity outside the same rack failure domain so that a single lost rack does not take down the entire training run.
 
@@ -2092,7 +2131,7 @@ The same rack boundary also shapes recovery. The job scheduler must be topology-
 
 ***Fat-tree***\index{Fat-tree!definition}\index{Clos network|see{Fat-tree}} is a hierarchical ML cluster network topology in which the number of parallel paths (and therefore aggregate cross-sectional capacity) increases at each switch tier toward the spine, providing full $\text{BW}_{\text{bisect}}$ and multiple equal-cost routes between any two nodes [@al-fares2008].
 
-1.  **Significance**: A $k$-ary fat-tree built from radix-$k$ switches supports $k^2/2$ hosts in a standalone two-tier configuration and $k^3/4$ hosts in a three-tier configuration with full $\text{BW}_{\text{bisect}}$. With $k=64$, a standalone two-tier fabric supports 2,048 GPUs and a three-tier fabric supports 65,536 hosts. This is a capacity bound for suitable routing and admissible traffic; it does not eliminate endpoint contention or guarantee that a particular AllReduce implementation reaches line rate.
+1.  **Significance**: A $k$-ary fat-tree built from radix-$k$ switches supports $k^2/2$ hosts in a standalone two-tier configuration and $k^3/4$ hosts in a three-tier configuration with full $\text{BW}_{\text{bisect}}$. With `{python} NetworkTopologyRadixRecap.radix_str`-port switches, a standalone two-tier fabric supports `{python} NetworkTopologyRadixRecap.two_tier_hosts_str` GPUs and a three-tier fabric supports `{python} NetworkTopologyRadixRecap.three_tier_hosts_str` hosts. This is a capacity bound for suitable routing and admissible traffic; it does not eliminate endpoint contention or guarantee that a particular AllReduce implementation reaches line rate.
 2.  **Distinction**: Unlike a standard tree (where bandwidth at the root is a single bottleneck shared by all leaves), a fat-tree replaces each root with multiple spine switches whose combined uplink capacity matches the total edge bandwidth, eliminating the bottleneck.
 3.  **Common pitfall**: A frequent misconception is that fat-trees guarantee zero network cost. They require $\mathcal{O}(N \log N)$ switches and dense cabling, so a non-blocking three-tier fat-tree at the 4,000-GPU scale needs hundreds of switches and more than ten thousand links before a single accelerator is purchased.
 
@@ -2349,7 +2388,7 @@ class FatTreeScaling:
     """Fat-tree host count for radix-64 switches."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    fat_tree_k = 64
+    fat_tree_k = int(Systems.SwitchFabric.NdrSwitchPorts)  # NDR switch radix
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     fat_tree_hosts_val = (fat_tree_k**3) // 4
@@ -2361,6 +2400,7 @@ class FatTreeScaling:
     check(fat_tree_hosts_val == 65536, f"k=64 fat-tree should support 65,536 hosts, got {fat_tree_hosts_val}")
     check(fat_tree_two_tier_hosts_val == 2048, f"k=64 standalone two-tier should support 2,048 hosts, got {fat_tree_two_tier_hosts_val}")
     check(fat_tree_pod_hosts_val == 1024, f"k=64 three-tier pod should hold 1,024 hosts, got {fat_tree_pod_hosts_val}")
+    check(fat_tree_two_tier_hosts_val == NetworkTopologyRadixRecap.two_tier_hosts, "Radix recap and fat-tree cell must agree")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     fat_tree_hosts_str = fmt_int(fat_tree_hosts_val, commas=True)
@@ -2382,7 +2422,7 @@ class NetworkFatTreeRecap:
     n_gpus_str = fmt(Systems.Clusters.Training_1K.total_accelerators, precision=0, commas=True)
 ```
 
-A fat-tree built from switches with radix[^fn-radix-switch-density] $k$ supports $N_{\text{hosts}} = k^{3}/4$ hosts at three tiers. A standalone two-tier non-blocking fabric can instead use $k$ leaves, each with $k/2$ host ports and $k/2$ uplinks, connected to $k/2$ spines. Each spine uses all $k$ ports to reach the leaves, providing $k^{2}/2 =$ `{python} FatTreeScaling.fat_tree_two_tier_hosts_str` host ports for radix-64 switches. One pod of the three-tier design has only $k/2$ leaves and therefore $(k/2)^2 =$ `{python} FatTreeScaling.fat_tree_pod_hosts_str` host ports; its aggregation switches reserve ports for the core. These are different port allocations and switch counts, not two ways of counting the same fabric. The `{python} NetworkFatTreeRecap.n_gpus_str` reference cluster fits within a standalone two-tier design.
+A fat-tree built from switches with radix[^fn-radix-switch-density] $k$ supports $N_{\text{hosts}} = k^{3}/4$ hosts at three tiers. A standalone two-tier non-blocking fabric can instead use $k$ leaves, each with $k/2$ host ports and $k/2$ uplinks, connected to $k/2$ spines. Each spine uses all $k$ ports to reach the leaves, providing $k^{2}/2 =$ `{python} FatTreeScaling.fat_tree_two_tier_hosts_str` host ports for radix-64 switches. One pod of the three-tier design has only $k/2$ leaves and therefore $(k/2)^2 =$ `{python} FatTreeScaling.fat_tree_pod_hosts_str` host ports; its aggregation switches reserve ports for the core. These are different port allocations and switch counts, not two ways of counting the same fabric. The `{python} NetworkFatTreeRecap.n_gpus_str`-GPU reference cluster fits within a standalone two-tier design.
 
 A concrete bisection estimate shows how quickly oversubscription turns into synchronization delay.
 
@@ -2408,10 +2448,11 @@ class BisectionScaling:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    gradient = 5 * GB  # scenario assumption: per-GPU gradient payload (2026-09-28: was 100 GB, which exceeds 80 GB of H100 HBM)
-    oversubscription_ratio = 4.0  # scenario assumption: cost-optimized spine
-    cluster_cost_m = 300  # scenario assumption: cluster cost in millions USD
-    comm_fraction = 0.30  # scenario assumption: training time spent communicating
+    _econ = ReferenceStats.NetworkEconomicsProfile
+    gradient = _econ.PerGpuGradientPayload  # per-GPU gradient payload
+    oversubscription_ratio = Systems.Fabrics.InfiniBand_NDR_Oversub4to1.oversubscription_ratio  # cost-optimized spine
+    cluster_cost = _econ.ClusterCapex  # cluster capital cost
+    comm_fraction = _econ.CommunicationFraction  # training time spent communicating
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     gpus_per_side = n_gpus // 2
@@ -2424,7 +2465,7 @@ class BisectionScaling:
     time_4_1 = total_data / bw_4_1_q
     slowdown = (time_4_1 / time_1_1).to_base_units().magnitude
     _, throughput_loss = calc_oversubscription_effect(comm_fraction, oversubscription_ratio)
-    waste_m = throughput_loss * cluster_cost_m
+    waste = throughput_loss * cluster_cost
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_gpus % 2 == 0, "Bisection model requires an even GPU count")
     # 2026-09-28: cut load depends on ring placement, not total network traffic.
@@ -2433,7 +2474,7 @@ class BisectionScaling:
     check(observed_crossings == crossing_edges_per_direction, "Alternating ring must have N/2 cut crossings per direction")
     check(abs(time_1_1.to(second).magnitude - 0.1998046875) < 1e-9, "Ring AllReduce time should be about 0.200 s")
     check(round(slowdown, 3) == round(oversubscription_ratio, 3), "Slowdown must match oversubscription ratio")
-    check(round(waste_m, 1) == 142.1, f"Expected oversubscription waste to be about $142.1M, got ${waste_m:.1f}M")
+    check(round(waste.to(USD).magnitude / MILLION, 1) == 142.1, f"Expected oversubscription waste to be about $142.1M, got {waste}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     bbs_n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
     bbs_gpus_per_side_value_str = fmt(gpus_per_side, precision=0, commas=False)
@@ -2447,14 +2488,14 @@ class BisectionScaling:
     bbs_slowdown_mult_str = fmt_multiple(slowdown, commas=False, precision=0)
     bbs_time_1_1_s_str = fmt_time(time_1_1, second, precision=3, commas=False)
     bbs_time_4_1_s_str = fmt_time(time_4_1, second, precision=3, commas=False)
-    bbs_cluster_cost_m_str = fmt_usd(cluster_cost_m * MILLION, precision=0, commas=False, scale="M")
+    bbs_cluster_cost_m_str = fmt_usd(cluster_cost, precision=0, commas=False, scale="M")
     bbs_comm_fraction_pct_str = fmt_percent(comm_fraction, precision=0, commas=False, style='prose')
-    bbs_waste_m_str = fmt_usd(waste_m * MILLION, precision=1, commas=False, scale="M")
+    bbs_waste_m_str = fmt_usd(waste, precision=1, commas=False, scale="M")
 ```
 
 ::: {#nbk-network-fabrics-bisection-bandwidth-cost-oversubscription .callout-notebook title="Bisection bandwidth: The cost of oversubscription"}
 
-**Problem**: A cluster designer is choosing between a "non-blocking" (1:1) fat-tree and a "cost-optimized" (4:1) spine for a cluster of `{python} BisectionScaling.bbs_n_gpus_str`. How much slower will a `{python} BisectionScaling.bbs_gradient_gb_str`-per-GPU AllReduce be on the cheaper network?
+**Problem**: A cluster designer is choosing between a "non-blocking" (1:1) fat-tree and a "cost-optimized" (`{python} BisectionScaling.bbs_oversubscription_ratio_str`:1) spine for a cluster of `{python} BisectionScaling.bbs_n_gpus_str`. How much slower will a `{python} BisectionScaling.bbs_gradient_gb_str`-per-GPU AllReduce be on the cheaper network?
 
 **Math**:
 Bisection bandwidth ($\text{BW}_{\text{bisect}}$) is the minimum pipe diameter between halves of the cluster.
@@ -2482,7 +2523,7 @@ These questions check whether hierarchical switch-fabric trade-offs are clear:
 
 :::
 
-[^fn-radix-switch-density]: **Switch radix**\index{Switch radix!port density}: High-end switches (for example, NVIDIA Quantum-2) can feature a radix of 64 ports, each at 400 Gb/s. This density allows a standalone two-tier fat-tree to support up to 2,048 GPUs; a path between distinct leaves traverses leaf, spine, and destination leaf, or three switches. As model scale pushes toward 100,000 GPUs, increasing switch radix (to 128 or 256), grouping accelerators into larger local domains, or accepting topology constraints are the main ways to avoid adding more tiers and the resulting latency/cost explosion.
+[^fn-radix-switch-density]: **Switch radix**\index{Switch radix!port density}: High-end switches (for example, NVIDIA Quantum-2) can feature a radix of `{python} NetworkTopologyRadixRecap.radix_str` ports, each at `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str`. This density allows a standalone two-tier fat-tree to support up to `{python} NetworkTopologyRadixRecap.two_tier_hosts_str` GPUs; a path between distinct leaves traverses leaf, spine, and destination leaf, or three switches. As model scale pushes toward 100,000 GPUs, increasing switch radix (to 128 or 256), grouping accelerators into larger local domains, or accepting topology constraints are the main ways to avoid adding more tiers and the resulting latency/cost explosion.
 
 Scaling beyond this requires a three-tier architecture with core switches, enabling the fabric to reach `{python} FatTreeScaling.fat_tree_hosts_str` hosts, but the added scale carries both cost and latency. A non-blocking $k=64$ three-tier tree requires roughly $5k^2/4 \approx$ `{python} FatTreeScaling.fat_tree_switches_str` switches across the core, aggregation, and edge layers; at `{python} FatTreeScaling.switch_cost_low_str` to `{python} FatTreeScaling.switch_cost_high_str` per switch, the switching layer alone represents `{python} FatTreeScaling.infra_cost_low_m_str` to `{python} FatTreeScaling.infra_cost_high_m_str`. Typical **hop counts**\index{Hop count!definition} also rise, from two inter-switch links and three switch traversals for intra-pod traffic (leaf-spine-leaf) to four inter-switch links and five switch traversals for inter-pod traffic (leaf-spine-core-spine-leaf), adding serialization delay and switch processing time to the $\alpha$ latency term across thousands of synchronization steps. Rail-optimized topologies respond to both pressures by matching the physical cabling pattern to the collective communication pattern.
 
@@ -2821,7 +2862,7 @@ class RailLatency:
     # ┌── 1. LOAD ──────────────────────────────────────────
     FABRIC_HOP_LATENCY = Systems.SwitchFabric.HopLatency
     t_hop = FABRIC_HOP_LATENCY  # switch + wire latency
-    n_nodes = 128
+    n_nodes = Systems.Clusters.Training_1K.count  # reference-cluster node count
     # Standard fat-tree: source Leaf -> Spine -> destination Leaf = 3 switch
     # traversals (2026-06-07: was counted as 2, dropping the destination leaf).
     # Rail-optimized: one shared rail switch = 1 traversal.
@@ -3107,7 +3148,45 @@ The danger of PFC lies in its cascading nature\index{Priority flow control!casca
 *One paused receiver can freeze unrelated flows.*
 :::
 
-::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**A true incast burst**: This deliberately worst-case fan-in scenario sends 256 sources at 50 GB/s toward one 400 Gb/s (50 GB/s) egress with a 32 MB buffer. The 12.8 TB/s offered load oversubscribes the destination egress by 256$\times$. Flat aggregation or synchronized reads can create this pattern; bandwidth-optimal ring AllReduce does not, because each rank exchanges point-to-point chunks." fig-alt="Eight labeled GPU nodes, with 248 more implied, converge at 50 GB/s each on one switch egress with 400 Gb/s capacity and a 32 MB buffer."}
+```{python}
+#| echo: false
+#| label: network-fabrics-incast-figure
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INCAST FIGURE SCENARIO (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-congestion-cascade caption. IncastBurst (@dfn-network-fabrics-incast)
+# │          reads the same inputs from this cell.
+# │ Goal: Pin the caption's sender count, rates, and buffer to the registry.
+# │ How: One DGX H100 SuperPOD scalable unit of NDR senders onto one 400G egress.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_memory, fmt_multiple
+
+class IncastCascadeFigure:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    n_senders = Systems.Clusters.DgxH100SuperPodSU.total_accelerators  # one GPU per sender
+    sender_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # per port, per direction
+    egress_port = Systems.Fabrics.Ethernet_400G.bandwidth
+    buffer = 32 * MB  # scenario assumption: switch egress buffer
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    offered = n_senders * sender_bw
+    oversub = (offered / egress_port).to_base_units().magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    # fig-alt (literal) says "Eight labeled GPU nodes, with 248 more implied".
+    check(n_senders == 256, "fig-alt text assumes 256 senders")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    n_senders_str = fmt_count(n_senders, commas=False)
+    sender_bw_gb_per_s_str = fmt_bandwidth(sender_bw, unit=GB / second, precision=0, commas=False)
+    port_gbit_per_s_str = fmt_bandwidth(egress_port, unit=Gbps, precision=0, commas=False)
+    port_gb_per_s_str = fmt_bandwidth(egress_port, unit=GB / second, precision=0, commas=False)
+    buffer_mb_str = fmt_memory(buffer, unit=MB, precision=0, commas=False)
+    offered_tb_per_s_str = fmt_bandwidth(offered, unit=TB / second, precision=1, commas=False)
+    oversub_mult_str = fmt_multiple(oversub, precision=0, commas=False)
+```
+
+::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**A true incast burst**: This deliberately worst-case fan-in scenario sends `{python} IncastCascadeFigure.n_senders_str` sources at `{python} IncastCascadeFigure.sender_bw_gb_per_s_str` toward one `{python} IncastCascadeFigure.port_gbit_per_s_str` (`{python} IncastCascadeFigure.port_gb_per_s_str`) egress with a `{python} IncastCascadeFigure.buffer_mb_str` buffer. The `{python} IncastCascadeFigure.offered_tb_per_s_str` offered load oversubscribes the destination egress by `{python} IncastCascadeFigure.oversub_mult_str`. Flat aggregation or synchronized reads can create this pattern; bandwidth-optimal ring AllReduce does not, because each rank exchanges point-to-point chunks." fig-alt="Eight labeled GPU nodes, with 248 more implied, converge at 50 GB/s each on one switch egress with 400 Gb/s capacity and a 32 MB buffer."}
 ![](images/svg/incast-flow.svg)
 
 <!--
@@ -3526,16 +3605,19 @@ class IncastBurst:
     """Many-to-one incast burst onto a single switch egress port."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    su_nodes = 32  # scenario assumption: SuperPOD scalable unit (32 DGX nodes)
-    gpus_per_node = Systems.Clusters.Training_1K.node.accelerators_per_node  # 8 GPUs per DGX node
+    _su = Systems.Clusters.DgxH100SuperPodSU  # DGX H100 SuperPOD scalable unit
+    su_nodes = _su.count  # 32 DGX nodes per scalable unit
+    gpus_per_node = _su.node.accelerators_per_node  # 8 GPUs per DGX node
     n_senders = su_nodes * gpus_per_node  # 256 scalable-unit GPUs (one per egress)
-    sender_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per port (per direction)
-    egress_port = Systems.Fabrics.Ethernet_400G.bandwidth  # 400 Gb/s (50 GB/s) egress port
-    buffer = 32 * MB  # scenario assumption: switch egress buffer
+    sender_bw = IncastCascadeFigure.sender_bw  # 50 GB/s per port (per direction)
+    egress_port = IncastCascadeFigure.egress_port  # 400 Gb/s (50 GB/s) egress port
+    buffer = IncastCascadeFigure.buffer  # scenario assumption (set in the figure cell): switch egress buffer
     feedback_rtt = 5 * microsecond  # scenario assumption: congestion-feedback round trip
+    ref_cluster_gpus = Systems.Clusters.Training_1K.total_accelerators  # SuperPOD prose: reference cluster
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     offered = n_senders * sender_bw
+    su_per_ref_cluster = ref_cluster_gpus // n_senders
     oversub = (offered / egress_port).to_base_units().magnitude
     buffer_hold = buffer / egress_port  # time one egress stream takes to drain the buffer
     net_fill = offered - egress_port  # fill rate after the single egress port drains
@@ -3545,13 +3627,21 @@ class IncastBurst:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(offered.to(TB / second).magnitude - 12.8) < 1e-6, "256 × 50 GB/s should be 12.8 TB/s")
     check(round(oversub) == 256, "Offered load should oversubscribe the egress port 256×")
+    check(n_senders == IncastCascadeFigure.n_senders, "Incast definition and figure caption must use the same sender count")
     check(abs(buffer_hold.to(microsecond).magnitude - 640) < 1e-3, "32 MB / 50 GB/s should be 640 μs")
     check(overflow.to(microsecond).magnitude < 5, "Buffer should overflow in a few microseconds")
     check(abs(bandwidth_delay_product.to(KB).magnitude - 250) < 1e-6, "50 GB/s × 5 μs should be 250 KB")
+    check(ref_cluster_gpus % n_senders == 0, "Reference cluster should be a whole number of scalable units")
+    # SuperPOD prose spells these counts as words; fail loudly if the registry moves them.
+    check(int(gpus_per_node) == 8, "SuperPOD prose says eight H100 GPUs per node")
+    check(su_per_ref_cluster == 4, "SuperPOD prose says four scalable units")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     n_senders_str = fmt_count(n_senders, commas=False)
     su_nodes_str = fmt_count(su_nodes, commas=False, label="node")
+    gpus_per_node_word_str = MarkdownStr("eight")  # guarded above
+    su_per_ref_cluster_word_str = MarkdownStr("four")  # guarded above
+    ref_cluster_gpus_str = fmt_count(ref_cluster_gpus, commas=True, label="GPU")
     n_senders_gpus_str = fmt_count(n_senders, commas=False, label="GPU")
     sender_bw_gb_per_s_str = fmt_bandwidth(sender_bw, unit=GB / second, precision=0, commas=False)
     offered_tb_per_s_str = fmt_bandwidth(offered, unit=TB / second, precision=1, commas=False)
@@ -3628,13 +3718,40 @@ The bandwidth hierarchy plotted in @fig-bandwidth-hierarchy dictates the paralle
 
 ### NVIDIA DGX SuperPOD architecture {#sec-network-fabrics-dgx-superpod}
 
-The NVIDIA DGX SuperPOD architecture connects DGX H100 nodes using an NDR InfiniBand network, serving as a concrete implementation of the gradient bus concept [@nvidia2023dgxSuperpodH100]. Each node acts as a dense compute island, with eight H100 GPUs connected via NVSwitch to provide `{python} NetworkFabricsClusterRecap.nvlink_h100_gb_per_s_str` of internal bandwidth. Externally, each GPU pairs with a ConnectX-7 NIC delivering `{python} NetworkFabricsClusterRecap.ib_ndr_gbit_per_s_str` of injection bandwidth. Across a standard scalable unit of `{python} IncastBurst.su_nodes_str` (`{python} IncastBurst.n_senders_gpus_str`), this yields an aggregate injection bandwidth of `{python} IncastBurst.offered_tb_per_s_str` (`{python} IncastBurst.n_senders_str` $\times$ `{python} IncastBurst.sender_bw_gb_per_s_str`), the rate the scalable unit can offer the fabric when every GPU transmits at once.
+The NVIDIA DGX SuperPOD architecture connects DGX H100 nodes using an NDR InfiniBand network, serving as a concrete implementation of the gradient bus concept [@nvidia2023dgxSuperpodH100]. Each node acts as a dense compute island, with `{python} IncastBurst.gpus_per_node_word_str` H100 GPUs connected via NVSwitch to provide `{python} NetworkFabricsClusterRecap.nvlink_h100_gb_per_s_str` of internal bandwidth. Externally, each GPU pairs with a ConnectX-7 NIC delivering `{python} NetworkFabricsClusterRecap.ib_ndr_gbit_per_s_str` of injection bandwidth. Across a standard scalable unit of `{python} IncastBurst.su_nodes_str` (`{python} IncastBurst.n_senders_gpus_str`), this yields an aggregate injection bandwidth of `{python} IncastBurst.offered_tb_per_s_str` (`{python} IncastBurst.n_senders_str` $\times$ `{python} IncastBurst.sender_bw_gb_per_s_str`), the rate the scalable unit can offer the fabric when every GPU transmits at once.
 
-This architecture explicitly instantiates the five-level network model. At Level 1, it standardizes on `{python} NetworkFabricsClusterRecap.ib_ndr_gbit_per_s_str` NDR links, with media chosen by reach between each node and its leaf and between leaf and spine. At Level 2, it relies on InfiniBand's native credit-based flow control to guarantee a lossless medium without the fragility of Ethernet PFC. Level 3 implements a rail-optimized fat-tree\index{Rail-optimized topology!DGX SuperPOD implementation}: GPU rails are aligned across a scalable unit so same-rail traffic stays close and cross-rail traffic traverses the spine layer. At Level 4, hardware-based adaptive routing can select among spine paths to improve bisection behavior for cross-rank communication. At Level 5, the design is modular: multiple SuperPOD scalable units connect through additional switching to form larger clusters [@nvidia2023dgxSuperpodH100]. For the 175B-parameter model, the physical infrastructure would consist of approximately four SuperPOD scalable units wired together, allowing about 1,024 GPUs to function as a single synchronous instrument.
+This architecture explicitly instantiates the five-level network model. At Level 1, it standardizes on `{python} NetworkFabricsClusterRecap.ib_ndr_gbit_per_s_str` NDR links, with media chosen by reach between each node and its leaf and between leaf and spine. At Level 2, it relies on InfiniBand's native credit-based flow control to guarantee a lossless medium without the fragility of Ethernet PFC. Level 3 implements a rail-optimized fat-tree\index{Rail-optimized topology!DGX SuperPOD implementation}: GPU rails are aligned across a scalable unit so same-rail traffic stays close and cross-rail traffic traverses the spine layer. At Level 4, hardware-based adaptive routing can select among spine paths to improve bisection behavior for cross-rank communication. At Level 5, the design is modular: multiple SuperPOD scalable units connect through additional switching to form larger clusters [@nvidia2023dgxSuperpodH100]. For the 175B-parameter model, the physical infrastructure would consist of `{python} IncastBurst.su_per_ref_cluster_word_str` SuperPOD scalable units wired together, allowing `{python} IncastBurst.ref_cluster_gpus_str` to function as a single synchronous instrument.
 
 ### Meta Grand Teton platform {#sec-network-fabrics-grand-teton}
 
-Meta disclosed two Grand Teton-based 24,576-H100 clusters: one using RoCE over an Arista/OCP Ethernet fabric and one using NVIDIA Quantum-2 InfiniBand, both with 400 Gb/s endpoints. Meta used both for Llama 3 training and reported ongoing Llama 3 training on the RoCE cluster [@meta2024genaiInfrastructure]. The primary motivation for Ethernet is operational scale and supply chain resilience: by using Ethernet, Meta can source switches from multiple vendors and use the same optical infrastructure and management tooling shared by their front-end serving fleet, avoiding the operational silo of a dedicated InfiniBand island.
+```{python}
+#| echo: false
+#| label: network-fabrics-grand-teton
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ META GRAND TETON CLUSTERS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-grand-teton opening paragraph.
+# │ Goal: Pin the disclosed cluster size and endpoint rate to the registry.
+# │ How: Systems.Clusters.Meta_GenAI_H100_24K_RoCE / _IB (3,072 Grand Teton
+# │      nodes × 8 H100) on Systems.Fabrics.RoCE_400G / InfiniBand_NDR.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_bandwidth
+
+class GrandTetonClusters:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    roce = Systems.Clusters.Meta_GenAI_H100_24K_RoCE
+    ib = Systems.Clusters.Meta_GenAI_H100_24K_IB
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(roce.total_accelerators == ib.total_accelerators, "Both Meta clusters have the same GPU count")
+    check(roce.fabric.bandwidth == ib.fabric.bandwidth, "Both Meta clusters use the same endpoint rate")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    n_gpus_value_str = fmt(roce.total_accelerators, precision=0, commas=True)
+    endpoint_gbit_per_s_str = fmt_bandwidth(roce.fabric.bandwidth, unit=Gbps, precision=0, commas=False)
+```
+
+Meta disclosed two Grand Teton-based `{python} GrandTetonClusters.n_gpus_value_str`-H100 clusters: one using RoCE over an Arista/OCP Ethernet fabric and one using NVIDIA Quantum-2 InfiniBand, both with `{python} GrandTetonClusters.endpoint_gbit_per_s_str` endpoints. Meta used both for Llama 3 training and reported ongoing Llama 3 training on the RoCE cluster [@meta2024genaiInfrastructure]. The primary motivation for Ethernet is operational scale and supply chain resilience: by using Ethernet, Meta can source switches from multiple vendors and use the same optical infrastructure and management tooling shared by their front-end serving fleet, avoiding the operational silo of a dedicated InfiniBand island.
 
 Making Ethernet perform like a dedicated HPC fabric at this scale requires significant engineering at Level 4. Meta's RoCE study describes PFC watchdogs for long-duration pause events, iterative routing designs beyond plain ECMP, future-oriented flowlet switching experiments, and a 400G deployment experience in which DCQCN tuning proved difficult enough that Meta proceeded without DCQCN while relying on PFC plus higher-layer collective controls [@gangidi2024rdma]. While this architecture achieves high line-rate bandwidth for large gradient transfers, it accepts a trade-off: small-message latency can remain higher than InfiniBand because RoCE deployments rely on Ethernet buffering, QoS, PFC/ECN/DCQCN tuning, routing policy, and switch/NIC implementation choices rather than InfiniBand's native credit-based fabric semantics. For giant models where bandwidth dominates, this is an acceptable exchange; for latency-sensitive MoE routing, the penalty requires careful algorithmic compensation.
 
@@ -3648,7 +3765,37 @@ These case studies close the five-level stack by showing how the physical wire, 
 
 ## Network Virtualization {#sec-network-fabrics-virtualization}
 
-Production ML clusters are rarely dedicated to a single training job, creating a massive economic imperative for efficient multi-tenancy. A \$300 million supercomputer that sits 30 percent idle because it cannot securely isolate concurrent workloads represents a \$90 million waste of capital. To recover this utility, the network must support virtualization\index{Network virtualization!multi-tenancy} along three orthogonal dimensions: bandwidth partitioning (guaranteeing minimum throughput), latency determinism (preventing head-of-line blocking), and security isolation (preventing memory snooping between tenants). Technologies like single-root I/O virtualization (SR-IOV) and virtual lanes decouple the training job from the physical wire, much as hypervisors decoupled the operating system from the CPU. For the 175B model, this means the training job can reliably consume 80 percent of the cluster's $\text{BW}_{\text{bisect}}$ while a high-priority inference service and a background data preprocessing job share the remaining 20 percent, with the fabric enforcing hard boundaries that prevent the preprocessor's bursty traffic from stalling gradient updates.
+```{python}
+#| echo: false
+#| label: network-virtualization-idle-cost
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MULTI-TENANCY IDLE-CAPITAL COST (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-virtualization opening paragraph.
+# │ Goal: Price the capital stranded by a cluster that cannot isolate tenants.
+# │ How: stranded capital = cluster capex × idle fraction. Capex is the same
+# │      NetworkEconomicsProfile anchor the bisection notebook uses.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_percent, fmt_usd
+
+class VirtualizationIdleCost:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    cluster_cost = ReferenceStats.NetworkEconomicsProfile.ClusterCapex
+    idle_fraction = 0.30  # scenario assumption: share of cluster idle without tenant isolation
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    stranded = cluster_cost * idle_fraction
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(0 < idle_fraction < 1, "Idle fraction must be a fraction")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    cluster_cost_str = fmt_usd(cluster_cost, precision=0, commas=False, scale="million")
+    idle_pct_str = fmt_percent(idle_fraction, precision=0, commas=False, style="prose")
+    stranded_str = fmt_usd(stranded, precision=0, commas=False, scale="million")
+```
+
+Production ML clusters are rarely dedicated to a single training job, creating a massive economic imperative for efficient multi-tenancy. A `{python} VirtualizationIdleCost.cluster_cost_str` supercomputer that sits `{python} VirtualizationIdleCost.idle_pct_str` idle because it cannot securely isolate concurrent workloads represents a `{python} VirtualizationIdleCost.stranded_str` waste of capital. To recover this utility, the network must support virtualization\index{Network virtualization!multi-tenancy} along three orthogonal dimensions: bandwidth partitioning (guaranteeing minimum throughput), latency determinism (preventing head-of-line blocking), and security isolation (preventing memory snooping between tenants). Technologies like single-root I/O virtualization (SR-IOV) and virtual lanes decouple the training job from the physical wire, much as hypervisors decoupled the operating system from the CPU. For the 175B model, this means the training job can reliably consume 80 percent of the cluster's $\text{BW}_{\text{bisect}}$ while a high-priority inference service and a background data preprocessing job share the remaining 20 percent, with the fabric enforcing hard boundaries that prevent the preprocessor's bursty traffic from stalling gradient updates.
 
 ### Hardware NIC virtualization with SR-IOV {#sec-network-fabrics-sriov}
 
@@ -3798,7 +3945,7 @@ The diagnostic sequence preserves the chapter's layer model: application symptom
 
 ::: {#chk-network-fabrics-diagnosing-training-slowdown .callout-checkpoint title="Diagnosing a training slowdown"}
 
-Your 175B model training job has been running for 3 days on the 1,024-GPU reference cluster. You notice that the iteration time has gradually increased from 4.2 seconds to 4.8 seconds (a 14 percent slowdown). The GPU utilization reported by `nvidia-smi` has dropped from 92 percent to 85 percent.
+Your `{python} NetworkRunningExampleCluster.params_str` model training job has been running for 3 days on the `{python} NetworkRunningExampleCluster.n_gpus_value_str`-GPU reference cluster. You notice that the iteration time has gradually increased from 4.2 seconds to 4.8 seconds (a 14 percent slowdown). The GPU utilization reported by `nvidia-smi` has dropped from 92 percent to 85 percent.
 
 - [ ] **First diagnostic**: choose the first diagnostic step, name the tool that confirms whether the bottleneck is communication-bound or compute-bound, and cite the evidence that distinguishes the two.
 - [ ] **Physical layer**: identify physical-layer causes that could explain a 50 percent bandwidth drop when `ib_write_bw` finds one node pair at 24 GB/s instead of the expected 48 GB/s, and verify them using switch counters.
@@ -3877,7 +4024,7 @@ A quick estimate makes the power dividend concrete.
 ```{python}
 #| echo: false
 #| label: optical-dividend-calc
-from mlsysim.fmt import check, fmt, fmt_int, fmt_power
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_int, fmt_power
 
 class OpticalDividend:
     """Power savings from Co-Packaged Optics (CPO)."""
@@ -3913,6 +4060,7 @@ class OpticalDividend:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     n_ports_str = fmt(n_ports, precision=0, commas=False)
+    switch_capacity_tbit_per_s_str = fmt_bandwidth(SWITCH_ASIC_51T2_BW, unit=terabit / second, precision=1, commas=False)
     p_pluggable_w_str = fmt_power(OPTICS_POWER_PLUGGABLE_400G_W, unit=watt, precision=0, commas=False)
     p_cpo_w_str = fmt_power(OPTICS_POWER_CPO_400G_W, unit=watt, precision=0, commas=False)
     savings_kw_str = fmt_power(savings, unit=kilowatt, precision=2, commas=False)
@@ -3926,7 +4074,7 @@ class OpticalDividend:
 
 ::: {#nbk-network-fabrics-napkin-math-optical-dividend .callout-notebook title="The optical dividend"}
 
-**Problem**: Calculate the power savings of moving a 51.2 Tb/s switch from pluggable transceivers to co-packaged optics.
+**Problem**: Calculate the power savings of moving a `{python} OpticalDividend.switch_capacity_tbit_per_s_str` switch from pluggable transceivers to co-packaged optics.
 
 1. **Pluggable architecture**\index{Pluggable optics!power cost}: `{python} OpticalDividend.n_ports_str` ports $\times$ `{python} OpticalDividend.p_pluggable_w_str` = `{python} OpticalDividend.total_pluggable_kw_str` for optics alone.
 2. **CPO architecture**\index{Co-packaged optics!power savings}: `{python} OpticalDividend.n_ports_str` engines $\times$ `{python} OpticalDividend.p_cpo_w_str` = `{python} OpticalDividend.total_cpo_kw_str`.
@@ -4055,18 +4203,19 @@ RoCE over Ethernet can achieve throughput comparable to InfiniBand for large tra
 # │ Context: Fallacies — bisection waste recap.
 class BisectionWasteRecap:
     num_gpus = Systems.Clusters.Training_1K.total_accelerators
-    gradient_size_gb = 5
-    oversub_ratio_b = 4
-    cluster_cost_m = 300
-    comm_fraction = 0.30
+    # Same anchors as BisectionScaling (@sec-network-fabrics-fat-tree).
+    oversub_ratio_b = Systems.Fabrics.InfiniBand_NDR_Oversub4to1.oversubscription_ratio
+    cluster_cost = ReferenceStats.NetworkEconomicsProfile.ClusterCapex
+    comm_fraction = ReferenceStats.NetworkEconomicsProfile.CommunicationFraction
     rel_throughput, throughput_loss = calc_oversubscription_effect(comm_fraction, oversub_ratio_b)
-    waste_val = throughput_loss * cluster_cost_m
+    waste_val = throughput_loss * cluster_cost
+    check(waste_val == BisectionScaling.waste, "Fallacy recap must match the bisection-bottleneck notebook")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     oversub_ratio_b_value_str = fmt(oversub_ratio_b, precision=0, commas=False)
     oversub_ratio_b_mult_str = fmt_multiple(oversub_ratio_b, precision=0, commas=False)
-    cluster_cost_m_str = fmt_usd(cluster_cost_m * MILLION, precision=0, commas=False, scale="M")
+    cluster_cost_m_str = fmt_usd(cluster_cost, precision=0, commas=False, scale="M")
     comm_fraction_pct_str = fmt_percent(comm_fraction, precision=0, commas=False, style="prose")
-    waste_m_str = fmt_usd((waste_val) * MILLION, precision=1, commas=False, scale="M")
+    waste_m_str = fmt_usd(waste_val, precision=1, commas=False, scale="M")
 ```
 
 :::

@@ -342,9 +342,73 @@ What matters for system design is the kind of difference these ratios represent.
 
 The transition to on-device learning introduces fundamental tension in machine learning systems design. While cloud-based architectures use abundant computational resources and controlled operational environments, edge devices must function within severely constrained resource envelopes. Memory ranges from a few gigabytes on phones down to hundreds of kilobytes on microcontrollers, sustained power ranges from a few watts down to milliwatts, and network connectivity may be intermittent or entirely absent. When a local model operates in a safety-critical loop, these constraints become life-safety engineering problems.
 
+```{python}
+#| echo: false
+#| label: edge-mobile-power-envelope
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MOBILE POWER ENVELOPE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Archetype C power wall, battery/thermal prose, and nearby footnote.
+# │
+# │ Goal: Keep mobile sustained and burst power ranges sourced from MLSysIM.
+# │ Show: Sustained and burst mobile ML power ranges; hours a flagship
+# │       battery lasts at the burst ceiling.
+# │ How: Pull ReferenceStats.MobilePower anchors and the Archetype C scenario,
+# │      validate ordering, format ranges; hours = battery_Wh / burst_W.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import ReferenceStats, Scenarios
+from mlsysim.core.units import Wh, hour, watt
+from mlsysim.fmt import check, fmt_qty_range, fmt_power, fmt_energy, fmt_time
+
+class EdgeMobilePowerEnvelope:
+    """Shared mobile power ranges for edge-learning prose."""
+
+    # ┌── 1. LOAD ────────────────────────────────────────────────────────────
+    archetype_c = Scenarios.FederatedMobileVision
+    sustained_low = ReferenceStats.MobilePower.MobileMlSustainedLow
+    sustained_high = ReferenceStats.MobilePower.MobileMlSustainedHigh
+    burst_low = ReferenceStats.MobilePower.MobileMlBurstLow
+    burst_high = ReferenceStats.MobilePower.MobileMlBurstHigh
+    battery = ReferenceStats.PhoneBattery.EnergyWh
+
+    # ┌── 2. EXECUTE ─────────────────────────────────────────────────────────
+    burst_battery_hours = (battery / burst_high).to(hour).magnitude
+
+    # ┌── 3. GUARD ───────────────────────────────────────────────────────────
+    check(sustained_low < sustained_high < burst_low < burst_high, "Mobile sustained and burst power ranges should be ordered.")
+    check(archetype_c.power_budget == sustained_high, "Archetype C sustained budget should equal the mobile sustained ceiling.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    envelope_range_str = fmt_qty_range(
+        sustained_low,
+        burst_high,
+        watt,
+        precision=0,
+        commas=False,
+    )
+    burst_high_str = fmt_power(burst_high, unit=watt, precision=0, commas=False)
+    battery_wh_str = fmt_energy(battery, unit=Wh, precision=0, commas=False)
+    burst_battery_hours_str = fmt_time(burst_battery_hours, 'hour', precision=1, commas=False, style='word')
+    sustained_range_str = fmt_qty_range(
+        sustained_low,
+        sustained_high,
+        watt,
+        precision=0,
+        commas=False,
+    )
+    burst_range_str = fmt_qty_range(
+        burst_low,
+        burst_high,
+        watt,
+        precision=0,
+        commas=False,
+    )
+```
+
 ::: {#lhs-edge-intelligence-archetype-c-federated-mobilenet-edge-power-wall .callout-lighthouse title="Archetype C (Federated MobileNet): The edge power wall"}
 
-These constraints run through Archetype C (Federated MobileNet) (@sec-introduction-archetype-c-federated-mobilenet-65a3), where learning happens on phone-class devices whose power budget spans roughly 2 to 10 W, a few watts sustained with brief bursts toward 10 W, and which must share that budget with the user's foreground work. Privacy and policy constraints often forbid moving raw examples off the device, and even where transfer is permitted, a mobile uplink and battery rarely afford shipping raw data to the cloud. Data locality is therefore both a policy requirement and a bandwidth and energy constraint. Quantized training, sparse updates, and federated coordination are the strategies that let Archetype C learn within that envelope. Microcontroller-class sensors with hundreds of kilobytes of memory and milliwatt budgets sit at an extreme below Archetype C, and this chapter treats them as such.
+These constraints run through Archetype C (Federated MobileNet) (@sec-introduction-archetype-c-federated-mobilenet-65a3), where learning happens on phone-class devices whose power budget spans roughly `{python} EdgeMobilePowerEnvelope.envelope_range_str`, a few watts sustained with brief bursts toward `{python} EdgeMobilePowerEnvelope.burst_high_str`, and which must share that budget with the user's foreground work. Privacy and policy constraints often forbid moving raw examples off the device, and even where transfer is permitted, a mobile uplink and battery rarely afford shipping raw data to the cloud. Data locality is therefore both a policy requirement and a bandwidth and energy constraint. Quantized training, sparse updates, and federated coordination are the strategies that let Archetype C learn within that envelope. Microcontroller-class sensors with hundreds of kilobytes of memory and milliwatt budgets sit at an extreme below Archetype C, and this chapter treats them as such.
 
 :::
 
@@ -714,7 +778,7 @@ Decentralized, continuous learning rewrites the rules of system design. The syst
 
 ## Design Constraints {#sec-edge-intelligence-design-constraints-c776}
 
-Fine-tuning a neural network on a smartphone is constrained by power and heat. A GPU training cluster may consume megawatts, while a smartphone sustains only a few watts before throttling and bursts toward 10 W for brief periods. Even held at that 10 W burst ceiling, an idealized 15 Wh battery would be exhausted in about 1.5 hours, and thermal discomfort or throttling would end the workload sooner. On-device learning must therefore use compute, memory, and data sparingly.
+Fine-tuning a neural network on a smartphone is constrained by power and heat. A GPU training cluster may consume megawatts, while a smartphone sustains only a few watts before throttling and bursts toward `{python} EdgeMobilePowerEnvelope.burst_high_str` for brief periods. Even held at that burst ceiling, an idealized `{python} EdgeMobilePowerEnvelope.battery_wh_str` battery would be exhausted in about `{python} EdgeMobilePowerEnvelope.burst_battery_hours_str`, and thermal discomfort or throttling would end the workload sooner. On-device learning must therefore use compute, memory, and data sparingly.
 
 The constraints on parameters, operations, and data interact multiplicatively rather than additively, creating a constrained optimization problem far more challenging than inference-only deployment. The most important shift concerns what compression is for. Quantization shrinks bytes per weight, pruning removes unnecessary parameters, and knowledge distillation transfers behavior into a smaller architecture, while on-device learning turns these tools from optional optimizations into baseline feasibility requirements. This compression baseline, established here, is what later sections build on rather than re-derive.
 
@@ -1114,13 +1178,15 @@ Resource-constrained devices use a two-stage learning process. Offline pretraini
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Model constraints — MobileNetV2 and STM32 sizing.
-from mlsysim import BYTES_FP32, BYTES_INT8, Datasets, KB, MB, Models, param
+# │ Context: Model constraints — MobileNetV2, STM32F4, and ESP32-S3 sizing.
+from mlsysim import BYTES_FP32, BYTES_INT8, Datasets, Hardware, KB, KiB, MB, Models, param
+from mlsysim.core.units import ureg
 from mlsysim.fmt import (
     check,
     fmt_int,
     fmt_math,
     fmt_memory,
+    fmt_memory_capacity,
     fmt_params,
     fmt_percent,
     fmt_qty_int,
@@ -1130,9 +1196,14 @@ class EdgeMobilenetSizing:
     mobilenetv2_alpha10_params = int(Models.Vision.MobileNetV2.parameters.to(param).magnitude)
     mobilenetv2_alpha05_total_params = int(Models.Vision.MobileNetV2_Alpha0_5.parameters.to(param).magnitude)
     mobilenetv2_alpha05_feature_params = int(Models.Vision.MobileNetV2_Alpha0_5FeatureExtractor.parameters.to(param).magnitude)
-    stm32_sram_kb = 192
-    stm32_hidden_inputs = 1_000
-    stm32_hidden_outputs = 10
+    stm32 = Hardware.Tiny.STM32F4
+    esp32 = Hardware.Tiny.ESP32_S3
+    stm32_sram = stm32.memory.sram_capacity
+    stm32_clock = stm32.compute.clock_rate
+    esp32_sram = esp32.memory.sram_capacity
+    esp32_clock = esp32.compute.clock_rate
+    stm32_hidden_inputs = 1_000  # scenario assumption: dense-layer input features
+    stm32_hidden_outputs = 10  # scenario assumption: hidden units
     imagenet = Datasets.ImageNet
     imagenet_width_px = imagenet.image_width
     imagenet_height_px = imagenet.image_height
@@ -1145,7 +1216,6 @@ class EdgeMobilenetSizing:
     imagenet_rgb_image = imagenet_width_px * imagenet_height_px * imagenet_channels * bytes_per_channel
     stm32_hidden_params = stm32_hidden_inputs * stm32_hidden_outputs + stm32_hidden_outputs
     stm32_hidden = stm32_hidden_params * BYTES_FP32
-    stm32_sram = stm32_sram_kb * KB
     imagenet_rgb_sram_pct = (imagenet_rgb_image / EdgeDeviceSpectrum.mcu_sram).to("").magnitude
     imagenet_rgb_sram_pct_rounded = round(imagenet_rgb_sram_pct * 10) / 10
     stm32_hidden_sram_pct = (stm32_hidden / stm32_sram).to_base_units().magnitude * 100
@@ -1165,9 +1235,14 @@ class EdgeMobilenetSizing:
     imagenet_rgb_shape_math = fmt_math(rf"{imagenet_width_px}{{\times}}{imagenet_height_px}{{\times}}{imagenet_channels}")
     imagenet_rgb_image_kb_str = fmt_qty_int(imagenet_rgb_image, unit=KB, approx=True, commas=False)
     imagenet_rgb_sram_pct_str = fmt_percent(imagenet_rgb_sram_pct_rounded, precision=0, commas=False, style='prose')
-    stm32_hidden_inputs_str = fmt_int(stm32_hidden_inputs, commas=False)
-    stm32_hidden_kb_str = fmt_memory(stm32_hidden, unit=KB, precision=3, commas=False)
-    stm32_hidden_sram_pct_str = fmt_percent(stm32_hidden_sram_pct / 100, precision=3, commas=False, style='prose')
+    stm32_hidden_inputs_str = fmt_int(stm32_hidden_inputs, commas=True)
+    stm32_hidden_kb_str = fmt_qty_int(stm32_hidden, KB, commas=False)
+    stm32_hidden_sram_pct_str = fmt_percent(round(stm32_hidden_sram_pct) / 100, precision=0, commas=False, style='prose')
+    stm32_hidden_outputs_str = fmt_int(stm32_hidden_outputs, commas=False)
+    stm32_sram_kb_str = fmt_memory_capacity(stm32_sram, unit=KiB, precision=0, commas=False)
+    stm32_clock_mhz_str = fmt_qty_int(stm32_clock, ureg.MHz, commas=False)
+    esp32_sram_kb_str = fmt_memory_capacity(esp32_sram, unit=KiB, precision=0, commas=False)
+    esp32_clock_mhz_str = fmt_qty_int(esp32_clock, ureg.MHz, commas=False)
     model_budget = 4 * MB  # scenario assumption: compact on-device model budget
     model_budget_mb_str = fmt_qty_int(model_budget, MB, commas=False)
 ```
@@ -1181,50 +1256,6 @@ The scale of these constraints becomes concrete across the device spectrum. Mobi
 The training process itself dramatically expands the effective memory footprint. Standard backpropagation caches activations for each layer during the forward pass, then reuses them during gradient computation in the backward pass. The constraint-amplification analysis established that this activation caching multiplies memory requirements compared to inference-only deployment. A seemingly modest 10-layer convolutional model processing $64{\times}64$ images may require 1 to 2 MB, well beyond the SRAM capacity of most embedded systems.
 
 Model complexity also directly affects runtime energy consumption and thermal limits. In smartwatches or battery-powered wearables, sustained model training can rapidly deplete energy reserves or trigger thermal throttling that degrades performance. Training a full model using floating-point operations on these devices is often infeasible from an energy perspective, even when memory constraints are satisfied. Ultra-lightweight benchmarks such as MLPerf Tiny provide small quantized inference targets for severely constrained devices [@banbury2021mlperftiny]. On-device adaptation techniques\index{TinyML!on-device adaptation} then reduce training cost by freezing most parameters, reducing activation storage, or selecting sparse update sets [@cai2020tinytl; @kwon2024tinytrain].
-
-```{python}
-#| echo: false
-#| label: edge-mobile-power-envelope
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MOBILE POWER ENVELOPE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Edge on-device learning battery/thermal prose and nearby footnote.
-# │
-# │ Goal: Keep mobile sustained and burst power ranges sourced from MLSysIM.
-# │ Show: Sustained and burst mobile ML power ranges.
-# │ How: Pull ReferenceStats.MobilePower anchors, validate ordering, format ranges.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import ReferenceStats
-from mlsysim.core.units import watt
-from mlsysim.fmt import check, fmt_qty_range
-
-class EdgeMobilePowerEnvelope:
-    """Shared mobile power ranges for edge-learning prose."""
-
-    sustained_low = ReferenceStats.MobilePower.MobileMlSustainedLow
-    sustained_high = ReferenceStats.MobilePower.MobileMlSustainedHigh
-    burst_low = ReferenceStats.MobilePower.MobileMlBurstLow
-    burst_high = ReferenceStats.MobilePower.MobileMlBurstHigh
-
-    check(sustained_low < sustained_high < burst_low < burst_high, "Mobile sustained and burst power ranges should be ordered.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    sustained_range_str = fmt_qty_range(
-        sustained_low,
-        sustained_high,
-        watt,
-        precision=0,
-        commas=False,
-    )
-    burst_range_str = fmt_qty_range(
-        burst_low,
-        burst_high,
-        watt,
-        precision=0,
-        commas=False,
-    )
-```
 
 The practical implications of battery and thermal constraints extend beyond just limiting training duration. Mobile devices must carefully balance training opportunities with user experience. Aggressive on-device training can cause noticeable device heating and rapid battery drain, leading to user dissatisfaction and potential app uninstalls. Smartphone ML workloads commonly operate within a sustained processing envelope of `{python} EdgeMobilePowerEnvelope.sustained_range_str` to prevent thermal discomfort, though they can burst to `{python} EdgeMobilePowerEnvelope.burst_range_str` for brief periods before thermal throttling kicks in. Training even modest models can easily exceed these sustainable power limits. This reality necessitates intelligent scheduling strategies: training during charging periods when external power is available, provided measured thermal headroom remains sufficient, using low-power cores for gradient computation when possible, and implementing thermal-aware duty cycling that pauses training when temperature thresholds are exceeded. Some systems even use device usage patterns, scheduling intensive adaptation only during overnight charging when the device is idle and connected to power.
 
@@ -1256,11 +1287,11 @@ The edge hardware landscape provides the computational substrate for machine lea
 
 On-device learning must operate within computational envelopes that differ from cloud-based training infrastructure by factors of hundreds or thousands in raw capacity. The key difference: backpropagation requires significantly higher memory bandwidth than inference due to gradient computation and activation caching, weight updates create write-heavy access patterns unlike inference's read-only operations, and optimizer state management demands additional memory allocation. Hardware perfectly adequate for inference may prove entirely inadequate for adaptation, even when updating only a small parameter subset.
 
-At the most constrained end, devices such as the STM32F4[^fn-stm32-memory-limits] or ESP32[^fn-esp32-microcontroller-training] microcontrollers\index{Microcontroller!compute and energy constraints} offer only a few hundred kilobytes of SRAM and limited compute and power budgets [@warden2020tinyml]. Although these families include single-precision floating-point support, practical ML deployments commonly rely on quantized or fixed-point kernels for efficiency. Libraries like CMSIS-NN [@lai2018cmsis] provide optimized neural network kernels for Arm Cortex-M processors, achieving 4.6$\times$ runtime improvement through fixed-point arithmetic and single instruction, multiple data optimizations. These severe limitations preclude conventional deep learning libraries and require models designed for quantized arithmetic and minimal runtime memory allocation. Quantization-aware training[^fn-qat-power-efficiency] can prepare models for efficient quantized inference. Executing local updates requires a separately supported training path, potentially with selective updates, quantized gradients, or a compact floating-point working set.
+At the most constrained end, devices such as the STM32F4[^fn-stm32-memory-limits] or ESP32-S3[^fn-esp32-microcontroller-training] microcontrollers\index{Microcontroller!compute and energy constraints} offer only a few hundred kilobytes of SRAM and limited compute and power budgets [@warden2020tinyml]. Although these families include single-precision floating-point support, practical ML deployments commonly rely on quantized or fixed-point kernels for efficiency. Libraries like CMSIS-NN [@lai2018cmsis] provide optimized neural network kernels for Arm Cortex-M processors, achieving 4.6$\times$ runtime improvement through fixed-point arithmetic and single instruction, multiple data optimizations. These severe limitations preclude conventional deep learning libraries and require models designed for quantized arithmetic and minimal runtime memory allocation. Quantization-aware training[^fn-qat-power-efficiency] can prepare models for efficient quantized inference. Executing local updates requires a separately supported training path, potentially with selective updates, quantized gradients, or a compact floating-point working set.
 
-[^fn-stm32-memory-limits]: **STM32F4 Microcontroller**\index{STM32F4 Microcontroller!definition}\index{STM32F4!compute constraints}: With 192 KB SRAM, a 168 MHz clock speed, and a single-precision floating-point unit, the main constraint is not the absence of floating point but the tiny memory and energy envelope. A dense layer with `{python} EdgeMobilenetSizing.stm32_hidden_inputs_str` input features and 10 hidden units requires approximately `{python} EdgeMobilenetSizing.stm32_hidden_kb_str` for weights and biases in FP32, consuming about `{python} EdgeMobilenetSizing.stm32_hidden_sram_pct_str` of total SRAM before accounting for activations or gradients. At approximately 100 mW active power, even simple gradient updates must be duty-cycled, and INT8 or fixed-point kernels remain preferable when accuracy allows.
+[^fn-stm32-memory-limits]: **STM32F4 Microcontroller**\index{STM32F4 Microcontroller!definition}\index{STM32F4!compute constraints}: With `{python} EdgeMobilenetSizing.stm32_sram_kb_str` SRAM, a `{python} EdgeMobilenetSizing.stm32_clock_mhz_str` clock speed, and a single-precision floating-point unit, the main constraint is not the absence of floating point but the tiny memory and energy envelope. A dense layer with `{python} EdgeMobilenetSizing.stm32_hidden_inputs_str` input features and `{python} EdgeMobilenetSizing.stm32_hidden_outputs_str` hidden units requires approximately `{python} EdgeMobilenetSizing.stm32_hidden_kb_str` for weights and biases in FP32, consuming about `{python} EdgeMobilenetSizing.stm32_hidden_sram_pct_str` of total SRAM before accounting for activations or gradients. At approximately 100 mW active power, even simple gradient updates must be duty-cycled, and INT8 or fixed-point kernels remain preferable when accuracy allows.
 
-[^fn-esp32-microcontroller-training]: **ESP32**\index{ESP32!definition}: Provides 520 KB SRAM and dual-core 240 MHz processing with built-in Wi-Fi and Bluetooth, making it an inexpensive platform for experiments that combine local adaptation with federated coordination. Its CPU includes floating-point support, but fixed-point and 8-bit kernels are usually preferred for throughput, memory footprint, and energy efficiency; compact 8-bit models can fit in approximately 50 KB, enabling basic on-device adaptation for sensor anomaly detection.
+[^fn-esp32-microcontroller-training]: **ESP32-S3**\index{ESP32!definition}: Provides `{python} EdgeMobilenetSizing.esp32_sram_kb_str` SRAM and dual-core `{python} EdgeMobilenetSizing.esp32_clock_mhz_str` processing with built-in Wi-Fi and Bluetooth, making it an inexpensive platform for experiments that combine local adaptation with federated coordination. Its CPU includes floating-point support, but fixed-point and 8-bit kernels are usually preferred for throughput, memory footprint, and energy efficiency; compact 8-bit models can fit in approximately 50 KB, enabling basic on-device adaptation for sensor anomaly detection.
 
 [^fn-qat-power-efficiency]: **Quantization-Aware Training (QAT)**\index{Quantization-Aware Training!definition}: Simulates quantization during training to adapt the model to low-precision inference [@jacob2018; @krishnamoorthi2018quantizing]. Fake-quantization operations commonly retain floating-point training tensors, so QAT does not itself imply integer backward kernels or a smaller training-state budget. On-device adaptation must separately establish supported update arithmetic, state storage, and measured energy costs.
 
@@ -4967,7 +4998,7 @@ class EdgeAdaptationPowerMetrics:
 
 Beyond traditional inference metrics, adaptive systems require measures that explain whether local learning is worth the resource cost. Adaptation efficiency measures how much accuracy improves per training sample consumed. A system that gains two percentage points of accuracy from 100 local samples is more useful on a device than one that needs 500 samples for the same improvement, because fewer samples mean faster personalization, less local storage, and fewer training windows competing with user-facing work.
 
-Device-envelope fit measures whether the improvement stays inside resource budgets. Memory-constrained convergence evaluates validation loss under a fixed RAM budget, such as "convergence within 512 KB training footprint," while energy-per-update measures millijoules consumed per gradient step; an illustrative background envelope of `{python} EdgeAdaptationPowerMetrics.background_range_str` corresponds to `{python} EdgeAdaptationPowerMetrics.background_energy_per_hour_str` while active. Battery impact depends on duty cycle, usable battery capacity, foreground demand, and charging state. Time-to-adaptation extends the same idea to scheduling by measuring wall-clock time from new data to measurable improvement, including waiting for idleness, charging status, and thermal headroom rather than only raw accelerator throughput.
+Device-envelope fit measures whether the improvement stays inside resource budgets. Memory-constrained convergence evaluates validation loss under a fixed RAM budget, such as "convergence within `{python} EdgeDeviceSpectrum.mcu_sram_kb_str` training footprint," while energy-per-update measures millijoules consumed per gradient step; an illustrative background envelope of `{python} EdgeAdaptationPowerMetrics.background_range_str` corresponds to `{python} EdgeAdaptationPowerMetrics.background_energy_per_hour_str` while active. Battery impact depends on duty cycle, usable battery capacity, foreground demand, and charging state. Time-to-adaptation extends the same idea to scheduling by measuring wall-clock time from new data to measurable improvement, including waiting for idleness, charging status, and thermal headroom rather than only raw accelerator throughput.
 
 Personalization quality measures whether adaptation improves the right behavior without damaging the base model. Per-user performance delta compares the adapted model against the global baseline on user-specific holdout data, and acceptance requires an application-specific improvement threshold with uncertainty reported, before accepting the compute and energy overhead. Personalization-privacy trade-off measures accuracy gain per unit of local data exposure, while catastrophic forgetting rate measures degradation on the original task after local adaptation; the allowable degradation is application-specific and must state whether accuracy change is measured in percentage points or relative percent.
 

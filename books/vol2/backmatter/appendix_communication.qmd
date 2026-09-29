@@ -45,7 +45,7 @@ class CommAlphaBeta:
     ib_hdr = Systems.Fabrics.InfiniBand_HDR
     roce = Systems.Fabrics.RoCE_100G
 
-    ib_ndr_alpha_us = Systems.Fabrics.InfiniBand_NDR.latency_us
+    ib_ndr_alpha_us = Systems.SwitchFabric.AlphaNdr.to(microsecond).magnitude  # NDR per-message α anchor (editor ruling: SwitchFabric.AlphaNdr)
     ib_ndr_beta = ib_ndr.bandwidth
     ib_hdr_alpha_us = Systems.Fabrics.InfiniBand_HDR.latency_us
     ib_hdr_beta = ib_hdr.bandwidth
@@ -56,17 +56,28 @@ class CommAlphaBeta:
     pcie_gen5_bw = Hardware.Cloud.H100.interconnect.bandwidth
     nvlink_latency = Hardware.Tech.Interconnect.NVLink.latency
     pcie_latency = Hardware.Tech.Interconnect.PCIeGen5.latency
-    ring_n_gpus = 256
-    grad_layer_mb_min = 10
-    grad_layer_mb_max = 100
+    ring_n_gpus = Systems.Clusters.Research_256.total_accelerators
+    grad_layer_mb_min = 10  # scenario assumption: per-layer gradient size, low end
+    grad_layer_mb_max = 100  # scenario assumption: per-layer gradient size, high end
 
     crossover = ib_ndr_alpha_us * microsecond * ib_ndr_beta
 
-    check(round(crossover.to(KB).magnitude) == 250, f"IB NDR crossover mismatch: {crossover}")
+    check(
+        abs(crossover.to(KB).magnitude - ib_ndr_alpha_us * ib_ndr_beta.to(KB / microsecond).magnitude) < 1e-9,
+        f"IB NDR crossover mismatch: {crossover}",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    ib_ndr_alpha_us_str = fmt_time(ib_ndr_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
+    ib_ndr_alpha_us_str = fmt_time(ib_ndr_alpha_us * microsecond, unit=microsecond, precision=None, commas=False)
     ib_ndr_beta_gb_per_s_str = fmt_bandwidth(ib_ndr_beta, unit=GB / second, precision=0, commas=False)
+    ib_ndr_line_str = fmt_bandwidth(ib_ndr_beta, unit=Gbps, precision=0, commas=False)
+    ib_hdr_line_str = fmt_bandwidth(ib_hdr_beta, unit=Gbps, precision=0, commas=False)
+    roce_line_str = fmt_bandwidth(roce_beta, unit=Gbps, precision=0, commas=False)
+    nvlink_h100_total_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
+    check(
+        Hardware.Cloud.H100.nvlink.bandwidth_per_direction * 2 == Hardware.Cloud.H100.nvlink.bandwidth,
+        "Caption states the per-direction rate is half the bidirectional aggregate",
+    )
     ib_hdr_alpha_us_str = fmt_time(ib_hdr_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
     ib_hdr_beta_gb_per_s_str = fmt_bandwidth(ib_hdr_beta, unit=GB / second, precision=0, commas=False)
     roce_alpha_us_str = fmt_time(roce_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
@@ -77,6 +88,7 @@ class CommAlphaBeta:
     nvlink_lat_ns_str = fmt_time(nvlink_latency, unit=nanosecond, precision=0, commas=False)
     pcie_lat_ns_str = fmt_time(pcie_latency, unit=nanosecond, precision=0, commas=False)
     crossover_kb_str = fmt_qty_int(crossover, KB, commas=False)
+    check(abs(crossover.to(KB).magnitude - round(crossover.to(KB).magnitude)) < 1e-6, "Crossover renders as an integer KB value")
     ring_n_str = fmt_count(ring_n_gpus, commas=False, label="GPU")
     grad_layer_mb_range_str = fmt_range(grad_layer_mb_min, grad_layer_mb_max, precision=0, commas=False, unit="MB")
 ```
@@ -103,16 +115,16 @@ The model decomposes every transfer into exactly two costs: a per-message tax ($
 
 Parameterizing physical interconnects (@tbl-alpha-beta-params) provides the baseline $\alpha$ and $\beta$ values for hardware commonly found in ML clusters:
 
-| **Interconnect**              |            **$\alpha$ (Latency)**            |              **$\beta$ (Bandwidth)**              | **Typical Role**                 |
-|:------------------------------|:--------------------------------------------:|:-------------------------------------------------:|:---------------------------------|
-| **NVLink 4.0 (H100)**         |  `{python} CommAlphaBeta.nvlink_lat_ns_str`  |  `{python} CommAlphaBeta.nvlink_bw_gb_per_s_str`  | Intra-node GPU-to-GPU            |
-| **PCIe Gen5**                 |   `{python} CommAlphaBeta.pcie_lat_ns_str`   |   `{python} CommAlphaBeta.pcie_bw_gb_per_s_str`   | CPU-GPU, NIC-GPU                 |
-| **InfiniBand NDR (400 Gbps)** | `{python} CommAlphaBeta.ib_ndr_alpha_us_str` | `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str` | Inter-node (high-end clusters)   |
-| **InfiniBand HDR (200 Gbps)** | `{python} CommAlphaBeta.ib_hdr_alpha_us_str` | `{python} CommAlphaBeta.ib_hdr_beta_gb_per_s_str` | Inter-node (previous generation) |
-| **RoCE v2 (100 GbE)**         |  `{python} CommAlphaBeta.roce_alpha_us_str`  |  `{python} CommAlphaBeta.roce_beta_gb_per_s_str`  | Inter-node (Ethernet clusters)   |
-| **TCP/IP (Ethernet)**         |  `{python} CommAlphaBeta.tcp_alpha_us_str`   |                       Varies                      | Control plane, non-RDMA fallback |
+| **Interconnect**                                              |            **$\alpha$ (Latency)**            |              **$\beta$ (Bandwidth)**              | **Typical Role**                 |
+|:--------------------------------------------------------------|:--------------------------------------------:|:-------------------------------------------------:|:---------------------------------|
+| **NVLink 4.0 (H100)**                                         |  `{python} CommAlphaBeta.nvlink_lat_ns_str`  |  `{python} CommAlphaBeta.nvlink_bw_gb_per_s_str`  | Intra-node GPU-to-GPU            |
+| **PCIe Gen5**                                                 |   `{python} CommAlphaBeta.pcie_lat_ns_str`   |   `{python} CommAlphaBeta.pcie_bw_gb_per_s_str`   | CPU-GPU, NIC-GPU                 |
+| **InfiniBand NDR (`{python} CommAlphaBeta.ib_ndr_line_str`)** | `{python} CommAlphaBeta.ib_ndr_alpha_us_str` | `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str` | Inter-node (high-end clusters)   |
+| **InfiniBand HDR (`{python} CommAlphaBeta.ib_hdr_line_str`)** | `{python} CommAlphaBeta.ib_hdr_alpha_us_str` | `{python} CommAlphaBeta.ib_hdr_beta_gb_per_s_str` | Inter-node (previous generation) |
+| **RoCE v2 (`{python} CommAlphaBeta.roce_line_str`)**          |  `{python} CommAlphaBeta.roce_alpha_us_str`  |  `{python} CommAlphaBeta.roce_beta_gb_per_s_str`  | Inter-node (Ethernet clusters)   |
+| **TCP/IP (Ethernet)**                                         |  `{python} CommAlphaBeta.tcp_alpha_us_str`   |                       Varies                      | Control plane, non-RDMA fallback |
 
-: **$\alpha$-$\beta$ Parameters by Interconnect**: Startup latency and sustained bandwidth for interconnects used in ML clusters. The $\beta$ column uses one-way or per-direction bandwidth, so the H100 NVLink entry is half of the 900 GB/s bidirectional aggregate specification. NVLink and PCIe operate within a node; InfiniBand and RoCE operate between nodes. TCP latency is dominated by kernel software stack overhead. {#tbl-alpha-beta-params}
+: **$\alpha$-$\beta$ Parameters by Interconnect**: Startup latency and sustained bandwidth for interconnects used in ML clusters. The $\beta$ column uses one-way or per-direction bandwidth, so the H100 NVLink entry is half of the `{python} CommAlphaBeta.nvlink_h100_total_gb_per_s_str` bidirectional aggregate specification. The InfiniBand NDR $\alpha$ is the per-message base latency of the $\alpha$-$\beta$ model, which is smaller than the fabric's end-to-end one-way latency; the other rows are end-to-end startup latencies, so compare NDR with them only loosely. NVLink and PCIe operate within a node; InfiniBand and RoCE operate between nodes. TCP latency is dominated by kernel software stack overhead. {#tbl-alpha-beta-params}
 
 ### Latency-dominated vs. bandwidth-dominated regimes {#sec-appdx-comm-foundations-regimes}
 
@@ -195,9 +207,9 @@ class CommCollectives:
     from mlsysim import Hardware
 
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
-    ring_n_gpus = 256
-    ring_msg = 1 * GB
-    ib_ndr_alpha_us = Systems.Fabrics.InfiniBand_NDR.latency_us
+    ring_n_gpus = Systems.Clusters.Research_256.total_accelerators
+    ring_msg = 1 * GB  # scenario assumption: gradient tensor size
+    ib_ndr_alpha_us = Systems.SwitchFabric.AlphaNdr.to(microsecond).magnitude
     ib_ndr_beta = ib_ndr.bandwidth
 
     ring_time = calc_ring_allreduce_time(ring_msg, ring_n_gpus, ib_ndr_beta, ib_ndr_alpha_us * microsecond)
@@ -209,13 +221,13 @@ class CommCollectives:
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     ring_n_str = fmt(ring_n_gpus, precision=0, commas=False)
-    ib_ndr_alpha_us_str = fmt_time(ib_ndr_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
+    ib_ndr_alpha_us_str = fmt_time(ib_ndr_alpha_us * microsecond, unit=microsecond, precision=None, commas=False)
     ib_ndr_beta_gb_per_s_str = fmt_bandwidth(ib_ndr_beta, unit=GB / second, precision=0, commas=False)
     ring_msg_gb_str = fmt_memory(ring_msg, unit=GB, precision=0, commas=False)
     ring_msg_params = int(ring_msg.to(GB).magnitude * BILLION / 2)
     ring_msg_params_m_str = fmt_params(ring_msg_params * param, scale="M", precision=0, commas=False)
     ring_time_ms_str = fmt_time(ring_time, ms, precision=1, commas=False)
-    tree_time_ms_str = fmt_time(tree_time, ms, precision=1, commas=False)
+    tree_time_ms_str = fmt_time(tree_time, ms, precision=None, commas=False)
 ```
 
 ::: {#nbk-appendix-communication-ring-vs-tree-allreduce .callout-notebook title="Worked example: Ring vs. tree AllReduce"}
@@ -484,14 +496,15 @@ class CommCompression:
     from mlsysim import Hardware
 
     ib_ndr = Systems.Fabrics.InfiniBand_NDR
-    ring_n_gpus = 256
-    ring_msg = 1 * GB
-    compress_ratio = 64
-    compress_overhead = 2.0 * ms
+    ib_ndr_alpha = Systems.SwitchFabric.AlphaNdr
+    ring_n_gpus = Systems.Clusters.Research_256.total_accelerators
+    ring_msg = 1 * GB  # scenario assumption: gradient tensor size
+    compress_ratio = 64  # scenario assumption
+    compress_overhead = 2.0 * ms  # scenario assumption: codec cost
 
-    ring_time = calc_ring_allreduce_time(ring_msg, ring_n_gpus, ib_ndr.bandwidth, Systems.Fabrics.InfiniBand_NDR.latency_us * microsecond)
+    ring_time = calc_ring_allreduce_time(ring_msg, ring_n_gpus, ib_ndr.bandwidth, ib_ndr_alpha)
     compressed_msg = ring_msg / compress_ratio
-    compressed_comm = calc_ring_allreduce_time(compressed_msg, ring_n_gpus, ib_ndr.bandwidth, Systems.Fabrics.InfiniBand_NDR.latency_us * microsecond)
+    compressed_comm = calc_ring_allreduce_time(compressed_msg, ring_n_gpus, ib_ndr.bandwidth, ib_ndr_alpha)
     compressed_total = compressed_comm + compress_overhead
     compress_speedup = (ring_time / compressed_total).to_base_units().magnitude
     codec_budget = ring_time - compressed_comm
@@ -505,7 +518,7 @@ class CommCompression:
         compression_ratio,
         n_gpus=ring_n_gpus,
         bandwidth=ib_ndr.bandwidth,
-        alpha_us=Systems.Fabrics.InfiniBand_NDR.latency_us,
+        alpha_us=Systems.SwitchFabric.AlphaNdr.to(microsecond).magnitude,
     ):
         uncompressed = uncompressed_ms * ms
         startup = 2 * (n_gpus - 1) * alpha_us * microsecond
@@ -528,7 +541,7 @@ class CommCompression:
     uncompressed_ms_str = fmt_time(ring_time, ms, precision=1, commas=False)
     compressed_comm_ms_str = fmt_time(compressed_comm, ms, precision=1, commas=False)
     compressed_total_ms_str = fmt_time(compressed_total, ms, precision=1, commas=False)
-    compress_speedup_mult_str = fmt_multiple(compress_speedup, precision=1, commas=False)
+    compress_speedup_mult_str = fmt_multiple(compress_speedup, precision=None, commas=False)
     breakeven_4_10_str = fmt(breakeven_ms(10, 4), precision=1, commas=False)
     breakeven_4_40_str = fmt(breakeven_ms(40, 4), precision=1, commas=False)
     breakeven_4_100_str = fmt(breakeven_ms(100, 4), precision=1, commas=False)
@@ -538,7 +551,7 @@ class CommCompression:
     breakeven_64_10_str = fmt(breakeven_ms(10, 64), precision=1, commas=False)
     breakeven_64_40_str = fmt(breakeven_ms(40, 64), precision=1, commas=False)
     breakeven_64_100_str = fmt(breakeven_ms(100, 64), precision=1, commas=False)
-    breakeven_256_10_str = fmt(breakeven_ms(10, 256), precision=2, commas=False)
+    breakeven_256_10_str = fmt(breakeven_ms(10, 256), precision=1, commas=False)
     breakeven_256_40_str = fmt(breakeven_ms(40, 256), precision=1, commas=False)
     breakeven_256_100_str = fmt(breakeven_ms(100, 256), precision=1, commas=False)
 ```
@@ -556,7 +569,7 @@ class CommCompression:
 - Total with compression: `{python} CommCompression.compressed_total_ms_str`
 - Speedup: `{python} CommCompression.compress_speedup_mult_str`
 
-**Result**: Compression delivers an `{python} CommCompression.compress_speedup_mult_str` speedup in communication time. The `{python} CommCompression.compress_overhead_ms_str` codec overhead is a small fraction of the `{python} CommCompression.uncompressed_ms_str` uncompressed baseline.
+**Result**: Compression shortens communication time by `{python} CommCompression.compress_speedup_mult_str`. The `{python} CommCompression.compress_overhead_ms_str` codec overhead is a small fraction of the `{python} CommCompression.uncompressed_ms_str` uncompressed baseline.
 
 **Systems insight**: Compression saves communication time under the assumed payload ratio, codec cost, and unchanged collective structure. Independent top-k selections do not generally preserve that structure: sparse indices, differing supports, and merge operations must also be modeled. Lossy compression can require more iterations to reach the same accuracy, negating a per-iteration gain.
 

@@ -197,7 +197,7 @@ class SingleMachineRecap:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h = Hardware.Cloud.H100
-    m = Models.Language.GPT3  # Archetype A running instance (175B dense)
+    m = Scenarios.DenseLLMPretrainingReference.workload  # Archetype A running instance (GPT-3, 175B dense)
     hbm_cap = h.memory.capacity
     hbm_bw = h.memory.bandwidth
     l2_cap = h.memory.l2_cache
@@ -207,12 +207,16 @@ class SingleMachineRecap:
     tokens = m.training_tokens.magnitude
     layers = m.layers
     hidden = m.hidden_dim
-    seq_len = 2048  # scenario input: GPT-3 context length, as in the KV-cache example
+    seq_len = m.context_length  # GPT-3 context length (registry), as in the KV-cache example
+    adam = ReferenceStats.MixedPrecisionAdam
+    state_bpp = adam.TrainingStateBytesPerParameter * param  # 16 B/param training state
+    ckpt_bpp = adam.CheckpointBytesPerParameter * param  # 14 B/param resumable checkpoint
+    flops_per_param_token = Literature.Chinchilla.ComputeConstant  # 6 FLOPs per parameter-token
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params = params_q.to(param).magnitude
-    state_bpp = BYTES_FP16 + BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE
-    ckpt_bpp = BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE
+    state_bpp_sum = BYTES_FP16 + BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE  # table rows
+    ckpt_bpp_sum = BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE
     train_state_q = (params * state_bpp).to(TB)
     ckpt_q = (params * ckpt_bpp).to(TB)
     weights_q = (params * BYTES_FP16).to(GB)
@@ -220,14 +224,14 @@ class SingleMachineRecap:
     hbm_pcie_ratio = (hbm_bw / pcie_bw).to("").magnitude
     layer_params = 12 * layers * hidden**2
     layer_params_ratio = layer_params / params
-    train_flops_q = (6 * params * tokens) * flop
+    train_flops_q = (flops_per_param_token * params * tokens) * flop
     registry_flops_q = m.training_ops
     attn_ratio = seq_len / (6 * hidden)
     kv_per_token_q = (2 * layers * hidden * BYTES_FP16).to(MB)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(state_bpp.to(byte).magnitude == 16, "Training state should be 16 bytes/param")
-    check(ckpt_bpp.to(byte).magnitude == 14, "Checkpoint state should be 14 bytes/param")
+    check(state_bpp_sum.to(byte).magnitude == state_bpp.to(byte).magnitude, "Table rows must sum to the registry training-state bytes/param")
+    check(ckpt_bpp_sum.to(byte).magnitude == ckpt_bpp.to(byte).magnitude, "Checkpoint rows must sum to the registry checkpoint bytes/param")
     check(abs(train_state_q.magnitude - 2.8) < 0.01, "Archetype A state should be 2.8 TB")
     check(abs(layer_params_ratio - 1) < 0.02, "12 N_L d^2 should match GPT-3 within 2 percent")
     check(abs((train_flops_q / registry_flops_q).to("").magnitude - 1) < 0.01, "6PD should match registry training FLOPs")

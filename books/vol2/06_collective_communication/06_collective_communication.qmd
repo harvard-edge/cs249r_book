@@ -80,8 +80,8 @@ The gap between that assumption and the wire reveals an asymmetry in how computa
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Systems
-from mlsysim.core.units import GB, byte, param, second
-from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_math, fmt_memory, fmt_time
+from mlsysim.core.units import BYTES_FP16, GB, byte, param, second
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_count, fmt_math, fmt_memory, fmt_params, fmt_time
 
 class GradSyncSignificance:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -92,7 +92,7 @@ class GradSyncSignificance:
     cluster_size = 1000
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    gradient = (m.parameters * (2 * byte / param)).to(GB)
+    gradient = m.size_in_bytes(BYTES_FP16).to(GB)
     # Bandwidth-only ring AllReduce estimate: T ~ 2M / beta.
     ring_time = (2 * gradient / beta).to(second)
 
@@ -102,6 +102,8 @@ class GradSyncSignificance:
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     gradient_gb_str = fmt_memory(gradient, unit=GB, precision=0, commas=False)
+    params_str = fmt_params(m.parameters, scale="B", precision=0, commas=False)
+    bytes_per_param_str = fmt(BYTES_FP16.to(byte).magnitude, precision=0, commas=False)
     gradient_top1_gb_str = fmt_memory(gradient * 0.01, unit=GB, precision=1, commas=False)
     gradient_2x_gb_str = fmt_memory(gradient * 2, unit=GB, precision=0, commas=False)
     beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
@@ -321,7 +323,43 @@ Moving data consumes energy in storage arrays, interfaces, serializers, transcei
 
 :::
 
-For an illustrative 10,000-rank ring reducing a 1 GB payload, approximately twice the payload is sent per rank. At an assumed complete-path cost of 30 pJ per transmitted bit, this gives about 4.8 kJ per reduction. The assumption is a scenario input, not a hardware measurement. Comparing that energy with compute requires the same step duration and accounting boundary; the number alone cannot establish that communication rivals computation.
+```{python}
+#| echo: false
+#| label: collective-ring-energy
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RING ALLREDUCE TRANSFER ENERGY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: paragraph below (energy of one large-ring reduction).
+# │ Goal: Price one ring AllReduce in joules from the registry per-bit cost.
+# │ How: bytes sent = N × 2(N−1)/N × M; energy = bits × E_bit, with
+# │      E_bit = Systems.NetworkEnergy.InfiniBandEnergyPerBit (midpoint of a
+# │      20–50 pJ/bit switched-network envelope) and M the chapter's 1 GB buffer.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import ReferenceStats, Systems
+from mlsysim.core.units import GB, bit, kJ, pJ
+from mlsysim.fmt import check, fmt, fmt_energy, fmt_energy_per_bit, fmt_memory
+
+class RingReductionEnergy:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    n_ranks = 10_000  # scenario assumption: illustrative fleet-scale ring
+    payload = ReferenceStats.CollectiveCommunicationProfile.GradientBuffer
+    energy_per_bit = Systems.NetworkEnergy.InfiniBandEnergyPerBit
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    bytes_sent = n_ranks * 2 * (n_ranks - 1) / n_ranks * payload
+    energy = (bytes_sent * energy_per_bit).to(kJ)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(3 < energy.to(kJ).magnitude < 10, f"Ring energy {energy} outside the kilojoule scale the prose describes")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    n_ranks_str = fmt(n_ranks, precision=0, commas=True)
+    payload_str = fmt_memory(payload, unit=GB, precision=0, commas=False)
+    energy_per_bit_str = fmt_energy_per_bit(energy_per_bit, unit=pJ / bit, precision=0)
+    energy_kj_str = fmt_energy(energy, unit=kJ, precision=1, commas=False)
+```
+
+For an illustrative `{python} RingReductionEnergy.n_ranks_str`-rank ring reducing a `{python} RingReductionEnergy.payload_str` payload, approximately twice the payload is sent per rank. At a complete-path transfer cost of `{python} RingReductionEnergy.energy_per_bit_str`, the midpoint of the range typical of switched fabrics, this gives about `{python} RingReductionEnergy.energy_kj_str` per reduction. The per-bit figure is a representative envelope value, not a measurement of any particular fabric. Comparing that energy with compute requires the same step duration and accounting boundary; the number alone cannot establish that communication rivals computation.
 
 These constraints enter different parts of a communication budget. Latency sets the floor for every message regardless of size. Bandwidth caps the throughput for large transfers. Protocol overhead adds a per-message tax that penalizes fine-grained communication, which is why the kernel-bypass transports recalled in @sec-network-fabrics-rdma matter for collective performance. RDMA's zero-copy path[^fn-zerocopy-rdma-bypass] avoids staging each transfer through host memory and the kernel's socket buffers. The physical fabric supplies these limits; the collective schedule determines how many times the job pays them.
 
@@ -370,8 +408,8 @@ class AllReduceCost:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Gradient size (BF16 = 2 bytes/param)
-    bf16_bytes_per_param = 2
-    gradient_qty = m.parameters * (bf16_bytes_per_param * byte / param)
+    bf16_bytes_per_param = int(BYTES_FP16.to(byte).magnitude)
+    gradient_qty = m.size_in_bytes(BYTES_FP16)
 
     # Use shared library formula for Ring AllReduce time
     # Note: calc_ring_allreduce_time handles both bandwidth and latency (alpha).
@@ -383,7 +421,7 @@ class AllReduceCost:
     ring_lat_time = calc_ring_allreduce_latency_time(n_gpus, alpha).to(ms)
 
     # Value of halving an exposed AllReduce over a training campaign.
-    campaign_steps = 100_000  # scenario assumption: steps in one training run
+    campaign_steps = ReferenceStats.CollectiveCommunicationProfile.TrainingRunSteps  # steps in one training run
     halved_saving = (ring_total / 2).to(second)
     halved_saving_gpu_hours = (halved_saving * campaign_steps * n_gpus).to("hour").magnitude
 
@@ -554,9 +592,54 @@ A data center engineer cannot predict how long it takes to send ten megabytes ac
 
 The two parameters take on collective-specific meanings. Latency ($\alpha$) is the fixed start-up cost to send a message regardless of size, covering software overhead (kernel launch, NCCL initialization), PCIe\index{PCIe}\index{Peripheral Component Interconnect Express|see{PCIe}} traversal, and network switching time. Bandwidth ($\beta$) is the sustained data transfer rate in bytes per second. The critical message size\index{Critical Message Size} $n^* = \alpha \cdot \beta$ marks the crossover point: messages smaller than $n^*$ are latency-bound\index{Latency!bound}; messages larger are bandwidth-bound\index{Bandwidth!bound}. @Sec-appdx-comm-foundations-alpha-beta works this model through concrete message-size regimes and roofline analysis, so a reader who wants the full derivation behind the crossover can follow it there; the parameters in @tbl-interconnect-parameters apply directly to collective design.
 
-The crossover explains two recurring optimizations. For InfiniBand NDR at $\alpha \approx 2\,\mu\text{s}$ and $\beta \approx 50\,\text{GB/s}$, $n^* \approx 100\,\text{KB}$. A $4\,\text{KB}$ routing message is far below $n^*$, so the startup tax dominates; fusing 100 such messages into one $400\,\text{KB}$ message\index{Message fusion!startup latency amortization} reduces communication cost from $100\alpha = 200\,\mu\text{s}$ to one $\alpha + n/\beta \approx 10\,\mu\text{s}$, a 20$\times$ improvement. More generally, $N$ small messages of size $n/N$ cost up to $N\times$ more than one message of size $n$ when $n/N \ll n^*$, which is why NCCL fuses small AllReduce calls and MoE runtimes buffer tokens before launching collectives. A `{python} GradSyncSignificance.gradient_gb_str` gradient tensor sits at the other extreme, far above $n^*$, so bandwidth dominates and reducing payload bytes is the effective lever. Compression shrinks only the $n/\beta$ term, however, so it pays while the compressed message stays well above $n^*$ and stops paying once the payload approaches $n^*$, where the unchanged $\alpha$ term dominates. Shrinking a 70B model's gradient payload from `{python} GradSyncSignificance.gradient_gb_str` to `{python} GradSyncSignificance.gradient_top1_gb_str` still leaves it far above $n^*$, so that reduction pays in full; compressing a $4\,\text{KB}$ routing message saves almost nothing.
+```{python}
+#| echo: false
+#| label: collective-message-fusion
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MESSAGE FUSION ON NDR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The crossover explains two recurring optimizations" paragraph.
+# │ Goal: Price 100 separate small messages vs. one fused message on NDR.
+# │ How: n* = alpha·beta with alpha = Systems.SwitchFabric.AlphaNdr (the
+# │      chapter's canonical NDR alpha) and beta = InfiniBand_NDR bandwidth;
+# │      T_sep = k·alpha (bandwidth term negligible); T_fused = alpha + k·n/beta.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_multiple, fmt_time
 
-@Tbl-interconnect-parameters shows typical values for data center interconnects, and the critical-size column carries the load-bearing pattern: intra-node NVLink stays latency-bound up to several hundred kilobytes, whereas the inter-node fabrics cross over near 100 KB. A message between those crossover sizes can therefore be latency-bound inside a node but bandwidth-bound once it travels between nodes.
+class MessageFusion:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    alpha = Systems.SwitchFabric.AlphaNdr
+    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    small_msg = 4 * KB  # scenario assumption: MoE routing message
+    n_msgs = 100  # scenario assumption: messages fused into one
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    n_star = (alpha * beta).to(KB)
+    fused_msg = n_msgs * small_msg
+    t_separate = (n_msgs * alpha).to(microsecond)
+    t_fused = (alpha + fused_msg / beta).to(microsecond)
+    speedup = (t_separate / t_fused).to_base_units().magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(small_msg < n_star / 10, "Routing message must sit far below n*")
+    check(fused_msg > n_star, "Fused message should cross into the bandwidth-bound regime")
+    check(n_msgs == 100, "Prose math writes the separate-message cost as 100α")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
+    beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
+    n_star_kb_str = fmt_memory(n_star, unit=KB, precision=0, commas=False)
+    small_msg_kb_str = fmt_memory(small_msg, unit=KB, precision=0, commas=False)
+    n_msgs_str = fmt(n_msgs, precision=0, commas=False)
+    fused_msg_kb_str = fmt_memory(fused_msg, unit=KB, precision=0, commas=False)
+    t_separate_us_str = fmt_time(t_separate, microsecond, precision=0, commas=False)
+    t_fused_us_str = fmt_time(t_fused, microsecond, precision=1, commas=False)
+    speedup_mult_str = fmt_multiple(round(speedup), precision=0, commas=False)
+```
+
+The crossover explains two recurring optimizations. For InfiniBand NDR at $\alpha \approx$ `{python} MessageFusion.alpha_us_str` and $\beta \approx$ `{python} MessageFusion.beta_gb_per_s_str`, $n^* \approx$ `{python} MessageFusion.n_star_kb_str`. A `{python} MessageFusion.small_msg_kb_str` routing message is far below $n^*$, so the startup tax dominates; fusing `{python} MessageFusion.n_msgs_str` such messages into one `{python} MessageFusion.fused_msg_kb_str` message\index{Message fusion!startup latency amortization} reduces communication cost from $100\alpha =$ `{python} MessageFusion.t_separate_us_str` to one $\alpha + n/\beta \approx$ `{python} MessageFusion.t_fused_us_str`, roughly a `{python} MessageFusion.speedup_mult_str` improvement. More generally, $N$ small messages of size $n/N$ cost up to $N\times$ more than one message of size $n$ when $n/N \ll n^*$, which is why NCCL fuses small AllReduce calls and MoE runtimes buffer tokens before launching collectives. A `{python} GradSyncSignificance.gradient_gb_str` gradient tensor sits at the other extreme, far above $n^*$, so bandwidth dominates and reducing payload bytes is the effective lever. Compression shrinks only the $n/\beta$ term, however, so it pays while the compressed message stays well above $n^*$ and stops paying once the payload approaches $n^*$, where the unchanged $\alpha$ term dominates. Shrinking a 70B model's gradient payload from `{python} GradSyncSignificance.gradient_gb_str` to `{python} GradSyncSignificance.gradient_top1_gb_str` still leaves it far above $n^*$, so that reduction pays in full; compressing a `{python} MessageFusion.small_msg_kb_str` routing message saves almost nothing.
+
+@Tbl-interconnect-parameters shows typical values for data center interconnects, and the critical-size column carries the load-bearing pattern: intra-node NVLink stays latency-bound up to several hundred kilobytes, whereas the inter-node fabrics cross over below roughly 100 KB. A message between those crossover sizes can therefore be latency-bound inside a node but bandwidth-bound once it travels between nodes.
 
 ```{python}
 #| echo: false
@@ -577,13 +660,13 @@ The crossover explains two recurring optimizations. For InfiniBand NDR at $\alph
 # │      included) — pedagogical assumptions consistent with the chapter's
 # │      wire-vs-effective discussion; the registry holds wire latencies
 # │      (Tech.Interconnect, Fabrics) and two effective anchors
-# │      (SwitchFabric.AlphaNdr/AlphaRoce). A single alpha canon is a pending
-# │      registry ruling (2026-06 audit); until then the ranges live here as
-# │      documented LOAD assumptions.
+# │      (SwitchFabric.AlphaNdr/AlphaRoce). Editor ruling 2026-09-28: AlphaNdr
+# │      is the canonical NDR alpha, so the NDR crossover uses it; the
+# │      per-fabric ranges stay here as documented LOAD assumptions.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_alpha_beta_crossover
-from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_qty_range
+from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_qty_range, fmt_time
 
 class InterconnectAlphaBeta:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -606,22 +689,28 @@ class InterconnectAlphaBeta:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Crossover at the alpha midpoint of each range: n* = alpha * beta
     nvlink_nstar = calc_alpha_beta_crossover((nvlink_alpha_lo + nvlink_alpha_hi) / 2, nvlink_bw)
-    ndr_nstar = calc_alpha_beta_crossover((ndr_alpha_lo + ndr_alpha_hi) / 2, ndr_bw)
+    # NDR row is anchored to the chapter's canonical NDR alpha (editor ruling
+    # 2026-09-28), not its range midpoint; the range stays as context.
+    ndr_alpha_anchor = Systems.SwitchFabric.AlphaNdr
+    ndr_nstar = calc_alpha_beta_crossover(ndr_alpha_anchor, ndr_bw)
     hdr_nstar = calc_alpha_beta_crossover((hdr_alpha_lo + hdr_alpha_hi) / 2, hdr_bw)
     pcie_nstar = calc_alpha_beta_crossover((pcie_alpha_lo + pcie_alpha_hi) / 2, pcie_bw)
     roce_nstar = calc_alpha_beta_crossover((roce_alpha_lo + roce_alpha_hi) / 2, roce_bw)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(nvlink_nstar > 500 * KB, "NVLink crossover should be several hundred KB — intra-node stays latency-bound up to large messages")
-    check(ndr_nstar < 200 * KB, "Inter-node fabrics should cross over near 100 KB")
+    check(ndr_alpha_lo <= ndr_alpha_anchor <= ndr_alpha_hi, "Registry NDR alpha must fall inside the tabulated NDR range")
+    check(max(ndr_nstar, hdr_nstar, roce_nstar) < 100 * KB, "Prose: inter-node fabrics cross over below roughly 100 KB")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     nvlink_alpha_range_str = fmt_qty_range(nvlink_alpha_lo, nvlink_alpha_hi, microsecond, precision=0, commas=False)
     ndr_alpha_range_str = fmt_qty_range(ndr_alpha_lo, ndr_alpha_hi, microsecond, precision=0, commas=False)
+    ndr_alpha_anchor_us_str = fmt_time(ndr_alpha_anchor, microsecond, precision=1, commas=False)
     hdr_alpha_range_str = fmt_qty_range(hdr_alpha_lo, hdr_alpha_hi, microsecond, precision=0, commas=False)
     pcie_alpha_range_str = fmt_qty_range(pcie_alpha_lo, pcie_alpha_hi, microsecond, precision=0, commas=False)
     roce_alpha_range_str = fmt_qty_range(roce_alpha_lo, roce_alpha_hi, microsecond, precision=0, commas=False)
     nvlink_bw_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_bidir_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
     ndr_bw_str = fmt_bandwidth(ndr_bw, unit=GB / second, precision=0, commas=False)
     hdr_bw_str = fmt_bandwidth(hdr_bw, unit=GB / second, precision=0, commas=False)
     pcie_bw_str = fmt_bandwidth(pcie_bw, unit=GB / second, precision=0, commas=False)
@@ -641,7 +730,7 @@ class InterconnectAlphaBeta:
 | **PCIe Gen5 (GPU$\leftrightarrow$CPU)** |  `{python} InterconnectAlphaBeta.pcie_alpha_range_str`  |      `{python} InterconnectAlphaBeta.pcie_bw_str`      |  `{python} InterconnectAlphaBeta.pcie_nstar_str`  |
 | **Ethernet 100 Gbps (RoCE)**            |  `{python} InterconnectAlphaBeta.roce_alpha_range_str`  |      `{python} InterconnectAlphaBeta.roce_bw_str`      |  `{python} InterconnectAlphaBeta.roce_nstar_str`  |
 
-: **Interconnect Performance Parameters**: Effective per-message launch latency ($\alpha$, including the software stack), per-direction link bandwidth ($\beta$, the one-way deliverable rate that enters $T(n) = \alpha + n/\beta$; NVLink's datasheet 900 GB/s is the bidirectional total, so its $\beta$ is the 450 GB/s one-way rate), and the computed crossover size $n^* = \alpha \cdot \beta$ at each row's $\alpha$ midpoint, where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
+: **Interconnect Performance Parameters**: Effective per-message launch latency ($\alpha$, including the software stack), per-direction link bandwidth ($\beta$, the one-way deliverable rate that enters $T(n) = \alpha + n/\beta$; NVLink's datasheet `{python} InterconnectAlphaBeta.nvlink_bidir_str` is the bidirectional total, so its $\beta$ is the `{python} InterconnectAlphaBeta.nvlink_bw_str` one-way rate), and the computed crossover size $n^* = \alpha \cdot \beta$ at each row's $\alpha$ midpoint (for InfiniBand NDR, at the representative `{python} InterconnectAlphaBeta.ndr_alpha_anchor_us_str` used throughout this chapter), where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
 
 @Fig-bandwidth-divergence places selected advertised capacities on a common directional basis. Intra-node GPU link totals and individual inter-node ports remain different resource boundaries. The gap motivates hierarchy-aware scheduling, but startup cost, available ports, routing, and payload size determine the useful crossover for a particular collective.
 
@@ -715,21 +804,22 @@ from mlsysim import Systems
 class CriticalMsgSize:
     # ┌── 1. LOAD ──────────────────────────────────────────
     # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
-    # effective collective-launch latency (scenario assumption).
+    # chapter's canonical effective NDR launch latency (Systems.SwitchFabric.AlphaNdr).
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    alpha = 2 * microsecond
+    alpha = Systems.SwitchFabric.AlphaNdr
     # ┌── 2. EXECUTE ───────────────────────────────────────
     n_star = (alpha * beta).to(KB)
     n_star_kb = round(n_star.to(KB).magnitude)
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(n_star_kb == 100, f"n* = {n_star_kb} KB, expected 100")
+    check(n_star_kb == round(MessageFusion.n_star.to(KB).magnitude), "n* must match the crossover paragraph")
+    check(n_star == InterconnectAlphaBeta.ndr_nstar.to(KB), "n* must match the NDR row of the interconnect table")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    alpha_us_str = fmt_time(alpha, microsecond, precision=0, commas=False)
+    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
     beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
     n_star_kb_str = fmt_memory(n_star, unit=KB, precision=0, commas=False)
     # Operands of n* = alpha . beta as scientific-notation math spans: alpha in
     # seconds, beta in bytes/s (so the derivation reads off the LOAD values).
-    alpha_s_sci_math = fmt_math(sci_latex(alpha.to(second).magnitude, precision=0))
+    alpha_s_sci_math = fmt_math(sci_latex(alpha.to(second).magnitude, precision=1))
     beta_bytes_s_sci_math = fmt_math(sci_latex(beta.to("byte/s").magnitude, precision=0))
 ```
 
@@ -1365,10 +1455,9 @@ class MoeAllToAll:
     bytes_per_elem = BYTES_FP16
     n_experts = 64
     # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
-    # effective collective-launch latency (scenario assumption, high end of the
-    # 1-3 us NDR range the interconnect table documents).
+    # chapter's canonical effective NDR launch latency (Systems.SwitchFabric.AlphaNdr).
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    alpha = 3 * microsecond
+    alpha = Systems.SwitchFabric.AlphaNdr
     # ┌── 2. EXECUTE ───────────────────────────────────────
     tokens_per_gpu = total_tokens // n_gpus
     experts_per_gpu = n_experts // n_gpus
@@ -1381,8 +1470,8 @@ class MoeAllToAll:
     total_sent = remote_gpus * data_per_transfer
     # Bandwidth term rounded to whole microseconds: the worked trace presents it
     # as the clean "≈ 5 μs" approximation the callout math line displays, so the
-    # downstream per-transfer and serialized totals stay on integer-microsecond
-    # arithmetic (3 + 5 = 8; 7 × 8 = 56).
+    # downstream per-transfer and serialized totals stay on visible
+    # arithmetic (1.5 + 5 = 6.5; 7 × 6.5 = 45.5).
     bw_time = round((data_per_transfer / beta).to(microsecond).magnitude) * microsecond
     per_transfer = alpha + bw_time
     serialized = remote_gpus * per_transfer
@@ -1395,10 +1484,10 @@ class MoeAllToAll:
     check(abs(kb_per_token.to(KB).magnitude - 4.096) < 1e-9, f"KB/token = {kb_per_token.to(KB).magnitude}")
     check(tokens_per_expert == 64, f"tokens/expert = {tokens_per_expert}")
     check(abs(data_per_transfer.to(KB).magnitude - 262.144) < 1e-9, f"data/transfer = {data_per_transfer.to(KB).magnitude} KB")
-    check(per_transfer == 8 * microsecond, f"T/transfer = {per_transfer.to(microsecond).magnitude} μs")
-    check(abs(parallel.to(microsecond).magnitude - 39.70016) < 1e-9, f"Parallel injection lower bound = {parallel.to(microsecond).magnitude} μs")
+    check(abs(per_transfer.to(microsecond).magnitude - 6.5) < 1e-9, f"T/transfer = {per_transfer.to(microsecond).magnitude} μs")
+    check(abs(parallel.to(microsecond).magnitude - 38.20016) < 1e-9, f"Parallel injection lower bound = {parallel.to(microsecond).magnitude} μs")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    alpha_us_str = fmt_time(alpha, microsecond, precision=0, commas=False)
+    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
     beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
     tokens_per_gpu_str = fmt_count(tokens_per_gpu, label="token", commas=False)
     tokens_per_transfer_str = fmt_count(tokens_per_transfer, label="token", commas=False)
@@ -1407,8 +1496,8 @@ class MoeAllToAll:
     data_per_transfer_kb_str = fmt_memory(data_per_transfer, unit=KB, precision=3, commas=False)
     total_sent_mb_str = fmt_memory(total_sent, unit=MB, precision=2, commas=False)
     bw_time_approx_us_str = fmt_time(bw_time, microsecond, precision=0, commas=False)
-    per_transfer_us_str = fmt_time(per_transfer, unit=microsecond, precision=0, commas=False)
-    serialized_us_str = fmt_time(serialized, unit=microsecond, precision=0, commas=False)
+    per_transfer_us_str = fmt_time(per_transfer, unit=microsecond, precision=1, commas=False)
+    serialized_us_str = fmt_time(serialized, unit=microsecond, precision=1, commas=False)
     parallel_us_str = fmt_time(parallel, unit=microsecond, precision=1, commas=False)
     total_tokens_str = fmt_count(total_tokens, label="token", commas=False)
     n_gpus_str = fmt(n_gpus, precision=0, commas=False)
@@ -1576,9 +1665,9 @@ from mlsysim.physics import calc_ring_allreduce_time, calc_tree_allreduce_time
 class RingTreeByteGap:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = 64
-    gradient = 1 * GB  # scenario assumption: 1 GB gradient buffer
+    gradient = ReferenceStats.CollectiveCommunicationProfile.GradientBuffer  # chapter's 1 GB gradient buffer
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 50 GB/s per port
-    run_steps = 100_000  # scenario assumption: steps in one training run
+    run_steps = ReferenceStats.CollectiveCommunicationProfile.TrainingRunSteps  # steps in one training run
     # ┌── 2. EXECUTE ───────────────────────────────────────
     ring_bw = calc_ring_allreduce_time(gradient, n_gpus, beta, 0 * second).to(ms)
     tree_bw = calc_tree_allreduce_time(gradient, n_gpus, beta, 0 * second).to(ms)
@@ -2294,6 +2383,7 @@ class CommInfraScenario:
     nvlink_bw_approx_str = fmt_bandwidth(nvlink_raw, unit=GB / second, precision=0, commas=False, approx=True)
     ib_ndr_bw_approx_str = fmt_bandwidth(ib_ndr_raw, unit=GB / second, precision=0, commas=False, approx=True)
     bandwidth_ratio_mult_str = fmt_multiple(bandwidth_ratio, precision=0, commas=False)
+    nvlink_perdir_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth_per_direction, unit=GB / second, precision=0, commas=False)
 ```
 
 Each GPU reaches its node peers with roughly `{python} CommInfraScenario.bandwidth_ratio_mult_str` more bandwidth than it can push through its own inter-node port. NVLink's `{python} CommInfraScenario.nvlink_h100_bw_gb_per_s_str` datasheet figure counts both directions, so the comparison uses half of it against InfiniBand's `{python} CommInfraScenario.ib_ndr_bw_gb_per_s_str` per port.
@@ -2307,7 +2397,7 @@ Flat collective algorithms assume that every link in the cluster delivers equal 
 | **Intra-Node** |      NVLink 4.0     | `{python} CommInfraScenario.nvlink_bw_approx_str` | `{python} CommInfraScenario.bandwidth_ratio_mult_str` faster |
 | **Inter-Node** | InfiniBand NDR 400G | `{python} CommInfraScenario.ib_ndr_bw_approx_str` |                     1$\times$ (baseline)                     |
 
-: **The Bandwidth Hierarchy**: Modern GPU clusters exhibit an order-of-magnitude bandwidth gap between intra-node and inter-node communication. Hierarchical algorithms exploit this gap. Relative speed compares per-direction rates (NVLink's 450 GB/s one-way against InfiniBand's 50 GB/s per port); the bandwidth column shows NVLink's bidirectional datasheet total. {#tbl-bandwidth-hierarchy}
+: **The Bandwidth Hierarchy**: Modern GPU clusters exhibit an order-of-magnitude bandwidth gap between intra-node and inter-node communication. Hierarchical algorithms exploit this gap. Relative speed compares per-direction rates (NVLink's `{python} CommInfraScenario.nvlink_perdir_gb_per_s_str` one-way against InfiniBand's `{python} CommInfraScenario.ib_ndr_bw_gb_per_s_str` per port); the bandwidth column shows NVLink's bidirectional datasheet total. {#tbl-bandwidth-hierarchy}
 
 A naive flat Ring AllReduce ignores this structure, routing data across InfiniBand when NVLink would suffice and saturating scarce inter-node bandwidth. Hierarchical AllReduce\index{Hierarchical AllReduce}\index{Hierarchical AllReduce!three-phase decomposition} decomposes the global operation into three phases that exploit the bandwidth hierarchy (@fig-hierarchical-allreduce).
 
@@ -2553,11 +2643,11 @@ class HierarchicalAllreduceCalc:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     n_nodes_har = 8
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    gradient = 1 * GB  # scenario assumption: 1 GB gradient buffer
+    gradient = ReferenceStats.CollectiveCommunicationProfile.GradientBuffer  # chapter's 1 GB gradient buffer
     ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # InfiniBand NDR 400 Gbps per port
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth  # NVLink 4.0 (H100), datasheet bidirectional (for display)
     nvlink_bw_beta = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # one-way rate for ring math
-    ib_alpha = 3 * microsecond  # scenario assumption: alpha-beta base latency
+    ib_alpha = Systems.SwitchFabric.AlphaNdr  # canonical effective NDR launch latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Flat ring uses the deliberate ~2x simplification the prose math shows
@@ -2636,7 +2726,7 @@ class HierarchicalAllreduceCalc:
 3. **Intra-node AllGather**: Each GPU receives `{python} HierarchicalAllreduceCalc.intra_data_mb_str` at `{python} HierarchicalAllreduceCalc.nvlink_bw_gb_per_s_str` per direction → ~`{python} HierarchicalAllreduceCalc.intra_ag_ms_str`
 4. **Total time**: $\approx$ `{python} HierarchicalAllreduceCalc.intra_rs_ms_str` + `{python} HierarchicalAllreduceCalc.inter_time_ms_str` + `{python} HierarchicalAllreduceCalc.intra_ag_ms_str` = `{python} HierarchicalAllreduceCalc.hier_total_ms_str`
 
-**Systems insight**: Hierarchical AllReduce achieves a `{python} HierarchicalAllreduceCalc.speedup_mult_str` speedup\index{Hierarchical AllReduce!bandwidth multiplier} by reducing the inter-node payload from 1 GB to `{python} HierarchicalAllreduceCalc.inter_data_mb_str` per GPU before the Ring traffic multiplier. This budget assumes an independent full-rate inter-node port per GPU and no oversubscription. A shared node uplink would limit the aggregate shard traffic and reduce the predicted speedup. This is why NVIDIA's NCCL and similar libraries often select hierarchical algorithms on multi-node clusters when the topology supports them.
+**Systems insight**: Hierarchical AllReduce achieves a `{python} HierarchicalAllreduceCalc.speedup_mult_str` speedup\index{Hierarchical AllReduce!bandwidth multiplier} by reducing the inter-node payload from `{python} HierarchicalAllreduceCalc.gradient_gb_str` to `{python} HierarchicalAllreduceCalc.inter_data_mb_str` per GPU before the Ring traffic multiplier. This budget assumes an independent full-rate inter-node port per GPU and no oversubscription. A shared node uplink would limit the aggregate shard traffic and reduce the predicted speedup. This is why NVIDIA's NCCL and similar libraries often select hierarchical algorithms on multi-node clusters when the topology supports them.
 
 :::
 
@@ -2644,7 +2734,7 @@ These three phases also generalize to additional fabric tiers. For example, 4 ra
 
 ### Llama 70B communication budget {#sec-communication-llama-budget}
 
-The alpha-beta model can budget a model-sized logical payload before state placement is finalized. Consider a 70B-parameter gradient payload reduced across 128 ranks spanning 16 nodes of 8 GPUs each. This is a streaming transfer budget, not an in-memory replicated H100 training configuration; the complete per-replica state requires sharding or offloading. The gradient tensor is `{python} GradSyncSignificance.gradient_gb_str` in BF16 (70 billion parameters at 2 bytes each, common for Llama-class training). During each training step, this entire gradient must be synchronized across all workers.
+The alpha-beta model can budget a model-sized logical payload before state placement is finalized. Consider a 70B-parameter gradient payload reduced across 128 ranks spanning 16 nodes of 8 GPUs each. This is a streaming transfer budget, not an in-memory replicated H100 training configuration; the complete per-replica state requires sharding or offloading. The gradient tensor is `{python} GradSyncSignificance.gradient_gb_str` in BF16 (`{python} GradSyncSignificance.params_str` parameters at `{python} GradSyncSignificance.bytes_per_param_str` bytes each, common for Llama-class training). During each training step, this entire gradient must be synchronized across all workers.
 
 Applying the three-phase schedule to this model gives a communication budget for one training step: ReduceScatter over NVLink inside each node, AllReduce the corresponding shards over InfiniBand, then AllGather the completed shards locally. The estimate uses each tier's per-direction bandwidth and includes inter-node startup latency; it neglects the smaller intra-node startup terms.
 
@@ -2667,7 +2757,7 @@ Applying the three-phase schedule to this model gives a communication budget for
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models, Systems
-from mlsysim.core.units import GB, byte, microsecond, ms, param, second
+from mlsysim.core.units import BYTES_FP16, GB, byte, microsecond, ms, param, second
 from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_time
 from mlsysim.physics import (
     calc_ring_allreduce_time,
@@ -2682,11 +2772,11 @@ class LlamaBudgetCalc:
     gpus_per_node_llama = Systems.Nodes.DGX_H100.accelerators_per_node
     n_nodes_llama = n_gpus_llama // gpus_per_node_llama
     param_count = Models.Language.Llama2_70B.parameters
-    gradient_bf16 = param_count * (2 * byte / param)  # 140 GB in BF16
+    gradient_bf16 = Models.Language.Llama2_70B.size_in_bytes(BYTES_FP16)  # 140 GB in BF16
 
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # one-way beta for ring math (datasheet 900 is bidirectional)
     ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # NDR 400 Gbps per port
-    ib_alpha = 3 * microsecond  # scenario assumption: alpha-beta base latency
+    ib_alpha = Systems.SwitchFabric.AlphaNdr  # canonical effective NDR launch latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Hierarchical AllReduce—Step 1: Intra-node ReduceScatter
@@ -2715,7 +2805,7 @@ class LlamaBudgetCalc:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gradient_bf16_gb_str = fmt_memory(gradient_bf16, unit=GB, precision=0, commas=False)
-    hier_total_llama_ms_str = fmt_time(hier_total_llama, ms, precision=1, commas=False)
+    hier_total_llama_ms_str = fmt_time(hier_total_llama, ms, precision=1, commas=True)
     flat_total_ms_str = fmt_time(flat_total, ms, precision=None, commas=True)
 ```
 
@@ -3440,13 +3530,14 @@ class OverlapBudgetCalc:
     """Step-time savings from layer-by-layer AllReduce overlap for a 32-layer 7B transformer."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_layers_overlap = 32  # transformer layers
+    _model = Models.Language.Llama2_7B
+    n_layers_overlap = _model.layers  # transformer layers
     backward_per_layer = 15 * ms  # scenario assumption: per-layer backward pass
-    gradient_per_layer = 875 * MB  # equal-layer model: 7B FP32 gradients / 32
+    gradient_per_layer = (_model.size_in_bytes(BYTES_FP32) / n_layers_overlap).to(MB)  # equal-layer model: FP32 gradients / layers
     bucket_size = 100 * MB  # scenario assumption: per AllReduce bucket
     allreduce_per_bucket = 3 * ms  # assumed fixed charge for each bucket, including the final partial bucket
     n_gpus_overlap = 64
-    params_b_overlap = 7
+    params_overlap = _model.parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_backward = n_layers_overlap * backward_per_layer
@@ -3467,6 +3558,7 @@ class OverlapBudgetCalc:
     from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_params, fmt_percent, fmt_time
 
     check(no_overlap > with_overlap, "No overlap should take longer than with overlap")
+    check(abs(gradient_per_layer.to(MB).magnitude - 875) < 1e-6, "Header comment and prose assume 875 MB per layer")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     total_backward_ms_str = fmt_time(total_backward, ms, precision=0, commas=False)
@@ -3480,7 +3572,7 @@ class OverlapBudgetCalc:
     n_gpus_overlap_str = fmt_count(n_gpus_overlap, commas=False, label="GPU")
     gradient_per_layer_mb_str = fmt_memory(gradient_per_layer, unit=MB, precision=0, commas=False)
     bucket_size_mb_str = fmt_memory(bucket_size, unit=MB, precision=0, commas=False)
-    params_b_overlap_str = fmt_params(params_b_overlap * BILLION, scale="B", precision=0, commas=False)
+    params_b_overlap_str = fmt_params(params_overlap, scale="B", precision=0, commas=False)
 ```
 
 ::: {#nbk-collective-communication-overlap-budget-7b-transformer .callout-notebook title="Overlap budget for a 7B transformer"}
@@ -3601,9 +3693,9 @@ class CommInfraRecap:
     nvlink_bw_beta = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
     n_nodes_har = 8
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    gradient = 1 * GB  # scenario assumption: 1 GB gradient buffer
+    gradient = ReferenceStats.CollectiveCommunicationProfile.GradientBuffer  # chapter's 1 GB gradient buffer
     ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    ib_alpha = 3 * microsecond  # scenario assumption: alpha-beta base latency
+    ib_alpha = Systems.SwitchFabric.AlphaNdr  # canonical effective NDR launch latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     flat_time = (2 * gradient / ib_bw).to(ms)
@@ -3783,9 +3875,41 @@ The fleet now has its logic (parallelism) and its traffic patterns (communicatio
 
 [^fn-allreduce-etymology-primitive]: **AllReduce**\index{AllReduce!etymology}: A compound term from MPI indicating a Reduce operation (summing data from all nodes to one) followed by a Broadcast (sending the sum to all nodes). Ring-based AllReduce implements this as a sequential ReduceScatter phase followed by an AllGather phase, each taking $N-1$ rounds for $2(N-1)$ rounds total; ranks send and receive concurrently within each round, and every GPU ends with the global sum without a centralized bottleneck.
 
+```{python}
+#| echo: false
+#| label: collective-fiber-delay
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FIBER PROPAGATION DELAY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: [^fn-speed-of-light] footnote.
+# │ How: delay = cable length / SPEED_OF_LIGHT_FIBER_KM_S.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics.constants import SPEED_OF_LIGHT_FIBER_KM_S
+from mlsysim.core.units import km, meter, microsecond, nanosecond, second
+from mlsysim.fmt import check, fmt, fmt_qty, fmt_time
+
+class FiberDelay:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    v_fiber = SPEED_OF_LIGHT_FIBER_KM_S.to(km / second)
+    cable = 100 * meter  # scenario assumption: rack-to-rack run in a large hall
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    meters_per_us = (v_fiber * microsecond).to(meter).magnitude
+    delay = (cable / v_fiber).to(nanosecond)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(meters_per_us - round(meters_per_us)) < 1e-9, "Meters per microsecond should be a whole number")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    v_fiber_km_s_str = fmt_qty(v_fiber, unit=km / second, precision=0, commas=True)
+    meters_per_us_str = fmt(meters_per_us, precision=0, commas=True)
+    cable_m_str = fmt(cable.to(meter).magnitude, precision=0, commas=False)
+    delay_ns_str = fmt_time(delay, nanosecond, precision=0, commas=False)
+```
+
 [^fn-zerocopy-rdma-bypass]: **Zero-Copy Communication**\index{Zero-Copy Communication!RDMA}: RDMA allows the NIC to transfer data directly from the application's memory on one node to the application's memory on another, bypassing the operating system's kernel buffers. GPUDirect RDMA extends the idea to accelerator memory, letting the NIC read gradients directly from the device, so a `{python} GradSyncSignificance.gradient_gb_str` gradient never passes through host DRAM, whereas a staged path writes and then rereads it there (`{python} GradSyncSignificance.gradient_2x_gb_str` of host-memory traffic per send).
 
-[^fn-speed-of-light]: **The Speed of Light Constraint**\index{Speed of Light!latency bound}: Light travels through optical fiber at approximately 200,000 km/s, or 200 meters per microsecond. In a massive data center where cables between racks span 100 meters, the "wire delay" alone contributes 500 ns to every message, a physical limit that no amount of better networking hardware can reduce.
+[^fn-speed-of-light]: **The Speed of Light Constraint**\index{Speed of Light!latency bound}: Light travels through optical fiber at approximately `{python} FiberDelay.v_fiber_km_s_str`, or `{python} FiberDelay.meters_per_us_str` meters per microsecond. In a massive data center where cables between racks span `{python} FiberDelay.cable_m_str` meters, the "wire delay" alone contributes `{python} FiberDelay.delay_ns_str` to every message, a physical limit that no amount of better networking hardware can reduce.
 
 ::: { .quiz-end }
 :::

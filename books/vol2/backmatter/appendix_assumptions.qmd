@@ -46,8 +46,8 @@ from mlsysim.fmt import (
 
 class FleetQuickCalc:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_gpus_small = 8_192
-    n_gpus_large = 100_000
+    n_gpus_small = Systems.Clusters.Frontier_8K.total_accelerators
+    n_gpus_large = Systems.Clusters.Mega_100K.total_accelerators
     mttf_h = Systems.Reliability.Gpu.mttf_hours
     model_params = Models.Language.Llama2_70B.parameters
     model_params_b = Models.Language.Llama2_70B.parameters.to(param).magnitude / BILLION
@@ -58,7 +58,7 @@ class FleetQuickCalc:
     pue = Infrastructure.FacilityCooling.BestAir.pue
     carbon_quebec = Infrastructure.Grids.Quebec.carbon_intensity_g_kwh * (gram / kWh)
     carbon_poland = Infrastructure.Grids.Poland.carbon_intensity_g_kwh * (gram / kWh)
-    hours_per_month = 720 * hour  # scenario assumption
+    hours_per_month = DAYS_PER_MONTH * HOURS_PER_DAY * hour  # book convention: 30-day month
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Failure rate
@@ -90,9 +90,9 @@ class FleetQuickCalc:
     n_small_str = fmt_count(n_gpus_small, label="GPU")
     mttf_hours_str = fmt_time(mttf_h, 'hour', precision=0, commas=True, style='word')
     fail_hr_str = fmt_rate(fail_per_hour, "failures/hour", precision=2, commas=False)
-    fail_day_str = fmt_rate(fail_per_day, "failures/day", precision=1, commas=False, approx=True)
+    fail_day_str = fmt_rate(fail_per_day, "failures/day", precision=1, commas=False)
     n_large_str = fmt_count(n_gpus_large, label="GPU")
-    fail_large_str = fmt_rate(fail_large_per_day, "failures/day", precision=0, commas=False, approx=True)
+    fail_large_str = fmt_rate(fail_large_per_day, "failures/day", precision=0, commas=False)
 
     model_b_str = fmt_params(model_params, scale="B", commas=False)
     bf16_bytes_value_str = fmt(bf16_bytes, precision=0, commas=False)
@@ -101,15 +101,17 @@ class FleetQuickCalc:
     allreduce_s_str = fmt_time(allreduce_time, second, precision=1, commas=False)
 
     n_carbon_str = fmt_count(n_gpus_carbon, label="GPU")
+    n_carbon_count_str = fmt_count(n_gpus_carbon)
     tdp_w_str = fmt_power(tdp, unit=watt, precision=0, commas=False)
     pue_str = fmt(pue, precision=2, commas=False)
     facility_mw_str = fmt_power(facility_power_q, unit=MW, precision=2, commas=False)
     carbon_q_g_kwh_str = fmt_carbon_intensity(carbon_quebec, unit=gram / kWh, precision=0, commas=False)
     co2_q_str = fmt_emissions(co2_quebec, unit=metric_ton, precision=1, commas=False)
     carbon_p_g_kwh_str = fmt_carbon_intensity(carbon_poland, unit=gram / kWh, precision=0, commas=False)
-    co2_p_str = fmt_emissions(co2_poland, unit=metric_ton, precision=1)
+    co2_p_str = fmt_emissions(co2_poland, unit=metric_ton, precision=1, commas=True)
     ratio_mult_str = fmt_multiple(carbon_ratio, precision=0, commas=False)
     model_params_b_value_str = fmt(model_params_b, precision=0, commas=False)
+    hours_per_month_str = fmt(hours_per_month.to(hour).magnitude, precision=0, commas=False)
 ```
 
 ::: {#nbk-appendix-assumptions-quick-calculations-constants .callout-notebook title="Quick calculations with these assumptions"}
@@ -147,13 +149,13 @@ The collective can consume a significant fraction of a training step.
 Pipeline and tensor parallelism exist partly to shrink the gradient volume each rank must communicate.
 
 **Problem**:
-Estimate the carbon footprint of a `{python} FleetQuickCalc.n_carbon_str` training run.
+Estimate the carbon footprint of a `{python} FleetQuickCalc.n_carbon_count_str`-GPU training run.
 
 **Variables**:
 Each H100 draws `{python} FleetQuickCalc.tdp_w_str` at thermal design power (TDP). Use power usage effectiveness (PUE) `{python} FleetQuickCalc.pue_str`, Quebec grid intensity `{python} FleetQuickCalc.carbon_q_g_kwh_str`, and Poland grid intensity `{python} FleetQuickCalc.carbon_p_g_kwh_str`.
 
 **Math**:
-A GPU-only facility-power proxy is `{python} FleetQuickCalc.n_carbon_str` $\times$ `{python} FleetQuickCalc.tdp_w_str` $\times$ `{python} FleetQuickCalc.pue_str` = `{python} FleetQuickCalc.facility_mw_str`. In Quebec, `{python} FleetQuickCalc.facility_mw_str` $\times$ 720 h/month $\times$ `{python} FleetQuickCalc.carbon_q_g_kwh_str` = `{python} FleetQuickCalc.co2_q_str` CO$_2$ per month.
+A GPU-only facility-power proxy is `{python} FleetQuickCalc.n_carbon_str` $\times$ `{python} FleetQuickCalc.tdp_w_str` $\times$ `{python} FleetQuickCalc.pue_str` = `{python} FleetQuickCalc.facility_mw_str`. In Quebec, `{python} FleetQuickCalc.facility_mw_str` $\times$ `{python} FleetQuickCalc.hours_per_month_str` h/month $\times$ `{python} FleetQuickCalc.carbon_q_g_kwh_str` = `{python} FleetQuickCalc.co2_q_str` CO$_2$ per month.
 
 **Result**:
 The same run in Poland emits `{python} FleetQuickCalc.co2_p_str`, a `{python} FleetQuickCalc.ratio_mult_str` difference.
@@ -171,7 +173,7 @@ from mlsysim.fmt import MarkdownStr, fmt, fmt_bandwidth, fmt_flop_rate, fmt_int,
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
-    return MarkdownStr(f"{val:g}"), MarkdownStr(unit_str)
+    return MarkdownStr(f"{val:,.10g}"), MarkdownStr(unit_str)
 
 class H100Recap:
     fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
@@ -215,27 +217,32 @@ from mlsysim.fmt import check, fmt_count, fmt_memory, fmt_params
 
 class ArchetypeARecap:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    params_q = Models.Language.GPT3.parameters
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    num_nodes = 128  # scenario input: reference cluster size fixed in the introduction
+    scenario = Scenarios.DenseLLMPretrainingReference
+    params_q = scenario.workload.parameters
+    gpus_per_node = scenario.system.node.accelerators_per_node
+    num_nodes = scenario.system.count
+    state_bpp_q = ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter
+    ckpt_bpp_q = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    state_bpp = BYTES_FP16 + BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE
-    ckpt_bpp = BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE
-    params = params_q.to(param).magnitude
-    train_state_q = (params * state_bpp).to(TB)
-    ckpt_q = (params * ckpt_bpp).to(TB)
-    num_gpus = gpus_per_node * num_nodes
+    train_state_q = (params_q * state_bpp_q).to(TB)
+    ckpt_q = (params_q * ckpt_bpp_q).to(TB)
+    num_gpus = scenario.system.total_accelerators
+    state_bpp = state_bpp_q.to(byte / param).magnitude
+    ckpt_bpp = ckpt_bpp_q.to(byte / param).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(state_bpp.to(byte).magnitude == 16, "Training state should be 16 bytes/param")
-    check(ckpt_bpp.to(byte).magnitude == 14, "Checkpoint should be 14 bytes/param")
-    check(num_gpus == 1024, f"Reference cluster should be 1,024 GPUs, got {num_gpus}")
+    check(
+        state_bpp == (2 * BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE).to(byte).magnitude,
+        "Training state must equal BF16 weights + BF16 gradients + FP32 master + two FP32 moments",
+    )
+    check(ckpt_bpp == (BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE).to(byte).magnitude, "Resumable checkpoint must omit gradients")
+    check(num_gpus == gpus_per_node * num_nodes, "Reference cluster must be nodes x accelerators per node")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     params_b_str = fmt_params(params_q, scale="B", precision=0, commas=False)
-    state_bpp_str = fmt_count(state_bpp.to(byte).magnitude)
-    ckpt_bpp_str = fmt_count(ckpt_bpp.to(byte).magnitude)
+    state_bpp_str = fmt_count(state_bpp)
+    ckpt_bpp_str = fmt_count(ckpt_bpp)
     train_state_str = fmt_memory(train_state_q, unit=TB, precision=1)
     ckpt_str = fmt_memory(ckpt_q, unit=TB, precision=2)
     num_gpus_str = fmt_count(num_gpus)
@@ -256,7 +263,7 @@ Where a chapter needs a concrete training job, it uses the Archetype A running i
 | Resumable checkpoint size            |                                                        `{python} ArchetypeARecap.ckpt_str`                                                         |
 | Reference cluster                    | `{python} ArchetypeARecap.num_gpus_str` H100 GPUs (`{python} ArchetypeARecap.num_nodes_str` nodes of `{python} ArchetypeARecap.gpus_per_node_str`) |
 
-: **Archetype A Running Instance**: Mixed-precision training with the Adam optimizer (BF16 weights and gradients, FP32 master weights, two FP32 Adam moments); the checkpoint omits gradients. @Sec-appdx-dam-taxonomy-training-memory derives the per-parameter bytes. The reference cluster is separate from the canonical cluster tiers below, which illustrate how behavior changes with scale. {#tbl-fleet-archetype-a}
+: **Archetype A Running Instance**: Mixed-precision training with the Adam optimizer (BF16 weights and gradients, FP32 master weights, two FP32 Adam moments); the checkpoint omits gradients. @Sec-appdx-dam-taxonomy-training-memory derives the per-parameter bytes. The reference cluster is the book's `{python} ArchetypeARecap.num_gpus_str`-GPU training cluster; the canonical cluster tiers below illustrate how behavior changes as scale departs from it. {#tbl-fleet-archetype-a}
 
 ```{python}
 #| echo: false
@@ -266,7 +273,7 @@ from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_percent, fmt_unit, fmt_va
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
-    return MarkdownStr(f"{val:g}"), MarkdownStr(unit_str)
+    return MarkdownStr(f"{val:,.10g}"), MarkdownStr(unit_str)
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Scope: chapter-anchor — the scaling-efficiency recap reuses the canonical
@@ -322,7 +329,7 @@ from mlsysim.fmt import (
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
-    return MarkdownStr(f"{val:g}"), MarkdownStr(unit_str)
+    return MarkdownStr(f"{val:,.10g}"), MarkdownStr(unit_str)
 
 class NetworkConstants:
     nvlink_v100_bw_str = fmt_val(Hardware.Cloud.V100.nvlink.bandwidth)
@@ -430,12 +437,12 @@ Network specifications define how fast data moves, but they say nothing about ho
 #| echo: false
 #| label: appendix-reliability-constants
 from mlsysim.core import units
-from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_memory, fmt_rate, fmt_time, fmt_unit, fmt_val
-from mlsysim.physics import calc_mtbf_cluster
+from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_memory, fmt_params, fmt_rate, fmt_time, fmt_unit, fmt_val
+from mlsysim.physics import calc_checkpoint_size, calc_mtbf_cluster
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
-    return MarkdownStr(f"{val:g}"), MarkdownStr(unit_str)
+    return MarkdownStr(f"{val:,.10g}"), MarkdownStr(unit_str)
 
 class ReliabilityConstants:
     gpu_mttf_hours_str, gpu_mttf_hours_unit_str = _fmt_plain(Systems.Reliability.Gpu.mttf_hours, "hours")
@@ -451,17 +458,22 @@ class ReliabilityConstants:
         Systems.Reliability.Recovery.checkpoint_write_bw_gbs, "GB/s"
     )
     dgx_h100_gpus_per_node_str, dgx_h100_gpus_per_node_unit_str = _fmt_plain(Systems.Nodes.DGX_H100.accelerators_per_node, "GPUs/node")
+    pcie_switches_per_node = 1  # scenario assumption: no sourced per-node PCIe-switch count in the DGX datasheet
     node_mttf_hours = 1 / (
         Systems.Nodes.DGX_H100.accelerators_per_node / Systems.Reliability.Gpu.mttf_hours
-        + Systems.Nodes.DGX_H100.accelerators_per_node / Systems.Reliability.Nic.mttf_hours
-        + 2 / Systems.Reliability.Psu.mttf_hours
-        + 1 / Systems.Reliability.PcieSwitch.mttf_hours
+        + Systems.Nodes.DGX_H100.nics_per_node / Systems.Reliability.Nic.mttf_hours
+        + Systems.Nodes.DGX_H100.psus_per_node / Systems.Reliability.Psu.mttf_hours
+        + pcie_switches_per_node / Systems.Reliability.PcieSwitch.mttf_hours
         + Systems.Nodes.DGX_H100.accelerators_per_node / Systems.Reliability.Hbm.mttf_hours
     )
-    node_mttf_hours_str = fmt_time(node_mttf_hours, 'hour', precision=1)
+    node_mttf_hours_str = fmt_time(node_mttf_hours, 'hour', precision=1, commas=True)
+    node_nics_str = fmt(Systems.Nodes.DGX_H100.nics_per_node, precision=0, commas=False)
+    node_psus_str = fmt(Systems.Nodes.DGX_H100.psus_per_node, precision=0, commas=False)
     node_mttf_days_str = fmt_time(node_mttf_hours / HOURS_PER_DAY, 'day', precision=1, commas=False)
     # Resumable mixed-precision Adam checkpoint: BF16 weights + FP32 master + two FP32 moments
-    recovery_checkpoint = Models.Language.Llama2_70B.parameters.to(param).magnitude * (BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE)
+    recovery_model = Models.Language.Llama2_70B
+    recovery_ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
+    recovery_checkpoint = calc_checkpoint_size(recovery_model.parameters, recovery_ckpt_bpp)
     recovery_time = (
         Systems.Reliability.Recovery.heartbeat_timeout_s * second
         + Systems.Reliability.Recovery.reschedule_time_s * second
@@ -471,6 +483,8 @@ class ReliabilityConstants:
     recovery_failures_per_day = 1 / frontier_cluster_mtbf * HOURS_PER_DAY * hour
     recovery_lost_time_per_day = recovery_time * recovery_failures_per_day
     recovery_checkpoint_gb_str = fmt_memory(recovery_checkpoint, unit=GB, precision=0, commas=False)
+    recovery_model_b_str = fmt_params(recovery_model.parameters, scale="B", precision=0, commas=False)
+    recovery_ckpt_bpp_str = fmt(recovery_ckpt_bpp.to(byte / param).magnitude, precision=0, commas=False)
     recovery_time_s_str = fmt_time(recovery_time, second, precision=1, commas=False)
     recovery_failures_per_day_str = fmt_rate(recovery_failures_per_day, "failures/day", precision=1, commas=False)
     recovery_lost_min_per_day_str = fmt_time(recovery_lost_time_per_day, minute, precision=1, commas=False)
@@ -494,7 +508,7 @@ At fleet scale, component failures are not exceptional events but statistical ce
 | Top-of-rack switch MTTF            | `{python} ReliabilityConstants.tor_switch_mttf_hours_str`  |  `{python} ReliabilityConstants.tor_switch_mttf_hours_unit_str` |
 | Optical cable and transceiver MTTF |    `{python} ReliabilityConstants.cable_mttf_hours_str`    |    `{python} ReliabilityConstants.cable_mttf_hours_unit_str`    |
 
-: **Component Mean Time To Failure**: Steady-state MTTF anchors from [@kokolis2025; @zu2024tpuv4; @barroso2019]. Combined node MTTF $\approx$ `{python} ReliabilityConstants.node_mttf_hours_str` (`{python} ReliabilityConstants.node_mttf_days_str`) at `{python} ReliabilityConstants.dgx_h100_gpus_per_node_str` per node. {#tbl-fleet-mttf}
+: **Component Mean Time To Failure**: Steady-state MTTF anchors from [@kokolis2025; @zu2024tpuv4; @barroso2019]. Combined DGX H100 node MTTF $\approx$ `{python} ReliabilityConstants.node_mttf_hours_str` (`{python} ReliabilityConstants.node_mttf_days_str`) for `{python} ReliabilityConstants.dgx_h100_gpus_per_node_str` GPUs with their HBM, `{python} ReliabilityConstants.node_nics_str` NICs, `{python} ReliabilityConstants.node_psus_str` PSUs, and one PCIe switch. The MTBF cascade in @sec-appdx-reliability-foundations-mtbf-cascade models only GPUs, NICs, and PSUs, so its node interval is longer. {#tbl-fleet-mttf}
 
 ### Recovery time assumptions {.unnumbered}
 
@@ -506,7 +520,7 @@ Failure detection and recovery introduce downtime that compounds with cluster si
 | Job reschedule delay                   |         `{python} ReliabilityConstants.RESCHEDULE_TIME_S_str`          |       `{python} ReliabilityConstants.RESCHEDULE_TIME_S_unit_str`      |
 | Checkpoint write bandwidth (aggregate) | `{python} ReliabilityConstants.checkpoint_write_bw_gb_per_s_value_str` | `{python} ReliabilityConstants.checkpoint_write_bw_gb_per_s_unit_str` |
 
-: **Recovery Time Parameters**: Design assumptions for heartbeat, reschedule, and checkpoint-write bandwidth (Young-Daly context [@young1974; @daly2006]). Recovery before replay $\approx$ detect + reschedule + checkpoint size divided by storage bandwidth; for a 70B-parameter model with a 14-byte-per-parameter checkpoint, about `{python} ReliabilityConstants.recovery_time_s_str` per failure. {#tbl-fleet-recovery}
+: **Recovery Time Parameters**: Design assumptions for heartbeat, reschedule, and checkpoint-write bandwidth (Young-Daly context [@young1974; @daly2006]). Recovery before replay $\approx$ detect + reschedule + checkpoint size divided by storage bandwidth; for a `{python} ReliabilityConstants.recovery_model_b_str`-parameter model with a `{python} ReliabilityConstants.recovery_ckpt_bpp_str`-byte-per-parameter checkpoint, about `{python} ReliabilityConstants.recovery_time_s_str` per failure. {#tbl-fleet-recovery}
 
 Reliability constants quantify how often failures occur and how long recovery takes. The cost of each failure depends on how much communication must be repeated. The following parameters model that communication overhead.
 
@@ -519,10 +533,11 @@ from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_power, fmt_unit, fmt_val
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
-    return MarkdownStr(f"{val:g}"), MarkdownStr(unit_str)
+    return MarkdownStr(f"{val:,.10g}"), MarkdownStr(unit_str)
 
 class CommModelConstants:
-    IB_NDR_LATENCY_US_str, IB_NDR_LATENCY_US_unit_str = _fmt_plain(Systems.Fabrics.InfiniBand_NDR.latency_us, "us")
+    ib_ndr_alpha_us = Systems.SwitchFabric.AlphaNdr.to(microsecond).magnitude  # NDR per-message α anchor (editor ruling)
+    IB_NDR_LATENCY_US_str, IB_NDR_LATENCY_US_unit_str = _fmt_plain(ib_ndr_alpha_us, "us")
     IB_HDR_LATENCY_US_str, IB_HDR_LATENCY_US_unit_str = _fmt_plain(Systems.Fabrics.InfiniBand_HDR.latency_us, "us")
     ROCE_LATENCY_US_str, ROCE_LATENCY_US_unit_str = _fmt_plain(Systems.Fabrics.RoCE_100G.latency_us, "us")
     TCP_LATENCY_US_str, TCP_LATENCY_US_unit_str = _fmt_plain(Systems.Fabrics.Ethernet_100G.latency_us, "us")
@@ -532,8 +547,9 @@ class CommModelConstants:
     ring_allreduce_factor_str, ring_allreduce_factor_unit_str = _fmt_plain(Literature.Communication.RingAllreduceFactor, "(dimensionless)")
     dgx_h100_gpus_per_node_str, dgx_h100_gpus_per_node_unit_str = _fmt_plain(Systems.Nodes.DGX_H100.accelerators_per_node, "GPUs/node")
     tcp_ndr_latency_ratio_mult_str = fmt_multiple(
-        Systems.Fabrics.Ethernet_100G.latency_us / Systems.Fabrics.InfiniBand_NDR.latency_us, precision=0, commas=False
+        round(Systems.Fabrics.Ethernet_100G.latency_us / ib_ndr_alpha_us), precision=0, commas=False  # prose rounds to a whole multiple
     )
+    dgx_gpus_per_node_count_str = fmt(Systems.Nodes.DGX_H100.accelerators_per_node, precision=0, commas=False)
 ```
 
 ## Communication Model Parameters {.unnumbered}
@@ -550,7 +566,7 @@ This book models communication cost using the $\alpha$-$\beta$ framework: $T(n) 
 | RoCE sustained bandwidth ($\beta$)           |   `{python} CommModelConstants.roce_100g_bw_gb_per_s_value_str`    |    `{python} CommModelConstants.roce_100g_bw_gb_per_s_unit_str`   |
 | TCP startup latency ($\alpha$)               |          `{python} CommModelConstants.TCP_LATENCY_US_str`          |       `{python} CommModelConstants.TCP_LATENCY_US_unit_str`       |
 
-: **Communication Model Parameters ($\alpha$-$\beta$)**: $\alpha$ (startup) and $\beta$ (bandwidth) from fabric specifications and measured cluster studies [@infiniband2000spec; @jiang2024megascale]. The `{python} CommModelConstants.tcp_ndr_latency_ratio_mult_str` NDR-vs-TCP gap explains why RDMA fabrics dominate synchronous training. {#tbl-fleet-alpha-beta}
+: **Communication Model Parameters ($\alpha$-$\beta$)**: $\alpha$ (startup) and $\beta$ (bandwidth) from fabric specifications and measured cluster studies [@infiniband2000spec; @jiang2024megascale]. The InfiniBand NDR $\alpha$ is the per-message base latency used in the book's collective models, which is smaller than the fabric's end-to-end one-way latency in @tbl-fleet-inter-node; the other rows are end-to-end startup latencies. The `{python} CommModelConstants.tcp_ndr_latency_ratio_mult_str` NDR-vs-TCP gap explains why RDMA fabrics dominate synchronous training. {#tbl-fleet-alpha-beta}
 
 ### AllReduce cost model {.unnumbered}
 
@@ -561,7 +577,7 @@ The ring AllReduce (the most common collective for gradient synchronization) tra
 | Ring AllReduce bandwidth factor | `{python} CommModelConstants.ring_allreduce_factor_str`  |  `{python} CommModelConstants.ring_allreduce_factor_unit_str` |
 | GPUs per node                   | `{python} CommModelConstants.dgx_h100_gpus_per_node_str` | `{python} CommModelConstants.dgx_h100_gpus_per_node_unit_str` |
 
-: **AllReduce Cost Parameters**: Ring AllReduce factor of 2 from the standard ring algorithm [@gibiansky2017baidu]. `Systems.Nodes.DGX_H100` (8 GPUs per node) sets the intra-node versus inter-node boundary in hierarchical collectives. {#tbl-fleet-allreduce}
+: **AllReduce Cost Parameters**: Ring AllReduce factor of 2 from the standard ring algorithm [@gibiansky2017baidu]. The DGX H100 node (`{python} CommModelConstants.dgx_gpus_per_node_count_str` GPUs per node) sets the intra-node versus inter-node boundary in hierarchical collectives. {#tbl-fleet-allreduce}
 
 Communication models quantify the overhead of coordination. The sustainability cost of that coordination (the power drawn, the water consumed, the carbon emitted) requires separate assumptions for the physical infrastructure surrounding the compute.
 
@@ -574,12 +590,12 @@ from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_percent, fmt_power, fmt_u
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
-    return MarkdownStr(f"{val:g}"), MarkdownStr(unit_str)
+    return MarkdownStr(f"{val:,.10g}"), MarkdownStr(unit_str)
 
 class SustainabilityConstants:
     pue_liquid_cooled_str, pue_liquid_cooled_unit_str = _fmt_plain(Infrastructure.FacilityCooling.LiquidCooled.pue, "(ratio)")
     pue_best_air_str, pue_best_air_unit_str = _fmt_plain(Infrastructure.FacilityCooling.BestAir.pue, "(ratio)")
-    pue_typical_str, pue_typical_unit_str = _fmt_plain(Infrastructure.FacilityCooling.Typical.pue, "(ratio)")
+    pue_industry_avg_str, pue_industry_avg_unit_str = _fmt_plain(Infrastructure.FacilityCooling.UptimeSurvey2022Average.pue, "(ratio)")
     pue_legacy_str, pue_legacy_unit_str = _fmt_plain(Infrastructure.FacilityCooling.Legacy.pue, "(ratio)")
     wue_air_cooled_str, wue_air_cooled_unit_str = _fmt_plain(Infrastructure.FacilityCooling.BestAir.wue, "L/kWh")
     wue_evaporative_str, wue_evaporative_unit_str = _fmt_plain(Infrastructure.FacilityCooling.Typical.wue, "L/kWh")
@@ -598,11 +614,11 @@ class SustainabilityConstants:
     pue_legacy_extra_pct_str = fmt_percent(
         Infrastructure.FacilityCooling.Legacy.pue / Infrastructure.FacilityCooling.LiquidCooled.pue - 1, precision=1, commas=False, style='prose'
     )
-    tenk_h100_it_power = 10_000 * Hardware.Cloud.H100.tdp
+    tenk_h100_it_power = Systems.Clusters.Training_10K.total_accelerators * Hardware.Cloud.H100.tdp
     pue_extra_overhead_power = tenk_h100_it_power * (Infrastructure.FacilityCooling.Legacy.pue - Infrastructure.FacilityCooling.LiquidCooled.pue)
     tenk_h100_it_mw_str = fmt_power(tenk_h100_it_power, unit=MW, precision=0, commas=False)
     pue_extra_overhead_mw_str = fmt_power(pue_extra_overhead_power, unit=MW, precision=1, commas=False)
-    wue_example_power = 10 * MW  # scenario assumption
+    wue_example_power = ReferenceStats.FacilityScaleAnchors.ReferenceItLoad
     wue_evap_rate = (wue_example_power * hour).to(kWh) * (Infrastructure.FacilityCooling.Typical.wue * ureg.liter / kWh) / hour
     wue_example_mw_str = fmt_power(wue_example_power, unit=MW, precision=0, commas=False)
     wue_evap_lph_l_per_hour_str = fmt_water_rate(wue_evap_rate, unit=L / hour, precision=0)
@@ -626,7 +642,7 @@ PUE is the ratio of total facility power to IT equipment power. A PUE of 1.0 wou
 |:-----------------------------------|:--------------------------------------------------------:|:-------------------------------------------------------------:|
 | PUE (liquid-cooled, best in class) | `{python} SustainabilityConstants.pue_liquid_cooled_str` | `{python} SustainabilityConstants.pue_liquid_cooled_unit_str` |
 | PUE (best air-cooled)              |   `{python} SustainabilityConstants.pue_best_air_str`    |    `{python} SustainabilityConstants.pue_best_air_unit_str`   |
-| PUE (industry average)             |    `{python} SustainabilityConstants.pue_typical_str`    |    `{python} SustainabilityConstants.pue_typical_unit_str`    |
+| PUE (industry average, 2022)       | `{python} SustainabilityConstants.pue_industry_avg_str`  |  `{python} SustainabilityConstants.pue_industry_avg_unit_str` |
 | PUE (legacy air-cooled)            |    `{python} SustainabilityConstants.pue_legacy_str`     |     `{python} SustainabilityConstants.pue_legacy_unit_str`    |
 
 : **power usage effectiveness (PUE)**: Illustrative PUE tiers from hyperscale surveys and Green Grid definitions [@davis2022uptime; @thegreengrid2007pue]. Legacy vs. liquid-cooled gap: `{python} SustainabilityConstants.pue_legacy_extra_pct_str` more facility power for the same IT load. {#tbl-fleet-pue}
@@ -656,7 +672,7 @@ The same training run emits vastly different amounts of CO$_2$ depending on the 
 | Grid carbon intensity (US average) | `{python} SustainabilityConstants.carbon_us_avg_gco2_kwh_str` | `{python} SustainabilityConstants.carbon_us_avg_gco2_kwh_unit_str` |
 | Grid carbon intensity (Poland)     | `{python} SustainabilityConstants.carbon_poland_gco2_kwh_str` | `{python} SustainabilityConstants.carbon_poland_gco2_kwh_unit_str` |
 
-: **Regional Grid Carbon Intensity**: Grid carbon intensity in gCO$_2$/kWh, anchored to emissions-factor data [@iea2024emissionsFactors; @canada2026emissionFactors] and ordered from low (Norway) to high (Poland). Location spans a `{python} SustainabilityConstants.carbon_low_high_ratio_mult_str` carbon spread, often larger than algorithmic tweaks. {#tbl-fleet-carbon}
+: **Regional Grid Carbon Intensity**: Grid carbon intensity in gCO$_2$/kWh, anchored to emissions-factor data [@iea2024emissionsFactors; @canada2026emissionFactors] and ordered from low (Norway) to high (Poland). Location alone changes carbon intensity by `{python} SustainabilityConstants.carbon_low_high_ratio_mult_str`, often more than algorithmic tweaks. {#tbl-fleet-carbon}
 
 ### Power density {.unnumbered}
 
@@ -682,7 +698,7 @@ from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_percent, fmt_time, fmt_un
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
-    return MarkdownStr(f"{val:g}"), MarkdownStr(unit_str)
+    return MarkdownStr(f"{val:,.10g}"), MarkdownStr(unit_str)
 
 class EconomicConstants:
     cloud_gpu_training_per_hour_str = fmt_val(Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate)
@@ -731,11 +747,11 @@ Economic constants set the price per unit of resource. Capacity planning instead
 #| echo: false
 #| label: appendix-capacity-constants
 from mlsysim.core import units
-from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_percent, fmt_time, fmt_unit, fmt_val
+from mlsysim.fmt import MarkdownStr, fmt, fmt_count, fmt_int, fmt_percent, fmt_time, fmt_unit, fmt_val
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
-    return MarkdownStr(f"{val:g}"), MarkdownStr(unit_str)
+    return MarkdownStr(f"{val:,.10g}"), MarkdownStr(unit_str)
 
 class CapacityConstants:
     mfu_training_low_str, mfu_training_low_unit_str = _fmt_plain(Literature.Training.MfuLow, "(fraction)")
@@ -755,6 +771,7 @@ class CapacityConstants:
     scaling_eff_8192_effective_gpus_str = fmt(
         Systems.Clusters.Frontier_8K.total_accelerators * ReferenceStats.TrainingScaleProfiles.Eff8192Gpu, precision=1
     )
+    frontier_8k_nominal_gpus_str = fmt_count(Systems.Clusters.Frontier_8K.total_accelerators)
     overhead_total_pct_str = fmt_percent(
         Ops.TrainingRunOverheads.PipelineBubble
         + Ops.TrainingRunOverheads.Checkpoint
@@ -827,7 +844,7 @@ Scaling efficiency $\eta_{\text{scaling}} = T_1/(N \times T_N)$ measures how muc
 | Scaling efficiency (1,024 GPUs) | `{python} CapacityConstants.scaling_eff_1024gpu_str` | `{python} CapacityConstants.scaling_eff_1024gpu_unit_str` |
 | Scaling efficiency (8,192 GPUs) | `{python} CapacityConstants.scaling_eff_8192gpu_str` | `{python} CapacityConstants.scaling_eff_8192gpu_unit_str` |
 
-: **Scaling Efficiency by Cluster Size**: Illustrative $\eta_{\text{scaling}}$ tiers from [@chowdhery2022palm; @jiang2024megascale]. At 8,192 GPUs, `{python} CapacityConstants.scaling_eff_8192_effective_gpus_str` effective GPUs of `{python} ClusterConstants.frontier_8k_total_gpus_str` nominal. {#tbl-fleet-scaling}
+: **Scaling Efficiency by Cluster Size**: Illustrative $\eta_{\text{scaling}}$ tiers from [@chowdhery2022palm; @jiang2024megascale]. At `{python} CapacityConstants.frontier_8k_nominal_gpus_str` GPUs, `{python} CapacityConstants.scaling_eff_8192_effective_gpus_str` effective GPUs of `{python} CapacityConstants.frontier_8k_nominal_gpus_str` nominal. {#tbl-fleet-scaling}
 
 ### Overhead budgets {.unnumbered}
 
@@ -888,6 +905,7 @@ class UnitConstants:
     watt_factor_str, watt_base_str = _fmt_unit_identity("watt")
     meter_factor_str, meter_base_str = _fmt_unit_identity("meter")
     ib_ndr_gbit_per_s_to_gb_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=GB / second, precision=0, commas=False)
+    ib_ndr_gbps_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
 ## Unit Conventions {.unnumbered}
@@ -925,7 +943,7 @@ Hardware capacity is the one deliberate exception\index{Assumptions!nameplate ca
 
 Two fleet-scale conventions deserve emphasis beyond the table:
 
-- Network bandwidth appears in both bit-rate (Gbps) and byte-rate (GB/s). Divide by 8 to convert Gbps to GB/s (for example, 400 Gbps = `{python} UnitConstants.ib_ndr_gbit_per_s_to_gb_per_s_str` for InfiniBand NDR). Chapters use whichever form fits the calculation; byte-rate is usually easier for transfer-time estimates.
+- Network bandwidth appears in both bit-rate (Gbps) and byte-rate (GB/s). Divide by 8 to convert Gbps to GB/s (for example, `{python} UnitConstants.ib_ndr_gbps_str` = `{python} UnitConstants.ib_ndr_gbit_per_s_to_gb_per_s_str` for InfiniBand NDR). Chapters use whichever form fits the calculation; byte-rate is usually easier for transfer-time estimates.
 - Carbon intensity uses gCO$_2$/kWh (grams of CO$_2$ per kilowatt-hour). Multiply total energy (kWh) by regional carbon intensity to get emissions in grams, then divide by $10^6$ for tonnes.
 
 ```{python}
@@ -933,15 +951,18 @@ Two fleet-scale conventions deserve emphasis beyond the table:
 #| label: appendix-assumptions-summary-recap
 
 from mlsysim.core import units
-from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_unit, fmt_val
+from mlsysim.fmt import MarkdownStr, fmt, fmt_count, fmt_int, fmt_unit, fmt_val
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
-    return MarkdownStr(f"{val:g}"), MarkdownStr(unit_str)
+    return MarkdownStr(f"{val:,.10g}"), MarkdownStr(unit_str)
 
 class AssumptionsSummaryRecap:
+    ib_ndr_alpha_us = Systems.SwitchFabric.AlphaNdr.to(microsecond).magnitude
+    training_10k_gpus_str = fmt_count(Systems.Clusters.Training_10K.total_accelerators)
+    frontier_8k_gpus_str = fmt_count(Systems.Clusters.Frontier_8K.total_accelerators)
     tcp_ndr_latency_ratio_mult_str = fmt_multiple(
-        Systems.Fabrics.Ethernet_100G.latency_us / Systems.Fabrics.InfiniBand_NDR.latency_us, precision=0, commas=False
+        round(Systems.Fabrics.Ethernet_100G.latency_us / ib_ndr_alpha_us), precision=0, commas=False  # prose rounds to a whole multiple
     )
     carbon_low_high_ratio_mult_str = fmt_multiple(
         Infrastructure.Grids.Poland.carbon_intensity_g_kwh / Infrastructure.Grids.Norway.carbon_intensity_g_kwh, precision=0, commas=False
@@ -983,4 +1004,4 @@ The catalog below maps each appendix section to its source category and primary 
 
 ## Summary {.unnumbered}
 
-This appendix is the book's shared fleet-scale assumption sheet. Every napkin-math estimate in the chapters should trace to a row in the tables above, and @tbl-fleet-assumption-provenance-catalog records whether that row comes from a datasheet, a fleet study, an illustrative rate, or a book convention. Reliability rows set the failure clock, with failure a steady-state condition at 10,000 or more GPUs (@sec-appdx-reliability-foundations models it in depth). Communication rows decide whether synchronous training is viable, and the `{python} AssumptionsSummaryRecap.tcp_ndr_latency_ratio_mult_str` latency gap between RDMA and TCP explains why training clusters favor RDMA fabrics. Sustainability rows expose location as a lever, with a `{python} AssumptionsSummaryRecap.carbon_low_high_ratio_mult_str` spread in grid carbon intensity between Norway and Poland. Capacity rows bridge peak hardware to useful throughput. At 8,192 GPUs, about `{python} AssumptionsSummaryRecap.scaling_eff_8192_pct_str` of ideal scaling is realized, and the listed overheads consume about `{python} AssumptionsSummaryRecap.overhead_total_pct_str` of wall time. When a deployment differs in fabric, region, MFU, or cluster size, substitute its values and re-evaluate the corresponding formulas.
+This appendix is the book's shared fleet-scale assumption sheet. Every napkin-math estimate in the chapters should trace to a row in the tables above, and @tbl-fleet-assumption-provenance-catalog records whether that row comes from a datasheet, a fleet study, an illustrative rate, or a book convention. Reliability rows set the failure clock, with failure a steady-state condition at `{python} AssumptionsSummaryRecap.training_10k_gpus_str` or more GPUs (@sec-appdx-reliability-foundations models it in depth). Communication rows decide whether synchronous training is viable, and the `{python} AssumptionsSummaryRecap.tcp_ndr_latency_ratio_mult_str` startup-latency gap between InfiniBand NDR and TCP explains why training clusters favor RDMA fabrics. Sustainability rows expose location as a lever, since grid carbon intensity differs by `{python} AssumptionsSummaryRecap.carbon_low_high_ratio_mult_str` between Norway and Poland. Capacity rows bridge peak hardware to useful throughput. At `{python} AssumptionsSummaryRecap.frontier_8k_gpus_str` GPUs, about `{python} AssumptionsSummaryRecap.scaling_eff_8192_pct_str` of ideal scaling is realized, and the listed overheads consume about `{python} AssumptionsSummaryRecap.overhead_total_pct_str` of wall time. When a deployment differs in fabric, region, MFU, or cluster size, substitute its values and re-evaluate the corresponding formulas.

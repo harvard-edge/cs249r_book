@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Any, Optional
 from ..hardware.types import HardwareNode
 from ..infrastructure.types import Datacenter, GridProfile
@@ -145,7 +145,18 @@ class Node(BaseModel):
     host_cpu_cores: Optional[int] = None
     host_memory_bw: Optional[Quantity] = None
     host_storage: Optional[Any] = None
+    # Physical composition (added 2026-09-28; optional because only some node
+    # datasheets publish them): NVSwitch chips on the baseboard, NVLink links
+    # per accelerator, and chassis mass.
+    nvswitch_count: Optional[int] = None
+    nvlink_links_per_accelerator: Optional[int] = None
+    mass: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("mass", mode="after")
+    @classmethod
+    def _validate_mass(cls, v):
+        return require_dimensionality(v, ureg.kilogram, "mass")
 
     @field_validator("intra_node_bw", mode="after")
     @classmethod
@@ -175,12 +186,58 @@ class RackProfile(BaseModel):
     node: Node
     nodes_per_rack: int
     non_accelerator_power: Optional[Quantity] = None
+    # Optional breakdown of non_accelerator_power (added 2026-09-28). When all
+    # five are set, their sum must equal non_accelerator_power, so a table that
+    # explains the aggregate cannot drift from it.
+    host_power: Optional[Quantity] = None
+    switch_power: Optional[Quantity] = None
+    network_power: Optional[Quantity] = None
+    conversion_loss_power: Optional[Quantity] = None
+    cooling_allocation_power: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
-    @field_validator("non_accelerator_power", mode="after")
+    @field_validator(
+        "non_accelerator_power", "host_power", "switch_power", "network_power",
+        "conversion_loss_power", "cooling_allocation_power", mode="after",
+    )
     @classmethod
-    def _validate_non_accelerator_power(cls, v):
-        return require_dimensionality(v, ureg.watt, "non_accelerator_power")
+    def _validate_power_fields(cls, v, info):
+        return require_dimensionality(v, ureg.watt, info.field_name)
+
+    @model_validator(mode="after")
+    def _components_sum_to_aggregate(self):
+        parts = self.power_components
+        if parts is not None:
+            if self.non_accelerator_power is None:
+                raise ValueError(f"{self.name}: power components set without non_accelerator_power")
+            total = sum(q.m_as("watt") for q in parts.values())
+            if abs(total - self.non_accelerator_power.m_as("watt")) > 1e-6:
+                raise ValueError(
+                    f"{self.name}: power components sum to {total} W, "
+                    f"not non_accelerator_power {self.non_accelerator_power.m_as('watt')} W"
+                )
+        return self
+
+    @property
+    def power_components(self) -> Optional[dict]:
+        """The five-way breakdown of non_accelerator_power, or None if any part is unset."""
+        parts = {
+            "host": self.host_power,
+            "switch": self.switch_power,
+            "network": self.network_power,
+            "conversion_loss": self.conversion_loss_power,
+            "cooling_allocation": self.cooling_allocation_power,
+        }
+        if any(v is None for v in parts.values()):
+            return None
+        return parts
+
+    @property
+    def it_power(self) -> Quantity:
+        """Rack IT power: total_power minus the cooling allocation (requires the breakdown)."""
+        if self.cooling_allocation_power is None:
+            raise ValueError(f"{self.name}: cooling_allocation_power is not set")
+        return self.total_power - self.cooling_allocation_power
 
     @property
     def accelerator_count(self) -> int:

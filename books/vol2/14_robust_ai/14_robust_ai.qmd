@@ -223,7 +223,7 @@ class RobustAISetup:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     gpt3_params_b_val = m.parameters.to(param).magnitude / BILLION
-    b_param = 2  # FP16 (2 bytes per param)
+    b_param = BYTES_FP16.to(byte).magnitude  # FP16 (2 bytes per param)
     d_vol_gb = gpt3_params_b_val * b_param  # 350 GB
     # Branded hardware label: capacity is stored as 80 GiB; the vendor label is
     # "80 GB" (lego-units.md, Branded Hardware Labels), so read the binary magnitude.
@@ -478,13 +478,12 @@ from mlsysim.physics.reliability import calc_binomial_failure_probability
 from mlsysim.fmt import check, fmt, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
-# ┌── LEGO ───────────────────────────────────────────────
 class SilentErrorProbability:
     """Namespace for SDC probability at cluster scale."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    p_per_hr_illustrative = 1e-4
-    n_gpus_large = 10 * THOUSAND
+    p_per_hr_illustrative = 1e-4  # scenario assumption (stress-test rate)
+    n_gpus_large = Systems.Clusters.Training_10K.total_accelerators
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Pr(at least one) = 1 - (1-p)^N
@@ -556,11 +555,11 @@ ax.text(1.5, 0.97, 'Effectively certain', fontsize=8.5, color=COLORS['RedLine'],
 ax.axhline(y=0.5, color='#64748B', linestyle='--', linewidth=1, alpha=0.6)
 ax.text(1.5, 0.51, 'More likely than not', fontsize=8, color='#64748B', va='bottom')
 
-annot_p = 1e-4
-annot_n = 10000
+annot_p = SilentErrorProbability.p_per_hr_illustrative
+annot_n = SilentErrorProbability.n_gpus_large
 annot_prob = 1 - (1 - annot_p) ** annot_n
 ax.annotate(
-    f'At $p=10^{{-4}}$:\n$\\Pr={annot_prob:.2f}$ by 10K devices',
+    f'At $p=10^{{-4}}$:\n$\\Pr={annot_prob:.2f}$ by {annot_n // 1000:.0f}K devices',
     xy=(annot_n, annot_prob),
     xytext=(5700, 0.79),
     fontsize=8,
@@ -1625,6 +1624,37 @@ For practical computation, kernel density estimation with Gaussian kernels provi
 
 #### Statistical significance testing {#sec-robust-ai-statistical-significance-testing-dfde}
 
+```{python}
+#| echo: false
+#| label: ks-coefficient
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KS CRITICAL COEFFICIENT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-robust-ai-statistical-significance-testing-dfde
+# │
+# │ Goal: Pin the two-sample KS coefficient c(0.05) to the registry.
+# │ Show: "c(0.05) ≈ 1.36" inline.
+# │ How: Read Ops.Monitoring.KsTestCoefficient.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Ops
+from mlsysim.fmt import check, fmt, fmt_math
+
+class KsCoefficient:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    c_alpha = Ops.Monitoring.KsTestCoefficient  # alpha = 0.05
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    c_alpha_val = float(c_alpha)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(1.3 < c_alpha_val < 1.4, "KS 5% coefficient should be about 1.36")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    c_alpha_str = fmt(c_alpha_val, precision=2, commas=False)
+    c_alpha_math = fmt_math(rf"c(0.05) \approx {c_alpha_str}")
+```
+
 PSI and KL divergence quantify how large a distributional change appears to be; statistical hypothesis tests ask the complementary question of whether the observed difference is larger than sampling noise. The two-sample Kolmogorov-Smirnov (KS) test [@berger2014kolmogorov] compares the empirical cumulative distribution functions (CDFs) of two samples without assuming any specific parametric form. The test statistic is:
 
 $$
@@ -1637,7 +1667,7 @@ $$
 D_{n,m} > c(\alpha) \sqrt{\frac{n + m}{nm}}
 $$
 
-where $c(\alpha)$ depends on the significance level (for example, $c(0.05) \approx 1.36$). The KS statistic is most sensitive to differences near the center of the distribution, such as a location shift, and less sensitive to differences confined to the tails.
+where $c(\alpha)$ depends on the significance level (for example, `{python} KsCoefficient.c_alpha_math`). The KS statistic is most sensitive to differences near the center of the distribution, such as a location shift, and less sensitive to differences confined to the tails.
 
 For categorical features, the **chi-square goodness-of-fit test**\index{Chi-Square Goodness-of-Fit Test!definition} compares observed frequencies to expected frequencies under the baseline distribution:
 
@@ -1808,7 +1838,7 @@ class ContinuousDriftAnalysis:
     ks_statistic = 0.089  # observed two-sample KS statistic D
     n_base = 10_000  # baseline sample size
     n_curr = 10_000  # current sample size
-    c_alpha = 1.36  # KS critical coefficient at alpha = 0.05
+    c_alpha = Ops.Monitoring.KsTestCoefficient  # KS critical coefficient at alpha = 0.05
 
     # ┌── 2. EXECUTE (Gaussian KL closed form + KS critical value) ─────────────
     kl_term1 = math.log(sigma_curr / sigma_base)

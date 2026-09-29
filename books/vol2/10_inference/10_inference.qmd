@@ -79,12 +79,15 @@ from mlsysim.fmt import check, fmt
 # │ Context: @sec-inference-scale—initial hardware reference values
 # │
 # │ Goal: Establish H100 and A100 memory/bandwidth for the 'Memory Exhaustion'
-# │       section and initial footnotes.
-# │ Show: "80" GB, "3.35" TB/s, etc.
-# │ How: pulling constants from mlsysim.core.units.
+# │       section and initial footnotes, plus the recurring 70B FP16/INT4
+# │       weight footprints quoted throughout the chapter.
+# │ Show: "80" GB, "3.35" TB/s, 140 GB (70B FP16), 35 GB (70B INT4),
+# │       26 GB (13B FP16), 500 ms LLM TTFT target.
+# │ How: Hardware.Cloud.{H100,A100}; Models.Language.{Llama2_70B,Llama2_13B}
+# │      size_in_bytes; Scenarios.ChatbotServing.sla_latency.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_memory_capacity, fmt_qty_int
+from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_memory_capacity, fmt_qty_int, fmt_time
 
 class InferenceSetup:
     """Namespace for localized inference hardware reference values."""
@@ -95,16 +98,26 @@ class InferenceSetup:
     bw_a100 = Hardware.Cloud.A100.memory.bandwidth
     nvlink = Hardware.Cloud.H100.nvlink.bandwidth
     gpt4 = Models.Language.GPT4
+    mem_a100 = Hardware.Cloud.A100.memory.capacity
+    llama70b = Models.Language.Llama2_70B
+    llama13b = Models.Language.Llama2_13B
+    llm_ttft_slo = Scenarios.ChatbotServing.sla_latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     h100_mem = mem_h_h100
     h100_bw = bw_h_h100
     a100_bw = bw_a100
     gpt4_weights_fp16 = gpt4.size_in_bytes(BYTES_FP16)
+    llama70b_fp16 = llama70b.size_in_bytes(BYTES_FP16)
+    llama70b_int4 = llama70b.size_in_bytes(BYTES_INT4)
+    llama13b_fp16 = llama13b.size_in_bytes(BYTES_FP16)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(h100_bw > a100_bw, "H100 bandwidth should exceed A100 bandwidth")
     check(gpt4_weights_fp16 > 40 * h100_mem, "GPT-4-class FP16 weights should dwarf a single H100's HBM")
+    check(h100_mem < llama70b_fp16 < 2 * h100_mem, "70B FP16 weights must exceed one 80 GB GPU but fit on two")
+    check(llama70b_int4 < mem_a100, "70B INT4 weights must fit on a single A100")
+    check(llama13b_fp16 < mem_a100, "13B FP16 weights must fit on a single A100")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
@@ -113,6 +126,10 @@ class InferenceSetup:
     nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
     gpt4_params_t_str = fmt_params(gpt4.parameters, scale="T", precision=1, commas=False)
     gpt4_weights_tb_str = fmt_memory(gpt4_weights_fp16, unit=TB, precision=1, commas=False, approx=True)
+    llama70b_fp16_gb_str = fmt_memory(llama70b_fp16, unit=GB, precision=0, commas=False)
+    llama70b_int4_gb_str = fmt_memory(llama70b_int4, unit=GB, precision=0, commas=False)
+    llama13b_fp16_gb_str = fmt_memory(llama13b_fp16, unit=GB, precision=0, commas=False)
+    llm_ttft_slo_ms_str = fmt_time(llm_ttft_slo, ms, precision=0, commas=False)
 ```
 
 ## The Economics and Architecture of Inference {#sec-inference-scale-scaling-inference-beyond-single-machines-54e6}
@@ -143,13 +160,13 @@ The first signal is memory exhaustion, which occurs when model parameters, key-v
 
 Beyond memory constraints, throughput limitations emerge when request volume exceeds single-machine capacity even with optimal batching. Consider a recommendation system serving 100,000 queries per second with a 10 ms latency budget. If single-machine throughput peaks at 10,000 QPS, no amount of optimization on that machine can satisfy demand. Horizontal scaling\index{Horizontal scaling!inference replicas} across multiple replicas becomes mandatory.
 
-Finally, strict latency requirements drive distribution when model execution time exceeds latency budgets even at batch size one. Large language models generating responses token by token face this constraint acutely. A 70-billion parameter model requires approximately 140 GB of memory in FP16, exceeding a single 80 GB H100-class GPU before KV cache is considered. Even when quantization or larger-memory hardware makes a single-replica configuration possible, decode throughput is often limited by memory bandwidth. Sharding the model\index{Model sharding!latency reduction} across multiple GPUs enables parallel computation that reduces time-to-first-token below acceptable thresholds.
+Finally, strict latency requirements drive distribution when model execution time exceeds latency budgets even at batch size one. Large language models generating responses token by token face this constraint acutely. A 70-billion parameter model requires approximately `{python} InferenceSetup.llama70b_fp16_gb_str` of memory in FP16, exceeding a single `{python} InferenceSetup.h100_mem_gb_str` H100-class GPU before KV cache is considered. Even when quantization or larger-memory hardware makes a single-replica configuration possible, decode throughput is often limited by memory bandwidth. Sharding the model\index{Model sharding!latency reduction} across multiple GPUs enables parallel computation that reduces time-to-first-token below acceptable thresholds.
 
-| **Constraint** |   **Single-Machine Limit**  |                          **Example Workload**                         |  **Distribution Strategy**  |
-|:---------------|:---------------------------:|:---------------------------------------------------------------------:|:---------------------------:|
-| **Memory**     |         80 GB (H100)        | Illustrative MoE (`{python} InferenceSetup.gpt4_weights_tb_str` FP16) | Tensor/pipeline parallelism |
-| **Throughput** |      ~10K QPS (vision)      |                            100K QPS RecSys                            |    Horizontal replication   |
-| **Latency**    | Forward pass $> \text{SLO}$ |                            500 ms LLM TTFT                            |        Model sharding       |
+| **Constraint** |             **Single-Machine Limit**             |                          **Example Workload**                         |  **Distribution Strategy**  |
+|:---------------|:------------------------------------------------:|:---------------------------------------------------------------------:|:---------------------------:|
+| **Memory**     | `{python} InferenceSetup.h100_mem_gb_str` (H100) | Illustrative MoE (`{python} InferenceSetup.gpt4_weights_tb_str` FP16) | Tensor/pipeline parallelism |
+| **Throughput** |                ~10K QPS (vision)                 |                            100K QPS RecSys                            |    Horizontal replication   |
+| **Latency**    |           Forward pass $> \text{SLO}$            |         `{python} InferenceSetup.llm_ttft_slo_ms_str` LLM TTFT        |        Model sharding       |
 
 : **Triggers for distributed inference**: Each constraint type indicates different distribution strategies. Memory constraints require model sharding; throughput constraints require replication; latency constraints may require either depending on whether the bottleneck is compute or memory bandwidth. {#tbl-distribution-triggers}
 
@@ -161,9 +178,9 @@ Memory, throughput, and latency triggers all become user-visible once an interac
 
 Verify your understanding of when to move from single-machine to distributed inference:
 
-- [ ] **Shard vs. replicate**: for a 13B model (26 GB weights) that fits on a single A100, select model sharding or horizontal replication when throughput requirements double.
+- [ ] **Shard vs. replicate**: for a 13B model (`{python} InferenceSetup.llama13b_fp16_gb_str` weights) that fits on a single A100, select model sharding or horizontal replication when throughput requirements double.
 - [ ] **Latency floor**: for a real-time speech-to-text service where inter-token latency is the primary bottleneck, determine whether data-parallel replication reduces this latency.
-- [ ] **Mandatory sharding**: explain why a 175B model requires multiple 80 GB GPUs when all FP16 weights must remain accelerator-resident, regardless of request volume.
+- [ ] **Mandatory sharding**: explain why a 175B model requires multiple `{python} InferenceSetup.h100_mem_gb_str` GPUs when all FP16 weights must remain accelerator-resident, regardless of request volume.
 - [ ] **Latency trigger**: identify when a latency target forces distribution and when added network, serialization, coordination, or queuing overhead can erase the benefit.
 
 :::
@@ -1011,13 +1028,18 @@ The deployment topology determines how model computation maps to physical hardwa
 # │ Context: Deployment topology — tensor-parallel NVLink bandwidth.
 class InferenceTopologyRecap:
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
-    from mlsysim.fmt import fmt_bandwidth
+    nvlink_bw_per_dir = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
+    from mlsysim.fmt import check, fmt_bandwidth
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(abs((nvlink_bw / nvlink_bw_per_dir).to("").magnitude - 2) < 1e-9, "Per-direction NVLink must be half the bidirectional total")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_h100_per_dir_gb_per_s_str = fmt_bandwidth(nvlink_bw_per_dir, unit=GB / second, precision=0, commas=False)
 ```
 
-Multi-GPU tensor parallelism shards each layer's weight matrices across multiple GPUs connected by high-bandwidth interconnect (NVLink at `{python} InferenceTopologyRecap.nvlink_h100_gb_per_s_str` bidirectional [450 GB/s per direction] on H100). Each GPU computes a partial result for every layer, and an all-reduce operation synchronizes the partial results before the next layer. This topology distributes an accelerator-resident model that exceeds one device's memory. Ideal compute time falls with parallelism degree, but communication, imbalance, and kernel efficiency limit realized latency reduction. The model sharding section (@sec-inference-scale-model-sharding-inference-82b3) analyzes the communication overhead quantitatively.
+Multi-GPU tensor parallelism shards each layer's weight matrices across multiple GPUs connected by high-bandwidth interconnect (NVLink at `{python} InferenceTopologyRecap.nvlink_h100_gb_per_s_str` bidirectional [`{python} InferenceTopologyRecap.nvlink_h100_per_dir_gb_per_s_str` per direction] on H100). Each GPU computes a partial result for every layer, and an all-reduce operation synchronizes the partial results before the next layer. This topology distributes an accelerator-resident model that exceeds one device's memory. Ideal compute time falls with parallelism degree, but communication, imbalance, and kernel efficiency limit realized latency reduction. The model sharding section (@sec-inference-scale-model-sharding-inference-82b3) analyzes the communication overhead quantitatively.
 
 Disaggregated serving\index{Disaggregated serving!prefill-decode separation} separates the prefill phase\index{Prefill phase!compute-bound workload} (processing the input prompt, often compute-bound for long prompts) from the decode phase\index{Decode phase!memory-bandwidth-bound workload} (generating tokens one at a time per sequence, often memory-bandwidth-bound at small batch sizes) onto different hardware pools optimized for each workload profile (@fig-disaggregated-serving). Prefill nodes use high-FLOP/s accelerators; decode nodes use high-bandwidth-memory configurations. Separation removes prefill/decode interference and permits independent parallelism and capacity plans, but it also places a state transfer on the critical path [@zhong2024distserve]. Chunked prefill\index{Chunked Prefill!prefill-decode disaggregation}, which splits a long prompt into pieces interleaved with ongoing decode steps (@sec-inference-chunked-prefill), provides the contrasting colocated approach. It bounds interference without paying a network transfer [@agrawal2024sarathi].
 
@@ -1781,7 +1803,7 @@ The knee occurs where the variable compute cost $(B \times T_{\text{var}})$ star
    - Knee: $B \approx 40\text{ ms}/0.5\text{ ms} =$ `{python} BatchingEfficiency.bec_llm_knee_str`.
    - **Result**: LLMs require massive batches to amortize the expensive weight-loading overhead.
 
-**Systems insight**: Because the LLM's "fixed overhead" (loading 140 GB of weights from HBM) is so large, the system has not reached the efficiency knee until batch size `{python} BatchingEfficiency.bec_llm_knee_str`. This illustrative operating point motivates sharing weight reads across concurrent requests. It does not prescribe a universal batch size: the actual choice depends on context length, cache capacity, kernel efficiency, and the latency target. Continuous batching and paged allocation help exploit the available capacity.
+**Systems insight**: Because the LLM's "fixed overhead" (loading `{python} InferenceSetup.llama70b_fp16_gb_str` of weights from HBM) is so large, the system has not reached the efficiency knee until batch size `{python} BatchingEfficiency.bec_llm_knee_str`. This illustrative operating point motivates sharing weight reads across concurrent requests. It does not prescribe a universal batch size: the actual choice depends on context length, cache capacity, kernel efficiency, and the latency target. Continuous batching and paged allocation help exploit the available capacity.
 
 :::
 
@@ -3109,7 +3131,8 @@ Feature-parallel batching is natural when embeddings are sharded across servers:
 # │       Meta-scale batching example.
 # │ Show: Total = 5.2 ms; 50 million lookups/sec per shard; 50K lookups/batch.
 # │ How: Sum phase durations and divide request-level lookup volume across
-# │      embedding shards.
+# │      embedding shards. Platform QPS from
+# │      ReferenceStats.RecommenderAtScaleProfile.PlatformQps (Archetype B).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -3123,10 +3146,9 @@ class RecsysLatencyBreakdown:
     embedding = 2.0 * ms  # scenario table row
     feature = 1.0 * ms  # scenario table row
     ranking = 1.5 * ms  # scenario table row
-    platform_qps = 10_000_000  # scenario assumption: Meta-scale serving rate
+    platform_qps = ReferenceStats.RecommenderAtScaleProfile.PlatformQps.to(count / second).magnitude
     candidate_items = 100  # scenario assumption: candidates ranked per request
     lookups_per_item = 50  # scenario assumption: sparse features per candidate
-    embedding_table_size = 100 * TB  # scenario assumption: sharded embedding corpus
     embedding_shards = 1_000  # scenario assumption: embedding shard count
     accumulation_window = 1 * millisecond  # scenario batching window
 
@@ -3566,7 +3588,57 @@ Two classes of techniques meet at this boundary. KV-state capacity techniques, s
 
 Increasing the batch size to maximize throughput in LLM serving is bounded by the KV cache wall\index{KV Cache!capacity wall}. Model weights represent a fixed "static tax" on GPU memory, while the KV cache grows linearly with both batch size and sequence length (@fig-kv-cache-wall).
 
-::: {#fig-kv-cache-wall fig-env="figure" fig-pos="H" fig-cap="**The KV cache wall**: Total GPU memory usage for a 4-bit quantized 70B model (35 GB weights) on an 80 GB H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU (35 GB + 84 GB > 80 GB), forcing the system to either reduce batch size (killing throughput) or shard the model." fig-alt="Memory usage plot. Horizontal dashed line at 80 GB shows capacity. Solid blue region at bottom is 35 GB weights. Sloped lines for Batch 1, 2, 4, and 8 show memory rising with sequence length. Batch 8 hits the 80 GB line early (~16K tokens)."}
+```{python}
+#| echo: false
+#| label: kv-cache-wall-inputs
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KV CACHE WALL INPUTS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-kv-cache-wall caption and plotting cell.
+# │
+# │ Goal: Size the INT4 70B weights, the GQA KV cache per 1,000 tokens, and the
+# │       H100 capacity line, and check the caption's batch-2 128K claim.
+# │ Show: 35 GB weights; ~0.33 GB KV per 1K tokens; batch 2 at 128K = ~84 GB;
+# │       80 GB H100 capacity.
+# │ How: Models.Language.Llama2_70B.size_in_bytes(BYTES_INT4) and
+# │      get_kv_cache_size (80 layers x 8 KV heads x 128 head dim, FP16);
+# │      ServingProfiles.H100VendorMemoryBudget (decimal 80 GB).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_memory
+
+class KVCacheWallInputs:
+    """Inputs for the KV cache wall figure (70B INT4 on one H100)."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    model = Models.Language.Llama2_70B
+    # Vendor nameplate kept in decimal GB, like PrecisionDividend: the axis,
+    # weights, and KV lines are decimal GB, so the dashed line must sit at 80.
+    hbm = ReferenceStats.ServingProfiles.H100VendorMemoryBudget.to(GiB).magnitude * GB
+    long_context_k = 128  # scenario assumption: x-axis end, in 1,000-token units
+    batch_example = 2  # scenario assumption: caption's infeasible batch
+    batch_largest = 8  # scenario assumption: largest plotted batch
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    weights = model.size_in_bytes(BYTES_INT4)
+    kv_per_1k = model.get_kv_cache_size(1000, 1)
+    weights_gb = weights.to(GB).magnitude
+    hbm_cap_gb = hbm.to(GB).magnitude
+    gb_per_1k_tokens = kv_per_1k.to(GB).magnitude
+    batch_example_kv = batch_example * long_context_k * kv_per_1k
+    batch_largest_wall_k = ((hbm - weights) / (batch_largest * kv_per_1k)).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(weights < hbm, "INT4 70B weights must fit on one H100")
+    check(weights + batch_example_kv > hbm, "Batch 2 at 128K context must exceed one H100")
+    check(15 < batch_largest_wall_k < 20, "fig-alt says batch 8 hits the capacity line near 17K tokens")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
+    batch_example_kv_gb_str = fmt_memory(round(batch_example_kv.to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
+    hbm_gb_str = fmt_memory(hbm, unit=GB, precision=0, commas=False)
+```
+
+::: {#fig-kv-cache-wall fig-env="figure" fig-pos="H" fig-cap="**The KV cache wall**: Total GPU memory usage for a 4-bit quantized 70B model (`{python} KVCacheWallInputs.weights_gb_str` weights) on an `{python} KVCacheWallInputs.hbm_gb_str` H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU (`{python} KVCacheWallInputs.weights_gb_str` + `{python} KVCacheWallInputs.batch_example_kv_gb_str` exceeds `{python} KVCacheWallInputs.hbm_gb_str`), forcing the system to either reduce batch size (killing throughput) or shard the model." fig-alt="Memory usage plot. Horizontal dashed line at 80 GB shows capacity. Solid blue region at bottom is 35 GB weights. Sloped lines for Batch 1, 2, 4, and 8 show memory rising with sequence length. Batch 8 hits the capacity line early (~17K tokens)."}
 
 ```{python}
 #| echo: false
@@ -3578,7 +3650,7 @@ Increasing the batch size to maximize throughput in LLM serving is bounded by th
 # │ Goal: Plot total GPU memory (weights + KV cache) vs sequence length for
 # │       batch 1/2/4/8; show 80 GB HBM limit; OOM zone.
 # │ Show: fill_between weights; sloped KV lines; capacity dashed line.
-# │ How: KV = 2*80*8*128*2 bytes/token; gb_per_1k_tokens; book_style.set_book_style().
+# │ How: Inputs from KVCacheWallInputs (registry-backed); book_style.set_book_style().
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -3589,16 +3661,12 @@ from binder.tools.figures import style as book_style
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 4.8))
 
-# Parameters for Llama-70B GQA
-weights_gb = 35.0  # 4-bit
-hbm_cap_gb = 80.0
-# KV cache: 2 * layers * kv_heads * head_dim * precision
-# 2 * 80 * 8 * 128 * 2 bytes = 327,680 bytes/token
-#   = 0.32768 MB/token
-#   = 327.68 MB per 1,000 tokens = 0.32768 GB per 1,000 tokens
-gb_per_1k_tokens = 0.32768  # GB per 1k tokens (seq_len_k is in 1k-token units)
+# Llama 2 70B (GQA) inputs from the registry-backed LEGO cell above.
+weights_gb = KVCacheWallInputs.weights_gb
+hbm_cap_gb = KVCacheWallInputs.hbm_cap_gb
+gb_per_1k_tokens = KVCacheWallInputs.gb_per_1k_tokens  # seq_len_k is in 1k-token units
 
-seq_len_k = np.linspace(0, 128, 100)  # up to 128k tokens
+seq_len_k = np.linspace(0, KVCacheWallInputs.long_context_k, 100)
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 # Base weights
@@ -3620,10 +3688,12 @@ for b in [1, 2, 4, 8]:
 ax.axhline(y=hbm_cap_gb, color=COLORS['RedLine'], linestyle='--', linewidth=1.8)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+# Label sits below the line in the gap between the batch-1 and batch-2 lines,
+# so no sloped KV line crosses the label box.
 ax.text(
-    5,
-    hbm_cap_gb + 2.5,
-    'HBM Capacity (80 GB)',
+    72,
+    hbm_cap_gb - 6.5,
+    f'HBM Capacity ({KVCacheWallInputs.hbm_gb_str})',
     color=COLORS['RedLine'],
     fontsize=8.5,
     fontweight='bold',
@@ -3633,7 +3703,7 @@ ax.text(
 ax.set_xlabel('Sequence Length (1,000s of Tokens)')
 ax.set_ylabel('Total GPU Memory (GB)')
 ax.set_ylim(0, 110)
-ax.set_xlim(0, 128)
+ax.set_xlim(0, KVCacheWallInputs.long_context_k)
 ax.legend(loc='upper right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='#CBD5E1')
 
 plt.tight_layout()
@@ -4446,7 +4516,7 @@ class KVCacheCalc:
     kv_layers = _model.layers
     kv_heads = _model.heads  # MHA baseline; GQA heads are introduced as the reduction below
     kv_head_dim = _model.hidden_dim // _model.heads
-    kv_seq_len = 4096
+    kv_seq_len = int(ReferenceStats.ServingProfiles.PrecisionDividendContextLengthTokens)
     h100_mem = Hardware.Cloud.H100.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -4508,7 +4578,9 @@ class PrecisionDividend:
     # ┌── 1. LOAD ──────────────────────────────────────────
     int4_bits = BYTES_INT4.to(byte).magnitude * 8
     fp16_bits = BYTES_FP16.to(byte).magnitude * 8
-    tensor_parallel_degree = 4
+    # Same recurring deployment as the performance-engineering precision
+    # dividend: registry serving profile (eight-way tensor parallelism).
+    tensor_parallel_degree = int(ReferenceStats.ServingProfiles.PrecisionDividendTensorParallelDegree)
     # vendor nameplate magnitude kept in decimal GB: every other number in
     # this example (weights, KV cache) is decimal, so the printed budget
     # arithmetic only holds if the budget shares their unit space
@@ -4519,10 +4591,12 @@ class PrecisionDividend:
     avail_kv_fp16 = h100_mem - fp16_weight_per_gpu
     int4_weight_per_gpu = fp16_weight_per_gpu * (int4_bits / fp16_bits)
     avail_kv_int4 = h100_mem - int4_weight_per_gpu
-    kv_layers = 80
-    kv_heads = 64
-    kv_head_dim = 128
-    kv_seq_len = 4096
+    # MHA baseline shape, matching KVCacheCalc.kv_fp16 quoted in the problem statement.
+    _model = Models.Language.Llama2_70B
+    kv_layers = _model.layers
+    kv_heads = _model.heads
+    kv_head_dim = _model.hidden_dim // _model.heads
+    kv_seq_len = int(ReferenceStats.ServingProfiles.PrecisionDividendContextLengthTokens)
     kv_fp16 = calc_kv_cache_size(kv_layers, kv_heads, kv_head_dim, kv_seq_len, 1, BYTES_FP16)
     kv_fp16_per_gpu = kv_fp16 / tensor_parallel_degree
     kv_int8_total = kv_fp16 / 2
@@ -4530,18 +4604,19 @@ class PrecisionDividend:
     max_batch_fp16 = int((avail_kv_fp16 / kv_fp16_per_gpu).to("").magnitude)
     max_batch_int8 = int((avail_kv_int4 / kv_int8_per_gpu).to("").magnitude)
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs((avail_kv_fp16 - 45 * GB).to(GB).magnitude) < 1e-9, f"Expected 45 GB, got {avail_kv_fp16.to(GB).magnitude:.1f} GB")
-    check(abs((int4_weight_per_gpu - 8.75 * GB).to(GB).magnitude) < 0.01, f"Expected 8.75 GB, got {int4_weight_per_gpu.to(GB).magnitude:.2f} GB")
+    check(abs((avail_kv_fp16 - 62.5 * GB).to(GB).magnitude) < 1e-9, f"Expected 62.5 GB, got {avail_kv_fp16.to(GB).magnitude:.1f} GB")
+    check(abs((int4_weight_per_gpu - 4.375 * GB).to(GB).magnitude) < 0.01, f"Expected 4.375 GB, got {int4_weight_per_gpu.to(GB).magnitude:.3f} GB")
+    check(kv_fp16 == KVCacheCalc.kv_fp16, "Per-request FP16 KV must match the KVCacheCalc figure quoted in the problem")
     check(max_batch_int8 > max_batch_fp16, "INT4 weights plus INT8 KV should increase max batch")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GB, precision=0, commas=False)
-    fp16_weight_per_gpu_gb_str = fmt_memory(fp16_weight_per_gpu, unit=GB, precision=0, commas=False)
-    avail_kv_fp16_gb_str = fmt_memory(avail_kv_fp16, unit=GB, precision=0, commas=False)
+    fp16_weight_per_gpu_gb_str = fmt_memory(fp16_weight_per_gpu, unit=GB, precision=1, commas=False)
+    avail_kv_fp16_gb_str = fmt_memory(avail_kv_fp16, unit=GB, precision=1, commas=False)
     int4_weight_per_gpu_gb_str = fmt_memory(int4_weight_per_gpu, unit=GB, precision=2, commas=False)
     avail_kv_int4_gb_str = fmt_memory(avail_kv_int4, unit=GB, precision=2, commas=False)
-    kv_fp16_per_gpu_gb_str = fmt_memory(kv_fp16_per_gpu, unit=GB, precision=1, commas=False)
+    kv_fp16_per_gpu_gb_str = fmt_memory(kv_fp16_per_gpu, unit=GB, precision=2, commas=False)
     kv_int8_total_gb_str = fmt_memory(kv_int8_total, unit=GB, precision=1, commas=False)
-    kv_int8_per_gpu_gb_str = fmt_memory(kv_int8_per_gpu, unit=GB, precision=1, commas=False)
+    kv_int8_per_gpu_gb_str = fmt_memory(kv_int8_per_gpu, unit=GB, precision=2, commas=False)
     max_batch_fp16_str = fmt_int(max_batch_fp16, commas=False)
     max_batch_int8_str = fmt_int(max_batch_int8, commas=False)
     fp16_weight_total_gb_str = fmt_memory(fp16_weight_total, unit=GB, precision=0, commas=False)
@@ -4658,7 +4733,40 @@ Acceptance depends on the draft-target pair, sampling policy, and request distri
 
 #### The speculation tax and KV-cache admission {#sec-inference-scale-speculative-admission}
 
-The first concern is memory. The draft model is not free state: it requires its own GPU allocation for weights, and each in-flight request that uses speculation reserves a small additional KV cache for the draft model alongside the target's. Pairing a 7B draft model with a 70B target adds roughly 14 GB of weights per replica plus per-request draft cache. This *speculation tax*\index{Speculative Decoding!speculation tax} competes directly with the KV-cache admission budget developed in @sec-inference-scale-kv-cache-wall: every gigabyte the draft model holds is a gigabyte the admission controller cannot allocate to a concurrent request. Speculation therefore shrinks the maximum batch size the node can admit, so any per-request latency gain must be weighed against the lost concurrency. The admission controller and the speculation policy cannot be tuned independently; enabling speculation lowers the concurrency ceiling that the KV-cache wall already imposes.
+```{python}
+#| echo: false
+#| label: speculation-draft-weights
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SPECULATION TAX: DRAFT-MODEL WEIGHTS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "speculation tax" paragraph in
+# │          @sec-inference-scale-speculative-decoding-c438.
+# │
+# │ Goal: Size the resident FP16 weights of a 7B draft model paired with a 70B target.
+# │ Show: ~14 GB of draft weights per replica.
+# │ How: Models.Language.Llama2_7B.size_in_bytes(BYTES_FP16).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_memory
+
+class SpeculationDraftWeights:
+    """Resident FP16 weight cost of a 7B draft model."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    draft = Models.Language.Llama2_7B
+    target = Models.Language.Llama2_70B
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    draft_fp16 = draft.size_in_bytes(BYTES_FP16)
+    draft_share = (draft_fp16 / target.size_in_bytes(BYTES_FP16)).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(0.05 < draft_share < 0.15, "Draft weights should be about a tenth of the target's")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    draft_fp16_gb_str = fmt_memory(draft_fp16, unit=GB, precision=0, commas=False)
+```
+
+The first concern is memory. The draft model is not free state: it requires its own GPU allocation for weights, and each in-flight request that uses speculation reserves a small additional KV cache for the draft model alongside the target's. Pairing a 7B draft model with a 70B target adds roughly `{python} SpeculationDraftWeights.draft_fp16_gb_str` of FP16 weights per replica plus per-request draft cache. This *speculation tax*\index{Speculative Decoding!speculation tax} competes directly with the KV-cache admission budget developed in @sec-inference-scale-kv-cache-wall: every gigabyte the draft model holds is a gigabyte the admission controller cannot allocate to a concurrent request. Speculation therefore shrinks the maximum batch size the node can admit, so any per-request latency gain must be weighed against the lost concurrency. The admission controller and the speculation policy cannot be tuned independently; enabling speculation lowers the concurrency ceiling that the KV-cache wall already imposes.
 
 #### The latency-throughput tension under an SLO {#sec-inference-scale-speculative-sla}
 
@@ -4703,7 +4811,63 @@ else:
     rebuild()
 ```
 
-For Llama-70B GQA with 4K context, KV cache is about 1.3 GB total per sequence, or about 162.5 MB per device under 8-way tensor parallelism. At 100 Gbps (12.5 GB/s), transferring one shard takes roughly 13 ms, while transferring the full cache would take about 100 ms. Rebuilding the same 4K context requires about $5.7 \times 10^{14}$ FLOPs of prefill ($2 \times 70 \times 10^9$ parameters $\times$ 4,096 tokens), on the order of 100 ms on this eight-GPU group at realistic utilization. Parallel shard transfer therefore wins clearly, while a single-link full-cache transfer is roughly break-even. Transfer time grows linearly with context, while prefill cost grows faster once attention over the long prompt dominates, so transfer becomes decisive at long context.
+```{python}
+#| echo: false
+#| label: kv-migration-cost
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KV CACHE MIGRATION: TRANSFER VS REBUILD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: KV cache migration paragraph in the memory-management section.
+# │
+# │ Goal: Compare shipping a 4K-context KV cache over 100 GbE with rebuilding it
+# │       by prefill on an eight-GPU tensor-parallel group.
+# │ Show: ~1.3 GB cache, ~168 MB per device, ~13 ms shard transfer, ~107 ms
+# │       full transfer, ~5.8e14 FLOP prefill, ~180 ms rebuild.
+# │ How: Llama3_70B.get_kv_cache_size (GQA); Systems.Fabrics.Ethernet_100G;
+# │      prefill FLOPs = 2 x params x tokens at the batched-inference MFU anchor.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_bandwidth, fmt_int, fmt_math, fmt_memory, fmt_percent, fmt_time, sci_latex
+
+class KvMigrationCost:
+    """Transfer-versus-rebuild cost for migrating one conversation's KV cache."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    model = Models.Language.Llama3_70B
+    context_tokens = int(ReferenceStats.ServingProfiles.PrecisionDividendContextLengthTokens)
+    tp_degree = Systems.Nodes.DGX_H100.accelerators_per_node
+    link_bw = Systems.Fabrics.Ethernet_100G.bandwidth
+    gpu_peak = Hardware.Cloud.H100.compute.peak_flops
+    prefill_mfu = Literature.Training.MfuInferenceBatched
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    kv_total = model.get_kv_cache_size(context_tokens, 1)
+    kv_per_device = kv_total / tp_degree
+    shard_transfer = (kv_per_device / link_bw).to(ms)
+    full_transfer = (kv_total / link_bw).to(ms)
+    params = model.parameters.to(param).magnitude
+    prefill_flops = 2 * params * context_tokens
+    rebuild_time = (prefill_flops * flop / (tp_degree * gpu_peak * prefill_mfu)).to(ms)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(shard_transfer * 5 < rebuild_time, "Parallel shard transfer should win clearly")
+    check(full_transfer < rebuild_time < 3 * full_transfer, "Single-link full transfer should still win, but by a smaller margin")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    kv_total_gb_str = fmt_memory(kv_total, unit=GB, precision=1, commas=False)
+    kv_per_device_mb_str = fmt_memory(round(kv_per_device.to(MB).magnitude) * MB, unit=MB, precision=0, commas=False)
+    tp_degree_str = fmt_int(tp_degree, commas=False)
+    link_bw_gbps_str = fmt_bandwidth(link_bw, unit=Gbps, precision=0, commas=False)
+    link_bw_gb_per_s_str = fmt_bandwidth(link_bw, unit=GB / second, precision=1, commas=False)
+    shard_transfer_ms_str = fmt_time(round(shard_transfer.magnitude) * ms, ms, precision=0, commas=False)
+    full_transfer_ms_str = fmt_time(round(full_transfer.magnitude) * ms, ms, precision=0, commas=False)
+    rebuild_ms_str = fmt_time(round(rebuild_time.magnitude, -1) * ms, ms, precision=0, commas=False)
+    prefill_mfu_pct_str = fmt_percent(prefill_mfu, precision=0, commas=False, style="prose")
+    context_tokens_str = fmt_int(context_tokens, commas=True)
+    prefill_flops_math = fmt_math(rf"{sci_latex(prefill_flops, precision=1)}")
+    prefill_operands_math = fmt_math(rf"2 \times {sci_latex(params, precision=1)}")
+```
+
+For Llama 3 70B with GQA and a `{python} KvMigrationCost.context_tokens_str`-token context, KV cache is about `{python} KvMigrationCost.kv_total_gb_str` total per sequence, or about `{python} KvMigrationCost.kv_per_device_mb_str` per device under `{python} KvMigrationCost.tp_degree_str`-way tensor parallelism. At `{python} KvMigrationCost.link_bw_gbps_str` (`{python} KvMigrationCost.link_bw_gb_per_s_str`), transferring one shard takes roughly `{python} KvMigrationCost.shard_transfer_ms_str`, while transferring the full cache would take about `{python} KvMigrationCost.full_transfer_ms_str`. Rebuilding the same context requires about `{python} KvMigrationCost.prefill_flops_math` FLOPs of prefill (`{python} KvMigrationCost.prefill_operands_math` parameters $\times$ `{python} KvMigrationCost.context_tokens_str` tokens), roughly `{python} KvMigrationCost.rebuild_ms_str` on the same tensor-parallel group at `{python} KvMigrationCost.prefill_mfu_pct_str` utilization. Parallel shard transfer therefore wins clearly, while a single-link full-cache transfer still wins by a smaller margin. Transfer time grows linearly with context, while prefill cost grows faster once attention over the long prompt dominates, so transfer becomes decisive at long context.
 
 ### Memory management best practices {#sec-inference-scale-memory-management-best-practices-67e2}
 
@@ -4720,7 +4884,7 @@ That budget determines how many sequences can coexist before the scheduler must 
 
 ::: {#exmp-inference-kv-cache-memory-hierarchy .callout-example title="KV cache memory hierarchy"}
 
-**Scenario**: A multi-tenant LLM serving system experiences KV-cache HBM exhaustion (80 GB limit) during peak concurrency.
+**Scenario**: A multi-tenant LLM serving system experiences KV-cache HBM exhaustion (`{python} InferenceSetup.h100_mem_gb_str` limit) during peak concurrency.
 
 **Diagnosis**: Pure HBM allocation limits node concurrency to 50 active sequences. Evicting or dropping requests degrades user experience. Implementing a 3-tier memory hierarchy\index{KV Cache!hierarchical tiering} (HBM $\to$ CPU DRAM $\to$ Non-Volatile Memory Express (NVMe) SSD) allows swapping inactive sequence pages to CPU DRAM (1–5 ms swap latency) or NVMe (10–50 ms).
 
@@ -4730,7 +4894,7 @@ That budget determines how many sequences can coexist before the scheduler must 
 
 ### Adapter state and locality {#sec-inference-scale-lora-multi-tenancy}
 
-KV-cache management makes one GPU safe for many concurrent requests; multi-tenant adapter serving asks the same serving process to manage another kind of resident state. The KV cache is per-token attention state. A low-rank adaptation (LoRA) adapter is a per-tenant weight delta. Both must be available at the moment a decode step runs, and both can erase batching gains if the scheduler ignores locality. As serving platforms scale to support thousands of concurrent users on a single foundation model, personalization introduces a new memory bottleneck. LoRA\index{LoRA!multi-tenant serving} stores a small set of user- or task-specific adapter weights that modify a shared base model without copying the full model. When 10,000 users each have a unique LoRA adapter applied to the same 140 GB base model, replicating the base weights for each user is physically impossible. Instead, the base model remains pinned in HBM, while user-specific adapters are brought into the fast on-chip working set as needed.
+KV-cache management makes one GPU safe for many concurrent requests; multi-tenant adapter serving asks the same serving process to manage another kind of resident state. The KV cache is per-token attention state. A low-rank adaptation (LoRA) adapter is a per-tenant weight delta. Both must be available at the moment a decode step runs, and both can erase batching gains if the scheduler ignores locality. As serving platforms scale to support thousands of concurrent users on a single foundation model, personalization introduces a new memory bottleneck. LoRA\index{LoRA!multi-tenant serving} stores a small set of user- or task-specific adapter weights that modify a shared base model without copying the full model. When 10,000 users each have a unique LoRA adapter applied to the same `{python} InferenceSetup.llama70b_fp16_gb_str` base model, replicating the base weights for each user is physically impossible. Instead, the base model remains pinned in HBM, while user-specific adapters are brought into the fast on-chip working set as needed.
 
 ::: {#psp-inference-context-switch-machine-learning .callout-perspective title="The context switch of machine learning"}
 
@@ -4791,7 +4955,7 @@ The same locality problem reappears at a larger scale when the model itself exce
 
 ## Model Sharding for Inference {#sec-inference-scale-model-sharding-inference-82b3}
 
-A 70-billion-parameter model requires 140 GB of memory to hold its weights in FP16, exceeding a single 80 GB GPU's capacity. Serving this model requires slicing its architecture across multiple GPUs that act together as a single logical replica. Adapting distributed training parallelism techniques, specifically tensor and pipeline parallelism, for low-latency inference introduces a distinct set of constraints.
+A 70-billion-parameter model requires `{python} InferenceSetup.llama70b_fp16_gb_str` of memory to hold its weights in FP16, exceeding a single `{python} InferenceSetup.h100_mem_gb_str` GPU's capacity. Serving this model requires slicing its architecture across multiple GPUs that act together as a single logical replica. Adapting distributed training parallelism techniques, specifically tensor and pipeline parallelism, for low-latency inference introduces a distinct set of constraints.
 
 ```{python}
 #| echo: false
@@ -4801,21 +4965,38 @@ A 70-billion-parameter model requires 140 GB of memory to hold its weights in FP
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-inference-scale-model-sharding-inference-82b3
 # │
-# │ Goal: Provide H100 memory capacity for sharding calculations.
-# │ Show: "80" GB.
-# │ How: pulling Hardware.Cloud.H100.memory.capacity from mlsysim.core.units.
+# │ Goal: Provide H100 memory capacity and the 70B FP16 weight footprint for
+# │       the sharding-trigger calculation.
+# │ Show: "80" GB; 70e9 x 16/8 = 140 GB; minimum 2-way sharding.
+# │ How: Hardware.Cloud.H100.memory.capacity; Models.Language.Llama2_70B.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_int, fmt_memory_capacity
+import math
+from mlsysim.fmt import check, fmt, fmt_display_math, fmt_int, fmt_memory_capacity, sci_latex
 
 class HardwareSetupSharding:
     """Localized hardware reference for sharding."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h100_mem = Hardware.Cloud.H100.memory.capacity
+    model = Models.Language.Llama2_70B
+    fp16_bits = int(BYTES_FP16.to(byte).magnitude * 8)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    params = model.parameters.to(param).magnitude
+    weights = model.size_in_bytes(BYTES_FP16)
+    min_shards = math.ceil((weights / h100_mem).to("").magnitude)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(min_shards == 2, "70B FP16 weights should need exactly 2-way sharding on 80 GB GPUs")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
+    min_shards_str = fmt_int(min_shards, commas=False)
+    weight_display_math = fmt_display_math(
+        rf"M_{{\text{{weights}}}} = {sci_latex(params, precision=0)} \times \frac{{{fp16_bits}}}{{8}} = "
+        rf"{fmt(weights.to(GB).magnitude, precision=0, commas=False)} \text{{ GB}}"
+    )
 ```
 
 ### Memory and latency triggers for model sharding {#sec-inference-scale-sharding-becomes-necessary-81d4}
@@ -4828,9 +5009,9 @@ $$M_{\text{weights}} = P \times \frac{b}{8} \text{ bytes}$$ {#eq-weight-memory}
 
 A 70-billion-parameter model in FP16 (16 bits) requires:
 
-$$M_{\text{weights}} = 70 \times 10^9 \times \frac{16}{8} = 140 \text{ GB}$$
+`{python} HardwareSetupSharding.weight_display_math`
 
-The result exceeds the `{python} HardwareSetupSharding.h100_mem_gb_str` capacity of an H100 GPU, requiring at minimum 2-way sharding.
+The result exceeds the `{python} HardwareSetupSharding.h100_mem_gb_str` capacity of an H100 GPU, requiring at minimum `{python} HardwareSetupSharding.min_shards_str`-way sharding.
 
 The second driver is latency. Even when a model fits in memory, sharding can reduce latency by parallelizing computation. @Eq-parallel-time is the Fleet Law (@eq-fleet-law) applied to a single inference request, separating the compute term that sharding divides from the communication and synchronization terms it adds:
 
@@ -5516,9 +5697,11 @@ class MoEEconomics:
     moe_mem_gb_str = fmt_memory(moe_mem_fp16, unit=GB, precision=0, commas=False)
     compute_ratio_mult_str = fmt_multiple(compute_ratio, precision=1, commas=False)
     bw_ratio_mult_str = fmt_multiple(bw_ratio, precision=1, commas=False)
+    moe_active_params_str = fmt_params(moe_active_params, scale="B", precision=0)
+    moe_decode_gb_str = fmt_memory(moe_decode_bytes, unit=GB, precision=0, commas=False)
 ```
 
-The performance advantages are striking. During autoregressive decode at batch size 1, the dominant cost is reading weights from HBM. A dense 400B model in FP16 reads `{python} MoEEconomics.dense_mem_gb_str` per step. DeepSeek-V3, despite having more total parameters, reads only the 37B active parameters per step (approximately 74 GB in FP16), a `{python} MoEEconomics.bw_ratio_mult_str` reduction in per-token bandwidth. The compute savings are proportional: `{python} MoEEconomics.compute_ratio_mult_str` fewer FLOPs per token.
+The performance advantages are striking. During autoregressive decode at batch size 1, the dominant cost is reading weights from HBM. A dense 400B model in FP16 reads `{python} MoEEconomics.dense_mem_gb_str` per step. DeepSeek-V3, despite having more total parameters, reads only the `{python} MoEEconomics.moe_active_params_str` active parameters per step (approximately `{python} MoEEconomics.moe_decode_gb_str` in FP16), a `{python} MoEEconomics.bw_ratio_mult_str` reduction in per-token bandwidth. The compute savings are proportional: `{python} MoEEconomics.compute_ratio_mult_str` fewer FLOPs per token.
 
 ::: {.column-margin}
 ![](images/svg/vol2_inference_margin_002.svg){width="100%" fig-alt="Memory ladder comparing MoE resident weights at 1342 GB, dense resident weights at 800 GB, and MoE active read at 74 GB."}
@@ -6109,22 +6292,21 @@ The trade-off is locality against load balance. Row-wise sharding keeps each emb
 
 :::
 
-The following illustrative Archetype B scenario combines row-wise, column-wise, and hybrid sharding. Its catalog size and resident-memory budget are planning assumptions, not measurements of a named production deployment, and the 100 TB resident budget deliberately sits well above the multi-terabyte embedding tables that define Archetype B, so that the sharding arithmetic is stressed at the upper end of the regime.
-
-::: {#lhs-inference-embedding-sharding-at-meta .callout-lighthouse title="Archetype B (DLRM at Scale): Embedding sharding budget"}
-
 ```{python}
 #| echo: false
 #| label: meta-embedding-scale-check
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ META EMBEDDING SCALE CHECK (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Archetype B (DLRM at Scale): Embedding sharding at Meta" lighthouse callout.
+# │ Context: Archetype B embedding-sharding lighthouse callout and the paragraph
+# │          that introduces it.
 # │
 # │ Goal: Prevent the scale bullets from implying one dense resident table that
 # │       simultaneously has 10T entities, 128d vectors, and only 100 TB total.
 # │ Show: 10T * 128 INT8 dimensions would be 1,280 TB; 100 TB averages 10 B/entity.
 # │ How: Dense lower-bound storage = entities * dimensions * bytes per dimension.
+# │      Resident footprint, table size, and entity catalog from
+# │      ReferenceStats.RecommenderAtScaleProfile.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_percent
@@ -6133,23 +6315,27 @@ class MetaEmbeddingScaleCheck:
     """Dense lower-bound check for the Meta embedding scale bullets."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    storage = 100 * TB  # scenario storage total
-    entity_count_t = 10
+    profile = ReferenceStats.RecommenderAtScaleProfile
+    storage = profile.PlatformResidentEmbeddingFootprint  # platform-wide resident tier
+    table_size = profile.EmbeddingTableSize  # one Archetype B model's tables
+    entity_count = profile.EntityCatalogIds
     min_dimension = 128
     bytes_per_dimension_int8 = BYTES_INT8
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    entity_count = entity_count_t * TRILLION * count
+    entity_count_t = entity_count.to(count).magnitude / TRILLION
     dense_int8 = entity_count * min_dimension * bytes_per_dimension_int8
     effective_bytes_per_entity = (storage / entity_count).to(byte / count).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(dense_int8 > storage, "Dense INT8 lower bound should exceed the stated storage total")
     check(effective_bytes_per_entity < min_dimension, "100 TB over 10T entities cannot hold a dense 128d INT8 vector per entity")
+    check(storage >= 5 * table_size, "Platform resident tier should sit well above one model's embedding tables")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     storage_tb_str = fmt_memory(storage, unit=TB, precision=0, commas=False)
     entity_count_t_str = fmt_int(entity_count_t, commas=False)
+    table_size_tb_str = fmt_memory(table_size, unit=TB, precision=0, commas=False)
     min_dimension_str = fmt_int(min_dimension, commas=False)
     dense_int8_tb_str = fmt_memory(dense_int8, unit=TB, precision=0, commas=True)
     effective_bytes_per_entity_str = fmt_int(effective_bytes_per_entity, commas=False)
@@ -6160,12 +6346,16 @@ class MetaEmbeddingScaleCheck:
     tp_parallelism_str = fmt_int(8, commas=False)
 ```
 
+The following illustrative Archetype B scenario combines row-wise, column-wise, and hybrid sharding. Its catalog size and resident-memory budget are planning assumptions, not measurements of a named production deployment, and the `{python} MetaEmbeddingScaleCheck.storage_tb_str` platform-wide resident budget deliberately sits well above the `{python} MetaEmbeddingScaleCheck.table_size_tb_str`-plus embedding tables of a single Archetype B model, so that the sharding arithmetic is stressed at the upper end of the regime.
+
+::: {#lhs-inference-embedding-sharding-at-meta .callout-lighthouse title="Archetype B (DLRM at Scale): Embedding sharding budget"}
+
 Consider an Archetype B recommendation workload with a large entity catalog and a smaller resident embedding tier:
 
 **Scale**:
 
-- Resident embedding budget: 100 TB
-- Entity catalog: 10 trillion identifiers
+- Resident embedding budget (platform-wide): `{python} MetaEmbeddingScaleCheck.storage_tb_str`
+- Entity catalog: `{python} MetaEmbeddingScaleCheck.entity_count_t_str` trillion identifiers
 - Embedding dimension: 128–256
 - Shards: `{python} MetaEmbeddingScaleCheck.n_shards_str`+ servers
 
@@ -6411,7 +6601,48 @@ If ten model replicas are actively serving traffic, and a new request arrives as
 
 ::: {#lhs-inference-archetype-b-dlrm-at-scale-tail-at-scale .callout-lighthouse title="Archetype B (DLRM at Scale): The tail at scale"}
 
-Archetype B (DLRM at Scale) relies on $P_{99} \le 100\text{ ms}$ performance boundaries. Because high-throughput serving aggregates $10^7$ QPS, $10^{-4}$ tail latency events occur $1{,}000$ times per second. This necessitates two-choice routing to suppress the queuing delay $T_{\text{queue}}$ that otherwise dominates physical compute $T_{\text{compute}}$.
+```{python}
+#| echo: false
+#| label: archetype-b-tail-at-scale
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ARCHETYPE B TAIL AT SCALE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The tail at scale" Archetype B lighthouse callout; the P99 target
+# │          is reused in the embedding-heavy recommendation case study.
+# │
+# │ Goal: Show how a platform request rate turns a rare tail event into a
+# │       steady stream of slow requests.
+# │ Show: P99 <= 100 ms; 10^7 QPS; 10^-4 tail events -> 1,000 per second.
+# │ How: ReferenceStats.RecommenderAtScaleProfile P99LatencySlo and PlatformQps;
+# │      the 10^-4 tail probability is a scenario assumption.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import check, fmt_int, fmt_math, fmt_time
+
+class ArchetypeBTailAtScale:
+    """Tail-event rate for Archetype B at platform request rates."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    profile = ReferenceStats.RecommenderAtScaleProfile
+    p99_slo = profile.P99LatencySlo
+    qps = profile.PlatformQps.to(count / second).magnitude
+    tail_probability = 1e-4  # scenario assumption: rare slow-request event
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    tail_events_per_s = qps * tail_probability
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(tail_events_per_s >= 100, "Rare tail events should still occur hundreds of times per second")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    p99_slo_ms_str = fmt_time(p99_slo, ms, precision=0, commas=False)
+    p99_slo_math = fmt_math(rf"P_{{99}} \le {p99_slo.to(ms).magnitude:.0f}\text{{ ms}}")
+    qps_math = fmt_math(rf"10^{{{round(math.log10(qps))}}}")
+    tail_probability_math = fmt_math(rf"10^{{{round(math.log10(tail_probability))}}}")
+    tail_events_per_s_str = fmt_int(round(tail_events_per_s), commas=True)
+```
+
+Archetype B (DLRM at Scale) relies on `{python} ArchetypeBTailAtScale.p99_slo_math` performance boundaries. Because high-throughput serving aggregates `{python} ArchetypeBTailAtScale.qps_math` QPS, `{python} ArchetypeBTailAtScale.tail_probability_math` tail latency events occur `{python} ArchetypeBTailAtScale.tail_events_per_s_str` times per second. This necessitates two-choice routing to suppress the queuing delay $T_{\text{queue}}$ that otherwise dominates physical compute $T_{\text{compute}}$.
 
 :::
 
@@ -7982,7 +8213,7 @@ The controller also needs observability that distinguishes demand from impaired 
 
 **Scenario**: An autoscaling engine provisions a new Llama-70B serving replica on an H100 GPU instance during a sudden traffic surge.
 
-**Diagnosis**: Under the scenario assumptions, bringing up a fresh replica takes ~7 minutes ($T_{\text{cold start}} = T_{\text{provision}} + T_{\text{load}} + T_{\text{warmup}}$)\index{Cold start!LLM replica loading}, including 5 minutes to fetch 140 GB of model artifacts from object storage and 1 minute for device loading and warmup. Reactive autoscaling fails to absorb the surge before requests time out.
+**Diagnosis**: Under the scenario assumptions, bringing up a fresh replica takes ~7 minutes ($T_{\text{cold start}} = T_{\text{provision}} + T_{\text{load}} + T_{\text{warmup}}$)\index{Cold start!LLM replica loading}, including 5 minutes to fetch `{python} InferenceSetup.llama70b_fp16_gb_str` of model artifacts from object storage and 1 minute for device loading and warmup. Reactive autoscaling fails to absorb the surge before requests time out.
 
 **Systems lesson**: Cold-start latency depends on artifact size, effective storage bandwidth, provisioning delay, compilation, and warmup. The controller must measure this distribution and begin provisioning far enough ahead that its high percentile fits inside the forecast horizon; the 5–10 minute lead is specific to this scenario.
 
@@ -9031,7 +9262,7 @@ The fleet design so far has treated weight precision as a specified input to mem
 *INT4 turns a two-GPU model into a one-GPU candidate.*
 :::
 
-Weight quantization for serving is a bottleneck-selection decision: reducing weights from 16-bit floats to 8-bit or 4-bit integers can turn a 140 GB FP16 language model that requires two A100 GPUs into a 35 GB INT4 representation that fits on a single GPU. The trade-off is a small accuracy loss in exchange for a 4$\times$ reduction in memory bandwidth and capacity demand.
+Weight quantization for serving is a bottleneck-selection decision: reducing weights from 16-bit floats to 8-bit or 4-bit integers can turn a `{python} InferenceSetup.llama70b_fp16_gb_str` FP16 language model that requires two A100 GPUs into a `{python} InferenceSetup.llama70b_int4_gb_str` INT4 representation that fits on a single GPU. The trade-off is a small accuracy loss in exchange for a 4$\times$ reduction in memory bandwidth and capacity demand.
 
 ::: {#psp-inference-quantization-serving-constraint .callout-perspective title="Quantization as a serving constraint"}
 
@@ -9229,10 +9460,10 @@ class QuantizedServingCapacity:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     weight_int4 = llama70b.size_in_bytes(BYTES_INT4)
     kv_headroom = a100_kv_budget - weight_int4
-    kv_layers = 80
-    kv_heads = 64
-    kv_head_dim = 128
-    kv_seq_len = 4096
+    kv_layers = llama70b.layers
+    kv_heads = llama70b.heads  # MHA baseline, as in KVCacheCalc
+    kv_head_dim = llama70b.hidden_dim // llama70b.heads
+    kv_seq_len = int(ReferenceStats.ServingProfiles.PrecisionDividendContextLengthTokens)
     kv_fp16 = calc_kv_cache_size(kv_layers, kv_heads, kv_head_dim, kv_seq_len, 1, BYTES_FP16)
     kv_per_1k_sequence = kv_fp16 / (kv_seq_len / THOUSAND)
     max_1k_sequences = int((kv_headroom / kv_per_1k_sequence).to("").magnitude)
@@ -9313,7 +9544,7 @@ The following are illustrative design cases, not verified descriptions of named 
 
 An embedding-heavy recommendation service\index{Recommendation system!embedding-heavy serving case} binds on sparse lookup rather than dense forward-pass compute. This scenario models feeds, advertising, and content ranking with a large distributed embedding store.
 
-The operational scale explains why embedding locality dominates the architecture: the service processes billions of requests per day under a P99 budget below $10\text{ ms}$ for the ranking service, nested inside the roughly 100 ms end-to-end tail target of Archetype B (DLRM at Scale), spanning hundreds of distinct model variants over an entity catalog comprising trillions of unique sparse features.
+The operational scale explains why embedding locality dominates the architecture: the service processes billions of requests per day under a P99 budget below $10\text{ ms}$ for the ranking service, nested inside the roughly `{python} ArchetypeBTailAtScale.p99_slo_ms_str` end-to-end tail target of Archetype B (DLRM at Scale), spanning hundreds of distinct model variants over an entity catalog comprising trillions of unique sparse features.
 
 The serving stack separates sparse lookup from dense ranking:
 

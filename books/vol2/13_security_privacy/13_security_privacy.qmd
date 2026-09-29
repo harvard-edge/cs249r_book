@@ -1603,7 +1603,7 @@ class DefenseOverheadAnalysis:
     false_positive_pct = 0.3
     monitoring_ms = 2.0
     perturbation_ms = 0.5
-    base_inference_ms = 100
+    base_inference_ms = 100  # scenario assumption: ResNet-50 API per-request latency
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     queries_per_class = extraction_queries / class_count
@@ -3374,9 +3374,9 @@ class TEEMemoryFootprint:
 Security features scale differently than computational resources. Protected memory capacity, not host memory, sets how much of a model can remain resident inside a TEE without paging. On an older Intel SGX configuration with a `{python} TEEMemoryFootprint.sgx_epc_mb_str` enclave page cache (the protected resident memory), ResNet-50's FP32 weights alone would fill about `{python} TEEMemoryFootprint.resnet50_fp32_epc_pct_str` of it. A ResNet-18 model is about `{python} TEEMemoryFootprint.resnet18_fp32_mb_str` with FP32 weights or `{python} TEEMemoryFootprint.resnet18_int8_mb_str` with INT8 weights, while ResNet-50 is about `{python} TEEMemoryFootprint.resnet50_fp32_mb_str` with FP32 weights or `{python} TEEMemoryFootprint.resnet50_int8_mb_str` with INT8 weights before activations and runtime buffers. These constraints create architectural decisions that must be made early in system design.
 
 ::: {.column-margin}
-![](images/svg/vol2_security_privacy_margin_001.svg){width="100%" fig-alt="Memory ladder comparing a 128 MB SGX EPC limit with ResNet-50 at 102 MB and ResNet-18 at 12 MB."}
+![](images/svg/vol2_security_privacy_margin_001.svg){width="100%" fig-alt="Memory ladder comparing a 128 MB SGX EPC limit with ResNet-50 FP32 weights at 102 MB and ResNet-18 INT8 weights at 12 MB."}
 
-*Protected working-set capacity affects secure execution cost.*
+*Protected working-set capacity affects secure execution cost. The bars show ResNet-50 with FP32 weights and ResNet-18 with INT8 weights.*
 :::
 
 Different threat models and protection levels require quantitative trade-off analysis. Encryption and authentication are distinct operations: AES encryption alone does not verify integrity. An authenticated mode or a separate authentication mechanism is needed when tampering is in scope, and the latency must be measured for the actual data volume and hardware.
@@ -4820,7 +4820,40 @@ Organizations secure single-node ML systems effectively but fail to recognize th
 *Topology determines how communication channels scale with node count.*
 :::
 
-In the reference training cluster of 1,024 GPUs (128 nodes of eight), a single compromised node can inject poisoned gradients into global aggregation unless validation or robust aggregation contains it. Federated learning with 10,000 clients creates 10,000 separately managed endpoints, and there robust aggregation conflicts with secure aggregation because filtering needs the individual updates that masking hides (@sec-edge-intelligence-federated-privacy-a1ed). Effective distributed ML security therefore requires threat modeling the added nodes and boundaries: securing inter-node channels, managing identity across security domains, and coordinating policies across heterogeneous infrastructure.
+```{python}
+#| echo: false
+#| label: reference-cluster-attack-surface
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ REFERENCE CLUSTER ATTACK SURFACE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: distributed attack-surface pitfall, reference training cluster
+# │
+# │ Goal: Name the reference cluster's size from the registry.
+# │ Show: "1,024 GPUs (128 nodes with 8 GPUs each)" inline.
+# │ How: Read Scenarios.DenseLLMPretrainingReference system composition.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_count
+
+class ReferenceClusterAttackSurface:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    cluster = Scenarios.DenseLLMPretrainingReference.system
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    total_gpus = cluster.total_accelerators
+    node_count = cluster.count
+    gpus_per_node = cluster.node.accelerators_per_node
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(node_count * gpus_per_node == total_gpus, "Node composition must multiply to the cluster size")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    total_gpus_str = fmt_count(total_gpus)
+    node_count_str = fmt(node_count, precision=0, commas=False)
+    gpus_per_node_str = fmt(gpus_per_node, precision=0, commas=False)
+```
+
+In the reference training cluster of `{python} ReferenceClusterAttackSurface.total_gpus_str` GPUs (`{python} ReferenceClusterAttackSurface.node_count_str` nodes with `{python} ReferenceClusterAttackSurface.gpus_per_node_str` GPUs each), a single compromised node can inject poisoned gradients into global aggregation unless validation or robust aggregation contains it. Federated learning with 10,000 clients creates 10,000 separately managed endpoints, and there robust aggregation conflicts with secure aggregation because filtering needs the individual updates that masking hides (@sec-edge-intelligence-federated-privacy-a1ed). Effective distributed ML security therefore requires threat modeling the added nodes and boundaries: securing inter-node channels, managing identity across security domains, and coordinating policies across heterogeneous infrastructure.
 
 Recognizing that the shift from a single node to a distributed cluster adds nodes, channels, credentials, and trust boundaries rules out perimeter-only thinking. Security for the machine learning fleet must be layered, measured, and tied to the full lifecycle.
 

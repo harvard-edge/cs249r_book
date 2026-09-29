@@ -439,9 +439,12 @@ class MemoryWallScenario:
     shared_per_sm = Hardware.Cloud.H100.memory.shared_memory_per_sm
     tdp = Hardware.Cloud.H100.tdp
     hbm_latency = Hardware.Tech.Memory.DRAM.latency
+    smem_tier = Hardware.Tech.Memory.HopperSharedMemory  # Luo et al. (2024) microbenchmark
+    l2_tier = Hardware.Tech.Memory.HopperL2
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     ridge_fp8 = (flops_fp8 / bw).to(flop / byte)
+    full_read_time = (mem / bw).to(ms)
     # Register file is quoted in binary (KiB/MiB) and labeled with decimal units
     # in prose, matching the branded-hardware-label convention (e.g., 80 GiB -> "80 GB").
     register_total = sm_count * reg_per_sm
@@ -454,6 +457,13 @@ class MemoryWallScenario:
     check(30 * MiB <= register_total <= 36 * MiB, "H100 register file total should be ~33 MiB")
     check(40 * MB <= l2_cache <= 60 * MB, "H100 L2 cache should be ~50 MB")
     check(250 * nanosecond <= hbm_latency <= 350 * nanosecond, "HBM3 access latency should be ~300 ns")
+    check(smem_tier.latency_cycles < l2_tier.latency_cycles, "Shared memory must be faster than L2")
+    check(20 * ms < full_read_time < 30 * ms, "Full-HBM read should take tens of ms, far above inference latency targets")
+    # The TikZ roofline in @fig-roofline-model is static: its labels read
+    # "2,000 TFLOP/s FP8", "3.35 TB/s", and "Ridge ~600 FLOP/B". Guard them here.
+    check(abs(flops_fp8.to(TFLOP / second).magnitude - 2000) / 2000 < 0.02, "TikZ roofline FP8 ceiling label (2,000 TFLOP/s) drifted")
+    check(abs(bw.to(TB / second).magnitude - 3.35) < 0.005, "TikZ roofline slope label (3.35 TB/s) drifted")
+    check(550 < ridge_fp8.magnitude < 650, "TikZ roofline ridge label (~600 FLOP/B) drifted")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_fp8_tflop_per_s_str = fmt_qty_int(flops_fp8, TFLOP / second, commas=False)
@@ -467,6 +477,11 @@ class MemoryWallScenario:
     sm_count_str = fmt_int(sm_count, commas=False)
     reg_per_sm_kib_str = fmt_memory_capacity(reg_per_sm, unit=KiB, precision=0, commas=False)
     shared_mem_per_sm_kib_str = fmt_memory_capacity(shared_per_sm, unit=KiB, precision=0, commas=False)
+    smem_latency_cycles_str = fmt_int(round(smem_tier.latency_cycles), commas=False)
+    smem_latency_ns_str = fmt_time(round(smem_tier.latency.to(nanosecond).magnitude) * nanosecond, nanosecond, precision=0, commas=False)
+    l2_latency_cycles_str = fmt_int(round(l2_tier.latency_cycles), commas=False)
+    l2_latency_ns_str = fmt_time(round(l2_tier.latency.to(nanosecond).magnitude, -1) * nanosecond, nanosecond, precision=0, commas=False)
+    full_read_ms_str = fmt_time(round(full_read_time.magnitude) * ms, ms, precision=0, commas=False)
 ```
 
 An NVIDIA H100\index{H100!memory hierarchy} delivers `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str` of FP8 compute at a `{python} MemoryWallScenario.h100_tdp_w_str` thermal design power budget but only `{python} MemoryWallScenario.h100_hbm_bw_tb_per_s_str` of memory bandwidth. If an operation achieves an arithmetic intensity below `{python} MemoryWallScenario.h100_ridge_fp8_str`, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the memory wall, and it defines the landscape within which all performance engineering operates.
@@ -485,12 +500,12 @@ The capacity-bandwidth tension shapes the optimization space. Operator fusion re
 
 The physical structure of a GPU memory system dictates the limits of data movement. @Tbl-performance-engineering-memory-hierarchy summarizes the four levels by scale, access cost, and the optimization constraint each one imposes.
 
-| **Level**                            | **Scale on H100**                                                                                                                                                               | **Access cost**                                                   | **Optimization constraint**                                                                                                                                                                                                                          |
-|:-------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Registers**\index{Register File}   | `{python} MemoryWallScenario.reg_per_sm_kib_str` per SM across `{python} MemoryWallScenario.sm_count_str` SMs, about `{python} MemoryWallScenario.register_total_mib_str` total | One clock cycle                                                   | Private to each thread; FP32 accumulators can force register spilling\index{Register File!register spilling} to device-backed local memory, with cost determined by cache hits and misses; shared-memory spilling requires explicit compiler support |
-| **Shared memory (SRAM)**\index{SRAM} | Up to `{python} MemoryWallScenario.shared_mem_per_sm_kib_str` configurable shared memory per SM                                                                                 | 20--30 clock cycles (~20 ns)                                      | Shared within a thread block; operator fusion is profitable when intermediates fit here instead of returning to HBM                                                                                                                                  |
-| **L2 cache**                         | `{python} MemoryWallScenario.l2_cache_mb_str` on-chip buffer                                                                                                                    | About 200 clock cycles (~130 ns)                                  | Captures reuse automatically across SMs but cannot be explicitly managed by kernel authors                                                                                                                                                           |
-| **HBM**                              | `{python} MemoryWallScenario.h100_mem_gb_str` at `{python} MemoryWallScenario.h100_hbm_bw_tb_per_s_str` bandwidth                                                               | About `{python} MemoryWallScenario.hbm_latency_ns_str` per access | Supplies model and activation capacity, but reading the full device takes about 24 ms, far longer than real-time inference latency targets                                                                                                           |
+| **Level**                            | **Scale on H100**                                                                                                                                                               | **Access cost**                                                                                                               | **Optimization constraint**                                                                                                                                                                                                                          |
+|:-------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Registers**\index{Register File}   | `{python} MemoryWallScenario.reg_per_sm_kib_str` per SM across `{python} MemoryWallScenario.sm_count_str` SMs, about `{python} MemoryWallScenario.register_total_mib_str` total | One clock cycle                                                                                                               | Private to each thread; FP32 accumulators can force register spilling\index{Register File!register spilling} to device-backed local memory, with cost determined by cache hits and misses; shared-memory spilling requires explicit compiler support |
+| **Shared memory (SRAM)**\index{SRAM} | Up to `{python} MemoryWallScenario.shared_mem_per_sm_kib_str` configurable shared memory per SM                                                                                 | About `{python} MemoryWallScenario.smem_latency_cycles_str` clock cycles (~`{python} MemoryWallScenario.smem_latency_ns_str`) | Shared within a thread block; operator fusion is profitable when intermediates fit here instead of returning to HBM                                                                                                                                  |
+| **L2 cache**                         | `{python} MemoryWallScenario.l2_cache_mb_str` on-chip buffer                                                                                                                    | About `{python} MemoryWallScenario.l2_latency_cycles_str` clock cycles (~`{python} MemoryWallScenario.l2_latency_ns_str`)     | Captures reuse automatically across SMs but cannot be explicitly managed by kernel authors                                                                                                                                                           |
+| **HBM**                              | `{python} MemoryWallScenario.h100_mem_gb_str` at `{python} MemoryWallScenario.h100_hbm_bw_tb_per_s_str` bandwidth                                                               | About `{python} MemoryWallScenario.hbm_latency_ns_str` per access                                                             | Supplies model and activation capacity, but reading the full device takes about `{python} MemoryWallScenario.full_read_ms_str`, far longer than real-time inference latency targets                                                                  |
 
 : **GPU memory hierarchy constraints**: Faster GPU storage is smaller, closer to the compute units, and more explicitly managed, while HBM supplies capacity at much higher latency and energy cost. {#tbl-performance-engineering-memory-hierarchy tbl-colwidths="[17,24,24,35]"}
 
@@ -843,7 +858,7 @@ Any operation with an arithmetic intensity below `{python} RooflineRidgeCalc.h10
 
 @Fig-shifting-roofline overlays the roofline models for four GPU generations on a single log-log plot, making the generational ridge-point shift tabulated in @tbl-widening-gap visible at a glance. An operation like naive self-attention, with an arithmetic intensity near 10 FLOP/byte, is memory-bound on every generation, sitting more than an order of magnitude below each ridge point. More critically, operations near 200 FLOP/byte, such as some matrix multiplications and fused blocks, can change regime as hardware changes. The same kernel can change performance regime across hardware generations, a fact that demands re-profiling whenever hardware is upgraded.
 
-::: {#fig-shifting-roofline fig-env="figure" fig-pos="htb" fig-cap="**The shifting roofline across GPU generations**: Overlaid FP16/BF16 roofline models for V100 through B200 show the ridge point growing from 139 to 281 FLOP/byte. Operations near 200 FLOP/byte can change regime as the roofline shifts. The same kernel can change performance regime across hardware generations." fig-alt="Log-log roofline plot for V100, A100, H100, B200 with ridge points and example ML operations marked."}
+::: {#fig-shifting-roofline fig-env="figure" fig-pos="htb" fig-cap="**The shifting roofline across GPU generations**: Overlaid FP16/BF16 roofline models for V100 through B200 show the ridge point growing from `{python} WideningGap.v100_ridge_str` to `{python} WideningGap.b200_ridge_str` FLOP/byte. Operations near 200 FLOP/byte can change regime as the roofline shifts. The same kernel can change performance regime across hardware generations." fig-alt="Log-log roofline plot for V100, A100, H100, B200 with ridge points and example ML operations marked."}
 
 ```{python}
 #| echo: false
@@ -1932,7 +1947,40 @@ Profiling tools provide the measurement foundation for all optimization work. Wi
 
 ## Measurement at Scale {#sec-performance-engineering-measurement-scale}
 
-When scaling from 8 GPUs to 1,024 GPUs, new sources of overhead emerge that are invisible in local traces. Fleet measurements determine whether optimizing a local kernel is warranted in the first place. A profiler can explain why one kernel stalls; it cannot by itself say whether thousands of accelerators are converting power, memory bandwidth, and network time into useful model progress. The measurement contract introduced at the outset must therefore cover both the local execution boundary and global efficiency metrics that capture computation, communication, and hardware variability.
+```{python}
+#| echo: false
+#| label: measurement-scale-boundary
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASUREMENT SCALE BOUNDARY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Opening sentence of @sec-performance-engineering-measurement-scale.
+# │
+# │ Goal: Name the node-to-cluster scaling step with registry-backed counts.
+# │ Show: 8 GPUs (one DGX H100 node) to 1,024 GPUs (the reference cluster).
+# │ How: Systems.Nodes.DGX_H100.accelerators_per_node and
+# │      Scenarios.DenseLLMPretrainingReference.system.total_accelerators.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_count
+
+class MeasurementScaleBoundary:
+    """Node-to-cluster GPU counts for the fleet-measurement opening."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    node_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
+    cluster_gpus = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    nodes_in_cluster = cluster_gpus // node_gpus
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(nodes_in_cluster >= 100, "Cluster should span over a hundred nodes, so node-local traces miss fabric effects")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    node_gpus_str = fmt_count(node_gpus, label="GPU")
+    cluster_gpus_str = fmt_count(cluster_gpus, label="GPU")
+```
+
+When scaling from `{python} MeasurementScaleBoundary.node_gpus_str` to `{python} MeasurementScaleBoundary.cluster_gpus_str`, new sources of overhead emerge that are invisible in local traces. Fleet measurements determine whether optimizing a local kernel is warranted in the first place. A profiler can explain why one kernel stalls; it cannot by itself say whether thousands of accelerators are converting power, memory bandwidth, and network time into useful model progress. The measurement contract introduced at the outset must therefore cover both the local execution boundary and global efficiency metrics that capture computation, communication, and hardware variability.
 
 Before two measurements can support an optimization claim, they must share a reproducible measurement contract. Benchmark suites formalize this principle by fixing workload, quality, and measurement rules before comparing systems [@mattson2020mlperf; @reddi2020]. The contract fixes the workload envelope, including model, input and output length distributions, batch or concurrency, data distribution, and quality criterion; records hardware topology, accelerator clocks and power limits, software versions, precision, and compiler settings; and states the timing and synchronization boundaries. Cold-start compilation and cache-filling trials must remain separate from warmed steady-state trials. Each reported point needs repeated trials with a dispersion statistic, an output-equivalence or quality check, and latency percentiles at a named offered load. Without those controls, a speedup can come from different work, different machine state, asynchronous timing, or a shifted quality or service-level objective (SLO) rather than from the proposed optimization.
 
@@ -2142,23 +2190,33 @@ Each unfused kernel must also materialize its output in HBM. For the sequence $\
 # │          tensor traffic example.
 # │
 # │ Goal: Compute the per-layer HBM traffic caused by materializing two FP16
-# │       intermediates for hidden width 4096 and batch size 2048.
-# │ Show: 16 MB per tensor, 32 MB materialized, 64 MB write/read traffic.
-# │ How: Compute tensor bytes from hidden width, batch size, and FP16 element size; each intermediate is written
-# │      once and read once before the next kernel consumes it.
+# │       intermediates for the Llama 2 70B shape (hidden width 8192, 80
+# │       layers) at a 2048-token batch.
+# │ Show: ~34 MB per tensor, ~67 MB materialized, ~134 MB write/read traffic,
+# │       ~1.7x full-traffic ratio; also the launch-overhead budget used by
+# │       the CUDA Graphs prose (@sec-performance-engineering-cuda-graphs).
+# │ How: Hidden width and layer count from Models.Language.Llama2_70B; tensor
+# │      bytes = hidden x batch x FP16; each intermediate is written once and
+# │      read once before the next kernel consumes it. Launch cost floor from
+# │      Ops.RuntimeOverheads.KernelLaunch.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_multiple
+from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_multiple, fmt_time_range
 
 class FusionTrafficCalc:
     """HBM traffic from unfused intermediate tensors."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    hidden_dim = 4096
-    batch_size = 2048
+    model = Models.Language.Llama2_70B
+    hidden_dim = model.hidden_dim
+    num_layers = model.layers
+    batch_size = 2048  # scenario assumption: tokens per forward pass
     bytes_fp16 = BYTES_FP16
     intermediates = 2
-    num_layers = 80
+    # Launch-overhead budget (CUDA Graphs prose).
+    launch_low = Ops.RuntimeOverheads.KernelLaunch
+    launch_high = 10 * microsecond  # scenario assumption: eager-mode upper end
+    kernels_per_layer = 30  # scenario assumption: decoder layer with 30+ kernels
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     tensor_bytes = hidden_dim * batch_size * bytes_fp16
@@ -2169,22 +2227,34 @@ class FusionTrafficCalc:
     fused_bytes = 2 * tensor_bytes + weight_bytes
     unfused_bytes = fused_bytes + traffic_bytes
     traffic_ratio = (unfused_bytes / fused_bytes).to("").magnitude
-    check(abs(traffic_ratio - 2.0) < 1e-9, "Matched-shape full traffic ratio must be two")
+    launch_layer_low = (kernels_per_layer * launch_low).to(microsecond)
+    launch_layer_high = (kernels_per_layer * launch_high).to(microsecond)
+    launch_pass_low = (launch_layer_low * num_layers).to(ms)
+    launch_pass_high = (launch_layer_high * num_layers).to(ms)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(15 * MB < tensor_bytes < 17 * MB, f"Expected ~16 MB tensor, got {tensor_bytes.to(MB).magnitude:.1f} MB")
-    check(60 * MB < traffic_bytes < 70 * MB, f"Expected ~64 MB traffic, got {traffic_bytes.to(MB).magnitude:.1f} MB")
+    check(1.5 < traffic_ratio < 2.0, f"Fusion should cut full traffic by 1.5-2x, got {traffic_ratio:.2f}")
+    check(30 * MB < tensor_bytes < 40 * MB, f"Expected ~34 MB tensor, got {tensor_bytes.to(MB).magnitude:.1f} MB")
+    check(120 * MB < traffic_bytes < 150 * MB, f"Expected ~134 MB traffic, got {traffic_bytes.to(MB).magnitude:.1f} MB")
+    check(launch_low < launch_high, "Launch range must be ordered")
+    check(launch_pass_low > 2 * RooflineDiagnostic.decode_time, "Launch total should be several times the bandwidth-bound decode step")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    traffic_ratio_mult_str = fmt_multiple(traffic_ratio, precision=0, commas=False)
+    traffic_ratio_mult_str = fmt_multiple(traffic_ratio, precision=1, commas=False)
     tensor_mb_str = fmt_memory(tensor_bytes, unit=MB, precision=1, commas=False)
     materialized_mb_str = fmt_memory(materialized_bytes, unit=MB, precision=1, commas=False)
     traffic_mb_str = fmt_memory(traffic_bytes, unit=MB, precision=1, commas=False)
     traffic_gb_str = fmt_memory(traffic_bytes_all_layers, unit=GB, precision=1, commas=False)
     num_layers_str = fmt_int(num_layers, commas=False)
+    hidden_dim_str = fmt_int(hidden_dim, commas=False)
+    batch_size_str = fmt_int(batch_size, commas=False)
+    kernels_per_layer_str = fmt_int(kernels_per_layer, commas=False)
+    launch_range_us_str = fmt_time_range(launch_low, launch_high, microsecond, precision=0)
+    launch_layer_range_us_str = fmt_time_range(launch_layer_low, launch_layer_high, microsecond, precision=0)
+    launch_pass_range_ms_str = fmt_time_range(launch_pass_low, launch_pass_high, ms, precision=0)
 ```
 
-Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $Y$.\index{Intermediate tensor!materialization overhead} For a hidden dimension of 4096 and batch size of 2048 in FP16, each intermediate tensor is `{python} FusionTrafficCalc.tensor_mb_str`. The unfused execution materializes `{python} FusionTrafficCalc.materialized_mb_str` of intermediate tensors and performs `{python} FusionTrafficCalc.traffic_mb_str` of intermediate HBM traffic, writing and then rereading each tensor. A fused kernel avoids that traffic entirely by holding $Z_1$ and $Z_2$ in registers or shared memory within the SM. @Fig-fusion-before-after contrasts these two execution paths, making the HBM traffic savings visible.
+Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $Y$.\index{Intermediate tensor!materialization overhead} For the Llama 2 70B shape (hidden dimension `{python} FusionTrafficCalc.hidden_dim_str`) at a batch of `{python} FusionTrafficCalc.batch_size_str` tokens in FP16, each intermediate tensor is `{python} FusionTrafficCalc.tensor_mb_str`. The unfused execution materializes `{python} FusionTrafficCalc.materialized_mb_str` of intermediate tensors and performs `{python} FusionTrafficCalc.traffic_mb_str` of intermediate HBM traffic, writing and then rereading each tensor. A fused kernel avoids that traffic entirely by holding $Z_1$ and $Z_2$ in registers or shared memory within the SM. @Fig-fusion-before-after contrasts these two execution paths, making the HBM traffic savings visible.
 
 ::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator fusion before and after**: The diagram counts activation transfers: separate kernels write and reread two intermediate tensors, while the fused path retains them on chip. Weight reads and small parameter vectors are not drawn. Transfer counts alone do not determine total byte savings when tensors differ in size." fig-alt="Two stacked dataflow panels show six one-way activation transfers before fusion and two afterward. Weight reads are excluded; two intermediate writes and rereads disappear."}
 ![](images/svg/operator-fusion.svg)
@@ -2205,7 +2275,7 @@ When the sequence includes a reduction, the fusion decision becomes more constra
 
 The highest-payoff case is operator-specific fusion\index{Operator Fusion!operator-specific}. These are custom kernels designed for a specific sequence of operations, such as fused attention or fused GEMM-bias-activation. The kernel architect must reason about data flow, shared memory allocation, and thread scheduling simultaneously. The payoff is substantial: FlashAttention removes the quadratic attention workspace and keeps the online softmax state linear in sequence length.
 
-To appreciate the quantitative impact, consider each category applied to a single transformer layer with hidden dimension 4096 and batch size 2048 in FP16. Element-wise fusion of a bias-GELU-dropout chain in this shape eliminates two intermediate tensors of `{python} FusionTrafficCalc.tensor_mb_str` each, saving `{python} FusionTrafficCalc.traffic_mb_str` of HBM traffic per layer. Across `{python} FusionTrafficCalc.num_layers_str` layers, this reclaims about `{python} FusionTrafficCalc.traffic_gb_str` of HBM traffic per forward pass. Reduction fusion of LayerNorm avoids materializing large prenormalization tensors and intermediate statistics. Operator-specific attention fusion (FlashAttention) provides the largest single gain by removing the quadratic score and probability matrices that dominate long-context attention. The cumulative effect of all three fusion categories can remove a large fraction of HBM traffic for a memory-bound transformer forward pass, but the end-to-end speedup must still be verified with profiling because the bottleneck may shift.
+To appreciate the quantitative impact, consider each category applied to a single transformer layer of the same shape (hidden dimension `{python} FusionTrafficCalc.hidden_dim_str`, batch of `{python} FusionTrafficCalc.batch_size_str` tokens, FP16). Element-wise fusion of a bias-GELU-dropout chain in this shape eliminates two intermediate tensors of `{python} FusionTrafficCalc.tensor_mb_str` each, saving `{python} FusionTrafficCalc.traffic_mb_str` of HBM traffic per layer. Across `{python} FusionTrafficCalc.num_layers_str` layers, this reclaims about `{python} FusionTrafficCalc.traffic_gb_str` of HBM traffic per forward pass. Reduction fusion of LayerNorm avoids materializing large prenormalization tensors and intermediate statistics. Operator-specific attention fusion (FlashAttention) provides the largest single gain by removing the quadratic score and probability matrices that dominate long-context attention. The cumulative effect of all three fusion categories can remove a large fraction of HBM traffic for a memory-bound transformer forward pass, but the end-to-end speedup must still be verified with profiling because the bottleneck may shift.
 
 ### CUDA graphs for launch overhead amortization {#sec-performance-engineering-cuda-graphs}
 
@@ -2213,7 +2283,7 @@ An orthogonal technique for reducing the overhead term in the iron law is CUDA g
 
 [^fn-cuda-graphs-constraint]: **CUDA graphs**\index{CUDA Graphs!definition}: Graph capture records a sequence of GPU work and its dependencies for later replay [@nvidia2026cudaGraphs]. Replay requires a capture-compatible operation graph and valid referenced storage; it does not require numerically identical results. Dynamic control flow, shapes, or allocations can instead require graph variants, graph updates, or uncaptured regions. Repetitive decode shapes are often easier to capture than heterogeneous prefill shapes.
 
-In standard PyTorch execution, each kernel launch requires the CPU to push a command to the GPU's command queue. For a transformer decoder layer with 30+ kernels, this CPU-to-GPU roundtrip (typically 5--10 $\mu$s per launch) accumulates to 150--300 $\mu$s per layer. For the `{python} FusionTrafficCalc.num_layers_str`-layer 70B example, host-side kernel submission alone totals roughly 12--24 ms per forward pass, and whatever part of it the GPU cannot hide behind running kernels lands on the critical path. That total is several times the `{python} RooflineDiagnostic.decode_ms_str` bandwidth-bound decode step computed in notebook \ref{nbk-performance-engineering-roofline-diagnostic}, which is why eager decode is often launch-bound before it is bandwidth-bound.
+In standard PyTorch execution, each kernel launch requires the CPU to push a command to the GPU's command queue. For a transformer decoder layer with `{python} FusionTrafficCalc.kernels_per_layer_str` or more kernels, this CPU-to-GPU roundtrip (typically `{python} FusionTrafficCalc.launch_range_us_str` per launch) accumulates to `{python} FusionTrafficCalc.launch_layer_range_us_str` per layer. For the `{python} FusionTrafficCalc.num_layers_str`-layer 70B example, host-side kernel submission alone totals roughly `{python} FusionTrafficCalc.launch_pass_range_ms_str` per forward pass, and whatever part of it the GPU cannot hide behind running kernels lands on the critical path. That total is several times the `{python} RooflineDiagnostic.decode_ms_str` bandwidth-bound decode step computed in notebook \ref{nbk-performance-engineering-roofline-diagnostic}, which is why eager decode is often launch-bound before it is bandwidth-bound.
 
 CUDA Graphs address this by recording a sequence of GPU operations (kernel launches and memory copies) into a replayable graph. The recording happens once during a warmup phase. On subsequent iterations, one replay request submits the recorded graph and avoids rebuilding the launch sequence operation by operation. Replay still incurs host, driver, graph-launch, synchronization, and device scheduling costs, so the saved fraction must be measured for the captured region.
 
@@ -2957,7 +3027,48 @@ The storage cost for block-wise quantization\index{Block-wise Quantization!stora
 
 ::: {#lhs-performance-engineering-archetype-c-federated-mobilenet-tinyml-survival .callout-lighthouse title="Archetype C (Federated MobileNet): Precision as feasibility"}
 
-For Archetype C (Federated MobileNet), smartphone-class devices with power budgets of roughly 2--10 W, a few watts sustained with brief bursts toward 10 W, precision is part of the feasibility test: the model's weights, activations, and any local training state must fit beside the rest of the phone's workload, and INT8 or INT4 weights often decide whether an on-device model fits at all. Microcontroller-class sensors sit at an extreme below Archetype C, where a live FP16 working set that exceeds a 512 KB SRAM budget cannot reside on the device at all; smaller models or weights streamed from nonvolatile storage require a different accounting. Binary neural networks\index{Binary Neural Network!edge quantization} and 1-bit quantization\index{1-bit Quantization!edge quantization} push this to the extreme, representing weights as single bits (+1/-1). While this trades significant accuracy, it reduces the weight memory footprint by 16$\times$ relative to FP16 (32$\times$ relative to FP32). These storage ratios exclude metadata and activations; device energy savings require a supported execution path and measurement of the complete workload.
+```{python}
+#| echo: false
+#| label: archetype-c-precision-envelope
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ARCHETYPE C DEVICE ENVELOPE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Archetype C lighthouse callout (precision as feasibility).
+# │
+# │ Goal: Pin the smartphone power envelope and the microcontroller SRAM
+# │       budget quoted in the callout to registry anchors.
+# │ Show: 2--10 W phone envelope, ~3 W sustained, 10 W bursts; 256 KB MCU SRAM.
+# │ How: ReferenceStats.MobilePower sustained/burst anchors (the sustained high
+# │      end is the FederatedMobileVision scenario budget) and
+# │      ReferenceStats.EdgeDeviceSpectrum.MicrocontrollerSram.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_memory_capacity, fmt_power, fmt_qty_range
+
+class ArchetypeCEnvelope:
+    """Archetype C power envelope and microcontroller SRAM budget."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    sustained_low = ReferenceStats.MobilePower.MobileMlSustainedLow
+    sustained_high = Scenarios.FederatedMobileVision.power_budget
+    burst_high = ReferenceStats.MobilePower.MobileMlBurstHigh
+    mcu_sram = ReferenceStats.EdgeDeviceSpectrum.MicrocontrollerSram
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    burst_to_sustained = (burst_high / sustained_high).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(sustained_low < sustained_high < burst_high, "Sustained power must sit below the burst ceiling")
+    check(burst_to_sustained > 2, "Bursts should be well above the few-watt sustained budget")
+    check(mcu_sram < 1 * MiB, "MCU SRAM budget must be sub-megabyte")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    envelope_range_w_str = fmt_qty_range(sustained_low, burst_high, watt, precision=0)
+    sustained_high_w_str = fmt_power(sustained_high, unit=watt, precision=0, commas=False)
+    burst_high_w_str = fmt_power(burst_high, unit=watt, precision=0, commas=False)
+    mcu_sram_kb_str = fmt_memory_capacity(mcu_sram, unit=KiB, precision=0, commas=False)
+```
+
+For Archetype C (Federated MobileNet), smartphone-class devices with power budgets of roughly `{python} ArchetypeCEnvelope.envelope_range_w_str`, about `{python} ArchetypeCEnvelope.sustained_high_w_str` sustained with brief bursts toward `{python} ArchetypeCEnvelope.burst_high_w_str`, precision is part of the feasibility test: the model's weights, activations, and any local training state must fit beside the rest of the phone's workload, and INT8 or INT4 weights often decide whether an on-device model fits at all. Microcontroller-class sensors sit at an extreme below Archetype C, where a live FP16 working set that exceeds a `{python} ArchetypeCEnvelope.mcu_sram_kb_str` SRAM budget cannot reside on the device at all; smaller models or weights streamed from nonvolatile storage require a different accounting. Binary neural networks\index{Binary Neural Network!edge quantization} and 1-bit quantization\index{1-bit Quantization!edge quantization} push this to the extreme, representing weights as single bits (+1/-1). While this trades significant accuracy, it reduces the weight memory footprint by 16$\times$ relative to FP16 (32$\times$ relative to FP32). These storage ratios exclude metadata and activations; device energy savings require a supported execution path and measurement of the complete workload.
 
 :::
 
@@ -3789,7 +3900,7 @@ class NvlinkH100:
     b64_compute_to_comm_ratio = (b64_compute_time / b64_comm_time).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import check, fmt, fmt_memory, fmt_multiple, fmt_qty_int, fmt_time
+    from mlsysim.fmt import check, fmt, fmt_int, fmt_math, fmt_memory, fmt_multiple, fmt_qty_int, fmt_time
 
     check(400 * GB / second < bw < 500 * GB / second, "H100 NVLink per-direction bandwidth should be ~450 GB/s")
     check(b64_vol == 64 * b1_vol, "Batch-64 volume should be 64x the batch-1 volume")
@@ -3809,11 +3920,15 @@ class NvlinkH100:
     layer_shard_mb_str = fmt_memory(round(layer_shard_bytes.to(MB).magnitude) * MB, unit=MB, precision=0, commas=False)
     b64_compute_to_comm_mult_str = fmt_multiple(b64_compute_to_comm_ratio, precision=1, commas=False)
     launch_to_b1_transfer_mult_str = fmt_multiple(round(launch_to_b1_transfer_ratio, -1), precision=0, commas=False)
+    tp_degree_str = fmt_int(tensor_parallel_degree, commas=False)
+    d_model_math = fmt_math(rf"d_{{\text{{model}}}} = {d_model}")
+    b1_vol_math = fmt_math(rf"2 \times {d_model} \times {batch_small} \times 2 =")
+    b64_vol_math = fmt_math(rf"2 \times {d_model} \times {batch_large} \times 2 =")
 ```
 
-Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce\index{AllReduce} operations in the forward pass (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d_{\text{model}} \times B \times 2$ bytes at FP16 (where $d_{\text{model}} = 8192$ for a 70B model and $B$ is batch size). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 =$ `{python} NvlinkH100.b1_vol_kb_str` per AllReduce. At the `{python} NvlinkH100.bw_gb_per_s_str` per-direction NVLink bandwidth, this transfer takes approximately `{python} NvlinkH100.b1_time_ns_str`. However, the AllReduce launch overhead (approximately `{python} NvlinkH100.launch_overhead_us_str`) exceeds the actual data transfer time by roughly `{python} NvlinkH100.launch_to_b1_transfer_mult_str`. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
+Consider a concrete example: a 70B model with tensor parallelism across `{python} NvlinkH100.tp_degree_str` H100 GPUs. Each transformer layer requires two AllReduce\index{AllReduce} operations in the forward pass (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d_{\text{model}} \times B \times 2$ bytes at FP16 (where `{python} NvlinkH100.d_model_math` for Llama 2 70B and $B$ is batch size). At batch size 1, the data volume is `{python} NvlinkH100.b1_vol_math` `{python} NvlinkH100.b1_vol_kb_str` per AllReduce. At the `{python} NvlinkH100.bw_gb_per_s_str` per-direction NVLink bandwidth, this transfer takes approximately `{python} NvlinkH100.b1_time_ns_str`. However, the AllReduce launch overhead (approximately `{python} NvlinkH100.launch_overhead_us_str`) exceeds the actual data transfer time by roughly `{python} NvlinkH100.launch_to_b1_transfer_mult_str`. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
 
-At batch size 64, the data volume per AllReduce grows to $2 \times 8192 \times 64 \times 2 =$ `{python} NvlinkH100.b64_vol_mb_str`, taking approximately `{python} NvlinkH100.b64_time_us_str` at NVLink bandwidth. Including launch overhead, exposed communication takes approximately `{python} NvlinkH100.b64_comm_time_us_str`. The compute path between AllReduces is still bounded by weight streaming: each GPU reads its `{python} NvlinkH100.layer_shard_mb_str` share of a layer's FP16 weights from HBM in about `{python} NvlinkH100.layer_stream_time_us_str`, or about `{python} NvlinkH100.b64_compute_time_us_str` for each of the layer's two AllReduce intervals. Here, the compute time exceeds the communication time by about `{python} NvlinkH100.b64_compute_to_comm_mult_str`, creating a larger potential overlap window. Batching can therefore improve both weight reuse and the opportunity to hide communication, provided the schedule exposes independent work.
+At batch size 64, the data volume per AllReduce grows to `{python} NvlinkH100.b64_vol_math` `{python} NvlinkH100.b64_vol_mb_str`, taking approximately `{python} NvlinkH100.b64_time_us_str` at NVLink bandwidth. Including launch overhead, exposed communication takes approximately `{python} NvlinkH100.b64_comm_time_us_str`. The compute path between AllReduces is still bounded by weight streaming: each GPU reads its `{python} NvlinkH100.layer_shard_mb_str` share of a layer's FP16 weights from HBM in about `{python} NvlinkH100.layer_stream_time_us_str`, or about `{python} NvlinkH100.b64_compute_time_us_str` for each of the layer's two AllReduce intervals. Here, the compute time exceeds the communication time by about `{python} NvlinkH100.b64_compute_to_comm_mult_str`, creating a larger potential overlap window. Batching can therefore improve both weight reuse and the opportunity to hide communication, provided the schedule exposes independent work.
 
 The duration comparison gives an upper bound on the overlap opportunity. A consumer cannot use an activation before its reduction completes, so a tensor-parallel schedule also needs independent work or a legal chunking scheme to fill that interval. Total compute time alone does not prove that the communication can be hidden. Training gradient synchronization supplies a useful contrast: completed gradient buckets can communicate while later backward kernels compute other gradients, so the next calculation switches from activation exchanges to ring AllReduce over the gradient tensor.
 
@@ -3904,9 +4019,10 @@ class OverlapCalc:
     from mlsysim.fmt import check
 
     check(overlap_speedup > 1.0, f"Overlap should provide speedup, got {overlap_speedup:.2f}x")
+    check(h.interconnect.bandwidth < nvlink_bw / 5, "PCIe must be several times slower than NVLink per direction")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, fmt_multiple, MarkdownStr, fmt_time, fmt_qty_int
+    from mlsysim.fmt import fmt_int, fmt_multiple, MarkdownStr, fmt_percent, fmt_time, fmt_qty_int
 
     gradient_gb_str = fmt_memory(gradient_qty, unit=GB, precision=1, commas=False)
     ring_allreduce_factor_mult_str = fmt_multiple(ring_allreduce_factor, precision=2, commas=False)
@@ -3920,11 +4036,13 @@ class OverlapCalc:
     num_gpus_str = fmt_int(num_gpus, commas=False)
     nvlink_bw_gb_per_s_str = fmt_qty_int(h.nvlink.bandwidth, GB / second, commas=False)
     per_dir_bw_gb_per_s_str = fmt_qty_int(nvlink_bw, GB / second, commas=False)
+    pcie_bw_gb_per_s_str = fmt_qty_int(h.interconnect.bandwidth, GB / second, commas=False)
+    mfu_pct_str = fmt_percent(mfu, precision=0, commas=False, style="prose")
 ```
 
-Consider an 8-billion-parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str` aggregate bidirectional bandwidth (`{python} OverlapCalc.per_dir_bw_gb_per_s_str` per direction). Assume data-parallel replicas with optimizer state offloaded so that each device can hold its weights, gradients, and activation working set. The timing window below includes forward, backward, and gradient synchronization only; optimizer updates and offload transfers require additional accounting. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. Per the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` times the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The forward pass computation takes `{python} OverlapCalc.forward_ms_str` and the backward pass computation (at 40 percent MFU) takes approximately `{python} OverlapCalc.backward_ms_str`.
+Consider an 8-billion-parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str` aggregate bidirectional bandwidth (`{python} OverlapCalc.per_dir_bw_gb_per_s_str` per direction). Assume data-parallel replicas with optimizer state offloaded so that each device can hold its weights, gradients, and activation working set. The timing window below includes forward, backward, and gradient synchronization only; optimizer updates and offload transfers require additional accounting. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. Per the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The forward pass computation takes `{python} OverlapCalc.forward_ms_str` and the backward pass computation (at `{python} OverlapCalc.mfu_pct_str` MFU) takes approximately `{python} OverlapCalc.backward_ms_str`.
 
-Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` (`{python} OverlapCalc.forward_ms_str` + `{python} OverlapCalc.backward_ms_str` + `{python} OverlapCalc.allreduce_ms_str`). Under ideal overlap, with gradient buckets ready early enough and no resource interference, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str` (`{python} OverlapCalc.forward_ms_str` + `{python} OverlapCalc.backward_ms_str`), a `{python} OverlapCalc.overlap_speedup_mult_str` improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. The illustrative scaling scenario in @fig-overlap-budget shows overlap efficiency degrading from roughly 90 percent to roughly 18 percent as communication overhead eventually exceeds a fixed computation budget. Each bar is normalized to a compute budget of 100 units, and the bar height grows roughly fivefold across the x-axis because the exposed-communication segment stacked on top of that budget is precisely the portion of communication that overlap can no longer hide. The curve is diagnostic rather than model-specific: for smaller models or slower interconnects (for example, PCIe Gen5 at 64 GB/s per direction instead of NVLink at `{python} OverlapCalc.per_dir_bw_gb_per_s_str` per direction), the AllReduce can exceed the backward pass, and no amount of overlap can fully hide the communication.
+Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` (`{python} OverlapCalc.forward_ms_str` + `{python} OverlapCalc.backward_ms_str` + `{python} OverlapCalc.allreduce_ms_str`). Under ideal overlap, with gradient buckets ready early enough and no resource interference, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str` (`{python} OverlapCalc.forward_ms_str` + `{python} OverlapCalc.backward_ms_str`), a `{python} OverlapCalc.overlap_speedup_mult_str` improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. The illustrative scaling scenario in @fig-overlap-budget shows overlap efficiency degrading from roughly 90 percent to roughly 18 percent as communication overhead eventually exceeds a fixed computation budget. Each bar is normalized to a compute budget of 100 units, and the bar height grows roughly fivefold across the x-axis because the exposed-communication segment stacked on top of that budget is precisely the portion of communication that overlap can no longer hide. The curve is diagnostic rather than model-specific: for smaller models or slower interconnects (for example, PCIe Gen5 at `{python} OverlapCalc.pcie_bw_gb_per_s_str` per direction instead of NVLink at `{python} OverlapCalc.per_dir_bw_gb_per_s_str` per direction), the AllReduce can exceed the backward pass, and no amount of overlap can fully hide the communication.
 
 ::: {#fig-overlap-budget fig-env="figure" fig-pos="htb" fig-cap="**The overlap budget**: This illustrative normalized scenario holds the computation budget at 100 units as GPU count increases from 8 to 1,024. Communication overhead grows with scale, leaving more communication exposed above the fixed compute budget. The black line reports the fraction of communication hidden behind computation, which falls from roughly 90 percent to roughly 18 percent." fig-alt="Stacked bar chart of normalized step-time contribution versus GPU count. Overlapped communication and pure computation fill a fixed 100-unit compute budget, while exposed communication grows above it. A black line shows overlap efficiency falling from roughly 90 percent to roughly 18 percent."}
 

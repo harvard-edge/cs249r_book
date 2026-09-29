@@ -29,7 +29,7 @@ from mlsysim.core.units import *
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import MarkdownStr, check, fmt
+from mlsysim.fmt import MarkdownStr, check, fmt, fmt_params
 from mlsysim.physics import (
     calc_mtbf_cluster,
     calc_mtbf_node,
@@ -55,9 +55,10 @@ class ReliabilityFoundations:
     tor_mttf = Systems.Reliability.TorSwitch.mttf_hours
 
     # Level 2: Node Configuration
-    n_gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    n_nics_per_node = 2
-    n_psus_per_node = 2
+    node = Systems.Nodes.DGX_H100
+    n_gpus_per_node = node.accelerators_per_node
+    n_nics_per_node = node.nics_per_node
+    n_psus_per_node = node.psus_per_node
 
     # Level 3: Cluster Sizes
     cluster_sizes = [
@@ -74,8 +75,14 @@ class ReliabilityFoundations:
     t_reschedule = Systems.Reliability.Recovery.reschedule_time_s * second
     ckpt_write_bw = Systems.Reliability.Recovery.checkpoint_write_bw_gbs * (GB / second)
 
-    model_sizes_params = [7 * Bparam, 13 * Bparam, Models.Language.Llama2_70B.parameters, Models.Language.GPT3.parameters, 1 * Tparam]
-    model_labels = ["7B", "13B", "70B", "175B", "1T"]
+    ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
+    model_sizes_params = [
+        Models.Language.Llama2_7B.parameters,
+        Models.Language.Llama2_13B.parameters,
+        Models.Language.Llama2_70B.parameters,
+        Models.Language.GPT3.parameters,
+        ReferenceStats.CheckpointArchetypes.TrillionParameterReference,
+    ]
 
     avail_replicas = [1, 2, 3, 4, 5]
     avail_single = 0.99
@@ -98,7 +105,7 @@ class ReliabilityFoundations:
     cluster_mtbf_10k = node_mtbf / nodes_10k
 
     # Step 4: Young-Daly (10K cluster, 175B model)
-    ckpt_175b_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters)
+    ckpt_175b_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters, ckpt_bpp)
     ckpt_175b_gb = ckpt_175b_bytes.to(GB)
     ckpt_write_time_s = (ckpt_175b_bytes / ckpt_write_bw).to(second)
 
@@ -113,8 +120,24 @@ class ReliabilityFoundations:
     overhead_ckpt = (ckpt_write_time_s / tau_opt_s).to_base_units().magnitude
     overhead_failure = (t_recovery_total_s / cluster_mtbf_10k_s).to_base_units().magnitude
 
+    n_clocks_per_node = n_gpus_per_node + n_nics_per_node + n_psus_per_node
+    mtbf_256_days = (node_mtbf / (Systems.Clusters.Research_256.total_accelerators // n_gpus_per_node)).to(day)
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     canonical_cluster_gpus_str = fmt(Systems.Clusters.Training_10K.total_accelerators, precision=0, commas=True)
+    half_cluster_gpus_str = fmt(Systems.Clusters.Training_10K.total_accelerators // 2, precision=0, commas=True)
+    reference_cluster_gpus_str = fmt(Systems.Clusters.Training_1K.total_accelerators, precision=0, commas=True)
+    research_cluster_gpus_str = fmt(Systems.Clusters.Research_256.total_accelerators, precision=0, commas=True)
+    mega_cluster_gpus_str = fmt(Systems.Clusters.Mega_100K.total_accelerators, precision=0, commas=True)
+    gpus_per_node_str = fmt(n_gpus_per_node, precision=0, commas=False)
+    nics_per_node_str = fmt(n_nics_per_node, precision=0, commas=False)
+    psus_per_node_str = fmt(n_psus_per_node, precision=0, commas=False)
+    clocks_per_node_str = fmt(n_clocks_per_node, precision=0, commas=False)
+    mtbf_256_days_str = fmt(mtbf_256_days.magnitude, precision=1, commas=False)
+    ckpt_bpp_value = ckpt_bpp.to(byte / param).magnitude
+    ckpt_bpp_str = fmt(ckpt_bpp_value, precision=0, commas=False)
+    gpt3_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+    model_labels = [fmt_params(p, scale=("T" if p.to(param).magnitude >= 1e12 else "B"), precision=0, commas=False) for p in model_sizes_params]
 
     @classmethod
     def nodes_for_gpus(cls, n_gpus):
@@ -130,7 +153,7 @@ class ReliabilityFoundations:
 
     @classmethod
     def ckpt_size_gb(cls, n_params):
-        return calc_checkpoint_size(n_params).to(GB)
+        return calc_checkpoint_size(n_params, cls.ckpt_bpp).to(GB)
 
     @classmethod
     def avail_stacked(cls, k):
@@ -139,11 +162,16 @@ class ReliabilityFoundations:
 # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
 check(ReliabilityFoundations.cluster_mtbf_10k < 5.0 * hour, "10K cluster MTBF mismatch")
 check(ReliabilityFoundations.tau_opt_s > 5 * minute, "Young-Daly interval too short")
+check(
+    ReliabilityFoundations.ckpt_bpp_value == (BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE).to(byte).magnitude,
+    "Checkpoint bytes/param must equal the itemized BF16 + FP32 master + two FP32 moments (eq-checkpoint-size prints it)",
+)
+check(ReliabilityFoundations.mtbf_256_days > 1 * day, "Prose says more than a day passes between failures at 256 GPUs")
 
 R = ReliabilityFoundations
 ```
 
-The worked examples in this appendix use a `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU training fleet, a larger variation on the 1,024-GPU Archetype A reference cluster, unless noted otherwise.
+The worked examples in this appendix use a `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU training fleet, a larger variation on the `{python} ReliabilityFoundations.reference_cluster_gpus_str`-GPU Archetype A reference cluster, unless noted otherwise.
 
 - **"How often will something fail?"** Start with @sec-appdx-reliability-foundations-failure-probability and the MTBF cascade in @sec-appdx-reliability-foundations-mtbf-cascade.
 - **"Where does the $1/N$ come from?"** The probability tools in @sec-appdx-reliability-foundations-probability-tools derive it from independent exponential lifetimes.
@@ -155,7 +183,7 @@ The worked examples in this appendix use a `{python} ReliabilityFoundations.cano
 
 ## Failure Probability at Scale {#sec-appdx-reliability-foundations-failure-probability}
 
-Consider a training run on a 10,000-GPU cluster running for 30 days. The probability that at least one modeled node component fails during that time is effectively 100 percent, and that answer determines whether the system needs fault tolerance as a core design requirement or merely a nice-to-have.
+Consider a training run on a `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU cluster running for 30 days. The probability that at least one modeled node component fails during that time is effectively 100 percent, and that answer determines whether the system needs fault tolerance as a core design requirement or merely a nice-to-have.
 
 Individual hardware components are remarkably reliable. A data center-grade GPU operates for tens of thousands of hours before failing. The physics of large-scale systems, however, works against reliability: every additional component is another opportunity for failure, and the aggregate failure rate scales linearly with component count. Component-level failure rates aggregate systematically into cluster-wide failure predictions.
 
@@ -265,7 +293,7 @@ The following model treats a compute node as a series system: any modeled compon
 
 $$ \frac{1}{\text{MTBF}_{\text{node}}} = \frac{n_{\text{gpu}}}{\text{MTTF}_{\text{gpu}}} + \frac{n_{\text{nic}}}{\text{MTTF}_{\text{nic}}} + \frac{n_{\text{psu}}}{\text{MTTF}_{\text{psu}}} + \cdots $$ {#eq-mtbf-node}
 
-Think of each component as a ticking clock counting down to failure. A node with 8 GPUs, 2 network interface cards (NICs), and 2 PSUs has 12 independent clocks, and the node fails when the first clock reaches zero. More clocks mean a shorter expected wait.
+Think of each component as a ticking clock counting down to failure. A DGX H100 node with `{python} ReliabilityFoundations.gpus_per_node_str` GPUs, `{python} ReliabilityFoundations.nics_per_node_str` network interface cards (NICs), and `{python} ReliabilityFoundations.psus_per_node_str` PSUs has `{python} ReliabilityFoundations.clocks_per_node_str` independent clocks, and the node fails when the first clock reaches zero. More clocks mean a shorter expected wait.
 
 For a cluster of $N_{\text{nodes}}$ identical nodes, the same logic applies one level up, as @eq-mtbf-cluster shows:
 
@@ -338,9 +366,9 @@ for n_gpus in R.cluster_sizes:
 | **`{python} mtbf_data[4]["gpus"]`** | `{python} mtbf_data[4]["nodes"]` | `{python} mtbf_data[4]["mtbf"]` | `{python} mtbf_data[4]["per_day"]` |
 | **`{python} mtbf_data[5]["gpus"]`** | `{python} mtbf_data[5]["nodes"]` | `{python} mtbf_data[5]["mtbf"]` | `{python} mtbf_data[5]["per_day"]` |
 
-: **Cluster MTBF by Scale**: As cluster size grows, the aggregate MTBF shrinks proportionally. At 10,000 GPUs, failures occur every few hours; at 100,000 GPUs, they occur continuously. Node configuration: 8 GPUs, 2 NICs, 2 PSUs per node. {#tbl-mtbf-cluster}
+: **Cluster MTBF by Scale**: As cluster size grows, the aggregate MTBF shrinks proportionally. At `{python} ReliabilityFoundations.canonical_cluster_gpus_str` GPUs, failures occur every few hours; at `{python} ReliabilityFoundations.mega_cluster_gpus_str` GPUs, they occur continuously. Node configuration (DGX H100): `{python} ReliabilityFoundations.gpus_per_node_str` GPUs, `{python} ReliabilityFoundations.nics_per_node_str` NICs, `{python} ReliabilityFoundations.psus_per_node_str` PSUs per node. {#tbl-mtbf-cluster}
 
-The transition from hundreds of GPUs to tens of thousands is a qualitative regime shift. At 256 GPUs, a full day may pass between failures. At 10,000 GPUs, the cluster expects multiple failures per shift. At 100,000 GPUs, failures are a continuous background condition, and the system is never fully healthy.
+The transition from hundreds of GPUs to tens of thousands is a qualitative regime shift. At `{python} ReliabilityFoundations.research_cluster_gpus_str` GPUs, about `{python} ReliabilityFoundations.mtbf_256_days_str` days pass between failures. At `{python} ReliabilityFoundations.canonical_cluster_gpus_str` GPUs, the cluster expects multiple failures per shift. At `{python} ReliabilityFoundations.mega_cluster_gpus_str` GPUs, failures are a continuous background condition, and the system is never fully healthy.
 
 ### Probability of failure during a job {#sec-appdx-reliability-foundations-job-failure}
 
@@ -428,7 +456,7 @@ The formula assumes that failures follow an exponential distribution (memoryless
 
 ### Checkpoint sizing {#sec-appdx-reliability-foundations-checkpoint-sizing}
 
-Checkpoint size determines the write time $T_{\text{write}}$ that feeds into the Young-Daly formula. For common mixed-precision training checkpoints with the adaptive moment estimation (Adam) optimizer, each parameter requires approximately 14 bytes of persistent state:
+Checkpoint size determines the write time $T_{\text{write}}$ that feeds into the Young-Daly formula. For common mixed-precision training checkpoints with the adaptive moment estimation (Adam) optimizer, each parameter requires approximately `{python} ReliabilityFoundations.ckpt_bpp_str` bytes of persistent state:
 
 - 2 bytes for BF16 model weights
 - 4 bytes for FP32 master weights
@@ -476,7 +504,7 @@ for i, n_params in enumerate(R.model_sizes_params):
         write_s_str = fmt_time(write_time, second, precision=2, commas=False)
     else:
         write_s_str = fmt_time(round(write_time.to(second).magnitude) * second, second, precision=0, commas=False)
-    ckpt_data.append({"label": R.model_labels[i], "ckpt_gb": fmt_memory(ckpt_gb, unit=GB, precision=0), "write_time": write_s_str})
+    ckpt_data.append({"label": R.model_labels[i], "ckpt_gb": fmt_memory(ckpt_gb, unit=GB, precision=0, commas=True), "write_time": write_s_str})
 ```
 
 Mixed-precision Adam checkpoint sizing (@tbl-checkpoint-size) demonstrates how state scales from manageable gigabytes to frontier-scale terabytes:
@@ -489,13 +517,13 @@ Mixed-precision Adam checkpoint sizing (@tbl-checkpoint-size) demonstrates how s
 | **`{python} ckpt_data[3]["label"]`** | `{python} ckpt_data[3]["ckpt_gb"]` |                        `{python} ckpt_data[3]["write_time"]`                        |
 | **`{python} ckpt_data[4]["label"]`** | `{python} ckpt_data[4]["ckpt_gb"]` |                        `{python} ckpt_data[4]["write_time"]`                        |
 
-: **Checkpoint Sizes for Mixed-Precision Adam Training**: Each parameter requires about 14 bytes of persistent checkpoint state (model weights + FP32 master weights + optimizer moments); gradients are normally transient and recomputed after restore rather than serialized as durable checkpoint state. Write times assume 100 GB/s aggregate storage bandwidth. {#tbl-checkpoint-size}
+: **Checkpoint Sizes for Mixed-Precision Adam Training**: Each parameter requires about `{python} ReliabilityFoundations.ckpt_bpp_str` bytes of persistent checkpoint state (model weights, FP32 master weights, and optimizer moments); gradients are normally transient and recomputed after restore rather than serialized as durable checkpoint state. Write times assume `{python} ReliabilityStringsCkptRecap.ckpt_write_bw_gb_per_s_str` aggregate storage bandwidth. {#tbl-checkpoint-size}
 
-At frontier scale (175B+ parameters), these sizes reach the terabyte range. This makes checkpoint write time a significant cost that directly affects the Young-Daly optimal interval. The checkpoint strategies in @sec-fault-tolerance-reliability discuss techniques for reducing $T_{\text{write}}$ (asynchronous checkpointing, incremental deltas, and distributed storage), all of which improve the Young-Daly result by shrinking the $T_{\text{write}}$ factor under the square root.
+At frontier scale (`{python} ReliabilityFoundations.gpt3_params_b_str`+ parameters), these sizes reach the terabyte range. This makes checkpoint write time a significant cost that directly affects the Young-Daly optimal interval. The checkpoint strategies in @sec-fault-tolerance-reliability discuss techniques for reducing $T_{\text{write}}$ (asynchronous checkpointing, incremental deltas, and distributed storage), all of which improve the Young-Daly result by shrinking the $T_{\text{write}}$ factor under the square root.
 
 ### Calculating the optimal checkpoint interval {#sec-appdx-reliability-foundations-worked-example}
 
-Combining the checkpoint write time with the 10,000-GPU MTBF gives a concrete checkpoint cadence.
+Combining the checkpoint write time with the `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU MTBF gives a concrete checkpoint cadence.
 
 ```{python}
 #| echo: false
@@ -510,7 +538,7 @@ from mlsysim.fmt import fmt_bandwidth, fmt_memory, fmt_time
 # │
 # │ Goal: Compute optimal checkpoint interval τ_opt for 175B model on 10K-GPU cluster;
 # │       show scaling to 20K GPUs.
-# │ Show: ~14 min optimal interval, ~X% checkpoint overhead, shorter interval at 20K GPUs.
+# │ Show: ~13 min optimal interval, ~X% checkpoint overhead, shorter interval at 20K GPUs.
 # │ How: calc_young_daly_interval(T_write_s, MTBF_system_s) from R.ckpt_write_time_s and R.cluster_mtbf_10k_s.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -538,7 +566,7 @@ class WorkedExampleYoungDaly:
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     yd_mtbf_h_str = fmt_time(yd_mtbf_h, hour, precision=2, commas=True, style='word')
-    yd_tau_min_str = fmt_time(yd_tau_min, minute, precision=1, commas=True, style='word')
+    yd_tau_min_str = fmt_time(round(yd_tau_min.to(minute).magnitude), minute, precision=0, commas=True, style='word')  # prose rounds to whole minutes
     # Internal display-math values (no suffix — math adds its own \text{} units)
     _yd_t_write_s_value_str = fmt(yd_t_write_s.to(second).magnitude, precision=1, commas=False)
     _yd_mtbf_h_value_str = fmt(yd_mtbf_h.to(hour).magnitude, precision=2, commas=False)
@@ -570,7 +598,7 @@ class WorkedExampleYoungDaly:
 
 ::: {#nbk-appendix-reliability-young-daly-175b-10000-gpu-cluster .callout-notebook title="Young-Daly: 175B model on a 10,000-GPU cluster"}
 
-**Setup**: Consider training a 175B-parameter model on a `{python} WorkedExampleYoungDaly.n_gpus_str`-GPU cluster. The cluster MTBF is `{python} WorkedExampleYoungDaly.yd_mtbf_h_str` (@tbl-mtbf-cluster). The checkpoint size is `{python} WorkedExampleYoungDaly.ckpt_175b_gb_str`, and the parallel storage system writes at `{python} WorkedExampleYoungDaly.ckpt_write_bw_gb_per_s_str`.
+**Setup**: Consider training a `{python} ReliabilityFoundations.gpt3_params_b_str`-parameter model on a `{python} WorkedExampleYoungDaly.n_gpus_str`-GPU cluster. The cluster MTBF is `{python} WorkedExampleYoungDaly.yd_mtbf_h_str` (@tbl-mtbf-cluster). The checkpoint size is `{python} WorkedExampleYoungDaly.ckpt_175b_gb_str`, and the parallel storage system writes at `{python} WorkedExampleYoungDaly.ckpt_write_bw_gb_per_s_str`.
 
 **Step 1**: Checkpoint write time ($T_{\text{write}}$).
 `{python} WorkedExampleYoungDaly.t_write_eq_math`
@@ -636,7 +664,7 @@ class RecoveryAnatomy:
 | **$T_{\text{replay}}$**         |  ~`{python} RecoveryAnatomy.t_replay_min_str` | Recompute training steps since last checkpoint                                                                          |
 | **Total $T_{\text{recovery}}$** |  ~`{python} RecoveryAnatomy.t_total_min_str`  | System fully productive again                                                                                           |
 
-: **Recovery Time Breakdown**: Each phase contributes to the total time between failure and full-speed resumption. For the 10K-GPU, 175B-model scenario, replay dominates because it recomputes work lost since the last checkpoint. {#tbl-recovery-anatomy}
+: **Recovery Time Breakdown**: Each phase contributes to the total time between failure and full-speed resumption. For the `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU, `{python} ReliabilityFoundations.gpt3_params_b_str`-model scenario, replay dominates because it recomputes work lost since the last checkpoint. {#tbl-recovery-anatomy}
 
 Decomposing this sequence shows that replay time $T_{\text{replay}}$ typically dominates, controlled directly by the checkpoint interval: on average, half the interval must be replayed. This creates a reinforcing loop with the Young-Daly formula. Shorter intervals mean less replay but more checkpoint overhead, and the formula finds the minimum of this sum.
 
@@ -663,11 +691,11 @@ class ReliabilityStringsGoodputRecap:
 1. **Checkpoint overhead** ($\sim$ `{python} ReliabilityStringsGoodputRecap.overhead_ckpt_pct_str`): Training pauses during each checkpoint write.
 2. **Recovery and rework overhead** ($\sim$ `{python} ReliabilityStringsGoodputRecap.overhead_failure_pct_str`): Time lost to detection, rescheduling, reloading, and replaying work discarded after each failure.
 
-At 10,000-GPU scale, failures and checkpointing together can consume a substantial fraction of wall time. If they consume a fraction $f$, a fixed amount of useful work takes $1/(1-f)$ times its fault-free duration, not merely that duration plus $f$ of it. The fleet orchestration strategies in @sec-fleet-orchestration and @sec-ops-scale focus on narrowing this gap, because every percentage point of overhead recovered translates directly to dollars saved and training time shortened.
+At `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU scale, failures and checkpointing together can consume a substantial fraction of wall time. If they consume a fraction $f$, a fixed amount of useful work takes $1/(1-f)$ times its fault-free duration, not merely that duration plus $f$ of it. The fleet orchestration strategies in @sec-fleet-orchestration and @sec-ops-scale focus on narrowing this gap, because every percentage point of overhead recovered translates directly to dollars saved and training time shortened.
 
 ::: {#psp-appendix-reliability-hidden-cost-scale .callout-perspective title="The hidden cost of scale"}
 
-A common misconception is that doubling cluster size halves training time. In practice, doubling from 5,000 to 10,000 GPUs halves the MTBF and increases failure-related overhead. The effective speedup is less than 2$\times$, and at extreme scale, adding more GPUs can actually increase wall-clock time if the fault tolerance mechanisms cannot keep pace. This is the reliability analogue of Amdahl's Law: the serial overhead of recovery bounds the benefit of parallelism.
+A common misconception is that doubling cluster size halves training time. In practice, doubling from `{python} ReliabilityFoundations.half_cluster_gpus_str` to `{python} ReliabilityFoundations.canonical_cluster_gpus_str` GPUs halves the MTBF and increases failure-related overhead. The effective speedup is less than 2$\times$, and at extreme scale, adding more GPUs can actually increase wall-clock time if the fault tolerance mechanisms cannot keep pace. This is the reliability analogue of Amdahl's Law: the serial overhead of recovery bounds the benefit of parallelism.
 
 :::
 
@@ -840,9 +868,9 @@ class ReliabilitySummaryRecap:
         Systems.Reliability.Gpu.mttf_hours,
         n_gpus_per_node,
         Systems.Reliability.Nic.mttf_hours,
-        2,
+        Systems.Nodes.DGX_H100.nics_per_node,
         Systems.Reliability.Psu.mttf_hours,
-        2,
+        Systems.Nodes.DGX_H100.psus_per_node,
     )
     cluster_mtbf_10k = node_mtbf / Systems.Clusters.Training_10K.count
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
@@ -850,6 +878,6 @@ class ReliabilitySummaryRecap:
     cluster_mtbf_10k_hours_str = fmt_time(cluster_mtbf_10k.to(hour).magnitude, 'hour', precision=2, commas=True, style='word')
 ```
 
-Failure is a physical constraint of scale. Under independent, constant component failure rates, a single GPU's mean lifetime is `{python} ReliabilitySummaryRecap.gpu_mttf_yr_str`, yet the modeled 10,000-GPU cluster fails on average every `{python} ReliabilitySummaryRecap.cluster_mtbf_10k_hours_str`, because node failure rates sum across components and cluster MTBF divides by node count. The probability that a job is interrupted grows with its duration relative to that interval, so long runs on large clusters must plan for recovery rather than hope to avoid it.
+Failure is a physical constraint of scale. Under independent, constant component failure rates, a single GPU's mean lifetime is `{python} ReliabilitySummaryRecap.gpu_mttf_yr_str`, yet the modeled `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU cluster fails on average every `{python} ReliabilitySummaryRecap.cluster_mtbf_10k_hours_str`, because node failure rates sum across components and cluster MTBF divides by node count. The probability that a job is interrupted grows with its duration relative to that interval, so long runs on large clusters must plan for recovery rather than hope to avoid it.
 
 Recovery has four modeled phases (detection, rescheduling, reloading, and replay), and replay is controlled by the checkpoint interval. The Young-Daly formula $\tau_{\text{opt}} = \sqrt{2 T_{\text{write}} \, \text{MTBF}_{\text{system}}}$ (principle \ref{pri-young-daly}) balances write overhead against expected rework when writes are short compared with the MTBF, and @sec-appdx-reliability-daly-2nd-order gives the correction when they are not. Checkpoint/restart suits batch training, redundancy suits latency-sensitive serving, and elastic training sits between them. Independent replicas reduce unavailability multiplicatively, to $(1-A)^k$ for $k$ replicas, but only to the extent that failure-domain isolation keeps their failures independent.

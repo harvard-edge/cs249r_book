@@ -111,11 +111,45 @@ class Gpt3HouseholdEnergyAnchor:
 
 ## The Energy Ceiling {#sec-sustainable-ai-sustainable-ai-engineering-discipline-6d39}
 
+```{python}
+#| echo: false
+#| label: joule-energy-scale-anchor
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ JOULE ENERGY SCALE ANCHOR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: [^fn-joule-energy-scale] footnote immediately below.
+# │
+# │ Goal: Tie the per-second joule anchor to the A100 registry TDP.
+# │ Show: 400 J every second (400 W).
+# │ How: Hardware.Cloud.A100.tdp; one watt is one joule per second.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import joule, second, watt
+from mlsysim.fmt import check, fmt_energy, fmt_power
+
+class JouleEnergyScaleAnchor:
+    """A100 peak power expressed as joules per second."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    a100_tdp = Hardware.Cloud.A100.tdp
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    joules_per_second = (a100_tdp * (1 * second)).to(joule)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(a100_tdp.to(watt).magnitude - 400) < 1, f"A100 TDP drifted from 400 W: {a100_tdp}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    a100_tdp_w_str = fmt_power(a100_tdp, unit=watt, precision=0, commas=False)
+    joules_per_second_j_str = fmt_energy(joules_per_second, unit=joule, precision=0, commas=False)
+```
+
 A model can be secure against adversaries and robust under distribution shift, yet still fail if the available grid cannot power its accelerators or the facility cannot cool them. **Sustainability**\index{Sustainability!definition} begins at that boundary: the point where accuracy, latency, and reliability are no longer enough because the system must also fit within power, cooling, water, carbon, and hardware lifetime budgets. Energy is the ultimate currency of machine learning, and power density is the ceiling on data-center computational capacity.[^fn-joule-energy-scale]
 
 When an engineer optimizes a database query to save 100 ms, that is ordinary performance tuning. At fleet scale, the same saving repeated billions of times per day can reduce electrical demand, cooling load, and carbon emissions if it reduces measured energy per completed query [@lacoste2019quantifying]. A system that exceeds its operating envelope has failed operationally in the same sense as one that crashes, because it cannot be deployed at the intended scale.
 
-[^fn-joule-energy-scale]: **Joule Energy Scale**\index{Joule!definition}: A single A100 GPU at peak load consumes about 400 joules every second (400 W). Large-model training has no single defensible joule range: model size, hardware count, realized power, utilization, and run duration can each shift total energy by orders of magnitude. The engineering lesson lies in the conversion from repeated per-operation costs to facility energy, so this chapter reports measured or modeled workload energy rather than assigning every large run to one fixed range.
+[^fn-joule-energy-scale]: **Joule Energy Scale**\index{Joule!definition}: A single A100 GPU at peak load consumes about `{python} JouleEnergyScaleAnchor.joules_per_second_j_str` every second (`{python} JouleEnergyScaleAnchor.a100_tdp_w_str`). Large-model training has no single defensible joule range: model size, hardware count, realized power, utilization, and run duration can each shift total energy by orders of magnitude. The engineering lesson lies in the conversion from repeated per-operation costs to facility energy, so this chapter reports measured or modeled workload energy rather than assigning every large run to one fixed range.
 
 That ceiling makes sustainability a design constraint, not a reporting category. The same engineering discipline that budgets memory, bandwidth, and fault tolerance must also budget joules, cooling load, embodied carbon, and hardware replacement cycles.
 
@@ -146,14 +180,14 @@ Before calculating, we must fix what the energy measurement includes. This is th
 # │ Context: @chk-sustainable-ai-energy-intelligence (problem-statement inputs).
 # │
 # │ Goal: Pin the checkpoint's scenario inputs (model size, training FLOPs) to
-# │       the GPT-3 registry; PUE and end-to-end efficiency are round pedagogical
-# │       assumptions documented in LOAD.
+# │       the GPT-3 registry and the PUE to the state-of-the-art facility
+# │       profile; end-to-end efficiency is a round scenario assumption in LOAD.
 # │ Show: 175B parameters; 3.14 × 10^23 FLOPs; PUE 1.1; 50 GFLOP/J.
-# │ How: Read parameters and training_ops from Models.Language.GPT3; format the
-# │      scenario PUE and efficiency assumptions.
+# │ How: Read parameters and training_ops from Models.Language.GPT3 and PUE from
+# │      Infrastructure.FacilityCooling.StateOfArt; format the efficiency.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
+from mlsysim import Infrastructure, Models
 from mlsysim.fmt import check, fmt, fmt_compute_efficiency, fmt_math, fmt_params, sci_latex
 from mlsysim.core.units import GFLOP, J
 
@@ -161,11 +195,12 @@ class EnergyOfIntelligenceCheckpoint:
     # ┌── 1. LOAD ──────────────────────────────────────────
     model_params = Models.Language.GPT3.parameters
     train_flops = Models.Language.GPT3.training_ops
-    pue = 1.1  # round pedagogical PUE assumption for this checkpoint
-    efficiency = 50 * GFLOP / J  # round pedagogical end-to-end training efficiency
+    pue = Infrastructure.FacilityCooling.StateOfArt.pue
+    efficiency = 50 * GFLOP / J  # scenario assumption: round end-to-end IT-boundary training efficiency
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(train_flops.to("flop").magnitude - 3.14e23) < 1e21, "GPT-3 training FLOPs drifted from 3.14e23")
+    check(abs(pue - 1.1) < 0.005, f"Checkpoint PUE drifted from 1.1: {pue}")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     model_params_b_str = fmt_params(model_params, scale="B", precision=0)
@@ -322,17 +357,18 @@ That accelerator draw alone, before server, network, and cooling overhead, alrea
 # │ Context: "The Geography of Carbon" .callout-notebook
 # │
 # │ Goal: Quantify the carbon footprint difference between geographic regions.
-# │ Show: ratio ≈ 40x—inline in notebook result.
+# │ Show: ratio ≈ 41x—inline in notebook result.
 # │ How: Carbon = Energy_kWh * Intensity_g/kWh.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Infrastructure, ReferenceStats
 from mlsysim.fmt import check, fmt, fmt_carbon_intensity, fmt_emissions, fmt_energy
 from mlsysim.physics.quantities import carbon_from_energy
 from mlsysim.core.units import MWh, kWh, gram, metric_ton
 
 class CarbonFrontier:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    energy = 10_000 * MWh  # scenario assumption
+    energy = ReferenceStats.CarbonPlacementProfile.TrainingRunEnergy
     quebec_grid = Infrastructure.Grids.Quebec
     poland_grid = Infrastructure.Grids.Poland
     intensity_quebec = quebec_grid.carbon_intensity_g_kwh * (gram / kWh)
@@ -343,7 +379,7 @@ class CarbonFrontier:
     poland_carbon = carbon_from_energy(energy, intensity_poland)
     ratio = (poland_carbon / quebec_carbon).to("").magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(ratio > 40, f"Ratio {ratio:.1f} unexpected")
+    check(40 < ratio < 42, f"Quebec-vs-Poland ratio {ratio:.1f} unexpected (prose and margin figure say 41x)")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     cf_energy_mwh_str = fmt_energy(energy, unit=MWh, precision=0, commas=True)
     energy_kwh_str = fmt_energy(energy_kwh, unit=kWh, precision=0, commas=True)
@@ -367,50 +403,74 @@ The earlier carbon calculation held workload energy fixed while changing the gri
 # │ Context: Callout "Automated Carbon-Aware Scheduling"
 # │
 # │ Goal: Demonstrate the placement optimizer finding the cheapest geographic placement.
-# │ Show: How a $100/ton carbon tax shifts workloads from coal to hydro regions.
-# │ How: Invoke mlsysim.solvers.PlacementOptimizer.
+# │ Show: Ownership and maintenance dominate the total and are identical across
+# │       regions; without a carbon price Quebec wins only on facility overhead,
+# │       and a $100/ton tax widens its margin mostly through the carbon charge.
+# │ How: Size the run duration so the Frontier_8K fleet's modeled IT energy equals
+# │      the carbon-placement reference energy, then invoke
+# │      mlsysim.solvers.PlacementOptimizer over three regions.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems, Hardware
+from mlsysim import Infrastructure, Literature, ReferenceStats, Systems
+from mlsysim.engine.solvers.economics import EconomicsModel
 from mlsysim.solvers import PlacementOptimizer
-from mlsysim.fmt import MarkdownStr, check, fmt, fmt_energy, fmt_usd
+from mlsysim.fmt import MarkdownStr, check, fmt, fmt_energy, fmt_time, fmt_usd
 from mlsysim.core.units import MWh
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AutoPlacement:
     '''
     Namespace for automated Workload Placement.
-    Scenario: Finding the optimal region for a 10,000 MWh training run.
+    Scenario: Finding the optimal region for the carbon-placement reference run.
     '''
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     fleet = Systems.Clusters.Frontier_8K
-    energy = 10_000 * MWh  # pedagogical scenario — not a registry spec
+    energy = ReferenceStats.CarbonPlacementProfile.TrainingRunEnergy  # IT energy of the run
     carbon_tax = 100.0  # scenario policy assumption: $/ton carbon tax
-    duration_days = (energy.to(MWh).magnitude / 143.0) / 24.0
+    mfu = Literature.Training.MfuHigh
+    # The fleet's modeled IT energy per day is region-independent (PUE enters
+    # only at the facility boundary), so it sets the run duration.
+    it_energy_per_day = EconomicsModel().solve(fleet, duration_days=1, grid=Infrastructure.Grids.US_Avg, mfu=mfu).it_energy_kwh.to(MWh)
+    duration_days = (energy / it_energy_per_day).to("").magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     optimizer = PlacementOptimizer()
-    res = optimizer.solve(
-        fleet, duration_days=duration_days, regions=["US_Avg", "Quebec", "Iowa"], carbon_tax_per_ton=carbon_tax, mfu=Literature.Training.MfuHigh
-    )
+    res = optimizer.solve(fleet, duration_days=duration_days, regions=["US_Avg", "Quebec", "Iowa"], carbon_tax_per_ton=carbon_tax, mfu=mfu)
+    check_it_energy = EconomicsModel().solve(fleet, duration_days=duration_days, grid=Infrastructure.Grids.Quebec, mfu=mfu).it_energy_kwh.to(MWh)
+    res_no_tax = optimizer.solve(fleet, duration_days=duration_days, regions=["US_Avg", "Quebec", "Iowa"], carbon_tax_per_ton=0.0, mfu=mfu)
+    objective_by_region = {c["region"]: c["objective"] for c in res.top_candidates}
+    no_tax_by_region = {c["region"]: c["objective"] for c in res_no_tax.top_candidates}
+    us_gap_usd = objective_by_region["US_Avg"] - objective_by_region["Quebec"]
+    iowa_gap_usd = objective_by_region["Iowa"] - objective_by_region["Quebec"]
+    no_tax_us_gap_usd = no_tax_by_region["US_Avg"] - no_tax_by_region["Quebec"]
+    carbon_share_of_us_gap = 1 - no_tax_us_gap_usd / us_gap_usd
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(res.best_region == "Quebec", f"Quebec should be optimal with ${carbon_tax}/ton tax")
+    check(abs((check_it_energy / energy).to("").magnitude - 1) < 1e-6, "Modeled run IT energy must equal the reference run energy")
+    check(res_no_tax.best_region == "Quebec", "Prose says Quebec already wins on facility overhead without a carbon price")
+    check(0 < no_tax_us_gap_usd < us_gap_usd < iowa_gap_usd, "Prose orders the no-tax, US-average, and Iowa gaps")
+    check(carbon_share_of_us_gap > 0.5, "Prose says most of the taxed gap is the carbon charge")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     best_region = res.best_region  # kept raw for invariant check above
     best_region_str = MarkdownStr(res.best_region)
-    total_tco_str = fmt_usd(res.objective_value, precision=2, scale="M")
+    total_tco_str = fmt_usd(res.objective_value, precision=1, scale="M")
     carbon_tax_str = fmt_usd(carbon_tax, precision=0, commas=False, per="tonne")
     energy_mwh_str = fmt_energy(energy, unit=MWh, precision=0, commas=True)
+    fleet_gpus_str = fmt(fleet.total_accelerators, precision=0, commas=True)
+    duration_days_str = fmt_time(round(duration_days), 'day', precision=0, commas=False, style='word')
+    no_tax_us_gap_str = fmt_usd(round(no_tax_us_gap_usd, -3), precision=0, commas=True)
+    us_gap_musd_str = fmt_usd(us_gap_usd, precision=1, scale="M")
+    iowa_gap_musd_str = fmt_usd(iowa_gap_usd, precision=1, scale="M")
 ```
 
 ::: {#exmp-sustainable-ai-automated-carbon-aware-scheduling-tier-3-optimizer .callout-example title="Automated carbon-aware placement"}
 
-**Scenario**: A team is planning a large training run requiring `{python} AutoPlacement.energy_mwh_str` of energy, choosing between three candidate data center regions with different electricity prices and carbon intensities.
+**Scenario**: A team is planning a large training run requiring `{python} AutoPlacement.energy_mwh_str` of IT energy, which occupies an `{python} AutoPlacement.fleet_gpus_str`-GPU frontier-scale cluster for about `{python} AutoPlacement.duration_days_str`. The team is choosing between three candidate data center regions with different facility overheads (PUE) and grid carbon intensities.
 
-**Diagnosis**: Evaluating raw electricity rates alone favors regions with cheap fossil power. With an internal carbon tax of `{python} AutoPlacement.carbon_tax_str`, the `PlacementOptimizer` synthesizes grid carbon intensity and regional rates, selecting `{python} AutoPlacement.best_region_str` for a total cost of `{python} AutoPlacement.total_tco_str`.
+**Diagnosis**: With an internal carbon tax of `{python} AutoPlacement.carbon_tax_str`, the `PlacementOptimizer` adds a carbon charge to each region's modeled cost of ownership and selects `{python} AutoPlacement.best_region_str` for a total cost of `{python} AutoPlacement.total_tco_str`. Hardware ownership and maintenance make up most of that total and are the same in every region, so the candidates differ only in facility overhead and carbon. Without a carbon price, Quebec's lower PUE saves about `{python} AutoPlacement.no_tax_us_gap_str` against the US-average placement. With the tax, the US-average and Iowa placements cost `{python} AutoPlacement.us_gap_musd_str` and `{python} AutoPlacement.iowa_gap_musd_str` more than Quebec, and most of each gap is the carbon charge.
 
 **Systems lesson**: Carbon-aware placement adds an explicit carbon price to the fleet scheduling objective. The selected region minimizes the modeled cost among these candidates under the stated assumptions. A deployment decision must also check capacity, data transfer, deadlines, and reliability; this result does not establish a universally cheapest region.
 
@@ -441,13 +501,85 @@ Carbon = Energy $\times$ Grid Intensity.
 
 This comparison uses the fixed profiles as an illustrative placement scenario, not as a current inventory of either region. Its ratio is conditional on equal facility electricity and the chosen factors. It does not establish a universal geographic saving, and it must not be multiplied by an independent temporal-shifting factor without evaluating the joint schedule.
 
-The GPT-3 household-year calculation above anchors the workload scale. The fleet-scale consequence is larger: IEA projects global data-center electricity consumption to reach about 945 TWh by 2030, just under 3 percent of global electricity demand, with AI-accelerated servers driving much of the growth.[^fn-datacenter-power-scale] Historical studies document rapid growth in training compute [@sevilla2022], but a compute multiplier is not an energy multiplier without a matching efficiency measurement.
+```{python}
+#| echo: false
+#| label: global-datacenter-electricity-2030
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GLOBAL DATA-CENTER ELECTRICITY PROJECTION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: prose immediately below and its data-center scale footnote.
+# │
+# │ Goal: Pin the IEA 2030 data-center electricity projection to the registry.
+# │ Show: about 945 TWh by 2030, just under 3 percent of global electricity.
+# │ How: Literature.DatacenterElectricity.Global2030Twh / Global2030ShareOfElectricity.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.core.units import ureg
+from mlsysim.fmt import check, fmt_energy, fmt_percent
 
-[^fn-datacenter-power-scale]: **Data Center Industrial Scale**\index{Data Center Industrial Scale!definition}\index{Data Center!industrial electricity demand}: IEA's 2025 *Energy and AI* analysis projects data centers to consume about 945 TWh of electricity by 2030, just under 3 percent of global electricity demand. This is an electricity-demand metric, not directly comparable to aviation or cement shares of global emissions, but it still means AI infrastructure competes for grid capacity with heavy industry: regions that cannot expand power generation cannot expand AI deployment, regardless of demand.
+_TWh = ureg.terawatt_hour
+
+class GlobalDatacenterElectricity2030:
+    """IEA (2025) projection of global data-center electricity use in 2030."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    global_2030 = float(Literature.DatacenterElectricity.Global2030Twh) * _TWh
+    share_2030 = float(Literature.DatacenterElectricity.Global2030ShareOfElectricity)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(global_2030.to(_TWh).magnitude - 945) < 1, "IEA 2030 projection drifted from 945 TWh")
+    check(0.025 < share_2030 <= 0.03, "Prose says 'just under 3 percent'")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    global_2030_twh_str = fmt_energy(global_2030, unit=_TWh, precision=0, commas=False)
+    share_2030_pct_str = fmt_percent(share_2030, precision=0, commas=False, style="prose")
+```
+
+The GPT-3 household-year calculation above anchors the workload scale. The fleet-scale consequence is larger: IEA projects global data-center electricity consumption to reach about `{python} GlobalDatacenterElectricity2030.global_2030_twh_str` by 2030, just under `{python} GlobalDatacenterElectricity2030.share_2030_pct_str` of global electricity demand, with AI-accelerated servers driving much of the growth.[^fn-datacenter-power-scale] Historical studies document rapid growth in training compute [@sevilla2022], but a compute multiplier is not an energy multiplier without a matching efficiency measurement.
+
+[^fn-datacenter-power-scale]: **Data Center Industrial Scale**\index{Data Center Industrial Scale!definition}\index{Data Center!industrial electricity demand}: IEA's 2025 *Energy and AI* analysis projects data centers to consume about `{python} GlobalDatacenterElectricity2030.global_2030_twh_str` of electricity by 2030, just under `{python} GlobalDatacenterElectricity2030.share_2030_pct_str` of global electricity demand. This is an electricity-demand metric, not directly comparable to aviation or cement shares of global emissions, but it still means AI infrastructure competes for grid capacity with heavy industry: regions that cannot expand power generation cannot expand AI deployment, regardless of demand.
+
+```{python}
+#| echo: false
+#| label: hgx-h100-embodied-carbon
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HGX H100 EMBODIED CARBON (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: [^fn-gpu-embodied-carbon] footnote immediately below.
+# │
+# │ Goal: Keep the per-GPU and eight-GPU baseboard embodied carbon consistent.
+# │ Show: 1,312 kg CO2e per eight-GPU baseboard; 164 kg CO2e per H100.
+# │ How: Hardware.Cloud.H100.embodied_carbon_kg × Systems.Nodes.DGX_H100
+# │      accelerators_per_node.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Systems
+from mlsysim.core.units import kilogram
+from mlsysim.fmt import check, fmt, fmt_mass
+
+class HgxH100EmbodiedCarbon:
+    """NVIDIA HGX H100 product carbon footprint, total and per GPU."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    per_gpu = Hardware.Cloud.H100.embodied_carbon_kg * kilogram
+    gpus_per_baseboard = Systems.Nodes.DGX_H100.accelerators_per_node
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    baseboard = per_gpu * gpus_per_baseboard
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(gpus_per_baseboard == 8, "HGX H100 baseboard carries eight GPUs")
+    check(abs(baseboard.to(kilogram).magnitude - 1312) < 1, f"Baseboard footprint drifted: {baseboard}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    per_gpu_kg_str = fmt_mass(per_gpu, unit=kilogram, precision=0, commas=False)
+    baseboard_kg_str = fmt_mass(baseboard, unit=kilogram, precision=0, commas=True)
+```
 
 Beyond direct energy consumption, AI systems drive environmental impact through hardware manufacturing and resource consumption. Training and inference workloads depend on specialized processors that require rare earth metals whose extraction and processing generate pollution.[^fn-gpu-embodied-carbon] The growing demand for AI applications accelerates electronic waste production, with global e-waste reaching 54 million metric tons annually [@forti2020ewaste]. AI hardware rapidly becomes obsolete due to accelerating performance requirements.[^fn-ewaste-hardware-disposal]
 
-[^fn-gpu-embodied-carbon]: **GPU Manufacturing Embodied Carbon**\index{GPU Manufacturing Embodied Carbon!definition}: NVIDIA's HGX H100 product carbon footprint reports 1,312 kg CO~2~e for an eight-H100 baseboard, or roughly 164 kg CO~2~e per H100 if allocated evenly across the eight GPUs [@nvidia2025hgxh100pcf]. Advanced-node manufacturing also requires substantial ultrapure water, specialty gases, chemicals, and high-temperature process steps. This embodied cost means that in clean-grid regions (hydro, nuclear), manufacturing emissions can rival or exceed operational carbon, making hardware longevity and circular economy reuse critical sustainability levers.
+[^fn-gpu-embodied-carbon]: **GPU Manufacturing Embodied Carbon**\index{GPU Manufacturing Embodied Carbon!definition}: NVIDIA's HGX H100 product carbon footprint reports `{python} HgxH100EmbodiedCarbon.baseboard_kg_str` CO~2~e for an eight-H100 baseboard, or roughly `{python} HgxH100EmbodiedCarbon.per_gpu_kg_str` CO~2~e per H100 if allocated evenly across the eight GPUs [@nvidia2025hgxh100pcf]. Advanced-node manufacturing also requires substantial ultrapure water, specialty gases, chemicals, and high-temperature process steps. This embodied cost means that in clean-grid regions (hydro, nuclear), manufacturing emissions can rival or exceed operational carbon, making hardware longevity and circular economy reuse critical sustainability levers.
 
 [^fn-ewaste-hardware-disposal]: **AI Hardware E-waste**\index{AI Hardware E-waste!definition}: Retiring an accelerator does not necessarily create waste: equipment may be redeployed, resold, or recycled. Estimate disposal impacts from the actual equipment inventory, material composition, and end-of-life route. Extending useful service life can defer manufacturing and disposal, while certified handling limits exposure to hazardous materials in discarded electronics.
 
@@ -847,7 +979,8 @@ from mlsysim.fmt import fmt_int, fmt_mass, fmt_power, fmt_qty_int
 # │
 # │ Goal: Compute operational and amortized embodied carbon for a 70B run.
 # │ Show: ~742 tonnes operational + ~9 tonnes embodied = ~751 tonnes total.
-# │ How: GPU power * rack IT multiplier * hours * PUE * grid intensity; embodied / 36 months.
+# │ How: GPU power * rack IT multiplier * hours * PUE * grid intensity; embodied /
+# │      (accelerator service life in months).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -872,14 +1005,13 @@ class LifecycleCarbonEstimate:
 
     # Amortization details
     embodied_kg_per_gpu = h_h100.embodied_carbon_kg
-    amortization_months = 36
-    amortization_window_months = 1
-    lifecycle_years = amortization_months // 12
+    lifecycle_years = Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate
+    amortization_months = lifecycle_years * 12
+    amortization_window_months = 1  # scenario assumption: the job occupies one month
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     accelerator_power = n_gpus * h_h100.tdp
-    cooling_kw = 2.7 * kilowatt  # same cooling row as @tbl-rack-power; exclude before PUE
-    it_power_multiplier = ((rack.accelerator_power + rack.non_accelerator_power - cooling_kw) / rack.accelerator_power).to("").magnitude
+    it_power_multiplier = (rack.it_power / rack.accelerator_power).to("").magnitude  # @tbl-rack-power total less its non-IT cooling allocation
     it_power = accelerator_power * it_power_multiplier
     facility_power = it_power * effective_pue
     hours_per_day = HOURS_PER_DAY
@@ -975,22 +1107,33 @@ The manufacturing phase contributes embodied carbon\index{Embodied Carbon!hardwa
 # │ How: pulling Hardware.Cloud.H100.tdp from mlsysim.core.units.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_power
+from mlsysim import Hardware, Infrastructure
+from mlsysim.core.units import kilogram, kWh, ureg, watt
+from mlsysim.fmt import check, fmt_mass, fmt_power
 
 class GpuEmissionsScenario:
     """H100 operational footprint reference."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h_h100_tdp = Hardware.Cloud.H100.tdp
+    h100_embodied = Hardware.Cloud.H100.embodied_carbon_kg * kilogram
+    us_grid_ci = Infrastructure.Grids.US_Avg.carbon_intensity_kg_kwh * (kilogram / kWh)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Continuous operation at TDP on the US-average grid, per week.
+    weekly_operational = (h_h100_tdp * (1 * ureg.week)).to(kWh) * us_grid_ci
+    weeks_to_match_embodied = (h100_embodied / weekly_operational).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(h_h100_tdp.to(watt).magnitude == 700, "H100 TDP should be 700W")
+    check(3 <= weeks_to_match_embodied <= 4, f"Footnote says three to four weeks, got {weeks_to_match_embodied:.2f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h_h100_tdp_w_str = fmt_power(h_h100_tdp, unit=watt, precision=0, commas=False)
+    h100_embodied_kg_str = fmt_mass(h100_embodied, unit=kilogram, precision=0, commas=False)
 ```
 
-[^fn-embodied-hardware-carbon]: **Embodied Carbon**\index{Embodied Carbon!hardware lifecycle}: The non-use-phase emissions associated with manufacturing, transport, and end-of-life treatment. Manufacturing and delivery occur before use; disposal occurs later. Allocating NVIDIA's HGX H100 baseboard product carbon footprint evenly across its eight GPUs gives roughly 164 kg CO~2~e per H100 [@nvidia2025hgxh100pcf]; at `{python} GpuEmissionsScenario.h_h100_tdp_w_str` on the average U.S. grid, continuous operation matches embodied carbon in roughly three to four weeks. As data centers shift to renewables, embodied carbon's share of total lifetime emissions grows, potentially exceeding 30 percent, making hardware refresh cycles a first-order sustainability decision.
+[^fn-embodied-hardware-carbon]: **Embodied Carbon**\index{Embodied Carbon!hardware lifecycle}: The non-use-phase emissions associated with manufacturing, transport, and end-of-life treatment. Manufacturing and delivery occur before use; disposal occurs later. Allocating NVIDIA's HGX H100 baseboard product carbon footprint evenly across its eight GPUs gives roughly `{python} GpuEmissionsScenario.h100_embodied_kg_str` CO~2~e per H100 [@nvidia2025hgxh100pcf]; at `{python} GpuEmissionsScenario.h_h100_tdp_w_str` on the average U.S. grid, continuous operation matches embodied carbon in roughly three to four weeks. As data centers shift to renewables, embodied carbon's share of total lifetime emissions grows, potentially exceeding 30 percent, making hardware refresh cycles a first-order sustainability decision.
 
 #### Geographic and temporal optimization {#sec-sustainable-ai-geographic-temporal-optimization-492c}
 
@@ -1125,7 +1268,40 @@ Energy saved is the difference in infrastructure overhead $(\text{PUE}-1)$ acros
 
 :::
 
-A PUE of 1.0 would mean no measured non-IT overhead, not that all electricity produces useful computation. Idle servers and stalled accelerators remain inside the IT denominator. Surveyed data centers reported an average PUE near 1.55\index{Power Usage Effectiveness!industry average} in 2022, meaning that roughly 55 percent additional energy beyond IT consumption went to infrastructure, with older air-cooled sites higher still [@davis2022uptime]. Leading hyperscale facilities achieve PUE between 1.1 and 1.2 through advanced cooling techniques including free-air cooling in cold climates, liquid cooling for high-density GPU clusters, and optimized power distribution.
+```{python}
+#| echo: false
+#| label: pue-industry-average-2022
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INDUSTRY-AVERAGE PUE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: industry-average PUE prose immediately below.
+# │
+# │ Goal: Pin the surveyed 2022 average PUE and its overhead share to the registry.
+# │ Show: PUE ~1.55; roughly 55 percent additional energy beyond IT.
+# │ How: Infrastructure.FacilityCooling.UptimeSurvey2022Average.pue; overhead = PUE - 1.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Infrastructure
+from mlsysim.fmt import check, fmt, fmt_percent
+
+class PueIndustryAverage2022:
+    """Uptime Institute 2022 survey-average PUE."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    pue = Infrastructure.FacilityCooling.UptimeSurvey2022Average.pue
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    overhead_fraction = pue - 1
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(pue - 1.55) < 0.005, f"Uptime 2022 average PUE drifted: {pue}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    pue_str = fmt(pue, precision=2, commas=False)
+    overhead_pct_str = fmt_percent(overhead_fraction, precision=0, commas=False, style="prose")
+```
+
+A PUE of 1.0 would mean no measured non-IT overhead, not that all electricity produces useful computation. Idle servers and stalled accelerators remain inside the IT denominator. Surveyed data centers reported an average PUE near `{python} PueIndustryAverage2022.pue_str`\index{Power Usage Effectiveness!industry average} in 2022, meaning that roughly `{python} PueIndustryAverage2022.overhead_pct_str` additional energy beyond IT consumption went to infrastructure, with older air-cooled sites higher still [@davis2022uptime]. Leading hyperscale facilities achieve PUE between 1.1 and 1.2 through advanced cooling techniques including free-air cooling in cold climates, liquid cooling for high-density GPU clusters, and optimized power distribution.
 
 ::: {.column-margin}
 ![](images/svg/vol2_sustainable_ai_margin_002.svg){width="100%" fig-alt="Two horizontal PUE bars showing the same IT energy base plus infrastructure overhead: plus 58 percent at PUE 1.58 and plus 10 percent at PUE 1.10."}
@@ -1137,7 +1313,60 @@ A PUE of 1.0 would mean no measured non-IT overhead, not that all electricity pr
 
 $$\text{WUE} = \frac{W_{\text{annual\_water\_usage}}}{E_{\text{IT\_equipment}}}$$ {#eq-wue}
 
-The units are liters per kilowatt-hour\index{Water Usage Effectiveness!units and typical ranges}, with typical values ranging from 0.5 to 2.0 L/kWh depending on climate and cooling technology. A data center with WUE of 1.8 L/kWh training a model requiring 10,000 MWh of IT energy would consume 18 million liters of water, equivalent to roughly 40--50 US household-years of water use under a 380,000--450,000 L/year household baseline. A facility-energy estimate must first be converted to the IT boundary before applying this WUE.
+```{python}
+#| echo: false
+#| label: wue-training-water-footprint
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WUE TRAINING WATER FOOTPRINT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: WUE prose immediately below (@eq-wue).
+# │
+# │ Goal: Convert the carbon-placement reference run's IT energy into water use
+# │       at an evaporative WUE, and express it in US household-years of water.
+# │ Show: WUE 0.5 (air-cooled) and 1.8 L/kWh (evaporative); 10,000 MWh ->
+# │       18 million liters -> about 40 to 47 household-years.
+# │ How: water = IT energy × Infrastructure.FacilityCooling.Typical.wue;
+# │      household-years = water / ReferenceStats.WaterAnchors band.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Infrastructure, ReferenceStats
+from mlsysim.infrastructure.registry import WUE_AIR_COOLED
+from mlsysim.core.units import MWh, kWh, ureg
+from mlsysim.fmt import check, fmt, fmt_count, fmt_energy, fmt_int
+
+_liter = ureg.liter
+
+class WueTrainingWaterFootprint:
+    """Water footprint of the reference training run at an evaporative WUE."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    it_energy = ReferenceStats.CarbonPlacementProfile.TrainingRunEnergy
+    wue_air = float(WUE_AIR_COOLED) * _liter / kWh
+    wue_evaporative = float(Infrastructure.FacilityCooling.Typical.wue) * _liter / kWh
+    household_low = ReferenceStats.WaterAnchors.UsHouseholdAnnualWaterLow
+    household_high = ReferenceStats.WaterAnchors.UsHouseholdAnnualWaterHigh
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    water = (it_energy * wue_evaporative).to(_liter)
+    household_years_low = (water / household_high).to("").magnitude
+    household_years_high = (water / household_low).to("").magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(water.to(_liter).magnitude - 18e6) < 1e5, f"Water footprint drifted: {water}")
+    check(39.5 < household_years_low < household_years_high < 48, "Household-year band drifted")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    wue_air_str = fmt(wue_air.to(_liter / kWh).magnitude, precision=1, commas=False)
+    wue_evaporative_str = fmt(wue_evaporative.to(_liter / kWh).magnitude, precision=1, commas=False)
+    it_energy_mwh_str = fmt_energy(it_energy, unit=MWh, precision=0, commas=True)
+    water_million_liters_str = fmt_int(water.to(_liter).magnitude / 1e6, commas=False)
+    household_low_liters_str = fmt(household_low.to(_liter).magnitude, precision=0, commas=True)
+    household_high_liters_str = fmt(household_high.to(_liter).magnitude, precision=0, commas=True)
+    household_years_low_str = fmt_int(household_years_low, commas=False)
+    household_years_high_str = fmt_int(household_years_high, commas=False)
+```
+
+The units are liters per kilowatt-hour\index{Water Usage Effectiveness!units and typical ranges}, with typical values ranging from `{python} WueTrainingWaterFootprint.wue_air_str` to 2.0 L/kWh depending on climate and cooling technology. A data center with WUE of `{python} WueTrainingWaterFootprint.wue_evaporative_str` L/kWh training a model requiring `{python} WueTrainingWaterFootprint.it_energy_mwh_str` of IT energy would consume `{python} WueTrainingWaterFootprint.water_million_liters_str` million liters of water, equivalent to roughly `{python} WueTrainingWaterFootprint.household_years_low_str`--`{python} WueTrainingWaterFootprint.household_years_high_str` US household-years of water use under a `{python} WueTrainingWaterFootprint.household_low_liters_str`--`{python} WueTrainingWaterFootprint.household_high_liters_str` L/year household baseline. A facility-energy estimate must first be converted to the IT boundary before applying this WUE.
 
 Facility-level metrics identify where engineering intervention yields the greatest returns. The case study in @sec-sustainable-ai-case-study-deepmind-energy-efficiency-84fd demonstrates how ML-driven optimization of PUE translates directly into measurable energy savings.
 
@@ -1488,7 +1717,8 @@ from mlsysim.fmt import fmt_power, fmt_time
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-sustainable-ai-scale-environmental-impact-ac9a
 # │
-# │ Goal: Compute operational carbon for 64 A100 GPUs training for 14 days.
+# │ Goal: Compute operational carbon for the Lab_64_A100 cluster training a 7B
+# │       model for the mid-scale training window (64 A100s, 14 days).
 # │ Show: ~8,602 kWh GPU energy → ~12,864 kWh IT → ~14,408 kWh facility → ~6,181 kg CO2.
 # │ How: GPU energy = n_gpus * Hardware.Cloud.A100.tdp * hours; IT adds rack support; facility = IT * PUE.
 # │
@@ -1497,6 +1727,7 @@ from mlsysim.fmt import fmt_power, fmt_time
 from mlsysim.fmt import (
     fmt,
     fmt_carbon_intensity,
+    fmt_params,
     fmt_time,
     fmt_power,
     fmt_energy,
@@ -1505,7 +1736,7 @@ from mlsysim.fmt import (
     fmt_percent,
     check,
 )
-from mlsysim import Hardware, Infrastructure, Systems
+from mlsysim import Hardware, Infrastructure, Models, ReferenceStats, Systems
 from mlsysim.physics.quantities import energy_from_power, carbon_from_energy
 from mlsysim.core.units import Wh, watt, hour, kilowatt, kWh, gram, kilogram, metric_ton
 
@@ -1518,21 +1749,21 @@ class TrainingEmissions:
     """Namespace for 7B model training emissions worked example."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_gpus = 64
-    training_days = 14
+    n_gpus = Systems.Clusters.Lab_64_A100.total_accelerators
+    training_days = ReferenceStats.MidScaleTrainingCarbonProfile.TrainingDays.to("day").magnitude
     training_duration = training_days * HOURS_PER_DAY * hour
     a100_tdp = Hardware.Cloud.A100.tdp
     rack = Systems.Racks.DGX_H100_4Node
-    cooling_kw = 2.7 * kilowatt  # same cooling row as @tbl-rack-power; exclude before PUE
-    it_power_multiplier = ((rack.accelerator_power + rack.non_accelerator_power - cooling_kw) / rack.accelerator_power).to("").magnitude
+    it_power_multiplier = (rack.it_power / rack.accelerator_power).to("").magnitude  # @tbl-rack-power total less its non-IT cooling allocation
     us_grid = Infrastructure.Grids.US_Avg
     quebec_grid = Infrastructure.Grids.Quebec
     pue = us_grid.pue
     grid_ci = us_grid.carbon_intensity_g_kwh * (gram / kWh)
     quebec_ci = quebec_grid.carbon_intensity_g_kwh * (gram / kWh)
     embodied_carbon_per_accelerator = Hardware.Cloud.A100.embodied_carbon_kg * kilogram
-    embodied_lifetime_years = 4
+    embodied_lifetime_years = Infrastructure.Pricing.Capital.AcceleratorExtendedServiceLifeYears.rate
     hours_per_day = HOURS_PER_DAY
+    model_params = Models.Language.Llama2_7B.parameters  # the 7B model trained in this scenario
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     gpu_energy = energy_from_power(a100_tdp, training_duration) * n_gpus
@@ -1567,11 +1798,12 @@ class TrainingEmissions:
     emissions_tons_str = fmt_emissions(total_carbon.to(metric_ton), unit=metric_ton, precision=1, commas=False)
     quebec_emissions_kg_str = fmt_emissions(quebec_carbon.to(kilogram), unit=kilogram, precision=1)
     emissions_ratio_mult_str = fmt_multiple(emissions_ratio, precision=1, commas=False)
+    model_params_b_str = fmt_params(model_params, scale="B", precision=0)
 ```
 
 ::: {#nbk-sustainable-ai-training-emissions-calculation .callout-notebook title="Training emissions calculation"}
 
-**Problem**: Quantify the operational carbon footprint of training a 7B parameter model on `{python} TrainingEmissions.n_gpus_str` A100 GPUs for `{python} TrainingEmissions.training_days_str`.
+**Problem**: Quantify the operational carbon footprint of training a `{python} TrainingEmissions.model_params_b_str` parameter model on `{python} TrainingEmissions.n_gpus_str` A100 GPUs for `{python} TrainingEmissions.training_days_str`.
 
 ```{python}
 #| echo: false
@@ -1622,10 +1854,11 @@ years = ['Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5']
 x = np.arange(len(years))
 width = 0.52
 
-hw = np.array([3.2, 0.0, 0.0, 0.0, 0.0])
-elec = np.array([0.6, 0.6, 0.6, 0.6, 0.6])
-cool = np.array([0.2, 0.2, 0.2, 0.2, 0.2])
-carb = np.array([0.06, 0.08, 0.12, 0.17, 0.26])
+# Hypothetical five-year budget in $M (see caption); not registry-backed.
+hw = np.array([3.2, 0.0, 0.0, 0.0, 0.0])  # scenario assumption
+elec = np.array([0.6, 0.6, 0.6, 0.6, 0.6])  # scenario assumption
+cool = np.array([0.2, 0.2, 0.2, 0.2, 0.2])  # scenario assumption
+carb = np.array([0.06, 0.08, 0.12, 0.17, 0.26])  # scenario assumption
 
 annual_totals = hw + elec + cool + carb
 cum_tco = np.cumsum(annual_totals)
@@ -1714,9 +1947,41 @@ plt.show()
 
 As grids decarbonize, the bottleneck shifts toward embodied carbon from chip fabrication and data center construction, making hardware utilization and longevity first-order sustainability levers.
 
+```{python}
+#| echo: false
+#| label: accelerator-embodied-footprints
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ACCELERATOR EMBODIED FOOTPRINTS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: embodied-carbon prose immediately below (@eq-embodied-daily).
+# │
+# │ Goal: Pin the A100 and H100 manufacturing footprints to the registry.
+# │ Show: ~150 kg CO2e per A100; ~164 kg CO2e per H100.
+# │ How: Hardware.Cloud.{A100,H100}.embodied_carbon_kg.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import kilogram
+from mlsysim.fmt import check, fmt_mass
+
+class AcceleratorEmbodiedFootprints:
+    """Per-accelerator manufacturing footprints cited in the embodied-carbon account."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    a100 = Hardware.Cloud.A100.embodied_carbon_kg * kilogram
+    h100 = Hardware.Cloud.H100.embodied_carbon_kg * kilogram
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(a100 < h100, "The H100 allocation exceeds the A100 estimate in the prose ordering")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    a100_kg_str = fmt_mass(a100, unit=kilogram, precision=0, commas=False)
+    h100_kg_str = fmt_mass(h100, unit=kilogram, precision=0, commas=False)
+```
+
 Embodied carbon encompasses emissions from raw material extraction, semiconductor fabrication, assembly, transportation, and end-of-life disposal. For AI hardware, manufacturing emissions are dominated by the energy-intensive nature of advanced semiconductor processes.
 
-Advanced-node AI accelerators carry substantial manufacturing footprints: an NVIDIA A100 GPU embodies approximately 150 kg CO~2~eq per unit [@luccioni2023estimating], and NVIDIA's HGX H100 product carbon footprint implies roughly 164 kg CO~2~e per H100 when the baseboard footprint is allocated evenly across its eight GPUs [@nvidia2025hgxh100pcf], including wafer fabrication at advanced process nodes, high-bandwidth memory production, and packaging. @Eq-embodied-daily amortizes this embodied carbon over the hardware lifetime to compute per-use emissions:
+Advanced-node AI accelerators carry substantial manufacturing footprints: an NVIDIA A100 GPU embodies approximately `{python} AcceleratorEmbodiedFootprints.a100_kg_str` CO~2~eq per unit [@luccioni2023estimating], and NVIDIA's HGX H100 product carbon footprint implies roughly `{python} AcceleratorEmbodiedFootprints.h100_kg_str` CO~2~e per H100 when the baseboard footprint is allocated evenly across its eight GPUs [@nvidia2025hgxh100pcf], including wafer fabrication at advanced process nodes, high-bandwidth memory production, and packaging. @Eq-embodied-daily amortizes this embodied carbon over the hardware lifetime to compute per-use emissions:
 
 $$C_{\text{embodied,daily}} = \frac{C_{\text{manufacturing}}}{T_{\text{lifetime}} \times 365}$$ {#eq-embodied-daily}
 
@@ -1738,7 +2003,7 @@ class EmbodiedCarbonAmort:
     h100_tdp = Hardware.Cloud.H100.tdp
     t_job = 10 * hour  # scenario assumption
     mfg_carbon_per_gpu = Hardware.Cloud.H100.embodied_carbon_kg * kilogram
-    lifetime_years = 3
+    lifetime_years = Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate
     ci_dirty = Infrastructure.Grids.US_Avg.carbon_intensity_kg_kwh * (kilogram / kWh)
     ci_clean = Infrastructure.Grids.Quebec.carbon_intensity_kg_kwh * (kilogram / kWh)
 
@@ -1799,26 +2064,28 @@ $$C_{\text{total}} = C_{\text{operational}} + \left( \frac{C_{\text{manufacturin
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Embodied carbon amortization prose below.
 # │ Goal: Recap embodied-carbon inputs for the training-run example.
-from mlsysim import Hardware, Infrastructure, Systems
-from mlsysim.fmt import fmt, fmt_emissions, fmt_percent, fmt_time
+from mlsysim import Hardware, Infrastructure, ReferenceStats, Systems
+from mlsysim.fmt import check, fmt, fmt_emissions, fmt_percent, fmt_time
 from mlsysim.physics.quantities import energy_from_power, carbon_from_energy
 from mlsysim.core.units import hour, kilowatt, kWh, gram, kilogram, metric_ton, watt
 
 class TrainingEmbodiedRecap:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_gpus = 64
-    training_days = 14
+    n_gpus = Systems.Clusters.Lab_64_A100.total_accelerators
+    training_days = ReferenceStats.MidScaleTrainingCarbonProfile.TrainingDays.to("day").magnitude
     training_duration = training_days * HOURS_PER_DAY * hour
     a100_tdp = Hardware.Cloud.A100.tdp
     rack = Systems.Racks.DGX_H100_4Node
-    cooling_kw = 2.7 * kilowatt  # same cooling row as @tbl-rack-power; exclude before PUE
-    it_power_multiplier = ((rack.accelerator_power + rack.non_accelerator_power - cooling_kw) / rack.accelerator_power).to("").magnitude
+    it_power_multiplier = (rack.it_power / rack.accelerator_power).to("").magnitude  # @tbl-rack-power total less its non-IT cooling allocation
     us_grid = Infrastructure.Grids.US_Avg
     quebec_grid = Infrastructure.Grids.Quebec
     pue = us_grid.pue
     grid_ci = us_grid.carbon_intensity_g_kwh * (gram / kWh)
     quebec_ci = quebec_grid.carbon_intensity_g_kwh * (gram / kWh)
-    embodied_lifetime_years = 4
+    # Explicit extended-life contrast with the standard service life used in
+    # the earlier lifecycle estimate (the prose names both).
+    embodied_lifetime_years = Infrastructure.Pricing.Capital.AcceleratorExtendedServiceLifeYears.rate
+    standard_lifetime_years = Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate
     days_per_year = DAYS_PER_YEAR
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     gpu_energy_kwh = (energy_from_power(a100_tdp, training_duration) * n_gpus).to(kWh)
@@ -1830,14 +2097,25 @@ class TrainingEmbodiedRecap:
     embodied_training_carbon = n_gpus * training_days * embodied_daily_carbon
     embodied_us_ratio_pct = (embodied_training_carbon / total_carbon).to("").magnitude * 100
     embodied_quebec_total_share_pct = (embodied_training_carbon / (quebec_carbon + embodied_training_carbon)).to("").magnitude * 100
+    upfront_burden = n_gpus * embodied_carbon_per_accelerator  # unamortized cluster manufacturing burden
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────────
+    check(embodied_lifetime_years > standard_lifetime_years, "Extended service life must exceed the standard life")
+    check(abs(upfront_burden.to(metric_ton).magnitude - 9.6) < 0.05, f"Upfront burden drifted: {upfront_burden.to(metric_ton)}")
+    check(85 < embodied_training_carbon.to(kilogram).magnitude < 95, "Fallacy prose says about 90 kg")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     embodied_kg_per_accelerator_str = fmt_emissions(embodied_carbon_per_accelerator, unit=kilogram, commas=False)
+    standard_lifetime_years_attr_str = fmt_time(standard_lifetime_years, 'year', precision=0, commas=False, style='word', attributive=True)
+    upfront_burden_t_str = fmt_emissions(upfront_burden.to(metric_ton), unit=metric_ton, precision=1, commas=False)
+    embodied_training_kg_round_str = fmt_emissions(
+        round(embodied_training_carbon.to(kilogram).magnitude, -1) * kilogram, unit=kilogram, precision=0, commas=False
+    )
     embodied_lifetime_years_str = fmt_time(embodied_lifetime_years, 'year', precision=0, commas=False, style='word')
     embodied_lifetime_years_attr_str = fmt_time(embodied_lifetime_years, 'year', precision=0, commas=False, style='word', attributive=True)
     days_per_year_str = fmt_time(days_per_year, 'day', precision=0, commas=False, per='year')
     embodied_daily_kg_str = fmt_emissions(embodied_daily_carbon, unit=kilogram, precision=3, commas=False)
     n_gpus_str = fmt(n_gpus, precision=0, commas=False)
     training_days_str = fmt_time(training_days, 'day', precision=0, commas=False, style='word')
+    training_days_attr_str = fmt_time(training_days, 'day', precision=0, commas=False, style='word', attributive=True)
     embodied_training_kg_str = fmt_emissions(embodied_training_carbon, unit=kilogram, precision=1)
     embodied_us_ratio_pct_str = fmt_percent(embodied_us_ratio_pct / 100, precision=1, commas=False, style='prose')
     embodied_quebec_total_share_pct_str = fmt_percent(embodied_quebec_total_share_pct / 100, precision=1, commas=False, style='prose')
@@ -1845,7 +2123,7 @@ class TrainingEmbodiedRecap:
     quebec_emissions_kg_str = fmt_emissions(quebec_carbon.to(kilogram), unit=kilogram, precision=1)
 ```
 
-Returning to the earlier A100 training run, this calculation assumes a `{python} TrainingEmbodiedRecap.embodied_lifetime_years_attr_str` service life, slightly longer than the 3-year amortization window used in the earlier lifecycle estimate; the assumption matters because a longer life spreads the same manufacturing carbon over more service, lowering the per-job share. For an accelerator with `{python} TrainingEmbodiedRecap.embodied_kg_per_accelerator_str` embodied carbon (the A100 estimate cited earlier) and that `{python} TrainingEmbodiedRecap.embodied_lifetime_years_attr_str` data center lifetime, the first step is daily amortization: `{python} TrainingEmbodiedRecap.embodied_kg_per_accelerator_str` / (`{python} TrainingEmbodiedRecap.embodied_lifetime_years_str` $\times$ `{python} TrainingEmbodiedRecap.days_per_year_str`) $\approx$ `{python} TrainingEmbodiedRecap.embodied_daily_kg_str`/day.
+Returning to the earlier A100 training run, this calculation assumes a `{python} TrainingEmbodiedRecap.embodied_lifetime_years_attr_str` service life, an extended-life scenario slightly longer than the `{python} TrainingEmbodiedRecap.standard_lifetime_years_attr_str` amortization window used in the earlier lifecycle estimate; the assumption matters because a longer life spreads the same manufacturing carbon over more service, lowering the per-job share. For an accelerator with `{python} TrainingEmbodiedRecap.embodied_kg_per_accelerator_str` embodied carbon (the A100 estimate cited earlier) and that `{python} TrainingEmbodiedRecap.embodied_lifetime_years_attr_str` data center lifetime, the first step is daily amortization: `{python} TrainingEmbodiedRecap.embodied_kg_per_accelerator_str` / (`{python} TrainingEmbodiedRecap.embodied_lifetime_years_str` $\times$ `{python} TrainingEmbodiedRecap.days_per_year_str`) $\approx$ `{python} TrainingEmbodiedRecap.embodied_daily_kg_str`/day.
 
 The second step assigns that daily share to the job. A training run lasting `{python} TrainingEmbodiedRecap.training_days_str` on `{python} TrainingEmbodiedRecap.n_gpus_str` accelerators carries `{python} TrainingEmbodiedRecap.n_gpus_str` $\times$ `{python} TrainingEmbodiedRecap.training_days_str` $\times$ `{python} TrainingEmbodiedRecap.embodied_daily_kg_str` $\approx$ `{python} TrainingEmbodiedRecap.embodied_training_kg_str` CO~2~ of amortized embodied carbon.
 
@@ -2031,7 +2309,7 @@ The balance among these terms changes with serving volume and duration: a model 
 # │ How: queries/day * kWh/query * 365 * grid intensity.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Infrastructure, Systems
+from mlsysim import Hardware, Infrastructure, ReferenceStats, Systems
 from mlsysim.fmt import check, fmt, fmt_carbon_intensity, fmt_count, fmt_emissions, fmt_energy, fmt_int, fmt_time
 from mlsysim.physics.quantities import energy_from_power, carbon_from_energy
 from mlsysim.core.units import hour, kilowatt, kWh, kilogram, metric_ton, gram, watt
@@ -2046,13 +2324,12 @@ class InferenceLifecycleExample:
     days_per_year = DAYS_PER_YEAR
     us_grid = Infrastructure.Grids.US_Avg
     grid_ci = us_grid.carbon_intensity_kg_kwh * (kilogram / kWh)
-    n_gpus = 64
-    training_days = 14
+    n_gpus = Systems.Clusters.Lab_64_A100.total_accelerators
+    training_days = ReferenceStats.MidScaleTrainingCarbonProfile.TrainingDays.to("day").magnitude
     training_duration = training_days * HOURS_PER_DAY * hour
     a100_tdp = Hardware.Cloud.A100.tdp
     rack = Systems.Racks.DGX_H100_4Node
-    cooling_kw = 2.7 * kilowatt  # same cooling row as @tbl-rack-power; exclude before PUE
-    it_power_multiplier = ((rack.accelerator_power + rack.non_accelerator_power - cooling_kw) / rack.accelerator_power).to("").magnitude
+    it_power_multiplier = (rack.it_power / rack.accelerator_power).to("").magnitude  # @tbl-rack-power total less its non-IT cooling allocation
     pue = us_grid.pue
     gpu_energy_kwh = (energy_from_power(a100_tdp, training_duration) * n_gpus).to(kWh)
     facility_energy_kwh = gpu_energy_kwh * it_power_multiplier * pue
@@ -2087,31 +2364,31 @@ class InferenceLifecycleExample:
 # │ Context: Inference lifecycle crossover prose below.
 # │ Goal: Recap training emissions total for inference crossover comparison.
 from mlsysim.physics.quantities import energy_from_power, carbon_from_energy
-from mlsysim import Hardware, Infrastructure, Systems
+from mlsysim import Hardware, Infrastructure, ReferenceStats, Systems
 from mlsysim.core.units import hour, kilowatt, kWh, gram, metric_ton
 
 class TrainingEmissionsRecap:
-    n_gpus = 64
-    training_days = 14
+    n_gpus = Systems.Clusters.Lab_64_A100.total_accelerators
+    training_days = ReferenceStats.MidScaleTrainingCarbonProfile.TrainingDays.to("day").magnitude
     training_duration = training_days * HOURS_PER_DAY * hour
     a100_tdp = Hardware.Cloud.A100.tdp
     rack = Systems.Racks.DGX_H100_4Node
-    cooling_kw = 2.7 * kilowatt  # same cooling row as @tbl-rack-power; exclude before PUE
-    it_power_multiplier = ((rack.accelerator_power + rack.non_accelerator_power - cooling_kw) / rack.accelerator_power).to("").magnitude
+    it_power_multiplier = (rack.it_power / rack.accelerator_power).to("").magnitude  # @tbl-rack-power total less its non-IT cooling allocation
     us_grid = Infrastructure.Grids.US_Avg
     pue = us_grid.pue
     gpu_energy_kwh = (energy_from_power(a100_tdp, training_duration) * n_gpus).to(kWh)
     facility_energy_kwh = gpu_energy_kwh * it_power_multiplier * pue
     total_carbon = carbon_from_energy(facility_energy_kwh, us_grid.carbon_intensity_g_kwh * (gram / kWh))
-    from mlsysim.fmt import fmt_emissions
+    from mlsysim.fmt import fmt, fmt_emissions
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     emissions_tons_str = fmt_emissions(total_carbon.to(metric_ton), unit=metric_ton, precision=1, commas=False)
+    n_gpus_str = fmt(n_gpus, precision=0, commas=False)
 ```
 
 For models deployed at scale, inference emissions often dominate the lifecycle. Consider a model serving `{python} InferenceLifecycleExample.queries_per_day_str` queries per day at `{python} InferenceLifecycleExample.kwh_per_query_str` of attributed facility electricity per query, including its share of idle capacity and support systems. At this serving rate, daily energy consumption reaches `{python} InferenceLifecycleExample.daily_energy_kwh_str` (`{python} InferenceLifecycleExample.queries_per_day_str` queries $\times$ `{python} InferenceLifecycleExample.kwh_per_query_str`), accumulating over `{python} InferenceLifecycleExample.days_per_year_str` days to `{python} InferenceLifecycleExample.annual_energy_kwh_str` per year. Evaluated against the average US grid carbon intensity of `{python} InferenceLifecycleExample.grid_ci_kg_per_kwh_str`, this electricity demand produces `{python} InferenceLifecycleExample.annual_emissions_tonnes_str` (`{python} InferenceLifecycleExample.annual_emissions_kg_str`) of greenhouse gas emissions annually.
 
-Compared with the earlier 7B/64-A100 training example (`{python} TrainingEmissionsRecap.emissions_tons_str`), cumulative inference emissions exceed training emissions after approximately `{python} InferenceLifecycleExample.crossover_days_str` of deployment at this scale. For larger training runs, the crossover can shift to weeks or months depending on query volume, per-query energy, and grid intensity. The lifecycle perspective therefore sets the priority: optimize inference efficiency for widely deployed models, and focus training efficiency efforts on models that undergo frequent retraining or experimental iteration.
+Compared with the earlier `{python} TrainingEmissions.model_params_b_str`/`{python} TrainingEmissionsRecap.n_gpus_str`-A100 training example (`{python} TrainingEmissionsRecap.emissions_tons_str`), cumulative inference emissions exceed training emissions after approximately `{python} InferenceLifecycleExample.crossover_days_str` of deployment at this scale. For larger training runs, the crossover can shift to weeks or months depending on query volume, per-query energy, and grid intensity. The lifecycle perspective therefore sets the priority: optimize inference efficiency for widely deployed models, and focus training efficiency efforts on models that undergo frequent retraining or experimental iteration.
 
 #### Regional grid intensity data sources {#sec-sustainable-ai-regional-grid-intensity-data-sources-0b88}
 
@@ -2159,17 +2436,22 @@ def calculate_carbon_footprint(
     }
 
 
-# Example: 7B model training
+# Example: 7B model training on a 64-GPU A100 cluster for 14 days
 _us_grid = Infrastructure.Grids.US_Avg
+_cluster = Systems.Clusters.Lab_64_A100
+_run = ReferenceStats.MidScaleTrainingCarbonProfile
 result = calculate_carbon_footprint(
-    gpu_power_watts=400,
-    num_gpus=64,
-    training_hours=336,  # 14 days
+    gpu_power_watts=Hardware.Cloud.A100.tdp.m_as("W"),  # 400 W
+    num_gpus=_cluster.total_accelerators,  # 64
+    training_hours=_run.TrainingDays.m_as("h"),  # 336 h
     it_power_multiplier=TrainingEmissions.it_power_multiplier,
     pue=_us_grid.pue,
     grid_intensity_gco2_kwh=_us_grid.carbon_intensity_g_kwh,
     gpu_embodied_kg=Hardware.Cloud.A100.embodied_carbon_kg,
-    gpu_lifetime_years=4,
+    gpu_lifetime_years=(  # 4-year extended service life
+        Infrastructure.Pricing.Capital
+        .AcceleratorExtendedServiceLifeYears.rate
+    ),
 )
 print(
     f"Total carbon footprint: {result['total_carbon_kg']:.0f} kg CO2"
@@ -2189,13 +2471,49 @@ Facility sustainability therefore has to be read as a chain of constraints rathe
 
 ### Data center energy and AI workloads {#sec-sustainable-ai-data-center-energy-ai-workloads-b1a8}
 
+```{python}
+#| echo: false
+#| label: hyperscale-campus-scale
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HYPERSCALE CAMPUS SCALE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-sustainable-ai-data-center-energy-ai-workloads-b1a8 prose and
+# │          footnotes immediately below.
+# │
+# │ Goal: Pin the hyperscale campus load anchor and its household equivalent.
+# │ Show: 100 MW campus; continuous draw ≈ tens of thousands of US homes.
+# │ How: ReferenceStats.FacilityScaleAnchors.HyperscaleCampusPower × hours/year
+# │      / ReferenceStats.EnergyAnchors.USHouseholdAnnualElectricity.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import ReferenceStats
+from mlsysim.core.units import MW, hour, HOURS_PER_YEAR
+from mlsysim.fmt import check, fmt_power
+
+class HyperscaleCampusScale:
+    """Hyperscale campus power anchor."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    campus_power = ReferenceStats.FacilityScaleAnchors.HyperscaleCampusPower
+    household_annual = ReferenceStats.EnergyAnchors.USHouseholdAnnualElectricity
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    homes_equivalent = (campus_power * HOURS_PER_YEAR * hour / household_annual).to("").magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(10_000 <= homes_equivalent < 100_000, f"Footnote says tens of thousands of homes, got {homes_equivalent:.0f}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    campus_power_mw_str = fmt_power(campus_power, unit=MW, precision=0, commas=False)
+```
+
 At facility scale, the optimization target is no longer a single model but the overhead and grid context surrounding every watt of IT power. The PUE and geographic calculations already showed why the same IT workload can impose different facility and carbon costs; here the relevant change is aggregate demand. In its 2025 *Energy and AI* analysis, IEA estimated data-center electricity-use emissions at about 180 Mt and projected roughly 300 Mt by 2035 in its Base Case while remaining below 1.5 percent of total energy-sector emissions.[^fn-emissions-carbon-scale] The energy burden grows with data-center capacity, training workloads, and inference demand [@patterson2021carbon], so component efficiency must be evaluated against fleet expansion [@thompson2023compute; @dodge2022].
 
-[^fn-emissions-carbon-scale]: **Data Center Emissions Scale**\index{Data Center Emissions Scale!definition}: In IEA's 2025 *Energy and AI* analysis, data centers consumed roughly 1--2 percent of global electricity, with AI contributing to demand growth. IEA estimated emissions from data-center electricity use at about 180 Mt and projected around 300 Mt by 2035 in its Base Case while remaining below 1.5 percent of total energy-sector emissions. The largest hyperscale facilities can draw over 100 MW continuously, equivalent to powering tens of thousands of homes.
+[^fn-emissions-carbon-scale]: **Data Center Emissions Scale**\index{Data Center Emissions Scale!definition}: In IEA's 2025 *Energy and AI* analysis, data centers consumed roughly 1--2 percent of global electricity, with AI contributing to demand growth. IEA estimated emissions from data-center electricity use at about 180 Mt and projected around 300 Mt by 2035 in its Base Case while remaining below 1.5 percent of total energy-sector emissions. The largest hyperscale facilities can draw over `{python} HyperscaleCampusScale.campus_power_mw_str` continuously, equivalent to powering tens of thousands of homes.
 
 #### Energy demands in data centers {#sec-sustainable-ai-energy-demands-data-centers-b7ba}
 
-The relevant facility quantity is persistent megawatt-class load, not the model name alone. Hyperscale campuses house large fleets of accelerator servers and hold loads of 100 MW or more for years at a time.[^fn-hyperscale-facility-footprint] Per-watt gains in each accelerator generation lower the energy of a given job, but they do not shrink a campus whose capacity is sized to the demand it expects to serve.
+The relevant facility quantity is persistent megawatt-class load, not the model name alone. Hyperscale campuses house large fleets of accelerator servers and hold loads of `{python} HyperscaleCampusScale.campus_power_mw_str` or more for years at a time.[^fn-hyperscale-facility-footprint] Per-watt gains in each accelerator generation lower the energy of a given job, but they do not shrink a campus whose capacity is sized to the demand it expects to serve.
 
 [^fn-hyperscale-facility-footprint]: **Hyperscale Data Center Footprint**\index{Hyperscale Data Center Footprint!definition}: Meta's Prineville facility spans 230,000 m² and houses over 150,000 servers; major cloud fleets consume country-scale electricity annually. These physical scales matter for sustainability because each facility's power demand (100--300 MW) locks in decades of grid-dependency decisions that no algorithmic optimization can undo.
 
@@ -2203,9 +2521,54 @@ Whether that demand keeps growing depends on the race between workload growth an
 
 Beyond computational demands, cooling can account for 30--40 percent of facility energy in the conventional air-cooled data-center designs surveyed by @ebrahimi2014. This is a design-regime range, not a constant for modern hyperscale or liquid-cooled facilities; @sec-sustainable-ai-cooling derives the site-specific overhead through PUE and the cooling architecture.
 
-The United States alone illustrates how cloud and AI infrastructure can reshape national energy planning. @Fig-energy-gap presents US data center electricity consumption data from the Lawrence Berkeley National Laboratory (LBNL), showing that consumption tripled from 58 TWh in 2014 to 176 TWh in 2023. LBNL's projection treats AI workloads as an important driver of further growth and projects a doubling or tripling by 2028, with the high-end scenario implying that data centers would consume approximately 12 percent of US electricity. This trajectory represents a physical constraint on AI scaling that software optimization alone cannot remove.
+```{python}
+#| echo: false
+#| label: us-datacenter-electricity
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ US DATA-CENTER ELECTRICITY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-energy-gap (caption and plot) and the prose immediately below.
+# │
+# │ Goal: Pin the LBNL 2024 historical values and 2028 projections to the registry.
+# │ Show: 58 TWh (2014) → 176 TWh (2023), about 3× in nine years; 325 to 580 TWh
+# │       projected for 2028 (a doubling to tripling of 2023).
+# │ How: Literature.DatacenterElectricity.Us*Twh; growth = ratio of values.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.core.units import ureg
+from mlsysim.fmt import check, fmt, fmt_energy
 
-::: {#fig-energy-gap fig-env="figure" fig-pos="htb" fig-cap="**The Energy Gap**: US data center electricity consumption tripled from 58 TWh (2014) to 176 TWh (2023). LBNL projects a further doubling to 325 to 580 TWh by 2028, with AI workloads treated as an important driver of growth. At the high end, data centers would consume approximately 12 percent of US electricity, representing a physical constraint on AI scaling that software optimization alone cannot remove." fig-alt="Bar chart showing US data center electricity: 58 TWh in 2014, 176 TWh in 2023, projected 325 to 580 TWh by 2028. Bars colored blue for historical and red for projections."}
+_TWh = ureg.terawatt_hour
+
+class UsDatacenterElectricity:
+    """LBNL (2024) United States data-center electricity use, TWh."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    us_2014 = float(Literature.DatacenterElectricity.Us2014Twh)
+    us_2023 = float(Literature.DatacenterElectricity.Us2023Twh)
+    us_2028_low = float(Literature.DatacenterElectricity.Us2028LowTwh)
+    us_2028_high = float(Literature.DatacenterElectricity.Us2028HighTwh)
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    growth_2014_2023 = us_2023 / us_2014
+    growth_2028_low = us_2028_low / us_2023
+    growth_2028_high = us_2028_high / us_2023
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(2.8 < growth_2014_2023 < 3.2, "Prose says consumption tripled from 2014 to 2023")
+    check(1.7 < growth_2028_low < 2.1 and 2.9 < growth_2028_high < 3.5, "Prose says a doubling or tripling by 2028")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    us_2014_twh_str = fmt_energy(us_2014 * _TWh, unit=_TWh, precision=0, commas=False)
+    us_2023_twh_str = fmt_energy(us_2023 * _TWh, unit=_TWh, precision=0, commas=False)
+    us_2028_low_value_str = fmt(us_2028_low, precision=0, commas=False)
+    us_2028_high_twh_str = fmt_energy(us_2028_high * _TWh, unit=_TWh, precision=0, commas=False)
+```
+
+The United States alone illustrates how cloud and AI infrastructure can reshape national energy planning. @Fig-energy-gap presents US data center electricity consumption data from the Lawrence Berkeley National Laboratory (LBNL), showing that consumption tripled from `{python} UsDatacenterElectricity.us_2014_twh_str` in 2014 to `{python} UsDatacenterElectricity.us_2023_twh_str` in 2023. LBNL's projection treats AI workloads as an important driver of further growth and projects a doubling or tripling by 2028, with the high-end scenario implying that data centers would consume approximately 12 percent of US electricity. This trajectory represents a physical constraint on AI scaling that software optimization alone cannot remove.
+
+::: {#fig-energy-gap fig-env="figure" fig-pos="htb" fig-cap="**The Energy Gap**: US data center electricity consumption tripled from `{python} UsDatacenterElectricity.us_2014_twh_str` (2014) to `{python} UsDatacenterElectricity.us_2023_twh_str` (2023). LBNL projects a further doubling to `{python} UsDatacenterElectricity.us_2028_low_value_str` to `{python} UsDatacenterElectricity.us_2028_high_twh_str` by 2028, with AI workloads treated as an important driver of growth. At the high end, data centers would consume approximately 12 percent of US electricity, representing a physical constraint on AI scaling that software optimization alone cannot remove." fig-alt="Bar chart showing US data center electricity: 58 TWh in 2014, 176 TWh in 2023, projected 325 to 580 TWh by 2028. Bars colored blue for historical and red for projections."}
 
 ```{python}
 #| echo: false
@@ -2217,7 +2580,8 @@ from binder.tools.figures import style as book_style
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 5.0))
 
 labels = ['2014\n(Historical)', '2023\n(Recent)', '2028\n(Low Proj.)', '2028\n(High Proj.)']
-values = [58, 176, 325, 580]
+# Source of truth: Literature.DatacenterElectricity (LBNL 2024).
+values = [UsDatacenterElectricity.us_2014, UsDatacenterElectricity.us_2023, UsDatacenterElectricity.us_2028_low, UsDatacenterElectricity.us_2028_high]
 colors = [COLORS['BlueLine'], COLORS['BlueLine'], COLORS['RedLine'], COLORS['RedLine']]
 alphas = [1.0, 1.0, 0.75, 0.95]
 
@@ -2229,7 +2593,7 @@ for bar, val in zip(bars, values):
     ax.text(
         bar.get_x() + bar.get_width() / 2,
         bar.get_height() + 14,
-        f'{val} TWh',
+        f'{val:.0f} TWh',
         ha='center',
         va='bottom',
         fontsize=9.0,
@@ -2258,14 +2622,14 @@ ax.text(
     fontweight='bold',
 )
 
-ax.axhline(y=58, color=COLORS['BlueLine'], linestyle=':', linewidth=1.4, alpha=0.7, label='2014 Baseline (58 TWh)')
+ax.axhline(y=values[0], color=COLORS['BlueLine'], linestyle=':', linewidth=1.4, alpha=0.7, label=f'2014 Baseline ({values[0]:.0f} TWh)')
 ax.legend(loc='upper right', bbox_to_anchor=(0.72, 0.96), fontsize=8.0, frameon=True, facecolor='white', framealpha=0.95, edgecolor=COLORS['grid'])
 
-ax.annotate('', xy=(1, 176), xytext=(0, 58), arrowprops=dict(arrowstyle='<->', color=COLORS['OrangeLine'], lw=1.5))
+ax.annotate('', xy=(1, values[1]), xytext=(0, values[0]), arrowprops=dict(arrowstyle='<->', color=COLORS['OrangeLine'], lw=1.5))
 ax.text(
     0.5,
     130,
-    '3× growth\nin 9 years',
+    f'{UsDatacenterElectricity.growth_2014_2023:.0f}× growth\n' f'in {2023 - 2014} years',
     fontsize=8.0,
     fontweight='bold',
     color=COLORS['OrangeLine'],
@@ -2602,17 +2966,41 @@ Audit the carbon footprint of a machine learning platform by classifying the fol
 
 :::
 
-Accurately classifying these hidden emissions forces engineering teams to take responsibility for the entire value chain of their deployments. The abstract energy metrics of a facility, and the resulting carbon footprint, are ultimately governed by the physical thermodynamics of the rack. Delivering 120 kW to a single cabinet and extracting the resulting heat requires moving beyond traditional air conditioning.
+```{python}
+#| echo: false
+#| label: dense-rack-power-anchor
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DENSE RACK POWER ANCHOR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: transition prose immediately below.
+# │
+# │ Goal: Pin the single-cabinet power figure to a named rack-scale system.
+# │ Show: 120 kW per cabinet (GB200 NVL72).
+# │ How: Hardware.Cloud.GB200_NVL72.tdp.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import kilowatt
+from mlsysim.fmt import check, fmt_power
+
+class DenseRackPowerAnchor:
+    """Rack-scale power of an NVL72-class cabinet."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    cabinet_power = Hardware.Cloud.GB200_NVL72.tdp
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(cabinet_power.to(kilowatt).magnitude - 120) < 1, f"GB200 NVL72 power drifted: {cabinet_power}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    cabinet_power_kw_str = fmt_power(cabinet_power, unit=kilowatt, precision=0, commas=False)
+```
+
+Accurately classifying these hidden emissions forces engineering teams to take responsibility for the entire value chain of their deployments. The abstract energy metrics of a facility, and the resulting carbon footprint, are ultimately governed by the physical thermodynamics of the rack. Delivering `{python} DenseRackPowerAnchor.cabinet_power_kw_str` to a single cabinet (the rated draw of one GB200 NVL72 rack) and extracting the resulting heat requires moving beyond traditional air conditioning.
 
 ### Power delivery {#sec-sustainable-ai-power-delivery}
 
 @Sec-compute-power-wall traced the electrical path from the grid to the voltage regulator and defined PUE; this section asks where along that path energy and reliability margin are lost, and which of those losses a sustainability account must carry. Capacity planning fails when engineers budget only accelerator TDP. The first constraint sits outside the building. The largest ML facilities need a dedicated substation and a utility interconnection, and no engineering inside the building can deliver more power than that connection provides.
-
-::: {.column-margin}
-![](images/svg/sustainable_ai_grid_interconnection_ladder.svg){width="100%" fig-alt="Time ladder comparing a 24-month substation path with a 6-month GPU procurement path, with the fourfold lag marked as a ratio annotation."}
-
-*Substation lead time can run 4$\times$ longer than GPU procurement.*
-:::
 
 ```{python}
 #| echo: false
@@ -2634,8 +3022,7 @@ class GridQueue:
     cluster_gpus = Systems.Clusters.Training_10K.total_accelerators
     rack = Systems.Racks.DGX_H100_4Node
     cluster_gpu_power = cluster_gpus * Hardware.Cloud.H100.tdp
-    cooling_kw = 2.7 * kilowatt  # same cooling row as @tbl-rack-power; exclude before PUE
-    it_power_multiplier = ((rack.accelerator_power + rack.non_accelerator_power - cooling_kw) / rack.accelerator_power).to("").magnitude
+    it_power_multiplier = (rack.it_power / rack.accelerator_power).to("").magnitude  # @tbl-rack-power total less its non-IT cooling allocation
     cluster_power = cluster_gpu_power * it_power_multiplier
     # ┌── 2. EXECUTE ───────────────────────────────────────
     lead_time_ratio = substation_lead_time_months / gpu_lead_time_months
@@ -2665,6 +3052,12 @@ class GridQueue:
     cluster_power_mw_str = fmt_power(cluster_power, unit=MW, precision=1, commas=False)
 ```
 
+::: {.column-margin}
+![](images/svg/sustainable_ai_grid_interconnection_ladder.svg){width="100%" fig-alt="Time ladder comparing a 24-month substation path with a 6-month GPU procurement path, with the fourfold lag marked as a ratio annotation."}
+
+*Substation lead time can run `{python} GridQueue.ratio_mult_str` longer than GPU procurement.*
+:::
+
 ::: {#psp-sustainable-ai-interconnection-queue .callout-perspective title="The interconnection queue"}
 
 Deploying `{python} GridQueue.cluster_gpus_str` and deploying the electrical substation required to power their IT load (`{python} GridQueue.cluster_power_mw_str`, after the `{python} GridQueue.cluster_gpu_power_mw_str` GPU subtotal is expanded for rack support power) operate on different timelines. On the silicon path, GPU supply chains are volatile, but typical enterprise lead times are `{python} GridQueue.gpu_lead_time_months_str`. On the infrastructure path, permitting, engineering, procurement, construction, and grid connection for a new 10+ MW substation averages `{python} GridQueue.substation_lead_time_months_str`. Infrastructure therefore takes `{python} GridQueue.ratio_mult_str` longer to deploy than the accelerators themselves.
@@ -2692,7 +3085,7 @@ Inside the facility, every conversion stage turns part of the delivered power in
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Infrastructure
 from mlsysim.fmt import check, fmt, fmt_percent, fmt_power, fmt_usd
-from mlsysim.core.units import kW, hour
+from mlsysim.core.units import kW, hour, HOURS_PER_YEAR
 
 class DistributionEfficiencySavings:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -2701,7 +3094,7 @@ class DistributionEfficiencySavings:
     rack_power = 33 * kW  # scenario rack power density
     n_racks = 300  # scenario facility size
     nodes_per_rack = 4  # scenario: four-node racks
-    lifecycle_years = 3  # scenario amortization window
+    lifecycle_years = Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate  # hardware service life
     rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
@@ -2711,7 +3104,7 @@ class DistributionEfficiencySavings:
     node_power = rack_power / nodes_per_rack
     additional_nodes = round((facility_saved / node_power).to("").magnitude)
     additional_racks = additional_nodes / nodes_per_rack
-    lifecycle_hours = lifecycle_years * 365 * 24 * hour
+    lifecycle_hours = lifecycle_years * HOURS_PER_YEAR * hour
     lifecycle_energy_kwh = (facility_saved * lifecycle_hours).to("kWh")
     savings = (lifecycle_energy_kwh * rate).to("dollar").magnitude
 
@@ -2786,8 +3179,9 @@ To make this concrete, consider the power budget for a single rack containing fo
 # │
 # │ Goal:    Itemize power budget for a 4-node DGX H100 rack.
 # │ Show:    Per-component kW and percentage of rack total.
-# │ How:     GPU power from mlsysim constants; other components as inputs;
-# │          total = sum; percentages = component/total × 100.
+# │ How:     GPU power and the support-power components from the
+# │          Systems.Racks.DGX_H100_4Node profile; the component sum is guarded
+# │          against the registry aggregate; percentages = component/total × 100.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt, fmt_percent, fmt_power
@@ -2801,11 +3195,11 @@ class RackPowerBudget:
     nodes_per_rack = rack.nodes_per_rack
     non_accelerator_power = rack.non_accelerator_power
 
-    host_kw = 3.2 * kilowatt  # scenario assumption
-    nvswitch_kw = 1.6 * kilowatt  # scenario assumption
-    ib_kw = 0.8 * kilowatt  # scenario assumption
-    conversion_kw = 2.8 * kilowatt  # scenario: conversion losses inside the IT boundary
-    cooling_kw = 2.7 * kilowatt  # scenario assumption
+    host_kw = rack.host_power.to(kilowatt)
+    nvswitch_kw = rack.switch_power.to(kilowatt)
+    ib_kw = rack.network_power.to(kilowatt)
+    conversion_kw = rack.conversion_loss_power.to(kilowatt)  # conversion losses inside the IT boundary
+    cooling_kw = rack.cooling_allocation_power.to(kilowatt)  # allocated non-IT overhead
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     num_gpus = gpus_per_node * nodes_per_rack
@@ -2912,8 +3306,7 @@ class MegaClusterFacilityPower:
     cluster_gpus = Systems.Clusters.Mega_100K.total_accelerators
     gpu_tdp = Hardware.Cloud.H100.tdp
     rack = Systems.Racks.DGX_H100_4Node
-    cooling_kw = 2.7 * kilowatt  # same cooling row as @tbl-rack-power; exclude before PUE
-    it_power_multiplier = ((rack.accelerator_power + rack.non_accelerator_power - cooling_kw) / rack.accelerator_power).to("").magnitude
+    it_power_multiplier = (rack.it_power / rack.accelerator_power).to("").magnitude  # @tbl-rack-power total less its non-IT cooling allocation
     pue = Systems.Clusters.Mega_100K.effective_pue
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
@@ -2951,16 +3344,18 @@ This grid-procurement problem worsens when model and data growth multiply each o
 # │ Goal: Compare the annual energy of a 100 MW training facility to the annual
 # │       output of an equal-nameplate wind farm at a typical capacity factor.
 # │ Show: 876 GWh facility vs ~263 GWh/wind farm → ~3.3 wind-farm equivalents.
-# │ How: facility = power × 8760 h; wind = power × capacity_factor × 8760 h.
+# │ How: facility = ReferenceStats.FacilityScaleAnchors.HyperscaleCampusPower ×
+# │      hours/year; wind = power × capacity_factor × hours/year.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import ReferenceStats
 from mlsysim.fmt import check, fmt, fmt_energy, fmt_percent, fmt_power
-from mlsysim.core.units import MW, GWh, hour
+from mlsysim.core.units import MW, GWh, hour, HOURS_PER_YEAR
 
 class WindFarmEquivalent:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    facility_power = 100 * MW  # scenario training-facility nameplate
-    hours_per_year = 8760 * hour  # full-capacity operation for one year
+    facility_power = ReferenceStats.FacilityScaleAnchors.HyperscaleCampusPower  # training-facility nameplate
+    hours_per_year = HOURS_PER_YEAR * hour  # full-capacity operation for one year
     capacity_factor = 0.30  # scenario wind-farm capacity factor
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
@@ -3006,7 +3401,7 @@ class SustainableCoolingRackPowerRecap:
     non_gpu_power = rack.non_accelerator_power
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    rack_power = rack.total_power - 2.7 * kilowatt  # exclude the scenario's allocated non-IT overhead
+    rack_power = rack.it_power  # rack total less its allocated non-IT cooling overhead
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(rack_power.to(kilowatt).magnitude > node_gpu_power.to(kilowatt).magnitude, "Rack power should exceed one node's GPU power.")
@@ -3026,9 +3421,54 @@ class SustainableCoolingRackPowerRecap:
 *Below the thermal limit the chip runs safely; cross it and throttling climbs steeply.*
 :::
 
-Air cooling, the dominant technology for decades, works by blowing room-temperature air across heat sinks attached to the chips. The air absorbs heat at a rate determined by its specific heat capacity, roughly 1.0 kJ/kg/K. The heated air is exhausted from the rear of the rack, typically 15--20 degrees Celsius warmer than the inlet, and directed to a computer room air conditioning (CRAC) unit that cools it before recirculating.
+```{python}
+#| echo: false
+#| label: coolant-thermal-properties
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COOLANT THERMAL PROPERTIES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: air-cooling prose immediately below.
+# │
+# │ Goal: Pin air's specific heat and the air/water/copper thermal
+# │       conductivities to the physical-constants module.
+# │ Show: air c_p ≈ 1.0 kJ/kg/K; conductivity 0.026 (air), 0.6 (water),
+# │       400 (copper) W/m/K.
+# │ How: mlsysim.physics.constants AIR_SPECIFIC_HEAT, THERMAL_CONDUCTIVITY_*.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics.constants import (
+    AIR_SPECIFIC_HEAT,
+    THERMAL_CONDUCTIVITY_AIR,
+    THERMAL_CONDUCTIVITY_COPPER,
+    THERMAL_CONDUCTIVITY_WATER,
+)
+from mlsysim.core.units import K, kg, kJ, meter, watt
+from mlsysim.fmt import check, fmt_magnitude
 
-The fundamental problem is that air is a poor thermal conductor. Its thermal conductivity is only 0.026 W/m/K, compared to 0.6 W/m/K for water and 400 W/m/K for copper. Removing a large heat load with air requires substantial volumetric flow. Fan power depends on that flow, pressure drop, and fan efficiency; rack power alone does not specify a fixed cooling fraction.
+_conductivity = watt / (meter * K)
+
+class CoolantThermalProperties:
+    """Heat-transfer properties of air, water, and copper."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    air_cp = AIR_SPECIFIC_HEAT
+    k_air = THERMAL_CONDUCTIVITY_AIR
+    k_water = THERMAL_CONDUCTIVITY_WATER
+    k_copper = THERMAL_CONDUCTIVITY_COPPER
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(k_air < k_water < k_copper, "Prose orders air < water < copper conductivity")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    air_cp_kj_value_str = fmt_magnitude(air_cp, unit=kJ / (kg * K), precision=1, commas=False)
+    k_air_value_str = fmt_magnitude(k_air, unit=_conductivity, precision=3, commas=False)
+    k_water_value_str = fmt_magnitude(k_water, unit=_conductivity, precision=1, commas=False)
+    k_copper_value_str = fmt_magnitude(k_copper, unit=_conductivity, precision=0, commas=False)
+```
+
+Air cooling, the dominant technology for decades, works by blowing room-temperature air across heat sinks attached to the chips. The air absorbs heat at a rate determined by its specific heat capacity, roughly `{python} CoolantThermalProperties.air_cp_kj_value_str` kJ/kg/K. The heated air is exhausted from the rear of the rack, typically 15--20 degrees Celsius warmer than the inlet, and directed to a computer room air conditioning (CRAC) unit that cools it before recirculating.
+
+The fundamental problem is that air is a poor thermal conductor. Its thermal conductivity is only `{python} CoolantThermalProperties.k_air_value_str` W/m/K, compared to `{python} CoolantThermalProperties.k_water_value_str` W/m/K for water and `{python} CoolantThermalProperties.k_copper_value_str` W/m/K for copper. Removing a large heat load with air requires substantial volumetric flow. Fan power depends on that flow, pressure drop, and fan efficiency; rack power alone does not specify a fixed cooling fraction.
 
 The physics can be made precise with a simple calculation. The heat removal capacity of a fluid flow is:
 
@@ -3045,9 +3485,13 @@ $$Q = \dot{m} \times c_p \times \Delta T$$
 # │ Goal: Compute the mass flow, volumetric flow, and CFM required to remove a
 # │       fixed heat load with air, from the heat-removal equation Q = m_dot·cp·ΔT.
 # │ Show: 6.6 kg/s mass flow, 5.5 m^3/s volumetric flow, ~11,700 CFM.
-# │ How: m_dot = Q / (cp·ΔT); V_dot = m_dot / rho; convert to CFM.
+# │ How: m_dot = Q / (cp·ΔT); V_dot = m_dot / rho; convert to CFM. Air
+# │      properties from mlsysim.physics.constants; Q from
+# │      Infrastructure.Racks.AI_High.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Infrastructure
+from mlsysim.physics.constants import AIR_DENSITY_SEA_LEVEL, AIR_SPECIFIC_HEAT
 from mlsysim.core.units import K, J, feet, kg, kW, meter, minute, second, watt
 from mlsysim.fmt import (
     check,
@@ -3067,11 +3511,10 @@ _cfm_unit = feet**3 / minute
 
 class AirCoolingMassFlow:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    # Physical / scenario constants (no canonical mlsysim home yet):
-    cp = 1005 * J / (kg * K)  # specific heat capacity of air at constant pressure
-    delta_t = 15 * K  # inlet 20 C → outlet 35 C
-    air_density = 1.2 * kg / _m3  # sea-level dry air
-    heat_load = 100 * kW  # rack heat load to remove
+    cp = AIR_SPECIFIC_HEAT  # specific heat capacity of air at constant pressure
+    delta_t = 15 * K  # scenario assumption: inlet 20 C → outlet 35 C
+    air_density = AIR_DENSITY_SEA_LEVEL  # sea-level dry air
+    heat_load = Infrastructure.Racks.AI_High.power_kw * kW  # high-density AI rack heat load
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     mass_flow = (heat_load / (cp * delta_t)).to(kg / second)
@@ -3123,8 +3566,7 @@ class PueSavings:
     cluster_gpus = Systems.Clusters.Training_10K.total_accelerators
     rack = Systems.Racks.DGX_H100_4Node
     accelerator_power = cluster_gpus * Hardware.Cloud.H100.tdp
-    cooling_kw = 2.7 * kilowatt  # same cooling row as @tbl-rack-power; exclude before PUE
-    it_power_multiplier = ((rack.accelerator_power + rack.non_accelerator_power - cooling_kw) / rack.accelerator_power).to("").magnitude
+    it_power_multiplier = (rack.it_power / rack.accelerator_power).to("").magnitude  # @tbl-rack-power total less its non-IT cooling allocation
     it_power = accelerator_power * it_power_multiplier
     pue_air_simple = Infrastructure.FacilityCooling.SimpleAir.pue
     pue_air_industry = Infrastructure.FacilityCooling.Legacy.pue
@@ -3153,15 +3595,19 @@ class PueSavings:
     savings_15_to_11_musd_str = fmt_usd(savings_15_to_11_usd, precision=1, scale="M")
     savings_158_to_110_musd_str = fmt_usd(savings_158_to_110_usd, precision=1, scale="M")
     households_158_to_110_str = fmt(households_158_to_110_rounded, precision=0, commas=True)
+    pue_air_simple_str = fmt(pue_air_simple, precision=1, commas=False)
+    pue_air_industry_str = fmt(pue_air_industry, precision=2, commas=False)
+    pue_liquid_1dp_str = fmt(pue_liquid, precision=1, commas=False)
+    pue_liquid_2dp_str = fmt(pue_liquid, precision=2, commas=False)
 ```
 
-Reducing non-IT overhead lowers facility electricity at fixed IT load; PUE captures cooling and facility-side electrical losses together. At the scale of a 10,000-GPU cluster consuming `{python} PueSavings.it_power_mw_str` of IT power after rack support load, the difference between PUE 1.5 and PUE 1.1 is `{python} PueSavings.diff_15_to_11_mw_str` of additional facility power, costing approximately `{python} PueSavings.savings_15_to_11_musd_str` per year under the stated electricity-rate assumption.
+Reducing non-IT overhead lowers facility electricity at fixed IT load; PUE captures cooling and facility-side electrical losses together. At the scale of a 10,000-GPU cluster consuming `{python} PueSavings.it_power_mw_str` of IT power after rack support load, the difference between PUE `{python} PueSavings.pue_air_simple_str` and PUE `{python} PueSavings.pue_liquid_1dp_str` is `{python} PueSavings.diff_15_to_11_mw_str` of additional facility power, costing approximately `{python} PueSavings.savings_15_to_11_musd_str` per year under the stated electricity-rate assumption.
 
-[^fn-pue-facility-metric]: **PUE Cluster Savings**\index{Power Usage Effectiveness!savings}: The scenario compares fixed PUE values of 1.58 and 1.10; these inputs are not a current industry or vendor inventory. For a 10,000-GPU cluster consuming `{python} PueSavings.it_power_mw_str` of IT power after rack support load, reducing PUE from 1.58 to 1.10 saves `{python} PueSavings.diff_158_to_110_mw_str` of non-IT overhead, roughly `{python} PueSavings.savings_158_to_110_musd_str` per year in electricity and the equivalent of removing `{python} PueSavings.households_158_to_110_str` residential homes from the grid. The PUE assumption must cover all non-IT loads at the selected facility boundary.
+[^fn-pue-facility-metric]: **PUE Cluster Savings**\index{Power Usage Effectiveness!savings}: The scenario compares fixed PUE values of `{python} PueSavings.pue_air_industry_str` and `{python} PueSavings.pue_liquid_2dp_str`; these inputs are not a current industry or vendor inventory. For a 10,000-GPU cluster consuming `{python} PueSavings.it_power_mw_str` of IT power after rack support load, reducing PUE from `{python} PueSavings.pue_air_industry_str` to `{python} PueSavings.pue_liquid_2dp_str` saves `{python} PueSavings.diff_158_to_110_mw_str` of non-IT overhead, roughly `{python} PueSavings.savings_158_to_110_musd_str` per year in electricity and the equivalent of removing `{python} PueSavings.households_158_to_110_str` residential homes from the grid. The PUE assumption must cover all non-IT loads at the selected facility boundary.
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import check, fmt, fmt_power, fmt_usd
+from mlsysim.fmt import check, fmt, fmt_power, fmt_time, fmt_usd
 from mlsysim.core.units import watt, kilowatt, hour, USD, kWh
 
 class H100TdpCoolingRecap:
@@ -3181,7 +3627,7 @@ class H100TdpCoolingRecap:
     liquid_cooling = liquid_total - it_power
     savings = air_cooling - liquid_cooling
     annual_savings_usd = (savings * hours_per_year * electricity_rate).to(USD)
-    lifecycle_years = 3
+    lifecycle_years = Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate
     three_year_savings_usd = annual_savings_usd * lifecycle_years
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -3198,9 +3644,65 @@ class H100TdpCoolingRecap:
     electricity_rate_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
     three_year_savings_str = fmt_usd(three_year_savings_usd)
     pue_liquid_str = fmt(pue_liquid, precision=2, commas=False)
+    lifecycle_years_attr_str = fmt_time(lifecycle_years, 'year', precision=0, commas=False, style='word', attributive=True)
 ```
 
-Water has a specific heat capacity of 4.18 kJ/kg/K, over four times that of air, and a thermal conductivity roughly 25$\times$ higher. These physical properties make water an inherently superior heat transfer medium. To appreciate the magnitude of the difference, consider how much fluid must flow to remove `{python} H100TdpCoolingRecap.tdp_w_str` from a single GPU. Air at a 15-degree temperature rise requires tens of liters per second of airflow (a small wind tunnel). Water at the same temperature rise requires only about 0.01 liters per second (a thin stream). This thousands-fold difference in volumetric flow rate is why air cooling requires massive fans and carefully designed airflow paths, while liquid cooling requires only thin pipes and small pumps.
+```{python}
+#| echo: false
+#| label: coolant-flow-comparison
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AIR VS. WATER COOLANT FLOW (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: water-cooling prose immediately below.
+# │
+# │ Goal: Compare air and water as coolants for one H100 at a 15 K rise.
+# │ Show: water c_p 4.18 kJ/kg/K (over 4× air); conductivity ~23× air; air
+# │       needs tens of L/s, water ~0.01 L/s, a thousands-fold difference.
+# │ How: flow = P / (c_p · ΔT · ρ) with mlsysim.physics.constants properties and
+# │      Hardware.Cloud.H100.tdp.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.physics.constants import (
+    AIR_DENSITY_SEA_LEVEL,
+    AIR_SPECIFIC_HEAT,
+    THERMAL_CONDUCTIVITY_AIR,
+    THERMAL_CONDUCTIVITY_WATER,
+    WATER_SPECIFIC_HEAT,
+)
+from mlsysim.core.units import K, kg, kJ, second, ureg
+from mlsysim.fmt import check, fmt, fmt_magnitude, fmt_multiple
+
+_liter = ureg.liter
+
+class CoolantFlowComparison:
+    """Volumetric coolant flow needed to remove one H100's heat."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    gpu_power = Hardware.Cloud.H100.tdp
+    delta_t = 15 * K  # scenario assumption: same rise as the air-cooling example
+    water_density = 1 * kg / _liter  # scenario assumption: liquid water, ~1 kg per liter
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    cp_ratio = (WATER_SPECIFIC_HEAT / AIR_SPECIFIC_HEAT).to("").magnitude
+    k_ratio = (THERMAL_CONDUCTIVITY_WATER / THERMAL_CONDUCTIVITY_AIR).to("").magnitude
+    air_flow = (gpu_power / (AIR_SPECIFIC_HEAT * delta_t) / AIR_DENSITY_SEA_LEVEL).to(_liter / second)
+    water_flow = (gpu_power / (WATER_SPECIFIC_HEAT * delta_t) / water_density).to(_liter / second)
+    flow_ratio = (air_flow / water_flow).to("").magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(4 < cp_ratio < 5, "Prose says water's specific heat is over four times air's")
+    check(10 <= air_flow.magnitude < 100, "Prose says air needs tens of liters per second")
+    check(0.005 < water_flow.magnitude < 0.015, "Prose says water needs about 0.01 L/s")
+    check(1_000 <= flow_ratio < 10_000, "Prose says the flow difference is thousands-fold")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    water_cp_kj_value_str = fmt_magnitude(WATER_SPECIFIC_HEAT, unit=kJ / (kg * K), precision=2, commas=False)
+    k_ratio_mult_str = fmt_multiple(round(k_ratio), precision=0, commas=False)
+    water_flow_value_str = fmt(water_flow.magnitude, precision=2, commas=False)
+```
+
+Water has a specific heat capacity of `{python} CoolantFlowComparison.water_cp_kj_value_str` kJ/kg/K, over four times that of air, and a thermal conductivity roughly `{python} CoolantFlowComparison.k_ratio_mult_str` higher. These physical properties make water an inherently superior heat transfer medium. To appreciate the magnitude of the difference, consider how much fluid must flow to remove `{python} H100TdpCoolingRecap.tdp_w_str` from a single GPU. Air at a 15-degree temperature rise requires tens of liters per second of airflow (a small wind tunnel). Water at the same temperature rise requires only about `{python} CoolantFlowComparison.water_flow_value_str` liters per second (a thin stream). This thousands-fold difference in volumetric flow rate is why air cooling requires massive fans and carefully designed airflow paths, while liquid cooling requires only thin pipes and small pumps.
 
 Direct-to-chip liquid cooling\index{Liquid Cooling!direct-to-chip}\index{Direct-to-Chip Liquid Cooling!cold plate mechanism} routes chilled water (or a specialized dielectric coolant) through machined copper cold plates mounted directly on each GPU package. The cold plate makes physical contact with the GPU's heat spreader through a thin layer of thermal interface material, creating a thermal path with a resistance of less than 0.1 K/W. The coolant absorbs heat within millimeters of the die surface and carries it via manifolds and pipes to a coolant distribution unit (CDU)\index{Coolant Distribution Unit!cooling loop isolation} at the rack or row level.
 
@@ -3238,7 +3740,7 @@ Consider a `{python} H100TdpCoolingRecap.n_gpus_str`-GPU cluster of H100s at `{p
 - Air cooling (PUE `{python} H100TdpCoolingRecap.pue_air_str`): Total facility power = `{python} H100TdpCoolingRecap.it_power_kw_str` $\times$ `{python} H100TdpCoolingRecap.pue_air_str` = `{python} H100TdpCoolingRecap.air_total_kw_str`. Cooling overhead = `{python} H100TdpCoolingRecap.air_cooling_kw_str`.
 - Liquid cooling (PUE `{python} H100TdpCoolingRecap.pue_liquid_str`): Total facility power = `{python} H100TdpCoolingRecap.it_power_kw_str` $\times$ `{python} H100TdpCoolingRecap.pue_liquid_str` = `{python} H100TdpCoolingRecap.liquid_total_kw_str`. Cooling overhead = `{python} H100TdpCoolingRecap.liquid_cooling_kw_str`.
 
-**Savings**: Liquid cooling saves `{python} H100TdpCoolingRecap.savings_kw_str` of continuous power. At `{python} H100TdpCoolingRecap.electricity_rate_str`, the annual savings are approximately `{python} H100TdpCoolingRecap.annual_savings_str`. Over a 3-year hardware lifecycle, the cooling savings alone total `{python} H100TdpCoolingRecap.three_year_savings_str`, which is the figure to set against the installed capital cost of the liquid-cooling system when computing its payback period.
+**Savings**: Liquid cooling saves `{python} H100TdpCoolingRecap.savings_kw_str` of continuous power. At `{python} H100TdpCoolingRecap.electricity_rate_str`, the annual savings are approximately `{python} H100TdpCoolingRecap.annual_savings_str`. Over a `{python} H100TdpCoolingRecap.lifecycle_years_attr_str` hardware lifecycle, the cooling savings alone total `{python} H100TdpCoolingRecap.three_year_savings_str`, which is the figure to set against the installed capital cost of the liquid-cooling system when computing its payback period.
 
 :::
 
@@ -3248,9 +3750,61 @@ Consider a `{python} H100TdpCoolingRecap.n_gpus_str`-GPU cluster of H100s at `{p
 
 :::
 
-The final link in the cooling chain is **heat rejection**\index{Heat Rejection!definition}: getting the heat from the building's chilled water loop to the outside environment. The dominant technology is the cooling tower, which sprays warm water over a fill medium and uses evaporation to carry heat into the atmosphere. Evaporative cooling is thermally efficient (the latent heat of vaporization of water is 2,260 kJ/kg, compared to 4.18 kJ/kg/K for sensible heating), but it consumes water.
+```{python}
+#| echo: false
+#| label: cooling-tower-water-use
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COOLING-TOWER WATER USE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: heat-rejection prose immediately below.
+# │
+# │ Goal: Size the annual water draw of a 10 MW evaporatively cooled facility
+# │       and express it in US household-years of water.
+# │ Show: 10 MW × 8,760 h × 1.8 L/kWh ≈ 158 million liters ≈ 350 to 415
+# │       household-years; water c_p 4.18 kJ/kg/K.
+# │ How: ReferenceStats.FacilityScaleAnchors.ReferenceItLoad × hours/year ×
+# │      Infrastructure.FacilityCooling.Typical.wue; ReferenceStats.WaterAnchors.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Infrastructure, ReferenceStats
+from mlsysim.physics.constants import WATER_SPECIFIC_HEAT
+from mlsysim.core.units import K, kg, kJ, kWh, MW, hour, ureg, HOURS_PER_YEAR
+from mlsysim.fmt import check, fmt, fmt_int, fmt_magnitude, fmt_power
 
-A 10 MW data center with evaporative cooling towers can consume well over 100 million liters of water per year, depending on climate and cooling design, which has become a significant concern in water-stressed regions. To put this in perspective, 140 million liters is roughly 311--368 household-years of water use using the earlier 380,000--450,000-liter annual household baseline. As ML data centers grow to 100 MW and beyond, their water footprint becomes a meaningful factor in local resource planning.
+_liter = ureg.liter
+
+class CoolingTowerWaterUse:
+    """Annual evaporative water use of a reference IT load."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    it_load = ReferenceStats.FacilityScaleAnchors.ReferenceItLoad
+    wue = float(Infrastructure.FacilityCooling.Typical.wue) * _liter / kWh
+    household_low = ReferenceStats.WaterAnchors.UsHouseholdAnnualWaterLow
+    household_high = ReferenceStats.WaterAnchors.UsHouseholdAnnualWaterHigh
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    annual_it_energy = (it_load * HOURS_PER_YEAR * hour).to(kWh)
+    annual_water = (annual_it_energy * wue).to(_liter)
+    household_years_low = (annual_water / household_high).to("").magnitude
+    household_years_high = (annual_water / household_low).to("").magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(annual_water.magnitude > 100e6, "Prose says well over 100 million liters per year")
+    check(household_years_low < household_years_high, "Household-year band must be ordered")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    it_load_mw_str = fmt_power(it_load, unit=MW, precision=0, commas=False)
+    wue_str = fmt(wue.to(_liter / kWh).magnitude, precision=1, commas=False)
+    annual_water_million_liters_str = fmt_int(annual_water.magnitude / 1e6, commas=False)
+    household_years_low_str = fmt_int(household_years_low, commas=False)
+    household_years_high_str = fmt_int(household_years_high, commas=False)
+    water_cp_kj_value_str = fmt_magnitude(WATER_SPECIFIC_HEAT, unit=kJ / (kg * K), precision=2, commas=False)
+    campus_power_mw_str = fmt_power(ReferenceStats.FacilityScaleAnchors.HyperscaleCampusPower, unit=MW, precision=0, commas=False)
+```
+
+The final link in the cooling chain is **heat rejection**\index{Heat Rejection!definition}: getting the heat from the building's chilled water loop to the outside environment. The dominant technology is the cooling tower, which sprays warm water over a fill medium and uses evaporation to carry heat into the atmosphere. Evaporative cooling is thermally efficient (the latent heat of vaporization of water is 2,260 kJ/kg, compared to `{python} CoolingTowerWaterUse.water_cp_kj_value_str` kJ/kg/K for sensible heating), but it consumes water.
+
+A `{python} CoolingTowerWaterUse.it_load_mw_str` data center with evaporative cooling towers can consume well over 100 million liters of water per year, depending on climate and cooling design, which has become a significant concern in water-stressed regions. At the evaporative WUE of `{python} CoolingTowerWaterUse.wue_str` L/kWh used earlier, continuous operation consumes about `{python} CoolingTowerWaterUse.annual_water_million_liters_str` million liters per year, roughly `{python} CoolingTowerWaterUse.household_years_low_str`--`{python} CoolingTowerWaterUse.household_years_high_str` household-years of water use under the earlier annual household baseline. As ML data centers grow to `{python} CoolingTowerWaterUse.campus_power_mw_str` and beyond, their water footprint becomes a meaningful factor in local resource planning.
 
 Dry coolers, which use fans to blow air over a radiator without evaporation, eliminate water consumption but work efficiently only when the ambient air temperature is well below the coolant temperature, limiting their effectiveness in hot climates. Many facilities use hybrid approaches: dry coolers during cool weather and evaporative towers during heat waves.
 
@@ -3508,14 +4062,53 @@ Edge deployment can be more sustainable than cloud deployment when designed corr
 
 ARM-based edge devices operate under fundamentally different power constraints than data center accelerators. The engineering choice is to match each inference workload to the smallest power tier that still satisfies latency and accuracy.
 
+```{python}
+#| echo: false
+#| label: edge-power-tier-anchors
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EDGE POWER TIER ANCHORS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-edge-power-budgets example devices and the Archetype C phone
+# │          envelope in @sec-sustainable-ai-tinyml-power-state-dynamics-ceaf.
+# │
+# │ Goal: Pin the named Jetson configurable power ranges and the Archetype C
+# │       phone envelope to the registry.
+# │ Show: Jetson Orin NX 10--25 W; Jetson AGX Orin 15--60 W; phones 2--10 W.
+# │ How: Hardware.Edge.{JetsonOrinNX,JetsonAGXOrin}.tdp_min/tdp_max;
+# │      ReferenceStats.MobilePower sustained-low to burst-high.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, ReferenceStats
+from mlsysim.core.units import watt
+from mlsysim.fmt import check, fmt_qty_range
+
+class EdgePowerTierAnchors:
+    """Named edge-device power ranges used in the edge power-budget table."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    orin_nx = Hardware.Edge.JetsonOrinNX
+    agx_orin = Hardware.Edge.JetsonAGXOrin
+    phone_low = ReferenceStats.MobilePower.MobileMlSustainedLow
+    phone_high = ReferenceStats.MobilePower.MobileMlBurstHigh
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(orin_nx.tdp_min < orin_nx.tdp_max <= agx_orin.tdp_max, "Jetson power ranges should be ordered")
+    check(phone_low < phone_high, "Phone envelope should be ordered")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    orin_nx_range_str = fmt_qty_range(orin_nx.tdp_min, orin_nx.tdp_max, watt, precision=0, commas=False)
+    agx_orin_range_str = fmt_qty_range(agx_orin.tdp_min, agx_orin.tdp_max, watt, precision=0, commas=False)
+    phone_range_str = fmt_qty_range(phone_low, phone_high, watt, precision=0, commas=False)
+```
+
 Power budgets reflect the physical constraints of battery capacity, thermal dissipation, and deployment environment. @Tbl-edge-power-budgets groups edge AI power budget categories\index{Edge AI!power budget categories} and shows how these constraints propagate. TinyML\index{TinyML!definition} devices (microcontrollers that run small models in kilobytes of memory) operating from coin cells or energy harvesting cannot exceed milliwatt average power; mobile devices must balance user experience with battery life; and automotive systems face thermal constraints within enclosed vehicle compartments despite having access to vehicle power.
 
-| **Platform Category**  | **Idle Power** | **Active Power** | **Peak Power** | **Example Devices**                                                                   |
-|:-----------------------|:--------------:|:----------------:|:--------------:|:--------------------------------------------------------------------------------------|
-| **TinyML (MCU)**       | 1--100 $\mu$W  |     1--50 mW     |     100 mW     | Arduino Nano 33, STM32H7, Nordic nRF5340                                              |
-| **Mobile NPU**         |   10--100 mW   |     0.5--5 W     |      10 W      | Pixel Tensor, Apple Neural Engine, Snapdragon NPU                                     |
-| **Edge GPU/TPU**       |     1--5 W     |     5--30 W      |      75 W      | NVIDIA Jetson Orin NX (10--25 W) and AGX Orin (15--60 W), Google Edge TPU, RPi AI Kit |
-| **Autonomous Vehicle** |    10--50 W    |    50--200 W     |     500 W      | Tesla FSD Computer, Mobileye EyeQ, NVIDIA Drive                                       |
+| **Platform Category**  | **Idle Power** | **Active Power** | **Peak Power** | **Example Devices**                                                                                                                                                      |
+|:-----------------------|:--------------:|:----------------:|:--------------:|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **TinyML (MCU)**       | 1--100 $\mu$W  |     1--50 mW     |     100 mW     | Arduino Nano 33, STM32H7, Nordic nRF5340                                                                                                                                 |
+| **Mobile NPU**         |   10--100 mW   |     0.5--5 W     |      10 W      | Pixel Tensor, Apple Neural Engine, Snapdragon NPU                                                                                                                        |
+| **Edge GPU/TPU**       |     1--5 W     |     5--30 W      |      75 W      | NVIDIA Jetson Orin NX (`{python} EdgePowerTierAnchors.orin_nx_range_str`) and AGX Orin (`{python} EdgePowerTierAnchors.agx_orin_range_str`), Google Edge TPU, RPi AI Kit |
+| **Autonomous Vehicle** |    10--50 W    |    50--200 W     |     500 W      | Tesla FSD Computer, Mobileye EyeQ, NVIDIA Drive                                                                                                                          |
 
 : **Edge AI Power Budget Categories**: Edge platforms span five orders of magnitude in power consumption, from sub-milliwatt TinyML systems to automotive compute platforms approaching data center power levels. Sustainable deployment requires matching workload requirements to appropriate power tiers. {#tbl-edge-power-budgets}
 
@@ -3525,7 +4118,7 @@ TinyML devices are the smallest members of the edge fleets of @sec-edge-intellig
 
 $$P_{\text{average}} = P_{\text{active}} \times \frac{t_{\text{inference}}}{T_{\text{period}}} + P_{\text{sleep}} \times \frac{T_{\text{period}} - t_{\text{inference}}}{T_{\text{period}}}$$ {#eq-tinyml-duty-cycle}
 
-Consider a keyword-spotting model running on a Cortex-M4 microcontroller, an extreme well below the 2--10 W phones of Archetype C (@sec-vol2-introduction-archetypes) but governed by the same battery arithmetic. The device operates with an active inference power of 15 mW for 20 ms during each detection cycle, transitions to a deep-sleep draw of 10 microamps at 3.3 V (33 microwatts) between evaluations, and repeats on a 1-second detection period during continuous listening. Substituting these values into @eq-tinyml-duty-cycle yields the average power draw:
+Consider a keyword-spotting model running on a Cortex-M4 microcontroller, an extreme well below the `{python} EdgePowerTierAnchors.phone_range_str` phones of Archetype C (@sec-vol2-introduction-archetypes) but governed by the same battery arithmetic. The device operates with an active inference power of 15 mW for 20 ms during each detection cycle, transitions to a deep-sleep draw of 10 microamps at 3.3 V (33 microwatts) between evaluations, and repeats on a 1-second detection period during continuous listening. Substituting these values into @eq-tinyml-duty-cycle yields the average power draw:
 
 $$P_{\text{average}} = 15 \text{ mW} \times \frac{20 \text{ ms}}{1000 \text{ ms}} + 0.033 \text{ mW} \times \frac{980 \text{ ms}}{1000 \text{ ms}}$$
 
@@ -3674,6 +4267,39 @@ class OnDeviceLearningEnergy:
 
 The local-processing decision compares the energy of the required computation with the communication and remote computation it avoids. Per-bit radio costs motivate the comparison, but the full job must also include repeated training rounds and model transfers.
 
+```{python}
+#| echo: false
+#| label: edge-energy-hierarchy
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EDGE ENERGY HIERARCHY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The energy hierarchy" .callout-perspective immediately below.
+# │
+# │ Goal: Pin the per-operation arithmetic energies to Hardware.Tech.Op.
+# │ Show: INT32 add 0.1 pJ; FP32 multiply 3.7 pJ (Horowitz 2014, 45 nm).
+# │ How: Hardware.Tech.Op.AddInt32.energy and Hardware.Tech.Op.FlopFp32.energy.
+# │      The wireless per-bit range has no registry home and stays in prose.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import ureg
+from mlsysim.fmt import check, fmt_magnitude
+
+class EdgeEnergyHierarchy:
+    """Per-operation energies for the local-versus-radio comparison."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    int32_add = Hardware.Tech.Op.AddInt32.energy
+    fp32_mult = Hardware.Tech.Op.FlopFp32.energy
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(int32_add < fp32_mult, "INT32 add should cost less than an FP32 multiply")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    int32_add_pj_value_str = fmt_magnitude(int32_add, unit=ureg.picojoule / ureg.flop, precision=1, commas=False)
+    fp32_mult_pj_value_str = fmt_magnitude(fp32_mult, unit=ureg.picojoule / ureg.flop, precision=1, commas=False)
+```
+
 :::: {#psp-sustainable-ai-energy-hierarchy .callout-perspective title="The energy hierarchy"}
 
 ::: {.column-margin}
@@ -3686,8 +4312,8 @@ The local-processing decision compares the energy of the required computation wi
 
 Energy cost per operation (approximate):
 
-*   32-bit integer add: 0.1 pJ
-*   32-bit float mult: 4 pJ
+*   32-bit integer add: `{python} EdgeEnergyHierarchy.int32_add_pj_value_str` pJ
+*   32-bit float mult: `{python} EdgeEnergyHierarchy.fp32_mult_pj_value_str` pJ
 *   Wireless transmit (1 bit): 100,000--500,000 pJ (Bluetooth/Wi-Fi)
 
 **Systems insight**: Under these illustrative component costs, a transmitted bit consumes far more energy than one arithmetic operation. This motivates local processing but does not establish an offloading threshold: include memory, radio startup and protocol overhead, idle power, and remote computation in the full edge-cloud comparison. Local processing wins only when those complete terms favor it.
@@ -4710,9 +5336,41 @@ Algorithmic optimizations reduce per-operation energy, but the operational envir
 
 #### Green data centers {#sec-sustainable-ai-green-data-centers-2580}
 
-A single hyperscale data center can consume over 100 MW of power, comparable to a small city.[^fn-pue-efficiency-gap] Reducing this footprint requires three complementary strategies: renewable energy integration, advanced cooling, and AI-driven optimization.
+```{python}
+#| echo: false
+#| label: green-datacenter-scale
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GREEN DATA-CENTER SCALE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-sustainable-ai-green-data-centers-2580 prose and
+# │          [^fn-pue-efficiency-gap] immediately below.
+# │
+# │ Goal: Reuse the hyperscale campus power anchor at the green-data-center
+# │       section.
+# │ Show: 100 MW.
+# │ How: ReferenceStats.FacilityScaleAnchors.HyperscaleCampusPower.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import ReferenceStats
+from mlsysim.core.units import MW
+from mlsysim.fmt import check, fmt_power
 
-[^fn-pue-efficiency-gap]: **PUE Gap**\index{PUE Gap!definition}\index{PUE!hyperscale efficiency gap}: The PUE model in @sec-sustainable-ai-facilitylevel-power-metrics-5558 shows that facility overhead scales with every watt of IT load. At 100 MW, even a small PUE change therefore represents megawatts of cooling and power-delivery capacity, but its carbon value still depends on the grid signal.
+class GreenDatacenterScale:
+    """Hyperscale campus power for the green-data-center discussion."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    campus_power = ReferenceStats.FacilityScaleAnchors.HyperscaleCampusPower
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(campus_power.to(MW).magnitude - 100) < 1, "Prose frames the campus as a small-city load")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    campus_power_mw_str = fmt_power(campus_power, unit=MW, precision=0, commas=False)
+```
+
+A single hyperscale data center can consume over `{python} GreenDatacenterScale.campus_power_mw_str` of power, comparable to a small city.[^fn-pue-efficiency-gap] Reducing this footprint requires three complementary strategies: renewable energy integration, advanced cooling, and AI-driven optimization.
+
+[^fn-pue-efficiency-gap]: **PUE Gap**\index{PUE Gap!definition}\index{PUE!hyperscale efficiency gap}: The PUE model in @sec-sustainable-ai-facilitylevel-power-metrics-5558 shows that facility overhead scales with every watt of IT load. At `{python} GreenDatacenterScale.campus_power_mw_str`, even a small PUE change therefore represents megawatts of cooling and power-delivery capacity, but its carbon value still depends on the grid signal.
 
 Major cloud providers have announced renewable-energy commitments, but intermittency remains a challenge. AI infrastructure must incorporate energy storage solutions and intelligent scheduling that shifts workloads to times of peak renewable availability. Google's published 2030 target for 24/7 carbon-free energy[^fn-cfe-decarbonization-challenge] illustrates the harder version of this goal: matching electricity consumption with carbon-free generation, including nuclear as well as renewables, hour by hour rather than only on an annual basis.
 
@@ -4855,7 +5513,7 @@ Sustainability involves counterintuitive physics where efficiency improvements c
 
 **Fallacy**: *Cloud computing automatically makes AI systems more environmentally sustainable.*
 
-Engineers assume cloud providers operate efficiently and sustainably. Cloud infrastructure can improve utilization and facility efficiency, but it transfers neither the physical footprint nor the customer's accounting responsibility out of existence. Training a 7B model on `{python} TrainingEmissions.n_gpus_str` A100s for `{python} TrainingEmissions.training_days_str` produces `{python} TrainingEmissions.emissions_tons_str` CO~2~ on the US average grid (`{python} TrainingEmissions.grid_ci_g_per_kwh_str`) but only `{python} TrainingEmissions.quebec_emissions_kg_str` CO~2~ on Quebec's hydroelectric grid (`{python} TrainingEmissions.quebec_ci_g_per_kwh_str` operational), a roughly `{python} TrainingEmissions.emissions_ratio_mult_str` difference for this US-average-versus-Quebec pairing. The hydroelectric figure is an operational factor, not a lifecycle-zero one. As demonstrated in @sec-sustainable-ai-carbon-footprint-calculation-c2fe, cloud comparisons must disclose region, energy boundary, utilization, embodied allocation, and whether the electricity is Scope 2 for the provider or Scope 3 for the customer.
+Engineers assume cloud providers operate efficiently and sustainably. Cloud infrastructure can improve utilization and facility efficiency, but it transfers neither the physical footprint nor the customer's accounting responsibility out of existence. Training a `{python} TrainingEmissions.model_params_b_str` model on `{python} TrainingEmissions.n_gpus_str` A100s for `{python} TrainingEmissions.training_days_str` produces `{python} TrainingEmissions.emissions_tons_str` CO~2~ on the US average grid (`{python} TrainingEmissions.grid_ci_g_per_kwh_str`) but only `{python} TrainingEmissions.quebec_emissions_kg_str` CO~2~ on Quebec's hydroelectric grid (`{python} TrainingEmissions.quebec_ci_g_per_kwh_str` operational), a roughly `{python} TrainingEmissions.emissions_ratio_mult_str` difference for this US-average-versus-Quebec pairing. The hydroelectric figure is an operational factor, not a lifecycle-zero one. As demonstrated in @sec-sustainable-ai-carbon-footprint-calculation-c2fe, cloud comparisons must disclose region, energy boundary, utilization, embodied allocation, and whether the electricity is Scope 2 for the provider or Scope 3 for the customer.
 
 :::
 
@@ -4863,7 +5521,7 @@ Engineers assume cloud providers operate efficiently and sustainably. Cloud infr
 
 **Pitfall**: *Focusing only on operational energy consumption while ignoring embodied carbon and lifecycle impacts.*
 
-Teams optimize training efficiency while ignoring manufacturing emissions. In low-carbon grids, embodied carbon can dominate fleet-level footprint accounting. As quantified in @sec-sustainable-ai-embodied-carbon-assessment-9de0, an A100 accelerator embodies roughly 150 kg CO~2~ from manufacturing [@luccioni2023estimating]; for the earlier 14-day, 64-A100 training run, the unamortized upfront burden is roughly 9.6 metric tons CO~2~. Amortized over a 4-year service life, the share attributable to this specific 14-day job is about 90 kg. The job comparison must use that allocated share; a fleet lifecycle comparison must instead compare the full manufacturing burden against operations over the same fleet lifetime. Comparing the entire manufacturing burden with one short job's electricity would mix boundaries. Extending hardware lifetime from three to five years reduces amortized embodied carbon by 40 percent, but procurement decisions must also evaluate the operational cost of retaining the hardware.
+Teams optimize training efficiency while ignoring manufacturing emissions. In low-carbon grids, embodied carbon can dominate fleet-level footprint accounting. As quantified in @sec-sustainable-ai-embodied-carbon-assessment-9de0, an A100 accelerator embodies roughly `{python} TrainingEmbodiedRecap.embodied_kg_per_accelerator_str` CO~2~ from manufacturing [@luccioni2023estimating]; for the earlier `{python} TrainingEmbodiedRecap.training_days_attr_str`, `{python} TrainingEmbodiedRecap.n_gpus_str`-A100 training run, the unamortized upfront burden is roughly `{python} TrainingEmbodiedRecap.upfront_burden_t_str` CO~2~. Amortized over a `{python} TrainingEmbodiedRecap.embodied_lifetime_years_attr_str` service life, the share attributable to this specific job is about `{python} TrainingEmbodiedRecap.embodied_training_kg_round_str`. The job comparison must use that allocated share; a fleet lifecycle comparison must instead compare the full manufacturing burden against operations over the same fleet lifetime. Comparing the entire manufacturing burden with one short job's electricity would mix boundaries. Extending hardware lifetime from three to five years reduces amortized embodied carbon by 40 percent, but procurement decisions must also evaluate the operational cost of retaining the hardware.
 
 :::
 

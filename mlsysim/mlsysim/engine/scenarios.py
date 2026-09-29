@@ -220,6 +220,19 @@ class Scenarios:
         sla_latency=Q_("30 ms")
     )
 
+    # Added 2026-09-28. Federated on-device vision (the book's "Archetype C"):
+    # MobileNet trained/served locally on smartphone-class devices. The
+    # sustained power budget is the registry's 3 W upper sustained anchor; the
+    # burst ceiling stays at ReferenceStats.MobilePower.MobileMlBurstHigh.
+    FederatedMobileVision = Scenario(
+        name="Federated Mobile Vision",
+        description="On-device federated training and inference of a MobileNet on smartphone-class hardware.",
+        application="Federated mobile learning",
+        workload=_Models.Vision.MobileNetV2,
+        system=_Hardware.Mobile.iPhone15Pro,
+        power_budget=_ReferenceStats.MobilePower.MobileMlSustainedHigh,
+    )
+
     MobileAssistant = Scenario(
         name="Mobile Assistant",
         description="On-device assistant with a quantized small LLM on a smartphone.",
@@ -248,6 +261,20 @@ class Scenarios:
         workload=_Models.Language.GPT4,
         system=_Clusters.Frontier_8K,
         sla_latency=Q_("500 ms") # Per-step target
+    )
+
+    # Added 2026-09-28. The dense-LLM pretraining reference (the book's
+    # "Archetype A"): GPT-3-class 175B pretrained with mixed-precision Adam on
+    # the 1,024-GPU reference cluster (128 DGX H100 nodes). No SLA: it is a
+    # composition anchor. Byte policy: ReferenceStats.MixedPrecisionAdam.
+    # NOTE: Training_1K.fabric is InfiniBand_HDR (vol1 reads it; unchanged),
+    # while the book describes the reference cluster on NDR.
+    DenseLLMPretrainingReference = Scenario(
+        name="Dense LLM Pretraining (175B, 1,024 H100)",
+        description="GPT-3-class dense transformer pretrained with mixed-precision Adam on the 1,024-GPU reference cluster.",
+        application="Dense LLM pretraining",
+        workload=_Models.Language.GPT3,
+        system=_Clusters.Training_1K,
     )
 
     # --- SERVING WORLD ---

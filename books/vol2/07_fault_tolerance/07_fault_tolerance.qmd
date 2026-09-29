@@ -109,11 +109,16 @@ class FleetReliabilityRates:
     _fleet_tex = fmt(fleet_gpus, precision=0).replace(",", "{,}")
     _mttf_tex = fmt(gpu_mttf_h, precision=0).replace(",", "{,}")
     _fit_tex = fmt(gpu_fit, precision=0).replace(",", "{,}")
-    gpu_mttf_str = fmt_time(gpu_mttf_h, "hour", precision=0, style="word")
+    gpu_mttf_str = fmt_time(gpu_mttf_h, "hour", precision=0, commas=True, style="word")
     gpu_mttf_prose_str = fmt_time(gpu_mttf_h, "hour", precision=0, commas=True, style="word")
     fleet_gpus_str = fmt_count(fleet_gpus, label="GPU")
     fleet_fit_str = fmt(fleet_fit_total, precision=0)
     hours_between_str = fmt_time(hours_between, "hour", precision=0, commas=False, style="word")
+    gpu_mttf_sym_str = fmt_time(gpu_mttf_h, "hour", precision=0, commas=True)  # margin caption
+    gpu_mttf_attr_str = fmt_time(gpu_mttf_h, "hour", precision=0, commas=True, style="word", attributive=True)
+    gpu_fit_str = fmt(gpu_fit, precision=0)
+    node_gpus_str = fmt(Systems.Nodes.DGX_H100.accelerators_per_node, precision=0)  # series-system example
+    hours_between_sym_str = fmt_time(hours_between, "hour", precision=0)  # margin caption
     fit_eq_math = fmt_math(rf"\text{{FIT}} = {_fit_tex}")
     lambda_eq_math = fmt_math(rf"\lambda_{{\text{{hour}}}} = {sci_latex(lambda_gpu, precision=1)}")
     fleet_rate_eq_math = fmt_math(f"{_fleet_tex}/{_mttf_tex} = {fmt(fleet_rate_per_h, precision=1, commas=False)}")
@@ -460,7 +465,7 @@ The transition from small-scale experimentation to large-scale production change
 ```
 ![](images/svg/fault_tolerance_mtbf_ladder.svg){width="100%" fig-alt="Time ladder showing system mean time between failures collapsing as fleet size grows: 1 GPU at 50,000 hours, 1,000 GPUs at 50 hours, 10,000 GPUs at 5 hours."}
 
-*System MTBF collapses as the fleet grows: 50,000 h to 5 h.*
+*System MTBF collapses as the fleet grows: `{python} FleetReliabilityRates.gpu_mttf_sym_str` to `{python} FleetReliabilityRates.hours_between_sym_str`.*
 :::
 
 Because failures cannot be eliminated at this scale, fault-tolerant systems verify completion rather than assume it, treat failure as a normal code path, exercise recovery continuously, and account for partial failures that naive error handling may not anticipate. These techniques draw on decades of distributed systems research, but ML workloads change the economics. Training has properties that enable strategies unavailable to general distributed systems: stochastic gradient descent tolerates some errors that would corrupt other computations, checkpoint sizes are large but predictable, and recovery targets can sometimes be approximate rather than exact. Exploiting these properties can make ML-specific fault tolerance cheaper than the general-purpose approaches it descends from.
@@ -471,13 +476,13 @@ System reliability engineering provides the foundational framework for understan
 
 [^fn-poisson-failure-rate]: **Poisson process**\index{Poisson process!failure modeling}: A statistical model for events occurring independently at a constant average rate. Reliability models assume hardware failures follow a Poisson distribution, leading to the exponential survival function $R(t) = e^{-\lambda t}$. This assumption simplifies fleet planning: the probability of at least one failure in a 10,000-component cluster is $1 - e^{-N \lambda t}$. The aggregate hazard $N\lambda$ scales linearly with component count; the failure probability is nonlinear in both $N$ and $t$, approaching $N\lambda t$ only when that product is small.
 
-[^fn-fits-failure-rate]: **Failure rate ($\lambda$)**\index{Failure rate!FITs}: Expressed in FITs (Failures In Time), where 1 FIT equals one failure per billion device-hours. A data center GPU with `{python} FleetReliabilityRates.gpu_mttf_str` MTBF has `{python} FleetReliabilityRates.fit_eq_math`, corresponding to `{python} FleetReliabilityRates.lambda_eq_math` failures/hour. That seems negligible for one device but becomes dominant at fleet scale: a cluster with `{python} FleetReliabilityRates.fleet_gpus_str` accumulates `{python} FleetReliabilityRates.fleet_fit_str` FITs from GPUs alone, translating to an expected GPU failure every `{python} FleetReliabilityRates.hours_between_str`.
+[^fn-fits-failure-rate]: **Failure rate ($\lambda$)**\index{Failure rate!FITs}: Expressed in FITs (Failures In Time), where 1 FIT equals one failure per billion device-hours. A data center GPU with a `{python} FleetReliabilityRates.gpu_mttf_attr_str` MTBF has `{python} FleetReliabilityRates.fit_eq_math`, corresponding to `{python} FleetReliabilityRates.lambda_eq_math` failures/hour. That seems negligible for one device but becomes dominant at fleet scale: a cluster with `{python} FleetReliabilityRates.fleet_gpus_str` accumulates `{python} FleetReliabilityRates.fleet_fit_str` FITs from GPUs alone, translating to an expected GPU failure every `{python} FleetReliabilityRates.hours_between_str`.
 
 $$ R_{\text{single}}(t) = e^{-\lambda t} $$ {#eq-single-component-reliability}
 
 MTBF\index{MTBF!system failure rate}\index{MTBF!component vs. system} for this component equals $1/\lambda$. In this book's convention, mean time to failure (MTTF)\index{MTTF!per-component failure rate}\index{MTTF!vs. MTBF}\index{Mean time to failure|see{MTTF}} names a single component's expected time to its first failure while MTBF names the repairable system's expected time between successive failures; under the constant-rate exponential model used here the two coincide numerically, and the fault-tolerance model uses MTTF for per-component constants and MTBF for composed system rates. Data center GPUs often use planning MTBF values in the tens of thousands of hours, with field behavior depending on operating conditions, cooling effectiveness, manufacturing variation, and workload stress.[^fn-gpu-mtbf-reliability] @Sec-appdx-reliability-foundations-component-rates catalogs the canonical per-component MTTF values (H100, A100, Tensor Processing Unit (TPU), PCIe, power, network) that anchor these $\lambda$ and FIT figures, so a reader can substitute the constant for any device and reproduce the rates used throughout the fault-tolerance analysis.
 
-[^fn-gpu-mtbf-reliability]: **GPU MTBF variation**\index{GPU!MTBF variation}\index{MTBF!GPU field variation}: This chapter uses 50,000 hours as a planning constant for current data center GPUs (A100 and H100 class), not as a guarantee for every deployed GPU. Published fleet studies from Google TPUv4 pods and Meta GPU clusters report that field reliability depends on topology, cooling, workload, and operational practice [@zu2024tpuv4; @kokolis2025; @dubey2024llama]. The planning constant therefore anchors the arithmetic, while operators should substitute measured fleet rates when they have them.
+[^fn-gpu-mtbf-reliability]: **GPU MTBF variation**\index{GPU!MTBF variation}\index{MTBF!GPU field variation}: This chapter uses `{python} FleetReliabilityRates.gpu_mttf_prose_str` as a planning constant for current data center GPUs (A100 and H100 class), not as a guarantee for every deployed GPU. Published fleet studies from Google TPUv4 pods and Meta GPU clusters report that field reliability depends on topology, cooling, workload, and operational practice [@zu2024tpuv4; @kokolis2025; @dubey2024llama]. The planning constant therefore anchors the arithmetic, while operators should substitute measured fleet rates when they have them.
 
 When multiple independent components operate in a system where any single failure causes system failure, @eq-system-reliability-product formalizes how system reliability becomes the product of individual component reliabilities:
 
@@ -608,13 +613,16 @@ ax1.yaxis.set_major_formatter(FuncFormatter(format_accel))
 # MTBF axis
 ax2 = ax1.twinx()
 y1_min, y1_max = ax1.get_ylim()
-# System MTBF = 50000 / N
-y2_min = 50000.0 / y1_max
-y2_max = 50000.0 / y1_min
+# System MTBF = per-GPU MTTF / N, with the MTTF read from the registry.
+from mlsysim import Systems
+
+gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
+y2_min = gpu_mttf_h / y1_max
+y2_max = gpu_mttf_h / y1_min
 
 ax2.set_yscale('log')
 ax2.set_ylim(y2_max, y2_min)
-ax2.set_ylabel('System MTBF (Hours, assuming 50k hr/device)', color=color_mtbf)
+ax2.set_ylabel(f'System MTBF (Hours, assuming {gpu_mttf_h / 1000:.0f}k hr/device)', color=color_mtbf)
 ax2.tick_params(axis='y', labelcolor=color_mtbf)
 
 def format_mtbf(x, pos):
@@ -643,7 +651,41 @@ When failure is inevitable, the key engineering decision is how often to save pr
 
 $$ \tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}} $$
 
-$T_{\text{write}}$ in distributed ML training is not the time to flush a small process state; it is the time required to transfer FP32 optimizer state (momentum and variance tensors for every trainable parameter) plus model weights to durable storage. For a 70B-parameter model with full Adaptive Moment Estimation (Adam) state, a single resumable checkpoint approaches a terabyte at 14 bytes per parameter; for the later 175B-parameter running example, it exceeds two terabytes. Compressing $T_{\text{write}}$ therefore requires purpose-built high-bandwidth storage, and $T_{\text{write}}$ itself is the central constraint that determines how tightly the checkpoint interval can be set before I/O overhead displaces productive training compute.
+```{python}
+#| echo: false
+#| label: young-daly-checkpoint-state
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESUMABLE CHECKPOINT STATE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fault-tolerance-young-daly, the T_write paragraph below.
+# │
+# │ Goal: Size a resumable mixed-precision Adam checkpoint for a 70B model and
+# │       for the 175B running example from one bytes-per-parameter anchor.
+# │ Show: 14 bytes per parameter; ~1 TB (70B) and >2 TB (175B).
+# │ How:  params x ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models, ReferenceStats
+from mlsysim.fmt import check, fmt
+
+class YoungDalyCheckpointState:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
+    params_70b = Models.Language.Llama3_70B.parameters
+    params_175b = Models.Language.GPT3.parameters
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    ckpt_70b_tb = (params_70b * ckpt_bpp).to(TB).magnitude
+    ckpt_175b_tb = (params_175b * ckpt_bpp).to(TB).magnitude
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(0.9 < ckpt_70b_tb < 1.0, "70B checkpoint must 'approach a terabyte'")
+    check(ckpt_175b_tb > 2.0, "175B checkpoint must 'exceed two terabytes'")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    ckpt_bpp_str = fmt(ckpt_bpp.magnitude, precision=0)
+```
+
+$T_{\text{write}}$ in distributed ML training is not the time to flush a small process state; it is the time required to transfer FP32 optimizer state (momentum and variance tensors for every trainable parameter) plus model weights to durable storage. For a 70B-parameter model with full Adaptive Moment Estimation (Adam) state, a single resumable checkpoint approaches a terabyte at `{python} YoungDalyCheckpointState.ckpt_bpp_str` bytes per parameter; for the later 175B-parameter running example, it exceeds two terabytes. Compressing $T_{\text{write}}$ therefore requires purpose-built high-bandwidth storage, and $T_{\text{write}}$ itself is the central constraint that determines how tightly the checkpoint interval can be set before I/O overhead displaces productive training compute.
 
 To see the balance, consider an interval between saves. Doubling that interval halves the checkpoint writes per unit of training, but a failure then loses twice as much work on average. Under the constant-rate, rare-failure approximation, failure occurs approximately uniformly within an interval, so the average lost work is half the interval. Minimizing the sum of these opposing costs yields the square-root relation above, the U-shaped trade-off @fig-young-daly plots. Its scaling consequence is the one to carry forward: as clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage to keep $T_{\text{write}}$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth. @Sec-appdx-reliability-foundations-young-daly derives the approximation and a renewal model for finite checkpoint time; the later checkpointing section applies the formula to the local cluster once its system MTBF is in hand.
 
@@ -867,7 +909,7 @@ A cluster of `{python} NinesReliability.n_gpus_str` GPUs turns a per-GPU MTBF of
 
 ### Quantitative reliability analysis {#sec-fault-tolerance-reliability-quantitative-analysis}
 
-The GPU-only calculation in the opening reliability example supplies the scale intuition; a real training system then composes GPUs, high-bandwidth memory (HBM), links, power supplies, storage paths, and redundancy into one failure budget. With MTBF and the FIT rate already defined ($\text{FIT} = 10^9/\text{MTBF}$, so a 50,000-hour GPU contributes 20,000 FIT), the new question is how component rates compose. The composition rule depends on the redundancy structure. For series systems\index{Reliability!series system}\index{Series system!reliability calculation} (for example, a node where all 8 GPUs must work), failure of any component fails the whole, so reliabilities multiply and rates add:
+The GPU-only calculation in the opening reliability example supplies the scale intuition; a real training system then composes GPUs, high-bandwidth memory (HBM), links, power supplies, storage paths, and redundancy into one failure budget. With MTBF and the FIT rate already defined ($\text{FIT} = 10^9/\text{MTBF}$, so a `{python} FleetReliabilityRates.gpu_mttf_attr_str` GPU contributes `{python} FleetReliabilityRates.gpu_fit_str` FIT), the new question is how component rates compose. The composition rule depends on the redundancy structure. For series systems\index{Reliability!series system}\index{Series system!reliability calculation} (for example, a node where all `{python} FleetReliabilityRates.node_gpus_str` GPUs must work), failure of any component fails the whole, so reliabilities multiply and rates add:
 $$R_{\text{system}}(t) = \prod_{i=1}^{N} R_i(t), \qquad \text{MTBF}_{\text{system}} = \frac{1}{\sum \lambda_i}$$
 which is why the system failure rate grows linearly with component count while system MTBF falls in inverse proportion. For parallel systems\index{Reliability!parallel system}\index{Parallel system!redundancy calculation} providing redundancy (for example, active-active model replicas), failure occurs only when all redundant components fail simultaneously:
 $$R_{\text{system}}(t) = 1 - \prod_{i=1}^{N} (1 - R_i(t))$$
@@ -907,7 +949,7 @@ Composition makes the distinction between raw faults and job interruptions essen
 
 :::
 
-These per-component FIT figures describe the silicon's intrinsic soft-error budget, which is why they differ from the 50,000-hour whole-device MTTF used in the worked cascade that follows: the device MTTF folds in every field failure mode (thermal stress, power events, mechanical wear), not just the logic and memory soft-error rates isolated here. The cascade composes those whole-device rates into the cluster figure that actually sets the checkpoint interval; this estimate only establishes why memory protection is the precondition for everything that follows.
+These per-component FIT figures describe the silicon's intrinsic soft-error budget, which is why they differ from the `{python} FleetReliabilityRates.gpu_mttf_attr_str` whole-device MTTF used in the worked cascade that follows: the device MTTF folds in every field failure mode (thermal stress, power events, mechanical wear), not just the logic and memory soft-error rates isolated here. The cascade composes those whole-device rates into the cluster figure that actually sets the checkpoint interval; this estimate only establishes why memory protection is the precondition for everything that follows.
 
 ### Cluster MTBF calculation {#sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255}
 
@@ -929,6 +971,7 @@ These per-component FIT figures describe the silicon's intrinsic soft-error budg
 # │       Narrative cadence follows the displayed rate (0.2708) for self-consistency.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_count, fmt_rate, fmt_time
 
 class FailureCascadeExample:
@@ -939,6 +982,7 @@ class FailureCascadeExample:
     psu_mttf = float(Systems.Reliability.Psu.mttf_hours)
     nic_mttf = float(Systems.Reliability.Nic.mttf_hours)
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    ref_gpus = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
     l_gpu = 1 / gpu_mttf
@@ -957,9 +1001,11 @@ class FailureCascadeExample:
     check(0 < l_gpu < 1, "per-GPU failure rate must be a small positive value")
     check(2.0 < mtbf_h < 5.0, "10k-GPU cluster MTBF should be a few hours")
     check(per_week > per_day > 1, "weekly failures must exceed daily, both above one")
+    check(9 < fleet_gpus / ref_gpus < 11, "prose says 'roughly ten times' the reference cluster")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
     fleet_gpus_str = fmt(fleet_gpus, precision=0)
+    ref_gpus_str = fmt(ref_gpus, precision=0)
     gpu_mttf_hours_str = fmt_time(gpu_mttf, "hour", precision=0, commas=True, style="word")
     pcie_mttf_hours_str = fmt_time(pcie_mttf, "hour", precision=0, commas=True, style="word")
     psu_mttf_hours_str = fmt_time(psu_mttf, "hour", precision=0, commas=True, style="word")
@@ -996,7 +1042,7 @@ class FailureCascadeExample:
     weekly_failures_str = fmt_count(weekly_failures, precision=0, label="failure")
 ```
 
-Consider a training cluster designed for large language model development, roughly ten times the 1,024-GPU Archetype A reference cluster, with the following specifications:
+Consider a training cluster designed for large language model development, roughly ten times the `{python} FailureCascadeExample.ref_gpus_str`-GPU Archetype A reference cluster, with the following specifications:
 
 - `{python} FailureCascadeExample.fleet_gpus_str` NVIDIA H100\index{H100!cluster reliability}\index{NVIDIA!H100} GPUs
 - Individual GPU MTBF: `{python} FailureCascadeExample.gpu_mttf_hours_str`
@@ -1108,7 +1154,48 @@ class ClusterMtbfScaling:
 
 : **Cluster MTBF Scaling**: GPU-only mean time between failures decreases linearly with cluster size, transforming failures from rare events to continuous operating conditions at scale. Additional host, power, storage, and network failure domains reduce system-level MTBF further. {#tbl-cluster-mtbf-scaling}
 
-The theoretical $1/N$ scaling in @tbl-cluster-mtbf-scaling is not merely a textbook exercise. @Fig-published-failure-rates overlays published measurements and fitted projections from Meta's production clusters against the theoretical curve. The @kokolis2025 study of Meta's Research SuperCluster reported measured MTTF values for observed RSC job sizes and projected a 1.8-hour MTTF for 16,384-GPU jobs; Meta's Llama 3\index{Llama-3!failure report} training report independently documented 419 failures across 54 days on 16,384 H100 GPUs, an observed MTTF of about 3.1 hours. Together, the measured Llama run and Kokolis projection put 16,384-GPU training on a failure cadence of roughly two to three hours, bracketed by the 1.8-hour projection and the 3.1-hour measurement. This evidence turns the idealized $1/N$ relation into an engineering constraint that determines checkpoint frequency, recovery architecture, and infrastructure investment.
+```{python}
+#| echo: false
+#| label: published-failure-rates
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PUBLISHED FAILURE RATES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The Kokolis/Llama 3 paragraph below and @fig-published-failure-rates.
+# │
+# │ Goal: Pin the published fleet MTTF evidence to Literature so the prose and
+# │       the figure quote the same measured and projected values.
+# │ Show: 16,384-GPU projected MTTF (1.8 h); Llama 3 405B snapshot of 419
+# │       unexpected interruptions over 54 days on 16,384 H100s (~3.1 h MTTF).
+# │ How:  Literature.FleetOperations.Kokolis*; Literature.TrainingRuns.Llama3_405B_*;
+# │       Models.Language.Llama3_405B.training_accelerators_ref; MTTF = days*24/count.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature, Models
+from mlsysim.fmt import check, fmt, fmt_count, fmt_time
+
+class PublishedFailureRates:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    kokolis_16k_mttf_h = float(Literature.FleetOperations.Kokolis16KGpuProjectedMttfHours)
+    llama_gpus = Models.Language.Llama3_405B.training_accelerators_ref.magnitude
+    llama_interruptions = float(Literature.TrainingRuns.Llama3_405B_UnexpectedInterruptions)
+    llama_days = float(Literature.TrainingRuns.Llama3_405B_SnapshotDays)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    llama_mttf_h = llama_days * 24 / llama_interruptions
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(float(Literature.FleetOperations.Kokolis16KGpuJobGpus) - llama_gpus) < 1, "Kokolis projection and Llama 3 run must share a job size")
+    check(1.5 < kokolis_16k_mttf_h < 2.0 and 2.5 < llama_mttf_h < 3.5, "prose brackets the cadence at 'roughly two to three hours'")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    kokolis_16k_mttf_attr_str = fmt_time(kokolis_16k_mttf_h, "hour", precision=1, style="word", attributive=True)
+    llama_mttf_attr_str = fmt_time(llama_mttf_h, "hour", precision=1, style="word", attributive=True)
+    llama_mttf_str = fmt_time(llama_mttf_h, "hour", precision=1, style="word")
+    llama_gpus_str = fmt(llama_gpus, precision=0)
+    llama_interruptions_str = fmt(llama_interruptions, precision=0)
+    llama_days_str = fmt(llama_days, precision=0)
+```
+
+The theoretical $1/N$ scaling in @tbl-cluster-mtbf-scaling is not merely a textbook exercise. @Fig-published-failure-rates overlays published measurements and fitted projections from Meta's production clusters against the theoretical curve. The @kokolis2025 study of Meta's Research SuperCluster reported measured MTTF values for observed RSC job sizes and projected a `{python} PublishedFailureRates.kokolis_16k_mttf_attr_str` MTTF for `{python} PublishedFailureRates.llama_gpus_str`-GPU jobs; Meta's Llama 3\index{Llama-3!failure report} training report independently documented `{python} PublishedFailureRates.llama_interruptions_str` unexpected interruptions across a `{python} PublishedFailureRates.llama_days_str`-day snapshot on `{python} PublishedFailureRates.llama_gpus_str` H100 GPUs, an observed MTTF of about `{python} PublishedFailureRates.llama_mttf_str`. Together, the measured Llama run and Kokolis projection put `{python} PublishedFailureRates.llama_gpus_str`-GPU training on a failure cadence of roughly two to three hours, bracketed by the `{python} PublishedFailureRates.kokolis_16k_mttf_attr_str` projection and the `{python} PublishedFailureRates.llama_mttf_attr_str` measurement. This evidence turns the idealized $1/N$ relation into an engineering constraint that determines checkpoint frequency, recovery architecture, and infrastructure investment.
 
 ::: {#fig-published-failure-rates fig-env="figure" fig-pos="htb" fig-cap="**Published failure rates from production clusters**: Measured MTTF values and fitted projections from Meta's RSC clusters [@kokolis2025] plotted with Llama 3 training measurements [@dubey2024llama] against the theoretical 1/N curve. At 16,384 GPUs, the Kokolis projection and Llama 3 empirical measurement both fall in the 2-to-3-hour failure range, confirming that fault tolerance is a mathematical necessity, not an edge case. Data sources: Kokolis et al., arXiv:2410.21680; Meta, arXiv:2407.21783." fig-alt="Log-log scatter plot of MTTF in hours vs. GPU count with theoretical 1 over N curve and labeled measured and projected data points from Meta RSC and Llama 3 training."}
 
@@ -1146,14 +1233,26 @@ ax.plot(
     color=COLORS['grid'],
     linestyle='--',
     linewidth=1.5,
-    label=f'Theoretical: {Systems.Reliability.Gpu.mttf_hours:,}h/N',
+    label=f'Theoretical: {Systems.Reliability.Gpu.mttf_hours:,.0f} h/N',
     zorder=1,
 )
 
-# MEASURED AND PROJECTED DATA: Kokolis et al. (arXiv:2410.21680, HPCA 2025)
-kokolis_gpus = [8, 1024, 16384, 131072]
-kokolis_mttf = [1144.8, 7.9, 1.8, 0.23]  # hours
-kokolis_labels = ['8 GPUs\n(47.7 days)', '1,024 GPUs\n(7.9 hrs)', '16,384 GPUs\n(projected, 1.8 hrs)', '131K GPUs\n(projected, 14 min)']
+# MEASURED AND PROJECTED DATA: Kokolis et al. (arXiv:2410.21680, HPCA 2025),
+# read from Literature.FleetOperations so the figure matches the prose.
+_fo = Literature.FleetOperations
+kokolis_gpus = [float(_fo.Kokolis8GpuJobGpus), float(_fo.Kokolis1024GpuJobGpus), float(_fo.Kokolis16KGpuJobGpus), float(_fo.Kokolis131KGpuJobGpus)]
+kokolis_mttf = [
+    float(_fo.Kokolis8GpuJobMttfHours),
+    float(_fo.Kokolis1024GpuJobMttfHours),
+    float(_fo.Kokolis16KGpuProjectedMttfHours),
+    float(_fo.Kokolis131KGpuProjectedMttfHours),
+]  # hours
+kokolis_labels = [
+    f'{kokolis_gpus[0]:,.0f} GPUs\n({kokolis_mttf[0] / 24:.1f} days)',
+    f'{kokolis_gpus[1]:,.0f} GPUs\n({kokolis_mttf[1]:.1f} hrs)',
+    f'{kokolis_gpus[2]:,.0f} GPUs\n(projected, {kokolis_mttf[2]:.1f} hrs)',
+    f'{kokolis_gpus[3] / 1000:.0f}K GPUs\n(projected, {kokolis_mttf[3] * 60:.0f} min)',
+]
 
 ax.scatter(
     kokolis_gpus,
@@ -1183,10 +1282,10 @@ for i, (x, y, lbl) in enumerate(zip(kokolis_gpus, kokolis_mttf, kokolis_labels))
         arrowprops=dict(arrowstyle='->', color=COLORS['BlueLine'], shrinkA=0, shrinkB=5, lw=0.8),
     )
 
-# VERIFIED DATA: Meta Llama 3 (arXiv:2407.21783)
-# 419 failures in 54 days = MTTF ~3.1 hours
-llama_gpus = [16384]
-llama_mttf = [3.1]
+# VERIFIED DATA: Meta Llama 3 (arXiv:2407.21783), via PublishedFailureRates
+# (unexpected interruptions over the snapshot window -> observed MTTF)
+llama_gpus = [PublishedFailureRates.llama_gpus]
+llama_mttf = [PublishedFailureRates.llama_mttf_h]
 
 ax.scatter(
     llama_gpus, llama_mttf, color=COLORS['RedLine'], s=120, zorder=4, marker='*', edgecolors='white', linewidth=0.8, label='Llama 3 (Meta 2024)'
@@ -1194,8 +1293,9 @@ ax.scatter(
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.annotate(
-    'Llama 3 (16K H100s,\n419 failures in 54 days)',
-    xy=(16384, 3.2),
+    f'Llama 3 ({PublishedFailureRates.llama_gpus / 1024:.0f}K H100s,\n'
+    f'{PublishedFailureRates.llama_interruptions_str} interruptions in {PublishedFailureRates.llama_days_str} days)',
+    xy=(PublishedFailureRates.llama_gpus, PublishedFailureRates.llama_mttf_h * 1.03),
     xytext=(40000, 8),
     fontsize=7,
     ha='center',
@@ -1212,7 +1312,7 @@ for hrs, lbl in durations:
 
 # Key annotation
 ax.annotate(
-    'At 16K GPUs: one failure\n every ~2--3 hours',
+    'At 16K GPUs: one failure\n every ~2–3 hours',
     xy=(15870, 1.7),
     xytext=(1200, 0.4),
     fontsize=7,
@@ -2219,20 +2319,20 @@ Correlated failures violate the independence assumption underlying @eq-system-re
 
 Defending against correlated failures\index{Correlated failure!failure domain protection} requires understanding failure domains\index{Failure domain!ML infrastructure} and ensuring redundancy spans independent failure domains. @Tbl-failure-domains catalogs common failure domains in ML infrastructure, from single GPUs to entire data center regions, each requiring distinct mitigation strategies. @Fig-failure-domains illustrates how these domains nest hierarchically, with failures propagating downward through the containment structure.
 
-| **Failure Domain**     |     **Impact Scope**     | **Typical Recovery Time** |   **Mitigation Strategy**    |
-|:-----------------------|:------------------------:|:-------------------------:|:----------------------------:|
-| **Single GPU**         |          1 GPU           |      Seconds (spare)      | Hot spare, elastic training  |
-| **Node (power/OS)**    |          8 GPUs          |          Minutes          | Checkpoint, node replacement |
-| **Rack (ToR switch)**  |       32--64 GPUs        |      Minutes to hours     |    Cross-rack redundancy     |
-| **Power domain**       |      100--500 GPUs       |           Hours           |     Multiple power feeds     |
-| **Data Center region** |         All GPUs         |       Hours to days       |   Geographic distribution    |
-| **Software version**   | All GPUs running version |     Minutes (rollback)    |       Staged rollouts        |
+| **Failure Domain**     |                   **Impact Scope**                  | **Typical Recovery Time** |   **Mitigation Strategy**    |
+|:-----------------------|:---------------------------------------------------:|:-------------------------:|:----------------------------:|
+| **Single GPU**         |                        1 GPU                        |      Seconds (spare)      | Hot spare, elastic training  |
+| **Node (power/OS)**    | `{python} FleetReliabilityRates.node_gpus_str` GPUs |          Minutes          | Checkpoint, node replacement |
+| **Rack (ToR switch)**  |                     32--64 GPUs                     |      Minutes to hours     |    Cross-rack redundancy     |
+| **Power domain**       |                    100--500 GPUs                    |           Hours           |     Multiple power feeds     |
+| **Data Center region** |                       All GPUs                      |       Hours to days       |   Geographic distribution    |
+| **Software version**   |               All GPUs running version              |     Minutes (rollback)    |       Staged rollouts        |
 
 : **Failure Domains in ML Infrastructure**: Understanding failure domain boundaries enables placement of redundant components across independent domains, preventing correlated failures from defeating redundancy strategies. {#tbl-failure-domains}
 
 The nesting of failure domains in @tbl-failure-domains has direct consequences for redundancy placement: placing replicas within the same domain provides zero protection against that domain's failure mode.
 
-::: {#fig-failure-domains fig-env="figure" fig-pos="htb" fig-cap="**Hierarchy of failure domains**: Failure domains are often nested or overlapping. A GPU failure affects one device. A node failure affects 8 GPUs. A rack switch failure affects 32-64 GPUs. A power distribution unit (PDU) failure may affect multiple racks. Effective fault tolerance requires placing replicas across independent domains (for example, different racks or rows) to survive correlated failures." fig-alt="Nested rectangles showing failure domain hierarchy. Region contains Zone A and Zone B. Each zone contains a rack with switch and PDU. Each rack contains a node with OS and PCIe. Each node contains multiple GPUs. Annotation explains containment."}
+::: {#fig-failure-domains fig-env="figure" fig-pos="htb" fig-cap="**Hierarchy of failure domains**: Failure domains are often nested or overlapping. A GPU failure affects one device. A node failure affects `{python} FleetReliabilityRates.node_gpus_str` GPUs. A rack switch failure affects 32-64 GPUs. A power distribution unit (PDU) failure may affect multiple racks. Effective fault tolerance requires placing replicas across independent domains (for example, different racks or rows) to survive correlated failures." fig-alt="Nested rectangles showing failure domain hierarchy. Region contains Zone A and Zone B. Each zone contains a rack with switch and PDU. Each rack contains a node with OS and PCIe. Each node contains multiple GPUs. Annotation explains containment."}
 ![](images/svg/failure-domains.svg)
 
 <!--
@@ -2388,11 +2488,35 @@ Verify your understanding of how failure domains nest and their operational impa
 
 :::
 
+```{python}
+#| echo: false
+#| label: tpuv4-war-story-scale
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TPUv4 WAR-STORY SCALE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: War story "The supercomputer that swapped in spare cubes" below.
+# │
+# │ Goal: Pin the TPUv4 supercomputer's chip count to the registry pod.
+# │ Show: 4,096 chips.
+# │ How:  Systems.Pods.TPUv4_4096.chips.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Systems
+from mlsysim.fmt import check, fmt
+
+class TpuV4WarStoryScale:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    pod_chips = Systems.Pods.TPUv4_4096.chips
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(pod_chips > 1000, "war story describes a multi-thousand-chip pod")
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    pod_chips_str = fmt(pod_chips, precision=0)
+```
+
 ::: {#ws-fault-tolerance-google-tpuv4-routing .callout-war-story title="The supercomputer that swapped in spare cubes (2024)"}
 
-**Context**: Google's TPUv4\index{TPU!v4 supercomputer} machine-learning supercomputer used 4,096 TPU chips connected by a custom 3D torus ICI fabric, and Google engineers published their operating experience with automatic fault resiliency and hardware recovery [@zu2024tpuv4].
+**Context**: Google's TPUv4\index{TPU!v4 supercomputer} machine-learning supercomputer used `{python} TpuV4WarStoryScale.pod_chips_str` TPU chips connected by a custom 3D torus ICI fabric, and Google engineers published their operating experience with automatic fault resiliency and hardware recovery [@zu2024tpuv4].
 
-**Mechanism**: At 4,096-chip scale, component failures (TPU chips, ICI optical links, or optical circuit switches) severed 3D torus communication rings, breaking AllReduce collective topologies.
+**Mechanism**: At `{python} TpuV4WarStoryScale.pod_chips_str`-chip scale, component failures (TPU chips, ICI optical links, or optical circuit switches) severed 3D torus communication rings, breaking AllReduce collective topologies.
 
 **Impact**: Because a synchronous job needs its full torus shape, one failed chip or link inside a slice halts every rank in that slice, not just the ranks attached to the failed component.
 
@@ -2550,7 +2674,7 @@ ax.scatter([6.0], [peak_y], color=COLORS['GreenLine'], edgecolor='white', linewi
 ax.text(
     6.0,
     0.55,
-    'GPU MTBF at peak\n~50,000 hours',
+    f'GPU MTBF at peak\n~{float(Systems.Reliability.Gpu.mttf_hours):,.0f} hours',
     ha='center',
     va='center',
     fontsize=7.2,
@@ -2593,42 +2717,52 @@ The three phases in @fig-bathtub-curve guide fleet admission and maintenance. Be
 # │ Note: resumable checkpoint = 14 B/param (bf16 weights, fp32 master
 # │       weights, fp32 Adam moments; no gradients or activations).
 from mlsysim.physics import calc_checkpoint_size
-from mlsysim import Models, Hardware
-from mlsysim.fmt import check, fmt, fmt_memory
+from mlsysim import Models, Hardware, ReferenceStats
+from mlsysim.fmt import check, fmt, fmt_memory, fmt_text
 
 class FaultToleranceIntroRecap:
     m = Models.Language.GPT3
+    ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
     gpt3_ckpt_bytes = calc_checkpoint_size(m.parameters)  # 14 B/param default
-    gpus_example = Systems.Clusters.Training_10K.total_accelerators * 2.5
+    gpus_example = Systems.Clusters.Training_10K.total_accelerators * 2.5  # scenario assumption: 25,000-GPU run
     rate = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate.to(USD / hour).magnitude
     daily_cost = gpus_example * rate * 24
+    vit_ckpt = ReferenceStats.CheckpointArchetypes.MediumVisionTransformerCheckpointSize
+    recsys_table = ReferenceStats.RecommenderAtScaleProfile.EmbeddingTableSize
+    check(
+        abs((gpt3_ckpt_bytes / (m.parameters * ckpt_bpp)).to("").magnitude - 1) < 1e-9, "calc_checkpoint_size must use the registry 14 B/param anchor"
+    )
     check(2.3e12 < gpt3_ckpt_bytes.to(byte).magnitude < 2.6e12, "175B resumable checkpoint must be about 2.45 TB")
+    check(1.0 < vit_ckpt.to(GB).magnitude < 2.0, "ViT-Large checkpoint row is a single-digit-GB 'middle ground'")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    ckpt_bpp_str = fmt(ckpt_bpp.magnitude, precision=0)
     gpt3_ckpt_tb_str = fmt_memory(gpt3_ckpt_bytes, unit=TB, precision=2, commas=False)
     gpus_example_str = fmt(gpus_example, precision=0, commas=True)
     rate_str = fmt_usd(rate, precision=0, commas=False, per="GPU-hour")
     daily_cost_str = fmt_usd(daily_cost, scale="M", precision=1, commas=False)
+    vit_ckpt_str = fmt_memory(vit_ckpt, unit=GB, precision=1, commas=False)
+    recsys_table_str = fmt_text(fmt_memory(recsys_table, unit=TB, precision=0, commas=False), "+")
 ```
 
 While the mathematics of failure rates apply universally, the failure impact by model type differs dramatically. The impact of losing an hour of training depends on what that training costs, how much state must be recovered, and how long recovery takes. @Tbl-failure-impact-by-model quantifies these factors across model architectures, revealing orders-of-magnitude variation from large language models (LLMs) incurring millions of dollars in wasted compute to vision models losing modest amounts of progress.
 
-| **Model Type**                  | **Typical Training Duration** |                     **Checkpoint Size**                     |      **State Sensitivity**      |        **Failure Cost**       |
-|:--------------------------------|:-----------------------------:|:-----------------------------------------------------------:|:-------------------------------:|:-----------------------------:|
-| **Archetype A (GPT-4/Llama-3)** |           2--4 weeks          | `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str` (175B) |  High (position in data order)  | \$2--5M compute per 24hr loss |
-| **Vision (ViT-Large)**          |           1--3 days           |                           1--2 GB                           |   Medium (augmentation state)   |     \$10--50K per day loss    |
-| **Archetype B (DLRM at Scale)** |           Continuous          |                     10+ TB (embeddings)                     | Very High (embedding freshness) |    Revenue impact per hour    |
-| **Speech (Whisper-scale)**      |           3--7 days           |                           5--10 GB                          |              Medium             |    \$50--200K per day loss    |
-| **Scientific (AlphaFold)**      |         Days to weeks         |                          10--50 GB                          |     High (exploration state)    |         Research delay        |
+| **Model Type**                  | **Typical Training Duration** |                        **Checkpoint Size**                        |      **State Sensitivity**      |                              **Failure Cost**                             |
+|:--------------------------------|:-----------------------------:|:-----------------------------------------------------------------:|:-------------------------------:|:-------------------------------------------------------------------------:|
+| **Archetype A (GPT-4/Llama-3)** |           2--4 weeks          |    `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str` (175B)    |  High (position in data order)  | `{python} FaultToleranceIntroRecap.daily_cost_str` compute per 24 hr loss |
+| **Vision (ViT-Large)**          |           1--3 days           |          `{python} FaultToleranceIntroRecap.vit_ckpt_str`         |   Medium (augmentation state)   |                           \$10--50K per day loss                          |
+| **Archetype B (DLRM at Scale)** |           Continuous          | `{python} FaultToleranceIntroRecap.recsys_table_str` (embeddings) | Very High (embedding freshness) |                          Revenue impact per hour                          |
+| **Speech (Whisper-scale)**      |           3--7 days           |                              5--10 GB                             |              Medium             |                          \$50--200K per day loss                          |
+| **Scientific (AlphaFold)**      |         Days to weeks         |                             10--50 GB                             |     High (exploration state)    |                               Research delay                              |
 
 : **Failure Impact by Model Type**: The cost of training failures varies dramatically by model type, driven by training duration, checkpoint overhead, and the value of accumulated training state. These differences demand model-specific fault tolerance strategies. {#tbl-failure-impact-by-model}
 
-Large language models experience the highest absolute failure costs due to their extended training durations and the computational expense of each training hour. For example, a large training run consuming `{python} FaultToleranceIntroRecap.gpus_example_str` GPUs at approximately `{python} FaultToleranceIntroRecap.rate_str` incurs `{python} FaultToleranceIntroRecap.daily_cost_str` in compute costs per day. A failure that loses 24 hours of training progress costs `{python} FaultToleranceIntroRecap.daily_cost_str` in wasted compute plus schedule delay. The checkpoint overhead is correspondingly large. A resumable checkpoint stores 14 bytes per parameter (BF16 weights, FP32 master weights, and the two FP32 Adam moments, but no gradients or activations), so a 70B-class model approaches a terabyte and the 175B-parameter running example reaches `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str`.
+Large language models experience the highest absolute failure costs due to their extended training durations and the computational expense of each training hour. For example, a large training run consuming `{python} FaultToleranceIntroRecap.gpus_example_str` GPUs at approximately `{python} FaultToleranceIntroRecap.rate_str` incurs `{python} FaultToleranceIntroRecap.daily_cost_str` in compute costs per day. A failure that loses 24 hours of training progress costs `{python} FaultToleranceIntroRecap.daily_cost_str` in wasted compute plus schedule delay. The checkpoint overhead is correspondingly large. A resumable checkpoint stores `{python} FaultToleranceIntroRecap.ckpt_bpp_str` bytes per parameter (BF16 weights, FP32 master weights, and the two FP32 Adam moments, but no gradients or activations), so a 70B-class model approaches a terabyte and the 175B-parameter running example reaches `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str`.
 
 Recommendation systems such as Archetype B (DLRM at Scale) present a different challenge because their training is often continuous rather than episodic. The value of a RecSys model derives partly from its freshness. Embeddings that capture recent user behavior outperform stale embeddings. A failure that loses hours of embedding updates may degrade recommendation quality in ways that directly impact revenue. Meta has documented that recommendation model freshness directly correlates with engagement metrics, making recovery time a business-critical metric.[^fn-recsys-model-freshness]
 
 [^fn-recsys-model-freshness]: **RecSys freshness**\index{Recommendation system!freshness fault tolerance}: Meta's DLRM infrastructure documents that embedding staleness measured in hours produces measurable degradation in recommendation relevance and engagement metrics. This inverts the typical fault tolerance priority: for recommendation systems, minimizing recovery time matters more than minimizing checkpoint overhead, because stale embeddings directly reduce revenue.
 
-Vision models occupy a middle ground with moderate training durations and manageable checkpoint sizes. The relatively small checkpoints enable frequent checkpointing with minimal overhead. A vision transformer (ViT)-Large checkpoint in the 1--2 GB range imposes little overhead compared with large language or embedding-heavy recommendation workloads. Data augmentation state represents the primary state beyond model weights that must be preserved for reproducible recovery. The augmentation parameters and data shuffling seed must be captured.
+Vision models occupy a middle ground with moderate training durations and manageable checkpoint sizes. The relatively small checkpoints enable frequent checkpointing with minimal overhead. A vision transformer (ViT)-Large checkpoint of about `{python} FaultToleranceIntroRecap.vit_ckpt_str` imposes little overhead compared with large language or embedding-heavy recommendation workloads. Data augmentation state represents the primary state beyond model weights that must be preserved for reproducible recovery. The augmentation parameters and data shuffling seed must be captured.
 
 Scientific models such as those used in protein structure prediction or climate simulation often have unique state requirements beyond model parameters. AlphaFold-style training may maintain exploration state tracking which protein families have been sampled, preventing repetition during recovery. Drug discovery models may track which molecular configurations have been evaluated. This domain-specific state complicates checkpoint and recovery design.
 
@@ -2771,6 +2905,7 @@ Check-and-verify methods\index{Silent data corruption!detection methods} turn th
 ```{python}
 #| echo: false
 #| label: sdc-prob-calc
+import math
 from mlsysim.fmt import check, fmt, fmt_int, fmt_math, fmt_percent, fmt_time
 
 class SDCCollective:
@@ -2779,8 +2914,9 @@ class SDCCollective:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_10K.total_accelerators * 10
     p_sdc_per_gpu_hr = Systems.Reliability.SdcRatePerGpuHr  # illustrative generic SDC-rate assumption
-    training_step_s = 2
+    training_step_s = 2  # scenario assumption: illustrative step time
     # ┌── 2. EXECUTE ───────────────────────────────────────
+    _sdc_exp = round(math.log10(float(p_sdc_per_gpu_hr)))
     exposure_gpu_hr = n_gpus * (training_step_s / SEC_PER_HOUR)  # aggregate GPU-hours per step
     p_step_sdc = 1 - (1 - p_sdc_per_gpu_hr) ** exposure_gpu_hr
     expected_steps = 1 / p_step_sdc
@@ -2788,11 +2924,14 @@ class SDCCollective:
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(p_step_sdc > 0.00005, f"Prob {p_step_sdc:.6f} unexpected")
     check(abs(exposure_gpu_hr - 55.56) < 0.1, f"Expected ~55.6 GPU-hours exposure, got {exposure_gpu_hr:.2f}")
+    check(abs(float(p_sdc_per_gpu_hr) / 10**_sdc_exp - 1) < 1e-9, "SDC rate must be an exact power of ten to render as 10^k")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     prob_str = fmt_percent(p_step_sdc, precision=4, commas=False, style='prose')
     n_gpus_str = fmt(n_gpus, precision=0, commas=True)
     n_gpus_k_str = fmt_text(fmt_int(n_gpus // 1000), "k")
     training_step_s_str = fmt_time(training_step_s, unit="second", precision=0, commas=False)
+    training_step_attr_str = fmt_time(training_step_s, unit="second", precision=0, style="word", attributive=True)
+    sdc_rate_math = fmt_math(rf"10^{{{_sdc_exp}}}")
     steps_between_str = fmt_count(round(expected_steps), commas=True, label="step")
     hours_between_str = fmt_time(round(expected_hours), "hour", precision=0, style="word")
     _n_tex = n_gpus_str.replace(",", "{,}")
@@ -2804,8 +2943,8 @@ class SDCCollective:
 **Problem**: Under an illustrative generic SDC-rate assumption, calculate the probability that at least one GPU in a `{python} SDCCollective.n_gpus_str`-GPU fleet experiences an SDC event during a single `{python} SDCCollective.training_step_s_str` training step.
 
 1. **Fleet size**: `{python} SDCCollective.n_gpus_str` accelerators.
-2. **Individual risk**: $10^{-6}$ per GPU-hour (an illustrative generic SDC-rate assumption).
-3. **The exposure**: In a 2-second window, the fleet has `{python} SDCCollective.exposure_eq_math` "GPU-hours" of exposure.
+2. **Individual risk**: `{python} SDCCollective.sdc_rate_math` per GPU-hour (an illustrative generic SDC-rate assumption).
+3. **The exposure**: In a `{python} SDCCollective.training_step_attr_str` window, the fleet has `{python} SDCCollective.exposure_eq_math` "GPU-hours" of exposure.
 4. **The probability**: $\Pr(\text{at least one SDC}) \approx$ `{python} SDCCollective.prob_str`.
 
 **Systems insight**: Under this illustrative constant-rate assumption, a `{python} SDCCollective.n_gpus_k_str`-GPU fleet expects one SDC event every `{python} SDCCollective.steps_between_str` (roughly every `{python} SDCCollective.hours_between_str`), even though the per-step probability is only `{python} SDCCollective.prob_str`. A CRC or hash can protect each shard or reduced buffer against corruption in transit or storage, while a redundant reduction can test the arithmetic path independently. The distinction matters: equal digests establish equal bytes, not a correct gradient. Robustness moves from being a *restart* problem to a *verification* problem only when the verification covers the failure mechanism being claimed.
@@ -3340,7 +3479,55 @@ Here, $f_{\text{ckpt}}$ is the dimensionless fraction of time lost to checkpoint
 
 #### The "stop-the-world" cost {#sec-fault-tolerance-reliability-stoptheworld-cost-beaa}
 
-The financial impact of synchronous checkpointing at scale is severe. When a 10,000-GPU cluster pauses for 2 minutes to push a multi-TB checkpoint through shared storage delivering about 20 GB/s, it burns $10,000 \times \frac{2}{60} \approx 333$ idle GPU-hours, which at roughly \$3 per GPU-hour costs about \$1,000 in wasted compute for a single checkpoint. If checkpoints occur hourly, that idle time compounds to \$24,000 per day spent waiting for storage I/O. This economic reality drives the aggressive adoption of asynchronous checkpointing strategies that move data movement off the critical path. @Tbl-checkpoint-overhead-by-model reveals how checkpoint characteristics vary dramatically by model architecture: larger models require longer write times but also benefit from correspondingly longer optimal intervals.
+```{python}
+#| echo: false
+#| label: stop-the-world-checkpoint-cost
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STOP-THE-WORLD CHECKPOINT COST (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fault-tolerance-reliability-stoptheworld-cost-beaa prose below.
+# │
+# │ Goal: Price one synchronous checkpoint pause for the 175B running example on
+# │       the 10,000-GPU cluster, then the daily cost at an hourly cadence.
+# │ Show: ~2-minute pause, ~333 idle GPU-hours, ~$1,000 per checkpoint, ~$24,000/day.
+# │ How:  GPT-3 resumable checkpoint / shared-storage rate -> pause (rounded to
+# │       the displayed minutes); GPU-hours x utility-scenario GPU-hour price.
+# │ Note: 20 GB/s is a slower shared-storage tier than the registry's
+# │       Systems.Reliability.Recovery.checkpoint_write_bw_gbs (100 GB/s).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Infrastructure, Models, ReferenceStats, Systems
+from mlsysim.fmt import check, fmt, fmt_int, fmt_math, fmt_usd
+
+class CheckpointStopTheWorld:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    n_gpus = Systems.Clusters.Training_10K.total_accelerators
+    ckpt_bytes = Models.Language.GPT3.parameters * ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
+    shared_storage_bw_gbs = 20  # scenario assumption: shared-storage tier delivering ~20 GB/s
+    gpu_hour_usd = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate.to(USD / hour).magnitude
+    ckpts_per_day = 24  # scenario assumption: hourly checkpoints
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    pause_s = ckpt_bytes.to(GB).magnitude / shared_storage_bw_gbs
+    pause_min = round(pause_s / 60)  # display-consistent minutes
+    idle_gpu_h = n_gpus * pause_min / 60
+    ckpt_cost = idle_gpu_h * gpu_hour_usd
+    daily_cost = ckpt_cost * ckpts_per_day
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(90 < pause_s < 150, "multi-TB checkpoint at ~20 GB/s must take about 2 minutes")
+    check(900 < ckpt_cost < 1100 and 22_000 < daily_cost < 26_000, "prose claims ~$1,000 per checkpoint and ~$24,000/day")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    n_gpus_str = fmt(n_gpus, precision=0)
+    pause_min_str = fmt(pause_min, precision=0)
+    storage_bw_str = fmt(shared_storage_bw_gbs, precision=0)
+    idle_eq_math = fmt_math(rf"{n_gpus_str.replace(',', '{,}')} \times \frac{{{pause_min}}}{{60}} \approx {fmt_int(round(idle_gpu_h))}")
+    gpu_hour_str = fmt_usd(gpu_hour_usd, precision=0)
+    ckpt_cost_str = fmt_usd(round(ckpt_cost, -2), precision=0)
+    daily_cost_str = fmt_usd(round(daily_cost, -3), precision=0)
+```
+
+The financial impact of synchronous checkpointing at scale is severe. When a `{python} CheckpointStopTheWorld.n_gpus_str`-GPU cluster pauses for `{python} CheckpointStopTheWorld.pause_min_str` minutes to push a multi-TB checkpoint through shared storage delivering about `{python} CheckpointStopTheWorld.storage_bw_str` GB/s, it burns `{python} CheckpointStopTheWorld.idle_eq_math` idle GPU-hours, which at roughly `{python} CheckpointStopTheWorld.gpu_hour_str` per GPU-hour costs about `{python} CheckpointStopTheWorld.ckpt_cost_str` in wasted compute for a single checkpoint. If checkpoints occur hourly, that idle time compounds to `{python} CheckpointStopTheWorld.daily_cost_str` per day spent waiting for storage I/O. This economic reality drives the aggressive adoption of asynchronous checkpointing strategies that move data movement off the critical path. @Tbl-checkpoint-overhead-by-model reveals how checkpoint characteristics vary dramatically by model architecture: larger models require longer write times but also benefit from correspondingly longer optimal intervals.
 
 ```{python}
 #| echo: false
@@ -3367,8 +3554,13 @@ class CheckpointOverheadCalc:
     checkpoint_archetypes = ReferenceStats.CheckpointArchetypes
     # Archetype A: 14 B/param resumable checkpoint (calc_checkpoint_size default),
     # the same 2.45 TB contract used throughout the chapter.
+    ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
     archA_size = calc_checkpoint_size(Models.Language.GPT3.parameters)
     check(2.3 * TB < archA_size < 2.6 * TB, "Archetype A checkpoint must be about 2.45 TB")
+    check(
+        abs((archA_size / (Models.Language.GPT3.parameters * ckpt_bpp)).to("").magnitude - 1) < 1e-9,
+        "calc_checkpoint_size must match the registry bytes/param anchor",
+    )
     dense20b_size = checkpoint_archetypes.Dense20BTransformerCheckpointSize
     bert_size = Models.Language.BERT_Large.size_in_bytes(BYTES_FP32)
     archB_size = checkpoint_archetypes.EmbeddingHeavyRecommenderCheckpointSize
@@ -3421,6 +3613,7 @@ class CheckpointOverheadCalc:
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     # -- Checkpoint sizes
+    ckpt_bpp_str = fmt(ckpt_bpp.magnitude, precision=0)
     archA_ckpt_tb_str = fmt_memory(archA_size, unit=TB, precision=2, commas=False)
     dense20b_ckpt_gb_str = fmt_memory(dense20b_size, unit=GB, precision=0, commas=False)
     bert_ckpt_gb_str = fmt_memory(bert_size, unit=GB, precision=1, commas=False)
@@ -3456,7 +3649,7 @@ class CheckpointOverheadCalc:
     vision_transformer_overhead_pct_str = fmt_percent(vision_transformer_overhead_ratio, precision=2, commas=False, style='symbol')
 ```
 
-The Archetype A row in @tbl-checkpoint-overhead-by-model uses the same 14-byte-per-parameter resumable checkpoint (`{python} CheckpointOverheadCalc.archA_ckpt_tb_str`) as the rest of the chapter. Because the table divides by the GPU-only cluster MTBF rather than the full-system MTBF of the worked cascade, its Archetype A interval is somewhat longer than the one in the Young-Daly notebook.
+The Archetype A row in @tbl-checkpoint-overhead-by-model uses the same `{python} CheckpointOverheadCalc.ckpt_bpp_str`-byte-per-parameter resumable checkpoint (`{python} CheckpointOverheadCalc.archA_ckpt_tb_str`) as the rest of the chapter. Because the table divides by the GPU-only cluster MTBF rather than the full-system MTBF of the worked cascade, its Archetype A interval is somewhat longer than the one in the Young-Daly notebook.
 
 | **Model Type**                  |                       **Checkpoint Size**                        | **Write Time (`{python} CheckpointOverheadCalc.write_bw_gb_per_s_str`)** | **Optimal Interval (`{python} CheckpointOverheadCalc.mtbf_hr_str` GPU-only MTBF)** |                           **Save Overhead**                           |
 |:--------------------------------|:----------------------------------------------------------------:|:------------------------------------------------------------------------:|:----------------------------------------------------------------------------------:|:---------------------------------------------------------------------:|
@@ -3467,7 +3660,7 @@ The Archetype A row in @tbl-checkpoint-overhead-by-model uses the same 14-byte-p
 | **ResNet-50**                   |       `{python} CheckpointOverheadCalc.resnet_ckpt_mb_str`       |           `{python} CheckpointOverheadCalc.resnet_write_s_str`           |              `{python} CheckpointOverheadCalc.resnet_interval_s_str`               |       `{python} CheckpointOverheadCalc.resnet_overhead_pct_str`       |
 | **Vision transformer class**    | `{python} CheckpointOverheadCalc.vision_transformer_ckpt_gb_str` |     `{python} CheckpointOverheadCalc.vision_transformer_write_s_str`     |        `{python} CheckpointOverheadCalc.vision_transformer_interval_s_str`         | `{python} CheckpointOverheadCalc.vision_transformer_overhead_pct_str` |
 
-: **Checkpoint Overhead by Model Type**: The Archetype A row is the 175B running example at 14 bytes per parameter (weights, FP32 master weights, and Adam moments); the 20B, recommender, and vision transformer rows are representative scenario sizes; the BERT-Large and ResNet-50 rows count FP32 weights only and omit optimizer state, so their write times understate a full resumable checkpoint. Larger models require longer save times but also benefit from longer optimal checkpoint intervals. The percentage column reports save-only checkpoint write tax, not total Young-Daly waste; at the optimum, expected rework adds a comparable term. {#tbl-checkpoint-overhead-by-model}
+: **Checkpoint Overhead by Model Type**: The Archetype A row is the 175B running example at `{python} CheckpointOverheadCalc.ckpt_bpp_str` bytes per parameter (weights, FP32 master weights, and Adam moments); the 20B, recommender, and vision transformer rows are representative scenario sizes; the BERT-Large and ResNet-50 rows count FP32 weights only and omit optimizer state, so their write times understate a full resumable checkpoint. Larger models require longer save times but also benefit from longer optimal checkpoint intervals. The percentage column reports save-only checkpoint write tax, not total Young-Daly waste; at the optimum, expected rework adds a comparable term. {#tbl-checkpoint-overhead-by-model}
 
 While the theoretical overhead of checkpointing appears manageable for individual models, writing these massive state files introduces a new bottleneck. When thousands of GPUs simultaneously attempt to write gigabytes of data to a shared file system, the resulting I/O congestion threatens to bring the entire cluster to a halt. The scale of that I/O burst is easiest to see by expanding the example from one model to thousands of simultaneous writers.
 
@@ -3549,7 +3742,7 @@ class CheckpointDebug:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
 
-    from mlsysim import Models, Hardware, Systems
+    from mlsysim import Models, Hardware, Systems, ReferenceStats
 
     m = Models.Language.Llama2_70B
     nfs_bw = 10 * Gbps
@@ -3567,9 +3760,9 @@ class CheckpointDebug:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # 14 bytes/param: BF16 weights + separate FP32 master + two FP32 Adam moments.
     # Checkpoint is at an update boundary; no live gradients. Metadata is omitted.
-    bytes_per_param = 14
+    bytes_per_param = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
     params_count = m.parameters.to(param).magnitude
-    total_ckpt_qty = memory_from_params(params_count * param, bytes_per_param * byte / param)
+    total_ckpt_qty = memory_from_params(params_count * param, bytes_per_param)
     total_ckpt_gb_val = total_ckpt_qty.to(GB).magnitude
 
     # Use library formula for transfer time
@@ -4424,13 +4617,46 @@ Verify your understanding of how detection latency and recovery strategy trade a
 
 ## Elastic Recovery {#sec-fault-tolerance-reliability-reliability-elastic-training-4f87}
 
-Suppose a 1,024-GPU training job loses an 8-GPU node to a hardware fault, but the cluster has no spare nodes available. Under checkpoint-restart recovery, the remaining 1,016 GPUs sit idle for hours waiting for a repair. Elastic recovery instead allows the job to dynamically resize and continue with slightly less compute, breaking the rigid assumption of a fixed worker count.
+```{python}
+#| echo: false
+#| label: elastic-recovery-node-loss
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ELASTIC RECOVERY NODE LOSS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fault-tolerance-reliability-reliability-elastic-training-4f87 opener.
+# │
+# │ Goal: Size the survivors when the Archetype A reference job loses one node.
+# │ Show: 1,024-GPU job, 8-GPU node, 1,016 surviving GPUs.
+# │ How:  Scenarios.DenseLLMPretrainingReference system: total minus one node.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.fmt import check, fmt, fmt_percent
+
+class ElasticNodeLoss:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    job_gpus = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
+    gpus_per_node = Scenarios.DenseLLMPretrainingReference.system.node.accelerators_per_node
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    survivors = job_gpus - gpus_per_node
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(survivors == 1016, "prose quotes 1,016 surviving GPUs")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    job_gpus_str = fmt(job_gpus, precision=0)
+    gpus_per_node_str = fmt(gpus_per_node, precision=0)
+    survivors_str = fmt(survivors, precision=0)
+    retained_pct_str = fmt_percent(survivors / job_gpus, precision=1, style="prose")
+```
+
+Suppose a `{python} ElasticNodeLoss.job_gpus_str`-GPU training job loses an `{python} ElasticNodeLoss.gpus_per_node_str`-GPU node to a hardware fault, but the cluster has no spare nodes available. Under checkpoint-restart recovery, the remaining `{python} ElasticNodeLoss.survivors_str` GPUs sit idle for hours waiting for a repair. Elastic recovery instead allows the job to dynamically resize and continue with slightly less compute, breaking the rigid assumption of a fixed worker count.
 
 ::: {#dfn-fault-tolerance-elastic-training .callout-definition title="Elastic training"}
 
 ***Elastic training***\index{Elastic Training!definition}\index{Training!elastic} is the capability of a distributed training job to adjust its worker count across membership changes, potentially through a coordinated worker-group restart.
 
-1.  **Significance**: It converts a permanent capacity loss into a temporary interruption followed by reduced throughput. A pure data-parallel 1,024-GPU job that loses 8 GPUs retains 99.2 percent of its device count and may resume if the remaining devices can hold the state. Tensor- and pipeline-parallel jobs additionally need a feasible partition and compatible group sizes; retained device count does not guarantee the same fraction of throughput. It requires learning rate recalibration and gradient accumulation adjustment to maintain mathematical consistency as the global batch size changes.
+1.  **Significance**: It converts a permanent capacity loss into a temporary interruption followed by reduced throughput. A pure data-parallel `{python} ElasticNodeLoss.job_gpus_str`-GPU job that loses `{python} ElasticNodeLoss.gpus_per_node_str` GPUs retains `{python} ElasticNodeLoss.retained_pct_str` of its device count and may resume if the remaining devices can hold the state. Tensor- and pipeline-parallel jobs additionally need a feasible partition and compatible group sizes; retained device count does not guarantee the same fraction of throughput. It requires learning rate recalibration and gradient accumulation adjustment to maintain mathematical consistency as the global batch size changes.
 2.  **Distinction**: Unlike fixed-size checkpoint-restart recovery, which waits for replacement hardware to restore the original allocation, elastic recovery can restart or resume with a different worker count. The optimization loop may pause while membership, ranks, and state are re-established.
 3.  **Common pitfall**: A frequent misconception is that elasticity is "automatic." In reality, recovery requires coordinated adaptation: the training framework, the data loader, and the orchestrator must all synchronize their state to ensure that no data samples are lost or double-counted during the resize.
 
@@ -5034,9 +5260,54 @@ Model-specific serving differences follow from what state is expensive to lose a
 
 : **Serving Recovery State Invariants**: Serving fault tolerance starts from the state whose loss changes user-visible quality. LLMs protect live context, recommendation systems protect feature freshness, and vision services protect preprocessing and device correctness. {#tbl-serving-recovery-state-invariants}
 
+```{python}
+#| echo: false
+#| label: kv-cache-live-state
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KV-CACHE LIVE STATE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: [^fn-kv-cache-resilience] below (serving fault tolerance).
+# │
+# │ Goal: Size one full-context conversation's KV cache for a Llama-family 70B
+# │       model, with grouped-query attention and with one KV head per query head.
+# │ Show: 80 layers, 8 KV heads, 128K context, 128-dim heads; ~43 GB vs ~344 GB.
+# │ How:  Models.Language.Llama3_70B.get_kv_cache_size at its context_length,
+# │       BF16 (2 bytes); counterfactual via calc_kv_cache_size with .heads.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim.physics.memory import calc_kv_cache_size
+from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_text
+
+class KvCacheLiveState:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    m = Models.Language.Llama3_70B
+    kv_bytes = BYTES_FP16  # BF16 and FP16 are both 2 bytes per element
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    head_dim = m.hidden_dim // m.heads
+    kv_gqa = m.get_kv_cache_size(seq_len=m.context_length, batch_size=1, precision=kv_bytes)
+    kv_mha = calc_kv_cache_size(
+        n_layers=m.layers, n_heads=m.heads, head_dim=head_dim, seq_len=m.context_length, batch_size=1, bytes_per_elem=kv_bytes
+    )
+    ratio = (kv_mha / kv_gqa).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(40 < kv_gqa.to(GB).magnitude < 45, "footnote quotes about 43 GB per conversation")
+    check(abs(ratio - m.heads / m.kv_heads) < 1e-9, "MHA/GQA ratio must equal heads/kv_heads")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    layers_str = fmt(m.layers, precision=0)
+    kv_heads_str = fmt(m.kv_heads, precision=0)
+    heads_str = fmt(m.heads, precision=0)
+    context_k_str = fmt_text(fmt_int(m.context_length // 1024), "K")
+    head_dim_str = fmt(head_dim, precision=0)
+    kv_gqa_str = fmt_memory(round(kv_gqa.to(GB).magnitude) * GB, unit=GB, precision=0)
+    kv_mha_str = fmt_memory(round(kv_mha.to(GB).magnitude) * GB, unit=GB, precision=0)
+```
+
 The KV cache[^fn-kv-cache-resilience] can be substantial (gigabytes for long contexts across attention layers). Losing it requires recomputing attention state from the retained token history, which can take seconds to minutes; previously delivered text need not be generated again. During an in-flight response, recovery must also know which output tokens the client has already received so a retry does not silently duplicate or replace part of the response.
 
-[^fn-kv-cache-resilience]: [offset=-34mm] **KV Cache**\index{KV Cache!serving fault tolerance}: Stores key and value projections for all previous tokens across all attention layers, scaling as $2 \times N_L \times H_{\text{KV}} \times S \times d_{\text{head}} \times \text{bytes}$. For a Llama-family 70B model with 80 layers, 8 key-value heads, 128K context, 128-dimension heads, and BF16 storage, the KV cache is about 43 GB per conversation; using 64 independent key-value heads would be about 344 GB. Losing this derived state requires replaying retained tokens to rebuild their attention state, rather than generating the conversation again. Reconstruction can exceed serving latency service level agreements (SLAs) even when a replacement replica is already available.
+[^fn-kv-cache-resilience]: [offset=-34mm] **KV Cache**\index{KV Cache!serving fault tolerance}: Stores key and value projections for all previous tokens across all attention layers, scaling as $2 \times N_L \times H_{\text{KV}} \times S \times d_{\text{head}} \times \text{bytes}$. For a Llama-family 70B model with `{python} KvCacheLiveState.layers_str` layers, `{python} KvCacheLiveState.kv_heads_str` key-value heads, `{python} KvCacheLiveState.context_k_str` context, `{python} KvCacheLiveState.head_dim_str`-dimension heads, and BF16 storage, the KV cache is about `{python} KvCacheLiveState.kv_gqa_str` per conversation; using `{python} KvCacheLiveState.heads_str` independent key-value heads would be about `{python} KvCacheLiveState.kv_mha_str`. Losing this derived state requires replaying retained tokens to rebuild their attention state, rather than generating the conversation again. Reconstruction can exceed serving latency service level agreements (SLAs) even when a replacement replica is already available.
 
 ::: {.column-margin}
 ![](images/svg/fault_tolerance_kv_live_state_ladder.svg){width="100%" fig-alt="Memory ladder comparing a 64-head KV cache at 344 GB with a grouped-query KV cache at 43 GB, with the 8x gap marked as a ratio annotation."}
@@ -5090,7 +5361,47 @@ The dimensions in @tbl-graceful-degradation-dimensions become operational only w
 
 Model fallback turns quality into an explicit availability lever by maintaining multiple model versions with different resource requirements. The primary model\index{Graceful degradation!primary model} provides full capability at the highest resource cost, a secondary model\index{Graceful degradation!secondary model} reduces capability and resource demand, a tertiary model\index{Graceful degradation!tertiary model} preserves minimal capability, and a static fallback\index{Graceful degradation!static fallback} serves precomputed defaults with no inference at all. When the primary path is unavailable or overloaded, the policy descends only as far as resource pressure requires, then returns upward after the primary path is healthy again.
 
-An image classification cascade makes the trade-off concrete. The primary path might run a ViT-Large model with 307 million parameters and 88 percent ImageNet top-1 accuracy, fall back to EfficientNet-B4 with 19 million parameters and 83 percent accuracy under pressure, then fall back again to MobileNet-V3-Large with 5.4 million parameters and 75 percent accuracy when only minimal classification remains affordable. If even that path cannot meet the SLO, the service can return cached labels, a coarse category, or "classification unavailable" rather than blocking the request indefinitely. For that ladder to be real rather than aspirational, the production system must keep multiple models deployed, route requests to the appropriate level, monitor fallback frequency, and measure the quality impact of each level.
+```{python}
+#| echo: false
+#| label: model-fallback-cascade
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MODEL FALLBACK CASCADE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fault-tolerance-reliability-reliability-model-fallback-bc6e prose below.
+# │
+# │ Goal: Pin the three named vision models' sizes and ImageNet top-1 accuracy.
+# │ Show: ViT-Large 307M / 88%; EfficientNet-B4 19M / 83%; MobileNetV3-Large 5.4M / 75%.
+# │ How:  Models.Vision.*.parameters; Literature.Benchmarks.*ImageNetTop1.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature, Models
+from mlsysim.fmt import check, fmt, fmt_percent
+
+class ModelFallbackCascade:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    vit_params_m = Models.Vision.ViT_Large.parameters.to(param).magnitude / 1e6
+    effnet_params_m = Models.Vision.EfficientNetB4.parameters.to(param).magnitude / 1e6
+    mobilenet_params_m = Models.Vision.MobileNetV3_Large.parameters.to(param).magnitude / 1e6
+    vit_top1 = float(Literature.Benchmarks.ViTLargeImageNetTop1)
+    effnet_top1 = float(Literature.Benchmarks.EfficientNetB4ImageNetTop1)
+    mobilenet_top1 = float(Literature.Benchmarks.MobileNetV3LargeImageNetTop1)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    # (no derived values; each rung is a named registry entity)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(vit_params_m > effnet_params_m > mobilenet_params_m, "each fallback rung must be smaller")
+    check(vit_top1 > effnet_top1 > mobilenet_top1, "each fallback rung must trade accuracy for cost")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    vit_params_str = fmt(vit_params_m, precision=0)
+    effnet_params_str = fmt(effnet_params_m, precision=0)
+    mobilenet_params_str = fmt(mobilenet_params_m, precision=1)
+    vit_top1_str = fmt_percent(round(vit_top1 * 100) / 100, precision=0, style="prose")
+    effnet_top1_str = fmt_percent(round(effnet_top1 * 100) / 100, precision=0, style="prose")
+    mobilenet_top1_str = fmt_percent(round(mobilenet_top1 * 100) / 100, precision=0, style="prose")
+```
+
+An image classification cascade makes the trade-off concrete. The primary path might run a ViT-Large model with `{python} ModelFallbackCascade.vit_params_str` million parameters and `{python} ModelFallbackCascade.vit_top1_str` ImageNet top-1 accuracy, fall back to EfficientNet-B4 with `{python} ModelFallbackCascade.effnet_params_str` million parameters and `{python} ModelFallbackCascade.effnet_top1_str` accuracy under pressure, then fall back again to MobileNet-V3-Large with `{python} ModelFallbackCascade.mobilenet_params_str` million parameters and `{python} ModelFallbackCascade.mobilenet_top1_str` accuracy when only minimal classification remains affordable. If even that path cannot meet the SLO, the service can return cached labels, a coarse category, or "classification unavailable" rather than blocking the request indefinitely. For that ladder to be real rather than aspirational, the production system must keep multiple models deployed, route requests to the appropriate level, monitor fallback frequency, and measure the quality impact of each level.
 
 Recommendation and ranking systems use the same pattern when a complex deep learning model falls back to a top-n popularity list, a linear ranker, or a cached response during primary serving failures. Complex models often fight for the last mile of accuracy while simple heuristics provide the bulk of the utility, so the fallback path must be monitored as a first-class quality signal rather than treated as a silent failover. Otherwise the product appears healthy while quality is silently traded for availability.
 
@@ -5704,19 +6015,95 @@ Cascade failures are particularly insidious because the root cause is obscured b
 
 ## Case Studies {#sec-fault-tolerance-reliability-reliability-case-studies-927f}
 
-Published production systems make the chapter's scale lesson concrete: failure detection, state preservation, and observability reappear as checkpoint tax, topology reconfiguration, chaos testing, and elastic recovery. The case studies in this section use public reports from Meta, Google, Netflix, and Microsoft to show representative engineering patterns. Treat the operational numbers as reported magnitudes that reveal the design pressure, not as universal constants. Meta's Open Pre-trained Transformer (OPT-175B) training run on a 992-GPU cluster provides the first example: dozens of hardware failures had to be absorbed without aborting training.
+```{python}
+#| echo: false
+#| label: opt175b-case-study
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OPT-175B CASE STUDY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Case-studies opener and
+# │          @sec-fault-tolerance-reliability-reliability-largescale-llm-training-fault-tolerance-f4aa.
+# │
+# │ Goal: Pin the OPT-175B run's reported cluster size, restart counts, host
+# │       churn, and sustained throughput to Literature.TrainingRuns.
+# │ Show: 992 GPUs; at least 35 manual and ~70 automatic restarts; >100 hosts;
+# │       147 TFLOP/s per A100, about 47 percent of A100 dense FP16 peak.
+# │ How:  Literature.TrainingRuns.Opt175B*; fraction = 147 / A100 peak_flops.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Literature
+from mlsysim.fmt import check, fmt, fmt_percent
+
+class Opt175BCaseStudy:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    gpus = float(Literature.TrainingRuns.Opt175BGpus)
+    manual_restarts = float(Literature.TrainingRuns.Opt175BManualRestarts)
+    auto_restarts = float(Literature.TrainingRuns.Opt175BAutomaticRestarts)
+    hosts_cycled = float(Literature.TrainingRuns.Opt175BHostsCycled)
+    tflops_per_gpu = float(Literature.TrainingRuns.Opt175BTflopsPerGpu)
+    a100_peak_tflops = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs / second).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    peak_fraction = tflops_per_gpu / a100_peak_tflops
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(0.45 < peak_fraction < 0.50, "prose says 'near 50 percent of FP16 peak'")
+    check(manual_restarts < auto_restarts, "paper: more automatic than manual restarts")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    gpus_str = fmt(gpus, precision=0)
+    manual_restarts_str = fmt(manual_restarts, precision=0)
+    auto_restarts_str = fmt(auto_restarts, precision=0)
+    hosts_cycled_str = fmt(hosts_cycled, precision=0)
+    tflops_per_gpu_str = fmt(tflops_per_gpu, precision=0)
+    peak_fraction_str = fmt_percent(round(peak_fraction * 100) / 100, precision=0, style="prose")
+```
+
+Published production systems make the chapter's scale lesson concrete: failure detection, state preservation, and observability reappear as checkpoint tax, topology reconfiguration, chaos testing, and elastic recovery. The case studies in this section use public reports from Meta, Google, Netflix, and Microsoft to show representative engineering patterns. Treat the operational numbers as reported magnitudes that reveal the design pressure, not as universal constants. Meta's Open Pre-trained Transformer (OPT-175B) training run on a `{python} Opt175BCaseStudy.gpus_str`-GPU cluster provides the first example: dozens of hardware failures had to be absorbed without aborting training.
 
 ### Large-scale LLM training at Meta {#sec-fault-tolerance-reliability-reliability-largescale-llm-training-fault-tolerance-f4aa}
 
-The training of the Open Pre-trained Transformer (OPT-175B) at Meta provides a well-documented study in the physics of failure for large deep-learning jobs [@zhang2022opt]. Using a cluster of 992 NVIDIA A100 GPUs continuously for two months, the engineering team faced a statistical certainty: hardware components would fail, and they would fail often. Over the course of the training run, the team logged approximately 90 manual restarts driven by hardware failures (ECC memory errors, NCCL/InfiniBand network issues, lost GPUs) and training-stability incidents, alongside the cycling of more than 100 hosts [@opt2022logbook]. In a synchronous data-parallel regime, a single GPU failure halts the entire cluster, making the MTBF of the aggregate system a fraction of any individual component's reliability. For OPT-175B, roughly two machines went down per day, dropping the effective system-wide MTBF to a fraction of a day and necessitating a fault tolerance strategy that treated interruption as the norm rather than the exception.
+The training of the Open Pre-trained Transformer (OPT-175B) at Meta provides a well-documented study in the physics of failure for large deep-learning jobs [@zhang2022opt]. Using a cluster of `{python} Opt175BCaseStudy.gpus_str` NVIDIA A100 GPUs continuously for two months, the engineering team faced a statistical certainty: hardware components would fail, and they would fail often. Over the course of the training run, the team reported at least `{python} Opt175BCaseStudy.manual_restarts_str` manual restarts and an estimated `{python} Opt175BCaseStudy.auto_restarts_str` or more automatic restarts driven by hardware failures (ECC memory errors, NCCL/InfiniBand network issues, lost GPUs) and training-stability incidents, alongside the cycling of more than `{python} Opt175BCaseStudy.hosts_cycled_str` hosts [@zhang2022opt; @opt2022logbook]. In a synchronous data-parallel regime, a single GPU failure halts the entire cluster, making the MTBF of the aggregate system a fraction of any individual component's reliability. For OPT-175B, roughly two machines went down per day, dropping the effective system-wide MTBF to a fraction of a day and necessitating a fault tolerance strategy that treated interruption as the norm rather than the exception.
 
 During the OPT run, the team monitored progress through train-log freshness checks: the public logbook records a 15-minute modified-file threshold, later relaxed to one hour, as part of restart monitoring [@opt2022logbook]. Detection alone does not bound the restart tax. A recoverable training checkpoint must preserve the numerical and optimizer state required by its restart contract, rather than counting FP16 model weights alone. Asynchronous staging can shorten the pause before computation resumes, but the snapshot becomes recoverable only after the required durable writes and commit complete. The storage path must drain checkpoints at their production rate or the staging backlog eventually reaches the training process.
 
-Recovery procedures also had to account for nonhardware failures, specifically loss spikes associated with numerical instabilities. Unlike a fail-stop event, this symptom made recent model state suspect and required diagnosis rather than identifying a failed device. The recovery strategy combined a last-good-checkpoint rollback with intervention in the optimizer: when gradient overflows or loss-scale floors were observed, the team reverted to an earlier checkpoint and resumed training with a lowered learning rate (ultimately running at roughly two-thirds of the rate OpenAI used for GPT-3) to stabilize the trajectory [@opt2022logbook]. This dual-layer resilience, handling both physical silicon failures and mathematical divergence, allowed Meta to sustain approximately 147 TFLOP/s per A100 (near 50 percent of FP16 peak) despite daily interruptions [@zhang2022opt]. The enduring lesson from OPT-175B is that at scale, the trade-off between checkpoint frequency and training throughput is a central variable in determining feasibility; checkpointing too often wastes compute, while checkpointing too rarely risks losing days of progress to one failure or invalid state transition.
+Recovery procedures also had to account for nonhardware failures, specifically loss spikes associated with numerical instabilities. Unlike a fail-stop event, this symptom made recent model state suspect and required diagnosis rather than identifying a failed device. The recovery strategy combined a last-good-checkpoint rollback with intervention in the optimizer: when gradient overflows or loss-scale floors were observed, the team reverted to an earlier checkpoint and resumed training with a lowered learning rate (ultimately running at roughly two-thirds of the rate OpenAI used for GPT-3) to stabilize the trajectory [@opt2022logbook]. This dual-layer resilience, handling both physical silicon failures and mathematical divergence, allowed Meta to sustain approximately `{python} Opt175BCaseStudy.tflops_per_gpu_str` TFLOP/s per A100 (about `{python} Opt175BCaseStudy.peak_fraction_str` of dense FP16 peak) despite daily interruptions [@zhang2022opt]. The enduring lesson from OPT-175B is that at scale, the trade-off between checkpoint frequency and training throughput is a central variable in determining feasibility; checkpointing too often wastes compute, while checkpointing too rarely risks losing days of progress to one failure or invalid state transition.
 
 ### Google TPU pod resilience {#sec-fault-tolerance-reliability-reliability-google-tpu-pod-resilience}
 
-Google's TPUv4 supercomputer takes a fundamentally different architectural approach to fault tolerance, driven by a custom ICI fabric and a network of optical circuit switches that dynamically reconfigure the topology. A TPUv4 pod contains 4,096 chips organized as 64 "cubes" of 64 chips each, with each cube arranged in a $4{\times}4{\times}4$ 3D mesh [@zu2024tpuv4]. In this architecture, the network effectively is the computer: a single chip or optical link failure does not merely reduce capacity by $1/4096$th; it creates a hole in the communication topology that would deadlock the synchronous mesh required for collective operations such as AllReduce.
+```{python}
+#| echo: false
+#| label: tpuv4-pod-cubes
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TPUv4 POD CUBES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fault-tolerance-reliability-reliability-google-tpu-pod-resilience.
+# │
+# │ Goal: Derive the pod's cube count from the registry pod size.
+# │ Show: 4,096 chips as 64 cubes of 64 chips; one chip = 1/4096 of capacity.
+# │ How:  Systems.Pods.TPUv4_4096.chips / cube size (4x4x4, architectural constant).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Systems
+from mlsysim.fmt import check, fmt, fmt_math
+
+class TpuV4PodCubes:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    pod_chips = Systems.Pods.TPUv4_4096.chips
+    cube_chips = 4 * 4 * 4  # 4x4x4 cube, the OCS-switched building block [@zu2024tpuv4]
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    n_cubes = pod_chips // cube_chips
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(n_cubes * cube_chips == pod_chips, "pod must be a whole number of cubes")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    pod_chips_str = fmt(pod_chips, precision=0)
+    n_cubes_str = fmt(n_cubes, precision=0)
+    cube_chips_str = fmt(cube_chips, precision=0)
+    chip_share_math = fmt_math(rf"1/{pod_chips}")
+```
+
+Google's TPUv4 supercomputer takes a fundamentally different architectural approach to fault tolerance, driven by a custom ICI fabric and a network of optical circuit switches that dynamically reconfigure the topology. A TPUv4 pod contains `{python} TpuV4PodCubes.pod_chips_str` chips organized as `{python} TpuV4PodCubes.n_cubes_str` "cubes" of `{python} TpuV4PodCubes.cube_chips_str` chips each, with each cube arranged in a $4{\times}4{\times}4$ 3D mesh [@zu2024tpuv4]. In this architecture, the network effectively is the computer: a single chip or optical link failure does not merely reduce capacity by `{python} TpuV4PodCubes.chip_share_math`th; it creates a hole in the communication topology that would deadlock the synchronous mesh required for collective operations such as AllReduce.
 
 Consequently, Google's strategy focuses on slice abstraction rather than in-place repair. The OCS network combines multiple healthy cubes into logical "slices" sized to the training job's needs. When a fault is detected by two software components, `libtpunet` and `healthd`, that monitor link integrity and machine health, the orchestration system does not attempt to route around the failure within the active slice. Instead, the control plane preempts the job and reconfigures the OCS fabric to attach the workload to spare healthy cubes elsewhere in the pod. This treats hardware as immutable infrastructure during a job's execution: rather than repairing the running topology, the system reconstitutes one with identical shape from surviving healthy components.
 
@@ -5778,13 +6165,15 @@ Organizations commonly set checkpoint intervals based on "feels right": "every h
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Systems
 from mlsysim.core.units import minute
 from mlsysim.fmt import check, fmt_display_math, fmt_int, fmt_time
 
 class YoungDalyIntuitionFallacy:
     # ┌── 1. LOAD (Constants) ──────────────────────
     # The 1,000-GPU row of the chapter's cluster-MTBF table, plus two write times.
-    mtbf_min = 50 * 60  # the chapter's 1,000-GPU cluster MTBF, in minutes
+    cluster_gpus = ClusterMtbfScaling.sizes[3]  # the 1,000-GPU row of @tbl-cluster-mtbf-scaling (scenario sweep)
+    mtbf_min = round(float(Systems.Reliability.Gpu.mttf_hours) / cluster_gpus * 60)  # cluster MTBF, minutes
     write_fast_min = 5  # checkpoint write time, fast storage
     write_slow_min = 15  # checkpoint write time, slower storage / larger model
 
@@ -5825,7 +6214,42 @@ Reliability does not compose by averaging; it compounds by multiplication. For $
 
 The reliability equation $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}}/N$ assumes component failures are statistically independent. In production, however, failures correlate across common physical and operational dependencies. A shared power domain\index{Correlated failure!shared power domain} can fail an entire rack when an uninterruptible power supply faults, a shared top-of-rack switch\index{Correlated failure!shared switch} isolates all attached accelerators, shared software\index{Correlated failure!shared software} bugs triggered by specific inputs crash all replicas simultaneously, and cooling failures induce clustered thermal throttling\index{Correlated failure!thermal correlation} across adjacent chassis.
 
-Correlated failures change two quantities that the simple MTBF equation hides: incident frequency and blast radius. A cluster with 1,000 independent GPUs each with 50,000-hour MTBF has a first-GPU-failure MTBF of 50 hours. If a shared power, cooling, or software hazard adds an incident rate 10 times larger than that independent first-failure rate, the effective incident MTBF drops to about 5 hours. Separately, a correlated incident may take out 10 GPUs at once, increasing recovery cost even if the independent GPU failure rate itself has not changed. Reliability engineering must identify and mitigate correlation through diversity: different power feeds, different network paths, different software versions in canary deployments.
+```{python}
+#| echo: false
+#| label: correlated-failure-pitfall
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CORRELATED FAILURE PITFALL (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Pitfall "Using MTBF calculations as if failures were independent."
+# │
+# │ Goal: Show how a correlated hazard 10x the independent rate collapses MTBF.
+# │ Show: 1,000 GPUs x 50,000-hour MTBF -> 50 h; adding a 10x hazard -> ~5 h.
+# │ How:  MTBF = MTTF / N; combined rate = (1 + 10) x independent rate.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Systems
+from mlsysim.fmt import check, fmt, fmt_time
+
+class CorrelatedFailurePitfall:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
+    cluster_gpus = ClusterMtbfScaling.sizes[3]  # the 1,000-GPU row of @tbl-cluster-mtbf-scaling (scenario sweep)
+    hazard_multiple = 10  # scenario assumption: correlated hazard 10x the independent rate
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    independent_mtbf_h = gpu_mttf_h / cluster_gpus
+    effective_mtbf_h = 1 / ((1 + hazard_multiple) / independent_mtbf_h)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(4.0 < effective_mtbf_h < 5.0, "prose says the effective incident MTBF drops to 'about 5 hours'")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    cluster_gpus_str = fmt(cluster_gpus, precision=0)
+    gpu_mttf_attr_str = fmt_time(gpu_mttf_h, "hour", precision=0, commas=True, style="word", attributive=True)
+    independent_mtbf_str = fmt_time(independent_mtbf_h, "hour", precision=0, style="word")
+    effective_mtbf_str = fmt_time(round(effective_mtbf_h), "hour", precision=0, style="word")
+```
+
+Correlated failures change two quantities that the simple MTBF equation hides: incident frequency and blast radius. A cluster with `{python} CorrelatedFailurePitfall.cluster_gpus_str` independent GPUs each with `{python} CorrelatedFailurePitfall.gpu_mttf_attr_str` MTBF has a first-GPU-failure MTBF of `{python} CorrelatedFailurePitfall.independent_mtbf_str`. If a shared power, cooling, or software hazard adds an incident rate 10 times larger than that independent first-failure rate, the effective incident MTBF drops to about `{python} CorrelatedFailurePitfall.effective_mtbf_str`. Separately, a correlated incident may take out 10 GPUs at once, increasing recovery cost even if the independent GPU failure rate itself has not changed. Reliability engineering must identify and mitigate correlation through diversity: different power feeds, different network paths, different software versions in canary deployments.
 
 :::
 
@@ -5851,7 +6275,7 @@ class FleetReliabilityFallacyRates:
     _fleet_tex = fmt(fleet_gpus, precision=0).replace(",", "{,}")
     _mttf_tex = fmt(gpu_mttf_h, precision=0).replace(",", "{,}")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpu_mttf_str = fmt_time(gpu_mttf_h, "hour", precision=0, style="word")
+    gpu_mttf_str = fmt_time(gpu_mttf_h, "hour", precision=0, commas=True, style="word")
     fleet_gpus_str = fmt_count(fleet_gpus, label="GPU")
     fleet_rate_eq_math = fmt_math(f"{_fleet_tex}/{_mttf_tex} = {fmt(fleet_rate_per_h, precision=1, commas=False)}")
     hours_between_str = fmt_time(hours_between, "hour", precision=0, commas=False, style="word")
@@ -5947,7 +6371,7 @@ Fault tolerance turns the statistical expectation of hardware failure into a man
 
 Checkpointing provides the foundational mechanism for preserving training progress across failures. Synchronous checkpointing offers simplicity but imposes I/O overhead that scales with model size, while asynchronous approaches overlap checkpoint writes with computation at the cost of additional consistency complexity. The Young-Daly formula, $\tau_{\text{opt}} = \sqrt{2 \times T_{\text{write}} \times \text{MTBF}_{\text{system}}}$, minimizes expected waste, while RPO and RTO bound acceptable lost work and recovery delay. Immutable shards and a manifest published last establish which checkpoint generation is safe to restore. During membership change, epochs and fencing prevent stale workers from mutating that state, while idempotency, inherited deadlines, and retry budgets prevent recovery traffic from amplifying the incident. Elastic training can then resume with a changed worker set when the training algorithm preserves its data, batch-size, and optimizer invariants.
 
-Serving fault tolerance presents a different recovery budget from training. Training can tolerate minutes of recovery when the restored state satisfies its optimization contract, while interactive serving must preserve responsiveness and authoritative session history. Stateless model workers use replica redundancy and routing; stateful workers additionally need a policy for recovering session state. LLM KV caches can be reconstructed from retained history when latency permits, or replicated when reconstruction would exceed the request budget. Graceful degradation supplies a validated fallback when full service cannot be restored in time. The case studies examined in this chapter, from Meta's OPT-175B training through roughly 90 restarts driven by hardware failures and training-stability incidents to Netflix's chaos engineering for serving dependencies, demonstrate that these principles are operational necessities at production scale.
+Serving fault tolerance presents a different recovery budget from training. Training can tolerate minutes of recovery when the restored state satisfies its optimization contract, while interactive serving must preserve responsiveness and authoritative session history. Stateless model workers use replica redundancy and routing; stateful workers additionally need a policy for recovering session state. LLM KV caches can be reconstructed from retained history when latency permits, or replicated when reconstruction would exceed the request budget. Graceful degradation supplies a validated fallback when full service cannot be restored in time. The case studies examined in this chapter, from Meta's OPT-175B training through at least `{python} Opt175BCaseStudy.manual_restarts_str` manual and an estimated `{python} Opt175BCaseStudy.auto_restarts_str` or more automatic restarts driven by hardware failures and training-stability incidents to Netflix's chaos engineering for serving dependencies, demonstrate that these principles are operational necessities at production scale.
 
 Recovery depends on evidence about both the failure and the state being restored. A loss spike can originate in hardware, data, numerical behavior, or synchronization, so telemetry and replay must distinguish those causes before the system drains a device or rolls back training. Restore drills and fault injection then test whether the selected response actually preserves valid state and meets its recovery budget. Passing those tests establishes evidence for the exercised fault model, rather than a guarantee against every failure.
 
