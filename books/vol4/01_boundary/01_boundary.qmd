@@ -129,8 +129,8 @@ An erroneous action can therefore move the machine into states poorly represente
 ### Delay consumes stopping clearance {#sec-boundary-kinematic-roofline}
 
 A moving base needs distance both before braking begins and while braking brings it to rest. For a steady initial speed, constant deceleration after onset, and a stationary obstacle, the elementary stopping budget is:
-$$d_{\text{stop}} = \underbrace{v \tau_{\text{delay}}}_{\text{computational blind travel}} + \underbrace{\frac{v^2}{2 a_{\max}}}_{\text{mechanical dissipation}} \le R_{\text{sensor}}$$
-Here $v$ is the initial speed, $\tau_{\text{delay}}$ is the full interval from the relevant observation to the onset of retarding force, $a_{\max}$ is the braking deceleration assumed for this calculation, and $R_{\text{sensor}}$ is the usable observed clearance. The first term is travel during the delay; the second is travel while shedding kinetic energy. This simple bound is the starting point for the kinematic roofline, the speed limit imposed by available clearance and response time.
+$$d_{\text{stop}} = \underbrace{v \tau_{\text{delay}}}_{\text{computational blind travel}} + \underbrace{\frac{v^2}{2 a_{\text{brake}}}}_{\text{mechanical dissipation}} \le D_{\text{clear}}$$
+Here $v$ is the initial speed, $\tau_{\text{delay}}$ is the full interval from the relevant observation to the onset of retarding force, $a_{\text{brake}}$ is the braking deceleration assumed for this calculation, and $D_{\text{clear}}$ is the usable observed clearance. The first term is travel during the delay; the second is travel while shedding kinetic energy. This simple bound is the starting point for the kinematic roofline, the speed limit imposed by available clearance and response time.
 
 ```{python}
 #| label: boundary-blind-travel
@@ -262,6 +262,80 @@ The classes identify a dominant constraint, not mutually exclusive kinds of robo
 A humanoid makes the coupling especially visible. Catching a load perturbs balance, a recovery step demands additional torque, and that torque draws current and generates heat. Protecting the control electronics does not by itself supply the drive energy needed for the recovery. The part-ending humanoid examples test how each engineering principle survives these coupled demands.
 :::
 
+### The running machine {#sec-boundary-running-machine}
+
+The mobile manipulator is the one machine every later chapter works on, so its parameters are fixed once. @Tbl-01-machine-card collects the fifteen that later calculations use most, each with the evidence category defined in @sec-reader-numbers. A later worked example cites these values by name rather than restating them, and the full data sheet in @sec-appendix-systems-machine-data-sheet lists every other input with the registry field that holds it.
+
+```{python}
+#| label: boundary-machine-card
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE RUNNING MACHINE'S CARD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-01-machine-card in @sec-boundary-running-machine.
+# │ Goal:    Fix the fifteen parameters later chapters use most, with their
+# │          evidence categories, and state the premise the credible
+# │          deceleration rests on.
+# │ Show:    368 kg; 1.5 and 1.3 m/s; 2.0 m/s^2 on a dry floor (mu >= 0.204 with
+# │          all weight on the driven wheels, 0.250 at the load share the drive
+# │          motors allow; tip-over unchecked); 7.11 m/s^3; 1.10 m; 133.6 ms;
+# │          1 ms tick; 60 ms lease; 25 ms step and 50 ms replan; 336 ms intent
+# │          latency at 2 Hz; 605 ms and 4.47 s takeovers.
+# │ How:     machine_card() reads each row from the registry through the same
+# │          helper that prints the full data sheet; the friction premise comes
+# │          from calc_required_friction. Nothing is retyped here.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.embodied.datasheet import data_sheet_lookup, machine_card
+from mlsysim.fmt import MarkdownStr, fmt, check
+
+class MachineCard:
+    """The running machine's most-used parameters, with their evidence categories."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    card = machine_card()  # category: per row, from the registry and its provenance
+    sheet = data_sheet_lookup()  # the braking premise rows of the full sheet
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mu_all = sheet["mu_req"].value  # friction a_brake needs, all weight on the driven wheels
+    mu_share = sheet["mu_req_rated"].value  # friction it needs at the largest allowed load share
+    cg_unknown = sheet["cg_height"].value is None
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(len(card) == 15, f"The machine card prints fifteen rows, got {len(card)}.")
+    check(abs(mu_all - 0.204) < 5e-4, f"Dry-floor premise is mu >= 0.204, got {mu_all}.")
+    check(abs(mu_share - 0.250) < 5e-4, f"At the rated load share the premise is mu >= 0.250, got {mu_share}.")
+    check(cg_unknown, "The tip-over check stays open until the loaded center of gravity is measured.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    value_str = {r.key: MarkdownStr(r.value_str) for r in card}
+    category_str = {r.key: MarkdownStr(r.category_str) for r in card}
+    mu_all_str = fmt(mu_all, precision=3)
+    mu_share_str = fmt(mu_share, precision=3)
+```
+
+| Parameter                                   | Value                                              | Category                                              | Basis                                                                                                                                                                                                                                                                                                   |
+|:--------------------------------------------|:---------------------------------------------------|:------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Loaded mass $m$                             | `{python} MachineCard.value_str["m_loaded"]`       | `{python} MachineCard.category_str["m_loaded"]`       | Base, arm, and a full tote rack; an upper bound (@sec-body-kinetic-momentum)                                                                                                                                                                                                                            |
+| Drive limit $v_{\max}$                      | `{python} MachineCard.value_str["v_drive"]`        | `{python} MachineCard.category_str["v_drive"]`        | Class profile of a warehouse base                                                                                                                                                                                                                                                                       |
+| Aisle speed $v_{\text{aisle}}$              | `{python} MachineCard.value_str["v_aisle"]`        | `{python} MachineCard.category_str["v_aisle"]`        | Set below the dry-floor speed ceiling (@sec-enforcement-stopping-envelopes)                                                                                                                                                                                                                             |
+| Credible deceleration $a_{\text{brake}}$    | `{python} MachineCard.value_str["a_brake"]`        | `{python} MachineCard.category_str["a_brake"]`        | Loaded, on a dry floor that supplies $\mu \ge$ `{python} MachineCard.mu_all_str` with all weight on the driven wheels, or `{python} MachineCard.mu_share_str` at the share the drive motors allow; tip-over is unchecked until the center of gravity is measured (@sec-body-stopping-distance-prebrake) |
+| Stop jerk bound $j_{\max}$                  | `{python} MachineCard.value_str["j_brake"]`        | `{python} MachineCard.category_str["j_brake"]`        | Stipulated for the jerk-limited stop, whose deceleration bound is $a_{\max} = a_{\text{brake}}$ (@sec-planning-c2-stopping-suffix)                                                                                                                                                                      |
+| Rack-end clear distance $D_{\text{clear}}$  | `{python} MachineCard.value_str["d_clear"]`        | `{python} MachineCard.category_str["d_clear"]`        | Clearance the stop must fit inside                                                                                                                                                                                                                                                                      |
+| Total pre-brake delay $\tau_{\text{delay}}$ | `{python} MachineCard.value_str["tau_delay"]`      | `{python} MachineCard.category_str["tau_delay"]`      | Observation age, lease path, and brake onset (@sec-perception-latency-waterfall)                                                                                                                                                                                                                        |
+| Permission tick $T_{\text{tick}}$           | `{python} MachineCard.value_str["t_tick"]`         | `{python} MachineCard.category_str["t_tick"]`         | Period of the chosen permission-loop rate (@sec-nervous-cadences)                                                                                                                                                                                                                                       |
+| Chunk lease $T_{\text{lease}}$              | `{python} MachineCard.value_str["t_lease"]`        | `{python} MachineCard.category_str["t_lease"]`        | Longest an admitted chunk may drive without renewal (@sec-nervous-lease-sizing)                                                                                                                                                                                                                         |
+| Setpoint step $\Delta t$                    | `{python} MachineCard.value_str["t_step"]`         | `{python} MachineCard.category_str["t_step"]`         | Spacing of the chunk policy's setpoints (@sec-brain-action-chunking)                                                                                                                                                                                                                                    |
+| Chunk replan period                         | `{python} MachineCard.value_str["t_period"]`       | `{python} MachineCard.category_str["t_period"]`       | A whole number of setpoint steps                                                                                                                                                                                                                                                                        |
+| Intent-model latency                        | `{python} MachineCard.value_str["t_intent"]`       | `{python} MachineCard.category_str["t_intent"]`       | Prefill plus decode on the application processor (@sec-brain-memory-wall)                                                                                                                                                                                                                               |
+| Intent-model rate                           | `{python} MachineCard.value_str["f_intent"]`       | `{python} MachineCard.category_str["f_intent"]`       | Largest rate whose period covers the latency                                                                                                                                                                                                                                                            |
+| In-loop takeover $T_{\Sigma,1}$             | `{python} MachineCard.value_str["t_takeover_in"]`  | `{python} MachineCard.category_str["t_takeover_in"]`  | Slow-bound human reaction plus console video and handshake (@sec-intervention-reaction-drift)                                                                                                                                                                                                           |
+| Out-of-loop takeover $T_{\Sigma,2}$         | `{python} MachineCard.value_str["t_takeover_out"]` | `{python} MachineCard.category_str["t_takeover_out"]` | Take-over time of the 90th-percentile study condition plus video and handshake                                                                                                                                                                                                                          |
+
+: **The running machine's card**: The fifteen parameters of the warehouse mobile manipulator that later calculations use most. A derived value built on illustrative inputs is illustrative evidence. Values print from the MLSysIM registry when the book is built. {#tbl-01-machine-card tbl-colwidths="[24,12,12,52]"}
+
 The first design task is to identify which margin the intended action approaches, then establish the physical response available before that margin is exhausted. The detailed force, heat, and power calculations belong to the body's design. A separate scope test determines whether the machine also needs the learning and delegated-authority discipline developed in this book.
 
 ## The Physical AI Scope Test {#sec-boundary-scope-test}
@@ -308,7 +382,7 @@ The Body establishes what motion, force, and power the machine can sustain. The 
 4. **The Boundary (Level 4):** The interface where commands produce physical effects and sensors convert physical events into measurements.
 5. **The World (Level 5):** Floors, payloads, contact, people, and other conditions that continue evolving whether the machine observes them or not.
 
-One implementation places the learned proposer on an application processor, the permission path on a separate real-time controller, and the motor current loops on dedicated drives. The required separation follows from timing and fault assumptions; naming a processor family or operating system does not establish it. @Sec-nervous turns this division of responsibility into an explicit handoff contract.
+One implementation places the learned proposer on an application processor, the permission path on a separate real-time controller, and the motor current loops on dedicated drives. The required separation follows from timing and fault assumptions; naming a processor family or operating system does not establish it. @Sec-nervous turns this division of responsibility into an explicit handoff record.
 
 Governance is not a sixth level. It is the lifecycle envelope around all five, deciding who may command the machine, what evidence licenses it to operate, and when that license expires, and it changes on the timescale of interventions and releases rather than control cycles.
 
@@ -360,9 +434,9 @@ The book develops the ability to carry a learned proposal from a physical requir
 ![](images/svg/fig01_book_spine.svg){width="100%"}
 :::
 
-Part I, The Machine Anatomy, turns irreversibility into design limits. @Sec-body measures the plant's budgets, @sec-brain establishes what the learned proposer can supply on time, and @sec-nervous connects them through a permission path whose timing follows from those budgets. The limit and handoff records make those assumptions explicit. Part II, Teaching the Machine, follows the consequences of actions changing future observations. @Sec-data, @sec-training, and @sec-evaluation develop the evidence needed to collect demonstrations, train a policy, and assess its competence within a declared operating domain. The provenance record, policy manifest, and evaluation record preserve both the supported claims and their gaps.
+Part I, The Machine Anatomy, turns irreversibility into design limits. @Sec-body measures the plant's budgets, @sec-brain establishes what the learned proposer can supply on time, and @sec-nervous connects them through a permission path whose timing follows from those budgets. The limit and handoff records make those assumptions explicit. Part II, Teaching the Machine, follows the consequences of actions changing future observations. @Sec-data, @sec-training, and @sec-evaluation develop the evidence needed to collect demonstrations, train a policy, and assess its competence within a declared operating domain. The demonstration provenance record, policy manifest, and evaluation record preserve both the supported claims and their gaps.
 
-Part III, Running the Machine, implements the distinction between proposing and permitting an action. @Sec-perception through @sec-placement follow a command from a timestamped observation through a belief, an intent lease, and a proposed trajectory to admission and timely execution. Part IV, Governing the Machine, determines how evidence limits continued operation. @Sec-intervention, @sec-verification, and @sec-release address command authority, fault tests, and release conditions. @Sec-frontier concludes by applying the method to an unfamiliar machine, synthesizing what an engineer can now build and justify, and identifying the work needed to extend that capability. Across these parts, the warehouse mobile manipulator introduced here gives the reader one machine on which to connect the decisions. Its records make the reasoning inspectable; completing a record does not establish that the machine satisfies the physical claim it contains.
+Part III, Running the Machine, implements the distinction between proposing and permitting an action. @Sec-perception through @sec-placement follow a command from a timestamped observation through a belief, an intent lease, and a proposed trajectory to admission and timely execution. Part IV, Governing the Machine, determines how evidence limits continued operation. @Sec-intervention, @sec-verification, and @sec-release address command authority, fault tests, and release conditions. @Sec-frontier concludes by applying the method to an unfamiliar machine, synthesizing what an engineer can now build and justify, and identifying the work needed to extend that capability. Across these parts, the warehouse mobile manipulator introduced here gives the reader one machine on which to connect the decisions. Its records make the reasoning inspectable; completing a record does not establish that the machine satisfies the physical claim it contains. The record register in @sec-appendix-systems-record-register gives each of the fifteen records its name, the chapter that produces it, and what it binds, and the machine card in @sec-boundary-running-machine fixes the machine's own parameters.
 
 The route is a method for making useful behavior dependable. A documented failure now illustrates why these responsibilities must be joined before a machine enters service.
 
