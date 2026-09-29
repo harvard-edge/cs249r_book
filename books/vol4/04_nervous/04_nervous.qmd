@@ -85,8 +85,8 @@ In standard computer systems, workloads share processors, caches, and memory int
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-nervous-multi-rate-bridge, the running-machine bullets.
 # │ Goal:    Show how far the base moves while each learned proposer computes.
-# │ Show:    60 mm in one 40 ms chunk inference, 240 mm in one 160 ms intent
-# │          inference, at the 1.5 m/s drive limit.
+# │ Show:    60 mm in one 40 ms chunk inference, 503 mm in one computed
+# │          336 ms intent inference, at the 1.5 m/s drive limit.
 # │ How:     Distance = drive limit x inference latency, all from the registry.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -101,7 +101,7 @@ class MachineStallTravel:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     v = RM.base.max_velocity  # category: illustrative (drive limit)
     t_chunk = RM.chunk_inference_latency  # category: illustrative (P99, incl. vision)
-    t_intent = RM.intent_inference_latency  # category: illustrative
+    t_intent = RM.intent_inference_latency  # category: derived (prefill plus decode, @sec-brain-memory-wall)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     d_chunk = (v * t_chunk).to(millimeter)
@@ -110,16 +110,17 @@ class MachineStallTravel:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(v.to(meter / second).magnitude - 1.5) < 1e-9, f"Drive limit drifted: {v}")
     check(abs(t_chunk.to(millisecond).magnitude - 40.0) < 1e-9, f"Chunk inference latency drifted: {t_chunk}")
-    check(abs(t_intent.to(millisecond).magnitude - 160.0) < 1e-9, f"Intent inference latency drifted: {t_intent}")
+    # 2026-09-28 (M2): intent latency computed, no longer a stipulated 160 ms.
+    check(abs(t_intent.to(millisecond).magnitude - 335.61) < 5e-3, f"Intent inference latency drifted: {t_intent}")
     check(abs(d_chunk.magnitude - 60.0) < 1e-6, f"Chunk-inference travel drifted: {d_chunk}")
-    check(abs(d_intent.magnitude - 240.0) < 1e-6, f"Intent-inference travel drifted: {d_intent}")
+    check(abs(d_intent.magnitude - 503.41) < 5e-3, f"Intent-inference travel drifted: {d_intent}")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
     t_chunk_str = fmt_latency(t_chunk, unit=millisecond, precision=0)
-    t_intent_str = fmt_latency(t_intent, unit=millisecond, precision=0)
+    t_intent_str = fmt_latency(round(t_intent.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
     d_chunk_str = fmt_length(d_chunk, unit=millimeter, precision=0)
-    d_intent_str = fmt_length(d_intent, unit=millimeter, precision=0)
+    d_intent_str = fmt_length(round(d_intent.magnitude) * millimeter, unit=millimeter, precision=0)
 ```
 
 @Sec-brain established how long each learned proposer on the machine needs to turn camera frames into a proposal. An electromagnetic motor coil has an electrical time constant ($\tau_e = L/R$) measured in fractions of a millisecond, while moving linkages carry kinetic energy ($E_k = \frac{1}{2} m v^2$). Delaying or miscalculating the current command can therefore exhaust a physical margin before deliberation finishes. On the mobile manipulator, the mismatch takes two forms:
@@ -185,7 +186,7 @@ A motor drive cannot wait for the next camera-based proposal before regulating w
 # │          paragraph, and the chunk-policy tier paragraph.
 # │ Goal:    Give the machine's own proposer rates and chunk horizon, and the
 # │          base's travel during one camera exposure.
-# │ Show:    chunk policy 20 Hz, intent model 5 Hz, H = 16; 22.5 mm of base
+# │ Show:    chunk policy 20 Hz, intent model 2 Hz (500 ms), H = 16; 22.5 mm of base
 # │          travel in a 15 ms exposure at the 1.5 m/s drive limit.
 # │ How:     Rates and horizon from RM; travel = drive limit x exposure, with
 # │          the exposure a scenario input.
@@ -211,7 +212,7 @@ class MachineTiers:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(f_chunk.to(hertz).magnitude - 20.0) < 1e-9, f"Chunk rate drifted: {f_chunk}")
-    check(abs(f_intent.to(hertz).magnitude - 5.0) < 1e-9, f"Intent rate drifted: {f_intent}")
+    check(abs(f_intent.to(hertz).magnitude - 2.0) < 1e-9, f"Intent rate drifted: {f_intent}")
     check(chunk_horizon == 16, f"Chunk horizon drifted: {chunk_horizon}")
     check(abs(v.to(meter / second).magnitude - 1.5) < 1e-9, f"Drive limit drifted: {v}")
     check(abs(d_exp.magnitude - 22.5) < 1e-9, f"Exposure travel drifted: {d_exp}")
@@ -219,6 +220,7 @@ class MachineTiers:
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     f_chunk_str = fmt_frequency(f_chunk, unit=hertz, precision=0)
     f_intent_str = fmt_frequency(f_intent, unit=hertz, precision=0)
+    t_intent_period_str = fmt_latency((1 / f_intent).to(millisecond), unit=millisecond, precision=0)
     chunk_horizon_str = fmt_int(chunk_horizon)
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
     t_exp_str = fmt_latency(t_exp, unit=millisecond, precision=0)
@@ -230,7 +232,7 @@ The mobile manipulator's motor inverters regulate winding current every $50\ \mu
 1. **Inner Commutation and Current Loop ($20\text{ kHz}$, $50\,\mu\text{s}$ cycle):** Governed by the stator winding electrical time constant ($\tau_e = L/R \approx 0.5\text{ ms}$). Sampling phase currents ten times per electrical time constant synchronously with PWM carrier midpoints fixes $T_s = 50\,\mu\text{s}$. Operating directly inside dedicated motor drive silicon or real-time FPGA logic, this loop executes Clarke and Park vector transforms, proportional-integral current regulation in the rotor reference frame, and space-vector PWM modulation to command electromagnetic torque within the allocated timing margin.
 2. **Permission and Joint-Control Loop ($1\text{ kHz}$, $1000\,\mu\text{s} \pm 10\,\mu\text{s}$ cycle):** The isolated real-time microcontroller checks proposal integrity, freshness, and physical limits, then tracks admitted motion against measured joint state. It requests a state-matched fallback when active authority ends. The trajectory construction in @sec-planning supplies smooth motion between waypoints; @sec-enforcement develops the command checks and response selection.
 3. **Action-Chunk Policy Stream (`{python} MachineTiers.f_chunk_str`, $50\text{ ms}$ cycle):** Bridging observation age and mechanical execution, the local policy emits receding-horizon action chunks ($H =$ `{python} MachineTiers.chunk_horizon_str` waypoints). Compact visuomotor networks (such as Action Chunking with Transformers or Diffusion Policy heads) run on an edge neural accelerator, amortizing memory bandwidth weight-streaming overhead ($f \le B/M$) across physical wall-clock execution time.
-4. **Multimodal Intent Planner (`{python} MachineTiers.f_intent_str`, $200\text{ ms}$ cycle):** High-capacity Vision-Language-Action (VLA) foundation models evaluate multi-camera video, linguistic instructions, and scene affordances to emit strategic task goals and navigation targets.
+4. **Multimodal Intent Planner (`{python} MachineTiers.f_intent_str`, `{python} MachineTiers.t_intent_period_str` cycle):** High-capacity Vision-Language-Action (VLA) foundation models evaluate camera frames, linguistic instructions, and scene affordances to emit strategic task goals and navigation targets.
 
 ::: {.column-margin .margin-pointer}
 ↩ Microsecond interrupt latency requirements build upon the sensor freshness bounds introduced in @sec-body-measurement-freshness.
@@ -989,7 +991,8 @@ The individual physical limits established across Part I do not operate in isola
 # │ Goal:    Join Ch2's distance terms, this chapter's lease, and Ch3's supply
 # │          rates into the lease rule for the running machine.
 # │ Show:    ceiling 258.3 ms; running total 835.5 mm; intent sweep 98.0 ms,
-# │          intent 5 Hz / 160 ms; chunk sweep 0.70 ms, 20 Hz / 40 ms;
+# │          intent 2 Hz / 336 ms computed (INT4 sweep 24.5 ms); chunk sweep
+# │          1.12 ms, 20 Hz / 40 ms;
 # │          50 + 5 = 55 ms < 60 ms lease; upper limit 236.3 ms less age.
 # │ How:     ceiling and running total read from MachineLeaseBudget;
 # │          calc_action_chunk_streaming_amortization on RM / AISLE; the 5 ms renewal jitter is a scenario assumption.
@@ -1012,7 +1015,7 @@ class PartOneCoupledBudget:
     t_bus = AISLE.t_bus  # category: illustrative
     t_act = AISLE.t_brake_onset  # category: illustrative
     f_intent = RM.intent_rate  # category: chosen
-    t_intent = RM.intent_inference_latency  # category: illustrative
+    t_intent = RM.intent_inference_latency  # category: derived (prefill plus decode, @sec-brain-memory-wall)
     f_chunk = RM.chunk_rate  # category: chosen
     t_chunk = RM.chunk_inference_latency  # category: illustrative (P99, incl. vision)
     t_renewal_jitter = MachineLeaseBudget.t_renewal_jitter  # category: chosen (from calc-nervous-machine-lease-budget)
@@ -1022,7 +1025,7 @@ class PartOneCoupledBudget:
     running_total = MachineLeaseBudget.running_total  # one source for the stopping budget
 
     intent_sweep = calc_action_chunk_streaming_amortization(
-        model_weight_memory=memory_from_params(RM.intent_model.parameters, BYTES_FP16 / param),
+        model_weight_memory=RM.intent_weight_memory,  # deployed INT4 weights
         memory_bandwidth=RM.brain_soc.memory.bandwidth,
         chunk_horizon=RM.chunk_horizon,
         bus_efficiency=RM.dram_efficiency,
@@ -1042,14 +1045,15 @@ class PartOneCoupledBudget:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_ceiling.magnitude - 258.333) < 5e-3, f"Pre-brake ceiling drifted: {t_ceiling}")
     check(abs(running_total.magnitude - 835.5) < 1e-6, f"Running total drifted: {running_total}")
-    check(abs(intent_sweep.magnitude - 98.04) < 5e-3, f"Intent weight sweep drifted: {intent_sweep}")
-    check(abs(chunk_sweep.magnitude - 0.700) < 5e-4, f"Chunk weight sweep drifted: {chunk_sweep}")
+    # 2026-09-28 (M2): deployed INT4 intent weights; ACT corrected to about 80M parameters.
+    check(abs(intent_sweep.magnitude - 24.51) < 5e-3, f"Intent weight sweep drifted: {intent_sweep}")
+    check(abs(chunk_sweep.magnitude - 1.1204) < 5e-4, f"Chunk weight sweep drifted: {chunk_sweep}")
     check(abs(f_chunk.to(hertz).magnitude - 20.0) < 1e-9, f"Chunk rate drifted: {f_chunk}")
-    check(abs(f_intent.to(hertz).magnitude - 5.0) < 1e-9, f"Intent rate drifted: {f_intent}")
+    check(abs(f_intent.to(hertz).magnitude - 2.0) < 1e-9, f"Intent rate drifted: {f_intent}")
     check(abs(t_chunk.to(millisecond).magnitude - 40.0) < 1e-9, f"Chunk inference latency drifted: {t_chunk}")
-    check(abs(t_intent.to(millisecond).magnitude - 160.0) < 1e-9, f"Intent inference latency drifted: {t_intent}")
+    check(abs(t_intent.to(millisecond).magnitude - 335.61) < 5e-3, f"Intent inference latency drifted: {t_intent}")
     check(abs(t_chunk_period.magnitude - 50.0) < 1e-6, f"Chunk period drifted: {t_chunk_period}")
-    check(intent_sweep > t_lease and t_intent > t_lease, "The intent model must be unable to renew a chunk lease")
+    check(t_intent > t_lease, "The intent model must be unable to renew a chunk lease")
     check(t_chunk < t_chunk_period, "Chunk inference must finish within the chunk period")
     check(abs(t_renewal_need.magnitude - 55.0) < 1e-6, f"Lease lower limit drifted: {t_renewal_need}")
     check(t_renewal_need < t_lease, "Lease rule: chunk period plus jitter must be shorter than the lease")
@@ -1062,7 +1066,7 @@ class PartOneCoupledBudget:
     t_ceiling_str = fmt_latency(t_ceiling, unit=millisecond, precision=1)
     running_total_str = fmt_length(running_total, unit=millimeter, precision=1)
     intent_sweep_str = fmt_latency(intent_sweep, unit=millisecond, precision=1)
-    t_intent_str = fmt_latency(t_intent, unit=millisecond, precision=0)
+    t_intent_str = fmt_latency(round(t_intent.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
     f_intent_str = fmt_frequency(f_intent, unit=hertz, precision=0)
     chunk_sweep_str = fmt_latency(chunk_sweep, unit=millisecond, precision=2)
     f_chunk_str = fmt_frequency(f_chunk, unit=hertz, precision=0)
@@ -1077,7 +1081,7 @@ class PartOneCoupledBudget:
 
 The three chapters of Part I each set terms of one budget, and the chunk lease is where they meet. @Sec-body-kinetic-momentum fixed the distance side. At its `{python} PartOneCoupledBudget.v_str` drive limit the loaded machine must stop inside the `{python} PartOneCoupledBudget.d_clear_str` clear distance at a rack end, and the braking term and the fixed overheads leave `{python} PartOneCoupledBudget.t_ceiling_str` for everything that happens before braking force begins. @Sec-nervous-cadences spent part of that time. A proposer that stalls keeps its authority for one lease, the stop reaches the drives one tick and one bus cycle later, and the stopping budget stands at `{python} PartOneCoupledBudget.running_total_str`.
 
-The lease cannot be made as short as the budget would like, because a proposer must renew it. @Sec-brain-cognitive-pipeline established what each learned proposer can supply. The intent model's weights take `{python} PartOneCoupledBudget.intent_sweep_str` to stream from memory once, before any vision work, and a full inference takes `{python} PartOneCoupledBudget.t_intent_str`, so at `{python} PartOneCoupledBudget.f_intent_str` it cannot renew a proposal every few tens of milliseconds. The chunk policy's weights stream in `{python} PartOneCoupledBudget.chunk_sweep_str`, and its selected `{python} PartOneCoupledBudget.f_chunk_str` cadence calls for a fresh chunk every `{python} PartOneCoupledBudget.t_chunk_period_str`. Its illustrative `{python} PartOneCoupledBudget.t_chunk_str` P99 inference time makes that cadence a plausible supply target, not a guaranteed renewal bound. Late or missing renewals remain the permission path's responsibility.
+The lease cannot be made as short as the budget would like, because a proposer must renew it. @Sec-brain-cognitive-pipeline established what each learned proposer can supply. The intent model's INT4 weights take `{python} PartOneCoupledBudget.intent_sweep_str` to stream from memory once, but a full inference, a compute-bound prefill followed by bandwidth-bound decode sweeps, takes `{python} PartOneCoupledBudget.t_intent_str`, so at `{python} PartOneCoupledBudget.f_intent_str` it cannot renew a proposal every few tens of milliseconds. The chunk policy's weights stream in `{python} PartOneCoupledBudget.chunk_sweep_str`, and its selected `{python} PartOneCoupledBudget.f_chunk_str` cadence calls for a fresh chunk every `{python} PartOneCoupledBudget.t_chunk_period_str`. Its illustrative `{python} PartOneCoupledBudget.t_chunk_str` P99 inference time makes that cadence a plausible supply target, not a guaranteed renewal bound. Late or missing renewals remain the permission path's responsibility.
 
 These facts fix the **lease rule**\index{Chunk lease!lease rule} for this machine. For continuous tracking, the lease must outlast the chosen successful-admission interval plus its variation allowance, which together set the `{python} PartOneCoupledBudget.t_renewal_need_str` floor of \ref{nbk-nervous-watchdog-stopping-lease}. It must also fit inside the pre-brake ceiling once the tick, the bus cycle, and brake onset are reserved, which leaves `{python} PartOneCoupledBudget.t_lease_upper_str` less the evidence age at admission. The capture-to-dispatch age developed in @sec-perception is only part of that subtraction; dispatch-to-admission work remains an unclosed allowance in this calculation. The chosen `{python} PartOneCoupledBudget.t_lease_str` sits just above the renewal target, because every millisecond of lease costs `{python} PartOneCoupledBudget.mm_per_ms_str` at the drive limit. It remains a candidate allocation until the complete capture-to-admission age and later response terms fit. Increasing the lease to hide admission delays would spend further clearance rather than close that missing budget.
 

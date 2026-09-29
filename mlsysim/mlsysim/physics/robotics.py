@@ -186,10 +186,17 @@ def calc_c2_stop_suffix(entry_velocity, peak_deceleration):
         T = 1.5 * v / a,    d = 0.75 * v^2 / a,
 
     which is 1.5 times the constant-deceleration distance v^2 / (2 * a).
+    The factor belongs to this polynomial, not to smooth stopping in general:
+    its jerk q''' = -(6 v_c / T^2)(1 - 2u) peaks in magnitude at the ends,
+
+        j_peak = 6 * v / T^2 = (8 / 3) * a^2 / v,
+
+    and a jerk-limited S-curve with the same a and j_peak stops shorter
+    (calc_scurve_stop_distance).
 
     Source: derived here. The polynomial satisfies q' = v_c, q'' = 0 at u = 0
     and q' = 0, q'' = 0 at u = 1; peak |q''| occurs at u = 1/2 (minimum of
-    q''(u) = v_c / T * (-6u + 6u^2)).
+    q''(u) = v_c / T * (-6u + 6u^2)); peak |q'''| occurs at u = 0 and u = 1.
 
     Parameters
     ----------
@@ -201,17 +208,190 @@ def calc_c2_stop_suffix(entry_velocity, peak_deceleration):
     Returns
     -------
     dict
-        duration (ms) and distance (m).
+        duration (ms), distance (m), and peak_jerk (m/s^3).
     """
     validate_positive(entry_velocity, "entry_velocity")
     validate_positive(peak_deceleration, "peak_deceleration")
 
     v = entry_velocity.to(ureg.meter / ureg.second)
     a = peak_deceleration.to(ureg.meter / ureg.second**2)
+    duration = 1.5 * v / a
     return {
-        "duration": (1.5 * v / a).to(ureg.millisecond),
+        "duration": duration.to(ureg.millisecond),
         "distance": (0.75 * v**2 / a).to(ureg.meter),
+        "peak_jerk": (6.0 * v / duration**2).to(ureg.meter / ureg.second**3),
     }
+
+
+def _scurve_stop_si(v, a, j):
+    """Duration (s) and distance (m) of a jerk-limited stop, SI magnitudes."""
+    if v <= 0.0:
+        return 0.0, 0.0
+    if v >= a * a / j:
+        # Trapezoidal acceleration: ramp to a in a/j, hold, ramp back to zero.
+        t = v / a + a / j
+    else:
+        # Triangular acceleration: the peak sqrt(v j) stays below a.
+        t = 2.0 * math.sqrt(v / j)
+    # The velocity profile is point-symmetric about its midpoint, so d = v T / 2.
+    return t, 0.5 * v * t
+
+
+def _scurve_si_inputs(entry_velocity, max_deceleration, max_jerk):
+    validate_nonnegative(entry_velocity, "entry_velocity")
+    validate_positive(max_deceleration, "max_deceleration")
+    validate_positive(max_jerk, "max_jerk")
+    return (
+        entry_velocity.to(ureg.meter / ureg.second).magnitude,
+        max_deceleration.to(ureg.meter / ureg.second**2).magnitude,
+        max_jerk.to(ureg.meter / ureg.second**3).magnitude,
+    )
+
+
+def calc_scurve_stop_distance(entry_velocity, max_deceleration, max_jerk):
+    """
+    Distance of a jerk-limited S-curve stop entered from zero-acceleration cruise.
+
+    The stop drives acceleration from zero to -a at the jerk limit j, holds
+    -a, and returns acceleration to zero at the jerk limit as velocity reaches
+    zero (trapezoidal acceleration, the "double S" velocity profile). The
+    profile is C2: position, velocity, and acceleration are continuous and
+    jerk is piecewise constant.
+
+        if v >= a^2 / j:   d = (v / 2) * (v / a + a / j)
+                             = v^2 / (2 a) + v * a / (2 j)
+        else:              d = v * sqrt(v / j)     (a is never reached)
+
+    In the first case the stop equals constant-deceleration braking at a plus
+    cruise over half of one jerk ramp, a / (2 j). Under the bounds |a| <= a_max
+    and |j| <= j_max this is the time-optimal stop, and for a stop that does not
+    reverse it is also the shortest.
+
+    Source: Biagiotti, L. and Melchiorri, C., Trajectory Planning for Automatic
+    Machines and Robots, Springer (2008; DOI 10.1007/978-3-540-85629-0),
+    ch. 3, trajectory with double S velocity profile, specialized here to a
+    stop from v to rest with zero boundary accelerations. Formula re-derived and
+    checked against a discretized minimum-distance linear program.
+
+    Parameters
+    ----------
+    entry_velocity : Quantity
+        Cruise velocity at stop onset (e.g. m/s); zero gives zero distance.
+    max_deceleration : Quantity
+        Deceleration bound a_max (e.g. m/s^2).
+    max_jerk : Quantity
+        Jerk bound j_max (e.g. m/s^3).
+
+    Returns
+    -------
+    Quantity
+        Stopping distance in meters.
+    """
+    v, a, j = _scurve_si_inputs(entry_velocity, max_deceleration, max_jerk)
+    return (_scurve_stop_si(v, a, j)[1] * ureg.meter).to(ureg.meter)
+
+
+def calc_scurve_stop_time(entry_velocity, max_deceleration, max_jerk):
+    """
+    Duration of the jerk-limited S-curve stop of calc_scurve_stop_distance.
+
+        if v >= a^2 / j:   T = v / a + a / j
+        else:              T = 2 * sqrt(v / j)
+
+    Source: Biagiotti and Melchiorri (2008), ch. 3, double S velocity profile;
+    see calc_scurve_stop_distance.
+
+    Returns
+    -------
+    Quantity
+        Stopping time in milliseconds.
+    """
+    v, a, j = _scurve_si_inputs(entry_velocity, max_deceleration, max_jerk)
+    return (_scurve_stop_si(v, a, j)[0] * ureg.second).to(ureg.millisecond)
+
+
+def calc_scurve_max_permitted_velocity(
+    d_clear,
+    total_latency,
+    max_deceleration,
+    max_jerk,
+    loc_margin=None,
+    physical_margin=None,
+    approach_velocity=None,
+):
+    """
+    Highest cruise speed whose delayed S-curve stop fits the clearance.
+
+    Solves for the largest v with
+
+        v * tau + d_S(v) + v_h * (tau + T_S(v)) <= D_clear - delta_loc - delta_margin,
+
+    where d_S and T_S are the S-curve stop distance and time
+    (calc_scurve_stop_distance, calc_scurve_stop_time) and v_h is an optional
+    obstacle approach speed (zero for a static obstacle). The left side is
+    continuous and strictly increasing in v, so bisection finds the root.
+    Because d_S is not a single quadratic in v, no one closed form covers both
+    stop regimes; for v_h = 0 in the trapezoidal regime the result equals
+    calc_max_permitted_velocity with delay tau + a / (2 j).
+
+    Source: derived here from calc_scurve_stop_distance (Biagiotti and
+    Melchiorri 2008, ch. 3) and the additive delay-plus-braking budget of
+    calc_safe_stopping_distance.
+
+    Parameters
+    ----------
+    d_clear : Quantity
+        Clear distance to the obstacle (e.g. m).
+    total_latency : Quantity
+        Pre-brake delay tau (e.g. ms).
+    max_deceleration, max_jerk : Quantity
+        Stop limits a_max (m/s^2) and j_max (m/s^3).
+    loc_margin, physical_margin : Quantity, optional
+        Localization bound and protective clearance subtracted from d_clear.
+    approach_velocity : Quantity, optional
+        Speed at which the obstacle closes during delay and stop (e.g. m/s).
+
+    Returns
+    -------
+    Quantity
+        Speed ceiling in m/s (zero if the margins consume the clearance).
+    """
+    validate_nonnegative(d_clear, "d_clear")
+    validate_nonnegative(total_latency, "total_latency")
+    a = max_deceleration.to(ureg.meter / ureg.second**2).magnitude
+    j = max_jerk.to(ureg.meter / ureg.second**3).magnitude
+    validate_positive(max_deceleration, "max_deceleration")
+    validate_positive(max_jerk, "max_jerk")
+
+    d_eff = d_clear.to(ureg.meter).magnitude
+    for margin, name in ((loc_margin, "loc_margin"), (physical_margin, "physical_margin")):
+        if margin is not None:
+            validate_nonnegative(margin, name)
+            d_eff -= margin.to(ureg.meter).magnitude
+    tau = total_latency.to(ureg.second).magnitude
+    v_h = 0.0
+    if approach_velocity is not None:
+        validate_nonnegative(approach_velocity, "approach_velocity")
+        v_h = approach_velocity.to(ureg.meter / ureg.second).magnitude
+
+    def excess(v):
+        t_s, d_s = _scurve_stop_si(v, a, j)
+        return v * tau + d_s + v_h * (tau + t_s) - d_eff
+
+    zero = 0.0 * (ureg.meter / ureg.second)
+    if excess(0.0) >= 0.0:
+        return zero
+    # d_S(v) >= v^2 / (2 a), so excess(sqrt(2 a d_eff)) >= 0: a valid upper bracket.
+    lo, hi = 0.0, math.sqrt(2.0 * a * d_eff)
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if excess(mid) > 0.0:
+            hi = mid
+        else:
+            lo = mid
+        if hi - lo <= 1e-15 * max(1.0, hi):
+            break
+    return (lo * (ureg.meter / ureg.second)).to(ureg.meter / ureg.second)
 
 
 def calc_kinetic_energy(mass, velocity):

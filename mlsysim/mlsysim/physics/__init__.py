@@ -62,6 +62,7 @@ from .transformer import (
     calc_transformer_training_flops,
     calc_transformer_decode_flops,
     calc_transformer_prefill_flops,
+    calc_vla_inference_latency,
 )
 from .serving import calc_queue_latency_mmc
 from .statistics import (
@@ -89,6 +90,9 @@ from .robotics import (
     calc_safe_stopping_distance,
     calc_max_permitted_velocity,
     calc_c2_stop_suffix,
+    calc_scurve_stop_distance,
+    calc_scurve_stop_time,
+    calc_scurve_max_permitted_velocity,
     calc_c2_effective_deceleration,
     calc_latch_contact_stopping_profile,
     calc_scenario_stopping_budget,
@@ -194,6 +198,7 @@ __all__ = [
     "calc_transformer_training_flops",
     "calc_transformer_decode_flops",
     "calc_transformer_prefill_flops",
+    "calc_vla_inference_latency",
     "calc_queue_latency_mmc",
     "calc_population_stability_index",
     "calc_two_proportion_sample_size",
@@ -215,6 +220,9 @@ __all__ = [
     "calc_safe_stopping_distance",
     "calc_max_permitted_velocity",
     "calc_c2_stop_suffix",
+    "calc_scurve_stop_distance",
+    "calc_scurve_stop_time",
+    "calc_scurve_max_permitted_velocity",
     "calc_c2_effective_deceleration",
     "calc_latch_contact_stopping_profile",
     "calc_scenario_stopping_budget",

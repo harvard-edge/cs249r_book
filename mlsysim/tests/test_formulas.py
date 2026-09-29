@@ -32,6 +32,7 @@ from mlsysim.physics import (
     calc_multiagent_speedup,
     calc_multiagent_optimal_concurrency,
     calc_transformer_prefill_flops,
+    calc_vla_inference_latency,
     calc_bottleneck,
     model_memory,
     calc_ring_allreduce_time,
@@ -1268,3 +1269,56 @@ class TestTransformerPrefillFlops:
         attn_bidir = 4.0 * layers * hidden * (s ** 2)
         assert causal.m_as(ureg.flop) == pytest.approx(2.0 * p * s + attn_causal, rel=1e-6)
         assert bidir.m_as(ureg.flop) == pytest.approx(2.0 * p * s + attn_bidir, rel=1e-6)
+
+
+# ======================================================================
+# calc_vla_inference_latency (added 2026-09-28)
+# ======================================================================
+
+class TestVlaInferenceLatency:
+    """Prefill (compute-bound) plus decode (bandwidth-bound) for one VLA evaluation."""
+
+    # 7B parameters, 43 TFLOP/s dense FP16, 200 GB/s: round numbers checked by hand.
+    N = 7e9
+    PI = 43e12 * ureg.flop / ureg.second
+    BW = 200e9 * ureg.byte / ureg.second
+
+    def test_autoregressive_hand_check(self):
+        r = calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 300, 7, self.PI, self.BW)
+        # prefill 2 N S / Pi = 4.2e12 / 43e12 = 97.67 ms > 70 ms sweep -> compute-bound
+        assert r["prefill_bound"] == "compute"
+        assert r["t_prefill"].m_as(ureg.millisecond) == pytest.approx(4.2e12 / 43e12 * 1e3, rel=1e-9)
+        # six decode steps, each one 70 ms weight sweep
+        assert r["decode_steps"] == 6
+        assert r["t_decode"].m_as(ureg.millisecond) == pytest.approx(6 * 70.0, rel=1e-9)
+        assert r["t_total"].m_as(ureg.millisecond) == pytest.approx(4.2e12 / 43e12 * 1e3 + 420.0, rel=1e-9)
+
+    def test_weight_only_quantization_cuts_decode_not_prefill(self):
+        fp16 = calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 300, 7, self.PI, self.BW)
+        int4 = calc_vla_inference_latency(self.N, 3.5e9 * ureg.byte, 300, 7, self.PI, self.BW)
+        assert int4["t_prefill"] == fp16["t_prefill"]
+        assert int4["t_decode"].m_as(ureg.millisecond) == pytest.approx(fp16["t_decode"].m_as(ureg.millisecond) / 4)
+
+    def test_parallel_decode_moves_actions_into_prefill(self):
+        r = calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 300, 7, self.PI, self.BW, parallel_decode=True)
+        assert r["decode_steps"] == 0 and r["prefill_tokens"] == 307
+        assert r["t_total"] == r["t_prefill"]
+
+    def test_short_prompt_is_memory_bound(self):
+        r = calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 10, 1, self.PI, self.BW)
+        assert r["prefill_bound"] == "memory"
+        assert r["t_total"].m_as(ureg.millisecond) == pytest.approx(70.0)
+
+    def test_efficiency_factors_scale_terms(self):
+        r = calc_vla_inference_latency(
+            self.N, 14e9 * ureg.byte, 300, 7, self.PI, self.BW,
+            compute_utilization=0.5, bus_efficiency=0.7,
+        )
+        assert r["t_prefill"].m_as(ureg.millisecond) == pytest.approx(2 * 4.2e12 / 43e12 * 1e3)
+        assert r["t_decode_step"].m_as(ureg.millisecond) == pytest.approx(100.0)
+
+    def test_rejects_bad_inputs(self):
+        with pytest.raises(ValueError):
+            calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 0, 7, self.PI, self.BW)
+        with pytest.raises(ValueError):
+            calc_vla_inference_latency(self.N, 14e9 * ureg.byte, 300, 7, self.PI, self.BW, compute_utilization=0)

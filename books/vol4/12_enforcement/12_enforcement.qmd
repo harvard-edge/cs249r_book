@@ -209,8 +209,8 @@ The chapters that own a stopping term have each added it to the warehouse mobile
 The pre-brake delay $\tau_{\text{delay}}$ in the stopping distance of @sec-body-kinetic-momentum already includes the enforcer's own permission-loop tick, which @sec-nervous-cadences budgets with the lease path. What remains is the gap between the reference and the plant that follows it.
 
 The permission path closes that gap with the tracking bound $\epsilon_{\text{track}}$ of @sec-enforcement-handoff and defends the stopping distance of @eq-body-stopping-distance inset by it. A commanded reference can be admitted only if the plant, which may lag that reference by up to $\epsilon_{\text{track}}$, can still stop inside $D_{\text{clear}}$. The admission condition combines clearance and velocity into one test:
-$$v\,\tau_{\text{delay}} + \frac{v^2}{2a_{\text{eff}}} + \delta_{\text{loc}} + \delta_{\text{margin}} + \epsilon_{\text{track}} \le D_{\text{clear}}$$ {#eq-enforce-stopping-envelope}
-Here $a_{\text{eff}}$ is a distance-equivalent deceleration: it makes $v^2/(2a_{\text{eff}})$ equal the travel of the selected stop. It equals $a_{\text{brake}}$ for constant-deceleration braking; for the shaped stop of @sec-planning-behavior-seam it is smaller than the peak, although the actual deceleration varies throughout the profile; $\delta_{\text{loc}}$ is the localization bound and $\delta_{\text{margin}}$ the fixed protective clearance. The left side is the stopping distance $d_{\text{stop}}(v)$ of @eq-body-stopping-distance plus the tracking inset $\epsilon_{\text{track}}$.[^fn-math-stopping-dist]
+$$v\,\tau_{\text{delay}} + d_{\text{suffix}}(v) + \delta_{\text{loc}} + \delta_{\text{margin}} + \epsilon_{\text{track}} \le D_{\text{clear}}$$ {#eq-enforce-stopping-envelope}
+Here $d_{\text{suffix}}(v)$ is the travel of the resident stop from speed $v$. It equals $v^2/2a_{\text{brake}}$ for constant-deceleration braking; for the jerk-limited stop of @sec-planning-behavior-seam it is @eq-plan-c2-stopping-suffix, which adds the travel of the jerk ramps; $\delta_{\text{loc}}$ is the localization bound and $\delta_{\text{margin}}$ the fixed protective clearance. The left side is the stopping distance $d_{\text{stop}}(v)$ of @eq-body-stopping-distance plus the tracking inset $\epsilon_{\text{track}}$.[^fn-math-stopping-dist]
 
 [^fn-math-stopping-dist]: **Kinematic Stopping Distance**\index{Stopping envelope!kinematic distance}\index{Latency!stopping distance contribution}: The inset stopping distance in this model compounds five terms: blind travel, braking distance under the credible deceleration, the localization bound, the fixed protective clearance, and the transient tracking bound. Omitting computational transport delay or tracking error results in premature encroachment on physical obstacles before peak braking can engage. See @sec-appendix-systems-stopping for formal kinematic derivations.
 
@@ -238,19 +238,26 @@ The composite stopping budget joins the remaining distance claims into the **spa
 # │          the missed-tick cost reused by the cycle list; the walking-person
 # │          ceiling (moved from @sec-memory-belief-through-occlusion); the
 # │          base stall at the aisle speed (distance added, overrun past D_clear).
-# │ How:     RM/AISLE fields; calc_c2_stop_suffix (row 6, a_eff),
-# │          calc_max_permitted_velocity (ceiling), calc_safe_stopping_distance
-# │          (cross-check), calc_action_chunk_streaming_amortization (time row).
+# │ How:     RM/AISLE fields; jerk bound = peak jerk of the reference C2
+# │          polynomial at the drive limit (calc_c2_stop_suffix);
+# │          calc_scurve_stop_distance / _time (row 6, stop rows);
+# │          calc_scurve_max_permitted_velocity (ceilings, solved numerically);
+# │          calc_safe_stopping_distance with tau + a/(2j) (closed-form
+# │          cross-check above a^2/j); calc_action_chunk_streaming_amortization
+# │          (time row).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import ureg, BYTES_FP16
 from mlsysim.physics.robotics import (
     calc_c2_stop_suffix,
+    calc_scurve_stop_distance,
+    calc_scurve_stop_time,
+    calc_scurve_max_permitted_velocity,
     calc_max_permitted_velocity,
     calc_safe_stopping_distance,
     calc_action_chunk_streaming_amortization,
 )
-from mlsysim.fmt import fmt, fmt_length, fmt_velocity, fmt_latency, fmt_acceleration, fmt_magnitude, fmt_math, check
+from mlsysim.fmt import fmt, fmt_length, fmt_velocity, fmt_latency, fmt_acceleration, fmt_jerk, fmt_magnitude, fmt_math, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
@@ -279,9 +286,12 @@ class EnforcementStoppingBudget:
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     lease_path = (t_lease + t_tick + t_bus).to(millisecond)
     overhead = (delta_loc + delta_margin).to(millimeter)
-    c2_drive = calc_c2_stop_suffix(v_drive, a_brake)["distance"].to(millimeter)
-    c2_aisle = calc_c2_stop_suffix(v_aisle, a_brake)["distance"].to(millimeter)
-    a_eff = (v_drive**2 / (2 * c2_drive)).to(meter / second**2)
+    # Jerk bound: the peak jerk of the reference C2 polynomial at the drive limit (@sec-planning-c2-stopping-suffix)
+    j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"].to(meter / second**3)
+    v_plateau = (a_brake**2 / j_brake).to(meter / second)
+    ramp_delay = (a_brake / (2 * j_brake)).to(millisecond)
+    c2_drive = calc_scurve_stop_distance(v_drive, a_brake, j_brake).to(millimeter)
+    c2_aisle = calc_scurve_stop_distance(v_aisle, a_brake, j_brake).to(millimeter)
 
     # Rows 1-7 at the drive limit, in book order
     brake_drive = (v_drive**2 / (2 * a_brake)).to(millimeter)
@@ -321,12 +331,16 @@ class EnforcementStoppingBudget:
     stall_breach = (total_aisle + stall_added - d_clear).to(millimeter)
 
     # Speed is the one free term: the ceiling of @eq-enforce-stopping-envelope
-    ceiling = calc_max_permitted_velocity(d_clear, tau_delay, a_eff, loc_margin=delta_loc, physical_margin=delta_margin + eps_track).to(
-        meter / second
-    )
-    total_check = calc_safe_stopping_distance(v_drive, tau_delay, a_eff, loc_margin=delta_loc, physical_margin=delta_margin + eps_track).to(
-        millimeter
-    )
+    ceiling = calc_scurve_max_permitted_velocity(
+        d_clear, tau_delay, a_brake, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
+    ).to(meter / second)
+    # Above a^2/j the S-curve is constant braking at a_brake with the delay lengthened by a/(2j)
+    ceiling_closed = calc_max_permitted_velocity(
+        d_clear, tau_delay + ramp_delay, a_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
+    ).to(meter / second)
+    total_check = calc_safe_stopping_distance(
+        v_drive, tau_delay + ramp_delay, a_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
+    ).to(millimeter)
 
     # Time rows (no distance added)
     intent_sweep = calc_action_chunk_streaming_amortization(intent_weights, RM.brain_soc.memory.bandwidth, RM.chunk_horizon, RM.dram_efficiency)[
@@ -340,26 +354,23 @@ class EnforcementStoppingBudget:
     capture_to_onset_max = (tau_delay + t_latest).to(millisecond)
     mu_min = (a_brake / ureg.standard_gravity).to("dimensionless").magnitude
     a_inspected = min(a_brake, (mu_inspected * ureg.standard_gravity).to(meter / second**2))
-    ceiling_inspected = calc_max_permitted_velocity(
-        d_clear,
-        tau_delay,
-        a_inspected * (a_eff / a_brake).to("dimensionless"),
-        loc_margin=delta_loc,
-        physical_margin=delta_margin + eps_track,
+    # The floor caps the deceleration; the jerk bound belongs to the load and is unchanged.
+    ceiling_inspected = calc_scurve_max_permitted_velocity(
+        d_clear, tau_delay, a_inspected, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
     ).to(meter / second)
 
     # Walking person: v tau + d_stop(v) + v_h (tau + T_stop(v)) + overhead = d_clear.
-    # The C2 suffix has d_stop proportional to v^2 and T_stop proportional to v,
-    # so evaluating it at unit speed yields the quadratic's coefficients.
+    # The S-curve's distance and time are not one polynomial in v, so MLSysIM solves it numerically.
     overhead_all = AISLE.fixed_overhead  # category: derived (delta_loc + delta_margin + eps_track)
-    v_unit = 1.0 * meter / second
-    stop_unit = calc_c2_stop_suffix(v_unit, a_brake)
-    qa = stop_unit["distance"] / v_unit**2
-    qb = tau_delay + v_human * stop_unit["duration"] / v_unit
-    qc = v_human * tau_delay - (d_clear - overhead_all)
-    v_walk = ((-qb + (qb**2 - 4 * qa * qc) ** 0.5) / (2 * qa)).to(meter / second)
-    stop_walk = calc_c2_stop_suffix(v_walk, a_brake)
-    d_walk = (v_walk * tau_delay + stop_walk["distance"] + v_human * (tau_delay + stop_walk["duration"]) + overhead_all).to(meter)
+    v_walk = calc_scurve_max_permitted_velocity(
+        d_clear, tau_delay, a_brake, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track, approach_velocity=v_human
+    ).to(meter / second)
+    d_walk = (
+        v_walk * tau_delay
+        + calc_scurve_stop_distance(v_walk, a_brake, j_brake)
+        + v_human * (tau_delay + calc_scurve_stop_time(v_walk, a_brake, j_brake))
+        + overhead_all
+    ).to(meter)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(run1.magnitude - 562.5) < 1e-6, "Row 1 running total is 562.5 mm.")
@@ -367,33 +378,37 @@ class EnforcementStoppingBudget:
     check(abs(run3.magnitude - 742.5) < 1e-6, "Row 3 running total is 742.5 mm.")
     check(abs(run4.magnitude - 835.5) < 1e-6, "Row 4 running total is 835.5 mm.")
     check(abs(run5.magnitude - 912.9) < 1e-6, "Row 5 running total is 912.9 mm.")
-    check(abs(run6.magnitude - 1194.15) < 1e-6, "Row 6 running total is 1194.15 mm.")
-    check(abs(run7.magnitude - 1234.15) < 1e-6, "Row 7 running total is 1234.15 mm.")
+    check(abs(j_brake.magnitude - 64.0 / 9.0) < 1e-9, "The jerk bound is the reference polynomial's 7.11 m/s^3 peak.")
+    check(v_aisle >= v_plateau and v_drive >= v_plateau, "Both budget speeds reach the deceleration bound (trapezoidal regime).")
+    check(abs(run6.magnitude - 1123.8375) < 1e-6, "Row 6 running total is 1123.84 mm.")
+    check(abs(run7.magnitude - 1163.8375) < 1e-6, "Row 7 running total is 1163.84 mm.")
     check(abs(total_check.magnitude - run7.magnitude) < 1e-6, "Row 7 total must equal @eq-enforce-stopping-envelope at the drive limit.")
-    check(abs(left[6].magnitude + 134.15) < 1e-6, "Row 7 runs 134.15 mm past the clear distance.")
+    check(abs(left[6].magnitude + 63.8375) < 1e-6, "Row 7 runs 63.84 mm past the clear distance.")
     check(abs(lease_path.magnitude - 62.0) < 1e-9, "Lease path is 62 ms.")
     check(abs(tau_delay.magnitude - 133.6) < 1e-9, "tau_delay is 133.6 ms.")
-    check(abs(a_eff.magnitude - 2.0 / 1.5) < 1e-9, "The C2 suffix uses a_eff = a_brake / 1.5.")
-    check(abs(ceiling.magnitude - 1.3898) < 5e-5, "Ceiling is 1.39 m/s.")
+    check(abs(ceiling.magnitude - ceiling_closed.magnitude) < 1e-9, "Numerical ceiling must match the closed form above a^2/j.")
+    check(ceiling >= v_plateau, "The ceiling lies in the trapezoidal regime.")
+    check(abs(ceiling.magnitude - 1.4367) < 5e-5, "Ceiling is 1.44 m/s.")
     check(v_aisle < ceiling, "The chosen aisle speed must sit under the ceiling.")
-    check(abs(total_aisle.magnitude - 997.43) < 1e-6, "Budget at 1.3 m/s is 997.43 mm.")
-    check(abs(spare.magnitude - 102.57) < 1e-6, "Spare at 1.3 m/s is 102.57 mm.")
+    check(abs(total_aisle.magnitude - 968.9925) < 1e-6, "Budget at 1.3 m/s is 968.99 mm.")
+    check(abs(spare.magnitude - 131.0075) < 1e-6, "Spare at 1.3 m/s is 131.01 mm.")
     check(abs(stall_added.magnitude - 182.0) < 1e-6, "A 200 ms stall adds 182 mm at 1.3 m/s.")
     check(stall_added > spare, "The stall's added travel exceeds the whole spare.")
-    check(abs(stall_breach.magnitude - 79.43) < 5e-3, "The stall runs 79.4 mm past the clear distance.")
+    check(abs(stall_breach.magnitude - 50.9925) < 5e-3, "The stall runs 51.0 mm past the clear distance.")
     check(abs(intent_sweep.magnitude - 98.04) < 5e-3, "Intent weight sweep is 98.0 ms.")
     check(intent_sweep > t_lease, "The intent sweep cannot renew a chunk lease.")
     check(abs(belief_life.magnitude - 31.25) < 1e-9, "Occluded-rack-end belief expires in about 31 ms.")
     check(belief_life < two_frames, "The rack-end belief lapses in under two camera frames.")
     check(abs(missed_tick.magnitude - 1.3) < 1e-9, "One missed tick costs 1.3 mm at 1.3 m/s.")
-    check(abs(t_latest.magnitude - 78.9) < 5e-2, "The unallocated timing allowance is 78.9 ms at 1.3 m/s.")
+    check(abs(t_latest.magnitude - 100.775) < 5e-3, "The unallocated timing allowance is 100.8 ms at 1.3 m/s.")
     check(
         abs((capture_to_onset_max - capture_to_admission_max - t_lease - t_tick - t_bus - t_act).to(millisecond).magnitude) < 1e-9,
         "Admission-to-onset must contain the lease, tick, bus, and drive onset exactly once.",
     )
     check(abs(mu_min - 0.204) < 5e-4, "Friction premise is 0.204.")
-    check(abs(ceiling_inspected.magnitude - 1.0947) < 5e-5, "Inspected-floor ceiling is 1.09 m/s.")
-    check(abs(v_walk.magnitude - 0.4620) < 5e-5, f"Walking-person ceiling should be 0.462 m/s, got {v_walk}.")
+    check(abs(ceiling_inspected.magnitude - 1.2309) < 5e-5, "Inspected-floor ceiling is 1.23 m/s.")
+    check(abs(v_walk.magnitude - 0.2599) < 5e-5, f"Walking-person ceiling should be 0.260 m/s, got {v_walk}.")
+    check(v_walk < v_plateau, "The walking-person stop never reaches the deceleration bound.")
     check(abs((d_walk - d_clear).to(millimeter).magnitude) < 1e-6, "At the walking-person ceiling the budget must fill the clear distance exactly.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
@@ -404,7 +419,8 @@ class EnforcementStoppingBudget:
     v_walk_str = fmt_velocity(v_walk, precision=2)
     d_clear_str = fmt_length(d_clear, unit=meter, precision=2)
     a_brake_str = fmt_acceleration(a_brake, precision=0)
-    a_eff_str = fmt_acceleration(a_eff, precision=2)
+    j_brake_str = fmt_jerk(j_brake, precision=2)
+    ramp_delay_str = fmt_latency(ramp_delay, unit=millisecond, precision=1)
     tau_delay_str = fmt_latency(tau_delay, unit=millisecond, precision=1)
     lease_path_str = fmt_latency(lease_path, unit=millisecond, precision=0)
     t_age_str = fmt_latency(t_age, unit=millisecond, precision=1)
@@ -424,7 +440,7 @@ class EnforcementStoppingBudget:
     spare_str = fmt_length(spare, unit=millimeter, precision=1)
     t_stall_str = fmt_latency(t_stall, unit=millisecond, precision=0)
     stall_added_str = fmt_length(stall_added, unit=millimeter, precision=0)
-    stall_breach_str = fmt_length(round(stall_breach.magnitude, 1) * millimeter, unit=millimeter, precision=1)
+    stall_breach_str = fmt_length(stall_breach, unit=millimeter, precision=2)
     # Table cells (the column headers carry mm)
     brake_drive_value_str = fmt_magnitude(brake_drive, millimeter, precision=1, commas=True)
     overhead_value_str = fmt_magnitude(overhead, millimeter, precision=0, commas=True)
@@ -458,11 +474,11 @@ class EnforcementStoppingBudget:
 
 For the warehouse mobile manipulator, the inset is the base's tracking bound of `{python} EnforcementStoppingBudget.inset_str`, and it is the last distance term the budget receives. At the `{python} EnforcementStoppingBudget.v_drive_str` drive limit, the matched stop suffix of @sec-planning-behavior-seam had already carried the running total to `{python} EnforcementStoppingBudget.run6_str`, past the `{python} EnforcementStoppingBudget.d_clear_str` clear distance at the rack end. The inset brings it to `{python} EnforcementStoppingBudget.run7_str`, `{python} EnforcementStoppingBudget.over7_str` more than the clear distance.
 
-The accounted terms in @eq-enforce-stopping-envelope come from the chapters that own them: the credible deceleration and the fixed overheads by @sec-body-kinetic-momentum, the lease path by @sec-nervous-cadences, the observation age by @sec-perception-transduction-calibration, the stop's shape by @sec-planning-behavior-seam, and the inset here. The $C^2$ stop suffix replaces constant deceleration ($v^2 / 2a_{\text{brake}}$) with jerk-limited S-curve braking ($a_{\text{eff}} = a_{\text{brake}} / 1.5$), which increases the braking distance by 50 percent:
-$$\frac{v^2}{2 a_{\text{eff}}} = \frac{v^2}{2 (a_{\text{brake}} / 1.5)} = 0.75 \frac{v^2}{a_{\text{brake}}}.$$
+The accounted terms in @eq-enforce-stopping-envelope come from the chapters that own them: the credible deceleration and the fixed overheads by @sec-body-kinetic-momentum, the lease path by @sec-nervous-cadences, the observation age by @sec-perception-transduction-calibration, the stop's shape by @sec-planning-behavior-seam, and the inset here. The $C^2$ stop suffix replaces constant deceleration ($v^2 / 2a_{\text{brake}}$) with jerk-limited S-curve braking at the same peak and a jerk bound of $j_{\max} =$ `{python} EnforcementStoppingBudget.j_brake_str`. Both budget speeds reach the deceleration bound, so by @eq-plan-c2-stopping-suffix the stop adds the travel of half a jerk ramp:
+$$d_{\text{suffix}}(v) = \frac{v^2}{2 a_{\text{brake}}} + v\,\frac{a_{\text{brake}}}{2 j_{\max}}.$$
 The shaped stop spends more clearance than constant-deceleration braking, so the admissible speed must be solved from the finished budget.
 
-Speed is the one term the machine can still choose. With the currently accounted delay $\tau_{\text{delay}} =$ `{python} EnforcementStoppingBudget.tau_delay_str` and the suffix's $a_{\text{eff}} =$ `{python} EnforcementStoppingBudget.a_eff_str` (@eq-plan-c2-stopping-suffix), the calculated ceiling is `{python} EnforcementStoppingBudget.ceiling_str`. We select `{python} EnforcementStoppingBudget.v_aisle_str` as a candidate below that ceiling. The listed terms then total `{python} EnforcementStoppingBudget.total_aisle_str`, leaving `{python} EnforcementStoppingBudget.spare_str` before any unaccounted delay or additional reserve.
+Speed is the one term the machine can still choose. With the currently accounted delay $\tau_{\text{delay}} =$ `{python} EnforcementStoppingBudget.tau_delay_str`, the jerk ramps act as `{python} EnforcementStoppingBudget.ramp_delay_str` of extra delay before braking at $a_{\text{brake}}$, so the ceiling is the positive root of a quadratic, `{python} EnforcementStoppingBudget.ceiling_str`. Below $a_{\text{brake}}^2/j_{\max}$ the stop never reaches $a_{\text{brake}}$ and its distance is no longer quadratic in $v$; MLSysIM then solves @eq-enforce-stopping-envelope numerically. We select `{python} EnforcementStoppingBudget.v_aisle_str` as a candidate below that ceiling. The listed terms then total `{python} EnforcementStoppingBudget.total_aisle_str`, leaving `{python} EnforcementStoppingBudget.spare_str` before any unaccounted delay or additional reserve.
 
 The observation-age term ends at dispatch, whereas the execution lease begins at admission. Let $\Delta_{\mathrm{da}}$ denote elapsed dispatch-to-admission time not already charged in the listed intervals. The complete delay is $\tau_{\mathrm{true}}=\tau_{\text{delay}}+\Delta_{\mathrm{da}}$, and the actual reservation adds $v\Delta_{\mathrm{da}}$ to the table's subtotal. This interval includes any remaining inference, admission work, and waiting on that path; overlapping stages must not be charged twice. A refreshed observation can change the ledger only if the implementation actually supplies and qualifies it before activation.
 
@@ -477,12 +493,12 @@ At the candidate speed, the entire unallocated allowance corresponds to `{python
 |   4 | @sec-nervous-cadences                    | Lease path, $v(T_{\text{lease}}+T_{\text{tick}}+T_{\text{bus}})$ over `{python} EnforcementStoppingBudget.lease_path_str`                                                  | `{python} EnforcementStoppingBudget.lease_drive_value_str` | `{python} EnforcementStoppingBudget.run4_value_str` | `{python} EnforcementStoppingBudget.left4_value_str` | `{python} EnforcementStoppingBudget.lease_aisle_value_str` |
 |   5 | @sec-perception-transduction-calibration | Observation age, $v\,t_{\text{age}}$ over `{python} EnforcementStoppingBudget.t_age_str`                                                                                   |   `{python} EnforcementStoppingBudget.age_drive_value_str` | `{python} EnforcementStoppingBudget.run5_value_str` | `{python} EnforcementStoppingBudget.left5_value_str` |   `{python} EnforcementStoppingBudget.age_aisle_value_str` |
 |   — | @sec-memory-belief-through-occlusion     | Time only: belief that an occluded rack end is clear expires in `{python} EnforcementStoppingBudget.belief_life_str`, under two camera frames, so memory cannot certify it |                                                          — |                                                   — |                                                    — |                                                          — |
-|   6 | @sec-planning-behavior-seam              | $C^2$ stop suffix, $0.75v^2/a_{\text{brake}}$ in place of $0.5v^2/a_{\text{brake}}$                                                                                        | `{python} EnforcementStoppingBudget.shape_drive_value_str` | `{python} EnforcementStoppingBudget.run6_value_str` |      `{python} EnforcementStoppingBudget.left6_math` | `{python} EnforcementStoppingBudget.shape_aisle_value_str` |
+|   6 | @sec-planning-behavior-seam              | Jerk-limited $C^2$ stop, the jerk-ramp travel $v\,a_{\text{brake}}/2j_{\max}$ added to $v^2/2a_{\text{brake}}$                                                             | `{python} EnforcementStoppingBudget.shape_drive_value_str` | `{python} EnforcementStoppingBudget.run6_value_str` |      `{python} EnforcementStoppingBudget.left6_math` | `{python} EnforcementStoppingBudget.shape_aisle_value_str` |
 |   7 | @sec-enforcement-stopping-envelopes      | Tracking inset, $\epsilon_{\text{track}}$                                                                                                                                  |       `{python} EnforcementStoppingBudget.inset_value_str` | `{python} EnforcementStoppingBudget.run7_value_str` |      `{python} EnforcementStoppingBudget.left7_math` |       `{python} EnforcementStoppingBudget.inset_value_str` |
 |     |                                          | **Total**                                                                                                                                                                  |        `{python} EnforcementStoppingBudget.run7_value_str` |                                                     |                                                      | `{python} EnforcementStoppingBudget.total_aisle_value_str` |
 |     |                                          | **Left of $D_{\text{clear}}$**                                                                                                                                             |            `{python} EnforcementStoppingBudget.left7_math` |                                                     |                                                      |       `{python} EnforcementStoppingBudget.spare_value_str` |
 
-: **The warehouse mobile manipulator's stopping budget**: Each numbered row is the distance one chapter adds, loaded and on a dry floor, at the `{python} EnforcementStoppingBudget.v_drive_str` drive limit and at the `{python} EnforcementStoppingBudget.v_aisle_str` aisle speed; the running total and remainder are at the drive limit, against the `{python} EnforcementStoppingBudget.d_clear_str` clear distance. Row 6 replaces constant-deceleration braking with the resident $C^2$ stop, so its entry is the added distance. Time rows add no distance. The totals exclude unaccounted dispatch-to-admission travel, which must be charged before activation. {#tbl-enforcement-stopping-budget tbl-colwidths="[5,17,38,10,10,10,10]"}
+: **The warehouse mobile manipulator's stopping budget**: Each numbered row is the distance one chapter adds, loaded and on a dry floor, at the `{python} EnforcementStoppingBudget.v_drive_str` drive limit and at the `{python} EnforcementStoppingBudget.v_aisle_str` aisle speed; the running total and remainder are at the drive limit, against the `{python} EnforcementStoppingBudget.d_clear_str` clear distance. Row 6 replaces constant-deceleration braking with the resident jerk-limited $C^2$ stop, so its entry is the added distance. Time rows add no distance. The totals exclude unaccounted dispatch-to-admission travel, which must be charged before activation. {#tbl-enforcement-stopping-budget tbl-colwidths="[5,17,38,10,10,10,10]"}
 
 ::: {#fig-enforcement-stopping-budget fig-env="figure" fig-pos="t" fig-cap="**The stopping budget, row by row**: Each bar is the running total after one chapter adds its term, at the drive limit, loaded, on a dry floor. Braking, overhead, brake onset, the lease path, and the observation age stay inside the clear distance; the matched stop suffix carries the total past it, and the tracking inset widens the overrun. The final bar is the accounted subtotal at the candidate aisle speed. Its remainder must first cover unaccounted dispatch-to-admission travel; only the balance is available for further reserve." fig-alt="Stacked bar chart of stopping distance in millimeters. Seven bars at the drive limit grow from braking alone to the full budget, adding overhead, brake onset, lease path, observation age, the matched stop suffix, and the tracking inset; the sixth and seventh bars cross a dashed horizontal line marking the clear distance at the rack end. An eighth bar at the aisle speed, built from the same terms, ends below the line."}
 
@@ -499,7 +515,7 @@ At the candidate speed, the entire unallocated allowance corresponds to `{python
 # │ How:     the terms of @tbl-enforcement-stopping-budget from RM/AISLE
 # ├─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import check
 from mlsysim import viz
 
@@ -510,13 +526,14 @@ AISLE = Embodied.Scenario.WarehouseAisle
 v_drive = RM.base.max_velocity  # category: illustrative (drive limit)
 v_aisle = AISLE.v_aisle  # category: chosen
 a_brake = AISLE.a_brake  # category: illustrative
+j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"]  # category: derived (reference polynomial's peak jerk)
 lease_path = AISLE.t_lease + AISLE.t_tick + AISLE.t_bus  # category: chosen (lease, tick) + illustrative (bus)
 d_clear_mm = AISLE.d_clear.to(millimeter).magnitude  # category: illustrative
 
 # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
 def terms(v):
     brake = (v**2 / (2 * a_brake)).to(millimeter).magnitude
-    c2 = calc_c2_stop_suffix(v, a_brake)["distance"].to(millimeter).magnitude
+    c2 = calc_scurve_stop_distance(v, a_brake, j_brake).to(millimeter).magnitude
     return {
         "braking": brake,
         "overhead": (AISLE.delta_loc + AISLE.delta_margin).to(millimeter).magnitude,
@@ -535,8 +552,8 @@ bars.append(aisle)
 totals = [sum(b.values()) for b in bars]
 
 # ┌── 3. GUARD ────────────────────────────────────────────────────────────────
-check(abs(totals[6] - 1234.15) < 1e-6, "Row 7 total at the drive limit is 1234.15 mm.")
-check(abs(totals[7] - 997.43) < 1e-6, "The aisle-speed bar is 997.43 mm.")
+check(abs(totals[6] - 1163.8375) < 1e-6, "Row 7 total at the drive limit is 1163.84 mm.")
+check(abs(totals[7] - 968.9925) < 1e-6, "The aisle-speed bar is 968.99 mm.")
 check(totals[4] < d_clear_mm < totals[5], "The budget first passes the clear distance at row 6.")
 
 # ┌── 4. PLOT ─────────────────────────────────────────────────────────────────
@@ -612,7 +629,7 @@ An independent protective scanner needs its own event-to-stop ledger. Its detect
 
 In the distance--velocity $(d, v)$ phase plane, the stopping envelope separates states with enough clearance for the modeled stop from states without that reservation. Its boundary sets a speed ceiling under the stated braking and delay assumptions; crossing it does not prove that every possible maneuver ends in collision.
 
-::: {#fig-12-stopping-envelope-phase-plane fig-env="figure" fig-pos="t" fig-cap="**Conditional stopping envelope**: For the warehouse mobile manipulator's base, a parabolic boundary separates states with modeled braking clearance from states that have already exhausted it. The inset includes the pre-brake delay, the matched stop suffix's gentler deceleration, and the localization, protective, and tracking allowances. Clearance below the fixed allowances admits no approach speed, including zero. The curves use the accounted delay and stated braking envelope; unaccounted dispatch-to-admission time lowers the ceiling further." fig-alt="Phase portrait with obstacle distance on the horizontal axis and approach speed on the vertical axis. A braking-only parabola and an inset stopping boundary show the cost of pre-brake delay, the matched stop suffix, and the fixed allowances; a marker at the rack-end clear distance shows the speed ceiling, with the chosen aisle speed just below it."}
+::: {#fig-12-stopping-envelope-phase-plane fig-env="figure" fig-pos="t" fig-cap="**Conditional stopping envelope**: For the warehouse mobile manipulator's base, a boundary separates states with modeled braking clearance from states that have already exhausted it. The inset includes the pre-brake delay, the matched stop suffix's jerk ramps, and the localization, protective, and tracking allowances. Clearance below the fixed allowances admits no approach speed, including zero. The curves use the accounted delay and stated braking envelope; unaccounted dispatch-to-admission time lowers the ceiling further." fig-alt="Phase portrait with obstacle distance on the horizontal axis and approach speed on the vertical axis. A braking-only parabola and an inset stopping boundary show the cost of pre-brake delay, the matched stop suffix, and the fixed allowances; a marker at the rack-end clear distance shows the speed ceiling, with the chosen aisle speed just below it."}
 
 ```{python}
 #| echo: false
@@ -624,12 +641,13 @@ In the distance--velocity $(d, v)$ phase plane, the stopping envelope separates 
 # │ Goal:    show the speed ceiling clearance imposes, independent of throughput
 # │ Show:    the viable set in the distance-velocity plane, and what pre-brake
 # │          delay, the C2 stop, and the overheads cost relative to pure braking
-# │ How:     0.75 v^2/a + tau v + overhead <= d (@eq-enforce-stopping-envelope
-# │          with a_eff = a_brake / 1.5), from RM/AISLE
+# │ How:     tau v + d_S(v) + overhead <= d (@eq-enforce-stopping-envelope with
+# │          the S-curve stop), solved by calc_scurve_max_permitted_velocity
+# │          at each clearance, from RM/AISLE
 # ├─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_max_permitted_velocity
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_max_permitted_velocity, calc_scurve_max_permitted_velocity
 from mlsysim.fmt import check
 from mlsysim import viz
 
@@ -643,34 +661,47 @@ OVERHEAD = AISLE.fixed_overhead.to(meter).magnitude  # category: illustrative + 
 D_CLEAR = AISLE.d_clear.to(meter).magnitude  # category: illustrative
 V_AISLE = AISLE.v_aisle.to(meter / second).magnitude  # category: chosen
 _v_ref = RM.base.max_velocity  # category: illustrative (drive limit)
-C2_COEFF = (calc_c2_stop_suffix(_v_ref, AISLE.a_brake)["distance"] * AISLE.a_brake / _v_ref**2).to("dimensionless").magnitude  # category: derived
+J_BRAKE = calc_c2_stop_suffix(_v_ref, AISLE.a_brake)["peak_jerk"]  # category: derived (reference polynomial's peak jerk)
 
 # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
+def _ceiling_at(d):
+    return (
+        calc_scurve_max_permitted_velocity(
+            d * meter,
+            AISLE.tau_delay,
+            AISLE.a_brake,
+            J_BRAKE,
+            loc_margin=AISLE.delta_loc,
+            physical_margin=AISLE.delta_margin + AISLE.eps_track,
+        )
+        .to(meter / second)
+        .magnitude
+    )
+
 def v_admissible(d):
-    """Positive root of C2_COEFF v^2/a + tau v + (overhead - d) = 0."""
-    qa = C2_COEFF / A_BRAKE
-    disc = TAU_DELAY**2 + 4.0 * qa * np.maximum(d - OVERHEAD, 0.0)
-    root = (-TAU_DELAY + np.sqrt(disc)) / (2.0 * qa)
-    return np.where(np.asarray(d) >= OVERHEAD, root, np.nan)
+    """Largest v with tau v + d_S(v) + overhead <= d; NaN inside the fixed allowances."""
+    d_arr = np.atleast_1d(np.asarray(d, dtype=float))
+    root = np.array([_ceiling_at(x) if x >= OVERHEAD else np.nan for x in d_arr])
+    return root if np.ndim(d) else root[0]
 
 v_braking_only = lambda d: np.sqrt(2.0 * A_BRAKE * d)  # constant deceleration, no delay or allowances
 v_ceiling = float(v_admissible(D_CLEAR))
 
 # ┌── 3. GUARD ────────────────────────────────────────────────────────────────
-check(abs(C2_COEFF - 0.75) < 1e-12, "The C2 stop costs 0.75 v^2 / a.")
 check(abs(OVERHEAD - 0.190) < 1e-9, "Fixed overheads are 190 mm.")
+# Closed form above a^2/j: constant braking at a_brake after tau + a/(2j)
 _ceiling_ref = (
     calc_max_permitted_velocity(
         AISLE.d_clear,
-        AISLE.tau_delay,
-        AISLE.a_brake / 1.5,
+        AISLE.tau_delay + AISLE.a_brake / (2 * J_BRAKE),
+        AISLE.a_brake,
         loc_margin=AISLE.delta_loc,
         physical_margin=AISLE.delta_margin + AISLE.eps_track,
     )
     .to(meter / second)
     .magnitude
 )
-check(abs(v_ceiling - _ceiling_ref) < 1e-9, "The figure's ceiling must match calc_max_permitted_velocity.")
+check(abs(v_ceiling - _ceiling_ref) < 1e-9, "The figure's ceiling must match the closed form above a^2/j.")
 check(V_AISLE < v_ceiling, "The aisle speed sits inside the viable set.")
 check(np.isnan(v_admissible(OVERHEAD / 2)), "No speed is admissible below the fixed clearance allowance.")
 check(abs(float(v_admissible(OVERHEAD))) < 1e-12, "At exactly the fixed allowance, only zero approach speed fits.")
@@ -724,7 +755,7 @@ plt.show()
 
 :::
 
-In the distance–velocity plane of @fig-12-stopping-envelope-phase-plane, the stopping equation draws a parabolic boundary between states that can still stop and states that have exhausted their clearance, and the gap to the braking-only curve is the clearance consumed by pre-brake delay, the matched stop's gentler deceleration, and the fixed allowances.
+In the distance–velocity plane of @fig-12-stopping-envelope-phase-plane, the stopping equation draws a boundary between states that can still stop and states that have exhausted their clearance, and the gap to the braking-only curve is the clearance consumed by pre-brake delay, the matched stop's jerk ramps, and the fixed allowances.
 
 Just as the Roofline model [@williams2009roofline] caps attainable computing throughput by memory bandwidth in memory-bound regimes, the stopping envelope establishes a **Kinematic Roofline** on the physical system: available physical clearance ($D_{\text{clear}}$) caps legal transit velocity, regardless of how quickly the upstream policy computes or how many TOPS of neural acceleration are hosted on the system-on-chip (SoC). When an autonomous system operates in a clearance-bound regime, increasing inference frequency or scaling model parameter count yields zero operational speedup; the speed ceiling can be elevated only by improving the physical denominators: raising credible braking deceleration $a_{\text{brake}}$, shortening physical transport lag $\tau_{\text{delay}}$, or tightening tracking error bounds $\epsilon_{\text{track}}$ and localization uncertainty $\delta_{\text{loc}}$.
 
@@ -760,11 +791,12 @@ Crucially, gravitational and dynamic bias is directionally asymmetric. When moti
 # │          delay on the base overruns the spare.
 # │ Show:    arm stop with and without bias; unbraked windup travel vs. spare.
 # │ How:     RM.arm.max_torque, RM.tcp_speed_limit, AISLE fields,
-# │          calc_c2_stop_suffix for the finished budget at the aisle speed.
+# │          calc_scurve_stop_distance for the finished budget at the aisle
+# │          speed (jerk bound from calc_c2_stop_suffix at the drive limit).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt, fmt_length, fmt_latency, fmt_velocity, fmt_torque, fmt_inertia, fmt_percent, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -798,8 +830,10 @@ class EnforcementAuthorityLoss:
     overrun = (d_eff - d_nom).to(millimeter)
     tcp_speed = (link_length * joint_speed).to(meter / second)
     windup_travel = (v_aisle * unwind).to(millimeter)
-    budget = (v_aisle * tau_delay + calc_c2_stop_suffix(v_aisle, a_brake)["distance"] + fixed_overhead).to(millimeter)
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, a_brake)["peak_jerk"]  # reference polynomial's peak jerk
+    budget = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_brake, j_brake) + fixed_overhead).to(millimeter)
     spare = (d_clear - budget).to(millimeter)
+    windup_excess = (windup_travel - spare).to(millimeter)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(bias.magnitude - 65.25) < 1e-9, "Bias is 65.25 of 87 N·m.")
@@ -807,8 +841,8 @@ class EnforcementAuthorityLoss:
     check(abs(d_eff.magnitude / d_nom.magnitude - 4.0) < 1e-9, "Bias quadruples the tool stopping travel.")
     check(tcp_speed <= tcp_limit, "The descending tool point stays inside the free-space TCP limit.")
     check(abs(windup_travel.magnitude - 195.0) < 1e-9, "Windup at 1.3 m/s adds 195 mm.")
-    check(abs(spare.magnitude - 102.57) < 1e-6, "The finished budget leaves 102.57 mm spare at 1.3 m/s.")
-    check(windup_travel > 1.8 * spare, "Windup travel is almost twice the spare.")
+    check(abs(spare.magnitude - 131.0075) < 1e-6, "The finished budget leaves 131.01 mm spare at 1.3 m/s.")
+    check(windup_travel > spare, "Windup travel exceeds the spare.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     torque_limit_str = fmt_torque(torque_limit, precision=0)
@@ -833,6 +867,7 @@ class EnforcementAuthorityLoss:
     unwind_str = fmt_latency(unwind, unit=millisecond, precision=0)
     v_aisle_str = fmt_velocity(v_aisle, precision=1)
     windup_travel_str = fmt_length(windup_travel, unit=millimeter, precision=0)
+    windup_excess_str = fmt_length(windup_excess, unit=millimeter, precision=2)
     spare_str = fmt_length(spare, unit=millimeter, precision=1)
 ```
 
@@ -840,7 +875,7 @@ Consider the warehouse mobile manipulator's arm carrying the mug from the takeaw
 
 During the descent, however, the arm's own geometry and the mug load the joint with a downward bias of $\tau_{\text{bias}} =$ `{python} EnforcementAuthorityLoss.bias_str`, `{python} EnforcementAuthorityLoss.bias_pct_str` of its peak torque. By @eq-enforce-effective-deceleration, the net torque left for braking is $\tau_{\max} - \tau_{\text{bias}} =$ `{python} EnforcementAuthorityLoss.net_torque_str`, and the angular deceleration falls fourfold to $\alpha_{\text{eff}} =$ `{python} EnforcementAuthorityLoss.alpha_eff_str` $\text{rad/s}^2$. The stopping angle grows fourfold to `{python} EnforcementAuthorityLoss.angle_eff_str` $\text{rad}$ (`{python} EnforcementAuthorityLoss.angle_eff_deg_str`$^\circ$), and the tool travels `{python} EnforcementAuthorityLoss.d_eff_str`, an unbudgeted overrun of `{python} EnforcementAuthorityLoss.overrun_str`. If the enforcer evaluates barrier envelopes with the datasheet torque $\tau_{\max}$ rather than the net headroom $\tau_{\max} - \tau_{\text{bias}}$, the real stop runs `{python} EnforcementAuthorityLoss.overrun_str` past the predicted one. Whether that overrun ends on the station surface depends on the clearance at which braking begins, which the barrier of @sec-enforcement-safe-sets-conditional-permission evaluates. The coworker's hand must never come within the arm's biased stop of `{python} EnforcementAuthorityLoss.d_eff_str` plus its blind travel before the handover channel engages.
 
-An unprotected integrator beneath the enforcer can add latency during saturation. In the illustrative controller failure considered here, clipping does not stop integration, and the brake request passes through the same wound-up controller instead of bypassing or resetting it. The output consequently remains at the forward limit while the integral unwinds. If error accumulates for `{python} EnforcementAuthorityLoss.windup_span_str`, unwinding delays net braking force by $\tau_{\text{unwind}} =$ `{python} EnforcementAuthorityLoss.unwind_str`. On the mobile manipulator's base at the `{python} EnforcementAuthorityLoss.v_aisle_str` aisle speed, this delay adds $v\,\tau_{\text{unwind}} =$ `{python} EnforcementAuthorityLoss.windup_travel_str` of unbraked travel, almost twice even the `{python} EnforcementAuthorityLoss.spare_str` unallocated remainder before dispatch-to-admission travel is charged. Anti-windup clamping, back-calculation, and conditional integration address the loop [@astrom2006advanced; @franklin1998digital]; the enforcement requirement is to measure the unwinding delay that remains and budget its unbraked distance inside the stopping horizon.
+An unprotected integrator beneath the enforcer can add latency during saturation. In the illustrative controller failure considered here, clipping does not stop integration, and the brake request passes through the same wound-up controller instead of bypassing or resetting it. The output consequently remains at the forward limit while the integral unwinds. If error accumulates for `{python} EnforcementAuthorityLoss.windup_span_str`, unwinding delays net braking force by $\tau_{\text{unwind}} =$ `{python} EnforcementAuthorityLoss.unwind_str`. On the mobile manipulator's base at the `{python} EnforcementAuthorityLoss.v_aisle_str` aisle speed, this delay adds $v\,\tau_{\text{unwind}} =$ `{python} EnforcementAuthorityLoss.windup_travel_str` of unbraked travel, `{python} EnforcementAuthorityLoss.windup_excess_str` more than even the `{python} EnforcementAuthorityLoss.spare_str` unallocated remainder before dispatch-to-admission travel is charged. Anti-windup clamping, back-calculation, and conditional integration address the loop [@astrom2006advanced; @franklin1998digital]; the enforcement requirement is to measure the unwinding delay that remains and budget its unbraked distance inside the stopping horizon.
 
 Saturation is one of the few hardware failures with a direct, deterministic detector inside the permission path. On each $1\text{ ms}$ tick the permission path compares the commanded effort $u_{\text{cmd}}$ with the realizable effort $u_{\text{act}} = \text{clip}(u_{\text{cmd}}, u_{\text{min}}, u_{\text{max}})$. A nonzero difference or current-limit status reports clipping of the requested effort. This is a direct detector of commanded saturation, not a measurement of delivered torque or tire traction. Current, voltage, thermal, and state evidence still bound the physical braking authority.
 
@@ -1288,10 +1323,11 @@ The fallback ladder organizes four state-matched responses. The ring labels are 
 # │ Context: the controlled-stop paragraph immediately below.
 # │ Goal:    show that the stop rung executes the resident C2 suffix.
 # │ Show:    aisle speed, credible deceleration, suffix duration and distance.
-# │ How:     calc_c2_stop_suffix on AISLE.v_aisle and AISLE.a_brake.
+# │ How:     calc_scurve_stop_time / _distance on AISLE.v_aisle and
+# │          AISLE.a_brake; jerk bound from calc_c2_stop_suffix at the drive limit.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance, calc_scurve_stop_time
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, fmt_acceleration, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -1303,22 +1339,22 @@ class EnforcementStopRung:
     a_brake = AISLE.a_brake  # category: illustrative
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    suffix = calc_c2_stop_suffix(v_aisle, a_brake)
-    duration = suffix["duration"].to(millisecond)
-    distance = suffix["distance"].to(millimeter)
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, a_brake)["peak_jerk"]  # reference polynomial's peak jerk
+    duration = calc_scurve_stop_time(v_aisle, a_brake, j_brake).to(millisecond)
+    distance = calc_scurve_stop_distance(v_aisle, a_brake, j_brake).to(millimeter)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
-    check(abs(duration.magnitude - 975.0) < 1e-6, "The C2 stop from 1.3 m/s takes 975 ms.")
-    check(abs(distance.magnitude - 633.75) < 1e-6, "The C2 stop from 1.3 m/s covers 633.75 mm.")
+    check(abs(duration.magnitude - 931.25) < 1e-6, "The S-curve stop from 1.3 m/s takes 931.25 ms.")
+    check(abs(distance.magnitude - 605.3125) < 1e-6, "The S-curve stop from 1.3 m/s covers 605.31 mm.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     v_aisle_str = fmt_velocity(v_aisle, precision=1)
     a_brake_str = fmt_acceleration(a_brake, precision=0)
-    duration_str = fmt_latency(duration, unit=millisecond, precision=0)
+    duration_str = fmt_latency(duration, unit=millisecond, precision=2)
     distance_str = fmt_length(distance, unit=millimeter, precision=2)
 ```
 
-When a body in motion loses its proposal's authority or a tracking or model assumption fails, the response is a controlled dynamic stop, analogous to a Category 1 stop under IEC 60204-1\index{Safe stop 1}. On the warehouse mobile manipulator's base, this rung executes the resident stop suffix admitted with the trajectory (@sec-planning-behavior-seam) rather than composing a stop at the moment of the fault. In the zero-acceleration cruise case, the resident profile matches the state at an earlier stop onset as well as at commitment; other entry states require their qualified state-matched response. From the `{python} EnforcementStopRung.v_aisle_str` aisle speed, the $C^2$ suffix peaks at the `{python} EnforcementStopRung.a_brake_str` credible deceleration, lasts `{python} EnforcementStopRung.duration_str`, and covers `{python} EnforcementStopRung.distance_str`, the braking term already reserved in the stopping budget of @sec-enforcement-stopping-envelopes. The kinetic energy the stop removes regenerates through the inverter into the DC bus (@sec-body-power-integrity), so bus capacitance and a brake chopper must absorb the surge without an overvoltage fault.[^fn-hw-chopper-clamp] Power removal, if specified, follows the measured standstill condition.
+When a body in motion loses its proposal's authority or a tracking or model assumption fails, the response is a controlled dynamic stop, analogous to a Category 1 stop under IEC 60204-1\index{Safe stop 1}. On the warehouse mobile manipulator's base, this rung executes the resident stop suffix admitted with the trajectory (@sec-planning-behavior-seam) rather than composing a stop at the moment of the fault. In the zero-acceleration cruise case, the resident profile matches the state at an earlier stop onset as well as at commitment; other entry states require their qualified state-matched response. From the `{python} EnforcementStopRung.v_aisle_str` aisle speed, the jerk-limited $C^2$ suffix holds the `{python} EnforcementStopRung.a_brake_str` credible deceleration between its jerk ramps, lasts `{python} EnforcementStopRung.duration_str`, and covers `{python} EnforcementStopRung.distance_str`, the braking term already reserved in the stopping budget of @sec-enforcement-stopping-envelopes. The kinetic energy the stop removes regenerates through the inverter into the DC bus (@sec-body-power-integrity), so bus capacitance and a brake chopper must absorb the surge without an overvoltage fault.[^fn-hw-chopper-clamp] Power removal, if specified, follows the measured standstill condition.
 
 [^fn-hw-chopper-clamp]: **Dynamic brake choppers and DC-bus overvoltage clamping**\index{Power electronics!Brake chopper}\index{Dynamic braking!DC bus overvoltage}: In a regenerative Category 1 stop, mechanical kinetic energy flows through the inverter bridge into DC bus capacitors ($\Delta E = \frac{1}{2} m v^2$). A suitably rated chopper and resistor can dissipate energy when the DC bus rises; switching thresholds, pulse-energy rating, and thermal behavior must be validated for the stop profile. Other designs use mechanical dissipation or a battery that can accept regeneration.
 
@@ -1334,11 +1370,12 @@ When a body in motion loses its proposal's authority or a tracking or model assu
 # │ Goal:    compare logic/coil hold-up with the selected stop sequence;
 # │          inverter torque survival is a separate qualification premise.
 # │ Show:    spring-brake engage range, hold-up, flag-to-brakes-set time, margin.
-# │ How:     RM D15 rail fields; the C2 suffix at the inspected-floor ceiling
-# │          (EnforcementStoppingBudget) with the friction-bound peak.
+# │ How:     RM D15 rail fields; the S-curve suffix at the inspected-floor
+# │          ceiling (EnforcementStoppingBudget) with the friction-bound peak
+# │          and the load's jerk bound.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix
+from mlsysim.physics.robotics import calc_scurve_stop_time
 from mlsysim.fmt import fmt, fmt_latency, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -1357,15 +1394,15 @@ class EnforcementRailHoldup:
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     flag_to_onset = (tick + bus + onset).to(millisecond)
-    longest_stop = calc_c2_stop_suffix(v_inspected, a_inspected)["duration"].to(millisecond)
+    longest_stop = calc_scurve_stop_time(v_inspected, a_inspected, EnforcementStoppingBudget.j_brake).to(millisecond)
     flag_to_set = (flag_to_onset + longest_stop + engage_max).to(millisecond)
     margin = (holdup - flag_to_set).to(millisecond)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(holdup.to(second).magnitude - 2.0) < 1e-9, "The permission rail holds up for 2.0 s.")
     check(abs(flag_to_onset.magnitude - 22.0) < 1e-9, "Stop onset follows the flag within 22 ms.")
-    check(abs(flag_to_set.magnitude - 1497.35) < 5e-3, "Flag to all brakes set is 1497.35 ms.")
-    check(abs(margin.magnitude - 502.65) < 5e-3, "The hold-up leaves 502.65 ms.")
+    check(abs(flag_to_set.magnitude - 1313.43) < 5e-3, "Flag to all brakes set is 1313.43 ms.")
+    check(abs(margin.magnitude - 686.57) < 5e-3, "The hold-up leaves 686.57 ms.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     engage_min_ms_str = fmt_latency(engage_min, unit=millisecond, precision=0)
@@ -1528,12 +1565,13 @@ The `parent_trajectory_digest` links a command to the admitted trajectory and ch
 # │ Show:    tracking bound; resident stop at the aisle speed and drive limit;
 # │          both base configurations; the latch approach and its projection;
 # │          the free-space TCP limit and the handover ceiling under accept_item.
-# │ How:     calc_c2_stop_suffix on RM/AISLE; the inspected-floor peak from
-# │          EnforcementStoppingBudget; calc_contact_yield_deadline for the door;
+# │ How:     calc_scurve_stop_time / _distance on RM/AISLE with the jerk bound
+# │          and inspected-floor peak from EnforcementStoppingBudget;
+# │          calc_contact_yield_deadline for the door;
 # │          the contact-force ceiling F_h / sqrt(k_h m_eff) for the handover.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_contact_yield_deadline
+from mlsysim.physics.robotics import calc_scurve_stop_distance, calc_scurve_stop_time, calc_contact_yield_deadline
 from mlsysim.fmt import fmt, fmt_length, fmt_latency, fmt_velocity, fmt_acceleration, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -1562,28 +1600,26 @@ class EnforcementRecordMachine:
     m_eff_arm = RM.arm_effective_contact_mass  # category: derived
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    stop_aisle = calc_c2_stop_suffix(v_aisle, a_brake)
-    stop_drive = calc_c2_stop_suffix(v_drive, a_brake)
-    stop_restricted = calc_c2_stop_suffix(v_restricted, a_inspected)
-    t_stop_aisle = stop_aisle["duration"].to(millisecond)
-    d_stop_aisle = stop_aisle["distance"].to(millimeter)
-    t_stop_drive = stop_drive["duration"].to(millisecond)
-    d_stop_drive = stop_drive["distance"].to(millimeter)
-    t_stop_restricted = stop_restricted["duration"].to(millisecond)
-    d_stop_restricted = stop_restricted["distance"].to(millimeter)
+    j_brake = EnforcementStoppingBudget.j_brake  # category: derived (reference polynomial's peak jerk)
+    t_stop_aisle = calc_scurve_stop_time(v_aisle, a_brake, j_brake).to(millisecond)
+    d_stop_aisle = calc_scurve_stop_distance(v_aisle, a_brake, j_brake).to(millimeter)
+    t_stop_drive = calc_scurve_stop_time(v_drive, a_brake, j_brake).to(millisecond)
+    d_stop_drive = calc_scurve_stop_distance(v_drive, a_brake, j_brake).to(millimeter)
+    t_stop_restricted = calc_scurve_stop_time(v_restricted, a_inspected, j_brake).to(millisecond)
+    d_stop_restricted = calc_scurve_stop_distance(v_restricted, a_inspected, j_brake).to(millimeter)
     t_yield_high = calc_contact_yield_deadline(f_latch_limit, k_latch, v_latch_high).to(millisecond)
     v_handover_ceiling = (f_contact / (k_hand * m_eff_arm) ** 0.5).to(meter / second)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(eps_track.to(millimeter).magnitude - 40.0) < 1e-9, "The base's tracking bound is 40 mm.")
-    check(abs(t_stop_aisle.magnitude - 975.0) < 1e-6, "The C2 stop from 1.3 m/s takes 975 ms.")
-    check(abs(d_stop_aisle.magnitude - 633.75) < 1e-6, "The C2 stop from 1.3 m/s covers 633.75 mm.")
-    check(abs(t_stop_drive.magnitude - 1125.0) < 1e-6, "The C2 stop from 1.5 m/s takes 1125 ms.")
-    check(abs(d_stop_drive.magnitude - 843.75) < 1e-6, "The C2 stop from 1.5 m/s covers 843.75 mm.")
+    check(abs(t_stop_aisle.magnitude - 931.25) < 1e-6, "The S-curve stop from 1.3 m/s takes 931.25 ms.")
+    check(abs(d_stop_aisle.magnitude - 605.3125) < 1e-6, "The S-curve stop from 1.3 m/s covers 605.31 mm.")
+    check(abs(t_stop_drive.magnitude - 1031.25) < 1e-6, "The S-curve stop from 1.5 m/s takes 1031.25 ms.")
+    check(abs(d_stop_drive.magnitude - 773.4375) < 1e-6, "The S-curve stop from 1.5 m/s covers 773.44 mm.")
     check(abs(a_inspected.to(meter / second**2).magnitude - 1.1768) < 5e-4, "The inspected-floor peak is 1.177 m/s^2.")
     check(v_restricted < v_inspected, "The restricted speed must sit under the inspected-floor ceiling.")
-    check(abs(t_stop_restricted.magnitude - 1274.6) < 5e-2, "The restricted stop from 1.0 m/s takes 1274.6 ms.")
-    check(abs(d_stop_restricted.magnitude - 637.3) < 5e-2, "The restricted stop from 1.0 m/s covers 637.3 mm.")
+    check(abs(t_stop_restricted.magnitude - 1015.25) < 5e-2, "The restricted stop from 1.0 m/s takes 1015.3 ms.")
+    check(abs(d_stop_restricted.magnitude - 507.63) < 5e-2, "The restricted stop from 1.0 m/s covers 507.6 mm.")
     check(abs(t_yield_high.magnitude - 2.5) < 1e-9, "At 0.10 m/s the contact deadline is 2.5 ms.")
     check(t_yield_high > t_contact, "The faster approach passes only the onset-delay comparison, not the full contact admission test.")
     check(v_latch < v_latch_high, "The target-ODD approach is the slower one.")
@@ -1596,9 +1632,9 @@ class EnforcementRecordMachine:
     eps_track_str = fmt_length(eps_track, unit=millimeter, precision=0)
     v_aisle_str = fmt_velocity(v_aisle, precision=1)
     v_drive_str = fmt_velocity(v_drive, precision=1)
-    t_stop_aisle_str = fmt_latency(t_stop_aisle, unit=millisecond, precision=0)
+    t_stop_aisle_str = fmt_latency(t_stop_aisle, unit=millisecond, precision=2)
     d_stop_aisle_str = fmt_length(d_stop_aisle, unit=millimeter, precision=2)
-    t_stop_drive_str = fmt_latency(t_stop_drive, unit=millisecond, precision=0)
+    t_stop_drive_str = fmt_latency(t_stop_drive, unit=millisecond, precision=2, commas=True)
     d_stop_drive_str = fmt_length(d_stop_drive, unit=millimeter, precision=2)
     mu_min_str = fmt(mu_min, precision=3)
     mu_inspected_str = fmt(mu_inspected, precision=2)
@@ -1619,7 +1655,7 @@ class EnforcementRecordMachine:
 Filled in for the machine, the record fixes the base's stops at the rack end and the arm's validity region and channels at the door and the packing station:
 
 - The tracking bound $\epsilon_{\text{track}}$ is `{python} EnforcementRecordMachine.eps_track_str`, the inset of row 7 in @tbl-enforcement-stopping-budget.
-- The resident stop is the $C^2$ suffix, which lasts `{python} EnforcementRecordMachine.t_stop_aisle_str` and covers `{python} EnforcementRecordMachine.d_stop_aisle_str` from the `{python} EnforcementRecordMachine.v_aisle_str` aisle speed, or `{python} EnforcementRecordMachine.t_stop_drive_str` and `{python} EnforcementRecordMachine.d_stop_drive_str` from the `{python} EnforcementRecordMachine.v_drive_str` drive limit.
+- The resident stop is the jerk-limited $C^2$ suffix, which lasts `{python} EnforcementRecordMachine.t_stop_aisle_str` and covers `{python} EnforcementRecordMachine.d_stop_aisle_str` from the `{python} EnforcementRecordMachine.v_aisle_str` aisle speed, or `{python} EnforcementRecordMachine.t_stop_drive_str` and `{python} EnforcementRecordMachine.d_stop_drive_str` from the `{python} EnforcementRecordMachine.v_drive_str` drive limit.
 - The loop period is `{python} EnforcementCycleBudget.tick_str`, with a declared WCET of `{python} EnforcementCycleBudget.wcet_us_str` $\mu\text{s}$ inside a `{python} EnforcementCycleBudget.deadline_us_str` $\mu\text{s}$ deadline. Three timers run beside it, the `{python} EnforcementLeaseStop.lease_ms_str` chunk lease, the `{python} EnforcementLeaseStop.heartbeat_rate_hz_str` $\text{Hz}$ host heartbeat with its `{python} EnforcementLeaseStop.heartbeat_timeout_ms_str` silence timeout, and the `{python} EnforcementLeaseStop.self_watchdog_ms_str` self-watchdog.
 - The validity region for the arm covers the door and the packing station. For the original door policy it is the nominal target ODD of @sec-evaluation-logs: the nominal plate, the door's own load, a stopped base, and the guarded approach. The separately stipulated recovery update in @sec-evaluation-recovery-update adds the qualified positive displaced-plate cell only under its new record; it does not expand the original policy's validity region. At the packing station it admits the mug pick from the conveyor under a live intent lease (@sec-intent-lease), and the handover that follows.
 - The arm's channels are ceilings the enforcer applies to the tool point. The approach-speed channel of the evaluation record's `runtime_monitor_specs` caps it at `{python} EnforcementRecordMachine.v_latch_str` inside the door zone. The mug pick runs under the `{python} EnforcementRecordMachine.tcp_limit_str` free-space Tool Center Point (TCP) limit. While the coworker holds `accept_item` (@sec-intervention-human-authority), a handover channel caps the approach to the coworker's hand at `{python} EnforcementRecordMachine.v_handover_str`, below the `{python} EnforcementRecordMachine.v_handover_ceiling_str` contact-force ceiling, and it engages before the hand comes within the arm's biased stop plus its blind travel.
@@ -1627,7 +1663,7 @@ Filled in for the machine, the record fixes the base's stops at the rack end and
 
 The base entry must also carry the qualified dispatch-to-admission bound and the positive reserve remaining after its travel is charged. Without that bound, neither the normal nor restricted configuration is admitted by these subtotals alone.
 
-Each numerical entry in the record carries the evidence category of its limit record (@sec-body-measuring-limits), whether measured, derived, datasheet, or illustrative, and the categories carry very different real-world confidence. The base's `{python} EnforcementRecordMachine.t_stop_aisle_str` stopping time is derived. It follows from the shape of the $C^2$ suffix and from a credible deceleration that is itself illustrative, and it assumes that the drive delivers the commanded current and that the tires hold the floor throughout the stop. Only loaded stopping trials on the floor itself make it a measured value, and those trials expose what no derivation contains, among them the scatter in brake onset and the friction of the actual floor surface. Even then the measured sample stands for the bound only with a justified worst-case fault and stated operating conditions. Recording the category prevents an integrator from mistaking a derived stop for a measured hardware limit.
+Each numerical entry in the record carries the evidence category of its limit record (@sec-body-measuring-limits), whether measured, derived, datasheet, or illustrative, and the categories carry very different real-world confidence. The base's `{python} EnforcementRecordMachine.t_stop_aisle_str` stopping time is derived. It follows from the shape of the $C^2$ suffix, from a jerk bound stipulated rather than measured, and from a credible deceleration that is itself illustrative, and it assumes that the drive delivers the commanded current and that the tires hold the floor throughout the stop. Only loaded stopping trials on the floor itself make it a measured value, and those trials expose what no derivation contains, among them the scatter in brake onset and the friction of the actual floor surface. Even then the measured sample stands for the bound only with a justified worst-case fault and stated operating conditions. Recording the category prevents an integrator from mistaking a derived stop for a measured hardware limit.
 
 The routing table below summarizes the state-dependent choices established in @sec-enforcement-fallback-ladder. An invalid replacement cannot renew an active command or revoke one merely by arriving; the active command continues only while its own conditions hold. Lease and heartbeat expiry end proposer authority. Loss of the MCU cycle invokes the external trip. Supply undervoltage is a separate test of surviving drive authority: in motion STOP is available only while powered braking remains feasible, and at rest finite hold-up must bridge to a qualified restraint. A contactor, if fitted, provides independently timed supply isolation.
 
@@ -1721,10 +1757,11 @@ When a lease lapses or a checked premise fails, the enforcer selects a **fallbac
 # │ Context: the summary paragraph immediately below.
 # │ Goal:    restate the finished stopping budget term by term at the aisle speed.
 # │ Show:    reaction, C2 stop, overheads, inset, total, and spare.
-# │ How:     RM/AISLE fields; calc_c2_stop_suffix for the resident stop.
+# │ How:     RM/AISLE fields; calc_scurve_stop_distance for the resident
+# │          stop, jerk bound from calc_c2_stop_suffix at the drive limit.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt_length, fmt_velocity, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -1741,19 +1778,20 @@ class EnforcementSummaryBudget:
     v_drive = RM.base.max_velocity  # category: illustrative (drive limit)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
+    j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"]  # reference polynomial's peak jerk
     reaction = (v_aisle * tau_delay).to(millimeter)
-    braking = calc_c2_stop_suffix(v_aisle, a_brake)["distance"].to(millimeter)
+    braking = calc_scurve_stop_distance(v_aisle, a_brake, j_brake).to(millimeter)
     total = (reaction + braking + overhead + eps_track).to(millimeter)
     spare = (d_clear - total).to(millimeter)
     # The drive limit under constant-deceleration braking and under the C2 stop
     total_const_drive = (v_drive * tau_delay + v_drive**2 / (2 * a_brake) + overhead + eps_track).to(millimeter)
-    total_c2_drive = (v_drive * tau_delay + calc_c2_stop_suffix(v_drive, a_brake)["distance"] + overhead + eps_track).to(millimeter)
+    total_c2_drive = (v_drive * tau_delay + calc_scurve_stop_distance(v_drive, a_brake, j_brake) + overhead + eps_track).to(millimeter)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(reaction.magnitude - 173.68) < 1e-6, "Reaction over tau_delay at 1.3 m/s is 173.68 mm.")
-    check(abs(braking.magnitude - 633.75) < 1e-6, "The C2 stop from 1.3 m/s is 633.75 mm.")
-    check(abs(total.magnitude - 997.43) < 1e-6, "The finished budget at 1.3 m/s is 997.43 mm.")
-    check(abs(spare.magnitude - 102.57) < 1e-6, "The finished budget leaves 102.57 mm spare.")
+    check(abs(braking.magnitude - 605.3125) < 1e-6, "The S-curve stop from 1.3 m/s is 605.31 mm.")
+    check(abs(total.magnitude - 968.9925) < 1e-6, "The finished budget at 1.3 m/s is 968.99 mm.")
+    check(abs(spare.magnitude - 131.0075) < 1e-6, "The finished budget leaves 131.01 mm spare.")
     check(total_const_drive < d_clear, "Constant-deceleration braking alone would admit the drive limit.")
     check(total_c2_drive > d_clear, "The finished budget runs past the clear distance at the drive limit.")
 

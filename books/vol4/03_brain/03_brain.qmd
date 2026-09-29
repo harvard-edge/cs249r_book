@@ -186,7 +186,7 @@ For the mug pick, the model must turn images and instructions into a candidate m
 3. **Specialized Action Decoders (The Outputs):**
    Instead of generating open-ended conversational text, the final hidden representation $\mathbf{h}_{\text{context}} \in \mathbb{R}^d$ is routed to specialized action decoders. While vision-language navigation (VLN) models emit topological waypoints or heading rates $(v_t, \omega_t)$ (@fig-vln-navigation), manipulation (VLA) models diverge sharply in how they bridge semantic representations to physical motion:
 
-   Discrete action decoders map each action dimension to a categorical token [@brohan2023rt1; @brohan2023rt2; @kim2024openvla]. Sequential token generation can require several model evaluations for one action vector, and discretization limits spatial resolution. Continuous decoders instead emit a trajectory chunk, either directly or through iterative refinement [@chi2024diffusionpolicy; @octo_2023; @black2024pi0]:
+   Discrete action decoders map each action dimension to a categorical token [@brohan2023rt1; @brohan2023rt2; @kim2024openvla], and discretization limits spatial resolution. Autoregressive decoders such as RT-2 and OpenVLA then generate those tokens one after another, one model evaluation per action dimension [@brohan2023rt2; @kim2024openvla]. Discretization does not require sequential decoding. RT-1 emits all of its action tokens from one pass, and its authors found that conditioning each token on the previous ones did not improve performance and more than doubled inference time [@brohan2023rt1]. Parallel decoding recovers that one-pass cost for an autoregressive VLA by fine-tuning it to predict every action token at once [@kim2025openvlaoft]. Continuous decoders instead emit a trajectory chunk, either directly or through iterative refinement [@chi2024diffusionpolicy; @octo_2023; @black2024pi0]:
    $$\mathbf{A}_{t:t+H-1} = [\mathbf{a}_t, \mathbf{a}_{t+1}, \dots, \mathbf{a}_{t+H-1}] \in \mathbb{R}^{H \times d_a} \quad (H = 16\text{--}64\text{ steps})$$
    Here $H$ counts future setpoints and $d_a$ counts values per action. A chunk supplies several requested motions from one sensory context; it does not contain new observations. The runtime comparison therefore depends on how many backbone and decoder evaluations produce the chunk, and how long those evaluations take. @Sec-appendix-ml-multimodal derives discrete tokenization and explains how generative decoders represent alternative demonstrated routes without averaging them into an obstacle.
 
@@ -233,13 +233,245 @@ On-chip static RAM (SRAM) and caches can reuse weights and intermediate state wi
 
 To understand the physical consequence of this bandwidth ceiling, consider what happens if a robot attempts to generate continuous motor actions one discrete step at a time through an autoregressive foundation model (such as a multi-billion-parameter VLA model). For a decoder that revisits nonresident weights at each token step, each evaluation streams those weights across the external DRAM bus. In single-token decoding with FP16 weights and request batch size $B = 1$, the dense weight projections become matrix-vector operations ($\mathbf{y} = \mathbf{W}\mathbf{x}$), yielding an arithmetic intensity, the operations performed per byte transferred, of just $I \approx 1.0\,\text{FLOP/byte}$. The sustained memory bandwidth $B_{\text{mem}}$ and model weight footprint $M_{\text{weights}}$ strictly bound the maximum fresh-evaluation frequency:
 $$f \le \frac{B_{\text{mem}}}{M_{\text{weights}}}$$
-This bound must use the bandwidth actually available to the policy and the weights it transfers at the selected precision. The worked example below applies it to the mobile manipulator's processor and intent model, before tokenization, multimodal attention, or decoding adds any latency. In single-step autoregressive generation, each action dimension requires predicting additional tokens; if each token revisits off-chip parameters, latency scales linearly with degrees of freedom. Because physical stabilization, joint impedance control, and reflex-level collision avoidance require deterministic update rates of $100\text{--}1000\,\text{Hz}$, the assumed nonresident models cannot supply those control rates. This timing result rules out using that inference path as the fast controller. The separate requirement that learned outputs remain proposals follows from their physical checking obligations, including the timely-but-wrong cases below.
+This bound must use the bandwidth actually available to the policy and the weights it transfers at the selected precision. It prices only the weight transfer. A fresh evaluation first reads its input tokens (image patches and the instruction) through the backbone in one pass, the **prefill**\index{Prefill!compute-bound phase}, and that pass reuses every fetched weight across all of those tokens, so arithmetic rather than bandwidth can bind it. The worked example in \ref{nbk-brain-intent-model-latency} prices both terms for the mobile manipulator's intent model. When a decoder emits one token per action dimension, each action dimension requires another token; if each token revisits off-chip parameters, that decode latency scales linearly with degrees of freedom. Because physical stabilization, joint impedance control, and reflex-level collision avoidance require deterministic update rates of $100\text{--}1000\,\text{Hz}$, the assumed nonresident models cannot supply those control rates. This timing result rules out using that inference path as the fast controller. The separate requirement that learned outputs remain proposals follows from their physical checking obligations, including the timely-but-wrong cases below.
+
+```{python}
+#| label: calc-brain-intent-model-latency
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INTENT-MODEL LATENCY: MEMORY WALL PLUS PREFILL
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: nbk-brain-intent-model-latency (canonical memory-wall example),
+# │          @fig-patterson-roofline, and the two-proposer notebook
+# │ Goal:    price one fresh intent-model evaluation from both roofline terms
+# │          and show which rate the machine can state
+# │ Show:    98.04 ms FP16 sweep (10.2 Hz wall); 188.5 ms compute-bound prefill
+# │          of S = 288 tokens; 6 decode sweeps; FP16 total 777 ms; INT4 total
+# │          336 ms (2.98 Hz) against the 336 ms Jetson measurement; 2 Hz rate
+# │ How:     calc_vla_inference_latency (prefill max(F/(u Pi), sweep) plus
+# │          (D - 1) bandwidth-bound decode sweeps); RM.intent_latency_breakdown
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import (
+    fmt_params,
+    fmt_memory,
+    fmt_bandwidth,
+    fmt_latency,
+    fmt_frequency,
+    fmt_percent,
+    fmt_int,
+    fmt_qty,
+    fmt_arithmetic_intensity,
+    fmt_display_math,
+    sci_latex,
+    check,
+)
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class IntentModelLatency:
+    """One fresh intent-model evaluation: FP16 memory wall, prefill, decode, INT4."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    model = RM.intent_model  # category: chosen (OpenVLA-sized intent model)
+    soc = RM.brain_soc  # category: datasheet (application processor)
+    n_params = model.parameters  # category: datasheet
+    n_layers = model.layers  # category: datasheet
+    d_model = model.hidden_dim  # category: datasheet
+    d_action = model.action_dim  # category: datasheet (one token per action dimension)
+    s_in = RM.intent_input_tokens  # category: illustrative (256 patches derived + 32 prompt)
+    patches = 256  # category: derived; (224 / 14)^2 patches for one 224 x 224 view
+    pi_fp16 = soc.compute.precision_flops["fp16"]  # category: datasheet (dense FP16 GPU)
+    b_peak = soc.memory.bandwidth  # category: datasheet
+    eta = RM.dram_efficiency  # category: illustrative (sustained fraction of peak)
+    u = RM.intent_compute_utilization  # category: illustrative (achieved fraction of FP16 peak)
+    bpp_fp16 = 2 * (byte / param)  # category: chosen (FP16 weights)
+    bpp_int4 = RM.intent_weight_bytes_per_param  # category: chosen (INT4 weights, deployed)
+    t_measured = RM.intent_reference_latency  # category: measured (Jetson AI Lab, INT4 on AGX Orin)
+    s_three_cameras = 800  # category: illustrative; three views plus prompt and state tokens
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    m_fp16 = memory_from_params(n_params, bpp_fp16)
+    m_int4 = RM.intent_weight_memory
+    b_sus = (b_peak * eta).to(GB / second)
+    ridge = (pi_fp16 / b_peak).to(flop / byte)
+    intensity_prefill = (2 * n_params.to(count).magnitude * s_in * flop / (m_fp16)).to(flop / byte)
+
+    fp16 = calc_vla_inference_latency(
+        n_params,
+        m_fp16,
+        s_in,
+        d_action,
+        pi_fp16,
+        b_peak,
+        bus_efficiency=eta,
+        compute_utilization=u,
+        n_layers=n_layers,
+        hidden_dim=d_model,
+    )
+    int4 = RM.intent_latency_breakdown
+    int4_parallel = calc_vla_inference_latency(
+        n_params,
+        m_int4,
+        s_in,
+        d_action,
+        pi_fp16,
+        b_peak,
+        bus_efficiency=eta,
+        compute_utilization=u,
+        parallel_decode=True,
+        n_layers=n_layers,
+        hidden_dim=d_model,
+    )
+    int4_three = calc_vla_inference_latency(
+        n_params,
+        m_int4,
+        s_three_cameras,
+        d_action,
+        pi_fp16,
+        b_peak,
+        bus_efficiency=eta,
+        compute_utilization=u,
+        n_layers=n_layers,
+        hidden_dim=d_model,
+    )
+    t_sweep_fp16 = fp16["t_weight_sweep"]
+    f_wall = (1 / t_sweep_fp16).to(hertz)
+    flops_linear = (2 * n_params.to(count).magnitude * s_in) * flop
+    flops_attn = (2 * n_layers * d_model * s_in**2) * flop
+    t_prefill = int4["t_prefill"]
+    t_int4 = RM.intent_inference_latency
+    f_int4 = int4["f_max"]
+    rate = RM.intent_rate
+    t_period = (1 / rate).to(millisecond)
+    t_period_next = (1 / (rate + 1 * hertz)).to(millisecond)
+    t_period_5hz = (1 / (5 * hertz)).to(millisecond)
+    measured_gap = abs((t_int4 - t_measured) / t_measured).to("dimensionless").magnitude
+    parallel_slack = ((t_period_5hz - int4_parallel["t_total"]) / t_period_5hz).to("dimensionless").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(m_fp16.to(GB).magnitude - 14.0) < 1e-9, f"FP16 weights drifted: {m_fp16}")
+    check(abs(t_sweep_fp16.to(millisecond).magnitude - 98.04) < 5e-3, f"FP16 sweep drifted: {t_sweep_fp16}")
+    check(abs(f_wall.magnitude - 10.20) < 5e-3, f"Memory-wall rate drifted: {f_wall}")
+    check(s_in == 288 and d_action == 7, f"Intent tokens drifted: {s_in}, {d_action}")
+    check(intensity_prefill > ridge, "Prefill intensity must exceed the ridge (compute-bound)")
+    check(fp16["prefill_bound"] == "compute" and int4["prefill_bound"] == "compute", "Prefill must be compute-bound")
+    check(abs(t_prefill.to(millisecond).magnitude - 188.55) < 5e-3, f"Prefill drifted: {t_prefill}")
+    check(int4["t_prefill"] == fp16["t_prefill"], "Weight-only quantization must not change the prefill")
+    check(abs(fp16["t_total"].to(millisecond).magnitude - 776.78) < 5e-3, f"FP16 total drifted: {fp16['t_total']}")
+    check(abs(t_int4.to(millisecond).magnitude - 335.61) < 5e-3, f"INT4 total drifted: {t_int4}")
+    check(measured_gap < 0.05, f"Model must stay near the measured INT4 latency: {measured_gap}")
+    check(abs(rate.to(hertz).magnitude - 2.0) < 1e-9, f"Intent rate drifted: {rate}")
+    check(t_period >= t_int4 > t_period_next, "Rate must be the largest whole-hertz rate the latency supports")
+    check(t_int4 > t_period_5hz, "A 5 Hz intent rate must be infeasible at the deployed configuration")
+    check(0 < parallel_slack < 0.05, f"Parallel decoding must fit 5 Hz only with thin slack: {parallel_slack}")
+    check(abs(int4_three["t_total"].to(millisecond).magnitude - 675.8) < 0.05, f"Three-camera case drifted: {int4_three['t_total']}")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    params_str = fmt_params(n_params, precision=0)
+    n_layers_str = fmt_int(n_layers)
+    d_model_str = fmt_int(d_model, commas=False)
+    d_action_str = fmt_int(d_action)
+    decode_steps_str = fmt_int(int4["decode_steps"])
+    s_in_str = fmt_int(s_in)
+    patches_str = fmt_int(patches)
+    prompt_tokens_str = fmt_int(s_in - patches)
+    u_display = f"{u:g}"
+    pi_str = fmt_qty(pi_fp16, unit="TFLOPs/s", precision=0)
+    u_pct_str = fmt_percent(u, precision=0, style="prose")
+    b_peak_str = fmt_bandwidth(b_peak, unit=GB / second, precision=0)
+    eta_pct_str = fmt_percent(eta, precision=0, style="prose")
+    b_sus_str = fmt_bandwidth(b_sus, unit=GB / second, precision=1)
+    m_fp16_str = fmt_memory(m_fp16, unit=GB, precision=0)
+    m_int4_str = fmt_memory(m_int4, unit=GB, precision=1)
+    ridge_str = fmt_arithmetic_intensity(ridge, precision=1)
+    intensity_str = fmt_arithmetic_intensity(intensity_prefill, precision=0)
+    sweep_fp16_str = fmt_latency(t_sweep_fp16, unit=millisecond, precision=1)
+    sweep_int4_str = fmt_latency(int4["t_weight_sweep"], unit=millisecond, precision=1)
+    f_wall_str = fmt_frequency(f_wall, unit=hertz, precision=1)
+    prefill_ms_str = fmt_latency(t_prefill, unit=millisecond, precision=1)
+    prefill_whole_str = fmt_latency(round(t_prefill.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    decode_fp16_str = fmt_latency(round(fp16["t_decode"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    decode_int4_str = fmt_latency(round(int4["t_decode"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    total_fp16_str = fmt_latency(round(fp16["t_total"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    f_fp16_str = fmt_frequency(fp16["f_max"], unit=hertz, precision=1)
+    total_int4_str = fmt_latency(round(t_int4.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    f_int4_str = fmt_frequency(f_int4, unit=hertz, precision=2)
+    t_measured_str = fmt_latency(t_measured, unit=millisecond, precision=0)
+    measured_gap_str = fmt_percent(measured_gap, precision=1, style="prose")
+    rate_str = fmt_frequency(rate, unit=hertz, precision=0)
+    rate_next_str = fmt_frequency(rate + 1 * hertz, unit=hertz, precision=0)
+    period_str = fmt_latency(t_period, unit=millisecond, precision=0)
+    period_next_str = fmt_latency(round(t_period_next.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    period_5hz_str = fmt_latency(t_period_5hz, unit=millisecond, precision=0)
+    parallel_tokens_str = fmt_int(int4_parallel["prefill_tokens"])
+    parallel_total_str = fmt_latency(round(int4_parallel["t_total"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    parallel_slack_str = fmt_percent(parallel_slack, precision=1, style="prose")
+    s_three_str = fmt_int(s_three_cameras)
+    three_total_str = fmt_latency(round(int4_three["t_total"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+
+    sweep_display_math = fmt_display_math(
+        rf"t_{{\text{{sweep}}}} = \frac{{M_{{\text{{weights}}}}}}{{B_{{\text{{sustained}}}}}} = \frac{{{m_fp16_str}}}{{{b_sus_str}}} \approx {sweep_fp16_str}, \qquad f \le \frac{{1}}{{t_{{\text{{sweep}}}}}} \approx {f_wall_str}"
+    )
+    flops_display_math = fmt_display_math(
+        rf"F_{{\text{{prefill}}}} \approx 2 N S + 2 L d S^2 = {sci_latex(flops_linear, precision=2)} + {sci_latex(flops_attn, precision=2)} \approx {sci_latex(int4['prefill_flops'], precision=2)}\ \text{{FLOP}}"
+    )
+    prefill_display_math = fmt_display_math(
+        rf"t_{{\text{{prefill}}}} = \frac{{F_{{\text{{prefill}}}}}}{{u\,\Pi_{{\text{{peak}}}}}} = \frac{{{sci_latex(int4['prefill_flops'], precision=2)}\ \text{{FLOP}}}}{{{u_display} \times {pi_str}}} \approx {prefill_ms_str}"
+    )
+    fp16_total_display_math = fmt_display_math(
+        rf"t_{{\text{{FP16}}}} = t_{{\text{{prefill}}}} + (D-1)\,t_{{\text{{sweep}}}} \approx {prefill_whole_str} + {decode_steps_str} \times {sweep_fp16_str} \approx {prefill_whole_str} + {decode_fp16_str} = {total_fp16_str}"
+    )
+    int4_total_display_math = fmt_display_math(
+        rf"t_{{\text{{INT4}}}} \approx {prefill_whole_str} + {decode_steps_str} \times {sweep_int4_str} \approx {prefill_whole_str} + {decode_int4_str} = {total_int4_str}, \qquad f \le {f_int4_str}"
+    )
+```
+
+::: {#nbk-brain-intent-model-latency .callout-notebook title="Pricing one intent-model evaluation"}
+
+**Problem**: The mobile manipulator's intent model is a `{python} IntentModelLatency.params_str`-parameter VLA, sized after OpenVLA [@kim2024openvla], running on the application processor. How long does one fresh evaluation take, which resource binds each part of it, and what renewal rate can the machine therefore state?
+
+**Variables**:
+
+* Parameters $N =$ `{python} IntentModelLatency.params_str` in $L =$ `{python} IntentModelLatency.n_layers_str` layers of width $d =$ `{python} IntentModelLatency.d_model_str` (Datasheet). The decoder emits $D =$ `{python} IntentModelLatency.d_action_str` action tokens, one per action dimension, one after another (Datasheet).
+* Input tokens $S =$ `{python} IntentModelLatency.s_in_str`: `{python} IntentModelLatency.patches_str` patches from one $224 \times 224$ view (Derived) plus `{python} IntentModelLatency.prompt_tokens_str` instruction tokens (Illustrative).
+* Dense FP16 peak $\Pi_{\text{peak}} =$ `{python} IntentModelLatency.pi_str` (Datasheet), of which the prefill achieves $u =$ `{python} IntentModelLatency.u_pct_str` (Illustrative).
+* Peak bandwidth `{python} IntentModelLatency.b_peak_str` (Datasheet), of which `{python} IntentModelLatency.eta_pct_str` is sustained (Illustrative), so $B_{\text{sustained}} =$ `{python} IntentModelLatency.b_sus_str`.
+* Stored weights: FP16 (2 bytes per parameter) or INT4 (half a byte), with activations kept in 16 bits (Chosen).
+
+**Math**:
+
+*The memory wall.* FP16 weights occupy `{python} IntentModelLatency.m_fp16_str`. If every evaluation streams them once, the bound above gives
+`{python} IntentModelLatency.sweep_display_math`
+
+*The prefill binds on arithmetic.* All $S$ input tokens pass through the backbone together, costing two FLOPs per parameter per token plus a small attention term:
+`{python} IntentModelLatency.flops_display_math`
+Each fetched weight now serves $S$ tokens, so the intensity is about $S \approx$ `{python} IntentModelLatency.intensity_str`, beyond the `{python} IntentModelLatency.ridge_str` ridge of @fig-patterson-roofline. Arithmetic binds, and the weight sweep runs underneath it:
+`{python} IntentModelLatency.prefill_display_math`
+
+*The decode binds on bandwidth.* The prefill emits the first action token. Each of the remaining $D - 1 =$ `{python} IntentModelLatency.decode_steps_str` tokens is a matrix-vector pass that rereads every weight:
+`{python} IntentModelLatency.fp16_total_display_math`
+That is about `{python} IntentModelLatency.f_fp16_str`.
+
+*INT4 weights shrink only the bandwidth term.* Storing the weights in four bits cuts them to `{python} IntentModelLatency.m_int4_str` and each sweep to `{python} IntentModelLatency.sweep_int4_str`, but the prefill still multiplies 16-bit activations at the FP16 rate:
+`{python} IntentModelLatency.int4_total_display_math`
+
+*Sensitivity.* Parallel decoding [@kim2025openvlaoft] moves the action tokens into the prefill ($S + D =$ `{python} IntentModelLatency.parallel_tokens_str`) and removes the decode sweeps, giving `{python} IntentModelLatency.parallel_total_str`, only `{python} IntentModelLatency.parallel_slack_str` inside a `{python} IntentModelLatency.period_5hz_str` period with the processor busy for all of it. Three camera views ($S \approx$ `{python} IntentModelLatency.s_three_str`) raise the INT4 total to `{python} IntentModelLatency.three_total_str`.
+
+**Result**: At INT4 one evaluation takes about `{python} IntentModelLatency.total_int4_str`. A published measurement of the same model and quantization on this processor reports `{python} IntentModelLatency.t_measured_str` per frame [@franklin2024openvla], a gap of `{python} IntentModelLatency.measured_gap_str`. That agreement is closer than two illustrative factors deserve. It shows that the model has the right terms, not that $u$ and the sustained fraction are exactly right. A `{python} IntentModelLatency.rate_next_str` rate would need a `{python} IntentModelLatency.period_next_str` period, so the machine runs its intent model at `{python} IntentModelLatency.rate_str`, one evaluation per `{python} IntentModelLatency.period_str`.
+
+**Systems insight**: The binding resource depends on the phase. Prefill reuses weights across tokens and is compute-bound; decode rereads them per token and is bandwidth-bound [@pope2023efficiently]. Weight-only quantization attacks only the second, so after INT4 the compute-bound prefill is most of the latency, and the next gain must come from fewer input tokens, lower-precision arithmetic that the processor's kernels support, or a faster compute roof. Quantization is also an accuracy decision. OpenVLA reports INT4 weights matching bfloat16 task success, while INT8 through a generic library ran slower and succeeded less often [@kim2024openvla]. Those results come from tabletop tasks; the machine's contact tasks must be revalidated at the deployed precision.
+
+:::
 
 A separate illustrative sequential pipeline shows where additional delay can enter. Its stage ranges are not the selected chunk policy's timing budget:
 $$\text{Latency}_{\text{E2E}} = t_{\text{shutter}} + t_{\text{MIPI-DMA}} + t_{\text{vision-encoder}} + t_{\text{policy-backbone}} + t_{\text{action-decoder}} + t_{\text{detokenize}} + t_{\text{CAN-bus}} + t_{\text{FOC-driver}}$$
 In this illustrative pipeline, camera shutter exposure integration requires $t_{\text{shutter}} \approx 10\text{--}33\,\text{ms}$, serial MIPI CSI-2 DMA frame grab adds $t_{\text{MIPI-DMA}} \approx 1\text{--}2\,\text{ms}$, Vision Transformer feature extraction takes $t_{\text{vision-encoder}} \approx 15\text{--}30\,\text{ms}$, policy backbone evaluation takes $t_{\text{policy-backbone}} \approx 30\text{--}80\,\text{ms}$, action chunk decoding consumes $t_{\text{action-decoder}} \approx 5\text{--}15\,\text{ms}$, action de-tokenization and safety validation takes $t_{\text{detokenize}} \approx 0.5\text{--}1.0\,\text{ms}$, CAN bus transmission adds $t_{\text{CAN-bus}} \approx 0.5\text{--}2.0\,\text{ms}$, and motor driver current control takes $t_{\text{FOC-driver}} \approx 0.05\text{--}0.1\,\text{ms}$. The rounded total spans $60\text{--}160\,\text{ms}$. These stage ranges describe an example budget, not measured tail latencies or a justified response bound. @Sec-nervous-deterministic-fieldbuses distinguishes those evidence categories; @sec-appendix-systems supplies the memory-wall and roofline background.
 
-This memory wall[^fn-hw-dram-bandwidth] places single-token streaming deep in the memory-bound region of the roofline (@fig-patterson-roofline) [@williams2009roofline]. On the mobile manipulator's application processor it caps the intent model's fresh-evaluation rate, before any vision or decoding work, far below the rate of a joint controller that asks for a new command every millisecond (\ref{nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking}). A model renewed that slowly can say where the arm should go, but it cannot close the loop on moving mass, so it proposes waypoints and a faster loop below it tracks them.
+This memory wall[^fn-hw-dram-bandwidth] places single-token streaming deep in the memory-bound region of the roofline (@fig-patterson-roofline) [@williams2009roofline]. On the mobile manipulator's application processor it caps the intent model's fresh-evaluation rate, before any vision or decoding work, far below the rate of a joint controller that asks for a new command every millisecond (\ref{nbk-brain-intent-model-latency}). A model renewed that slowly can say where the arm should go, but it cannot close the loop on moving mass, so it proposes waypoints and a faster loop below it tracks them.
 
 [Single-token decoding at batch size 1]{.heading-3-inline}
 Servers can combine independent requests so that a weight matrix multiplies several input vectors at once, reusing fetched weights. A robot waiting for its next action token often has only one such request. Waiting for future observations to form a batch would add delay, and sequentially dependent action tokens cannot all be evaluated at once by an autoregressive decoder. This limits reuse in those projections. It does not make every operation in an embodied model a matrix-vector product. Image patches, multiple camera views, prompt tokens, and parallel action decoders can expose matrix-matrix work within one robot's request. The low-intensity estimate therefore describes the single-token weight sweep, not the complete perception-and-action workload.
@@ -248,7 +480,7 @@ Servers can combine independent requests so that a weight matrix multiplies seve
 
 Repeated off-chip transfers also consume memory-system energy. Their power cost depends on the DRAM, controller, access pattern, and transfer rate, so a bandwidth calculation alone does not establish battery drain or actuator heating. The processor's measured power and the chassis thermal path belong in the shared thermal budget of @sec-body-thermal-duty-cycles.
 
-::: {#fig-patterson-roofline fig-env="figure" fig-pos="t" fig-cap="**Illustrative embodied roofline**: Arithmetic intensity against attainable throughput using the application processor's dense FP16 GPU ceiling and rounded peak memory bandwidth. Single-token weight streaming can be memory-bound. Chunk length alone does not determine arithmetic intensity; chunked workloads require measured operations and memory traffic. A separate real-time loop executes accepted waypoints between fresh model updates." fig-alt="Illustrative roofline diagram plotting arithmetic intensity against attainable throughput, with a single-token weight-streaming point and a ridge separating memory and compute bounds."}
+::: {#fig-patterson-roofline fig-env="figure" fig-pos="t" fig-cap="**Illustrative embodied roofline**: Arithmetic intensity against attainable throughput using the application processor's dense FP16 GPU ceiling and rounded peak memory bandwidth. Single-token weight streaming sits deep in the memory-bound region, while the intent model's prefill, which reuses each fetched weight across all of its input tokens, lies past the ridge where compute binds. Chunk length alone does not determine arithmetic intensity; chunked workloads require measured operations and memory traffic. A separate real-time loop executes accepted waypoints between fresh model updates." fig-alt="Illustrative roofline diagram plotting arithmetic intensity against attainable throughput, with a single-token weight-streaming point on the sloped memory-bound roof, an intent-model prefill point on the flat compute-bound roof, and a ridge separating the two bounds."}
 
 ```{python}
 #| echo: false
@@ -257,10 +489,13 @@ Repeated off-chip transfers also consume memory-system energy. Their power cost 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ EMBODIED ROOFLINE (FIGURE)
 # │ Context: @fig-patterson-roofline
-# │ Goal:    show that embodied inference sits far inside the memory-bound regime
+# │ Goal:    show single-token decode inside the memory-bound regime and the
+# │          intent model's prefill past the ridge
 # │ Show:    arithmetic intensity against attainable throughput for an edge part
-# │ How:     roof from the registry node; the point represents an FP16
-# │          matrix-vector weight sweep, excluding other memory traffic
+# │ How:     roof from the registry node; one point represents an FP16
+# │          matrix-vector weight sweep, excluding other memory traffic; the
+# │          other the intent model's prefill (intensity ~ S, from
+# │          calc-brain-intent-model-latency)
 # ├─────────────────────────────────────────────────────────────────────────────
 from mlsysim import viz
 from mlsysim import Embodied
@@ -299,6 +534,7 @@ roof_ridge_display_math = fmt_display_math(
 
 points = [
     ("Autoregressive VLA\n(single token)", I_TOKEN),
+    (f"Intent-model prefill\n(S = {IntentModelLatency.s_in} tokens)", IntentModelLatency.intensity_prefill.to(flop / byte).magnitude),
 ]
 
 # ┌── 5. PLOT ──────────────────────────────────────────────────────────────────
@@ -312,7 +548,8 @@ for idx, (label, ai) in enumerate(points):
     if idx == 0:
         pos, ha, va = (ai * 0.30, y * 4.0), "left", "bottom"
     else:
-        pos, ha, va = (ai * 2.4, y * 0.30), "left", "top"
+        # the prefill point sits beside the ridge label, so its label drops into the compute-bound region
+        pos, ha, va = (ai * 4.0, y * 0.08), "left", "top"
     ax.annotate(
         label,
         xy=(ai, y),
@@ -350,7 +587,7 @@ Consider the dense weight projections in single-token autoregressive decoding at
 $$I_{\text{token}} = \frac{2\,\text{FLOPs}}{2\,\text{Bytes}} = 1.0\,\text{FLOP/byte}$$
 For the mobile manipulator's Jetson AGX Orin application processor, the dense FP16 GPU Tensor Core ceiling is `{python} roof_peak_str`; the aggregate sparse INT8 rating cannot be used for this FP16 workload. Using the model's rounded peak memory bandwidth of `{python} roof_bw_str`, the hardware ridge point occurs at:
 `{python} roof_ridge_display_math`
-For this weight-streaming example, $I_{\text{token}} = 1.0\,\text{FLOP/byte}$ is far below `{python} roof_ridge_str`, so memory bandwidth sets the roofline ceiling. Attainable throughput is bounded by $\beta_{\text{mem}} \cdot I_{\text{token}}$, or `{python} roof_attainable_str`, about `{python} roof_fraction_str` of the dense FP16 peak. That ratio is a workload throughput bound, not a measurement of how many cores are idle. If a 7-billion-parameter FP16 decoder emits a 7-DoF action through seven sequential tokens and rereads all weights for each token, the seven transfers alone require nearly $500\,\text{ms}$ at the stated bandwidth. A controller that waits for that entire sequence before each motor update would miss a millisecond deadline; a separate tracking loop must continue between policy evaluations.
+For this weight-streaming example, $I_{\text{token}} = 1.0\,\text{FLOP/byte}$ is far below `{python} roof_ridge_str`, so memory bandwidth sets the roofline ceiling. Attainable throughput is bounded by $\beta_{\text{mem}} \cdot I_{\text{token}}$, or `{python} roof_attainable_str`, about `{python} roof_fraction_str` of the dense FP16 peak. That ratio is a workload throughput bound, not a measurement of how many cores are idle. The intent model's prefill sits on the other side of the ridge: it reuses each fetched weight across its `{python} IntentModelLatency.s_in_str` input tokens, so its intensity is about `{python} IntentModelLatency.intensity_str` and compute binds. Its decode returns to the memory-bound point, because the `{python} IntentModelLatency.decode_steps_str` action tokens after the first each reread all FP16 weights, and those transfers alone take `{python} IntentModelLatency.decode_fp16_str` at the sustained bandwidth. A controller that waits for that entire sequence before each motor update would miss a millisecond deadline; a separate tracking loop must continue between policy evaluations.
 
 Action chunking reduces backbone weight traffic per supplied waypoint when one backbone evaluation supports several future actions. That amortization does not establish an equal increase in arithmetic intensity. Predicting a chunk can add decoder work without repeating the backbone's matrix operations for every waypoint; its roofline position depends on the operations performed and the bytes actually transferred.
 
@@ -360,10 +597,61 @@ For an iterative decoder, each refinement pass adds work on the action head. If 
 
 The memory bound limits how often a large model can revise its proposal. A controller can track previously admitted motion between those revisions, but a policy that supplies only one future setpoint leaves little planned motion available while it computes. Predicting a trajectory segment gives the controller a sequence to track without making the next fresh observation arrive sooner.
 
+```{python}
+#| label: calc-brain-chunk-supply-demand
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BANDWIDTH DEMANDED BY SINGLE-STEP VERSUS CHUNKED SUPPLY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the supply-rate paragraph in @sec-brain-action-chunking
+# │ Goal:    show why one weight sweep per setpoint cannot feed the arm
+# │ Show:    50 Hz x 14 GB = 700 GB/s, 4.9x the 142.8 GB/s sustained; H = 16
+# │          cuts demand to 43.75 GB/s, 30.6 percent of sustained
+# │ How:     demand = f_supply x M_weights; chunked = demand / H
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_frequency, fmt_bandwidth, fmt_int, fmt_percent, fmt, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class ChunkSupplyDemand:
+    """Weight-sweep bandwidth demanded at the setpoint rate, single-step versus chunked."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    f_supply = (1 / RM.chunk_step).to(hertz)  # category: derived (setpoint rate)
+    horizon = RM.chunk_horizon  # category: chosen
+    m_fp16 = IntentModelLatency.m_fp16  # category: derived (FP16 intent weights)
+    b_sus = IntentModelLatency.b_sus  # category: derived (sustained bandwidth)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    demand = (f_supply * m_fp16).to(GB / second)
+    over = (demand / b_sus).to("dimensionless").magnitude
+    demand_chunk = (demand / horizon).to(GB / second)
+    share_chunk = (demand_chunk / b_sus).to("dimensionless").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(f_supply.magnitude - 50.0) < 1e-9, f"Setpoint rate drifted: {f_supply}")
+    check(abs(demand.magnitude - 700.0) < 1e-6, f"Single-step demand drifted: {demand}")
+    check(over > 1, "Single-step supply must exceed the sustained bandwidth")
+    check(demand_chunk < b_sus, "Chunked supply must fit the sustained bandwidth")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    f_supply_str = fmt_frequency(f_supply, unit=hertz, precision=0)
+    f_supply_num_str = fmt_int(f_supply.magnitude)
+    demand_str = fmt_bandwidth(demand, unit=GB / second, precision=0)
+    over_str = fmt(over, precision=1)
+    horizon_str = fmt_int(horizon)
+    demand_chunk_str = fmt_bandwidth(demand_chunk, unit=GB / second, precision=1)
+    share_chunk_str = fmt_percent(share_chunk, precision=1, style="prose")
+```
+
 [Supply rate vs. closed-loop reaction latency]{.heading-3-inline}
 To supply dense waypoints despite slow full-model inference, modern physical AI policies employ **action chunking**\index{Action chunking!temporal trajectory} (\ref{dfn-brain-action-chunking}) [@zhao2023learning; @chi2024diffusionpolicy]. Each chunk then crosses the proposal boundary as one packet, the chunk payload of @sec-nervous-cadences. The transfer saving follows from reusing one evaluation across several outputs.
 
-Predicting a horizon of $H \in [8, 64]$ actions per forward pass spreads the multi-gigabyte DRAM weight streaming cost over $H \times \Delta t_{\text{step}}$ seconds of physical execution. On an edge SoC with $B_{\text{mem}} \approx 204\,\text{GB/s}$ running a 7B FP16 model ($14\,\text{GB}$), generating single-step actions at $50\,\text{Hz}$ would demand $50 \times 14\,\text{GB} = 700\,\text{GB/s}$ of sustained memory bandwidth—exceeding physical bus capacity by over $3.4\times$. An action chunk of $H = 16$ waypoints reduces demanded bandwidth by sixteenfold to $700 / 16 \approx 43.8\,\text{GB/s}$ if one such sweep supplies each full chunk. More frequent replanning, decoder work, and competing memory traffic consume additional bandwidth.
+Predicting a horizon of $H \in [8, 64]$ actions per forward pass spreads the multi-gigabyte DRAM weight streaming cost over $H \times \Delta t_{\text{step}}$ seconds of physical execution. On the mobile manipulator's application processor, a `{python} IntentModelLatency.params_str` FP16 model (`{python} IntentModelLatency.m_fp16_str`) generating single-step actions at the `{python} ChunkSupplyDemand.f_supply_str` setpoint rate would demand `{python} ChunkSupplyDemand.f_supply_num_str` $\times$ `{python} IntentModelLatency.m_fp16_str` $=$ `{python} ChunkSupplyDemand.demand_str` of memory bandwidth, `{python} ChunkSupplyDemand.over_str` times the `{python} IntentModelLatency.b_sus_str` it can sustain. A chunk of $H =$ `{python} ChunkSupplyDemand.horizon_str` waypoints cuts that demand to `{python} ChunkSupplyDemand.demand_chunk_str`, `{python} ChunkSupplyDemand.share_chunk_str` of the sustained bandwidth, if one sweep supplies each full chunk. More frequent replanning, decoder work, and competing memory traffic consume additional bandwidth.
 
 Predicting a sequence also changes how a learned policy uses recent actions, but chunking alone does not establish that the policy attends to the right evidence or recovers from an unfamiliar contact. Those properties depend on training and closed-loop evaluation. The supply calculation establishes only the weight traffic needed for the stated execution schedule.
 
@@ -404,15 +692,15 @@ However, action chunking introduces the problem of **chunk seam continuity**. Be
 
 To reduce discontinuities between overlapping chunks, systems can implement **temporal ensembling**\index{Temporal ensembling!trajectory smoothing}, blending overlapping trajectory predictions via exponentially weighted averaging:
 
-$$\mathbf{a}_t = \frac{\sum_{i=0}^{\min(t, H-1)} w_i \, \mathbf{a}_{t \mid t-i}}{\sum_{i=0}^{\min(t, H-1)} w_i}, \quad w_i = \exp(-m \cdot i)$$
+$$\mathbf{a}_t = \frac{\sum_{k=0}^{n-1} w_k \, \mathbf{a}_t^{(k)}}{\sum_{k=0}^{n-1} w_k}, \quad w_k = \exp(-m \cdot k)$$
 
-where $\mathbf{a}_{t \mid t-i}$ represents the action predicted for time step $t$ by the action chunk initiated at time $t-i$, and $m > 0$ is a tunable temporal discount factor. The permission path interpolates the blended waypoints below the proposal boundary (@sec-nervous-cadences).
+where $\mathbf{a}_t^{(k)}$ is the action for step $t$ predicted by the $k$-th oldest of the $n$ chunks that cover step $t$ ($k = 0$ is the oldest), and $m > 0$ is a tunable weighting rate. Following ACT, the oldest prediction receives the largest weight, which favors smoothness over responsiveness; a smaller $m$ lets new observations enter the blend faster [@zhao2023learning]. The formula assumes that the policy is queried at every control step, as ACT does, so that $n = \min(t + 1, H)$. A policy that renews less often than its setpoint step, like the mobile manipulator's chunk policy, blends fewer overlapping predictions, and its renewal instants need not fall on setpoint boundaries. The permission path interpolates the blended waypoints below the proposal boundary (@sec-nervous-cadences).
 
 ::: {.callout-perspective title="The temporal ensembling jerk trap"}
 Exponentially weighted temporal ensembling averages overlapping predictions, but averaging sampled setpoints alone guarantees neither continuous position nor continuous velocity between samples or at chunk boundaries. A downstream interpolator determines those properties. If successive chunks disagree in slope, a controller can receive a step in commanded velocity even when position remains continuous. In joint PD tracking ($\boldsymbol{\tau} = \mathbf{K}_p \mathbf{e} + \mathbf{K}_d \dot{\mathbf{e}}$), that velocity jump produces a finite torque step. With derivative gain $K_d = 40\,\text{N}\cdot\text{m}\cdot\text{s/rad}$ and velocity discontinuity $\Delta \dot{q} = 0.5\,\text{rad/s}$, the derivative term changes by $\Delta \tau = K_d \Delta \dot{q} = 20\,\text{N}\cdot\text{m}$. Dividing by the servo period would instead describe a torque slew rate, not a torque. Abrupt torque changes can excite mechanical resonances or exceed drive limits. Interpolation must match position, velocity, and acceleration at adjoining segments to provide $C^2$ continuity, while enforcing the machine's velocity, acceleration, and torque limits. Smoothness alone does not establish that the requested motion is feasible.
 :::
 
-The separation between policy renewal and trajectory tracking determines what an action rate means (@fig-03-vla-scaling-timeline). Discrete decoders generate action tokens sequentially [@brohan2023rt1; @brohan2023rt2; @kim2024openvla]. Chunked decoders generate several candidate waypoints from one sensory context, either directly or through iterative refinement [@zhao2023learning; @chi2024diffusionpolicy; @black2024pi0]. Supplying more waypoints from that context does not refresh the observation on which they depend.
+The separation between policy renewal and trajectory tracking determines what an action rate means (@fig-03-vla-scaling-timeline). Autoregressive discrete decoders generate action tokens sequentially [@brohan2023rt2; @kim2024openvla]. Chunked decoders generate several candidate waypoints from one sensory context, either directly or through iterative refinement [@zhao2023learning; @chi2024diffusionpolicy; @black2024pi0]. Supplying more waypoints from that context does not refresh the observation on which they depend.
 
 A downstream controller can use current state measurements while tracking admitted waypoints between policy renewals. Its feedback corrects tracking errors within its capabilities; a newly perceived obstacle still requires a timely checking or replanning response. The worked mobile-manipulator budget below therefore distinguishes the interval between fresh policy evaluations from the spacing between waypoints.
 
@@ -485,9 +773,10 @@ The single-model alternatives reduce cost per waypoint, but each fresh context s
 # │          memory-wall paragraphs that follow it
 # │ Goal:    show why the mobile manipulator's intent model cannot renew a
 # │          proposal every few tens of milliseconds while its chunk policy can
-# │ Show:    98.0 ms per intent-model weight sweep (about 10 Hz before vision);
-# │          6.1 ms amortized weight-sweep time per setpoint over H = 16;
-# │          0.70 ms per chunk-policy sweep; intent 5 Hz / 160 ms; chunk policy
+# │ Show:    98.0 ms per FP16 intent-model weight sweep (about 10 Hz before
+# │          vision); 6.1 ms amortized weight-sweep time per setpoint over
+# │          H = 16; 1.12 ms per chunk-policy sweep; intent 2 Hz with a computed
+# │          336 ms INT4 latency (calc-brain-intent-model-latency); chunk policy
 # │          20 Hz / 40 ms
 # │ How:     t_stream = M_weights / (B_peak * dram_efficiency);
 # │          tau_step = t_stream / H (calc_action_chunk_streaming_amortization)
@@ -526,7 +815,7 @@ class ActionChunkingLPDDR5:
     chunk_horizon = RM.chunk_horizon  # category: chosen
     chunk_step = RM.chunk_step  # category: chosen
     intent_rate = RM.intent_rate  # category: chosen
-    intent_latency = RM.intent_inference_latency  # category: illustrative
+    intent_latency = RM.intent_inference_latency  # category: derived (calc_vla_inference_latency)
     chunk_rate = RM.chunk_rate  # category: chosen
     chunk_latency = RM.chunk_inference_latency  # category: illustrative; P99 incl. vision
     kv_layers = model.layers  # category: datasheet
@@ -580,9 +869,12 @@ class ActionChunkingLPDDR5:
     check(chunk_horizon == 16, f"Unexpected chunk horizon: {chunk_horizon}")
     check(abs(tau_step.to(millisecond).magnitude - 6.13) < 0.01, f"Unexpected per-setpoint sweep time: {tau_step}")
     check(abs(chunk_span.magnitude - 320.0) < 1e-9, f"Unexpected chunk span: {chunk_span}")
-    check(abs(chunk_t_stream.to(millisecond).magnitude - 0.700) < 0.0005, f"Unexpected chunk sweep: {chunk_t_stream}")
-    check(abs(intent_rate.to(ureg.hertz).magnitude - 5.0) < 1e-9, f"Unexpected intent rate: {intent_rate}")
-    check(abs(intent_latency.to(millisecond).magnitude - 160.0) < 1e-9, f"Unexpected intent latency: {intent_latency}")
+    # 2026-09-28: ACT corrected to about 80M parameters (Zhao et al. 2023); intent
+    # latency now computed from prefill plus decode (decision M2).
+    check(abs(chunk_t_stream.to(millisecond).magnitude - 1.1204) < 0.0005, f"Unexpected chunk sweep: {chunk_t_stream}")
+    check(abs(intent_rate.to(ureg.hertz).magnitude - 2.0) < 1e-9, f"Unexpected intent rate: {intent_rate}")
+    check(abs(intent_latency.to(millisecond).magnitude - 335.61) < 5e-3, f"Unexpected intent latency: {intent_latency}")
+    check(intent_latency > (1 / chunk_rate), "The intent model's evaluation must exceed the chunk period")
     check(abs(chunk_rate.to(ureg.hertz).magnitude - 20.0) < 1e-9, f"Unexpected chunk rate: {chunk_rate}")
     check(abs(chunk_latency.to(millisecond).magnitude - 40.0) < 1e-9, f"Unexpected chunk latency: {chunk_latency}")
     check(t_stream > (1 / chunk_rate), "The intent sweep alone must exceed the chunk period")
@@ -606,7 +898,6 @@ class ActionChunkingLPDDR5:
     b_sustained_str = fmt_bandwidth(b_sustained, unit=GB / second, precision=1)
     dram_eff_pct_str = fmt_percent(bus_efficiency, precision=0, style="prose")
     t_stream_ms_str = fmt_latency(t_stream, unit=millisecond, precision=1)
-    t_stream_s_str = fmt_time(t_stream.to(second), 'second', precision=4)
     f_single_str = fmt_frequency(f_single, unit=ureg.hertz, precision=1)
     chunk_horizon_str = fmt_int(chunk_horizon)
     chunk_step_str = fmt_latency(chunk_step, unit=millisecond, precision=0)
@@ -614,7 +905,7 @@ class ActionChunkingLPDDR5:
     tau_step_str = fmt_latency(tau_step, unit=millisecond, precision=1)
     chunk_t_stream_str = fmt_latency(chunk_t_stream, unit=millisecond, precision=2)
     intent_rate_str = fmt_frequency(intent_rate, unit=ureg.hertz, precision=0)
-    intent_latency_str = fmt_latency(intent_latency, unit=millisecond, precision=0)
+    intent_latency_str = fmt_latency(round(intent_latency.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
     chunk_rate_str = fmt_frequency(chunk_rate, unit=ureg.hertz, precision=0)
     chunk_latency_str = fmt_latency(chunk_latency, unit=millisecond, precision=0)
     kv_layers_str = fmt_int(kv_layers)
@@ -633,10 +924,6 @@ class ActionChunkingLPDDR5:
     combined_mem_str = fmt_memory(combined_mem, unit=GB, precision=1)
     soc_mem_gb_str = fmt_memory(soc_mem, unit=GB, precision=1)
 
-    t_stream_display_math = fmt_display_math(rf"t_{{\text{{stream}}}} = \frac{{{weight_mem_str}}}{{{b_sustained_str}}} \approx {t_stream_ms_str}")
-    f_single_display_math = fmt_display_math(
-        rf"f_{{\text{{single}}}} = \frac{{1}}{{t_{{\text{{stream}}}}}} \approx \frac{{1}}{{{t_stream_s_str}}} \approx {f_single_str}"
-    )
     kv_display_math = fmt_display_math(
         rf"M_{{\text{{KV}}}} = 2 \times L \times d \times S \times \text{{bytes}} = 2 \times {kv_layers_str} \times {kv_hidden_str} \times S \times 2 \approx {kv_per_token_str} \cdot S"
     )
@@ -648,20 +935,8 @@ class ActionChunkingLPDDR5:
 ::: {#nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking .callout-notebook title="Memory walls, supply, and freshness"}
 Can action chunking let a multi-billion-parameter model on an embedded compute module renew proposals as fast as the arm consumes them, or does the machine need a second, smaller proposer?
 
-*1. The single-token memory bottleneck.*
-Consider the mobile manipulator's intent model, represented here by the nominal `{python} ActionChunkingLPDDR5.params_str` parameter count of OpenVLA [@kim2024openvla], stored in 16-bit precision (FP16) in the LPDDR5 memory of its application processor, an embedded edge System-on-Chip:
-
-- Weight footprint: $M_{\text{weights}} =$ `{python} ActionChunkingLPDDR5.params_str` params $\times$ `{python} ActionChunkingLPDDR5.bytes_per_param_str` bytes $\approx$ `{python} ActionChunkingLPDDR5.weight_mem_str`.
-- Rounded theoretical memory bandwidth used in this model: $B_{\text{peak}} =$ `{python} ActionChunkingLPDDR5.b_peak_str`.
-- Assumed sustained DRAM bandwidth (`{python} ActionChunkingLPDDR5.dram_eff_pct_str` of peak to model bus scheduling and memory overhead): $B_{\text{sustained}} \approx$ `{python} ActionChunkingLPDDR5.b_sustained_str`.
-
-Minimum streaming latency to fetch the weights from DRAM across the silicon bus once:
-`{python} ActionChunkingLPDDR5.t_stream_display_math`
-
-Bandwidth-only upper bound on fresh evaluations when each evaluation streams the full weights:
-`{python} ActionChunkingLPDDR5.f_single_display_math`
-
-Beyond model weights, retained autoregressive context also occupies KV cache. For a hypothetical multi-camera extension of the backbone, when sensory feeds (e.g., `{python} ActionChunkingLPDDR5.cameras_str` $224 \times 224$ RGB streams) are ingested, each video frame contributes hundreds of visual patch tokens (`{python} ActionChunkingLPDDR5.cameras_str` $\times$ `{python} ActionChunkingLPDDR5.patches_per_frame_str` $=$ `{python} ActionChunkingLPDDR5.visual_tokens_str` tokens). In the intent model's `{python} ActionChunkingLPDDR5.kv_layers_str`-layer transformer with hidden dimension $d =$ `{python} ActionChunkingLPDDR5.kv_hidden_str`, storing the FP16 Key and Value states consumes `{python} ActionChunkingLPDDR5.kv_per_token_str` per token:
+*1. The weight sweep and retained context.*
+\ref{nbk-brain-intent-model-latency} priced one sweep of the intent model's `{python} ActionChunkingLPDDR5.weight_mem_str` of FP16 weights at the `{python} ActionChunkingLPDDR5.b_sustained_str` sustained bandwidth: `{python} ActionChunkingLPDDR5.t_stream_ms_str`, a ceiling of `{python} ActionChunkingLPDDR5.f_single_str` on fresh evaluations. Beyond model weights, retained autoregressive context also occupies KV cache. For a hypothetical multi-camera extension of the backbone, when sensory feeds (e.g., `{python} ActionChunkingLPDDR5.cameras_str` $224 \times 224$ RGB streams) are ingested, each video frame contributes hundreds of visual patch tokens (`{python} ActionChunkingLPDDR5.cameras_str` $\times$ `{python} ActionChunkingLPDDR5.patches_per_frame_str` $=$ `{python} ActionChunkingLPDDR5.visual_tokens_str` tokens). In the intent model's `{python} ActionChunkingLPDDR5.kv_layers_str`-layer transformer with hidden dimension $d =$ `{python} ActionChunkingLPDDR5.kv_hidden_str`, storing the FP16 Key and Value states consumes `{python} ActionChunkingLPDDR5.kv_per_token_str` per token:
 `{python} ActionChunkingLPDDR5.kv_display_math`
 Across one synchronized `{python} ActionChunkingLPDDR5.visual_tokens_str`-token set of camera frames, the KV cache expands by `{python} ActionChunkingLPDDR5.kv_per_frame_str`. This is a full-width, standard multi-head attention estimate; it is not a measured cache footprint for the published OpenVLA checkpoint.
 
@@ -674,10 +949,10 @@ Suppose the intent model itself emitted an action chunk of $H =$ `{python} Actio
 `{python} ActionChunkingLPDDR5.tau_step_display_math`
 
 *3. The machine's split.*
-Amortization spreads one sweep across more setpoints, but it does not make a fresh proposal arrive sooner. Each new chunk from the intent model would still wait for at least one `{python} ActionChunkingLPDDR5.t_stream_ms_str` sweep, plus tokenization, attention, and decoding. The selected design therefore divides the work between two models. Under its stipulated timing assumptions, the intent model revises the goal at `{python} ActionChunkingLPDDR5.intent_rate_str` with `{python} ActionChunkingLPDDR5.intent_latency_str` of inference. A separate `{python} ActionChunkingLPDDR5.chunk_params_str`-parameter chunk policy uses ACT as its size reference and is assumed to be adapted to the mobile manipulator. Its `{python} ActionChunkingLPDDR5.chunk_weight_mem_str` of weights sweep in `{python} ActionChunkingLPDDR5.chunk_t_stream_str`. It proposes base velocity and arm joint targets together at `{python} ActionChunkingLPDDR5.chunk_rate_str` ($50\,\text{ms}$ replanning period), emitting waypoints spaced at $\Delta t =$ `{python} ActionChunkingLPDDR5.chunk_step_str` (a $50\,\text{Hz}$ supply rate), within a `{python} ActionChunkingLPDDR5.chunk_latency_str` P99 inference target that includes vision, while the low-level motor drive interpolates and closes current loops at $10\text{--}25\,\text{kHz}$. The intent model's sweep alone exceeds the required renewal period; the chunk policy's leaves room for the remaining work. That is a candidate architecture, not a measured timing result. Loaded execution must establish the inference target, and a percentile target still permits overruns. @Sec-nervous derives an execution lease whose expiration contains a missed renewal.
+Amortization spreads one sweep across more setpoints, but it does not make a fresh proposal arrive sooner. Each new chunk from the intent model would still wait for the compute-bound prefill of its input tokens and the sweeps of its decoder. The selected design therefore divides the work between two models. With INT4 weights the intent model needs about `{python} ActionChunkingLPDDR5.intent_latency_str` per evaluation (\ref{nbk-brain-intent-model-latency}), so it revises the goal at `{python} ActionChunkingLPDDR5.intent_rate_str`. A separate `{python} ActionChunkingLPDDR5.chunk_params_str`-parameter chunk policy uses ACT as its size reference and is assumed to be adapted to the mobile manipulator. Its `{python} ActionChunkingLPDDR5.chunk_weight_mem_str` of weights sweep in `{python} ActionChunkingLPDDR5.chunk_t_stream_str`. It proposes base velocity and arm joint targets together at `{python} ActionChunkingLPDDR5.chunk_rate_str` ($50\,\text{ms}$ replanning period), emitting waypoints spaced at $\Delta t =$ `{python} ActionChunkingLPDDR5.chunk_step_str` (a $50\,\text{Hz}$ supply rate), within a `{python} ActionChunkingLPDDR5.chunk_latency_str` P99 inference target that includes vision, while the low-level motor drive interpolates and closes current loops at $10\text{--}25\,\text{kHz}$. The intent model's evaluation lasts several renewal periods; the chunk policy's weight sweep leaves room for the remaining work. That is a candidate architecture, not a measured timing result. Loaded execution must establish the inference target, and a percentile target still permits overruns. @Sec-nervous derives an execution lease whose expiration contains a missed renewal.
 :::
 
-The `{python} ActionChunkingLPDDR5.t_stream_ms_str` sweep in \ref{nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking} is a weight-transfer floor. Vision, attention, and decoder work also consume resources; some computation can overlap those transfers, so their durations are not necessarily additive. Lower weight precision could reduce that floor; a fast action head could reduce later decoder work. These alternatives change different terms in the budget. INT4 storage would reduce the nominal weight footprint to `{python} ActionChunkingLPDDR5.weight_mem_int4_str` but needs accuracy validation for contact tasks. A single-model design could instead trade cadence for density without changing weight precision. It would evaluate the `{python} ActionChunkingLPDDR5.params_str` backbone periodically while a lightweight diffusion head denoises candidate trajectories, reusing on-chip data only when its working set fits, supplying dense candidate waypoints from each slower full-model evaluation. Its new-observation rate would still be limited by full inference latency, including vision and decoder work, which is why the mobile manipulator gives renewal to a separate chunk policy instead.
+The `{python} ActionChunkingLPDDR5.t_stream_ms_str` FP16 sweep is a weight-transfer floor, and the prefill of \ref{nbk-brain-intent-model-latency} shows that it is not the only term: some computation overlaps those transfers, so the two durations are not additive. Lower weight precision and a fast action head change different terms in the budget. The machine's INT4 weights cut the footprint to `{python} ActionChunkingLPDDR5.weight_mem_int4_str` and shrink every decode sweep, but leave the compute-bound prefill unchanged; a parallel or continuous action head would remove decode sweeps instead. A single-model design could instead trade cadence for density without changing weight precision. It would evaluate the `{python} ActionChunkingLPDDR5.params_str` backbone periodically while a lightweight diffusion head denoises candidate trajectories, reusing on-chip data only when its working set fits, supplying dense candidate waypoints from each slower full-model evaluation. Its new-observation rate would still be limited by full inference latency, including vision and decoder work, which is why the mobile manipulator gives renewal to a separate chunk policy instead.
 
 Retained context adds to the pressure the notebook began to measure. Counting language and proprioception tokens along with the visual patches raises each step to $S \approx$ `{python} ActionChunkingLPDDR5.context_tokens_str` tokens, so at `{python} ActionChunkingLPDDR5.kv_per_token_str` of FP16 key-value state per token each observation step adds `{python} ActionChunkingLPDDR5.kv_per_step_str` of KV cache. Retaining an unpruned `{python} ActionChunkingLPDDR5.history_window_str` historical context window at `{python} ActionChunkingLPDDR5.history_rate_str` would yield `{python} ActionChunkingLPDDR5.kv_history_str` of KV cache. This hypothetical history exceeds the published OpenVLA checkpoint's configured context window; the calculation exposes the storage cost of such an extension, rather than claiming that the checkpoint supports it. Combined with the intent model's `{python} ActionChunkingLPDDR5.weight_mem_str` of weights, this example claims `{python} ActionChunkingLPDDR5.combined_mem_str`, about half of the application processor's `{python} ActionChunkingLPDDR5.soc_mem_gb_str` before runtime overhead, memory that perception, mapping, and the chunk policy also need. Even where memory capacity permits, reading a large cache is further traffic on that same bus (@sec-placement-resource-contention). Bounding retained history therefore serves both capacity and timely renewal. Spatial pooling or cross-attention can reduce context traffic; fixed-horizon action output does not by itself bound the observation history retained by the backbone.
 
@@ -934,7 +1209,7 @@ Learned representations give the mobile manipulator what hand-authored geometry 
 
 ::: {.callout-takeaways title="Learned proposers and deliberation limits"}
 
-* **Memory traffic can bound fresh inference**: When every evaluation streams nonresident weights, the weight footprint and sustained bandwidth set a latency floor. Fetching the intent model's `{python} ActionChunkingLPDDR5.weight_mem_str` takes `{python} ActionChunkingLPDDR5.t_stream_ms_str` even before accounting for vision and decoding, already too slow for the machine's chunk-renewal period.
+* **Memory traffic and arithmetic both bound fresh inference**: When every evaluation streams nonresident weights, the weight footprint and sustained bandwidth set a latency floor. Fetching the intent model's `{python} ActionChunkingLPDDR5.weight_mem_str` of FP16 weights takes `{python} ActionChunkingLPDDR5.t_stream_ms_str`. The prefill of its input tokens is compute-bound and the per-token decode is bandwidth-bound, so even with INT4 weights one evaluation takes about `{python} IntentModelLatency.total_int4_str`, which sets the machine's `{python} IntentModelLatency.rate_str` intent rate and is far too slow for chunk renewal.
 * **Chunking supplies motion without refreshing evidence**: A chunk of `{python} ActionChunkingLPDDR5.chunk_horizon_str` setpoints spreads one backbone evaluation across `{python} ActionChunkingLPDDR5.chunk_span_str` of candidate motion. It reduces transfer cost per supplied waypoint, but reaction to a new observation still waits for the next policy evaluation.
 * **Supply and validity bound different horizons**: The conveyor example needs at least `{python} ConveyorChunkSizing.h_min_str` setpoints to bridge renewal, while target drift limits the evidence horizon to about `{python} ConveyorChunkSizing.tau_ev_str`. A longer queue does not authorize longer execution; the permission path must end motion before the applicable physical budget expires.
 * **Retained context competes with current sensing**: The hypothetical unpruned history consumes `{python} ActionChunkingLPDDR5.kv_history_str` of cache state. Its storage and transfer costs share the application's memory resources with new observations and proposal generation, so context retention belongs in the timing and capacity budget.

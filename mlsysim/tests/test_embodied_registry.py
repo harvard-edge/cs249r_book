@@ -237,7 +237,7 @@ _QUANTITY_GUARDS = [
      31.25, "ms", 1e-9),
     ("E_k", lambda: 0.5 * _RM.loaded_mass * _v(1.5) ** 2, 414.0, "J", 1e-9),
     ("intent_sweep", lambda: _weight_sweep(_RM.intent_model), 98.04, "ms", 5e-3),
-    ("chunk_sweep", lambda: _weight_sweep(_RM.chunk_model), 0.700, "ms", 5e-4),
+    ("chunk_sweep", lambda: _weight_sweep(_RM.chunk_model), 1.1204, "ms", 5e-4),  # ACT ~80M (2026-09-28)
     ("F_cmd", lambda: _AISLE.f_latch_tripwire
      + _AISLE.k_latch * _AISLE.v_latch_approach * _AISLE.t_contact_response, 39.0, "N", 1e-9),
     ("yield_0.03", lambda: calc_contact_yield_deadline(
@@ -365,3 +365,38 @@ def test_permission_rail_rides_through_the_envelope_stop():
     oil_stop = calc_c2_stop_suffix(_v(_ceiling(decel=_AISLE.mu_inspected_floor * _G)), oil)["duration"]
     assert (_AISLE.t_tick + _AISLE.t_bus + _AISLE.t_brake_onset + oil_stop
             + _RM.spring_brake_engage_max) > _RM.permission_rail_holdup
+
+
+# ---------------------------------------------------------------------------
+# Intent-model latency (added 2026-09-28, vol4 decision M2). The latency is
+# computed from a compute-bound prefill and bandwidth-bound decode sweeps, and
+# the stated rate must fit it.
+
+def test_intent_latency_is_computed_from_both_terms():
+    b = _RM.intent_latency_breakdown
+    assert b["prefill_bound"] == "compute"
+    assert b["prefill_tokens"] == 288 and b["decode_steps"] == 6
+    assert b["t_prefill"].to("ms").magnitude == pytest.approx(188.55, abs=5e-3)
+    assert b["t_weight_sweep"].to("ms").magnitude == pytest.approx(24.51, abs=5e-3)
+    assert b["t_decode"].to("ms").magnitude == pytest.approx(147.06, abs=5e-3)
+    assert _RM.intent_inference_latency.to("ms").magnitude == pytest.approx(335.61, abs=5e-3)
+
+
+def test_intent_rate_fits_computed_latency():
+    period = (1 / _RM.intent_rate).to("ms")
+    assert period >= _RM.intent_inference_latency
+    # 2 Hz is the largest whole-hertz rate whose period covers the latency.
+    assert (1 / (_RM.intent_rate + 1 * ureg.Hz)).to("ms") < _RM.intent_inference_latency
+
+
+def test_intent_latency_agrees_with_published_measurement():
+    # Jetson AI Lab, OpenVLA-7B INT4 on Jetson AGX Orin 64GB: 336 ms per frame.
+    ref = _RM.intent_reference_latency
+    assert ref.provenance.id == "prov:jetson-ai-lab-openvla-orin"
+    rel = abs((_RM.intent_inference_latency - ref) / ref).to("dimensionless").magnitude
+    assert rel < 0.05
+
+
+def test_intent_rate_rejects_unachievable_rate():
+    with pytest.raises(ValueError, match="shorter than the computed intent latency"):
+        _RM.model_validate({**_RM.__dict__, "intent_rate": 5.0 * ureg.Hz})

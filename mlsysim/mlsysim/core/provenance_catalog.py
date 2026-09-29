@@ -454,6 +454,23 @@ HEAVY_AMR = _est(
     verified="2026-09-18",
 )
 
+# OpenVLA on the Jetson AGX Orin (added 2026-09-28, vol4 M2 intent-model latency).
+JETSON_AI_LAB_OPENVLA_ORIN = _lit(
+    "prov:jetson-ai-lab-openvla-orin",
+    "Franklin, D., NVIDIA Jetson AI Lab, 'OpenVLA' tutorial (2024): OpenVLA-7B "
+    "quantization results on Jetson AGX Orin 64GB, JetPack 6",
+    url="https://www.jetson-ai-lab.com/archive/openvla.html",
+    verified="2026-09-28",
+    notes=(
+        "Measured mean per-frame latency over 10 BridgeData V2 episodes: FP16 "
+        "(HuggingFace backend) 840 ms / 1.19 FPS / 95.3% NRMSE accuracy; FP8 "
+        "(MLC q8f16_ft) 471 ms / 2.12 FPS / 95.2%; INT4 (MLC q4f16_ft) 336 ms / "
+        "2.97 FPS / 90.1%. Single 224x224 image, ~275 image tokens plus the text "
+        "prompt, 7 autoregressive action tokens; vision encoders in FP16 TensorRT. "
+        "Archived page; first published August 2024 (repository history)."
+    ),
+)
+
 # Volume IV running machine (added 2026-09-21, vol4 flow canon section 3.3).
 WAREHOUSE_MOBILE_MANIPULATOR = _est(
     "prov:warehouse-mobile-manipulator",
@@ -463,7 +480,8 @@ WAREHOUSE_MOBILE_MANIPULATOR = _est(
         "Composite of existing registry entries; component values carry their own "
         "records. Illustrative or chosen here: 50 kg tote-rack capacity, 1.00 m "
         "footprint width, 1 kHz permission loop, 20 kHz current loop, 1 ms EtherCAT "
-        "cycle, 9 servo axes, 5 Hz / 160 ms intent model, 20 Hz / 40 ms chunk policy, "
+        "cycle, 9 servo axes, 2 Hz intent model (latency computed, see "
+        "JETSON_AI_LAB_OPENVLA_ORIN), 20 Hz / 40 ms chunk policy, "
         "20 ms setpoint period, chunk horizon 16, 0.70 sustained DRAM efficiency, "
         "1.0 m/s free-space TCP limit. The WarehouseAMR record calls 300 kg gross, so "
         "the loaded mass is an upper bound."

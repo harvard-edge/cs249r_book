@@ -1,7 +1,7 @@
 """Embodied AI, cyber-physical machines, and robotics platform types."""
 
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..core.units import ureg
 from ..core.types import Quantity, Metadata, require_dimensionality
@@ -98,7 +98,15 @@ class MobileManipulatorPlatform(BaseModel):
     intent_model: EmbodiedWorkload
     chunk_model: EmbodiedWorkload
     intent_rate: Quantity                   # Hz
-    intent_inference_latency: Quantity      # ms
+    # Intent-model deployment. Its inference latency is not stored: the
+    # intent_inference_latency property computes it from these fields with
+    # calc_vla_inference_latency (compute-bound prefill plus bandwidth-bound
+    # decode), so the rate can be checked against it.
+    intent_weight_bytes_per_param: Quantity  # byte/param, stored weight precision
+    intent_input_tokens: int                # image-patch plus prompt tokens per evaluation
+    intent_parallel_decode: bool            # True: all action tokens in one pass (OFT)
+    intent_compute_utilization: float       # achieved fraction of the dense 16-bit peak
+    intent_reference_latency: Quantity      # ms, published measurement of this deployment
     chunk_rate: Quantity                    # Hz
     chunk_inference_latency: Quantity       # ms
     chunk_step: Quantity                    # ms
@@ -137,7 +145,7 @@ class MobileManipulatorPlatform(BaseModel):
         return require_dimensionality(v, _HZ, info.field_name)
 
     @field_validator(
-        "fieldbus_cycle", "intent_inference_latency", "chunk_inference_latency", "chunk_step",
+        "fieldbus_cycle", "intent_reference_latency", "chunk_inference_latency", "chunk_step",
         mode="after",
     )
     @classmethod
@@ -161,6 +169,25 @@ class MobileManipulatorPlatform(BaseModel):
     def _validate_efficiency(cls, v):
         if not 0.0 < v <= 1.0:
             raise ValueError(f"dram_efficiency must be in (0, 1]; got {v}")
+        return v
+
+    @field_validator("intent_compute_utilization", mode="after")
+    @classmethod
+    def _validate_utilization(cls, v):
+        if not 0.0 < v <= 1.0:
+            raise ValueError(f"intent_compute_utilization must be in (0, 1]; got {v}")
+        return v
+
+    @field_validator("intent_weight_bytes_per_param", mode="after")
+    @classmethod
+    def _validate_bytes_per_param(cls, v, info):
+        return require_dimensionality(v, ureg.byte / ureg.param, info.field_name)
+
+    @field_validator("intent_input_tokens", mode="after")
+    @classmethod
+    def _validate_tokens(cls, v, info):
+        if v < 1:
+            raise ValueError(f"{info.field_name} must be at least 1; got {v}")
         return v
 
     @field_validator(
@@ -188,6 +215,55 @@ class MobileManipulatorPlatform(BaseModel):
     @classmethod
     def _validate_permission_rail_power(cls, v, info):
         return require_dimensionality(v, ureg.watt, info.field_name)
+
+    @model_validator(mode="after")
+    def _intent_rate_fits_latency(self):
+        # 2026-09-28 (M2): the stated intent rate must be achievable. One
+        # evaluation per period, not pipelined, so the period must cover the
+        # computed latency; a 5 Hz / 160 ms stipulation had priced only the
+        # decode weight sweep.
+        period = (1 / self.intent_rate).to(ureg.millisecond)
+        if period < self.intent_inference_latency:
+            raise ValueError(
+                f"intent_rate {self.intent_rate:~P} gives a {period:~P} period, shorter than "
+                f"the computed intent latency {self.intent_inference_latency:~P}"
+            )
+        return self
+
+    @property
+    def intent_weight_memory(self):
+        """Stored intent-model weights at the deployed precision."""
+        return (self.intent_model.parameters * self.intent_weight_bytes_per_param).to(ureg.GB)
+
+    @property
+    def intent_latency_breakdown(self):
+        """Roofline terms of one fresh intent-model evaluation on the application processor.
+
+        Prefill runs at the dense FP16 rate (weight-only quantization keeps 16-bit
+        activations); decode sweeps the stored weights at the sustained bandwidth.
+        See ``calc_vla_inference_latency``.
+        """
+        from ..physics.transformer import calc_vla_inference_latency  # avoid import cycle
+
+        soc = self.brain_soc
+        return calc_vla_inference_latency(
+            self.intent_model.parameters,
+            self.intent_weight_memory,
+            self.intent_input_tokens,
+            self.intent_model.action_dim,
+            soc.compute.precision_flops["fp16"],
+            soc.memory.bandwidth,
+            bus_efficiency=self.dram_efficiency,
+            compute_utilization=self.intent_compute_utilization,
+            parallel_decode=self.intent_parallel_decode,
+            n_layers=self.intent_model.layers,
+            hidden_dim=self.intent_model.hidden_dim,
+        )
+
+    @property
+    def intent_inference_latency(self):
+        """Computed latency of one fresh intent-model evaluation (prefill plus decode)."""
+        return self.intent_latency_breakdown["t_total"]
 
     @property
     def unloaded_mass(self):

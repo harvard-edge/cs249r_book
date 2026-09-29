@@ -56,6 +56,10 @@ from mlsysim.physics.robotics import (
     calc_c2_effective_deceleration,
     calc_latch_contact_stopping_profile,
     calc_scenario_stopping_budget,
+    calc_c2_stop_suffix,
+    calc_scurve_stop_distance,
+    calc_scurve_stop_time,
+    calc_scurve_max_permitted_velocity,
 )
 
 
@@ -655,3 +659,72 @@ def test_calc_scenario_stopping_budget():
     assert budget_info["a_eff"].to("m/s^2").magnitude == pytest.approx(2.0 / 1.5, rel=1e-4)
     assert budget_info["tau_delay"].to("ms").magnitude == pytest.approx(133.6, rel=1e-3)
 
+
+
+# ── Jerk-limited S-curve stop (Biagiotti & Melchiorri 2008, ch. 3) ──────────
+
+def test_c2_polynomial_peak_jerk():
+    # T = 1.5 v / a = 1.125 s; j = 6 v / T^2 = (8/3) a^2 / v = 64/9 m/s^3.
+    res = calc_c2_stop_suffix(Q_("1.5 m/s"), Q_("2.0 m/s^2"))
+    assert res["peak_jerk"].to("m/s^3").magnitude == pytest.approx(64.0 / 9.0, rel=1e-12)
+
+
+def test_scurve_stop_trapezoidal_regime_matches_closed_form():
+    v, a, j = Q_("1.5 m/s"), Q_("2.0 m/s^2"), Q_(64.0 / 9.0, "m/s^3")
+    # v >= a^2/j = 0.5625: d = (v/2)(v/a + a/j), T = v/a + a/j
+    assert calc_scurve_stop_distance(v, a, j).to("mm").magnitude == pytest.approx(773.4375, rel=1e-12)
+    assert calc_scurve_stop_time(v, a, j).to("ms").magnitude == pytest.approx(1031.25, rel=1e-12)
+    # Equals constant braking plus cruise over half a jerk ramp.
+    d_equiv = 1.5**2 / (2 * 2.0) + 1.5 * 2.0 / (2 * 64.0 / 9.0)
+    assert calc_scurve_stop_distance(v, a, j).to("m").magnitude == pytest.approx(d_equiv, rel=1e-12)
+    assert calc_scurve_stop_distance(Q_("1.3 m/s"), a, j).to("mm").magnitude == pytest.approx(605.3125, rel=1e-12)
+
+
+def test_scurve_stop_triangular_regime_and_continuity():
+    a, j = Q_("2.0 m/s^2"), Q_("8.0 m/s^3")  # threshold a^2/j = 0.5 m/s
+    v = Q_("0.32 m/s")
+    assert calc_scurve_stop_time(v, a, j).to("s").magnitude == pytest.approx(2 * math.sqrt(0.04), rel=1e-12)
+    assert calc_scurve_stop_distance(v, a, j).to("m").magnitude == pytest.approx(0.32 * 0.2, rel=1e-12)
+    # Both branches agree at the threshold speed.
+    lo = calc_scurve_stop_distance(Q_(0.5 - 1e-12, "m/s"), a, j).to("m").magnitude
+    hi = calc_scurve_stop_distance(Q_(0.5, "m/s"), a, j).to("m").magnitude
+    assert lo == pytest.approx(hi, rel=1e-9)
+    assert calc_scurve_stop_distance(Q_("0 m/s"), a, j).to("m").magnitude == 0.0
+
+
+def test_scurve_is_shorter_than_polynomial_and_longer_than_constant_decel():
+    for v_mps in (0.8, 1.0, 1.5, 2.5):
+        v, a = Q_(v_mps, "m/s"), Q_("2.0 m/s^2")
+        poly = calc_c2_stop_suffix(v, a)
+        s_curve = calc_scurve_stop_distance(v, a, poly["peak_jerk"]).to("m").magnitude
+        assert v_mps**2 / 4.0 < s_curve < poly["distance"].to("m").magnitude
+
+
+def test_scurve_stop_rejects_invalid_limits():
+    with pytest.raises(ValueError, match="max_jerk"):
+        calc_scurve_stop_distance(Q_("1 m/s"), Q_("2 m/s^2"), Q_("0 m/s^3"))
+    with pytest.raises(ValueError, match="max_deceleration"):
+        calc_scurve_stop_time(Q_("1 m/s"), Q_("-2 m/s^2"), Q_("7 m/s^3"))
+
+
+def test_scurve_ceiling_matches_closed_form_and_fills_clearance():
+    d, tau, a, j = Q_("1.10 m"), Q_("133.6 ms"), Q_("2.0 m/s^2"), Q_(64.0 / 9.0, "m/s^3")
+    loc, margin = Q_("0.05 m"), Q_("0.14 m")
+    v = calc_scurve_max_permitted_velocity(d, tau, a, j, loc_margin=loc, physical_margin=margin)
+    # Trapezoidal regime: constant braking after tau + a/(2j).
+    closed = calc_max_permitted_velocity(d, tau + (a / (2 * j)).to("ms"), a, loc_margin=loc, physical_margin=margin)
+    assert v.to("m/s").magnitude == pytest.approx(closed.to("m/s").magnitude, rel=1e-12)
+    assert v.to("m/s").magnitude == pytest.approx(1.43669, abs=1e-5)
+    used = (v * tau + calc_scurve_stop_distance(v, a, j) + loc + margin).to("m").magnitude
+    assert used == pytest.approx(1.10, rel=1e-12)
+
+
+def test_scurve_ceiling_with_approaching_obstacle_and_exhausted_clearance():
+    d, tau, a, j = Q_("1.10 m"), Q_("133.6 ms"), Q_("2.0 m/s^2"), Q_(64.0 / 9.0, "m/s^3")
+    vh = Q_("1.6 m/s")
+    v = calc_scurve_max_permitted_velocity(d, tau, a, j, Q_("0.05 m"), Q_("0.14 m"), approach_velocity=vh)
+    t = calc_scurve_stop_time(v, a, j)
+    used = (v * tau + calc_scurve_stop_distance(v, a, j) + vh * (tau + t) + Q_("0.19 m")).to("m").magnitude
+    assert used == pytest.approx(1.10, rel=1e-12)
+    assert v < Q_("0.5625 m/s")  # triangular regime
+    assert calc_scurve_max_permitted_velocity(Q_("0.1 m"), tau, a, j, Q_("0.05 m"), Q_("0.14 m")).magnitude == 0.0

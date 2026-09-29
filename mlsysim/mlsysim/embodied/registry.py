@@ -228,8 +228,22 @@ class MobileManipulators(Registry):
         imu=Sensors.IMU.Bosch_BMI088,
         intent_model=Models.Embodied.OpenVLA_7B,
         chunk_model=Models.Embodied.ACT_ALOHA,
-        intent_rate=5.0 * ureg.Hz,                             # chosen
-        intent_inference_latency=160.0 * ureg.millisecond,     # illustrative
+        # Intent model: OpenVLA-7B with INT4 weight-only quantization (OpenVLA
+        # reports INT4 matching bfloat16 task success; Kim et al. 2024, Table 2),
+        # decoding its 7 action tokens autoregressively. Latency is computed by
+        # the intent_inference_latency property (compute-bound prefill plus six
+        # bandwidth-bound decode sweeps), about 336 ms; the rate is the largest
+        # whole-hertz rate whose period covers it (2026-09-28, M2; was a
+        # stipulated 5 Hz / 160 ms that priced only one weight sweep).
+        intent_rate=2.0 * ureg.Hz,                             # chosen, <= 1 / computed latency
+        intent_weight_bytes_per_param=0.5 * (ureg.byte / ureg.param),  # chosen: INT4 weights
+        intent_input_tokens=288,                               # 256 image patches (224 px, P = 14) + 32 prompt tokens, illustrative
+        intent_parallel_decode=False,                          # OpenVLA: one token per action dimension
+        intent_compute_utilization=0.50,                       # illustrative achieved fraction of dense FP16 peak
+        intent_reference_latency=sourced_qty(
+            336.0 * ureg.millisecond, pc.JETSON_AI_LAB_OPENVLA_ORIN,
+            name="OpenVLA-7B INT4 per-frame latency, Jetson AGX Orin 64GB",
+        ),
         chunk_rate=20.0 * ureg.Hz,                             # chosen
         chunk_inference_latency=40.0 * ureg.millisecond,       # illustrative P99 incl. vision
         chunk_step=20.0 * ureg.millisecond,                    # chosen setpoint period
