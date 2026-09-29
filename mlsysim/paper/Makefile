@@ -1,4 +1,4 @@
-.PHONY: all paper svgs values check-values validate-anchors layout-review clean distclean FORCE
+.PHONY: all paper svgs values check-values validate-benchmarks validate-anchors layout-review clean distclean FORCE
 
 # ── Default: convert SVGs → compile paper ────────────────────
 # The default build needs only LaTeX and rsvg-convert. It reads the committed
@@ -14,7 +14,7 @@ MLSYSIM_ROOT = ..
 UV_RUN = uv run --no-project --python 3.11 \
 	--with "pint>=0.24.4" --with "pydantic>=2.10.5" --with "numpy>=2.0" \
 	--with typer --with rich --with pyyaml --with matplotlib \
-	--with pytest --with marimo --with scipy --with ortools
+	--with pytest --with marimo --with scipy --with ortools --with plotly
 GENERATOR = paper/scripts/generate_paper_values.py
 
 values:
@@ -24,9 +24,11 @@ values:
 check-values:
 	cd $(MLSYSIM_ROOT) && PYTHONPATH=. $(UV_RUN) python $(GENERATOR) --check
 
-# Compare the seven validation anchors with their published values.
-validate-anchors:
-	cd $(MLSYSIM_ROOT) && PYTHONPATH=. $(UV_RUN) python paper/scripts/validate_anchors.py
+# Compare the seven published benchmarks with their reported values.
+validate-benchmarks:
+	cd $(MLSYSIM_ROOT) && PYTHONPATH=. $(UV_RUN) python paper/scripts/validate_benchmarks.py
+
+validate-anchors: validate-benchmarks
 
 # ── Convert SVG figures to PDF ───────────────────────────────
 SVG_SOURCES = $(wildcard figures/*.svg)

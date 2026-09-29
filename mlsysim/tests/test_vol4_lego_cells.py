@@ -51,6 +51,7 @@ def test_vol4_ch01_tempe_idealized_constant_speed_budget():
     check(abs(d_lag.to(meter).magnitude - 19.2) < 0.1, f"Unexpected lag displacement: {d_lag}")
     check(abs(d_brake.to(meter).magnitude - 20.5) < 0.1, f"Unexpected braking distance: {d_brake}")
     check(abs(d_remaining.to(meter).magnitude - 3.6) < 0.1, f"Unexpected remaining travel: {d_remaining}")
+    check(abs(kinetic_energy.to(joule).magnitude - 387072.0) < 1.0, f"Unexpected kinetic energy: {kinetic_energy}")
     check(
         d_brake > d_remaining,
         "Idealized stopping distance should exceed remaining travel",
@@ -190,6 +191,7 @@ def test_vol4_ch14_intervention_takeover_budget():
     check(abs(d_drift_ool.magnitude - 10.0) < 0.01, f"Unexpected out-of-loop drift: {d_drift_ool}")
     check(abs(d_stop_ool.magnitude - 15.0) < 0.01, f"Unexpected out-of-loop stop: {d_stop_ool}")
     check(abs(drift_expansion_ratio.magnitude - 13.33) < 0.1, f"Unexpected drift expansion: {drift_expansion_ratio}")
+    check(abs(stop_expansion_ratio.magnitude - 2.61) < 0.05, f"Unexpected stop expansion: {stop_expansion_ratio}")
 
 
 def test_vol4_ch04_amr_watchdog_lease():
@@ -241,6 +243,9 @@ def test_vol4_ch04_fieldbus_schedulability():
     check(abs(canfd_64["t_tx"].to(microsecond).magnitude - 140.4) < 0.5, f"Unexpected CAN-FD 64B frame time: {canfd_64['t_tx']}")
     check(abs(canfd_64["t_total_tx"].to(microsecond).magnitude - 1123.2) < 2.0, f"Unexpected CAN-FD 64B total: {canfd_64['t_total_tx']}")
     check(canfd_64["utilization"] > 1.0, "CAN-FD 64B must overrun 1.0 ms cycle time")
+    check(canfd_32["utilization"] < 1.0, "CAN-FD 32B must fit within 1.0 ms cycle time")
+    check(abs(canfd_32["utilization"] - 0.714) < 0.01, f"Unexpected CAN-FD 32B utilization: {canfd_32['utilization']}")
+    check(canfd_32["is_schedulable"] is True, "CAN-FD 32B must be schedulable")
     check(abs(ethercat["t_cycle_total"].to(microsecond).magnitude - 30.4) < 0.2, f"Unexpected EtherCAT total: {ethercat['t_cycle_total']}")
     check(abs(ethercat["t_margin"].to(microsecond).magnitude - 969.6) < 0.5, f"Unexpected EtherCAT margin: {ethercat['t_margin']}")
     check(ethercat["utilization"] < 0.05, "EtherCAT utilization must be under 5%")
