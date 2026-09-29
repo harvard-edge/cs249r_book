@@ -163,7 +163,7 @@ A state machine makes that admission explicit. It also prevents a scheduler from
 
 : **Guarded Trajectory States**: An edge permits consideration of a transition, not unconditional execution. Events can update accounting or evidence without changing state. {#tbl-vol3-lifecycle-states}
 
-The ordinary cycle is `READY` → `CALLING_MODEL` → `WAITING_TOOL` → `READY`. A model response may instead produce no admissible action, request completion, or propose an action requiring approval. The runtime classifies the complete response and chooses the permitted path. A malformed or canceled partial response cannot become a tool invocation merely because some arguments can be recovered from it. An approved action goes from `AWAITING_APPROVAL` to `WAITING_TOOL` only when its current dispatch guards pass; a recorded approval alone need not change the state. Denial, expiry, or withdrawal can return a refusal observation to `READY`. The approval section develops these cases.
+The ordinary cycle is `READY` → `CALLING_MODEL` → `WAITING_TOOL` → `READY`. A model response may instead produce no admissible action, request completion, or propose an action requiring approval. The normalized invocation status of @tbl-vol3-invocation-status already fixes what the runtime may do with each outcome; the harness adds where each outcome leaves the trajectory. A `COMPLETED` reply goes to candidate validation. A validated tool proposal enters `WAITING_TOOL` once its dispatch is admitted, or `AWAITING_APPROVAL` when policy requires review; a completion request enters `FINALIZING` for the task's completion check; a reply with no admissible action returns to `READY` with an observation. `TRUNCATED`, `REFUSED`, and `REJECTED` replies return to `READY` with a bounded observation unless the task's refusal policy finalizes. A `CANCELED` reply returns to `READY` under the control hold that caused it. `TRANSPORT_FAILURE` and `FAULTED` return to `READY` for bounded failure handling while the budget permits and enter `FINALIZING` otherwise; their reservations remain outstanding until usage settles. A malformed or canceled partial response cannot become a tool invocation merely because some arguments can be recovered from it. An approved action goes from `AWAITING_APPROVAL` to `WAITING_TOOL` only when its current dispatch guards pass; a recorded approval alone need not change the state. Denial, expiry, or withdrawal can return a refusal observation to `READY`. The approval section develops these cases.
 
 ### Guard the transition and its admission
 
@@ -175,6 +175,40 @@ The `record_version` detects competing updates. The `control_epoch` identifies t
 
 Serialization applies to the local decision, not the duration of network I/O. The harness releases the record lock before calling a model or tool service. If an accepted pause wins the admission race, the later dispatch is refused. If dispatch admission wins first, a subsequent pause must account for already-admitted work, including a request whose transmission is underway. It cannot retrospectively establish that no request left the host. Tool-side conditions still require the enforcement described in @sec-vol3-tool-calling.
 
+@Lst-vol3-guarded-transition expresses this contract as one function. The legal edges are exactly those of @tbl-vol3-lifecycle-states, and every edge has an explicit guard; an edge with no registered guard is refused rather than allowed by default. The caller passes the `record_version` it read when it made its decision, so a competing update fails the version check, and a repeated delivery of the same event fails either that check or the edge check, instead of admitting the action twice. Admission work runs inside the lock and network I/O runs after it.
+
+::: {#lst-vol3-guarded-transition lst-cap="**Guarded Transitions**: Every state change checks the legal edge, its explicit guard, and the record version under the record lock, then performs admission bookkeeping before the state changes; the admitted request is sent only after the lock is released."}
+```python
+LIVE = {"READY", "CALLING_MODEL", "WAITING_TOOL",
+        "AWAITING_APPROVAL", "PAUSED"}
+LEGAL = {("READY", "CALLING_MODEL"), ("READY", "PAUSED"),
+         ("CALLING_MODEL", "READY"), ("CALLING_MODEL", "WAITING_TOOL"),
+         ("CALLING_MODEL", "AWAITING_APPROVAL"), ("WAITING_TOOL", "READY"),
+         ("AWAITING_APPROVAL", "WAITING_TOOL"),
+         ("AWAITING_APPROVAL", "READY"), ("PAUSED", "READY")}
+LEGAL |= {(s, "FINALIZING") for s in LIVE}
+LEGAL |= {("FINALIZING", t) for t in ("COMPLETED", "FAILED", "CANCELED")}
+# GUARDS maps each edge to a predicate over (record, decision).
+
+def transition(rec, new_state, decision, admit=None):
+    with rec.lock:                            # the local decision only
+        edge = (rec.state, new_state)
+        guard = GUARDS.get(edge)              # no guard, no permission
+        if edge not in LEGAL or guard is None or not guard(rec, decision):
+            raise IllegalTransition(edge, decision.id)
+        if decision.seen_version != rec.record_version:
+            raise StaleDecision(decision.id)  # a competing update won
+        if admit is not None:
+            admit(rec)                        # reserve, register, set eligibility
+        rec.state = new_state
+        rec.record_version += 1
+        rec.history.append((edge, decision.id, rec.record_version))
+    # The caller sends any admitted request after the lock is released.
+```
+:::
+
+The guard for `READY` → `CALLING_MODEL`, for example, tests pending control, task and context currency, grants, capacity, and the budget inequality developed in @sec-vol3-controlplane-accounting. The lock is held for a few lookups and an append, negligible beside a model call, so guarding every transition costs almost nothing.
+
 This is a live-host coordination contract. It does not by itself make the record survive a crash or make a local update atomic with an external effect. @Sec-vol3-durable-execution develops the durable intent and recovery ordering needed across that boundary.
 
 ### Preserve outcomes without reviving an obsolete turn
@@ -182,6 +216,34 @@ This is a live-host coordination contract. It does not by itself make the record
 The record separates `observation_eligible_calls` from the `operation_ledger`. The first identifies responses that may advance the current wait under its declared policy. The second retains admitted attempts, known outcomes, unresolved effects, charges, and the owner responsible for settlement. Removing a call from the eligibility set therefore does not remove its operation from the ledger.
 
 On arrival, the runtime authenticates a result and correlates its task, logical operation, and attempt identity. It then records admissible outcome evidence in the ledger. A matching current response can also satisfy the wait policy and contribute an observation to the next context. A stale response cannot be appended directly to an obsolete turn, but it can still settle an outstanding operation. If that evidence matters to resumed work, the runtime revalidates its relevance and stages it during a subsequent guarded context assembly. Unknown or mismatched identities are not accepted as task evidence.
+
+@Lst-vol3-harness-on-result shows the two paths. Ledger evidence and usage settlement happen for every authenticated, correlated result; staging an observation for the waiting continuation happens only when the call is still eligible under the current `control_epoch`. When the declared wait policy is satisfied, the return to `READY` goes through the ordinary guarded transition, whose guard evaluates that policy again under the lock.
+
+::: {#lst-vol3-harness-on-result lst-cap="**Routing a Tool Result**: Authenticated evidence always reaches the operation ledger and settles usage, while only a currently eligible result under the current control epoch is staged for the waiting continuation."}
+```python
+def on_tool_result(rec, result):
+    if not authenticate(result):
+        return audit(rec, "unauthenticated_result", result)
+    with rec.lock:
+        op = rec.operation_ledger.get(result.operation_id)
+        if op is None or result.attempt_id not in op.attempts:
+            return audit(rec, "unknown_operation", result)
+        if not op.record_evidence(result):  # already recorded: duplicate
+            return
+        settle(rec, op, result.usage)       # reserved -> actual; rest stays owed
+        eligible = (result.call_id in rec.observation_eligible_calls
+                    and result.epoch == rec.control_epoch)
+        if eligible:
+            rec.observation_eligible_calls.discard(result.call_id)
+            stage_observation(rec, result)  # for the current wait only
+        rec.record_version += 1
+        seen = rec.record_version
+    if eligible and wait_policy_satisfied(rec):  # the guard rechecks it
+        transition(rec, "READY", Decision(result.id, seen))
+```
+:::
+
+A stale result therefore settles its operation and charge without entering the obsolete turn, which closes the observation crossing while keeping the evidence that later settlement needs.
 
 Returning from `WAITING_TOOL` to `READY` follows the declared wait policy: all required results, an allowed partial batch, a timeout, or an explicit withdrawal. The record distinguishes received evidence from unresolved members. In the repair example, a timeout cannot justify claiming that the `r18` tests failed, and a later success must retain the candidate and test scope it actually covers. Nor does timeout authorize a blind repeat of an operation. Dependent actions remain subject to their preconditions and repeat-safety contract.
 
@@ -224,9 +286,48 @@ A **turn boundary**\index{Turn boundary} is a point at which the harness can dec
 
 The boundary is a local admission guarantee, not a claim that every remote operation has ended. If the control request wins the ordering, the next operation is withheld. If dispatch admission wins, the controller treats the operation as outstanding and applies the appropriate cancellation or completion policy. This distinction makes the remaining obligation inspectable instead of hiding it behind the timestamp of a stop button.
 
-Generation need not finish before local candidate processing stops. The harness can request streaming cancellation\index{Streaming cancellation}, close the invocation's eligibility to produce an actionable candidate, and retain partial content only for bounded diagnosis. The invocation contract in @sec-vol3-foundation-model-contract governs the result. A canceled or truncated payload cannot become a dispatchable call because a parser closes its brackets, because its prefix already parses, or because a complete-looking reply arrives after its eligibility was withdrawn. Such late evidence can still settle usage or explain what the service did.
+Generation need not finish before local candidate processing stops. The harness can request streaming cancellation\index{Streaming cancellation}, close the invocation's eligibility to produce an actionable candidate, and retain partial content only for bounded diagnosis. The invocation contract in @sec-vol3-foundation-model-contract governs the result. A canceled or truncated payload cannot become a dispatchable call because a parser closes its brackets, because its prefix already parses, or because a complete-looking reply arrives after its eligibility was withdrawn; the quarantining invariant (principle \ref{pri-02-quarantining-invariant}) holds regardless of how the invocation ended. Such late evidence can still settle usage or explain what the service did.
 
-Output and time limits perform different jobs. A service-enforced output allowance bounds the generated quantity under that service's accounting contract. It does not bound elapsed time without further assumptions about queueing, stalls, and generation rate. A host deadline determines when the supervisor stops waiting and initiates intervention; neither that deadline nor a closed stream proves that remote inference stopped. Reported final usage settles the reservation. Missing usage remains an outstanding liability rather than an assumed refund.
+```{python}
+#| label: calc-vol3-harness-boundary-wait
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TIME TO THE NEXT TURN BOUNDARY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-controlplane-signals, "Output and time limits" paragraph.
+# │ Goal: Show how long one admitted call can hold off the next turn boundary.
+# │ Show: Reference per-token output allowance, a scenario output ceiling,
+# │       and their product.
+# │ How: Same registry path as the foundation-model cost cell: 8-bit weight
+# │      bytes / accelerator bandwidth per generated token. No queueing,
+# │      stalls, or serving overhead, so the product understates real waits.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import BYTES_INT8
+from mlsysim.fmt import check, fmt_count, fmt_time
+
+class BoundaryWait:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    model = Models.Language.Llama3_70B
+    accel = Hardware.Cloud.H100
+    weight_bytes = BYTES_INT8
+    k_max = 4_096  # scenario: per-call output-token allowance
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    weights = model.parameters / ureg.param * weight_bytes
+    t_dec = (weights / accel.memory.bandwidth).to(second)
+    t_wait = (k_max * t_dec).to(second)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(60 * second < t_wait < 120 * second, "Boundary wait exceeds one minute")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_dec_ms_str = fmt_time(t_dec, unit=ms, precision=3)
+    k_max_str = fmt_count(k_max)
+    t_wait_str = fmt_time(t_wait, unit=second, precision=1)
+```
+
+Output and time limits perform different jobs. A service-enforced output allowance bounds the generated quantity under that service's accounting contract. It does not bound elapsed time without further assumptions about queueing, stalls, and generation rate. Even under the most favorable of those assumptions, the wait is long. At the reference output allowance of `{python} BoundaryWait.t_dec_ms_str` per generated token from @sec-vol3-foundation-model-cost, with no queueing or stall, a call admitted with a `{python} BoundaryWait.k_max_str`-token output allowance can hold the next turn boundary about `{python} BoundaryWait.t_wait_str` away. A pending cancel or pause that waited for the reply to end would wait at least that long, which is why the harness needs streaming cancellation rather than turn boundaries alone. A host deadline determines when the supervisor stops waiting and initiates intervention; neither that deadline nor a closed stream proves that remote inference stopped. Reported final usage settles the reservation. Missing usage remains an outstanding liability rather than an assumed refund.
 
 ### Pause and resume under one policy
 
@@ -251,9 +352,9 @@ A new user instruction also needs this discipline. Adding “change the target f
 
 ### Termination and remaining obligations
 
-Kill requests invoke enforcement without waiting for model cooperation or a completed reply. The controller can stop local execution, revoke mediated access, or fence obsolete workers on the paths its execution boundary controls. The sandbox lifetime contract in @sec-vol3-sandboxes-pooling-reset determines which processes, descendants, channels, and resources that enforcement covers. Terminating one process does not certify that all remote work ended, and changing a grant field does not close an already usable handle.
+Kill requests invoke enforcement without waiting for model cooperation or a completed reply, as out-of-band preemption requires (principle \ref{pri-vol3-preemptive-interrupts}). The controller can stop local execution, revoke mediated access, or fence obsolete workers on the paths its execution boundary controls. The sandbox lifetime contract in @sec-vol3-sandboxes-pooling-reset determines which processes, descendants, channels, and resources that enforcement covers. Terminating one process does not certify that all remote work ended, and changing a grant field does not close an already usable handle.
 
-Finalization therefore records confirmed termination separately from unresolved effects and charges. It may wait for evidence, fail cleanup, or transfer a remaining obligation to an identified settlement owner. The operation's repeat contract, established in @sec-vol3-tool-calling-idempotency, determines whether another attempt is safe; an identifier alone cannot answer what the interrupted attempt did. Even a terminal scheduling state must not cause the runtime to discard evidence that could settle that obligation.
+Finalization therefore records confirmed termination separately from unresolved effects and charges. It may wait for evidence, fail cleanup, or transfer a remaining obligation to an identified settlement owner. The operation's repeat contract, established in @sec-vol3-tool-calling-idempotency, determines whether another attempt is safe, and settlement comes before any retry (principle \ref{pri-vol3-exactly-once-settlement}); an identifier alone cannot answer what the interrupted attempt did. Even a terminal scheduling state must not cause the runtime to discard evidence that could settle that obligation.
 
 Outside control makes continuation independent of the model's willingness to cooperate. It does not require a worker to remain occupied while a job or cancellation response is outstanding. The next design step is to preserve these control and evidence obligations while the trajectory waits, then admit continuation only when the appropriate event and guards allow it.
 
@@ -324,17 +425,19 @@ The internal-review example in @sec-vol3-security-credentials permits submitting
 
 Review is a task-policy choice, not a consequence of every irreversible operation. Some actions are prohibited outright; others can proceed under a sufficiently narrow automated policy. A disclosure or reversible mutation may also require review. The gate therefore follows trusted policy over the actual operation, target, and data scope rather than the model's characterization of the action as safe. Requesting review cannot enlarge a grant the reviewer has no authority to change.
 
+The gate should also stay narrow. A reviewer asked to approve dozens of routine calls an hour learns to approve without reading, and a gate that always approves supplies no closure. Grants, sandboxes, and automated policy handle the operations they can make safe, which reserves review for the operations they cannot. The narrower the gate, the more each approval reflects an actual reading of the held proposal.
+
 ### Hold an identifiable proposal
 
-After validating a completed model response, the harness records the held proposal before publishing its approval request. The record references the task and requester, intended tool origin and operation, immutable candidate artifact and selected evidence, applicable preconditions, required approver policy, and approval expiry. It also assigns an approval-request identifier and a held-proposal version. These identify the decision under review; they are not the logical operation or transport-attempt identities used after dispatch.
+After validating a completed model response, the harness records the held proposal before publishing its approval request. The record references the task and requester, intended tool origin and operation, immutable candidate artifact and selected evidence, applicable preconditions, required approver policy, and approval expiry. It also assigns an approval-request identifier and a held-proposal version, and computes the approval digest\index{Approval digest}, a hash of the canonical held proposal covering the operation, its arguments, its target, and the versions of the referenced artifacts. The approval binds to that digest, as in @sec-vol3-security-credentials, so changing any argument or artifact produces a different digest and voids the approval. These identifiers and the digest identify the decision under review; they are not the logical operation or transport-attempt identities used after dispatch.
 
 For the review submission, the held artifact is the exact `r18` patch and named check records, not a path whose contents can change before use. The selected records retain their evidential scope; a targeted test pass does not become full acceptance because it appears in an approval request. The authentication and represented-action requirements are those already established in @sec-vol3-security-credentials. The harness adds the recorded status needed to distinguish pending, denied, expired, withdrawn, and admitted requests.
 
-The trajectory enters `AWAITING_APPROVAL` without sending the held tool call. Waiting releases its worker and requires no model inference merely to ask whether a person has answered. It still retains the proposal and referenced artifacts, and may retain a workspace lease or other resources. Their retention costs remain governed by the task. The approval expiry bounds this wait for a decision; the trajectory's elapsed-time deadline continues independently. Waiting is not a refund of elapsed time or of charges from previously admitted work.
+The trajectory enters `AWAITING_APPROVAL` without sending the held tool call. Waiting releases its worker and requires no model inference merely to ask whether a person has answered. It still retains the proposal and referenced artifacts, and may retain a workspace lease or other resources. Their retention costs remain governed by the task. Under stable flow, Little's law (@sec-vol3-kv-workload-dynamics) makes the mean number of trajectories held in `AWAITING_APPROVAL` equal to the rate of approval requests multiplied by the mean time to a decision, so review latency, not model speed, sets how many held trajectories and retained resources the system carries. The approval expiry bounds this wait for a decision; the trajectory's elapsed-time deadline continues independently. Waiting is not a refund of elapsed time or of charges from previously admitted work.
 
 ### Resolve the wait without dispatching twice
 
-The approval service returns an authenticated decision associated with the held request and its version. The harness checks the decision against the current record, rather than treating any approval message as permission to resume. Repeated delivery records no second decision or dispatch. A decision for a withdrawn, expired, or replaced request remains evidence about that earlier request and cannot revive it.
+The approval service returns an authenticated decision associated with the held request and its version. The harness checks the decision and its digest against the current record, rather than treating any approval message as permission to resume. Repeated delivery records no second decision or dispatch. A decision for a withdrawn, expired, or replaced request remains evidence about that earlier request and cannot revive it.
 
 @Tbl-vol3-escrow-transitions distinguishes recording a decision from admitting the operation. The state remains a supervisory state, not a claim that all other resources or effect obligations have disappeared.
 
@@ -397,7 +500,7 @@ The admission unit here is a `READY` trajectory's **next model call**, not its e
 
 Equal numbers of calls need not mean equal service. One maintenance call can carry a much longer prompt than an interactive call. A scheduler must therefore state what its shares measure. A simple policy charges each admitted call its full input-token count plus its allowed output-token count. This is a deliberately conservative *scheduling charge*: it measures admitted token allowance, not actual output, dollars, accelerator time, or task value. Cached input remains part of this charge. Another policy can use measured service, but then it needs an estimate at admission and a rule for reconciling that estimate afterward.
 
-Weighted deficit round-robin offers one way to share the declared charge. Keep a queue and a credit counter for each service class, with a rotating queue of trajectories inside each class. Each round adds a quantum proportional to the class's weight. Admit calls from that class while their charges fit its remaining credit and the other gates permit; each admission deducts its charge. Then rotate to the next class. Unspent credit carries into later rounds so a larger admissible call can eventually fit. When a class has no eligible work, reset its credit. This adapts the credit-carryover mechanism of [deficit round-robin](https://iqua.ece.toronto.edu/baochun/ece1771f/papers/deficitrr.pdf) to model-call admission rather than packet transmission.
+Weighted deficit round-robin offers one way to share the declared charge. Keep a queue and a credit counter for each service class, with a rotating queue of trajectories inside each class. Each round adds a quantum proportional to the class's weight. Admit calls from that class while their charges fit its remaining credit and the other gates permit; each admission deducts its charge. Then rotate to the next class. Unspent credit carries into later rounds so a larger admissible call can eventually fit. When a class has no eligible work, reset its credit. This adapts the credit-carryover mechanism of deficit round-robin [@shreedhar1995efficient] to model-call admission rather than packet transmission.
 
 Credit belongs to the class in this policy, not to each trajectory. Opening many trajectories therefore does not multiply the class's share. Rotation within the class also matters: restarting every scheduler pass at the same first record can starve records later in the list. Limit admitted request size, give every class intended to make progress a positive weight, and retain the rotation position between passes. If credit is capped, its cap must accommodate the largest request the policy allows. Otherwise a large call can wait forever despite repeated replenishment.
 
@@ -429,6 +532,10 @@ The repair trajectory has a test job outstanding when the operator requests a pa
 
 ### Multi-dimensional budget vectors {#sec-vol3-harness-multidim-budgets}
 
+The need for a lifetime bound shows most clearly in a **runaway retry loop**\index{Runaway retry loop}. Suppose a later candidate of the repair fails its targeted test. The model proposes a variant, then another, then a broader diagnostic that also fails. Each failure appends an error observation to the context, and each new proposal is a well-formed tool call inside every per-call limit. The trajectory waits correctly at every tool boundary, receives its fair share of service, and passes every per-call admission check. Many turns later it has consumed real resources and moved the repair no closer to acceptance.
+
+The model cannot be relied on to end this loop. As failures accumulate, they dilute the task instructions that framed the work, a cost established in @sec-vol3-context-engineering, and a reply that ends the turn becomes less likely rather than more. A remaining-budget notice or an instruction to stay under a stated limit lowers the probability of overspending; it does not bound it, and it weakens as the context fills with failures. A looping model stays live, well formed, and inside every per-call limit while advancing nothing, so the bound on the whole trajectory sits outside the model with the other controls (principle \ref{pri-vol3-preemptive-interrupts}). Recognizing that the loop has stalled is a separate judgment; the budget guarantees only that the loop ends.
+
 A per-trajectory **budget**\index{Budget!per-trajectory} limits accumulated consumption across the run. The familiar vector
 
 $$\mathbf{B} = \langle H_{\max},\ N_{\max},\ T_{\max},\ C_{\max} \rangle$$
@@ -448,6 +555,36 @@ $$\text{actual consumption} + \text{outstanding reservations} + \text{proposed b
 The test applies componentwise to the relevant counts and charges; the elapsed deadline is checked separately. Outstanding reservations cover admitted work not yet fully charged, including concurrent model calls and paid tools. The protected reserve funds the specified final checks, reporting, and cleanup rather than leaving those activities dependent on whatever exploration fails to spend. During finalization, the harness transfers an appropriate portion of that reserve into the admitted operation's reservation; it does not charge the same liability twice.
 
 Checking and reserving must be one admission decision with respect to competing dispatches. Otherwise two calls can both observe the same remaining balance and spend it. The runtime records the operation and its reservation before dispatch, together with the current state, grants, and deadline checks established earlier in this chapter. If sending fails, it releases the reservation only when the failure establishes that no charge can result. An ambiguous send remains outstanding.
+
+@Lst-vol3-harness-turn assembles one turn from these pieces. The reservation is made inside the guarded transition into `CALLING_MODEL`, so an unaffordable call is refused before any request leaves the host. Usage settles the reservation after the reply, and the reply's status decides the next state before any content can become a tool call. Admission never depends on a charge discovered after the call.
+
+::: {#lst-vol3-harness-turn lst-cap="**One Admitted Turn**: The harness reserves the call's bounded liability inside the guarded transition, settles from reported usage, routes every non-completed status away from dispatch, and reserves and registers tool calls before sending them."}
+```python
+def run_turn(rec):
+    call = new_invocation(rec)
+    liability = bound_call(rec.limits)        # full input + output allowance
+    transition(rec, "CALLING_MODEL", Decision(call.id, rec.record_version),
+               admit=lambda r: reserve(r, call, liability))  # admission test
+    reply = invoke_model(rec.context(), rec.limits, call.id)  # lock released
+    settle(rec, call, reply.usage)            # missing usage stays reserved
+    nxt = Decision(call.id, rec.record_version)
+    if reply.status != "COMPLETED":           # truncated, canceled, refused, ...
+        return transition(rec, route_status(rec, reply), nxt)  # never dispatched
+    proposal = validate(rec, reply)           # schema, epoch, authority
+    if proposal.kind == "complete":
+        return transition(rec, "FINALIZING", nxt)   # completion check follows
+    if proposal.kind == "none":
+        return transition(rec, "READY", nxt)
+    if needs_approval(rec, proposal):
+        return transition(rec, "AWAITING_APPROVAL", nxt,
+                          admit=lambda r: hold(r, proposal))
+    transition(rec, "WAITING_TOOL", nxt,
+               admit=lambda r: reserve_and_register(r, proposal.calls))
+    dispatch(proposal.calls)                  # already registered and reserved
+```
+:::
+
+The `reserve` step applies this section's admission inequality and fails the guard when the call does not fit; `route_status` applies the status mapping of @sec-vol3-controlplane-statemachine. The listing omits the per-call control check within a batch and the approval lifecycle, both of which follow the same pattern of deciding under the lock and sending after it.
 
 A positive unreserved balance can still be smaller than the next call's maximum additional charge. Checking only the already-paid bill would admit that call and discover the excess afterward. Reducing the output limit can make the call affordable only if the input charge and all other chargeable work still fit. A paid tool with no enforceable duration, unit, or charge limit supplies no finite reservation bound. The harness must reject it under a hard-ceiling policy, use a bounded alternative, or explicitly accept a stop threshold with possible overshoot. A host timeout alone does not turn that threshold into a hard financial ceiling.
 
@@ -589,7 +726,7 @@ A positive balance can be smaller than the next call's liability, and several ca
 ::: {.fallacy-pitfall}
 **Fallacy**: *A parseable reply is dispatchable after cancellation.*
 
-An incomplete or canceled invocation may leave syntactically valid fragments. Syntax does not restore the invocation's completion status or current authority. Quarantine those fragments as diagnostic data; a new proposal must pass the ordinary status and admission checks.
+An incomplete or canceled invocation may leave syntactically valid fragments. Syntax does not restore the invocation's completion status or current authority. Under the quarantining invariant (principle \ref{pri-02-quarantining-invariant}), those fragments remain diagnostic data; a new proposal must pass the ordinary status and admission checks.
 :::
 
 ::: {.fallacy-pitfall}
