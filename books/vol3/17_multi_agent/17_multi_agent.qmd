@@ -26,7 +26,7 @@
 
 _Why can splitting a task across several agents cost more and deliver less than giving one agent the same resources?_
 
-A planner that decomposes the work, coders that draft patches in parallel, and a reviewer that approves the result look like an engineering team, and the design is easy to build. Yet the handoffs introduce work of their own: workers repeat context, build on stale assumptions, return incompatible changes, and keep spending after their parent has stopped. One controller can already search alternatives in parallel and run isolated tools, so adding agents must buy something beyond concurrency. Separate task ownership and focused contexts can make a useful division of work, provided the runtime preserves evidence, bounds spending, and controls what each child may change. Delegation extends the horizon across handoffs, distributes state across workers, and passes authority down a tree, making closure at each boundary part of the cost of the split.
+When a task outgrows what one agent can hold in context or finish before its deadline, the natural response is to add agents: a planner that decomposes the work, workers that pursue the pieces in parallel, and a reviewer that approves the result. The arrangement resembles an engineering team and is easy to build, which is why it often ships before anyone asks whether it helped. Every split creates boundaries that a single agent never had. Work must be described to a worker that never saw the original request, results must be accepted from a trajectory the parent never observed, and spending and side effects continue in branches after the parent has moved on. A single well-built agent can already search in parallel and run isolated tools, so the added agents must buy something that concurrency alone does not, such as separate ownership of distinct subtasks or contexts small enough to stay focused. Taking the question seriously turns multi-agent design from an organizational metaphor into an engineering decision. Handoffs become contracts that the runtime enforces, agreement among agents stops counting as proof, and the design earns its place only by beating a capable single agent on a declared objective at matched resources. Delegation multiplies every exposure at once. The horizon extends across handoffs, state is distributed among workers, and authority passes down a tree, so closure at each boundary is part of the price of the split.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -36,17 +36,17 @@ A planner that decomposes the work, coders that draft patches in parallel, and a
 
 ::: {.callout-learning-objectives}
 
-- Estimate delegation overhead and scaling limits under explicit workload and scheduling assumptions
-- Select coordination topologies from task dependencies, critical paths, and bounded spawning requirements
-- Design typed task envelopes and bounded receipts separating claims, evidence, and runtime status
-- Validate concurrent candidates against changed dependencies before publishing the exact checked artifact
-- Explain how assumed error dependence changes ensemble evidence without making agreement a correctness guarantee
-- Compose cancellation, resource reservations, and descendant authority while retaining unresolved obligations
-- Evaluate delegation against a capable single-controller baseline using declared objectives and comparable resource ceilings
+- Estimate the speedup and useful worker count of a work partition from its serial fraction and coordination overhead
+- Calculate makespan bounds from a task's dependency graph to decide whether added slots or shorter tasks pay
+- Design bounded receipts and credit windows that cap returned context, item staleness, and payload occupancy
+- Apply shared-write collision estimates to justify private workspaces and dependency revalidation before publication
+- Calculate majority false approval under correlated reviewer errors to choose between more reviewers and a different check
+- Evaluate fan-out completion rules and hedging under deadline, capacity, and duplicate-effect constraints
+- Evaluate delegation against a capable single-controller baseline using a declared objective and matched resource ceilings
 
 :::
 
-## The Delegation Trade-Off {#sec-vol3-multiagent-need}
+## Splitting the Repair Agent's Work {#sec-vol3-multiagent-intro}
 
 Consider the repair agent (\ref{lhs-vol3-repair-agent}) assigned a hypothetical authentication-module migration. One part changes an interface; another updates its callers. A coordinator could keep the whole task, using parallel searches and tests to gather evidence before preparing a patch, or it could assign the interface and caller changes to separate workers, each able to inspect files, edit a candidate, and respond to tool feedback. The second design gives each worker a focused context and a bounded subtask, and it creates a new obligation. The caller patch must remain compatible with the interface that eventually lands, not merely the interface its worker first read.
 
@@ -56,7 +56,15 @@ Consider the repair agent (\ref{lhs-vol3-repair-agent}) assigned a hypothetical 
 *A fleet multiplies horizon, state, and authority, so every handoff must preserve closure.*
 :::
 
-That distinction defines the unit of delegation. A **delegated worker**\index{Delegated worker!definition} owns a bounded child trajectory with its own context, model-and-tool loop, task contract, and lifecycle. Several candidate samples[^fn-sample-voting-ensemble] requested by one controller are parallel calls inside one trajectory, not delegated workers. The architectural change is the boundary between separately managed trajectories, whether the workers run on one machine or many.
+The runtime built so far governs one trajectory at a time. The harness admits each model and tool call against one task's grant and budget, durable execution records one history, failure recovery restarts one loop, and evaluation scores one final artifact. Splitting the migration leaves each worker under those controls and leaves the space between the workers ungoverned. Nothing yet says which interface version the caller worker builds against, whether a textually clean merge of the two patches is a correct change, what five approving reviewers establish, who owns a test job still running after the coordinator cancels the task, or how much of the parent's authority and budget a child may use. Each of these gaps is a place where the split can cost more than it buys.
+
+This chapter builds the controls that make delegation governable and the measurement that decides whether it pays. The controls are records and checks the runtime owns: an assignment it can enforce, a receipt that separates a worker's claims from observed evidence, a publication step that revalidates dependencies before any candidate lands, a cancellation path that keeps unsettled work owned, and grants that narrow at every hop. The measurement compares the delegated design with a single agent given the same parallel tools and resource ceilings, with every failed and canceled branch priced.
+
+The sections follow the migration from the decision to split through the verdict on whether splitting helped. @Sec-vol3-multiagent-need defines the unit of delegation and screens a work partition for its coordination overhead. @Sec-vol3-multiagent-topologies separates the dependencies, message routes, and supervision a split creates, and @sec-vol3-multiagent-contracts specifies what crosses each handoff. @Sec-vol3-multiagent-concurrency and @sec-vol3-multiagent-consensus decide when concurrent results may be combined and what agreement among reviewers is worth. @Sec-vol3-multiagent-backpressure and @sec-vol3-multiagent-authority carry cancellation, flow control, and authority across descendants, and @sec-vol3-multiagent-evaluation closes the decision against the single-agent baseline.
+
+## The Delegation Trade-Off {#sec-vol3-multiagent-need}
+
+The migration's interface and caller workers differ from two parallel model calls, and that difference defines the unit of delegation. A **delegated worker**\index{Delegated worker!definition} owns a bounded child trajectory with its own context, model-and-tool loop, task contract, and lifecycle. Several candidate samples[^fn-sample-voting-ensemble] requested by one controller are parallel calls inside one trajectory, not delegated workers. The architectural change is the boundary between separately managed trajectories, whether the workers run on one machine or many.
 
 [^fn-sample-voting-ensemble]: **Sample Voting**\index{Self-consistency!sample voting}: Self-consistency decoding samples several reasoning paths from one model for one prompt and returns the most frequent final answer [@wang2022self]. It is the cheapest ensemble an agent can run, and also the most correlated one, because every sample shares the model, the prompt, and the difficulty of the input, a dependence @sec-vol3-multiagent-consensus quantifies.
 
@@ -1464,8 +1472,7 @@ $$ {#eq-vol3-multiagent-usl-peak}
 *   **Contention**\index{Contention coefficient!definition} ($\sigma$): The share of work that serializes, including undivided planning, final assessment, and queueing at single resources such as the supervisor or the integration queue.
 *   **Coherency**\index{Coherency coefficient!definition} ($\kappa$): The cost of pairwise reconciliation. Each of the $M(M-1)$ ordered worker pairs may exchange state, re-read a peer's output, or resolve a conflicting change, the same count as the mesh round in @sec-vol3-multiagent-topologies.
 *   **Amdahl's law**\index{Amdahl's law!as USL special case} ($\kappa=0$): Capacity saturates at $1/\sigma$ and never declines.
-
-**Pitfall**: *A positive $\kappa$ makes added workers harmful, not merely useless.* Capacity peaks at $M^*$ and falls below one, slower than a single worker, once $M>(1-\sigma)/\kappa$. With the screening notebook's $\sigma=$ `{python} UslScreen.sigma_str` and $\kappa=$ `{python} UslScreen.kappa_str`, every count from `{python} UslScreen.first_slower_str` workers up finishes later than the serial reference.
+*   **Retrograde region** ($M>(1-\sigma)/\kappa$): A positive $\kappa$ makes added workers harmful, not merely useless. Capacity peaks at $M^*$ and falls below one, slower than a single worker, past this count. With the screening notebook's $\sigma=$ `{python} UslScreen.sigma_str` and $\kappa=$ `{python} UslScreen.kappa_str`, every count from `{python} UslScreen.first_slower_str` workers up finishes later than the serial reference.
 
 :::
 
@@ -1544,33 +1551,43 @@ In practice the fit runs the other way from these screens. Trials at a few feasi
 Each mistake below treats a delegation boundary as a guarantee it does not provide, and each has a price the chapter's arithmetic can state.
 
 ::: {.fallacy-pitfall}
-**Fallacy:** *More workers necessarily improve the task outcome.*
+
+**Fallacy**: *More workers necessarily improve the task outcome.*
 
 Overhead grows with the fleet. In the screening notebook (\ref{nbk-17-the-amdahl-limits-of-multi-agent}), eight workers need `{python} DelegationScreen.eight_time_str` of the serial time against `{python} DelegationScreen.best_time_str` at `{python} DelegationScreen.best_workers_str`, and the same coefficients make `{python} UslScreen.first_slower_str` workers slower than one. Spend grows even when time does not: a token multiple of `{python} TokenBreakEven.token_ratio_mult_str` pays for itself only on tasks the single agent completes less than `{python} TokenBreakEven.max_single_acceptance_str` of the time. Compare the actual designs under the same resource ceilings and a declared objective.
+
 :::
 
 ::: {.fallacy-pitfall}
-**Pitfall:** *Treating a clean merge as evidence that concurrent changes remain compatible.*
+
+**Pitfall**: *Treating a clean merge as evidence that concurrent changes remain compatible.*
 
 With `{python} WriteCollision.files_str` files and `{python} WriteCollision.writes_str` writes each, two workers touch disjoint files `{python} WriteCollision.small_disjoint_str` of the time, so nearly every pair merges textually clean, including the caller and interface workers whose patches rely on incompatible interface versions. Validate the dependencies and the exact integration candidate before guarded publication (@sec-vol3-multiagent-concurrency).
+
 :::
 
 ::: {.fallacy-pitfall}
-**Fallacy:** *Agreement among reviewers proves correctness.*
+
+**Fallacy**: *Agreement among reviewers proves correctness.*
 
 Agreement is worth what the joint error model says. Five reviewers at a `{python} ReviewCorrelation.failure_p_str` false-approval rate reach a false majority `{python} ReviewCorrelation.independent_majority_str` of the time if independent, but `{python} ReviewCorrelation.mixture_majority_str` under the correlated mixture, and more reviewers of the same kind approach a floor of `{python} ReviewFloor.floor_str` (@sec-vol3-multiagent-consensus). Keep reviewer claims separate from protected checker results.
+
 :::
 
 ::: {.fallacy-pitfall}
-**Pitfall:** *Closing the parent task and releasing its reservations as soon as cancellation is requested.*
+
+**Pitfall**: *Closing the parent task and releasing its reservations as soon as cancellation is requested.*
 
 A stop request closes admission; remote execution, accepted effects, and charges settle later. In the delegation ledger, failed attempts and canceled branches account for `{python} DelegationDecision.multi_discard_str` of `{python} DelegationDecision.multi_cost_str` in delegated spend, money that a parent released at cancellation would leave unowned. Close admission at the gates, request cancellation, and keep unresolved operations, evidence, and charges under the settlement rule.
+
 :::
 
 ::: {.fallacy-pitfall}
-**Fallacy:** *If each worker usually finishes on time, the fan-out usually finishes on time.*
+
+**Fallacy**: *If each worker usually finishes on time, the fan-out usually finishes on time.*
 
 An all-results barrier multiplies the per-worker probability once per worker. At `{python} FanoutCompletion.admissible_str` per worker, `{python} FanoutCompletion.workers_str` workers all finish by the deadline only `{python} FanoutCompletion.all_str` of the time, and the barrier falls below even odds at `{python} FanoutCompletion.even_odds_workers_str` workers (@sec-vol3-multiagent-backpressure). Where the contract accepts interchangeable results, a stopping rule restores `{python} FanoutCompletion.enough_str`; where it does not, the fan-out must shrink.
+
 :::
 
 ## Summary {#sec-vol3-multi-agent-summary}
@@ -1598,13 +1615,13 @@ The relations in @tbl-vol3-multi-agent-key-equations carry the chapter's quantit
 
 ::: {.callout-takeaways title="Delegation must earn and preserve its boundaries"}
 
-* **Estimate the coordination cost under stated assumptions**: Serial work caps speedup at $1/\sigma$, and pairwise reconciliation makes capacity retrograde past $M^*=\sqrt{(1-\sigma)/\kappa}$. The universal scalability law screens a partition; measured trials fit its coefficients.
-* **Choose topology from dependencies**: Routing, precedence, and supervision answer different questions. Critical paths constrain completion, while dynamic spawning also needs bounded fan-out, depth, and aggregate admission.
-* **Make each handoff accountable**: Typed envelopes and bounded receipts preserve task identity, input versions, required evidence, and status; only optional summaries may be cut.
-* **Publish the candidate that was checked**: A clean merge proves nothing about dependencies. Revalidate them, check the exact combined artifact, and publish with a guarded expected-head update; a moved head returns to validation.
-* **Interpret agreement within an error model**: Correlated reviewer errors put a floor under majority false approval that more reviewers of the same kind cannot lower. Measure the correlation, buy a different kind of check past that floor, and keep agreement, scoped acceptance evidence, and authority distinct.
-* **Carry control and liability across descendants**: Cancellation, credit windows, and attenuated grants govern continued work, while atomic reservations and the settlement rule keep siblings and canceled branches from making commitments disappear.
-* **Compare against the capable baseline**: Give the single controller its parallel tools and search, declare the objective and matched ceilings in advance, and count coordination, failures, reconciliation, and cancellation. A justified trade-off need not improve every metric, but it must meet the stated constraints.
+* **Coordination overhead sets the useful fleet size**: Serial work caps speedup at $1/\sigma$, and pairwise reconciliation makes capacity fall past $M^*=\sqrt{(1-\sigma)/\kappa}$. Shrinking serial planning and integration raises the ceiling more than cheaper handoffs do, and measured trials, not the screen, fix the coefficients.
+* **Dependencies, not message routes, bound completion**: Routing, precedence, and supervision answer different questions. Only the critical path is worth shortening, and a model that spawns its own children needs runtime limits on fan-out, depth, and aggregate reservation.
+* **A handoff is a contract, not a message**: The envelope fixes inputs, authority, limits, and required evidence before work starts; the receipt keeps runtime records apart from the worker's explanation, and only optional prose may be cut to fit its bound.
+* **A clean merge is not a compatible change**: Disjoint writes say nothing about dependencies. Publication revalidates them at the current head, checks the exact combined candidate, and advances only if that head has not moved.
+* **Correlated reviewers put a floor under error**: When reviewers share a candidate's difficulty, majority false approval levels off instead of vanishing. Past that floor, the next dollar buys a different kind of check, and no amount of agreement confers authority.
+* **Obligations outlive the parent call**: Cancellation closes admission but settles nothing already sent. Credit windows, attenuated grants, and atomic reservations keep descendants bounded, and every unsettled operation keeps an owner.
+* **Delegation must beat a capable baseline**: The comparison gives one controller the same parallel tools and ceilings, prices every failed and canceled branch, and accepts a trade-off only when the declared objective values what it buys at its marginal price.
 
 :::
 
