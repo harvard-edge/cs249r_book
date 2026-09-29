@@ -65,7 +65,9 @@ FMT_QTY_DOMAIN_UNIT = re.compile(
     r"\bfmt_qty\s*\([^;\n]+?,\s*(?:unit\s*=\s*)?(?:"
     r"[TGKM]B\s*/\s*(?:second|s)|[TGKM]bps|[PEGT]FLOPs?\s*/\s*(?:second|s)|flops_per_second|"
     r"(?<![/\w])(?:W|kW|MW|GW|watt|kilowatt|megawatt)(?!\s*/\s*s)(?![a-zA-Z0-9_])|"
-    r"(?<![/\w])(?:GB|MB|KB|TB|gigabyte|terabyte|megabyte|kilobyte)(?!\s*/\s*s)(?![a-zA-Z0-9_])|"
+    # 2026-09-28: a memory unit multiplied by time (e.g. GB * second, a capacity-occupancy
+    # product) is not a memory quantity, so no domain formatter applies.
+    r"(?<![/\w])(?:GB|MB|KB|TB|gigabyte|terabyte|megabyte|kilobyte)(?!\s*[/*]\s*s)(?![a-zA-Z0-9_])|"
     r"(?<![/\w])(?:newton|kilonewton)(?!\s*/)(?![a-zA-Z0-9_])|"
     r"newton\s*/\s*(?:second|millisecond|s|ms)|"
     r"(?<![/\w])(?:kilogram|gram|metric_ton)(?!\s*/)(?![a-zA-Z0-9_])|"
