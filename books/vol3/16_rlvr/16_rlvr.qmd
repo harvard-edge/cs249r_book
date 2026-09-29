@@ -24,9 +24,9 @@
 \mlagentstack{0}{100}{0}{0}{0}{0}
 \end{marginfigure}
 
-_How can a check guide an agent's learning without showing it the right action at each turn?_
+_Why does a check that only scores an agent's attempts end up defining what the agent learns?_
 
-A test suite can assess a proposed repair without supplying the steps that produce it. Reinforcement learning uses that difference: the policy attempts the task, receives a reward, and uses sampled outcomes to guide its updates. This can supply a learning signal where corrective demonstrations are unavailable, but it also makes the check an optimization target. A gap in the assessment can reward an inadequate repair, and a delayed outcome may reveal little about which earlier decision helped. Every new attempt also consumes model time, tool execution, and assessment resources. Useful learning therefore depends on the reward's meaning, the recorded interactions, and the evidence for releasing the changed policy. Through the H·S·A lens, training changes the policy and moves no exposure: horizon, state, and authority stay bounded where the runtime closes them, whatever behavior the updated weights propose inside those bounds.
+Demonstrations run out before tasks do. For most agent work nobody has written down the right sequence of tool calls, yet a test suite, a type checker, or a proof checker can still tell a finished attempt from a failed one. Reinforcement learning turns that asymmetry into a training signal. The agent attempts the task, the check scores the attempt, and the update makes high-scoring behavior more probable. Learning can then continue wherever an outcome can be checked, long after curated examples are exhausted. The price is that the check stops being a measurement and becomes an objective. Optimization searches any gap between what the check verifies and what the task intends far more persistently than a human reviewer would, and a gap within the agent's reach, such as a test file in its own workspace, is found first because exploiting it takes fewer steps than solving the task. Taking this seriously moves the engineering effort away from the update rule. The check must be protected like a security boundary, every sampled attempt must be recorded faithfully enough to compute the update, and environments, verification, and training must be sized as one system whose slowest stage sets the pace. A rising training score then marks a candidate for evaluation, not a release decision. Through the H·S·A lens, this is the last and costliest rung of change. The weights move, but horizon, state, and authority stay bounded where the runtime closes them, whatever behavior the updated policy proposes.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -36,17 +36,17 @@ A test suite can assess a proposed repair without supplying the steps that produ
 
 ::: {.callout-learning-objectives}
 
-- Distinguish reward-driven learning from imitation and explain the role of exploration and sampled support
-- Design scoped rewards and protect the assessment that supplies them
-- Relate return, baseline, and credit while calculating the cost of continuation-based estimates
-- Compute group-relative coefficients and explain the limits of clipping and normalization
-- Construct token-faithful multi-turn rollout records under a bounded execution harness
-- Diagnose changes in reward and behavior without inferring internal cognition from generated text
-- Size and operate a versioned rollout-training loop and evaluate its candidate before release
+- Explain why reward-driven learning needs sampled support that imitation does not, and estimate when a task yields no reward contrast
+- Design a shaped reward that preserves the pass-over-failure order and bound the false accepts its assessment admits
+- Calculate the generation cost and standard error of continuation-based credit estimates across turns
+- Compute group-relative coefficients and the per-token weight that length normalization assigns them
+- Specify the per-invocation records and version-lag bound that keep a multi-turn update faithful to its sampling policy
+- Diagnose changes in reward and length from task outcomes rather than from the narration a policy generates
+- Size the environment cycle and verifier pool of a rollout-training loop and identify the stage that limits it
 
 :::
 
-## Foundations of Verifiable Reward Optimization {#sec-vol3-rlvr-need}
+## Learning from a Check {#sec-vol3-rlvr-introduction-228c}
 
 The repair agent's connection-pool repair (\ref{lhs-vol3-repair-agent}) now offers two different learning opportunities. Its curated recovery demonstration supplies selected responses to imitate. Its versioned fixture and acceptance checks can instead support new attempts whose intermediate actions have no demonstrated labels. A policy might inspect another source file, try a different edit, or stop with an unresolved limitation. The checks assess the resulting trial; they do not tell the policy which next response to write at every decision.
 
@@ -56,7 +56,15 @@ The repair agent's connection-pool repair (\ref{lhs-vol3-repair-agent}) now offe
 *Training changes the policy and leaves every exposure where the runtime closes it.*
 :::
 
-Reinforcement learning uses interactions and their rewards to update a policy. Imitation can already learn recovery and generalize beyond individual examples; what changes is the learning signal. A reward-scored rollout supplies an outcome-dependent signal without requiring a corrective response at every visited decision. The preceding chapter's illustrative `trained_policy_v1` is one possible starting artifact; the method does not require it.
+The tools already in hand stop short of using that verdict. Trajectory fine-tuning (@sec-vol3-fine-tuning) can learn recovery and generalize beyond its examples, but every target it imitates is a response someone admitted, and admitted repairs of hard bugs are scarce. Test-time selection (@sec-vol3-test-time-compute) can keep the passing candidate among several samples, but it pays for that sampling on every task and leaves the policy unchanged. Neither makes the passing behavior more probable from the check's verdict alone. Reinforcement learning does, and in doing so it changes what the check is. Once a score enters the update, a flaw in the score is learned into the weights rather than merely miscounted.
+
+This chapter builds the training loop that turns checked outcomes into policy updates for the repair agent. The loop has four parts that must hold together. A reward carries a meaning protected from the policy it scores. An update rule spreads one terminal outcome across many turns. A record of each rollout stays faithful to what the policy actually sampled. Environment, verification, and training capacity are sized so that the update receives fresh, complete groups of attempts.
+
+The sections follow that loop. @Sec-vol3-rlvr-need defines the interaction, the baseline, and the exploration that bound what a reward can teach, and @sec-vol3-rlvr-rewards turns acceptance checks into a reward and prices its false accepts. @Sec-vol3-rlvr-credit and @sec-vol3-rlvr-grpo show how one outcome becomes a coefficient on every sampled token, first through return and value estimates and then through group-relative scoring. @Sec-vol3-rlvr-multi-turn and @sec-vol3-rlvr-sandboxing specify the rollout record and the verifier boundary that make those coefficients trustworthy. @Sec-vol3-rlvr-pathologies reads the telemetry of a running loop, @sec-vol3-rlvr-infrastructure sizes the environments, verifiers, and trainer that feed it, and @sec-vol3-rlvr-synthesis carries one reward group through to a policy candidate that still awaits its release evidence.
+
+## Foundations of Verifiable Reward Optimization {#sec-vol3-rlvr-need}
+
+Reinforcement learning uses interactions and their rewards to update a policy. Relative to imitation, only the learning signal changes. A reward-scored rollout supplies an outcome-dependent signal without requiring a corrective response at every visited decision. The preceding chapter's illustrative `trained_policy_v1` is one possible starting artifact; the method does not require it. The interaction, the baseline, and the reach of exploration must be fixed before any update relies on that signal.
 
 ### Define the interaction before the update
 
@@ -1420,7 +1428,7 @@ A repair group can contain a positive reward without establishing a correct repa
 
 ::: {.fallacy-pitfall}
 
-**Fallacy:** *An automated reward is a complete task specification.*
+**Fallacy**: *An automated reward is a complete task specification.*
 
 A test suite misses what it does not test, and optimization finds the misses. In notebook \ref{nbk-16-oracle-gaming}, a verifier that accepts only `{python} OracleGaming.false_pos_pct_str` of failures still makes `{python} OracleGaming.frac_false_pct_str` of rewarded rollouts failures when the policy passes `{python} OracleGaming.true_pass_pct_str` of tasks, and every one of them raises the probability of the tokens that produced it. Test the reward against known incorrect candidates, measure its false-accept share at the policy's current pass rate, and accept the trained policy on the declared task criteria rather than on training reward.
 
@@ -1428,7 +1436,7 @@ A test suite misses what it does not test, and optimization finds the misses. In
 
 ::: {.fallacy-pitfall}
 
-**Pitfall:** *Leaving the scorer, the runner, or its configuration where the candidate can reach it.*
+**Pitfall**: *Leaving the scorer, the runner, or its configuration where the candidate can reach it.*
 
 A reachable scorer is the shortest path to reward. In the METR runs, the task whose scoring script the model could edit was hacked in `{python} MetrRewardHacking.foundry_hacks_str` of `{python} MetrRewardHacking.foundry_runs_str` runs (war story \ref{ws-16-metr-reward-hacking-2025}). In training, the first such hack on a hard task is the group's lone pass: in a group of `{python} DifficultyAbsorption.group_str` it receives coefficient `{python} DifficultyAbsorption.lone_str` while each honest failure receives `{python} DifficultyAbsorption.small_str` in magnitude. Assess the candidate in a fresh workspace behind a controller that owns the tests, the runner, and the result path (@sec-vol3-rlvr-sandboxing), and treat candidate code as untrusted even there.
 
@@ -1436,7 +1444,7 @@ A reachable scorer is the shortest path to reward. In the METR runs, the task wh
 
 ::: {.fallacy-pitfall}
 
-**Fallacy:** *A bigger group is the way to extract signal from hard tasks.*
+**Fallacy**: *A bigger group is the way to extract signal from hard tasks.*
 
 Doubling the group raises the chance that a group carries any contrast, but it raises the rollout bill faster. At a `{python} RolloutBudget.p_hard_str` pass rate, groups of `{python} RolloutBudget.group_str` spend `{python} RolloutBudget.per_info_hard_str` rollouts per informative group and groups of `{python} RolloutBudget.group_big_str` spend `{python} RolloutBudget.per_info_big_str`; selecting tasks near a `{python} RolloutBudget.p_target_str` pass rate spends `{python} RolloutBudget.per_info_target_str` (notebook \ref{nbk-16-rollout-budget}). Steer the task mix first, record the steering, and grow $G$ only where the pass rate is already moderate.
 
@@ -1444,7 +1452,7 @@ Doubling the group raises the chance that a group carries any contrast, but it r
 
 ::: {.fallacy-pitfall}
 
-**Pitfall:** *Reading longer self-correction text as evidence of better reasoning.*
+**Pitfall**: *Reading longer self-correction text as evidence of better reasoning.*
 
 Length can grow from the normalizer alone. Under per-rollout token averaging, a failing rollout of `{python} LengthCoefficient.short_str` tokens penalizes each token `{python} LengthCoefficient.ratio_mult_str` as hard as one of `{python} LengthCoefficient.long_str` tokens, so failures drift longer whether or not the added text checks anything (@eq-vol3-grpo-length-coefficient). Compare lengths by outcome, rerun under the constant-denominator objective, and judge revisions by the actions and task outcomes they produce under a matched budget, not by the narration of reconsidering.
 
@@ -1452,7 +1460,7 @@ Length can grow from the normalizer alone. Under per-rollout token averaging, a 
 
 ::: {.fallacy-pitfall}
 
-**Fallacy:** *Faster environment reset speeds training proportionally.*
+**Fallacy**: *Faster environment reset speeds training proportionally.*
 
 Reset is one term of the cycle. Cutting it from `{python} RolloutTime.cold_reset_str` to `{python} RolloutTime.snapshot_reset_str`, a `{python} RolloutTime.reset_ratio_mult_str` faster reset, raises slot capacity only `{python} RolloutTime.speedup_mult_str`, because `{python} RolloutTime.work_str` of model, tool, and assessment work remains in every cycle (notebook \ref{nbk-16-exploration-reset-goodput}). Even that gain becomes training updates only if inference, verification, and the trainer have the headroom to absorb it; find the saturated stage before optimizing any single one.
 
