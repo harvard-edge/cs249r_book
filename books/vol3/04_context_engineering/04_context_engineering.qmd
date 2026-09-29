@@ -50,7 +50,7 @@ A model call sees the information the runtime supplies, not the environment itse
 
 The connection-pool investigation now has more information than it started with. A controlled test recorded a connection becoming available while a waiter remained blocked. The timeout explanation has lost support, and missed notification is a working hypothesis. The next model call should use that progress. Replaying the investigation without distinguishing observations from proposals would instead present the rejected explanation alongside the evidence that weakened it.
 
-Continue the example with illustrative source and test version `r17`. The relevant files are `src/pool.py` and `tests/test_pool.py`; the controlled reproducer is `test_waiter_notified_on_return`. Before asking for a candidate repair, the runtime must decide which source excerpts, test observations, constraints, and unresolved questions belong in the next request. This is the **working-set decision**: selecting the information that supports the next bounded step.
+Continue the example with illustrative source and test version `r17`. The relevant files are `src/pool.py` and `tests/test_pool.py`; the controlled reproducer is `test_waiter_notified_on_return`. Before asking for a candidate repair, the runtime must decide which source excerpts, test observations, constraints, and unresolved questions belong in the next request. This is the **working-set decision**\index{Working-set decision!definition}: selecting the information that supports the next bounded step.
 
 The term comes from Denning's working-set model of program behavior [@denning1968]. Over any recent window, a running program references only a subset of its pages, and a memory manager that keeps that subset resident avoids thrashing while leaving the rest on backing store. The runtime faces the same question of what must be resident for the next step, with one difference that shapes the whole chapter. Denning's working set is measured from references the program has already made. The context working set must be chosen before the call, from a judgment about what the next decision depends on, and nothing in the model's behavior reports which staged tokens it used.
 
@@ -60,9 +60,9 @@ The term comes from Denning's working-set model of program behavior [@denning196
 *This chapter develops State through the selection, representation, and refresh of working context.*
 :::
 
-The selected context is not simply the latest messages. The user’s constraints may still matter after many tool calls, while a long recent log may contribute only a diagnostic and its conditions. Nor is it necessarily a subset of the conversation history. Current instructions, tool declarations, newly read source, and retrieved material can all contribute to the request. The runtime constructs an input representation from these sources; it does not turn that representation into the authoritative environment or a permit to act.
+Relevance, not recency, decides the selection. The user’s constraints may still matter after many tool calls, while a long recent log may contribute only a diagnostic and its conditions. The sources also extend beyond the conversation history: current instructions, tool declarations, newly read source, and retrieved material all contribute to the request. The runtime constructs an input representation from these sources, while the environment remains the authority on what is true and the runtime's controls remain the authority on what may be done.
 
-For this repair, a small context manifest identifies what the next invocation needs. The manifest in @tbl-vol3-context-manifest is an illustrative selection record, not a complete request serialization. Its source excerpts and observation payloads still need to be supplied where the decision requires their contents.
+For this repair, a **context manifest**\index{Context manifest!definition}, a record of the entries selected for the next invocation and why each is needed, identifies what that call requires. @Tbl-vol3-context-manifest is a selection record rather than a request serialization; the source excerpts and observation payloads it names are supplied in full where the decision depends on their contents.
 
 | Selected entry          | Content needed for the next step                                                                                                                                            |
 |:------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -77,7 +77,7 @@ For this repair, a small context manifest identifies what the next invocation ne
 
 Selection requires judgment about relevance. Keeping the failing observation but dropping its version would invite its use as evidence about a later patch. Keeping only “notification bug” would promote a hypothesis into a fact. Keeping only the latest source excerpt could omit the public-API constraint. Conversely, earlier speculative explanations need not retain their full narrative once their status and relevant evidence have been recorded. A model-generated summary can help construct this representation, but its claims still need to be checked against the available observations.
 
-The working context is also distinct from records retained outside the request. A raw test log may remain available through a stored handle, subject to retention, permissions, and tool access. The handle does not place the log’s contents in the model’s input. If a later decision needs an omitted assertion or configuration value, the runtime must retrieve it before relying on it. Keeping a record elsewhere and making its information available now are different decisions.
+The working context is also distinct from records retained outside the request. A raw test log may remain available through a **raw-payload handle**\index{Raw-payload handle!definition}, a reference to a retained record that an authorized tool can fetch, subject to retention, permissions, and tool access. The handle places a route to the log in the model's input, not the log's contents. If a later decision needs an omitted assertion or configuration value, the runtime must retrieve it before relying on it. Keeping a record elsewhere and making its information available now are different decisions.
 
 Selection must satisfy the invocation contract from @sec-vol3-foundation-model-tokenization. For an interface with a combined input/output limit, the final serialized input length $S$ must satisfy $S \leq S_{\max} - K_{\max}$, where $K_{\max}$ is the reserved output allowance. Independent input or output limits also apply when the interface specifies them. Count the completed request, including message framing and tool declarations, rather than summing independently tokenized fragments. A shorter evidence digest does not free its apparent token savings if the surrounding serialization adds them back.
 
@@ -93,23 +93,116 @@ Here $S_{\text{system}}$ covers application instructions, $S_{\text{tools}}$ the
 ![](images/svg/context_working_set_dynamics.svg)
 :::
 
+```{python}
+#| label: calc-vol3-usable-context-budget
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EVIDENCE BUDGET OF A REPAIR REQUEST (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-context-budget-partition; nbk-04-evidence-budget.
+# │ Goal: Show how many appended turns fit before observations overflow.
+# │ Show: Evidence share, turns that fit, per-turn digest for the full horizon,
+# │       and the input bill of appending vs. selecting over the horizon.
+# │ How: Registry window and step budget; scenario sizes for the four terms.
+# │ Note: Scenario token counts are serialized-request stipulations, not
+# │       measurements of any product; bills assume no prefix reuse.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
+
+class UsableContextBudget:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    agent = Agents.Coding.SWE_Bench_Runner
+    window = int(agent.context_window.to(ureg.token).magnitude)  # registry window
+    horizon = agent.max_trajectory_steps  # registry step budget, turns
+    output_reserve = 8_000  # scenario K_max, tokens
+    system_tokens = 3_000  # scenario application instructions
+    tool_tokens = 12_000  # scenario tool declarations
+    state_tokens = 24_000  # scenario constraints, progress record, excerpts
+    obs_per_turn = 4_000  # scenario tool-result tokens appended per turn
+    obs_selected = 8_000  # scenario observation share a selecting policy keeps
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    input_limit = window - output_reserve
+    evidence = input_limit - system_tokens - tool_tokens
+    evidence_share = evidence / window
+    obs_budget = evidence - state_tokens
+    turns_fit = obs_budget // obs_per_turn
+    turns_fit_half = obs_budget // (obs_per_turn // 2)
+    digest_max = obs_budget // horizon
+    fixed = system_tokens + tool_tokens + state_tokens
+    append_bill = horizon * fixed + obs_per_turn * horizon * (horizon + 1) // 2
+    select_bill = horizon * (fixed + obs_selected)
+    bill_ratio = append_bill / select_bill
+    window_needed = fixed + horizon * obs_per_turn + output_reserve
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(turns_fit < horizon <= turns_fit_half, "Appending overflows inside the step budget; halving fits it")
+    check(fixed + obs_selected <= input_limit, "The selecting policy fits every turn")
+    check(window_needed > window, "The appending policy's last request exceeds the window")
+    check(1.5 < bill_ratio < 3, "Appending bills roughly twice the selected input")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    window_str = fmt_int(window)
+    horizon_str = fmt_int(horizon)
+    reserve_str = fmt_int(output_reserve)
+    system_str = fmt_int(system_tokens)
+    tool_str = fmt_int(tool_tokens)
+    state_str = fmt_int(state_tokens)
+    obs_str = fmt_int(obs_per_turn)
+    obs_half_str = fmt_int(obs_per_turn // 2)
+    obs_selected_str = fmt_int(obs_selected)
+    input_limit_str = fmt_int(input_limit)
+    evidence_str = fmt_int(evidence)
+    evidence_pct_str = fmt_percent(evidence_share, style="prose", precision=1)
+    obs_budget_str = fmt_int(obs_budget)
+    turns_fit_str = fmt_int(turns_fit)
+    overflow_turn_str = fmt_int(turns_fit + 1)
+    turns_fit_half_str = fmt_int(turns_fit_half)
+    digest_max_str = fmt_int(digest_max)
+    append_bill_str = fmt_int(append_bill)
+    select_bill_str = fmt_int(select_bill)
+    bill_mult_str = fmt_multiple(bill_ratio, precision=1)
+    window_needed_str = fmt_int(window_needed)
+```
+
+::: {#nbk-04-evidence-budget .callout-notebook title="How much of the window is evidence"}
+
+**Problem**: The reference repair harness has a `{python} UsableContextBudget.window_str`-token context window and a `{python} UsableContextBudget.horizon_str`-turn step budget. A runtime reserves `{python} UsableContextBudget.reserve_str` tokens for output and spends `{python} UsableContextBudget.system_str` on application instructions and `{python} UsableContextBudget.tool_str` on tool declarations. Task state, meaning the constraints, progress record, and selected excerpts, takes `{python} UsableContextBudget.state_str`. If every tool result is appended at `{python} UsableContextBudget.obs_str` tokens per turn, how many turns fit, and what per-turn observation size would carry the whole step budget?
+
+**Variables**: The window and step budget come from the registry's repository-repair harness profile. The four term sizes and the per-turn observation are scenario stipulations for fully serialized requests.
+
+**Math**: By @eq-vol3-context-budget-partition, the input limit is `{python} UsableContextBudget.window_str` − `{python} UsableContextBudget.reserve_str` = `{python} UsableContextBudget.input_limit_str` tokens. Removing instructions and declarations leaves `{python} UsableContextBudget.evidence_str` tokens, `{python} UsableContextBudget.evidence_pct_str` of the window, for state and observations. Removing the state leaves `{python} UsableContextBudget.obs_budget_str` tokens for observations, enough for `{python} UsableContextBudget.obs_budget_str` / `{python} UsableContextBudget.obs_str` = `{python} UsableContextBudget.turns_fit_str` appended turns. Carrying all `{python} UsableContextBudget.horizon_str` turns requires at most `{python} UsableContextBudget.obs_budget_str` / `{python} UsableContextBudget.horizon_str` = `{python} UsableContextBudget.digest_max_str` tokens per turn.
+
+**Result**: The appending policy overflows at turn `{python} UsableContextBudget.overflow_turn_str` of `{python} UsableContextBudget.horizon_str`.
+
+**Systems insight**: Turns that fit equal the observation budget divided by the per-turn observation, so the per-turn size is the knob. Halving each result to `{python} UsableContextBudget.obs_half_str` tokens with a digest raises the fit to `{python} UsableContextBudget.turns_fit_half_str` turns, past the step budget, and the design rule is to size the digest so that the horizon times the digest fits the observation budget. Fit is the smaller cost. Every appended token is re-read on every later call, so the attempt cost in the numerator of $C_{\text{eff}}$ (@eq-vol3-cost-per-accepted-task) grows with the square of the horizon under appending and linearly under selection.
+
+:::
+
 These limits constrain admission, not adequacy. The request may fit while omitting the return path needed to propose a repair. It may include every relevant excerpt while burying their version relationships among superseded material. The chapter therefore first distinguishes nominal capacity from usable context, then develops staging, compaction, progress records, and refresh policies. Its final evaluation asks whether those choices preserve the information needed for subsequent decisions.
 
 ## Working Set Capacity {#sec-vol3-context-engineering-physics}
 
 Suppose the runtime can fit both the selected repair evidence and the investigation’s complete transcript into a request. Should it include both? The answer depends on what the additional material contributes. An omitted synchronization contract could change the proposed repair; repeated timeout speculation may not. Request length alone cannot distinguish these cases.
 
-The **nominal context capacity** specifies how much the configured model interface accepts, subject to its input and generation limits. It does not specify how well the model will use a particular collection of instructions and evidence. That second question requires a task, a quality criterion, and measurements under stated conditions.
+The **nominal context capacity**\index{Nominal context capacity!definition} specifies how much the configured model interface accepts, subject to its input and generation limits. How well the model uses a particular collection of instructions and evidence is a second question, answered only by a task, a quality criterion, and measurements under stated conditions.
 
 ::: {#dfn-usable-working-context .callout-definition title="Usable working context"}
-The context content, organization, and length with which a specified model and invocation configuration meet a chosen quality criterion on a stated workload. Usability is established through evaluation; it is not a fixed fraction of the nominal context window or a guarantee for every task instance.
+
+***Usable working context***\index{Usable working context!definition} is the context content, organization, and length with which a specified model and invocation configuration meet a chosen quality criterion on a stated workload.
+
+1. **Significance**: It, rather than the nominal window, sets how much of the input allowance $S_{\max}-K_{\max}$ supports decisions, and therefore how many turns a trajectory runs before selection or compaction must intervene and how much input each accepted task pays for in $C_{\text{eff}}$.
+2. **Distinction**: Nominal capacity is a property of the interface that admits a request; usable working context is a property of a task, model, and representation that only evaluation establishes.
+3. **Common pitfall**: Treating a fixed fraction of the nominal window, or success on an isolated retrieval probe, as the usable context of a different workload.
+
 :::
 
-For a repair workload, the criterion might combine the fraction of candidate patches passing designated checks with compliance with the permitted edit scope. The check suite and its limitations must be stated. Passing a controlled reproducer does not establish correctness under every concurrent execution. A different workload, such as extracting an identifier from a document, needs a different criterion. Its measured usable context need not match the repair workload’s.
+For a repair workload, the criterion might combine the fraction of candidate patches passing designated checks with compliance with the permitted edit scope, with the check suite and its coverage stated. A different workload, such as extracting an identifier from a document, needs a different criterion, and its usable context is measured separately.
 
 ### What a capacity test establishes
 
-An isolated retrieval probe asks whether specified information can be found in an input. A repair decision also requires relating evidence to artifacts, preserving constraints, and distinguishing an observation from a proposed explanation. These are different test obligations, as @tbl-vol3-capacity-comparison shows. Retrieval probes remain useful, but success on one does not by itself validate the broader context policy.
+An isolated retrieval probe asks whether specified information can be found in an input. A repair decision also requires relating evidence to artifacts, preserving constraints, and distinguishing an observation from a proposed explanation. These are different test obligations, as @tbl-vol3-capacity-comparison shows. A retrieval probe locates one kind of failure quickly; validating the context policy takes the decision-level test.
 
 | Test obligation           | Isolated key-retrieval probe                        | Connection-pool repair decision                                                                               |
 |:--------------------------|:----------------------------------------------------|:--------------------------------------------------------------------------------------------------------------|
@@ -118,9 +211,9 @@ An isolated retrieval probe asks whether specified information can be found in a
 | Respect task constraints  | Meet the probe’s answer requirements.               | Propose a scoped change while preserving the public API and leaving untested behavior unresolved.             |
 | Establish success         | Compare the returned value with the probe’s target. | Apply the chosen candidate checks and scope criteria; report only what they establish.                        |
 
-: **Retrieval and decision scope**: A simple retrieval probe and the running repair example test different capabilities. This comparison does not characterize every long-context benchmark or predict a universal performance gap. {#tbl-vol3-capacity-comparison tbl-colwidths="[23,29,48]"}
+: **Retrieval and decision scope**: A simple retrieval probe and the running repair example test different capabilities. {#tbl-vol3-capacity-comparison tbl-colwidths="[23,29,48]"}
 
-Input organization can affect measured performance even when the needed information is present. In multi-document question answering and key-value retrieval experiments, @liu2024lost reported substantial sensitivity to the position of relevant information in the tested models, often with poorer performance in the middle of the input. This finding motivates testing placement on the intended workload. It does not establish a universal failure threshold, a fixed middle region that every model ignores, or a mechanism proving that longer context must reduce repair quality.
+Input organization can affect measured performance even when the needed information is present. In multi-document question answering and key-value retrieval experiments, @liu2024lost reported substantial sensitivity to the position of relevant information in the tested models, often with poorer performance in the middle of the input. This position sensitivity, known as **lost in the middle**\index{Lost in the middle!definition}, is the reason to test placement on the intended workload; its size and location vary with the model and task.
 
 A first-order mechanism still explains why added material cannot be assumed free. Within one attention head, a query assigns weight to each visible key through a softmax. For a target key with scaled logit $z_{\text{target}}$ among $n$ other keys with logits $z_j = \mathbf{q}\cdot\mathbf{k}_j/\sqrt{d_k}$, the target's weight is
 
@@ -172,17 +265,17 @@ class SoftmaxDilution:
 *Fixed-logit distractors shrink the target's share of one normalizer.*
 :::
 
-All weights share one normalizer. Every added key contributes a positive term to the denominator of @eq-vol3-softmax-dilution, so when the existing logits stay fixed, added tokens can only lower the target's share. In a toy head with a target logit of `{python} SoftmaxDilution.z_target_str` and every other logit at `{python} SoftmaxDilution.z_background_str`, the target holds `{python} SoftmaxDilution.alpha_short_pct_str` of the weight among `{python} SoftmaxDilution.short_len_str` keys and `{python} SoftmaxDilution.alpha_long_pct_str` among `{python} SoftmaxDilution.long_len_str`, although no single background key is individually competitive. Agent contexts make the effect worse than unrelated filler would. Earlier source reads, logs, and superseded test output share identifiers such as `waiter`, `connection`, and `timeout` with the evidence that matters, so their logits are not small. This is a sufficient condition for dilution under fixed logits, not a prediction of lost accuracy. Trained models sharpen logits, route evidence through many heads and layers, and learn position-dependent behavior, which is why @liu2024lost measured the effect rather than derived it. The same normalizer also makes the earliest tokens absorb attention regardless of content, a serving consequence that @sec-vol3-kvcache-intrasequence takes up. For context selection, the lesson is that every staged token competes with the evidence the next decision needs.
+All weights share one normalizer. Every added key contributes a positive term to the denominator of @eq-vol3-softmax-dilution, so when the existing logits stay fixed, added tokens can only lower the target's share. This is **attention dilution**\index{Attention dilution!definition}. In a toy head with a target logit of `{python} SoftmaxDilution.z_target_str` and every other logit at `{python} SoftmaxDilution.z_background_str`, the target holds `{python} SoftmaxDilution.alpha_short_pct_str` of the weight among `{python} SoftmaxDilution.short_len_str` keys and `{python} SoftmaxDilution.alpha_long_pct_str` among `{python} SoftmaxDilution.long_len_str`, although no single background key is individually competitive. Agent contexts make the effect worse than unrelated filler would. Earlier source reads, logs, and superseded test output share identifiers such as `waiter`, `connection`, and `timeout` with the evidence that matters, so their logits are not small. This is a sufficient condition for dilution under fixed logits, not a prediction of lost accuracy. Trained models sharpen logits, route evidence through many heads and layers, and learn position-dependent behavior, which is why @liu2024lost measured the effect rather than derived it. The same normalizer also makes the earliest tokens absorb attention regardless of content, a serving consequence that @sec-vol3-kvcache-intrasequence takes up. For context selection, the lesson is that every staged token competes with the evidence the next decision needs.
 
 ### Choosing a working budget
 
 To choose a budget, evaluate candidate context policies on representative tasks using the same model, invocation settings, tools, and checking procedure. A policy specifies more than a token count: it determines which material is selected, how it is represented, and where it appears. When attributing an effect to length or placement, hold the other relevant choices fixed where possible. Otherwise, the experiment compares complete policies rather than isolating one cause.
 
-Measure decision quality alongside input size, latency, and cost. Additional context may improve quality by supplying missing evidence, leave it unchanged, or make a decision harder. There is no need to assume a single smooth curve with one optimal length. An acceptable policy may work across several budgets, and different task families may require different selections. A reported operating range should therefore name the workload, configuration, quality threshold, and tested conditions.
+Measure decision quality alongside input size, latency, and cost. Additional context may improve quality by supplying missing evidence, leave it unchanged, or make a decision harder, so the quality curve need not be smooth or have a single optimum. An acceptable policy may work across several budgets, and different task families may require different selections. A reported operating range names the workload, configuration, quality threshold, and tested conditions.
 
-The resource consequence follows the model-call accounting in @sec-vol3-foundation-model-cost. Additional uncached input requires additional processing; compatible prefix reuse can change the amount of repeated work. Neither a cache hit nor a low input cost establishes that the context is current or useful. Conversely, removing evidence merely to reduce processing can worsen the next decision. The task is to meet the chosen quality criterion within the available resource budget, not to minimize tokens without regard to their contents.
+The resource consequence follows the model-call accounting in @sec-vol3-foundation-model-cost. Additional uncached input requires additional processing, and compatible prefix reuse reduces repeated work. A cache hit or a low input price says nothing about whether the context is current or useful, and removing evidence to cut processing can worsen the next decision. The objective is the chosen quality criterion at the least resource cost, which is exactly the ratio $C_{\text{eff}}$ of @eq-vol3-cost-per-accepted-task: a token removed lowers the attempt cost in its numerator, and a needed fact removed lowers the acceptance probability $p_{\text{acc}}$ in its denominator.
 
-In the repair example, preserving a large old transcript is unnecessary if the selected excerpts, scoped observation, constraints, and hypothesis status support the next proposal. But deleting a required interface or test condition to fit a smaller budget is not a successful optimization. If no evaluated policy meets both the task criterion and the available budget, the runtime must obtain missing information, narrow the next permitted step, or report the limitation. It cannot infer adequate context from a successful request-admission check.
+In the repair example, a large old transcript earns no place once the selected excerpts, scoped observation, constraints, and hypothesis status support the next proposal. Deleting a required interface or test condition to fit a smaller budget, however, is a failed optimization. If no evaluated policy meets both the task criterion and the available budget, the runtime obtains the missing information, narrows the next permitted step, or reports the limitation; a successful request-admission check never certifies adequate context.
 
 Having selected the material and its working budget, the runtime still has to turn it into a request. The next section considers that staging decision: how to preserve source roles and evidence relationships while arranging stable and changing content for repeated invocations.
 
@@ -194,7 +287,7 @@ For the connection-pool repair, the next request needs the constraint to preserv
 
 ### Ordering by change rate
 
-A useful layout places infrequently changing material before frequently changing material. We will call these regions the *root*, *trunk*, and *leaf*. They describe relative change rates, not different kinds of memory or levels of authority. @Tbl-vol3-context-zone-stratification maps the repair's selected working set into this order.
+A useful layout places infrequently changing material before frequently changing material. We call these regions the **root**, **trunk**, and **leaf**\index{Context zones!definition}. They describe relative change rates, not different kinds of memory or levels of authority. @Tbl-vol3-context-zone-stratification maps the repair's selected working set into this order.
 
 | Zone  | Contents in the repair request                                                                                           | When it changes                                                                       |
 |:------|:-------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------|
@@ -206,19 +299,45 @@ A useful layout places infrequently changing material before frequently changing
 
 The root is stable only while its contents remain correct. A changed tool definition belongs in the next request even if updating it prevents reuse of earlier computation. Likewise, after a candidate patch creates revision `r18`, the runtime must not keep staging `r17` source as the current file merely to preserve the trunk. The old test failure remains evidence about `r17`; whether it describes the patched workspace requires another check. The invalidation section develops that distinction.
 
-The layout does not require every observation to remain in the leaf. A test result that continues to support the task may enter the progress record when the trunk is refreshed. Its source, version, and scope must survive that move. Conversely, a newly changed application instruction does not become less authoritative because it changes frequently. Placement answers when content changes; message roles and provenance answer where it came from and how the runtime presents it.
+Observations can leave the leaf. A test result that continues to support the task may enter the progress record when the trunk is refreshed, provided its source, version, and scope survive the move. Conversely, a newly changed application instruction keeps its full authority however often it changes. Placement answers when content changes; message roles and provenance answer where it came from and how the runtime presents it.
 
 ### Preserving source and scope
 
-The host should stage an observation with enough metadata to interpret its payload. For the failing test, that means identifying the test, the workspace revision, the relevant configuration, and the fact that the observation came from a particular test execution. The result supports a claim about that controlled execution. It does not establish that every connection-pool operation fails, nor that a proposed fix will preserve all other behavior.
+The host should stage an observation with enough metadata to interpret its payload. For the failing test, that means identifying the test, the workspace revision, the relevant configuration, and the fact that the observation came from a particular test execution. The result supports a claim about that controlled execution and no broader one.
 
-This framing must be constructed by the runtime, not accepted from text inside the observation. A standard serializer can encode payload text as a field value while the host supplies the surrounding source metadata. Correct encoding prevents quotes or closing delimiters in that text from changing the structure of the host's record. It does not guarantee that the model will ignore instructions embedded in the payload. A file or tool response may contain misleading directions even when its origin is accurately recorded.
+The runtime constructs this framing itself rather than accepting it from text inside the observation. A standard serializer encodes payload text as a field value while the host supplies the surrounding source metadata, so quotes or closing delimiters in the text cannot change the structure of the host's record. The payload remains an **untrusted span**\index{Untrusted span!definition}: text whose origin the runtime can record but whose content it did not author and cannot vouch for. Encoding keeps such a span in its field, yet the model may still follow an instruction the span contains, however accurately its origin is recorded.
 
-Source labels therefore support interpretation, not permission enforcement. Moving repository text into the trunk does not turn it into an application instruction, and labeling tool output as data does not authorize the actions it requests. The runtime must enforce the approved workspace and no-deployment boundary outside the model's text interpretation. Staging preserves the distinction between instructions and evidence; it is not a substitute for the action controls developed in @sec-vol3-security.
+Source labels therefore support interpretation, not permission enforcement. Moving repository text into the trunk leaves it repository text, and labeling tool output as data grants nothing the output requests. The runtime enforces the approved workspace and no-deployment boundary outside the model's text interpretation. Staging preserves the distinction between instructions and evidence, and the action controls of @sec-vol3-security enforce it.
+
+How much of a request is untrusted, and how fast its evidence grows or goes stale, depends on the workload. The repair agent reads mostly its own workspace; the volume's other recurring workloads fill the same budget with different material.
+
+::: {#lhs-04-context-by-archetype .callout-lighthouse title="Context by archetype"}
+
+```{=latex}
+\begin{minipage}{1\linewidth}
+```
+Each recurring workload loads a different term of @eq-vol3-context-budget-partition, and a different mechanism in this chapter answers it, as @tbl-vol3-context-by-archetype shows.
+
+| **Lighthouse**        | **What fills the request**                                                                                                                                | **Binding constraint**                                                    | **Mechanism that answers it**                                                          |
+|:----------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------|:---------------------------------------------------------------------------------------|
+| **Repair agent**      | Source excerpts, test logs, and a progress record from its own workspace, accumulating over a `{python} UsableContextBudget.horizon_str`-turn step budget | Growth of $S_{\text{obs}}$ displacing $S_{\text{state}}$                  | Compaction and progress records (@sec-vol3-context-engineering-compaction)             |
+| **Research agent**    | Retrieved pages and search results written by third parties                                                                                               | Untrusted spans that dominate $S_{\text{obs}}$ and may carry instructions | Provenance-preserving staging here; enforcement in @sec-vol3-security                  |
+| **Remediation agent** | Readings of shared production state that other actors change                                                                                              | Staleness between the read and the action                                 | Invalidation and action-time preconditions (@sec-vol3-context-engineering-context-rot) |
+| **Support agent**     | Fixed policy instructions and tool declarations, one customer record, a short session                                                                     | $S_{\text{system}}+S_{\text{tools}}$ repeated across many short sessions  | A stable root for prefix reuse (@sec-vol3-context-engineering-staging)                 |
+
+: **Context by archetype**: The four recurring workloads bind on different terms of the same input budget. {#tbl-vol3-context-by-archetype tbl-colwidths="[16,34,25,25]"}
+
+```{=latex}
+\end{minipage}
+```
+
+**Systems insight**: One budget equation binds on a different term for each workload: growth for the repair agent, provenance for the research agent, freshness for the remediation agent, and reuse of an unchanging root for the support agent. A context policy transfers between workloads only where the binding term is shared. Compaction that keeps a repair agent inside its step budget leaves a research agent's binding problem untouched, because a short request of third-party text is still untrusted.
+
+:::
 
 ### Preserving an exact prefix
 
-The ordering also affects repeated input processing. A serving system with prefix caching may reuse computation for a request's unchanged beginning instead of processing those tokens again. In a causal model, a token's computed state depends on the tokens before it. Once the requests differ, an otherwise identical suffix cannot simply reuse the old state as though its preceding context were unchanged. @Fig-vol3-context-zones traces where reuse ends across three consecutive calls under the root, trunk, and leaf order.
+The ordering also affects repeated input processing. A serving system with prefix caching (@sec-vol3-foundation-model-cost) may reuse computation for a request's unchanged beginning instead of processing those tokens again. In a causal model, a token's computed state depends on the tokens before it. Once the requests differ, an otherwise identical suffix cannot simply reuse the old state as though its preceding context were unchanged. @Fig-vol3-context-zones traces where reuse ends across three consecutive calls under the root, trunk, and leaf order.
 
 ::: {#fig-vol3-context-zones fig-env="figure" fig-pos="htb" fig-cap="**Reuse Ends at the First Changed Token**: Three consecutive requests follow the root, trunk, and leaf order of @tbl-vol3-context-zone-stratification, with the output reserve $K_{\max}$ beyond the input limit $S_{\max}-K_{\max}$. A new observation changes only the leaf, so the root and trunk remain a reusable prefix. Refreshing the trunk to r18 moves the first changed token to the end of the root, and every later token is processed again. The figure assumes compatible cached state on the serving side; an identical prefix alone does not guarantee reuse." fig-alt="Three horizontal request bars labeled call n cold start, call n plus 1 new observation, and call n plus 2 trunk refreshed. Each bar has root, trunk, and leaf segments followed by a hatched output reserve past a dotted input-limit line. In call n every segment is marked processed. In call n plus 1 the root and the trunk at r17 are marked prefix reused, and a red dashed line labeled first changed token sits at the leaf boundary. In call n plus 2 only the root is reused, the trunk is at r18, and the red dashed line sits at the root boundary. Headers name the zones above an axis running from changes rarely to changes every call."}
 ![](images/svg/context_staging_layout.svg)
@@ -228,7 +347,7 @@ The relevant equality is between token sequences in the final serialized request
 
 An exact token prefix is necessary but not sufficient for reuse. The serving system must still hold compatible cached state, computed for the appropriate model configuration, positions, and attention rules. Eviction or a configuration change may prevent reuse despite identical text. @Sec-vol3-kv-cache explains how the serving system stores and manages that state. Here the application-side obligation is to keep unchanged input genuinely unchanged, while refreshing information that the next decision needs.
 
-A per-call field near the beginning can shorten the matching prefix unnecessarily. Moving such a field toward the leaf preserves more of the unchanged beginning, provided message semantics are preserved. A changing timestamp does not necessarily eliminate the entire match: its label and some timestamp tokens may remain identical. A zero-length match requires a difference at the first token. The following calculation makes that stronger assumption explicitly so the two layouts can be compared without attributing a guaranteed outcome to ordinary timestamp formatting.
+A per-call field near the beginning shortens the matching prefix for no benefit. Moving such a field toward the leaf preserves more of the unchanged beginning, provided message semantics are preserved. A changing timestamp ends the match at its first changed token, so its label and leading digits may still match. The following calculation takes the extreme case, a difference at the first token, to bound the price of a volatile field at the front.
 
 ```{python}
 #| label: calc-vol3-context-layout-price
@@ -266,6 +385,7 @@ class ContextLayoutPrice:
     stable_cost = ((stable_prefill + cached_fraction * stable_cached) * token * input_price).to(USD)
     cost_ratio = (unstable_cost / stable_cost).to(ureg.dimensionless).magnitude
     prefill_ratio = unstable_prefill / stable_prefill
+    refresh_ratio = suffix_tokens / leaf_tokens  # trunk rewrite vs. warm call
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(warm_turns == 17, "Expected one cold call, two trunk changes, seventeen leaf changes")
@@ -297,27 +417,32 @@ class ContextLayoutPrice:
     stable_turn_usd_str = fmt_usd(stable_cost / turns, precision=3)
     cost_mult_str = fmt_multiple(cost_ratio, precision=1)
     prefill_mult_str = fmt_multiple(prefill_ratio, precision=1)
+    suffix_tokens_str = fmt_int(suffix_tokens)
+    refresh_int_str = fmt_int(refresh_ratio)
 ```
 
 ::: {#nbk-04-quantitative-impact-of-prefix-layout .callout-notebook title="Pricing a context layout across one trajectory"}
 
 **Problem**: A coding agent makes `{python} ContextLayoutPrice.turns_str` calls. Each fully serialized request contains a `{python} ContextLayoutPrice.root_tokens_str`-token root, a `{python} ContextLayoutPrice.trunk_tokens_str`-token trunk, and a `{python} ContextLayoutPrice.leaf_tokens_str`-token leaf, including framing tokens. These are stipulated token counts after assembly, not sums of independently tokenized fragments. The leaf is replaced on every call rather than appended indefinitely. The trunk is rewritten on `{python} ContextLayoutPrice.trunk_changes_str` calls after the first. Input costs a hypothetical `{python} ContextLayoutPrice.price_str` per million tokens, with cached reads billed at `{python} ContextLayoutPrice.cached_fraction_pct_str` of that price. What input bill follows from each layout?
 
-**Assumptions**: Both layouts have `{python} ContextLayoutPrice.context_tokens_str` tokens per request and `{python} ContextLayoutPrice.total_input_str` input tokens across the trajectory. In the unstable layout, the first token differs on every call and no prefix is reused. In the stable layout, the first call is cold; the two trunk rewrites first differ immediately after the root; the remaining `{python} ContextLayoutPrice.warm_turns_str` calls first differ immediately after the trunk. Compatible cached state remains available for every matching prefix. The calculation excludes output charges, cache-write charges, and other serving costs.
+**Variables**: Both layouts have `{python} ContextLayoutPrice.context_tokens_str` tokens per request and `{python} ContextLayoutPrice.total_input_str` input tokens across the trajectory. In the unstable layout, the first token differs on every call and no prefix is reused. In the stable layout, the first call is cold; the two trunk rewrites first differ immediately after the root; the remaining `{python} ContextLayoutPrice.warm_turns_str` calls first differ immediately after the trunk. Compatible cached state remains available for every matching prefix. The calculation excludes output charges, cache-write charges, and other serving costs.
 
 **Math**: The unstable layout processes all input without reuse and costs `{python} ContextLayoutPrice.unstable_cost_usd_str`. In the stable layout, the cold call processes the whole request, each trunk rewrite processes the trunk and leaf, and every remaining call processes only the leaf. The uncached count is `{python} ContextLayoutPrice.prefill_math` tokens. The remaining `{python} ContextLayoutPrice.stable_cached_str` tokens are reused, giving a token-weighted hit rate of `{python} ContextLayoutPrice.hit_rate_pct_str`. Billing uncached tokens at full price and reused tokens at the reduced price gives `{python} ContextLayoutPrice.stable_cost_usd_str` for the trajectory.
 
 **Result**: The average input bill is `{python} ContextLayoutPrice.stable_turn_usd_str` per call for the stable layout and `{python} ContextLayoutPrice.unstable_turn_usd_str` for the unstable layout. The unstable bill is `{python} ContextLayoutPrice.cost_mult_str` the stable bill, while its uncached-token count is `{python} ContextLayoutPrice.prefill_mult_str` as large. These are billing and token-count ratios, not latency speedups.
 
-**Systems insight**: Stable ordering can reduce repeated input work when the service can reuse the matching prefix. The saving depends on the actual matches, cache availability, and pricing rules. It never justifies retaining outdated content or changing the meaning of a message to preserve a cache hit.
+**Systems insight**: Once the prefix is stable, the leaf rather than the whole request sets the per-call input charge. A trunk rewrite processes `{python} ContextLayoutPrice.suffix_tokens_str` tokens, the uncached input of `{python} ContextLayoutPrice.refresh_int_str` leaf-only calls, so the design rule is to put every per-call field in the leaf and to rewrite the trunk only when an artifact or constraint it carries changes. The input share of the attempt cost in $C_{\text{eff}}$ falls by the bill ratio above, and $p_{\text{acc}}$ is unaffected only while the staged content stays current: a cache hit never justifies keeping outdated content.
 
 :::
 
 ::: {#chk-04-context-hierarchy .callout-checkpoint title="Checking the staged request"}
 
-- If a test result moves from the leaf into a refreshed progress record, what source, version, and scope must remain attached to it?
-- Why can a changing field near the start reduce prefix reuse without necessarily eliminating it?
-- After the source changes from `r17` to `r18`, why is keeping the old source in the trunk an incorrect optimization even if it increases the hit rate?
+A candidate patch has just moved the workspace from `r17` to `r18`, and the runtime is staging the next request.
+
+- [ ] **Provenance after promotion**: If a test result moves from the leaf into a refreshed progress record, what source, version, and scope must remain attached to it?
+- [ ] **Volatile fields**: Why does a changing field near the start shorten prefix reuse without necessarily eliminating it, and where should a per-call request identifier go?
+- [ ] **Trunk refresh estimate**: With the layout notebook's zone sizes, how many uncached input tokens does the trajectory pay if the trunk is rewritten on every fourth call after the first instead of twice? Compare the result with the unstable layout's count.
+- [ ] **Stale trunk**: After the source changes from `r17` to `r18`, why is keeping the old source in the trunk an incorrect optimization even when it raises the hit rate?
 
 :::
 
@@ -331,7 +456,7 @@ The connection-pool repair can accumulate repeated source reads, test setup mess
 
 ***Context compaction***\index{Context compaction!definition}\index{Working sets!compaction definition} replaces material in a working context with a shorter representation chosen for the task's next decisions.
 
-1. **Significance**: It creates room for new observations while retaining specified evidence, constraints, and unresolved obligations.
+1. **Significance**: It creates room for new observations inside the fixed input allowance $S_{\max}-K_{\max}$, so a trajectory can run past the turn at which appending would overflow while retaining specified evidence, constraints, and unresolved obligations.
 2. **Distinction**: A smaller representation is not necessarily equivalent to its source. Keeping a reference to omitted material makes recovery conditional on being able to retrieve and inspect it.
 3. **Common pitfall**: Treating a deterministic extractor, or a summary that contains all required field names, as proof that no relevant information was lost.
 
@@ -339,7 +464,7 @@ The connection-pool repair can accumulate repeated source reads, test setup mess
 
 ### Choosing what a shorter representation preserves
 
-Compaction methods differ in what they retain and what later work they require. They do not form a universal progression from harmless filtering to risky summarization. A regular expression produces a repeatable selection, but it can discard the only line that explains a failure. A source-code outline can preserve exact function signatures while removing the implementation needed to diagnose the notification bug. A model-written summary can retain the diagnosis while misreporting whether the repair was checked.
+Compaction methods differ in what they retain and what later work they require, and each fails in its own way, so none is uniformly safe. A regular expression produces a repeatable selection, but it can discard the only line that explains a failure. A source-code outline can preserve exact function signatures while removing the implementation needed to diagnose the notification bug. A model-written summary can retain the diagnosis while misreporting whether the repair was checked.
 
 @Tbl-compaction-spectrum compares the choices by their preservation obligations rather than by fixed reduction ratios. The useful choice depends on the next operation. Inspecting an interface may require only an outline; editing a synchronization path may require the relevant function bodies and their callers.
 
@@ -350,7 +475,7 @@ Compaction methods differ in what they retain and what later work they require. 
 | Deterministic extraction          | Matched log records, selected fields, source excerpts, or code outlines | Whether the extraction rule omitted relevant context, relationships, or implementation details |
 | Model-written summary             | A generated account of observations, hypotheses, and progress           | Whether each retained claim is supported and required details and uncertainty remain explicit  |
 
-: **Compaction representation choices**: Repeatability describes how a representation is produced; it does not establish that the representation preserves everything the task requires. {#tbl-compaction-spectrum}
+: **Compaction representation choices**: Repeatability describes how a representation is produced, not what it preserves. {#tbl-compaction-spectrum}
 
 The first three classes are built from a small set of deterministic techniques that a runtime can implement without a model call. @Tbl-vol3-compaction-techniques lists them with the evidence each can drop without any error being reported. The right-hand column carries the design information. Each technique is repeatable, and each is safe only when the next decision does not depend on what it removes.
 
@@ -366,7 +491,7 @@ The first three classes are built from a small set of deterministic techniques t
 
 : **Deterministic compaction techniques**: Each technique is repeatable, and each discards a characteristic kind of evidence without reporting it. The controlled-test log below shows the slicing row failing on the repair's own evidence. {#tbl-vol3-compaction-techniques tbl-colwidths="[24,38,38]"}
 
-Exact reversible compression preserves the source bytes, but an encoded archive generally must be decoded before its contents can serve as ordinary model input. A digest with a raw-payload handle follows a different contract: the full text is outside the prompt. The handle is useful only while retention, permissions, and the available inspection tool allow retrieval. Retrieval also spends time and request capacity. Neither technique makes omitted evidence immediately available to the next model call.
+Exact reversible compression preserves the source bytes, but an encoded archive generally must be decoded before its contents can serve as ordinary model input. A digest with a raw-payload handle follows a different contract: the full text is outside the prompt. The handle is useful only while retention, permissions, and the available inspection tool allow retrieval, and retrieval spends time and request capacity. With either technique, omitted evidence reaches the next model call only through an explicit decode or retrieval step.
 
 For the repair task, suppose the controlled test at `r17` emitted the illustrative excerpt in @lst-vol3-compaction-observation. Repeated progress messages have been abbreviated here; this is log text, not executable Python.
 
@@ -385,21 +510,21 @@ FAILED: assert waiter_resumed_at_notification_check
 
 A filter that keeps only lines containing `FAILED` would retain the assertion but omit the event ordering that makes it informative. A compact observation can instead state: “At `r17`, `test_waiter_notified_on_return` registered the waiter before returning a connection. The connection became available, but `assert waiter_resumed_at_notification_check` failed at the notification check.” The manifest also retains the source and test identities, the controlled-schedule configuration, and a handle to the raw trace if later inspection may be needed.
 
-The shorter account supports the missed-notification hypothesis under the tested conditions. It does not prove the complete cause of every reported timeout. The hypothesis remains separate from the observation. After a candidate patch produces `r18`, a passing reproducer belongs to `r18`; compaction must not merge that result with the historical `r17` failure into an unqualified “the bug is fixed.”
+The shorter account supports the missed-notification hypothesis under the tested conditions and keeps the hypothesis separate from the observation. After a candidate patch produces `r18`, a passing reproducer belongs to `r18`; compaction must not merge that result with the historical `r17` failure into an unqualified “the bug is fixed.”
 
 ### Task-scoped protected fields
 
-The runtime can name fields that a compaction pass must retain and check them against the source before replacing the working context. For this step of the repair, those fields include the tested artifact identities, test name, controlled event ordering, failed assertion, and check status. The task's constraints also remain present: preserve the public API, stay within the approved workspace, and do not deploy to production. A later step may require a particular function body or configuration value that the current digest does not contain.
+The runtime can name **protected fields**\index{Protected field!definition}, fields that a compaction pass must retain, and check them against the source before replacing the working context. For this step of the repair, those fields include the tested artifact identities, test name, controlled event ordering, failed assertion, and check status. The task's constraints also remain present: preserve the public API, stay within the approved workspace, and do not deploy to production. A later step may require a particular function body or configuration value that the current digest does not contain.
 
 Not every protected field arrives in the task contract. Some are discovered. Suppose the reproducer fails only under the controlled waiter-before-return schedule and passes under the default scheduler. No instruction states that condition; it exists only in tool results. A summary that records "the waiter test failed" and drops the schedule leaves the next call free to run the default configuration, observe a pass on unpatched code, and conclude that the defect is gone. The runtime therefore promotes a condition into the protected-field inventory when a tool result establishes that the task's evidence depends on it, and records the observation that supports it. The promoted field then receives the same audit as a contract constraint, and it can be revisited if the environment that produced it changes.
 
 Protection is therefore task-scoped. Keeping every historical line number and identifier would consume the capacity compaction is meant to release, while keeping only a fixed list of field names could miss an important relation. An assertion without its source version, or a result without the conditions that produced it, can be copied exactly and still mislead. Credentials and other secrets should not be retained merely because they are exact strings; preserve only the authorized information needed for the task.
 
-Protected-field validation can detect a missing test name, an altered literal, or a result attached to the wrong recorded version. It cannot establish that the designer selected every relevant field, that a retained observation is sufficient for the next decision, or that the model will use it correctly. Before dropping a payload, the runtime needs a disposition for information it has not retained: deliberately unnecessary for the next step, available through an authorized retrieval path, or unavailable and therefore a limit on what the agent can conclude. If an omitted detail becomes necessary and retrieval fails, the agent must obtain new evidence or report the limitation rather than reconstructing a plausible trace.
+Protected-field validation detects a missing test name, an altered literal, or a result attached to the wrong recorded version. Whether the designer selected every relevant field, and whether the model uses the retained ones, are questions for evaluation (@sec-vol3-context-engineering-evaluation). Before dropping a payload, the runtime needs a disposition for information it has not retained: deliberately unnecessary for the next step, available through an authorized retrieval path, or unavailable and therefore a limit on what the agent can conclude. If an omitted detail becomes necessary and retrieval fails, the agent must obtain new evidence or report the limitation rather than reconstructing a plausible trace.
 
 ### Scheduling compaction within the request budget
 
-A runtime can separate a high watermark that triggers compaction from a lower target length after compaction. This separation, called *hysteresis*, allows new observations to accumulate without rewriting the context after every small addition. A narrow gap can make compaction frequent. Raising the high watermark allows longer requests, whereas lowering the target creates headroom by shortening the retained representation further. The choice also depends on whether the retained context remains useful for the task, not only whether its tokens fit.
+A runtime can separate a high watermark that triggers compaction from a lower target length after compaction. This separation, called **hysteresis**\index{Hysteresis!compaction watermarks}, allows new observations to accumulate without rewriting the context after every small addition. A narrow gap can make compaction frequent. Raising the high watermark allows longer requests, whereas lowering the target creates headroom by shortening the retained representation further. The choice also depends on whether the retained context remains useful for the task, not only whether its tokens fit.
 
 For the following local calculation, let $\tau_{\text{high}}$ and $\tau_{\text{low}}$ be these two input-token counts. Both include the complete serialized request: instructions, tool descriptions, retained history, and serialization overhead. Reserve $K_{\max}$ output tokens within the combined window $S_{\max}$ before selecting the watermarks, so $\tau_{\text{low}} < \tau_{\text{high}} \le S_{\max} - K_{\max}$. The watermarks are policy settings, not universal attention thresholds.
 
@@ -409,7 +534,7 @@ $$
 n_{\text{cycle}} = \left\lceil \frac{\tau_{\text{high}} - \tau_{\text{low}}}{\Delta S_{\text{turn}}} \right\rceil.
 $$ {#eq-vol3-hysteretic-compaction-cadence}
 
-The pre-compaction length is $\tau_{\text{low}} + n_{\text{cycle}}\Delta S_{\text{turn}}$. It may exceed the high watermark by less than one arrival. A trigger checked after an addition is not a hard upper bound on length. When arrivals vary, the constant-arrival calculation gives no guarantee about the next observation; the runtime must bound or stage that observation and check the resulting request before submission. Any model call used to compact the material also needs its own input and output budget.
+The pre-compaction length is $\tau_{\text{low}} + n_{\text{cycle}}\Delta S_{\text{turn}}$, which overshoots the high watermark by less than one arrival, so a trigger checked after an addition is a soft bound. When arrivals vary, the runtime bounds or stages each observation and checks the assembled request before submission. A model call used for compaction needs its own input and output budget.
 
 ```{python}
 #| label: calc-vol3-compaction-cadence
@@ -442,6 +567,7 @@ class CompactionCadence:
     combined_at_trigger = trigger_length + output_reserve
     narrow_cadence = ceil((high - narrow_low) / arrival)
     narrow_trigger = narrow_low + narrow_cadence * arrival
+    frequency_ratio = cadence / narrow_cadence  # passes per turn, narrow vs. wide
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(0 < low < narrow_low < high <= input_limit, "Ordered watermarks")
@@ -465,21 +591,22 @@ class CompactionCadence:
     combined_str = fmt_int(combined_at_trigger)
     narrow_low_str = fmt_int(narrow_low)
     narrow_cadence_str = fmt_int(narrow_cadence)
+    frequency_mult_str = fmt_multiple(frequency_ratio, precision=0)
 ```
 
 ::: {#nbk-04-token-budget-compaction-and-roofline .callout-notebook title="Spacing compaction passes"}
 
 **Problem**: An illustrative runtime has a `{python} CompactionCadence.window_str`-token combined window and reserves `{python} CompactionCadence.reserve_str` tokens for output, leaving `{python} CompactionCadence.limit_str` tokens for serialized input. It compacts to `{python} CompactionCadence.low_str` input tokens and triggers another pass at `{python} CompactionCadence.high_str`. How often does compaction occur if each turn adds `{python} CompactionCadence.arrival_str` net input tokens?
 
-**Model**: Each compaction reaches the same target exactly. Arrivals are constant and include all net changes to the serialized input. The runtime checks after each addition and before the next call. These are hypothetical policy settings, not measured quality thresholds or recommended watermark fractions.
+**Variables**: Each compaction reaches the same target exactly. Arrivals are constant and include all net changes to the serialized input. The runtime checks after each addition and before the next call. The watermarks are hypothetical policy settings, not measured quality thresholds.
 
-**Calculation**: Rounding up in @eq-vol3-hysteretic-compaction-cadence gives `{python} CompactionCadence.cadence_str` additions between passes. The trigger is reached at `{python} CompactionCadence.trigger_str` input tokens, overshooting the high watermark by `{python} CompactionCadence.overshoot_str`. Including the output reserve requires `{python} CompactionCadence.combined_str` tokens, which fits the window even before this compaction pass. If the lower target instead rises to `{python} CompactionCadence.narrow_low_str` tokens, with the same trigger and arrivals, the interval shrinks to `{python} CompactionCadence.narrow_cadence_str` additions.
+**Math**: Rounding up in @eq-vol3-hysteretic-compaction-cadence gives `{python} CompactionCadence.cadence_str` additions between passes. The trigger is reached at `{python} CompactionCadence.trigger_str` input tokens, overshooting the high watermark by `{python} CompactionCadence.overshoot_str`. Including the output reserve requires `{python} CompactionCadence.combined_str` tokens, which fits the window even before this compaction pass. If the lower target instead rises to `{python} CompactionCadence.narrow_low_str` tokens, with the same trigger and arrivals, the interval shrinks to `{python} CompactionCadence.narrow_cadence_str` additions.
 
-**Interpretation**: More headroom between watermarks reduces compaction frequency under these assumptions. It does not establish that the shorter representation preserves enough evidence, that the larger one degrades quality, or that either setting minimizes cost. Those decisions require evaluating the context policy on the task.
+**Systems insight**: Compaction frequency scales with the arrival rate divided by the watermark gap. Narrowing the gap from `{python} CompactionCadence.cadence_str` arrivals to `{python} CompactionCadence.narrow_cadence_str` makes compaction `{python} CompactionCadence.frequency_mult_str` as frequent, and the compaction charge amortized per turn in @eq-vol3-hysteretic-compaction-cost rises by the same factor; a gap under one arrival compacts on every turn. Set the gap to several arrivals, and lower the target only as far as the protected fields allow, since how much evidence survives is decided by evaluation, not by the watermarks.
 
 :::
 
-Compaction can also change repeated-input costs. Rewriting an early part of a request can prevent reuse of the old prefix beyond the change, while an unchanged leading portion may still be reusable under compatible serving conditions. The effect is not necessarily a total cache miss, and a token-count reduction is not a measured latency reduction.
+Compaction also changes repeated-input costs. Rewriting an early part of a request ends reuse at the first changed token, while the unchanged leading portion stays reusable under compatible serving conditions (@fig-vol3-context-zones).
 
 For a cycle containing $n_{\text{cycle}}$ ordinary calls and one compaction pass, let $C_{\text{call},i}$ be the dollar cost of ordinary call $i$, including its actual cached and uncached input charges and output charge. Let $C_{\text{comp}}$ be the dollar cost of the compaction pass under the same accounting boundary. The average cost per ordinary call in this local model is
 
@@ -487,7 +614,7 @@ $$
 \bar{C}_{\text{turn}} = \frac{\sum_{i=1}^{n_{\text{cycle}}} C_{\text{call},i} + C_{\text{comp}}}{n_{\text{cycle}}}.
 $$ {#eq-vol3-hysteretic-compaction-cost}
 
-If an input-prefix rewrite increases a later call's uncached charge, that increase is already in $C_{\text{call},i}$ in @eq-vol3-hysteretic-compaction-cost; adding a separate cache-recomputation charge would count it twice. Comparing policies also requires costs outside this narrow model, including retrieval, repeated checks, and failures caused by missing evidence. The least expensive compaction pass need not produce the least expensive accepted repair.
+If an input-prefix rewrite increases a later call's uncached charge, that increase is already in $C_{\text{call},i}$ in @eq-vol3-hysteretic-compaction-cost; adding a separate cache-recomputation charge would count it twice. Comparing policies also requires costs outside this narrow model, including retrieval, repeated checks, and failures caused by missing evidence. The least expensive compaction pass need not produce the least expensive accepted repair, so the policy to choose is the one that minimizes $C_{\text{eff}}$, not $\bar{C}_{\text{turn}}$.
 
 A shorter observation represents one part of the task's progress. Continuing the repair also requires the current candidate, which checks support it, what remains untested, and the next bounded step. Those relationships must survive when the surrounding narrative leaves the request; a structured progress record makes them explicit.
 
@@ -495,7 +622,7 @@ A shorter observation represents one part of the task's progress. Continuing the
 
 The connection-pool repair has moved from a failing observation at `r17` to a candidate patch at `r18`. A compact summary that says "fixed the notification bug" loses the distinction the next decision needs. The controlled test on `r17` observed a connection becoming available while a waiter remained blocked. A reproducer passing on `r18` supplies evidence about that patched version under the tested conditions, while broader behavior remains unresolved. Once the detailed conversation leaves the prompt, the next call still needs to distinguish those observations from the working diagnosis and from an accepted repair.
 
-A structured progress record preserves this continuation state in named fields. It carries the current task requirements, relevant observations, hypotheses, artifact identities, and unfinished work without repeating every exchange that produced them. The structure makes specified omissions and contradictions easier to detect. It does not establish that the selected information is complete or that a generated description is true. A record useful for choosing the next step is also not an execution checkpoint: storing it does not preserve a running process, restore an edited workspace, or resolve an outstanding tool operation.
+A **structured progress record**\index{Structured progress record!definition} preserves this continuation state in named fields. It carries the current task requirements, relevant observations, hypotheses, artifact identities, and unfinished work without repeating every exchange that produced them. The structure makes specified omissions and contradictions detectable, while completeness and truth still need the audit developed below. The record is a continuation record rather than an execution checkpoint: it carries what the next call should know, and preserving a running process, an edited workspace, or an outstanding tool operation belongs to @sec-vol3-persistence-checkpointing.
 
 ### Recording what is known and what remains open
 
@@ -517,9 +644,9 @@ For our repair, the task still requires preserving the public API, staying withi
 
 : **A progress record for continuation**: Named fields preserve the difference between historical evidence, the current candidate, and work still needed. Field presence alone does not establish semantic fidelity. {#tbl-vol3-checkpoint-schema tbl-colwidths="[20,44,36]"}
 
-The observations remain scoped to their versions. The failure at `r17` is useful historical evidence even after the source changes. It does not say that `r18` still fails, just as a reproducer passing at `r18` does not establish that every later edit passes. A milestone should therefore name the operation and observed result rather than claim unrestricted success. "Reproducer passed on `r18`" preserves a checkable event; "race condition eliminated" extends beyond what the event establishes.
+The observations remain scoped to their versions. The failure at `r17` stays useful historical evidence after the source changes and describes `r17` only, just as a reproducer passing at `r18` describes `r18` only. A milestone should therefore name the operation and observed result rather than claim unrestricted success. "Reproducer passed on `r18`" preserves a checkable event; "race condition eliminated" extends beyond what the event establishes.
 
-Raw-payload handles preserve a route back to omitted detail, not the detail itself. The next call can use that route only through an available, permitted retrieval operation, while the payload remains retained. If the next decision needs an exact assertion or source fragment, the runtime must include it or admit a bounded retrieval step. A handle to an unavailable payload cannot supply the missing evidence. Credentials and other secrets should not be copied into the prompt merely to make a record appear self-contained.
+Raw-payload handles preserve a route back to omitted detail, not the detail itself. The next call can use that route only through an available, permitted retrieval operation, while the payload remains retained. If the next decision needs an exact assertion or source fragment, the runtime includes it or admits a bounded retrieval step.
 
 ### Auditing before replacing active history
 
@@ -527,9 +654,9 @@ A model-generated progress record is a candidate transformation of the available
 
 The audit needs a required-field inventory outside the candidate being audited. Otherwise, a summarizer could omit a constraint from both its record and its self-authored checklist and still pass a consistency test. The runtime can copy the current task constraints directly and compare required identifiers and assertion text against their sources. The inventory is task-scoped; identifying every fact a future decision might need remains a context-selection problem, not a property supplied by the schema.
 
-For claimed progress, the runtime resolves each evidence reference and compares the reported operation, result, and artifact versions with the recorded event. An absent result remains unknown. A failed command does not become a successful milestone because the summary describes the intended outcome. Nor does a nonzero exit status alone reveal the cause of failure. A diagnostic must support the specific conclusion drawn from it, and an unresolved diagnosis should remain labeled as such.
+For claimed progress, the runtime resolves each evidence reference and compares the reported operation, result, and artifact versions with the recorded event. An absent result remains unknown, a failed command stays failed whatever outcome the summary describes, and a nonzero exit status alone names no cause. A diagnostic must support the specific conclusion drawn from it, and an unresolved diagnosis should remain labeled as such.
 
-Suppose the proposed record says that the full regression suite passed on `r18`, but the available result names only `test_waiter_notified_on_return`. The audit can detect the mismatch and reject that claim. It can also detect a missing no-deployment constraint or a patch identity different from the artifact tested. It cannot infer from those checks that the record preserves every nuance of the source, that the test has adequate coverage, or that the model will obey the retained constraints. Those are separate questions about information fidelity, evidence sufficiency, and enforcement.
+Suppose the proposed record says that the full regression suite passed on `r18`, but the available result names only `test_waiter_notified_on_return`. The audit can detect the mismatch and reject that claim. It can also detect a missing no-deployment constraint or a patch identity different from the artifact tested. Fidelity to every nuance of the source, the test's coverage, and whether the model respects the retained constraints are separate questions, answered by evaluation and enforcement rather than by the audit.
 
 References require equally careful interpretation. A historical observation may legitimately name `r17` while the workspace holds `r18`; the version difference does not corrupt the historical record. A claim about the current workspace needs support applicable to the current artifacts and conditions. The audit should distinguish a missing historical payload from a valid old observation and from a current-state claim needing refresh. Treating all three as a hash mismatch would discard useful history without establishing present truth.
 
@@ -570,15 +697,15 @@ Against the proposed record above, check 2 rejects "full regression suite passed
 
 The runtime keeps the source material needed for the audit until it has decided whether the candidate is an adequate replacement. Removing narrative from the next prompt need not delete its retained payloads. If the audit fails, the runtime may report the specific mismatch and request a corrected record, or construct a narrower record directly from checked fields. These operations consume the remaining task budget. A retry policy must cap correction calls, retrieval work, and elapsed time rather than regenerate until a schema happens to pass.
 
-If the allowed corrections still leave essential evidence missing, the runtime cannot solve the problem by accepting the unsupported summary. It can retain a larger selected context if that context fits, retrieve a necessary source within the remaining allowance, or stop with an explicit unresolved handoff. If retrieval fails or no adequate context fits, that limitation must remain visible. Budget exhaustion bounds the continuation attempt; it does not establish summary fidelity or task completion.
+If the allowed corrections still leave essential evidence missing, the runtime retains a larger selected context if it fits, retrieves a necessary source within the remaining allowance, or stops with an explicit unresolved handoff that keeps the limitation visible. Accepting the unsupported summary is never among the options, and budget exhaustion ends the continuation attempt without certifying summary fidelity or task completion.
 
 ### Continuing from the record
 
-The next request combines the current contract, the audited progress record, and the fresh observations or source excerpts needed for its immediate decision. Stable serialization helps preserve an unchanged prefix when the inputs and serving configuration permit reuse. It does not require freezing a changed constraint or suppressing a new result. The fully assembled request still needs token accounting and generation headroom, including the framing around the record and any material retrieved through its handles.
+The next request combines the current contract, the audited progress record, and the fresh observations or source excerpts needed for its immediate decision. Stable serialization preserves an unchanged prefix when the inputs and serving configuration permit reuse, and a changed constraint or a new result takes precedence over that reuse. The fully assembled request still needs token accounting and generation headroom, including the framing around the record and any material retrieved through its handles.
 
 For the repair example, the next call can inspect the `r18` patch with the reproducer result and the unresolved compatibility requirement in view. It need not reread every discarded explanation of the timeout. If a later question depends on detail absent from the record, however, the runtime must obtain that detail or expose the gap. Repeated compaction should revisit source evidence where needed rather than treat an earlier summary as an unquestionable replacement for its sources.
 
-Persisting this record may make it available after an interruption, but availability alone does not make the task resumable. Restoring workspace state and deciding what to do about operations whose outcomes are uncertain require the execution-recovery contract developed in @sec-vol3-persistence-checkpointing. Context continuation makes a narrower promise: the next invocation receives the selected task state and evidence under their stated conditions. It promises neither bitwise regeneration of model output nor recovery of effects outside the prompt.
+Persisting this record may make it available after an interruption, but availability alone does not make the task resumable. Restoring workspace state and deciding what to do about operations whose outcomes are uncertain require the execution-recovery contract developed in @sec-vol3-persistence-checkpointing. Context continuation makes a narrower promise: the next invocation receives the selected task state and evidence under their stated conditions.
 
 ::: {#chk-04-context-compaction .callout-checkpoint title="Continuing after compaction"}
 
@@ -587,7 +714,7 @@ A candidate progress record says the repair is complete, while the retained evid
 - [ ] **Evidence scope**: Which claim should the audit reject, and which historical result should it retain?
 - [ ] **Constraint preservation**: How can the runtime check for a missing no-deployment requirement without relying on the summary's own checklist?
 - [ ] **Missing detail**: What conditions must hold before a raw-payload handle can supply an omitted assertion to the next call?
-- [ ] **Continuation limits**: If correction calls exhaust their allowance, which outcomes remain permissible without accepting unsupported progress?
+- [ ] **Correction budget**: If each rejected record costs one more call as large as the compaction pass and the policy caps corrections at two, what is the worst-case multiple on $C_{\text{comp}}$ in @eq-vol3-hysteretic-compaction-cost, and which outcomes remain permissible once the cap is reached?
 
 :::
 
@@ -595,9 +722,19 @@ A progress record preserves the distinctions needed to continue after old narrat
 
 ## Context Invalidation {#sec-vol3-context-engineering-context-rot}
 
-The connection-pool repair now has a candidate patch at `r18`, but its progress record still contains a failed test from `r17`. That failure remains evidence of what happened under the earlier source, test, and configuration. It does not establish that the patched implementation still fails. Context invalidation separates these uses of an observation so that the next request does not mistake historical evidence for a description of the current artifact.
+The connection-pool repair now has a candidate patch at `r18`, but its progress record still contains a failed test from `r17`. That failure remains evidence of what happened under the earlier source, test, and configuration, and says nothing yet about the patched implementation.
 
-The same distinction applies to source excerpts. An excerpt from `src/pool.py` at `r17` may explain the original missed-notification hypothesis, yet it cannot establish the exact code to edit at `r18`. The runtime must decide whether to retain that excerpt as history, replace it with current source, or omit it because the next decision no longer needs it. Invalidating current applicability does not require declaring the original observation false or deleting the record of the investigation.
+The same distinction applies to source excerpts. An excerpt from `src/pool.py` at `r17` may explain the original missed-notification hypothesis, yet the exact code to edit at `r18` requires a read of `r18`. The runtime decides whether to retain that excerpt as history, replace it with current source, or omit it because the next decision no longer needs it.
+
+::: {#dfn-context-invalidation .callout-definition title="Context invalidation"}
+
+***Context invalidation***\index{Context invalidation!definition} withdraws a staged observation's support for claims about current state when an artifact or condition it depends on changes, while keeping the observation as evidence about the state it recorded.
+
+1. **Significance**: A superseded observation that reaches a decision acts as an unchecked step error, which compounds over the horizon as in @eq-vol3-horizon-compounding; invalidation converts it into a refresh the runtime schedules before the decision.
+2. **Distinction**: Invalidation changes an observation's applicability, not its truth, and differs from deletion, which changes only what the request contains. The `r17` failure remains a true record of `r17`.
+3. **Common pitfall**: Treating a recent timestamp or an unexpired refresh interval as proof that an observation describes the current artifact.
+
+:::
 
 When the runtime skips this decision, stale context fails in three recognizable ways. In *offset drift*, an edit targets line numbers or byte ranges read at `r17`, but the patch that produced `r18` moved the code, so the edit either fails to apply or, under fuzzy matching, lands in the wrong function. In *ghost-symptom chasing*, the `r17` failure stays in the request as though it described the current code, and the model proposes another fix for a defect the patch may already have addressed. In *regression from old negative evidence*, a detailed early failure outweighs a brief later pass, and the model reverts or compensates for a change that the current check supports. @Lst-vol3-stale-offset-edit shows the first failure at the tool boundary. Each mode is a confusion of historical evidence with current state, which the dependency tracking below makes mechanical to prevent.
 
@@ -630,7 +767,7 @@ Derived conclusions inherit dependencies from their supporting observations. To 
 
 : **Dependencies and current applicability**: Each entry has a different reason to remain in, leave, or be refreshed within the repair's next request. {#tbl-vol3-context-tracking-schemas tbl-colwidths="[25,35,40]"}
 
-The runtime can compute this table rather than ask the model to maintain it. Each staged observation $o$ carries a binding to what it observed,
+The runtime can compute this table rather than ask the model to maintain it. Each staged observation $o$ carries an **observation binding**\index{Observation binding!definition} to what it observed,
 
 $$
 \lambda(o) = \langle \text{artifact}, \text{kind}, \text{revision}, \text{range}, \text{content id} \rangle,
@@ -642,19 +779,19 @@ naming the artifact, its kind (source file, test run, process, build output), th
 ![](images/svg/ch04-invalidation-graph.svg)
 :::
 
-A dependency record makes invalidation selective. Editing an unrelated documentation file need not invalidate the waiter/return trace's applicability to unchanged executable artifacts. Editing the test's assertion, a relevant configuration value, or the implementation it exercises does require reconsideration. When the runtime cannot identify the relevant dependencies reliably, it should conservatively widen the set of observations marked for refresh rather than treat an incomplete dependency list as proof of freshness.
+A dependency record makes invalidation selective. Editing an unrelated documentation file leaves the waiter/return trace applicable to the unchanged executable artifacts, while editing the test's assertion, a relevant configuration value, or the implementation it exercises requires reconsideration. When the dependencies are uncertain, the rule is to widen the set marked for refresh, because an incomplete dependency list is never proof of freshness.
 
-Content identifiers help establish whether the recorded inputs are the same. For a derived result, the runtime compares the identities of its dependencies with their recorded identities; it does not compare a test log's hash with a source file's hash. Even unchanged input files do not make a nondeterministic test result universal. Artifact identity, observation scope, and the uncertainty of the inference remain separate parts of the record.
+Content identifiers establish whether the recorded inputs are the same. For a derived result, the runtime compares the identities of its dependencies with their recorded identities, never a test log's hash with a source file's hash. Unchanged inputs still leave a nondeterministic test result a sample, so artifact identity, observation scope, and the uncertainty of the inference remain separate parts of the record.
 
 ### Detect changes and bound uncertainty
 
-The most direct change signal is a completed write through a tool controlled by the runtime. At the moment the candidate patch produces `r18`, the runtime can mark affected `r17` excerpts as historical and checks of the new implementation as pending. A subsequent result updates the status of the check actually performed. A requested or failed write does not prove that the artifact changed; the tool's outcome and, where needed, a follow-up read establish what happened. This update belongs in the runtime's evidence bookkeeping, not only in an instruction asking the model to remember that something changed.
+The most direct change signal is a completed write through a tool controlled by the runtime. At the moment the candidate patch produces `r18`, the runtime can mark affected `r17` excerpts as historical and checks of the new implementation as pending. A subsequent result updates the status of the check actually performed. A requested or failed write proves nothing about the artifact; the tool's outcome and, where needed, a follow-up read establish what happened. This update belongs in the runtime's evidence bookkeeping, not only in an instruction asking the model to remember that something changed.
 
-Other processes can also modify the environment. File metadata, such as size and modification time, provides inexpensive hints that a refresh may be needed, but is not a substitute for the relevant content or a trustworthy version identifier. Filesystem watchers can reduce the delay before a change is noticed, yet monitoring gaps and lost events can leave a tracked view incomplete. For example, Linux's inotify interface reports event-queue overflow and documents circumstances requiring consistency checks. [Linux inotify manual](https://man7.org/linux/man-pages/man7/inotify.7.html)
+Other processes can also modify the environment. File metadata, such as size and modification time, provides inexpensive hints that a refresh may be needed; the content or a trustworthy version identifier settles the question. Filesystem watchers shorten the delay before a change is noticed, yet monitoring gaps and lost events can leave a tracked view incomplete. For example, Linux's inotify interface reports event-queue overflow and documents circumstances requiring consistency checks. [Linux inotify manual](https://man7.org/linux/man-pages/man7/inotify.7.html)
 
-A time-to-live policy sets an age after which the runtime requests a refresh. An observation younger than that threshold may already be outdated; one older than it may still describe unchanged state. The threshold is therefore a refresh heuristic chosen for the task's change rate and cost of error, not a validity test. High-consequence decisions may require a fresh read even when no write, watcher event, or expiry has been reported.
+A **time-to-live**\index{Time-to-live!definition} (TTL) policy sets an age after which the runtime requests a refresh. An observation younger than that threshold may already be outdated, and one older than it may still describe unchanged state, so the TTL is a refresh heuristic chosen for the task's change rate and cost of error rather than a validity test. High-consequence decisions may require a fresh read even when no write, watcher event, or expiry has been reported.
 
-Refreshing before a model call also leaves an interval in which the world can change before the proposed action executes. The staged request cannot close that interval. Actions that depend on an unchanged version need an execution-time precondition or another appropriate control at the tool boundary; that mechanism belongs to tool execution rather than context assembly. Here, the context policy records the version on which the proposed action depends and avoids promising that a recent read guarantees action-time validity.
+Refreshing before a model call also leaves an interval in which the world can change before the proposed action executes. The staged request cannot close that interval. Actions that depend on an unchanged version need an execution-time precondition or another appropriate control at the tool boundary; that mechanism belongs to tool execution rather than context assembly. Here, the context policy records the version on which the proposed action depends so that the tool boundary can check it.
 
 ### Remove, replace, or append
 
@@ -670,9 +807,9 @@ Once an entry no longer supports a current-state claim, the runtime chooses its 
 
 For the repair, a replacement marker might state that the displayed source belongs to `r17` and that the relevant `r18` region must be read before another edit. If the earlier failure is still useful, its compact historical record can remain alongside the new check status. This preserves the investigation without continuing to present an old excerpt as current source. A raw-payload handle permits later inspection only if the payload remains retained and accessible through an authorized tool.
 
-An appended notice may preserve an unchanged prefix, but it leaves the model with both the old material and the superseding statement. Placing the notice near the end of the request or emphasizing its recency is not behavioral enforcement. Conversely, deleting the excerpt prevents that particular text from being read in the next request, but does not guarantee that the model's remaining summary, assumptions, or proposed action is correct. The policy must update dependent summaries and hypotheses as well as the raw observation.
+An appended notice preserves an unchanged prefix but leaves the model with both the old material and the superseding statement, and placing the notice last or emphasizing its recency enforces nothing. Deleting the excerpt removes that text from the next request while leaving any summary, assumption, or hypothesis derived from it in place, so the policy updates dependent entries along the recorded edges as well as the raw observation.
 
-As established in @sec-vol3-context-engineering-staging, computational reuse depends on a compatible unchanged prefix and available serving state. Replacing an excerpt with different tokens of the same length does not preserve the prefix after the first changed token. Neither a favorable token count nor possible reuse establishes that the resulting request contains adequate current evidence.
+As established in @sec-vol3-context-engineering-staging, reuse ends at the first changed token, so replacing an excerpt with different tokens of the same length still ends the prefix at the excerpt.
 
 ```{python}
 #| echo: false
@@ -697,6 +834,7 @@ class ContextInvalidationTokens:
     replaced_suffix = replaced_total - prefix
     appended_total = original + notice
     appended_suffix = notice
+    suffix_ratio = (replaced_suffix / appended_suffix).to(ureg.dimensionless).magnitude
 
     # 3. GUARD — conservation, valid edit location, and narrative endpoints.
     check(prefix + old_excerpt < original, "Excerpt must precede a retained suffix")
@@ -719,10 +857,11 @@ class ContextInvalidationTokens:
     replaced_suffix_str = fmt_tokens(replaced_suffix)
     appended_total_str = fmt_tokens(appended_total)
     appended_suffix_str = fmt_tokens(appended_suffix)
+    suffix_mult_str = fmt_multiple(round(suffix_ratio), precision=0)  # rounded for prose
 ```
 
 ::: {#nbk-04-latency-and-compute-roofline-of .callout-notebook title="Token accounting for invalidation"}
-**Problem**: How do removal, replacement, and an appended notice change the request's resident tokens and potentially nonreused suffix?
+**Problem**: How do removal, replacement, and an appended notice change the request's resident tokens and the suffix that must be processed again?
 
 **Variables**: Suppose the repair request contains `{python} ContextInvalidationTokens.original_str` tokens, including an outdated excerpt of `{python} ContextInvalidationTokens.old_excerpt_str` tokens after an unchanged prefix of `{python} ContextInvalidationTokens.prefix_str` tokens. An in-place marker occupies `{python} ContextInvalidationTokens.marker_str` tokens; a separate appended notice, including its message framing, occupies `{python} ContextInvalidationTokens.notice_str` tokens. These are hypothetical counts of final serialized requests, with no other content changes or tokenization-boundary effects. Removal and replacement first diverge at the stated prefix boundary. Compatible prefix state is assumed available, with reuse stopping at that divergence.
 
@@ -730,7 +869,7 @@ class ContextInvalidationTokens:
 
 Replacing the excerpt with the marker leaves `{python} ContextInvalidationTokens.removed_total_str` + `{python} ContextInvalidationTokens.marker_str` = `{python} ContextInvalidationTokens.replaced_total_str` resident tokens and `{python} ContextInvalidationTokens.replaced_total_str` − `{python} ContextInvalidationTokens.prefix_str` = `{python} ContextInvalidationTokens.replaced_suffix_str` tokens beyond the reusable prefix. Appending instead leaves `{python} ContextInvalidationTokens.original_str` + `{python} ContextInvalidationTokens.notice_str` = `{python} ContextInvalidationTokens.appended_total_str` resident tokens, of which only the new `{python} ContextInvalidationTokens.appended_suffix_str`-token tail lies beyond the assumed reusable prefix.
 
-**Systems insight**: Appending preserves much more potentially reusable input, but retains all `{python} ContextInvalidationTokens.old_excerpt_str` outdated tokens. Removal and replacement shorten the resident request while changing an early prefix. This ledger does not establish a latency ratio or a quality winner: the representations differ, and none supplies fresh source. A subsequent read, its serialization, and the reserved model output must be budgeted separately before submitting the complete request.
+**Systems insight**: For the next call, appending leaves `{python} ContextInvalidationTokens.appended_suffix_str` tokens beyond the reusable prefix against replacement's `{python} ContextInvalidationTokens.replaced_suffix_str`, a difference of roughly `{python} ContextInvalidationTokens.suffix_mult_str` in uncached input. It buys that saving by keeping all `{python} ContextInvalidationTokens.old_excerpt_str` superseded tokens in every later request, where they dilute attention to the current source (@eq-vol3-softmax-dilution) and invite the ghost-symptom chasing described earlier. The decision rule follows the dependency table: append a notice for history the next decision may cite, and replace any excerpt the next edit will target, paying the re-prefill once. None of the three supplies fresh source, so the `r18` read and the output reserve are budgeted on top.
 :::
 
 Invalidation maintains the distinction between what was observed and what currently supports the next decision. Its policy combines dependency tracking, bounded freshness checks, and an explicit choice of what remains visible. The remaining question is empirical: whether those choices preserve adequate evidence and lead to correct, constraint-respecting decisions at an acceptable context cost.
@@ -751,13 +890,13 @@ Controlled context probes and complete task trials answer different questions. A
 
 Complete task trials allow each policy to interact with its own copy of the initial environment. The resulting trajectories reveal whether a compact representation causes repeated reads, unsupported edits, or premature completion claims. The evaluator records all assigned trials, including failures, refusals, and budget exhaustion. A retained-field probe diagnoses one component; a task trial tests whether that component remains useful as actions change the environment. Neither substitutes for the other.
 
-Repetition remains necessary when generation or execution varies. A fixed seed or greedy decoding does not by itself freeze the model service, numerical execution, or test scheduling. Record the available model and service revision identifiers, decoding settings, environment configuration, and cache conditions, then repeat trials under the stated conditions. If a comparison changes the serving configuration as well as the context policy, its result concerns the combined system, not context selection alone. Broader uncertainty estimates and release decisions are developed in @sec-vol3-evaluation; the immediate requirement is to avoid mistaking one favorable trajectory for dependable behavior.
+Repetition remains necessary when generation or execution varies. A fixed seed or greedy decoding leaves the model service, numerical execution, and test scheduling free to vary. Record the available model and service revision identifiers, decoding settings, environment configuration, and cache conditions, then repeat trials under the stated conditions. If a comparison changes the serving configuration as well as the context policy, its result concerns the combined system, not context selection alone. One favorable trajectory is a sample, not a rate; uncertainty estimates and release decisions are developed in @sec-vol3-evaluation.
 
 ### Measuring retention, behavior, and cost
 
-The experiment needs measurements that separate a missing field from a model's failure to use a present field. For each probe, define the required information against the task fixture before inspecting policy outputs. In our repair, this includes the public-API constraint, approved workspace, deployment prohibition, source and test identities, and the scope of the recorded check. The inventory is an explicit evaluation criterion, not proof that the evaluator has anticipated every future information need.
+The experiment needs measurements that separate a missing field from a model's failure to use a present field. For each probe, define the required information against the task fixture before inspecting policy outputs. In our repair, this includes the public-API constraint, approved workspace, deployment prohibition, source and test identities, and the scope of the recorded check. The inventory is an explicit evaluation criterion, bounded by what the evaluator anticipated.
 
-Required-field retention counts correctly represented required items divided by the required items assessed. An item counts only if its value and scope agree with the fixture; the mere presence of a field named `test_status` is insufficient. For exact identifiers or assertion text, equality checks can test the specified string. For a paraphrased claim, the evaluator needs a stated semantic criterion and must account for disagreement or uncertainty in applying it. Report omitted, altered, and unsupported fields separately when those distinctions change the diagnosis.
+**Required-field retention**\index{Required-field retention!definition} counts correctly represented required items divided by the required items assessed. An item counts only if its value and scope agree with the fixture; the mere presence of a field named `test_status` is insufficient. For exact identifiers or assertion text, equality checks can test the specified string. For a paraphrased claim, the evaluator needs a stated semantic criterion and must account for disagreement or uncertainty in applying it. Report omitted, altered, and unsupported fields separately when those distinctions change the diagnosis.
 
 Retention across successive compactions is a stricter event than retention after only the final compaction. An item can disappear and later return through a fresh read. The experiment should state whether it measures presence at each boundary, uninterrupted retention, or successful recovery before use. For uninterrupted retention of a constraint set $\mathcal{C}$ through $k$ compaction boundaries, the measured score is
 
@@ -800,15 +939,15 @@ class ConstraintRetention:
     survive_long_pct_str = fmt_percent(survive_long, style="prose", precision=1)
 ```
 
-The product in @eq-vol3-constraint-retention is what makes repeated compaction demanding. If one specified item survives each round independently with probability $1-\rho$, it survives $k$ rounds with probability $(1-\rho)^k$, the horizon-compounding form of @eq-vol3-horizon-compounding with compaction rounds in place of turns. At a hypothetical loss of `{python} ConstraintRetention.loss_pct_str` per round, the item survives `{python} ConstraintRetention.short_rounds_str` rounds with probability `{python} ConstraintRetention.survive_short_pct_str` and `{python} ConstraintRetention.long_rounds_str` rounds with probability `{python} ConstraintRetention.survive_long_pct_str`. A loss rate that looks negligible in a single compaction test decides whether a long trajectory still carries its constraints, which is why protected fields are checked at every boundary rather than entrusted to a summarizer's average fidelity. Extending such a model to all required items needs their joint behavior, and empirical compaction errors need not be independent across items or rounds. A schema-valid record establishes neither event by itself.
+The product in @eq-vol3-constraint-retention is what makes repeated compaction demanding. If one specified item survives each round independently with probability $1-\rho$, it survives $k$ rounds with probability $(1-\rho)^k$, the horizon-compounding form of @eq-vol3-horizon-compounding with compaction rounds in place of turns. At a hypothetical loss of `{python} ConstraintRetention.loss_pct_str` per round, the item survives `{python} ConstraintRetention.short_rounds_str` rounds with probability `{python} ConstraintRetention.survive_short_pct_str` and `{python} ConstraintRetention.long_rounds_str` rounds with probability `{python} ConstraintRetention.survive_long_pct_str`. A loss rate that looks negligible in a single compaction test decides whether a long trajectory still carries its constraints, which is why protected fields are checked at every boundary rather than entrusted to a summarizer's average fidelity. Extending such a model to all required items needs their joint behavior, since empirical compaction errors can be correlated across items and rounds.
 
-Behavior needs its own denominator. A constraint-violation rate can count violating proposals among the proposals to which that constraint applies. The runtime should retain rejected proposals for this diagnosis without executing them. An executed-violation rate answers a different question about enforcement. Likewise, the stale-support rate
+Behavior needs its own denominator. A constraint-violation rate can count violating proposals among the proposals to which that constraint applies. The runtime should retain rejected proposals for this diagnosis without executing them. An executed-violation rate answers a different question about enforcement. Likewise, the **stale-support rate**\index{Stale-support rate!definition}
 
 $$
 \epsilon_{\text{stale}} = \frac{\text{decisions that treat superseded support as current}}{\text{decisions that require current evidence}}
 $$ {#eq-vol3-stale-support}
 
-restricts its denominator to decisions for which currency matters. A historical reference to the r17 failure is not an error merely because the workspace is now at r18. The error is using that reference to assert a property of r18 without support. Fixtures and trace review must make the classification rule explicit.
+restricts its denominator to decisions for which currency matters. A historical reference to the r17 failure remains legitimate after the workspace moves to r18; the error is using that reference to assert a property of r18 without support. Fixtures and trace review must make the classification rule explicit.
 
 Task acceptance provides the end-to-end measure,
 
@@ -829,7 +968,7 @@ which estimates the acceptance probability $p_{\text{acc}}$ of @eq-vol3-cost-per
 
 : **Context-policy measurement contract**: Representation checks, behavioral observations, and task outcomes answer different questions. Their denominators and coverage must remain explicit when comparing policies. {#tbl-vol3-context-evaluation tbl-colwidths="[21,43,36]"}
 
-Compression is a representation ratio, not a quality metric. At a specified decision point, construct a reference request from the available history without compaction and a request from the evaluated policy. Count each complete serialized request with the same tokenizer, including its instructions, tool definitions, metadata, and framing. The request compression ratio is
+Compression is a representation ratio, not a quality metric. At a specified decision point, construct a reference request from the available history without compaction and a request from the evaluated policy. Count each complete serialized request with the same tokenizer, including its instructions, tool definitions, metadata, and framing. The **request compression ratio**\index{Request compression ratio!definition} is
 
 $$
 C_r = \frac{S_{\text{ref}}}{S_{\pi}},
@@ -839,11 +978,11 @@ where $S_{\text{ref}}$ and $S_{\pi}$ are the serialized token counts of the refe
 
 The ratio also depends on which history is available. In a fixed-history probe, policies share that input, making their resulting request lengths directly comparable. In complete task trials, policies can generate different histories. A large compression ratio for one policy may reflect that it first produced more material to discard. Report absolute input counts and task expenditure alongside the ratio, including the cost of building summaries, obtaining fresh observations, and recovering omitted payloads. Context savings can otherwise hide work displaced into another call.
 
-Evidence use is harder to establish than token presence. Attention weights and a model's quotation of an identifier do not by themselves show that the identifier caused a useful decision. A targeted intervention supplies stronger diagnostic evidence. Remove or alter a task-relevant field while keeping the rest of a controlled fixture fixed, repeat the next-decision probe, and compare the resulting behavior. The intervention tests dependence under those conditions, not a universal usefulness score for each token. The complete task trial remains necessary because a policy may compensate for the missing field by obtaining a fresh observation.
+Evidence use is harder to establish than token presence, because attention weights and a model's quotation of an identifier are correlational. A targeted intervention supplies stronger diagnostic evidence. Remove or alter a task-relevant field while keeping the rest of a controlled fixture fixed, repeat the next-decision probe, and compare the resulting behavior. The intervention tests dependence under those conditions. The complete task trial remains necessary because a policy may compensate for the missing field by obtaining a fresh observation.
 
 ### Diagnosing a context-policy failure
 
-The shared manifest supports a compact test of both compaction and invalidation. The probe requires the earlier failure to retain its historical scope, while any claim about the candidate must remain tied to the candidate actually checked. The example below describes an illustrative probe, not a measured deployment trace or a claimed advantage for a particular policy.
+The shared manifest supports a compact test of both compaction and invalidation. The probe requires the earlier failure to retain its historical scope, while any claim about the candidate must remain tied to the candidate actually checked. The example below is an illustrative probe.
 
 ::: {#exmp-04-context-evidence-probe .callout-example title="A passing test without its version"}
 
@@ -857,7 +996,7 @@ The shared manifest supports a compact test of both compaction and invalidation.
 
 The same method can test omission rather than overstatement. If compaction removes the exact test identifier but retains a raw-log handle, the next request no longer contains that identifier. Whether the loss is recoverable depends on the retained log, permission to read it, and sufficient resources to retrieve and use it. A test with the handle unavailable exposes a fallback requirement that a field-presence score would miss. Failing gracefully without acceptance can be the correct behavior when the required evidence cannot be reconstructed.
 
-A context policy earns its operating point through this combination of measurements. Compare feasible policies by accepted outcomes, error categories, elapsed time, and total expenditure under the same task conditions. A shorter context with more unresolved trials is a trade-off to assess, not an automatic improvement. A structured record with high field retention but unsupported completion claims still fails the decision it was meant to support. No compression threshold or representation format supplies a universal winner.
+A context policy earns its operating point through this combination of measurements. Compare feasible policies by accepted outcomes, error categories, elapsed time, and total expenditure under the same task conditions. A structured record with high field retention but unsupported completion claims still fails the decision it was meant to support. The policy to deploy is the feasible one with the lowest cost per accepted task, $C_{\text{eff}}$, measured with every assigned trial in the denominator: a shorter context that adds unresolved trials lowers the attempt cost and $p_{\text{acc}}$ together, and only the ratio says which effect wins.
 
 ::: {#chk-04-context-policy-evaluation .callout-checkpoint title="Testing what survives compaction"}
 
@@ -866,6 +1005,7 @@ A policy preserves the manifest's field names but drops some values and version 
 - [ ] **Retention**: Can you define a check that distinguishes field presence from correct retention of the r18 reproducer result?
 - [ ] **Evidence scope**: Which probe distinguishes a useful historical r17 failure from an unsupported claim about the current workspace?
 - [ ] **Cost boundary**: If the model retrieves an omitted log on every subsequent turn, which measurements determine whether compaction saved resources?
+- [ ] **Retention estimate**: At the hypothetical per-round loss used for @eq-vol3-constraint-retention, after how many compaction rounds does a single constraint's survival fall below even odds, and what does that imply for where the protected-field check runs?
 - [ ] **Controlled comparison**: Why can a fixed-history probe diagnose a representation defect without establishing complete task performance?
 
 :::
@@ -879,35 +1019,42 @@ A compact request can omit a decisive assertion, and a complete transcript can p
 ::: {.fallacy-pitfall}
 **Fallacy**: *If every token fits, every needed fact is usable.*
 
-The interface's capacity limit admits a request; it does not establish that the model will use its evidence adequately. Relevant details can be missing from a short request or difficult to distinguish in a long one. The capacity experiment must vary the information and layout as well as record length, then measure the required decision quality on the intended workload. A larger window removes one admission constraint without deciding which observations remain relevant or current.
+The interface's capacity limit admits a request; how well the model uses the evidence inside it is a separate, measured property (@sec-vol3-context-engineering-physics). Under fixed logits, the toy head of @eq-vol3-softmax-dilution gives the target `{python} SoftmaxDilution.alpha_short_pct_str` of its weight among `{python} SoftmaxDilution.short_len_str` keys and `{python} SoftmaxDilution.alpha_long_pct_str` among `{python} SoftmaxDilution.long_len_str`, although every one of those keys fits. A capacity experiment therefore varies information and layout as well as length, and measures decision quality on the intended workload.
 
 :::
 
 ::: {.fallacy-pitfall}
 **Pitfall**: *Treating deterministic extraction as lossless task understanding.*
 
-A parser can reproducibly retain the same error lines and omit the same decisive warning. Its deterministic behavior makes the transformation inspectable; it does not establish that the selection is sufficient. Preserve specified task-critical fields, label omissions, and retain access to original payloads where the task permits it. A handle helps only when the payload remains retrievable within the available access and resource limits.
+A parser reproducibly retains the same error lines and omits the same decisive warning. A filter on `FAILED` applied to @lst-vol3-compaction-observation keeps the assertion and drops the event ordering that makes it informative. Determinism makes the transformation inspectable, not sufficient. Preserve the task's protected fields, label omissions, and keep a raw-payload handle where the task permits it.
 
 :::
 
 ::: {.fallacy-pitfall}
 **Fallacy**: *A valid progress-record schema guarantees continued compliance.*
 
-A record can contain every required field while misreporting a check or omitting the version to which it applies. Even an accurate record can be followed by a proposal that violates a retained restriction. Validate the specified fields against their sources, evaluate subsequent behavior, and enforce action limits outside the prompt. Context preparation communicates the task's constraints; it does not supply the execution boundary.
+A schema checks that a field exists, not that its value survived. At the hypothetical `{python} ConstraintRetention.loss_pct_str` per-round loss of @eq-vol3-constraint-retention, a constraint survives `{python} ConstraintRetention.long_rounds_str` compactions with probability `{python} ConstraintRetention.survive_long_pct_str`, and every one of those records can still validate. Check the protected fields against their sources at each boundary (@sec-vol3-context-engineering-summarization), evaluate subsequent behavior, and enforce action limits outside the prompt, since context communicates constraints and the runtime enforces them.
 
 :::
 
 ::: {.fallacy-pitfall}
 **Pitfall**: *Keeping obsolete support solely to preserve a prefix hit.*
 
-Appending a notice leaves the old payload in the request and relies on the model to interpret their relationship. Removing or replacing the payload changes the token sequence and can reduce reuse from that point onward, but unchanged text is not worth preserving when it produces unsupported current-state claims. Choose the representation by its measured decision behavior and cost. A passing result remains a historical observation of its recorded version, not proof about every later version at the same path.
+Appending a notice is the cheaper edit for the next call: in \ref{nbk-04-latency-and-compute-roofline-of}, replacement processes roughly `{python} ContextInvalidationTokens.suffix_mult_str` as many tokens beyond the prefix. The saving keeps `{python} ContextInvalidationTokens.old_excerpt_str` superseded tokens in every later request and relies on the model to reconcile them with the notice. Replace any excerpt the next edit will target, and keep an old result only as a historical observation of its recorded version (@sec-vol3-context-engineering-context-rot).
+
+:::
+
+::: {.fallacy-pitfall}
+**Fallacy**: *A larger context window removes the need to select and compact.*
+
+A window large enough to admit every request only moves the limit. In \ref{nbk-04-evidence-budget}, the appending policy's last request needs `{python} UsableContextBudget.window_needed_str` tokens, and a window that size admits all `{python} UsableContextBudget.horizon_str` turns while billing `{python} UsableContextBudget.append_bill_str` input tokens against `{python} UsableContextBudget.select_bill_str` for a selecting policy that keeps `{python} UsableContextBudget.obs_selected_str` tokens of observations, `{python} UsableContextBudget.bill_mult_str` as much. The appended tokens also dilute attention to the evidence the next decision needs. Selection and compaction lower both the attempt cost in $C_{\text{eff}}$ and the distraction in the request, whatever the window.
 
 :::
 
 ::: {.fallacy-pitfall}
 **Pitfall**: *Placing unnecessary volatile fields before reusable content.*
 
-A changing timestamp or request identifier can shorten the matching token prefix before otherwise stable task material. The layout calculation in \ref{nbk-04-quantitative-impact-of-prefix-layout} isolates the resulting input-charge difference under explicit reuse and pricing assumptions. The first differing token, not the message's role or the field's name, determines where exact-prefix matching ends. Move a field only when the new placement preserves the request's meaning, and do not infer a measured latency saving from the price calculation alone.
+A changing timestamp or request identifier at the front ends the matching prefix before otherwise stable task material. In \ref{nbk-04-quantitative-impact-of-prefix-layout}, the unstable layout's input bill is `{python} ContextLayoutPrice.cost_mult_str` the stable layout's under explicit reuse and pricing assumptions. The first differing token, not the message's role or the field's name, determines where exact-prefix matching ends. Move per-call fields to the leaf whenever the new placement preserves the request's meaning.
 
 :::
 
@@ -919,11 +1066,11 @@ The repair manifest follows one decision through several transformations. Select
 
 ::: {.callout-takeaways title="Context is selected information for the next decision"}
 
-* **Capacity does not establish adequacy**: The serialized request must fit while leaving output headroom, but the useful input depends on the task, model, and representation. Measure decision quality and resource use rather than infer sufficiency from the nominal window.
-* **Layout changes reuse, not authority**: Stable prefixes can avoid repeated input work under compatible serving conditions. Message roles, provenance, and change rate describe different properties; arranging them well does not authorize an action or establish that an observation is true.
-* **Compaction preserves specified needs, not everything**: Protect the exact fields required by the current task and check summaries against their support. Raw-payload handles provide conditional access to omitted material, not evidence that the next call already contains it.
-* **Historical evidence needs current interpretation**: A test result remains an observation of the version and conditions tested. Relevant changes can remove its support for a present-state claim without erasing history, while unrelated changes need not invalidate every observation.
-* **Evaluate decisions as well as representations**: Field retention, constraint compliance, current-evidence use, and accepted outcomes measure different properties. Count all policy costs and unsuccessful trials before deciding whether a smaller request improves the system.
+* **Capacity admits; evidence decides**: The serialized request must fit with output headroom, and within that limit the useful input depends on the task, model, and representation. Appending every tool result overflows the reference repair window at turn `{python} UsableContextBudget.overflow_turn_str` of `{python} UsableContextBudget.horizon_str`, so size each turn's observations to the horizon and measure decision quality directly.
+* **Layout changes reuse, not authority**: Stable prefixes avoid repeated input work under compatible serving conditions, and the illustrative trajectory's unstable layout bills `{python} ContextLayoutPrice.cost_mult_str` the stable one's input. Message roles, provenance, and change rate are separate properties, and a well-arranged request authorizes no action and certifies no observation.
+* **Compaction preserves specified needs**: Protect the exact fields the current task requires and check summaries against their sources at every boundary, because small per-round losses compound over repeated compactions. A raw-payload handle is a route to omitted material, usable only through an explicit retrieval.
+* **Historical evidence needs current interpretation**: A test result remains an observation of the version and conditions tested. A relevant change withdraws its support for present-state claims while the history stays, and unrelated changes leave it applicable.
+* **Evaluate decisions as well as representations**: Field retention, constraint compliance, current-evidence use, and accepted outcomes measure different properties. A smaller request improves the system only if it lowers the cost per accepted task with every trial and every policy cost counted.
 
 :::
 
