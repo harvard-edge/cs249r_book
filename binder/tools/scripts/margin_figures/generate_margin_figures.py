@@ -7,6 +7,7 @@ Uses the canonical margin devices in binder/tools/figures/margin/devices.py.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 import numpy as np
@@ -27,6 +28,34 @@ CONTENTS = ROOT / "books" / "vol4"
 
 def out_path(chap: str, name: str) -> str:
     return str(CONTENTS / chap / "images" / "svg" / f"{name}.svg")
+
+
+_LEGO_CACHE: dict = {}
+
+
+def lego(chap: str, name: str):
+    """Return LEGO class ``name`` from chapter ``chap`` by running its cells.
+
+    Margin figures must not hand-type values that a chapter's LEGO cell
+    computes. This runs the chapter's ``{python}`` cells in document order,
+    stopping once ``name`` is defined, and returns that object, so a margin
+    figure regenerates from the same numbers the prose prints.
+    """
+    key = (chap, name)
+    if key in _LEGO_CACHE:
+        return _LEGO_CACHE[key]
+    from binder.tools.audit.fmt.cell_exec import exec_cell_code, make_exec_namespace
+
+    qmd = CONTENTS / chap / f"{chap}.qmd"
+    cells = re.findall(r"^```\{python\}[^\n]*\n(.*?)^```", qmd.read_text(), re.S | re.M)
+    ns = make_exec_namespace()
+    for code in cells:
+        exec_cell_code(code, ns)
+        if name in ns:
+            _LEGO_CACHE[key] = ns[name]
+            plt.close("all")
+            return ns[name]
+    raise KeyError(f"LEGO object {name!r} not found in {qmd}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Chapter 01: The Causal Boundary
@@ -157,24 +186,43 @@ def gen_ch04():
 
 def gen_ch05():
     chap = "05_data"
-    # Fig 05-M1: Sensory Ingestion Bandwidth Cliff
+    # Fig 05-M1: Sensory ingestion bandwidth vs. storage write ceilings.
+    # Values come from the chapter's MultiCameraIngestionBudget LEGO cell.
+    B = lego(chap, "MultiCameraIngestionBudget")
+    mbps = lambda q: float(q.to("MB/s").magnitude)
+    bw_nvme, bw_total = mbps(B.bw_nvme), mbps(B.bw_total)
+    bw_nav, bw_sata = mbps(B.bw_nav), mbps(B.bw_sata)
     fig, ax = new_fig('hierarchy-ladder')
     tiers = [
-        ("NVMe PCIe: 3500 MB/s", 3500),
-        ("4x Cam Raw: 968 MB/s", 968),
-        ("SATA SSD: 550 MB/s", 550),
-        ("USB 3.0: 400 MB/s", 400)
+        (f"NVMe Gen4\n{bw_nvme:,.0f} MB/s", bw_nvme),
+        (f"All streams\n{bw_total:,.0f} MB/s", bw_total),
+        (f"Nav camera\n{bw_nav:,.0f} MB/s", bw_nav),
     ]
-    ladder(ax, tiers, domain='bandwidth', wall=True)
+    ladder(ax, tiers, domain='bandwidth', wall=False)
+    # The SATA write ceiling is the wall every camera rung crosses.
+    n = len(tiers)
+    ax.plot([bw_sata, bw_sata], [-0.4, n - 0.4], color=RED, lw=0.75, ls="--", zorder=3)
+    ax.text(bw_sata, n - 0.22, f"SATA SSD write {bw_sata:,.0f} MB/s", color=RED,
+            fontsize=5.0, ha="left", va="center")
+    ax.set_ylim(-0.4, n + 0.02)
     save(fig, out_path(chap, "margin_sensory_ingestion_bandwidth_ladder"))
 
-    # Fig 05-M2: Facility Demonstration Yield Burn-Down
+    # Fig 05-M2: Facility demonstration yield burn-down.
+    # Values come from the DemonstrationYieldFatigue LEGO cell; the session end
+    # is a schedule boundary, not a hazard, so it is drawn in slate.
+    Y = lego(chap, "DemonstrationYieldFatigue")
+    t_sched = float(Y.t_sched.to("minute").magnitude)
+    t_motion = float(Y.t_motion.to("minute").magnitude)
+    t_yield = round(float(Y.t_yield.to("minute").magnitude), 1)
     fig, ax = new_fig('budget-envelope')
     rows = [
-        ("Usable Data", 14.7, DATA),
-        ("Shift Time", 60.0, TIME)
+        ("Scheduled", t_sched, TIME),
+        ("Motion", t_motion, TIME),
+        ("Retained", t_yield, DATA),
     ]
-    budget_envelope(ax, rows=rows, limit=60.0, style='burn', limit_label="60 min Shift")
+    budget_envelope(ax, rows=rows, limit=t_sched, style='burn',
+                    limit_label=f"{t_sched:.0f} min session", limit_color=TIME,
+                    limit_label_offset=-0.02)
     save(fig, out_path(chap, "margin_facility_yield_burndown_envelope"))
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -227,13 +275,15 @@ def gen_ch06():
 
 def gen_ch07():
     chap = "07_evaluation"
-    # Fig 07-M1: Non-Asymptotic Zero-Failure Reliability Ladder
+    # Fig 07-M1: Zero-failure run counts vs. the success lower limit they buy.
+    # Values come from the chapter's ClopperPearsonZeroFailure LEGO cell.
+    Z = lego(chap, "ClopperPearsonZeroFailure")
     fig, ax = new_fig('hierarchy-ladder')
     tiers = [
-        ("2995 runs: 99.9%", 2995),
-        ("299 runs: 99.0%", 299),
-        ("59 runs: 95.0%", 59),
-        ("20 runs: 86.1%", 20)
+        (f"{Z.n_req_999:,} runs\n\u2265{Z.p_target_999:.1%}", Z.n_req_999),
+        (f"{Z.n_req_99:,} runs\n\u2265{Z.p_target_99:.1%}", Z.n_req_99),
+        (f"{Z.n_req_90:,} runs\n\u2265{Z.p_target_90:.1%}", Z.n_req_90),
+        (f"{Z.n_runs:,} runs\n\u2265{Z.p_lower:.1%}", Z.n_runs),
     ]
     ladder(ax, tiers, domain='rate', style='bars', color=DATA)
     save(fig, out_path(chap, "margin_nonasymptotic_reliability_ladder"))
@@ -247,8 +297,8 @@ def gen_ch07():
     ax.plot(t, p_gauss, color=TIME, lw=1.35)
     ax.fill_between(t, p_gauss, p_frechet, color=REDFILL, alpha=0.35)
     ax.text(0.95, 0.82, "Heavy tail (Fréchet)", color=RED, fontsize=5.0, fontweight="bold", ha="right")
-    ax.text(0.95, 0.62, "Gaussian (exponential)", color=TIME, fontsize=4.8, ha="right")
-    ax.set_xlim(0, 1.0); ax.set_ylim(0, 1.1)
+    ax.text(0.95, 0.62, "Light tail (Gumbel domain)", color=TIME, fontsize=4.8, ha="right")
+    ax.set_xlim(-0.04, 1.0); ax.set_ylim(-0.04, 1.1)  # margin so end strokes are not cut
     for s in ("top", "right", "left", "bottom"):
         ax.spines[s].set_visible(False)
     ax.set_xticks([]); ax.set_yticks([])

@@ -462,7 +462,8 @@ def blast(ax, n=5, style='fan'):
 
 # ── bounded operating budget → budget-envelope ────────────────────────────────
 def budget_envelope(ax, rows=(("used", 0.7, COMP), ("limit", 1.0, RED)), limit=1.0,
-                    style='burn', limit_label=None, limit_label_offset=0.0):
+                    style='burn', limit_label=None, limit_label_offset=0.0,
+                    limit_color=None):
     """finite budget, quota, capacity, or matched-rate envelope.
 
       • 'burn'    → one or more bars on a shared denominator with a red limit
@@ -487,8 +488,10 @@ def budget_envelope(ax, rows=(("used", 0.7, COMP), ("limit", 1.0, RED)), limit=1
     xmax = max_value * 1.16
     x0, w, h = 0.34, 0.58, 0.13
     limit_x = x0 + w * limit / xmax
-    ax.axvspan(limit_x, x0 + w, color=REDFILL, alpha=0.34, lw=0)
-    ax.axvline(limit_x, color=RED, lw=0.7, ls="--")
+    lim_c = limit_color or RED   # red only when the limit is a hazard or fault
+    if lim_c == RED:
+        ax.axvspan(limit_x, x0 + w, color=REDFILL, alpha=0.34, lw=0)
+    ax.axvline(limit_x, color=lim_c, lw=0.7, ls="--")
     ys = np.linspace(0.62, 0.32, len(rows))
     for (label, value, color), y in zip(rows, ys):
         ax.text(x0 - 0.04, y, label, ha="right", va="center", color=INK, fontsize=4.7)
@@ -524,7 +527,7 @@ def budget_envelope(ax, rows=(("used", 0.7, COMP), ("limit", 1.0, RED)), limit=1
         label_x += limit_label_offset
         label_ha = "left" if limit_label_offset > 0 else "right"
     ax.text(label_x, 0.82, limit_label or "limit", ha=label_ha, va="center",
-            color=RED, fontsize=4.8, bbox=dict(boxstyle="square,pad=0.12", fc="white", ec="none"))
+            color=lim_c, fontsize=4.8, bbox=dict(boxstyle="square,pad=0.12", fc="white", ec="none"))
     ax.set_xlim(0, 1); ax.set_ylim(0, 1); _clean(ax)
 
 # ── short ordered window/process → sequence-strip ─────────────────────────────

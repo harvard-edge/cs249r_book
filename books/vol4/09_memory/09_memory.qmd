@@ -169,11 +169,11 @@ A coordinate frame binds a spatial representation, but in an active physical mac
 
 A transform also spans several machine words (six or seven floating-point numbers for translations and rotation quaternions), so a high-rate control reader racing an asynchronous vision writer can observe an old rotation paired with a new translation. The lock-free seqlock mailbox established in @sec-nervous-cadences closes this concurrency race without blocking hard real-time control threads: each reader makes one bounded attempt per tick and never waits; a torn read is discarded, and the last validated transform ages in its place.
 
-::: {#fig-09-robot-transform-tree fig-env="figure" fig-pos="t" fig-cap="**Manipulator kinematic frame tree and temporal dynamics**: Articulated manipulator geometry (a) and corresponding directed acyclic coordinate transform tree in ROS \\texttt{tf2} (b). Each directed edge stores a homogeneous transformation matrix parameterized by joint state. Composing transforms across disparate acquisition epochs injects lever-arm positioning error $e_{\\text{tool}} \\approx \\ell\\,\\Delta\\theta$, while an uncompensated asynchronous edge references stale coordinates (adapted from Craig 2005 and Foote 2013 [@craig2005introduction; @foote2013tf])." fig-alt="Manipulator Kinematic Frame Tree and Temporal Lever-Arm Dynamics. (a) Physical geometry of an articulated manipulator with base link, joint linkages, wrist camera, and tool center point (tool0), indicating lever arm ℓ and angular deflection error e_tool ≈ ℓ · Δθ. (b) Spatial transformation tree (DAG) connecting world reference, base link, kinematic chain link1 through link6, wrist frame, wrist camera, tool0 TCP, and target object, highlighting an asynchronous stale transform edge. (Adapted from Craig 2005 and Foote 2013)."}
+::: {#fig-09-robot-transform-tree fig-env="figure" fig-pos="t" fig-cap="**Manipulator kinematic frame tree and temporal dynamics**: Articulated seven-joint manipulator geometry (a) and the corresponding coordinate transform tree in ROS \\texttt{tf2} (b), in which every frame has exactly one parent. Each tree edge stores a homogeneous transformation matrix parameterized by joint state. The target's pose hangs from the base frame, stamped with the epoch $t_0$ of the wrist-camera measurement that produced it, so composing it with the current joint chain mixes epochs, and a wrist rotation $\\Delta\\theta$ over the interval swings the tool center point by $e_{\\text{tool}} \\approx \\ell\\,\\Delta\\theta$ (adapted from Craig 2005 and Foote 2013 [@craig2005introduction; @foote2013tf])." fig-alt="Two panels. Panel a: a seven-joint arm on a base labeled base_link, joints numbered 1 to 7, a gripper whose tool center point is labeled tool0, and a wrist camera mounted on the flange. A dimension line labeled ℓ spans from joint 7, the wrist, to the tool center point, and a red dashed line turned by Δθ about the wrist shows the tool displaced by e_tool ≈ ℓ Δθ. Panel b: a tree with world at the root, then base_link, then a link1 to link7 chain annotated with joint angles at time t, whose children are wrist_cam and tool0. A red dashed edge labeled stamped t0 connects base_link to target_object, and a dotted teal path from wrist_cam to target_object is labeled camera measurement at t0, not a tree edge. A legend distinguishes tree edges, edges dated at an older epoch, and measurements."}
 ![](images/svg/fig09_canonical_robot_frame_tree.svg){width="100%"}
 :::
 
-In @fig-09-robot-transform-tree, panel (a) illustrates the physical geometry of an articulated serial manipulator carrying an eye-in-hand wrist camera and an end-effector tool center point (`tool0`). Mechanical links (`link1` through `link6`) are connected by revolute joints whose optical encoders continuously sample joint angles $\theta_i(t)$. The tool tip extends beyond the wrist joint by an effective lever arm $\ell$. When the wrist turns at angular rate $\omega$, any temporal latency $\Delta t$ in the wrist coordinate frame introduces an angular lag $\Delta\theta = \omega\,\Delta t$, sweeping the tool tip across an unmodeled circular arc $e_{\text{tool}} \approx \ell\,\Delta\theta$.
+In @fig-09-robot-transform-tree, panel (a) illustrates the physical geometry of an articulated serial manipulator carrying an eye-in-hand wrist camera and an end-effector tool center point (`tool0`). Mechanical links (`link1` through `link7`) are connected by revolute joints whose optical encoders continuously sample joint angles $\theta_i(t)$. The tool tip extends beyond the wrist joint by an effective lever arm $\ell$. When the wrist turns at angular rate $\omega$, any temporal latency $\Delta t$ in the wrist coordinate frame introduces an angular lag $\Delta\theta = \omega\,\Delta t$, sweeping the tool tip across an unmodeled circular arc $e_{\text{tool}} \approx \ell\,\Delta\theta$.
 
 Panel (b) depicts the corresponding coordinate transform tree maintained as a directed acyclic graph (DAG) in robot middleware such as ROS `tf2` [@foote2013tf]. Each directed edge represents a $4 \times 4$ homogeneous transformation matrix $\mathbf{T}_{A \leftarrow B}$ mapping points from child frame $B$ into parent frame $A$. Because internal joint encoders publish at high cadences (typically $500\text{--}1{,}000\text{ Hz}$) over deterministic fieldbuses while external visual perception pipelines publish target poses (`target_object`) at camera framerates ($30\text{--}60\text{ Hz}$) over asynchronous network transports, the transform tree inevitably buffers edges with disparate timestamps. The library itself refuses to mix them. A `tf2` lookup for a chain at time $t$ resolves every edge at that same $t$, interpolating each edge between its buffered samples, and it raises an extrapolation error when $t$ lies beyond an edge's latest sample; a request for "the latest" transform returns the chain at the latest time common to all its edges, which is again a single consistent epoch [@foote2013tf]. Hybrid poses come from application code that bypasses those semantics. A node that caches an edge, composes an object pose carried in a detection message with a separate lookup of the arm at "now," or republishes an old edge under a new stamp multiplies the current forward kinematics $\mathbf{T}_{\text{base} \leftarrow \text{wrist}}(t)$ with a stale vision edge $\mathbf{T}_{\text{wrist} \leftarrow \text{object}}(t - \Delta t)$. That composition is the **chimeric kinematic product anti-pattern**\index{Chimeric kinematic product anti-pattern!definition}: an unphysical hybrid pose that the robot never occupied.
 
@@ -485,7 +485,7 @@ A time allocation becomes a design constraint once it is expressed in the unit t
 
 : **What one lookup answers, and what clearance costs**: Reads for a sphere hull of radius `{python} RepresentationQuery.r_hull_str` plus the protective clearance, at a 5 cm pitch, against a budget of `{python} RepresentationQuery.reads_budget_str` reads per query on the permission controller. The octree count is the worst case near surfaces, a tree depth of `{python} RepresentationQuery.depth5_str` levels per cell; pruning reduces it in open space. {#tbl-09-representation-queries tbl-colwidths="[20,32,16,32]"}
 
-::: {#fig-09-memory-3d-representation-pareto fig-env="figure" fig-pos="htb" fig-cap="**Clearance query cost and snapshot storage by representation family**: (a) Memory reads to certify one sphere hull's clearance, computed from voxel pitch, hull radius plus protective clearance, and tree depth, against the per-query read budget that the 2 µs allocation and the permission controller's SRAM bandwidth allow. Occupancy scans grow with the cube of the inverse pitch and fit only at the coarsest pitch; an ESDF answers with one interpolated lookup at every pitch. (b) Storage for a dense snapshot of the stopping corridor (aisle width by clear distance by a chosen 2 m height) against the controller's SRAM. Counts, not measured latencies; rendering representations are absent because they do not answer a clearance query." fig-alt="Two log-scale panels against voxel pitch of 2, 5, and 10 cm. Panel a, memory reads per sphere-hull clearance query: worst-case octree scan from about 200,000 to about 1,300 reads, dense occupancy scan from about 22,000 to 180 reads, and ESDF lookup flat at 8 reads, with a dashed read budget at 800 per query that only the ESDF clears at every pitch and the occupancy scan clears only at 10 cm. Panel b, snapshot storage in kilobytes: ESDF at 8 bytes per cell falls from about 2,900 kB to 23 kB and occupancy at 4 bytes per cell from about 1,400 kB to 11 kB, with a dashed line at the permission MCU SRAM of about 1 MB that both snapshots exceed at 2 cm and fit under at 5 and 10 cm."}
+::: {#fig-09-memory-3d-representation-pareto fig-env="figure" fig-pos="htb" fig-cap="**Clearance query cost and snapshot storage by representation family**: (a) Memory reads to certify one sphere hull's clearance, computed from voxel pitch, hull radius plus protective clearance, and tree depth, against the per-query read budget that the 2 µs allocation and the permission controller's SRAM bandwidth allow. Occupancy scans grow with the cube of the inverse pitch and fit only at the coarsest pitch; an ESDF answers with one interpolated lookup at every pitch. (b) Storage for a dense snapshot of the stopping corridor (aisle width by clear distance by a chosen 2 m height) against the controller's SRAM. Counts, not measured latencies; rendering representations are absent because they do not answer a clearance query." fig-alt="Two log-scale panels against voxel pitch of 2, 5, and 10 cm. Panel a, memory reads per sphere-hull clearance query: worst-case octree scan from about 200,000 to about 1,300 reads, dense occupancy scan from about 22,000 to 180 reads, and ESDF lookup flat at 8 reads, with a dashed red read budget at 800 per query, shaded above, that only the ESDF clears at every pitch and the occupancy scan clears only at 10 cm. Panel b, snapshot storage in kilobytes: ESDF at 8 bytes per cell falls from about 2,900 kB to 23 kB and occupancy at 4 bytes per cell from about 1,400 kB to 11 kB, with a dashed red line at the permission MCU SRAM of about 1 MB, shaded above, that both snapshots exceed at 2 cm and fit under at 5 and 10 cm."}
 
 ```{python}
 #| echo: false
@@ -522,10 +522,11 @@ import matplotlib.pyplot as plt
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.5))
 
 ax1.plot(PITCH, OCT, marker="s", lw=2, color=C["OrangeLine"], label="octree occupancy scan (worst case)")
-ax1.plot(PITCH, OCC, marker="o", lw=2, color=C["RedLine"], label="dense occupancy scan")
+ax1.plot(PITCH, OCC, marker="o", lw=2, color=C["primary"], label="dense occupancy scan")
 ax1.plot(PITCH, ESDF, marker="^", lw=2, color=C["BlueLine"], label="ESDF lookup (trilinear)")
-ax1.axhline(BUDGET, color=C["primary"], lw=1.2, ls=(0, (5, 4)))
-ax1.text(1.7, BUDGET * 0.6, f"read budget: {BUDGET:.0f} per query", ha="left", va="top", fontsize=9, color=C["primary"])
+ax1.axhline(BUDGET, color=C["RedLine"], lw=1.2, ls=(0, (5, 4)))
+ax1.axhspan(BUDGET, 1e6, color=C["RedFill"], alpha=0.35, lw=0, zorder=0)
+ax1.text(1.7, BUDGET * 0.6, f"read budget: {BUDGET:.0f} per query", ha="left", va="top", fontsize=9, color=C["RedLine"])
 ax1.set_yscale("log")
 ax1.set_xticks(PITCH)
 ax1.set_xlim(1.5, 10.5)
@@ -536,9 +537,10 @@ ax1.set_title("(a) Clearance query cost", loc="left", fontsize=11)
 ax1.legend(loc="upper right", fontsize=8.5)
 
 ax2.plot(PITCH, ESDF_KB, marker="^", lw=2, color=C["BlueLine"], label="ESDF snapshot, 8 B per cell")
-ax2.plot(PITCH, OCC_KB, marker="o", lw=2, color=C["RedLine"], ls=(0, (6, 3)), label="occupancy snapshot, 4 B per cell")
-ax2.axhline(SRAM_KB, color=C["primary"], lw=1.2, ls=(0, (5, 4)))
-ax2.text(10.1, SRAM_KB * 1.25, "permission MCU SRAM", ha="right", va="bottom", fontsize=9, color=C["primary"])
+ax2.plot(PITCH, OCC_KB, marker="o", lw=2, color=C["primary"], ls=(0, (6, 3)), label="occupancy snapshot, 4 B per cell")
+ax2.axhline(SRAM_KB, color=C["RedLine"], lw=1.2, ls=(0, (5, 4)))
+ax2.axhspan(SRAM_KB, 2e4, color=C["RedFill"], alpha=0.35, lw=0, zorder=0)
+ax2.text(10.1, SRAM_KB * 1.25, "permission MCU SRAM", ha="right", va="bottom", fontsize=9, color=C["RedLine"])
 ax2.set_yscale("log")
 ax2.set_xticks(PITCH)
 ax2.set_xlim(1.5, 10.5)
@@ -683,6 +685,9 @@ class RaymarchBandwidth:
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(bw.magnitude - 7.3728) < 1e-6, f"Ray-march traffic should be 7.37 GB/s, got {bw}.")
     check(share < 0.05, "One naive depth stream should take under 5 percent of peak.")
+    # margin_volumetric_raycasting_bandwidth_ladder.svg draws 204 GB/s, 7.37 GB/s, and 3.6%
+    check(abs(soc_bw.to(ureg.gigabyte / ureg.second).magnitude - 204.0) < 1e-9, "Margin figure peak label (204 GB/s) is stale.")
+    check(abs(share - 0.036) < 5e-4, "Margin figure share label (3.6%) is stale.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     n_rays_str = fmt_int(n_rays)
@@ -702,8 +707,8 @@ where $S_{\text{rw}}$ is the read-modify-write memory traffic per traversed voxe
 For an illustrative VGA depth stream of `{python} RaymarchBandwidth.n_rays_str` rays at `{python} RaymarchBandwidth.f_cam_str`, marched over `{python} RaymarchBandwidth.d_ray_str` at a `{python} RaymarchBandwidth.pitch_str` pitch (`{python} RaymarchBandwidth.n_steps_str` steps per ray) with 8 bytes per step, @eq-mem-dram-bandwidth gives `{python} RaymarchBandwidth.bw_str`, `{python} RaymarchBandwidth.share_str` of the peak `{python} RaymarchBandwidth.soc_bw_str` of the host system-on-chip (SoC). The share of peak understates the effect, because these map updates share the memory system with the vision model and other workloads, and their cost depends on access locality and competing traffic rather than on peak bandwidth. The update calculation identifies a load to include in the contention test; it does not establish a measured interference bound. Block hashing reduces this traffic by keeping active blocks in on-chip memory, and projective TSDF updates project voxels inside the viewing frustum onto the depth image instead of marching every ray. These methods reduce repeated memory traffic, but the reduction depends on scene coverage and update strategy. Sparse allocation still grows as the machine explores new regions; a bounded host store needs an explicit retention policy.
 
 ::: {.column-margin}
-![](images/svg/margin_volumetric_raycasting_bandwidth_ladder.svg){width="100%" fig-alt="Vertical ladder comparing SoC bus limit against dense TSDF and sparse VDB memory bandwidth."}
-*Dense voxel updates consume shared memory bandwidth; sparse updates reduce that traffic but still require contention tests.*
+![](images/svg/margin_volumetric_raycasting_bandwidth_ladder.svg){width="100%" fig-alt="Two horizontal bars on a linear scale. An outlined bar reaching a red limit line is labeled SoC peak 204 GB/s. A short blue bar beneath it is labeled ray-march updates, 7.37 GB/s, 3.6 percent."}
+*One naive depth stream's ray-march updates take a small share of peak DRAM bandwidth; the share is a load to include in the contention test, not an interference bound.*
 :::
 
 What a map can certify comes from how a range return updates it. Traversing the ray from the sensor to the return [@amanatides1987fast], the map asserts **negative evidence**\index{Negative evidence} in every cell the ray crossed and positive evidence in the cell where it ended; @sec-appendix-ml-voxels gives the log-odds update. A valid empty ray can retire a phantom obstacle, but it says nothing about the volume behind a return. A new scan down the aisle therefore cannot renew cells hidden behind the rack. Sparse allocation saves capacity without eliminating ray traversal, and any resulting processing delay adds to evidence age (@sec-placement-resource-contention).
@@ -882,7 +887,150 @@ $$T_{\text{inv}} = \frac{d_{\text{free}} - \delta_{\text{loc}} - \delta_{\text{m
 
 evaluated for every hull the admitted motion and its stop will occupy, with a result of zero or less meaning that memory certifies nothing there. This **free-space erosion**\index{Free-space erosion} law is the worst-case form of the occlusion-aware reachable sets used in automated driving, where the region an unseen road user could occupy grows from the edge of the visible area [@orzechowski2018tackling].
 
-The law gives two very different answers on the same aisle. Abreast of the rack end, the unobserved cross aisle begins at the upright itself, so $d_{\text{free}}$ is the `{python} RackEndBelief.side_clearance_str` side clearance between hull and rack, exactly what localization error and protective clearance together consume. The deadline is `{python} RackEndBelief.t_exp_abreast_str`: memory cannot certify that position even at the instant of capture, and no frame rate changes that. For a hull at the machine's current position, with the rack end `{python} RackEndBelief.d_clear_str` ahead as the nearest unobserved boundary, the same law allows `{python} RackEndBelief.t_exp_ahead_str`. The frame that saw the aisle empty is already `{python} RackEndBelief.t_age_str` old when perception dispatches it (@sec-perception-transduction-calibration), which erodes `{python} RackEndBelief.d_age_eroded_str` of that depth before memory receives it and leaves `{python} RackEndBelief.t_left_str`, about `{python} RackEndBelief.frames_bridged_str` frame periods of the navigation camera. In the open aisle, memory usefully bridges dropped frames. That interval belongs to the hull at the machine's current position only. The base itself advances toward the rack end, so each later hull on the admitted path starts closer to the unobserved boundary and receives a shorter deadline, falling to zero as the hull comes abreast of the rack end; the permission path must therefore evaluate the law along the whole path and stop, or reacquire the cross aisle, before a hull's deadline reaches zero. Memory certifies the aisle only to a depth set by the distance from the occlusion boundary, and at the rack end that depth is gone.
+The law gives two very different answers on the same aisle (@fig-09-rack-end-erosion). Abreast of the rack end, the unobserved cross aisle begins at the upright itself, so $d_{\text{free}}$ is the `{python} RackEndBelief.side_clearance_str` side clearance between hull and rack, exactly what localization error and protective clearance together consume. The deadline is `{python} RackEndBelief.t_exp_abreast_str`: memory cannot certify that position even at the instant of capture, and no frame rate changes that. For a hull at the machine's current position, with the rack end `{python} RackEndBelief.d_clear_str` ahead as the nearest unobserved boundary, the same law allows `{python} RackEndBelief.t_exp_ahead_str`. The frame that saw the aisle empty is already `{python} RackEndBelief.t_age_str` old when perception dispatches it (@sec-perception-transduction-calibration), which erodes `{python} RackEndBelief.d_age_eroded_str` of that depth before memory receives it and leaves `{python} RackEndBelief.t_left_str`, about `{python} RackEndBelief.frames_bridged_str` frame periods of the navigation camera. In the open aisle, memory usefully bridges dropped frames. That interval belongs to the hull at the machine's current position only. The base itself advances toward the rack end, so each later hull on the admitted path starts closer to the unobserved boundary and receives a shorter deadline, falling to zero as the hull comes abreast of the rack end; the permission path must therefore evaluate the law along the whole path and stop, or reacquire the cross aisle, before a hull's deadline reaches zero. Memory certifies the aisle only to a depth set by the distance from the occlusion boundary, and at the rack end that depth is gone.
+
+::: {#fig-09-rack-end-erosion fig-env="figure" fig-pos="t" fig-cap="**Free-space erosion at the rack end**: (a) Top view. The navigation camera's sightline passes the rack end, so the cross aisle behind the rack is unknown from the moment of capture. A person hidden there can advance at $v_h$ = `{python} RackEndBelief.v_h_str`; the dashed disc is the region that person may occupy when the claim lapses, which stops $\\delta_{\\text{loc}} + \\delta_{\\text{margin}}$ short of the hull's front. (b) The depth memory still certifies, $d_{\\text{free}} - \\delta_{\\text{loc}} - \\delta_{\\text{margin}} - v_h t$. For the hull's current position it falls from the `{python} RackEndBelief.d_clear_str` clear distance to zero at `{python} RackEndBelief.t_exp_ahead_str`, and the frame's `{python} RackEndBelief.t_age_str` age at dispatch is spent before memory receives it; abreast of the rack end, the `{python} RackEndBelief.side_clearance_str` side clearance certifies nothing even at capture." fig-alt="Two panels. Panel a, a top view: a hull in an aisle between two racks, the upper rack ending 1.10 m ahead of the hull's front where a cross aisle opens. A dashed teal sightline runs from a camera on the hull's front past the rack end, and the cross aisle above the sightline is hatched and labeled unknown, hidden cross aisle. A pink dashed disc centered on the rack end, clipped to the floor, is labeled reach at T_inv, 0.95 m, and a small ring at its center is labeled at dispatch, 83 mm. Dimensions show D_clear 1.10 m ahead and a side gap of 150 mm between hull and rack. Panel b: certified free depth in millimeters against time since the frame, 0 to 700 ms. A solid blue line falls from 950 mm to zero at 593.75 ms, marked with a red dot. A dashed gray line for the hull abreast of the rack end lies at zero, with a red dot at 0 ms. A gray band covers the first 51.6 ms, labeled frame age at dispatch."}
+
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RACK-END FREE-SPACE EROSION (FIGURE)
+# │ Context: @fig-09-rack-end-erosion
+# │ Goal:    show where memory's claim of empty space comes from and how fast
+# │          it lapses: the unobserved cross aisle erodes the free region at
+# │          walking speed, so the claim is long ahead and nil abreast
+# │ Show:    (a) top view: sightline, occluded cross aisle, hull, D_clear, side
+# │          clearance, and a hidden person's reach at the frame's dispatch
+# │          and at T_inv; (b) certified depth vs elapsed time, ahead and
+# │          abreast, with the dispatch age marked
+# │ How:     all values from the RackEndBelief cell; reach radius = v_h t;
+# │          certified depth = d_free - delta_loc - delta_margin - v_h t.
+# │          Hull width = aisle width - 2 x side clearance (drawing only);
+# │          rack depth, hull length, and cross-aisle extent are schematic.
+# ├─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from matplotlib.patches import Rectangle, Polygon, Circle
+from mlsysim import viz
+
+# ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────────
+RB = RackEndBelief
+M = ureg.meter
+D_CLEAR = RB.d_clear.to(M).magnitude  # category: illustrative (from the cell)
+SIDE = RB.side_clearance.to(M).magnitude  # category: illustrative (from the cell)
+D_LOC = RB.delta_loc.to(M).magnitude  # category: illustrative (from the cell)
+D_MARGIN = RB.delta_margin.to(M).magnitude  # category: chosen (from the cell)
+V_H = RB.v_h.to(M / ureg.second).magnitude  # category: datasheet (from the cell)
+T_AGE = RB.t_age.to(ureg.second).magnitude  # category: derived (from the cell)
+T_INV = RB.t_exp_ahead.to(ureg.second).magnitude  # category: derived (from the cell)
+W_AISLE = AISLE.aisle_width.to(M).magnitude  # category: illustrative (registry)
+
+# ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
+half = W_AISLE / 2  # rack faces at +/- half
+hull_half = half - SIDE  # hull side sits one side clearance from each rack face
+corner = (D_CLEAR, half)  # rack end: nearest unobserved boundary, D_CLEAR ahead
+r_age = V_H * T_AGE
+r_inv = V_H * T_INV  # equals D_CLEAR - D_LOC - D_MARGIN
+check(abs(r_inv - (D_CLEAR - D_LOC - D_MARGIN)) < 1e-9, "Reach at T_inv must spend the free depth exactly.")
+X0, X1, YT = -1.3, 2.5, 1.9  # schematic extents (m)
+t = np.linspace(0, 0.7, 400)
+ahead = np.maximum(0.0, D_CLEAR - D_LOC - D_MARGIN - V_H * t)
+abreast = np.maximum(0.0, SIDE - D_LOC - D_MARGIN - V_H * t)
+
+# ┌── 3. PLOT ──────────────────────────────────────────────────────────────────
+viz.set_book_style()
+C = viz.COLORS
+import matplotlib.pyplot as plt
+
+fig, (ax, bx) = plt.subplots(1, 2, figsize=(6.6, 3.3), gridspec_kw=dict(width_ratios=[1.25, 1]))
+FS = 7.5
+
+# (a) top view
+ax.set_aspect("equal")
+ax.set_xlim(X0, X1)
+ax.set_ylim(-1.2, YT)
+ax.axis("off")
+ax.set_title("(a) Top view at the rack end", loc="left", fontsize=9)
+rack_kw = dict(facecolor="#E2E8F0", edgecolor="#A0AEC0", lw=0.8)
+ax.add_patch(Rectangle((X0, half), D_CLEAR - X0, 0.4, **rack_kw))  # upper rack ends at the cross aisle
+ax.add_patch(Rectangle((X0, -half - 0.4), X1 - X0, 0.4, **rack_kw))  # lower rack continues
+ax.text(-0.75, half + 0.2, "rack", ha="center", va="center", fontsize=FS, color="#4A5568")
+# occluded part of the cross aisle: beyond the rack end and above the sightline
+slope = half / D_CLEAR
+occl = Polygon([corner, (X1, slope * X1), (X1, YT), (D_CLEAR, YT)], closed=True, facecolor="white", edgecolor="#A0AEC0", hatch="////", lw=0)
+ax.add_patch(occl)
+ax.text(
+    1.35,
+    1.62,
+    "unknown:\nhidden cross aisle",
+    ha="left",
+    va="center",
+    fontsize=FS,
+    color="#4A5568",
+    bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none"),
+)
+# reach disc of a hidden person, clipped to walkable floor
+floor = Polygon([(X0, -half), (X1, -half), (X1, YT), (D_CLEAR, YT), corner, (X0, half)], closed=True, facecolor="none", edgecolor="none")
+ax.add_patch(floor)
+disc = Circle(corner, r_inv, facecolor=C["RedFill"], edgecolor=C["RedLine"], lw=1.1, ls=(0, (4, 2)), alpha=0.9)
+ax.add_patch(disc)
+disc.set_clip_path(floor)
+ring = Circle(corner, r_age, facecolor="none", edgecolor=C["RedLine"], lw=0.8)
+ax.add_patch(ring)
+ring.set_clip_path(floor)
+# sightline from the navigation camera past the rack end
+ax.plot([0, X1], [0, slope * X1], color="#007A87", lw=1.0, ls=(0, (5, 2)))
+ax.text(2.2, 1.08, "sightline", rotation=np.degrees(np.arctan(slope)), ha="center", va="bottom", fontsize=FS, color="#007A87", rotation_mode="anchor")
+# hull and camera
+hull_len = 0.9  # schematic
+ax.add_patch(Rectangle((-hull_len, -hull_half), hull_len, 2 * hull_half, facecolor="#F8FAFC", edgecolor="#1A4D3E", lw=1.2))
+ax.text(-hull_len / 2, -0.12, "hull", ha="center", va="center", fontsize=FS, color="#1A202C")
+ax.plot([0], [0], marker="o", ms=4, color="#007A87")
+# D_clear dimension
+ax.annotate("", xy=(D_CLEAR, -0.42), xytext=(0, -0.42), arrowprops=dict(arrowstyle="<->", lw=0.8, color="#1A202C"))
+ax.plot([D_CLEAR, D_CLEAR], [-0.5, half], color="#A0AEC0", lw=0.6, ls=(0, (2, 2)))
+ax.text(D_CLEAR / 2, -0.46, f"$D_{{clear}}$ = {D_CLEAR:.2f} m", ha="center", va="top", fontsize=FS, color="#1A202C")
+# side clearance
+ax.annotate("", xy=(-0.25, half), xytext=(-0.25, hull_half), arrowprops=dict(arrowstyle="<->", lw=0.7, color="#1A202C", shrinkA=0, shrinkB=0))
+ax.text(-0.3, (half + hull_half) / 2 - 0.02, f"side {SIDE*1000:.0f} mm", ha="right", va="center", fontsize=FS - 0.5, color="#1A202C")
+# reach radius and the leftover localization + margin band
+ax.annotate(
+    "", xy=(D_CLEAR - r_inv, 0.58), xytext=(D_CLEAR, 0.58), arrowprops=dict(arrowstyle="->", lw=0.8, color=C["RedLine"], shrinkA=0, shrinkB=0)
+)
+ax.text(1.95, -0.36, f"reach at $T_{{inv}}$:\n$v_h T_{{inv}}$ = {r_inv:.2f} m", ha="center", va="center", fontsize=FS, color=C["RedLine"])
+ax.text(D_CLEAR + 0.1, half - 0.08, f"at dispatch\n{r_age*1000:.0f} mm", ha="left", va="top", fontsize=FS - 0.5, color=C["RedLine"])
+
+# (b) certified depth vs elapsed time
+bx.plot(t * 1000, ahead * 1000, color=C["BlueLine"], lw=1.8, label=f"hull now: $d_{{free}}$ = {D_CLEAR:.2f} m")
+bx.plot(t * 1000, abreast * 1000, color="#4A5568", lw=1.6, ls=(0, (5, 2)), label=f"hull abreast: $d_{{free}}$ = {SIDE*1000:.0f} mm")
+bx.axvspan(0, T_AGE * 1000, color="#E2E8F0", lw=0)
+bx.text(T_AGE * 1000 + 8, 110, f"frame age at\ndispatch {T_AGE*1000:.1f} ms", fontsize=FS - 0.5, color="#4A5568", va="bottom")
+bx.plot([T_INV * 1000], [0], "o", ms=5, color=C["RedLine"], zorder=5)
+bx.annotate(
+    f"$T_{{inv}}$ = {T_INV*1000:.2f} ms",
+    xy=(T_INV * 1000, 0),
+    xytext=(690, 260),
+    fontsize=FS,
+    color=C["RedLine"],
+    ha="right",
+    arrowprops=dict(arrowstyle="->", lw=0.8, color=C["RedLine"]),
+)
+bx.plot([0], [0], "o", ms=5, color=C["RedLine"], zorder=5, clip_on=False)
+bx.text(14, 22, "abreast: 0 ms", fontsize=FS - 0.5, color=C["RedLine"], va="bottom")
+bx.set_xlim(0, 700)
+bx.set_ylim(-40, 1050)
+bx.set_xlabel("Time since the frame (ms)", fontsize=8)
+bx.set_ylabel("Certified free depth (mm)", fontsize=8)
+bx.tick_params(labelsize=7.5)
+bx.set_title("(b) Erosion at walking speed", loc="left", fontsize=9)
+bx.legend(loc="upper right", fontsize=7, frameon=False)
+
+plt.tight_layout()
+plt.show()
+```
+
+:::
 
 Nothing in the software marks the moment of expiry. The map still shows the cross aisle free, and the estimator still publishes a well-formed record, yet the prediction has stopped functioning as evidence. The eroded cells become unknown, and the region beside the rack end is unknown from the moment the uprights hide it. The stopping budget protects a static obstacle at $D_{\text{clear}}$, such as a person who has stepped out and stands in the aisle, or a dropped tote, and memory adds a deadline to that budget but no distance. The running total at the drive limit stays at the `{python} RackEndBelief.running_total_str` that @sec-perception-transduction-calibration left.
 

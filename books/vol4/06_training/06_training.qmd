@@ -317,9 +317,9 @@ Crucially, receding-horizon temporal ensembling introduces an acute physical fai
 
 [^fn-ctrl-commitment-horizon]: **Mode Commitment Horizons in Temporal Ensembling**\index{Action chunking!mode commitment}\index{Temporal ensembling!mode averaging failure}: One remedy is to stop blending across the seam. Real-time chunking generates the next chunk while the current one executes, freezes the actions already committed to execution, and inpaints the rest of the new chunk to agree with them, so the new chunk continues the executing mode instead of averaging against it [@black2025realtime]; @sec-brain-action-chunking places the committed prefix on the machine's renewal schedule. The method applies to diffusion and flow decoders, whose sampling can be conditioned on the frozen prefix. This commitment never overrides a state limit, evidence expiry, or lease expiry; the qualified fallback takes precedence when continued execution is invalid.
 
-Chunking changes how often the policy replans, but does not supply recovery states absent from the demonstrations. Executing $H_a$ actions between queries reduces the number of query boundaries to $T_{\text{eff}} = T/H_a$ while leaving disturbances within each execution window to the lower-level feedback system. This count alone does not convert the imitation-learning cost bound $\mathcal{O}(T^2 \epsilon)$ into a task-survival curve. ACT [@zhao2023learning] and receding-horizon diffusion [@chi2024diffusionpolicy] change temporal execution; DAgger [@ross2011reduction] changes the training distribution by obtaining labels on learner-visited states. These are separate ways to improve behavior, and their closed-loop benefits must be measured on the task. The normalized displacement sketches in @fig-06-compounding-error retain the persistent-error assumptions of the earlier calculation. Neither those sketches nor the imitation-learning cost bound establishes a task-survival probability or ranks learning algorithms.
+Chunking changes how often the policy replans, but does not supply recovery states absent from the demonstrations. Executing $H_a$ actions between queries reduces the number of query boundaries to $T_{\text{eff}} = T/H_a$ while leaving disturbances within each execution window to the lower-level feedback system. This count alone does not convert the imitation-learning cost bound $\mathcal{O}(T^2 \epsilon)$ into a task-survival curve. ACT [@zhao2023learning] and receding-horizon diffusion [@chi2024diffusionpolicy] change temporal execution; DAgger [@ross2011reduction] changes the training distribution by obtaining labels on learner-visited states. These are separate ways to improve behavior, and their closed-loop benefits must be measured on the task. @Fig-06-compounding-error places the section's three ideas in one state space: the tube of demonstrated states, a learner that drifts out of it, and the learner-visited state where DAgger obtains an expert label before the drift reaches a region from which no admissible action returns. Neither the sketch nor the imitation-learning cost bound establishes a task-survival probability or ranks learning algorithms.
 
-::: {#fig-06-compounding-error fig-env="figure" fig-pos="htb" fig-cap="**Horizon dependence under persistent error**: Dimensionless sketches of the quadratic and cubic cumulative-displacement relationships derived above, normalized to agree at a reference horizon. The curves assume persistent error without corrective feedback and fixed dynamic coefficients. They illustrate growth rates, not measured task survival, collision probability, or a ranking of learning algorithms." fig-alt="Two increasing curves of normalized cumulative displacement against normalized execution horizon. The cubic relationship rises more steeply than the quadratic relationship after their common reference point. A label identifies both as illustrative growth laws, not task-survival curves."}
+::: {#fig-06-compounding-error fig-env="figure" fig-pos="htb" fig-cap="**Drift out of the demonstrated states**: Behavioral cloning trains only inside the shaded tube the expert visited. Once the learner leaves it, each action is taken from an unfamiliar state and the error compounds. DAgger labels a learner-visited state outside the tube, which supplies recovery experience while a return is still possible. Past the red boundary, actuator and friction limits leave no action that restores the task, so no label can help. The sketch is schematic; its axes carry no units." fig-alt="Schematic state-space plot with task progress on the horizontal axis and deviation from the demonstrated path on the vertical axis. A shaded band surrounds a solid expert path. A dashed learner path leaves the band and continues upward into a red region at the top. At one point just outside the band, a marker labeled DAgger label has an arrow pointing back toward the band."}
 
 ```{python}
 #| label: fig-06-compounding-error
@@ -328,27 +328,75 @@ Chunking changes how often the policy replans, but does not supply recovery stat
 #| warning: false
 
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ NORMALIZED HORIZON DEPENDENCE UNDER PERSISTENT ERROR
+# │ DRIFT OUT OF THE DEMONSTRATED STATES (STATE-SPACE SKETCH)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-06-compounding-error follows the displacement examples.
-# │ Goal: Separate a growth-law sketch from empirical task-survival evidence.
-# │ Show: Quadratic and cubic growth normalized at one reference horizon.
-# │ How: Plot the previously derived T^2 and T^3 relationships in dimensionless
-# │      reference units; no probabilities or measured outcomes are supplied.
+# │ Context: @fig-06-compounding-error follows the DAgger and recoverability
+# │          paragraphs of @sec-training-recovery-experience-6a31.
+# │ Goal: Show where BC trains, where the learner goes, where DAgger labels,
+# │       and where no label can help, in one picture.
+# │ Show: demonstration tube around the expert path; learner drift leaving
+# │       it; a DAgger label at a learner-visited state; the unrecoverable
+# │       region bounded by actuator and friction limits.
+# │ How: Schematic in dimensionless coordinates; no measured quantity is
+# │      plotted, so the axes carry no ticks or units.
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from mlsysim import viz
 
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 4.5))
-horizon_ratio = np.linspace(1, 4, 200)
-ax.plot(horizon_ratio, horizon_ratio**2, color=COLORS["BlueLine"], linewidth=2.2, label=r"Quadratic growth: $(T/T_0)^2$")
-ax.plot(horizon_ratio, horizon_ratio**3, color=COLORS["OrangeLine"], linewidth=2.2, linestyle="--", label=r"Cubic growth: $(T/T_0)^3$")
-ax.set_xlabel(r"Execution horizon / reference horizon, $T/T_0$")
-ax.set_ylabel("Cumulative displacement / reference value")
-ax.set_xlim(0.9, 4.1)
-ax.set_ylim(0, 70)
-ax.legend(loc="upper left", frameon=True)
-ax.text(0.04, 0.60, "Illustrative growth laws\nNo task-survival probability implied", transform=ax.transAxes, fontsize=10, va="top")
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 4))
+x = np.linspace(0.0, 1.0, 300)
+expert = 0.10 * np.sin(2.2 * np.pi * x)  # demonstrated path (schematic)
+tube = 0.14  # half-width of the demonstrated states
+y_unrec = 0.78  # boundary of the unrecoverable region
+x_leave = 0.30  # learner leaves the tube here
+drift = 1.35 * np.clip(x - x_leave, 0.0, None) ** 1.6
+learner = expert + 0.09 + drift  # learner path, offset then compounding
+
+ax.axhspan(y_unrec, 1.0, color=COLORS["RedL"], lw=0, zorder=0)
+ax.axhline(y_unrec, color=COLORS["RedLine"], lw=1.4, zorder=1)
+ax.text(0.02, 0.89, "Unrecoverable: no admissible action returns (torque, friction limits)", color=COLORS["RedLine"], fontsize=9.5, va="center")
+ax.fill_between(x, expert - tube, expert + tube, color=COLORS["GreenFill"], lw=0, zorder=1)
+ax.plot(x, expert, color=COLORS["GreenLine"], lw=2.0, zorder=3)
+ax.text(0.97, -0.13, "Demonstrated states\n(BC trains here)", color=COLORS["GreenLine"], fontsize=9.5, ha="right", va="top")
+ax.text(0.03, -0.07, r"expert $\pi^*$", color=COLORS["GreenLine"], fontsize=9.5, va="top")
+mask = learner <= y_unrec + 0.02
+ax.plot(x[mask], learner[mask], color=COLORS["primary"], lw=2.0, ls="--", zorder=4)
+i_end = np.argmax(~mask) - 1
+ax.plot(x[i_end], learner[i_end], "o", color=COLORS["RedLine"], ms=6, zorder=5)
+i_lab = np.searchsorted(x, 0.78)
+ax.text(x[i_lab] - 0.02, learner[i_lab] + 0.02, r"learner $\pi_\theta$", color=COLORS["primary"], fontsize=9.5, ha="right", va="bottom")
+
+# DAgger: a learner-visited state just outside the tube gets an expert label.
+i_d = np.searchsorted(x, 0.56)
+xd, yd = x[i_d], learner[i_d]
+ax.plot(xd, yd, "o", color=COLORS["primary"], ms=6, zorder=5)
+ax.annotate(
+    "",
+    xy=(xd + 0.05, expert[i_d + 15] + 0.08),
+    xytext=(xd + 0.005, yd - 0.015),
+    arrowprops=dict(arrowstyle="-|>", color=COLORS["GreenLine"], lw=1.6),
+    zorder=5,
+)
+ax.text(
+    xd - 0.03,
+    yd + 0.10,
+    "DAgger: expert label\n" + r"$\pi^*(\mathbf{s})$ at a learner-visited $\mathbf{s}$",
+    color=COLORS["primary"],
+    fontsize=9.5,
+    ha="right",
+    va="bottom",
+)
+ax.plot([xd - 0.028, xd - 0.004], [yd + 0.10, yd + 0.012], color=COLORS["primary"], lw=0.8)
+
+ax.set_xlim(0.0, 1.0)
+ax.set_ylim(-0.30, 1.0)
+ax.set_xticks([])
+ax.set_yticks([])
+ax.grid(False)
+ax.set_xlabel("Task progress")
+ax.set_ylabel("Deviation from the demonstrated path")
+for s in ("top", "right"):
+    ax.spines[s].set_visible(False)
 fig.tight_layout()
 plt.show()
 plt.close()
@@ -480,6 +528,109 @@ The illustrative budget distinguishes sampler choice from execution authority:
 1. **Synchronous setpoint deadline:** The stipulated DDIM latency exceeds the next `{python} LatchContactDeadline.t_step_str` setpoint tick, so it cannot supply every tick synchronously. A compact `{python} DecoderBudget.k_flow_str`-evaluation flow-matching candidate, at `{python} DecoderBudget.t_enc_str` of encoding plus `{python} DecoderBudget.k_flow_str` evaluations of `{python} DecoderBudget.t_eval_str`, needs `{python} DecoderBudget.t_flow_str` and fits the compute-only budget. It becomes a viable synchronous choice only if action quality, scheduling, transfer, and admission also fit. A faster decoder does not remove the permission check.
 2. **Number of function evaluations:** A higher-order solver can use fewer integration steps while performing more network evaluations. Standard RK4 evaluates four stages per step; compare that total work with the single-stage alternative before choosing it. Distillation or a different solver is useful when it reduces measured latency without losing the recovery behavior the latch needs.
 3. **Asynchronous proposal renewal:** The slower candidate can instead generate chunks against the `{python} LatchContactDeadline.t_chunk_str` renewal cadence while the execution path plays an admitted prefix. There its margin is thin. The diffusion head leaves `{python} DecoderBudget.slack_ddim_str` of the renewal period, where the deployed ACT decoder leaves `{python} DecoderBudget.slack_act_str`. A contention stretch the size of the lease rule's `{python} DecoderBudget.t_jitter_str` renewal-jitter allowance (@sec-nervous-coupled-budget) leaves ACT inside its period but carries the diffusion head `{python} DecoderBudget.ddim_stretch_over_str` past it, so every such renewal would draw on the allowance that transport, validation, and mailbox delays also need. This compute-only fit still needs loaded timing evidence. The prediction horizon supplies candidate motion; it does not authorize playback for the entire horizon. The lease selected in @sec-nervous-lease-sizing bounds active permission separately from renewal cadence and evidence age. Fresh evidence and a valid replacement can renew execution; a new header cannot renew stale observations. An invalid new proposal leaves a valid active prefix in place only while that prefix's own state, evidence, and lease remain valid. On expiry, the execution path invokes a state-dependent, physically qualified fallback. Powered deceleration requires drive energy; a holding brake is engaged according to its qualified sequence, not credited with an unspecified emergency stop.
+
+@Fig-06-decoder-timing lays both decoders on the machine's schedule, where the difference between the two slacks is a difference in what a single stretched renewal can absorb.
+
+::: {#fig-06-decoder-timing fig-env="figure" fig-pos="htb" fig-cap="**Decoder latency on the renewal schedule**: Setpoints play every `{python} LatchContactDeadline.t_step_str` and proposals renew every `{python} LatchContactDeadline.t_chunk_str`. The deployed ACT decoder finishes with `{python} DecoderBudget.slack_act_str` to spare; the illustrative diffusion head leaves `{python} DecoderBudget.slack_ddim_str`, and a `{python} DecoderBudget.t_jitter_str` stretch pushes it `{python} DecoderBudget.ddim_stretch_over_str` past the renewal. The lease bounds how long the active prefix may play if a renewal is missed." fig-alt="Timing strip over 100 milliseconds with six rows. The top two rows mark setpoint ticks every 25 milliseconds and renewal boundaries every 50 milliseconds. Below them, bars show ACT inference with a short slack gap before each renewal, diffusion inference with a shorter gap, and diffusion inference stretched so that a red segment extends past the renewal boundary. The bottom row shows the lease interval extending beyond the first renewal."}
+
+```{python}
+#| label: fig-06-decoder-timing
+#| echo: false
+#| message: false
+#| warning: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DECODER TIMING STRIP: ACT VS. DIFFUSION ON THE RENEWAL SCHEDULE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-06-decoder-timing in @sec-training-decoder-costs.
+# │ Goal: Show renewal slack, not mean latency, as the quantity that decides
+# │       whether a decoder can run asynchronously.
+# │ Show: setpoint ticks, renewal boundaries, ACT and diffusion inference
+# │       bars with their slack, the diffusion overrun under a jitter-sized
+# │       stretch, and the lease interval.
+# │ How: timing_strip() draws one row per event stream; every duration from
+# │      DecoderBudget, LatchContactDeadline, and AISLE.t_lease.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+
+_B = DecoderBudget
+_ms = lambda q: q.to("millisecond").magnitude
+_t_step, _t_renew = _ms(_B.t_step), _ms(_B.t_renew)
+_t_act, _t_ddim, _t_jit = _ms(_B.t_act), _ms(_B.t_ddim), _ms(_B.t_jitter)
+_t_lease = _ms(AISLE.t_lease)
+check(abs(_t_renew - 2 * _t_step) < 1e-9, "renewal must be two setpoint steps")
+check(_t_renew < _t_lease < 2 * _t_renew, "lease must outlast one renewal but not two")
+check(abs(_t_ddim + _t_jit - _t_renew - _ms(_B.ddim_stretch_over)) < 1e-9, "overrun must match DecoderBudget")
+
+def timing_strip(ax, rows, t_end, bar_h=0.5):
+    """Draw a timing strip. rows = [(label, [(t0, t1, color, text, hatch)...], ticks)]."""
+    n = len(rows)
+    for i, (label, segs, ticks) in enumerate(rows):
+        y = n - 1 - i
+        ax.text(-0.02 * t_end, y, label, ha="right", va="center", fontsize=9.5)
+        for t in ticks:
+            ax.plot([t, t], [y - 0.28, y + 0.28], color=COLORS["primary"], lw=1.4)
+        for t0, t1, color, text, hatch in segs:
+            ax.barh(
+                y,
+                t1 - t0,
+                left=t0,
+                height=bar_h,
+                color="white" if hatch else color,
+                edgecolor=color,
+                hatch=None if hatch == "open" else hatch,
+                lw=1.0,
+            )
+            if text:
+                ax.text(0.5 * (t0 + t1), y, text, ha="center", va="center", fontsize=9, color="white" if not hatch else color)
+    ax.set_ylim(-0.7, n - 0.3)
+    ax.set_xlim(0, t_end)
+    ax.set_yticks([])
+    for s in ("top", "right", "left"):
+        ax.spines[s].set_visible(False)
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 4.2))
+PROP, LEASE = "#B87333", "#1A4D3E"
+t_end = 2 * _t_renew
+renewals = [0.0, _t_renew, 2 * _t_renew]
+for t in renewals:
+    ax.axvline(t, color=COLORS["grid"], lw=1.0, ls="--", zorder=0)
+rows = [
+    (f"setpoint every {_t_step:.0f} ms", [], [k * _t_step for k in range(int(t_end / _t_step) + 1)]),
+    (f"renewal every {_t_renew:.0f} ms", [], renewals),
+    (
+        "ACT decoder",
+        [(r, r + _t_act, PROP, f"{_t_act:.0f} ms", None) for r in renewals[:2]]
+        + [(r + _t_act, r + _t_renew, PROP, f"{_t_renew - _t_act:.0f} ms", "open") for r in renewals[:2]],
+        [],
+    ),
+    ("diffusion head", [(r, r + _t_ddim, PROP, f"{_t_ddim:.0f} ms", None) for r in renewals[:2]], []),
+    (
+        f"diffusion, {_t_jit:.0f} ms stretch",
+        [
+            (0.0, _t_ddim, PROP, f"{_t_ddim:.0f} ms", None),
+            (_t_ddim, _t_renew, PROP, "", "////"),
+            (_t_renew, _t_ddim + _t_jit, COLORS["RedLine"], "", None),
+        ],
+        [],
+    ),
+    ("lease from admission", [(0.0, _t_lease, LEASE, f"{_t_lease:.0f} ms lease", None)], []),
+]
+timing_strip(ax, rows, t_end)
+n = len(rows)
+ax.text(_t_ddim + 1, n - 4 + 0.30, f"{_t_renew - _t_ddim:.0f} ms slack", fontsize=9, color=PROP, ha="right", va="bottom")
+ax.text(
+    _t_ddim + _t_jit + 1.5, n - 5, f"stretch ends {_ms(_B.ddim_stretch_over):.0f} ms past renewal", color=COLORS["RedLine"], fontsize=9, va="center"
+)
+ax.text(_t_lease + 1.5, n - 6, "expires unless renewed", color=LEASE, fontsize=9, va="center")
+ax.set_xlabel("Time (ms)")
+ax.set_xticks([k * _t_step for k in range(int(t_end / _t_step) + 1)])
+ax.grid(False)
+fig.tight_layout()
+plt.show()
+plt.close()
+```
+:::
 
 ::: {.column-margin .margin-pointer}
 ↪ Hardware placement of multi-rate action chunk buffers across the application processor and the safety microcontroller is engineered in @sec-placement-two-paths-one-die.
@@ -909,7 +1060,78 @@ On the machine, the plate is `{python} LatchContactExploit.plate_over_sim_mult_s
 $$k_{\text{eff}} = \left(\frac{1}{k_{\text{plate}}} + \frac{1}{k_{\text{robot}}}\right)^{-1}.$$
 A rigid robot bounds the peak from above. With $k_{\text{robot}} \to \infty$ the same plunge peaks at `{python} LatchContactExploit.f_rigid_str`, `{python} LatchContactExploit.rigid_over_lim_mult_str` the latch limit. The latch limit is reached when $k_{\text{eff}}$ reaches $(F_{\text{lim}}/v)^2/m =$ `{python} LatchContactExploit.k_eff_star_str`, which requires a robot-side stiffness of `{python} LatchContactExploit.k_robot_star_str`. A robot stiffer than that value breaks the latch at the fast approach, and a softer one does not. The chapter has no measured $k_{\text{robot}}$ for this arm, gripper, and pad set, and it will not invent one. A quasi-static push test at the tool center point would supply it, and until it does the sign of the real outcome is unknown, which is exactly why the simulated result cannot be accepted. The same energy model gives `{python} LatchContactExploit.f_guarded_rigid_str` for a rigid robot coasting in at the guarded speed, under the limit even in the stiffest case.
 
-The energy model describes a mass that coasts into the plate after drive force stops. The constant-speed model of @sec-training-policy-synthesis describes the other case, a drive that keeps commanding motion into the plate, which is the worst case the permission path must stop. Whether the permission path can prevent that peak is a question of time. Contact force follows $F = k\,\Delta x$ (@sec-body-actuator-limits), and because the plate compresses at the approach speed, $\Delta x = vt$ and the force rises as $F = kvt$ from the moment of touch. With the plate alone as the stiffness, the conservative choice for a deadline, the latch limit arrives `{python} LatchContactDeadline.t_yield_fast_str` after touch at the fast approach, barely more than the `{python} LatchContactDeadline.t_contact_loop_str` the contact loop needs to respond, while at the guarded approach of `{python} LatchContactDeadline.v_guarded_str` it arrives after `{python} LatchContactDeadline.t_yield_guarded_str`. A response that begins with only `{python} LatchContactDeadline.t_left_fast_str` remaining under the constant-speed estimate has no established stopping margin in this example. Prevention must therefore act before contact. An independently enforced stopping envelope, such as $v_{\text{max}}(z) \le \sqrt{2 a_{\text{brake}} z}$, can preserve the ability to stop before contact. Here $z$ is usable clearance to a stopping boundary before the plate after reserving response travel, and $a_{\text{brake}}$ is the validated deceleration. The bound tends to zero at that boundary; it does not authorize a nonzero touch speed. Entering the guarded contact mode instead requires separate validation of approach speed, contact-force rise, response delay, and available deceleration. A force tripwire limits subsequent loading only within those validated assumptions. The contact deadline, not the training reward, is what confines the latch policy's declared ODD to the guarded approach (@sec-training-policy-manifest).
+The energy model describes a mass that coasts into the plate after drive force stops. The constant-speed model of @sec-training-policy-synthesis describes the other case, a drive that keeps commanding motion into the plate, which is the worst case the permission path must stop. Whether the permission path can prevent that peak is a question of time. Contact force follows $F = k\,\Delta x$ (@sec-body-actuator-limits), and because the plate compresses at the approach speed, $\Delta x = vt$ and the force rises as $F = kvt$ from the moment of touch. With the plate alone as the stiffness, the conservative choice for a deadline, the latch limit arrives `{python} LatchContactDeadline.t_yield_fast_str` after touch at the fast approach, barely more than the `{python} LatchContactDeadline.t_contact_loop_str` the contact loop needs to respond, while at the guarded approach of `{python} LatchContactDeadline.v_guarded_str` it arrives after `{python} LatchContactDeadline.t_yield_guarded_str`. A response that begins with only `{python} LatchContactDeadline.t_left_fast_str` remaining under the constant-speed estimate has no established stopping margin in this example. Prevention must therefore act before contact. An independently enforced stopping envelope, such as $v_{\text{max}}(z) \le \sqrt{2 a_{\text{brake}} z}$, can preserve the ability to stop before contact. Here $z$ is usable clearance to a stopping boundary before the plate after reserving response travel, and $a_{\text{brake}}$ is the validated deceleration. The bound tends to zero at that boundary; it does not authorize a nonzero touch speed. Entering the guarded contact mode instead requires separate validation of approach speed, contact-force rise, response delay, and available deceleration. A force tripwire limits subsequent loading only within those validated assumptions. The contact deadline, not the training reward, is what confines the latch policy's declared ODD to the guarded approach (@sec-training-policy-manifest). @Fig-06-latch-contact-force draws both approaches on one time axis, so the margin left after the contact loop responds can be read directly.
+
+::: {#fig-06-latch-contact-force fig-env="figure" fig-pos="htb" fig-cap="**Contact force against the contact-loop response**: Under constant drive into the plate, force rises as $F = kvt$ from touch. At the fast approach of `{python} LatchContactDeadline.v_fast_str` it crosses the `{python} LatchRewardProblem.f_trip_str` tripwire almost at once and reaches the `{python} LatchContactDeadline.f_lim_str` latch limit only `{python} LatchContactDeadline.t_left_fast_str` after the `{python} LatchContactDeadline.t_contact_loop_str` contact loop can respond. At the guarded approach of `{python} LatchContactDeadline.v_guarded_str`, the limit arrives at `{python} LatchContactDeadline.t_yield_guarded_str`, leaving several loop responses of margin. Plate stiffness alone is used, the stiffest and therefore shortest case." fig-alt="Line plot of contact force in newtons against time since touch in milliseconds. Two straight lines rise from the origin, a steep dashed line for the fast approach and a shallower solid line for the guarded approach. A gray dotted horizontal line marks the tripwire and a red horizontal line marks the latch limit, with a red band above it. A vertical line marks the contact-loop response time. Brackets show the short time left on the fast line and the longer time left on the guarded line."}
+
+```{python}
+#| label: fig-06-latch-contact-force
+#| echo: false
+#| message: false
+#| warning: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATCH CONTACT FORCE VS. TIME AT THE GUARDED AND FAST APPROACHES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-06-latch-contact-force in @sec-training-contact-exploit.
+# │ Goal: Make the contact deadline visible: how much time is left after the
+# │       contact loop responds, at each approach speed.
+# │ Show: F = k v t for both speeds, the tripwire, the latch limit, the
+# │       contact-loop response time, and the time left on each line.
+# │ How: Same constant-speed, plate-only model as LatchContactDeadline;
+# │      every value from LatchContactDeadline and LatchRewardProblem.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import viz
+
+_D = LatchContactDeadline
+_k = _D.k_plate.to("newton / meter").magnitude
+_v_g = _D.v_guarded.to("meter / second").magnitude
+_v_f = _D.v_fast.to("meter / second").magnitude
+_f_lim = _D.f_lim.to("newton").magnitude
+_f_trip = LatchRewardProblem.f_trip.to("newton").magnitude
+_t_loop = _D.t_contact_loop.to("millisecond").magnitude
+_t_g = _D.t_yield_guarded.to("millisecond").magnitude
+_t_f = _D.t_yield_fast.to("millisecond").magnitude
+check(abs(_f_lim / (_k * _v_f) * 1e3 - _t_f) < 1e-9, "plot model must match the fast deadline")
+check(abs(_f_lim / (_k * _v_g) * 1e3 - _t_g) < 1e-9, "plot model must match the guarded deadline")
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 4.2))
+t_ms = np.linspace(0.0, 10.0, 400)
+f_top = 1.3 * _f_lim
+ax.axhspan(_f_lim, f_top, color=COLORS["RedL"], lw=0, zorder=0)
+ax.axhline(_f_lim, color=COLORS["RedLine"], lw=1.6, zorder=2)
+ax.text(3.6, _f_lim + 3, f"latch limit {_f_lim:.0f} N", color=COLORS["RedLine"], ha="left", va="bottom", fontsize=9.5)
+ax.axhline(_f_trip, color=COLORS["secondary"], lw=1.2, ls=":", zorder=2)
+ax.text(9.9, _f_trip + 2, f"tripwire {_f_trip:.0f} N", color=COLORS["secondary"], ha="right", va="bottom", fontsize=9.5)
+ax.axvline(_t_loop, color="#1A4D3E", lw=1.4, zorder=2)
+ax.text(_t_loop + 0.1, 0.52 * _f_lim, f"contact loop\nresponds at\n{_t_loop:.0f} ms", color="#1A4D3E", ha="left", va="center", fontsize=9.5)
+
+ax.plot(t_ms, _k * _v_f * t_ms * 1e-3, color=COLORS["primary"], lw=2.2, ls="--", zorder=3)
+ax.plot(t_ms, _k * _v_g * t_ms * 1e-3, color=COLORS["GreenLine"], lw=2.2, zorder=3)
+ax.text(3.15, 1.12 * _f_lim, f"fast {_v_f:.2f} m/s", color=COLORS["primary"], ha="left", va="bottom", fontsize=9.5)
+ax.text(6.5, 0.62 * _f_lim, f"guarded {_v_g:.2f} m/s", color=COLORS["GreenLine"], ha="left", va="center", fontsize=9.5)
+ax.plot([_t_f, _t_g], [_f_lim, _f_lim], "o", color=COLORS["RedLine"], ms=5, zorder=4)
+
+def _left_bracket(y, t0, t1, label, color, below=True):
+    ax.annotate("", xy=(t1, y), xytext=(t0, y), arrowprops=dict(arrowstyle="<->", color=color, lw=1.2, shrinkA=0, shrinkB=0))
+    if below:
+        ax.text(0.5 * (t0 + t1), y - 2, label, color=color, ha="center", va="top", fontsize=9.5)
+    else:
+        ax.text(t1 + 0.12, y, label, color=color, ha="left", va="center", fontsize=9.5)
+
+_left_bracket(0.92 * _f_lim, _t_loop, _t_f, f"{_t_f - _t_loop:.1f} ms left", COLORS["primary"], below=False)
+_left_bracket(0.30 * _f_lim, _t_loop, _t_g, f"{_t_g - _t_loop:.1f} ms left", COLORS["GreenLine"])
+
+ax.set_xlim(0.0, 10.0)
+ax.set_ylim(0.0, f_top)
+ax.set_xlabel("Time since touch (ms)")
+ax.set_ylabel("Contact force (N)")
+fig.tight_layout()
+plt.show()
+plt.close()
+```
+:::
 
 Simulator fidelity for contact is therefore budgeted in observable mechanical quantities, namely contact onset timing, peak normal force, transferred impulse, slip distance, and release delay, not in the internals of the solver. The mismatch can also take the opposite sign. A penalty engine that resolves a collision within one integration step concentrates the momentum transfer into a sharp spike, while pad deformation and structural compliance on hardware spread it over many milliseconds. The integrated impulse can then agree closely while the peak force differs severalfold, and a policy that learned to detect contact onset from the simulated spike never sees that spike on the machine, so it keeps pushing until the drive reaches its current limit.
 

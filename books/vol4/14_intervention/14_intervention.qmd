@@ -511,7 +511,132 @@ In Mode 2 at the aisle speed, the machine would reach a static obstacle at the r
 
 ### Speed ceilings and the clearance collision horizon {#sec-intervention-speed-ceilings}
 
-The warehouse comparison can include different operator states without changing machines. Each state is useful only at speeds where its response time leaves room for the same resident stop, and the sourced response times differ by more than an order of magnitude.
+@Fig-14-takeover-timeline draws the two design takeovers at the aisle speed. Every trace ends in the same resident stop; what separates them is how long the machine coasts before that stop begins. The warehouse comparison can include different operator states without changing machines. Each state is useful only at speeds where its response time leaves room for the same resident stop, and the sourced response times differ by more than an order of magnitude.
+
+::: {#fig-14-takeover-timeline fig-env="figure" fig-pos="t" fig-cap="**Two takeovers against one clear distance**: Clearance consumed at the `{python} InterventionTakeoverBudget.v_str` aisle speed, starting from the fixed allowances. Each trace coasts through its delay and then follows the same jerk-limited resident stop. The machine alone stops `{python} InterventionTakeoverBudget.spare_str` short of the `{python} InterventionTakeoverBudget.d_clear_str` clear distance. A `{python} InterventionTakeoverBudget.t_in_str` in-loop takeover inserted before braking carries the stop to `{python} InterventionTakeoverBudget.d_stop_in_str`, and a `{python} InterventionTakeoverBudget.t_ool_str` out-of-loop takeover carries it to `{python} InterventionTakeoverBudget.d_stop_ool_str`. The waiting, not the braking, spends the clearance." fig-alt="Two panels of clearance consumed in meters against time in seconds. Three traces start at a shaded band of fixed allowances, rise linearly while the machine waits, and flatten during an identical braking curve. A dashed horizontal line marks the rack-end clear distance. The left panel shows the first two seconds: the machine-only trace ends below the line with a bracket marking the spare margin, and the in-loop takeover trace ends above it. The right panel shows six seconds and seven meters, where the out-of-loop takeover trace rises far above the line before braking."}
+
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TWO TAKEOVERS AGAINST ONE CLEAR DISTANCE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-14-takeover-timeline
+# │
+# │ Goal:    Show that the takeover delay, not the braking, spends the clearance.
+# │ Show:    Clearance consumed vs. time at the aisle speed for the machine
+# │          alone, the in-loop takeover, and the out-of-loop takeover; the
+# │          clear distance; the spare margin of the machine alone.
+# │ How:     InterventionTakeoverBudget terms. Each trace starts at the fixed
+# │          allowances, coasts for T_Sigma + tau_delay, then follows the
+# │          jerk-limited resident stop (trapezoidal deceleration, a_brake,
+# │          j_brake), integrated numerically and guarded against
+# │          calc_scurve_stop_distance through the budget endpoints.
+# │
+# │ Imports: InterventionTakeoverBudget (calc-intervention-takeover-budget)
+# │ Exports: (figure only)
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import viz
+from mlsysim.core.units import meter, second, millimeter
+from mlsysim.fmt import check
+
+TB = InterventionTakeoverBudget
+
+# ┌── 1. LOAD ─────────────────────────────────────────────────────────────────
+v = TB.v.to(meter / second).magnitude  # category: chosen
+a = TB.a_brake.to(meter / second**2).magnitude  # category: illustrative
+j = TB.j_brake.to(meter / second**3).magnitude  # category: derived
+delta = TB.overhead.to(meter).magnitude  # category: illustrative / chosen
+d_clear = TB.d_clear.to(meter).magnitude  # category: illustrative
+tau = TB.tau_delay.to(second).magnitude  # category: derived
+cases = [
+    ("machine alone", 0.0),
+    (f"in-loop takeover, {TB.t_in_str}", TB.t_in.to(second).magnitude),
+    (f"out-of-loop takeover, {TB.t_ool_str}", TB.t_ool.to(second).magnitude),
+]
+
+# ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
+def stop_profile(dt=1e-4):
+    """Speed and distance during the trapezoidal-deceleration stop from v."""
+    t_j = a / j
+    t_c = v / a - t_j
+    t = np.arange(0.0, 2 * t_j + t_c + dt, dt)
+    decel = np.where(t < t_j, j * t, np.where(t < t_j + t_c, a, np.clip(a - j * (t - t_j - t_c), 0.0, a)))
+    speed = np.maximum(v - np.concatenate([[0.0], np.cumsum(0.5 * (decel[1:] + decel[:-1]) * dt)]), 0.0)
+    dist = np.concatenate([[0.0], np.cumsum(0.5 * (speed[1:] + speed[:-1]) * dt)])
+    return t, dist
+
+t_stop, d_stop = stop_profile()
+traces = []
+for name, t_take in cases:
+    t_wait = t_take + tau
+    t = np.concatenate([np.linspace(0.0, t_wait, 200), t_wait + t_stop])
+    y = np.concatenate([delta + v * np.linspace(0.0, t_wait, 200), delta + v * t_wait + d_stop])
+    traces.append((name, t_wait, t, y))
+
+# ┌── 3. GUARD ────────────────────────────────────────────────────────────────
+ends = [tr[3][-1] for tr in traces]
+check(abs(ends[0] - TB.budget.to(meter).magnitude) < 1e-4, "machine-alone trace must end at the finished budget")
+check(abs(ends[1] - TB.d_stop_in.to(meter).magnitude) < 1e-4, "in-loop trace must end at the in-loop stop")
+check(abs(ends[2] - TB.d_stop_ool.to(meter).magnitude) < 1e-4, "out-of-loop trace must end at the out-of-loop stop")
+check(ends[0] < d_clear < ends[1], "only the machine-alone trace fits the clear distance")
+
+# ┌── 4. PLOT ─────────────────────────────────────────────────────────────────
+import matplotlib.pyplot as plt
+
+viz.set_book_style()
+C = viz.COLORS
+fig, axes = plt.subplots(1, 2, figsize=(10, 4.4), gridspec_kw={"width_ratios": [1, 1.1]})
+styles = [
+    dict(color=C["GreenLine"], ls="-", lw=2.0),
+    dict(color=C["BlueLine"], ls="--", lw=2.0),
+    dict(color=C["BrownLine"], ls="-.", lw=2.0),
+]
+panels = [(axes[0], 1.9, 2.0, "(a) First 1.9 s"), (axes[1], 6.0, 7.2, "(b) Full out-of-loop takeover")]
+for ax, t_max, y_max, title in panels:
+    ax.axhspan(0.0, delta, color=C["grid"], alpha=0.35, lw=0, zorder=1)
+    ax.axhline(d_clear, color=C["RedLine"], ls=(0, (5, 3)), lw=1.4, zorder=2)
+    for k, ((name, t_wait, t, y), st) in enumerate(zip(traces, styles)):
+        ax.plot(t, y, label=name, zorder=6 - k, **st)
+        if t_wait < t_max:
+            ax.plot([t_wait], [delta + v * t_wait], "o", ms=5, color=st["color"], zorder=9)
+    ax.set_xlim(0.0, t_max)
+    ax.set_ylim(0.0, y_max)
+    ax.set_xlabel("time since the hazard appears (s)")
+    ax.set_title(title, loc="left", fontsize=10.5)
+axes[0].set_ylabel("clearance consumed (m)")
+
+ax = axes[0]
+ax.text(1.88, d_clear + 0.03, f"clear distance {TB.d_clear_str}", ha="right", va="bottom", fontsize=8.5, color=C["RedLine"])
+ax.text(1.88, delta / 2, "fixed allowances", ha="right", va="center", fontsize=8.5, color=C["primary"])
+t_end0 = traces[0][2][-1]
+x_br = t_end0 + 0.08
+ax.annotate("", xy=(x_br, d_clear), xytext=(x_br, ends[0]), arrowprops=dict(arrowstyle="<->", color=C["primary"], lw=0.9))
+ax.text(x_br + 0.04, (d_clear + ends[0]) / 2, f"{TB.spare_str} spare", ha="left", va="center", fontsize=8.5, color=C["primary"])
+ax.text(traces[1][2][-1], ends[1] - 0.07, f"stops at {TB.d_stop_in_str}", ha="right", va="top", fontsize=8.5, color=C["BlueLine"])
+ax.text(0.05, 1.93, "dots: braking begins", ha="left", va="top", fontsize=8.5, color=C["primary"])
+ax.legend(loc="upper left", bbox_to_anchor=(0.0, 0.92), fontsize=8.5, frameon=False)
+
+ax = axes[1]
+ax.text(5.95, d_clear + 0.08, f"clear distance {TB.d_clear_str}", ha="right", va="bottom", fontsize=8.5, color=C["RedLine"])
+ax.text(traces[2][2][-1] - 0.05, ends[2] + 0.12, f"stops at {TB.d_stop_ool_str}", ha="right", va="bottom", fontsize=8.5, color=C["BrownLine"])
+ax.text(
+    2.1,
+    delta + v * 2.1 + 0.25,
+    f"{TB.travel_ool_str} of travel\nbefore any brake command",
+    ha="right",
+    va="bottom",
+    fontsize=8.5,
+    color=C["BrownLine"],
+)
+
+fig.tight_layout()
+plt.show()
+```
+
+:::
 
 ```{python}
 #| label: calc-intervention-takeover-ladder
@@ -932,7 +1057,7 @@ When multiple control sources propose commands, the permission path resolves sou
 
 The runtime intervention interface joins the four-phase handshake to an arbiter with bounded timeouts and explicit fallback transitions (@fig-14-authority-handshake-fsm).
 
-::: {#fig-14-authority-handshake-fsm fig-env="figure" fig-pos="t" fig-cap="**Authority handshake and owner states**: Request and acknowledgment precede atomic commit. At commit the policy token is revoked and the enforcer owns the blend between checked, latched endpoints; manual proposals begin only after profile completion with a live lease. Timeout invokes a separately validated fallback." fig-alt="Two-panel schematic of authority handover architecture. Panel (a) shows request, acknowledgment, commit to enforcer-owned blend, and confirmation. Panel (b) shows autonomous, pending, enforcer-owned blend, manual, and fallback states. Commit occurs before blend; timeout and lease expiry lead to fallback."}
+::: {#fig-14-authority-handshake-fsm fig-env="figure" fig-pos="t" fig-cap="**Authority states and their guards**: Each box is one value of the per-channel authority state, with its code name above its plain name. A handover runs from request through acknowledgment to a commit on a control tick; from then on the enforcer owns the blend between latched endpoints, and manual proposals begin only when the profile completes with a live manual lease. Timeout, lease lapse, or an invalid state leads to the validated fallback, whose only exit is a reset from rest with a fresh re-admission. The hardwired protective input preempts every state." fig-alt="State diagram with six boxes. Autonomous, Handover-Pending, Blend, Human-Manual, and Fallback sit inside a dashed enclosure. Arrows run from Autonomous to Handover-Pending on request, from Handover-Pending to Blend on acknowledgment and commit, directly from Autonomous to Blend on an operator acknowledgment, and from Blend to Human-Manual when the profile completes with a valid manual lease. Arrows from Autonomous, Handover-Pending, Blend, and Human-Manual lead to Fallback on lease expiry, timeout, invalid state, or lease lapse. A dashed arrow returns from Fallback to Autonomous on reset from rest. One arrow from the enclosure leads to the Protective state on a hardwired protective input or critical fault."}
 ![](images/svg/fig14_authority_handshake_fsm.svg){width="95%"}
 :::
 
@@ -1279,7 +1404,7 @@ Command blending removes the chosen output discontinuity, but a standby human fe
 
 To verify a transfer, record the command profile, motor current, encoder motion, and chassis inertial response on a shared timebase with bounded alignment error. A step command has a derivative discontinuity in the ideal model; ringing, high jerk, and slip are possible *observations*, not inevitable waveforms. A fixed-endpoint quintic bounds the commanded rate, and @fig-14-bumpless-transfer-dynamics contrasts the two profiles schematically. The measured plant response establishes whether the handover met its physical limits.
 
-::: {#fig-14-bumpless-transfer-dynamics fig-env="figure" fig-pos="t" fig-cap="**Step vs. quintic command transfer**: A step and fixed-endpoint quintic blend are compared. Blue is the command; red is its ideal derivative, and gray ringing is schematic. The profile bounds the commanded rate for the assumed endpoints." fig-alt="Two panels compare a step command with a fixed-endpoint quintic command. The step has an ideal rate impulse and a schematic damped response; the quintic command has a bounded rate across its blend window. The plotted rate is not a measured actuator jerk."}
+::: {#fig-14-bumpless-transfer-dynamics fig-env="figure" fig-pos="t" fig-cap="**Step vs. quintic command transfer**: A step and fixed-endpoint quintic blend are compared. Blue is the command. The step's ideal derivative is a red impulse, the quintic's bounded derivative is dashed slate, and gray ringing is schematic. The profile bounds the commanded rate for the assumed endpoints." fig-alt="Two panels compare a step command with a fixed-endpoint quintic command. The step has an ideal rate impulse and a schematic damped response; the quintic command has a bounded rate across its blend window. The plotted rate is not a measured actuator jerk."}
 ![](images/svg/fig14_bumpless_transfer_dynamics.svg){width="95%"}
 :::
 
@@ -1439,13 +1564,61 @@ The same channel ambiguity corrupts learning data. Behavioral cloning\index{Beha
 \clearpage
 :::
 
+```{python}
+#| label: calc-intervention-flight2904-strip
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FLIGHT 2904 GROUND-CONTACT TIMING STRIP (FIGURE GUARD)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: ws-intervention-when-automation-holds-authority-crew-cannot
+# │          (ws_flight2904_authority_lockout.svg).
+# │
+# │ Goal:    Keep the hand-drawn, to-scale strip in step with its source.
+# │ Show:    Left-gear contact and the start of wheel braking after right-gear
+# │          contact; the strip's time scale.
+# │ How:     BFU 1994 report: the left gear touched the runway 9 s after the
+# │          right; the wheel brakes began to act about 4 s after the left gear
+# │          touched. The SVG places t at x = 190 + 30 px/s; this cell reads the
+# │          drawn guide lines back from the file.
+# │
+# │ Imports: (none)
+# │ Exports: (none; guard only)
+# └─────────────────────────────────────────────────────────────────────────────
+import os as _os
+import re as _re
+from mlsysim.fmt import check
+
+class InterventionFlight2904Strip:
+    """Timing values drawn in ws_flight2904_authority_lockout.svg."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    t_left_gear_s = 9  # category: sourced (bfu1994warsaw)
+    t_brake_after_left_s = 4  # category: sourced (bfu1994warsaw, "about 4 seconds")
+    x0_px, px_per_s = 190, 30  # category: chosen (drawing scale)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    t_brake_s = t_left_gear_s + t_brake_after_left_s
+    _svg_rel = "images/svg/ws_flight2904_authority_lockout.svg"
+    _svg_path = next(_p for _p in (_svg_rel, "books/vol4/14_intervention/" + _svg_rel, "vol4/14_intervention/" + _svg_rel) if _os.path.exists(_p))
+    with open(_svg_path) as _f:
+        _svg = _f.read()
+    _guides = {int(m) for m in _re.findall(r'<line x1="(\d+)" y1="30"', _svg)}
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(_guides == {x0_px + px_per_s * t_left_gear_s, x0_px + px_per_s * t_brake_s}, "flight 2904 strip guides are stale")
+    check(f"left gear contact, {t_left_gear_s} s" in _svg, "flight 2904 left-gear label is stale")
+    check(f"brakes act, {t_brake_s} s" in _svg, "flight 2904 brake label is stale")
+```
+
 ::: {#ws-intervention-when-automation-holds-authority-crew-cannot .callout-war-story title="Ground-contact interlocks on flight 2904"}
 
-![](images/svg/ws_flight2904_authority_lockout.svg){fig-alt="Architectural block diagram of the supervisory state machine lockout on Lufthansa Flight 2904. The right landing gear contacts the wet runway before the left. Distinct strut and wheel-speed conditions delay spoilers, reversers, and wheel braking; the diagram separates these gates." width=100%}
+![](images/svg/ws_flight2904_authority_lockout.svg){fig-alt="To-scale timing strip over fifteen seconds after the right main gear touches down. The right gear is on the ground from time zero; the left gear strut stays uncompressed until 9 seconds. A crew command bar for brakes and reversers runs from touchdown. Ground spoilers and thrust reversers are locked out until 9 seconds and deployed afterward. Wheel brakes show no braking while the wheels aquaplane until 13 seconds, then braking." width=100%}
 
 **Context**: On Lufthansa Flight 2904 at Warsaw, the crew flew the approach for the crosswind in the weather information they had received, which was out of date; the aircraft met an unreported tailwind and touched down fast and far along a waterlogged runway. The crew then commanded maximum manual braking and thrust reversers, but the aircraft's automated ground-contact logic withheld deceleration authority [@bfu1994warsaw].
 
-**Mechanism**: Due to crosswinds and hydroplaning on a waterlogged runway, the right landing gear touched down approximately nine seconds before the left. Ground spoiler deployment required weight-on-wheels sensor compression on both main gear struts **or** wheel spin-up above 72 knots; thrust reversers required weight on both struts; and automatic wheel braking required both wheel spin-up and strut compression. Because hydroplaning prevented wheel spin-up and the asymmetric roll angle kept the left strut uncompressed, the safety interlocks concluded the aircraft was airborne, locking out all commanded deceleration modes for nine seconds.
+**Mechanism**: Due to crosswinds and hydroplaning on a waterlogged runway, the right landing gear touched down approximately nine seconds before the left. Ground spoiler deployment required weight-on-wheels sensor compression on both main gear struts **or** wheel spin-up above 72 knots; thrust reversers required weight on both struts; and the wheel brakes could act only once the wheels on both main gears had spun up. Because hydroplaning prevented wheel spin-up and the asymmetric roll angle kept the left strut uncompressed, the logic concluded the aircraft was airborne, locking out spoilers and reversers for nine seconds and the wheel brakes for longer.
 
 **Impact**: Wheel braking was delayed until thirteen seconds after initial touchdown. Unable to dissipate kinetic energy along the remaining wet runway, the aircraft overran the runway threshold at 72 knots, collided with an embankment, and caught fire, resulting in two fatalities and severe structural destruction.
 

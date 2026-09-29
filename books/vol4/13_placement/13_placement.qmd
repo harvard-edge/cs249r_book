@@ -249,6 +249,40 @@ Because software process isolation cannot remove these hardware couplings, the p
 
 (d) *A discrete safety microcontroller* removes every on-die row and pays in transport, a board-level link from the application processor that none of the on-die options needs and that @sec-placement-isolation-decisions budgets.
 
+@Fig-13-placement-resource-map places the four candidates on one board, so that each row of the inventory below has a physical location. Everything tinted as a consequence sits on the die or behind its memory controller, where a tick on candidate (a) or (b) can lose it; the safety island escapes most of those rows but still shares the fabric and the package; the discrete controller shares only the battery.
+
+```{python}
+#| label: calc-placement-resource-map-figure
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ VALUES DRAWN IN THE PLACEMENT RESOURCE MAP (FIGURE GUARD)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-13-placement-resource-map
+# │
+# │ Goal: Keep the hand-drawn labels of fig13_placement_resource_map.svg
+# │       pinned to the registry.
+# │ Show: MCU clock 400 MHz, permission tick 1 kHz, permission-rail hold-up 2 s.
+# │ How: PlacementMachine fields; a failed check means the SVG label is stale.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import second, hertz, ureg
+from mlsysim.fmt import check
+
+class PlacementResourceMapFigure:
+    # ┌── 1. LOAD ───────────────────────────────────────────────────────────
+    PM = PlacementMachine  # category: derived; calc-placement-machine-paths
+
+    # ┌── 3. GUARD ──────────────────────────────────────────────────────────
+    check(abs(PM.mcu_clock.to(ureg.megahertz).magnitude - 400.0) < 1e-9, "figure MCU clock label (400 MHz) is stale")
+    check(abs(PM.permission_rate.to(hertz).magnitude - 1000.0) < 1e-9, "figure tick-rate label (1 kHz) is stale")
+    check(abs(PM.rail_holdup.to(second).magnitude - 2.0) < 1e-9, "figure isolated-rail hold-up label (2 s) is stale")
+```
+
+::: {#fig-13-placement-resource-map fig-env="figure" fig-pos="t" fig-cap="**Where each candidate placement runs**: Badges (a) to (d) mark where the permission tick would execute. Tinted blocks are shared with the proposer on the application die (cache, memory controller and external DRAM, clock governor, core rail, reset chain, fabric, and the package's heat path), so a tick placed on the die can lose them to proposal-side load. The safety island carries its own crystal, rail, and memory but remains behind the shared fabric and in the shared package; the discrete controller, the machine's choice, reaches the die only through a checked board link and shares only the battery with it." fig-alt="Block diagram of the machine's compute board. On the left, one application SoC die holds application cores and a neural accelerator in bronze, a real-time cluster in green, and a dashed safety island with its own crystal, rail, and memory behind a firewall. Below them, red-tinted shared blocks: last-level cache, DRAM controller, clock governor, core supply rail, reset and boot chain, on-chip fabric, and die temperature and package, with external LPDDR5 DRAM below the die. Badges a, b, and c mark the application cores, the real-time cluster, and the island. On the right, a separate green discrete safety MCU package, badge d, with lockstep cores at 400 MHz and a 1 kHz tick, TCM, its own clock, a reset supervisor, and a local mailbox, receives a board link from the fabric, drives EtherCAT to the drives, and is fed by an isolated rail with 2 s hold-up. A battery and common board supply bar along the bottom feeds both sides."}
+![](images/svg/fig13_placement_resource_map.svg){width="100%"}
+:::
+
 | Shared resource                        | \(a\) Shared cores | \(b\) RT cluster, host domain | \(c\) On-die safety island                   | \(d\) Discrete MCU                         |
 |:---------------------------------------|:-------------------|:------------------------------|:---------------------------------------------|:-------------------------------------------|
 | **Cores and scheduler**                | Shared             | Separated                     | Separated                                    | Separated                                  |
@@ -521,6 +555,112 @@ class PlacementLoadedRead:
 
 :::
 
+@Fig-13-loaded-tick draws the notebook's thresholds on the tick's own time axis. Each row is one tick with a given number of backlogs queued ahead of the snapshot read, so the reader can see how much traffic separates the sense allowance, the declared bound, and the deadline, and how much less it takes when the backlog shares the snapshot's channel.
+
+::: {#fig-13-loaded-tick fig-env="figure" fig-pos="t" fig-cap="**How many backlogs one tick absorbs**: Each row is one permission tick on the rejected shared-die placement, drawn to scale on the 1 ms period, with the FIFO wait for queued backlogs ahead of the snapshot read followed by the `{python} PlacementLoadedRead.compute_after_sense_str` of constraint evaluation and drive-frame write. With addresses interleaved across the interface, `{python} PlacementLoadedRead.backlogs_sense_str` backlogs fit the sense allowance, `{python} PlacementLoadedRead.backlogs_wcet_str` the declared bound, and `{python} PlacementLoadedRead.backlogs_deadline_str` the deadline; confined to one channel, `{python} PlacementLoadedRead.backlogs_wcet_1ch_str` already reach the declared bound. Every row still ends well inside the period, which is why the declared bound, not the period, is the test the placement must pass." fig-alt="Horizontal bar chart on a time axis from 0 to 1,000 microseconds with five rows. The top row is the unloaded tick: a 40 microsecond sense read and 95 microseconds of constraint evaluation and write, ending at 135. Below it, rows with 21, 82, and 162 queued backlogs show a hatched memory wait growing until the tick ends near 135, 250, and 400 microseconds. The bottom row, with 5 backlogs confined to one memory channel, ends near 237 microseconds. Vertical lines mark the end of the sense allowance at 40, the declared worst-case execution time at 250, the deadline at 400, and the next tick at 1,000 microseconds."}
+
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE LOADED PERMISSION TICK, TO SCALE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-13-loaded-tick
+# │
+# │ Goal: Show the notebook's backlog thresholds on one tick's time axis.
+# │ Show: the unloaded tick, then the tick at the largest backlog count that
+# │       keeps each bound (sense allowance, declared WCET, deadline), and
+# │       the one-channel case at the WCET, against the 1 ms period.
+# │ How: PlacementMachine sub-costs and PlacementLoadedRead's FIFO model
+# │      (calc_axi_fifo_contention); no new inputs.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import viz
+from mlsysim.core.units import microsecond
+from mlsysim.fmt import check
+
+PM = PlacementMachine
+LR = PlacementLoadedRead
+viz.set_book_style()
+import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+
+C = viz.COLORS
+
+# ┌── 1. LOAD ─────────────────────────────────────────────────────────────────
+def us(q):
+    return q.to(microsecond).magnitude
+
+sense, compute = us(PM.sense), us(LR.compute_after_sense)
+wcet, deadline, tick = us(PM.wcet), us(PM.deadline), us(PM.tick)
+q, own = us(LR.queue), us(LR.own_read)
+q1, own1 = us(LR.queue_1ch), us(LR.own_read_1ch)
+
+# ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
+# (label, queued wait, snapshot read, compute after sense)
+rows = [
+    ("unloaded", 0.0, sense, compute),
+    (f"{LR.backlogs_sense} backlogs", LR.backlogs_sense * q, own, compute),
+    (f"{LR.backlogs_wcet} backlogs", LR.backlogs_wcet * q, own, compute),
+    (f"{LR.backlogs_deadline} backlogs", LR.backlogs_deadline * q, own, compute),
+    (f"{LR.backlogs_wcet_1ch} backlogs,\none channel", LR.backlogs_wcet_1ch * q1, own1, compute),
+]
+ends = [w + r + c for _, w, r, c in rows]
+
+# ┌── 3. GUARD ────────────────────────────────────────────────────────────────
+check(abs(ends[0] - us(PM.unloaded)) < 1e-9, "The unloaded row is the 135 µs tick.")
+check(rows[1][1] + rows[1][2] <= sense, "The sense row's read fits the sense allowance.")
+check(ends[2] <= wcet < ends[2] + q, "The WCET row is the largest backlog count within the declared bound.")
+check(ends[3] <= deadline < ends[3] + q, "The deadline row is the largest backlog count within the deadline.")
+check(ends[4] <= wcet < ends[4] + q1, "The one-channel row is the largest count within the declared bound.")
+check(max(ends) < tick, "Every row ends inside the 1 ms period.")
+
+# ┌── 4. PLOT ─────────────────────────────────────────────────────────────────
+fig, ax = plt.subplots(figsize=(10, 3.9))
+ys = list(range(len(rows)))[::-1]
+for y, (lab, w, r, c), end in zip(ys, rows, ends):
+    if w > 0:
+        ax.barh(y, w, left=0, height=0.56, color=C["BlueL"], edgecolor=C["BlueLine"], hatch="////", lw=0.8, zorder=3)
+    ax.barh(y, r, left=w, height=0.56, color=C["BlueLine"], edgecolor=C["BlueLine"], lw=0.8, zorder=3)
+    ax.barh(y, c, left=w + r, height=0.56, color=C["OrangeL"], edgecolor=C["OrangeLine"], lw=0.8, zorder=3)
+    x_lab = end + 10
+    for x_line in (wcet, deadline):
+        if end <= x_line < end + 60:
+            x_lab = x_line + 8
+    ax.text(x_lab, y, f"{end:.0f} µs", ha="left", va="center", fontsize=9, color=C["primary"], zorder=4)
+for x, lab, col, ls in [
+    (sense, "sense\nallowance", C["BlueLine"], (0, (2, 2))),
+    (wcet, "declared\nWCET", C["primary"], (0, (5, 3))),
+    (deadline, "deadline", C["RedLine"], "-"),
+    (tick, "next tick", C["grid"], (0, (4, 3))),
+]:
+    ax.axvline(x, color=col, lw=1.2, ls=ls, zorder=2)
+    ha, dx = ("right", -6) if x >= tick else ("left", 6)
+    ax.text(x + dx, len(rows) - 0.35, lab, ha=ha, va="bottom", fontsize=8.5, color=col if col != C["grid"] else C["primary"])
+ax.set_yticks(ys)
+ax.set_yticklabels([r[0] for r in rows], fontsize=9)
+ax.set_xlim(0, tick + 20)
+ax.set_ylim(-0.6, len(rows) + 0.25)
+ax.set_xticks([0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000])
+ax.set_xlabel("Time within one 1 ms tick (µs)")
+ax.grid(axis="y", visible=False)
+ax.legend(
+    handles=[
+        Patch(facecolor=C["BlueL"], edgecolor=C["BlueLine"], hatch="////", label="wait for queued backlogs"),
+        Patch(facecolor=C["BlueLine"], edgecolor=C["BlueLine"], label="snapshot read (sense)"),
+        Patch(facecolor=C["OrangeL"], edgecolor=C["OrangeLine"], label="constraints + drive-frame write"),
+    ],
+    loc="lower right",
+    bbox_to_anchor=(0.93, 0.0),
+    fontsize=8.5,
+    frameon=False,
+)
+plt.tight_layout()
+plt.show()
+```
+
+:::
+
 ### Which interference mechanism threatens the declared bound {#sec-placement-interference-mechanisms}
 
 ```{python}
@@ -722,8 +862,7 @@ In physical AI systems engineering, **thermal clock throttling**\index{Thermal c
 # │ How: WCET, deadline, and tick from the aisle scenario; cluster clocks and
 # │      the thermal model are scenario inputs for the rejected design.
 # │
-# │ Note: The clocks, times, and tick count match the checkpoint SVG
-# │       chk_placement_thermal_throttling_hysteresis.svg.
+# │ Note: @fig-13-thermal-hysteresis plots these values directly.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
@@ -768,7 +907,7 @@ class RejectedPlacementThrottle:
     check(abs(n_cycles - 3.0e5) < 1e-6, "250 µs at 1.2 GHz is 3.0e5 cycles.")
     check(
         abs(t_exec.magnitude - 250.0) < 1e-9 and abs(t_exec_throt.magnitude - 500.0) < 1e-9,
-        "Nominal 250 µs and throttled 500 µs, as the SVG draws them.",
+        "Nominal 250 µs and throttled 500 µs.",
     )
     check(t_exec < deadline < t_exec_throt < tick, "The nominal tick meets the deadline; the throttled tick misses it inside the 1 ms period.")
     check(t_exec_throt > wcet, "The throttled tick exceeds the declared WCET, the falsification threshold.")
@@ -777,7 +916,7 @@ class RejectedPlacementThrottle:
     check(abs(t_steady_load - 97.0) < 1e-9 and t_steady_load > t_start, "26 W x 2.0 K/W = 52 K over 45 °C is 97 °C, above the 95 °C trip.")
     check(abs(t_recov.magnitude - 2.18) < 5e-3, "Recovery from 95 to 85 °C takes about 2.18 s.")
     check(n_cycles > mcu_cycles, "The shared-die cluster, without TCM, spends more cycles per tick than the discrete MCU's unloaded 54,000.")
-    check(ticks_exposed == 2175, "2,175 scheduled ticks fall inside the hysteresis, as the SVG labels them.")
+    check(ticks_exposed == 2175, "2,175 scheduled ticks fall inside the hysteresis.")
     check(abs(t_trip.magnitude - 8.0 * math.log(22.0)) < 1e-9, "From 53 °C toward 97 °C, the junction reaches 95 °C after 8 ln 22 = 24.7 s.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
@@ -807,7 +946,7 @@ class RejectedPlacementThrottle:
     t_clear_str = fmt(t_clear, precision=0)
 ```
 
-For this illustrative thermal scenario, the electronics bay is assumed to sit at `{python} RejectedPlacementThrottle.t_ambient_str`$\,^{\circ}\text{C}$ ambient. @Fig-13-jetson-orin shows the developer kit of the module class used as its application processor; the photograph reveals neither the heat path nor the clock domains on which the estimate depends. An enclosure that excludes warehouse dust and conductive debris also constrains cooling. For the following shared-die candidate, the assumed conduction path must carry sustained proposal heat without pushing the permission core into a slower clock state.
+For this illustrative thermal scenario, the electronics bay is assumed to sit at `{python} RejectedPlacementThrottle.t_ambient_str`$\,^{\circ}\text{C}$ ambient. The heat path that matters is the package row of @fig-13-placement-resource-map, which every block on the application die shares. An enclosure that excludes warehouse dust and conductive debris also constrains cooling. For the following shared-die candidate, the assumed conduction path must carry sustained proposal heat without pushing the permission core into a slower clock state.
 
 For a conduction-cooled enclosure, the modeled path includes the package, thermal interface, and chassis:
 $$\theta_{\text{JA}} = \theta_{\text{JC}} + \theta_{\text{TIM}} + \theta_{\text{chassis}}.$$
@@ -815,15 +954,115 @@ Interface aging can increase that resistance. Battery and drive losses can also 
 
 Suppose the shared SoC within this enclosed bay were conduction-cooled with a **junction-to-ambient thermal resistance**\index{Thermal resistance!junction-to-ambient} of $\theta_{\text{JA}} =$ `{python} RejectedPlacementThrottle.theta_ja_str` $\text{K/W}$ and a **thermal time constant**\index{Thermal time constant} of $\tau_{\text{th}} =$ `{python} RejectedPlacementThrottle.tau_th_str` $\text{s}$. The permission loop with idle and memory power draws `{python} RejectedPlacementThrottle.p_base_str` $\text{W}$ and holds the junction at `{python} RejectedPlacementThrottle.t_target_str`$\,^{\circ}\text{C}$. Continuous proposal inference adds accelerator, memory-traffic, and regulator losses, and a total of `{python} RejectedPlacementThrottle.p_load_str` $\text{W}$ raises the steady state by $P\,\theta_{\text{JA}} =$ `{python} RejectedPlacementThrottle.t_rise_load_str` $\text{K}$ to $T_j =$ `{python} RejectedPlacementThrottle.t_steady_load_str`$\,^{\circ}\text{C}$. The single time constant is the first-order RC response of the junction and package, the fast pole of a thermal network whose heatsink and chassis poles run from minutes upward; the model holds the chassis at a fixed temperature. Rising along that pole from its baseline, the junction reaches the trip threshold after `{python} RejectedPlacementThrottle.t_trip_str` of continuous inference.
 
-::: {#fig-13-jetson-orin fig-env="figure" fig-pos="t" fig-cap="**Enclosed edge-compute kit**: The photograph shows a Jetson AGX Orin Developer Kit box and a closed, vented enclosure. The SoC, memory, cooling hardware, and clock domains are not visible; the thermal model in the text is a separate illustrative scenario. Photograph: [Auledas](https://commons.wikimedia.org/wiki/File:NVidia_Jetson_Orin_AGX.png), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), via Wikimedia Commons; local copy re-encoded." fig-alt="Jetson AGX Orin Developer Kit retail box beside a closed gray enclosure with ventilation slots and external connectors. Internal components and cooling paths are not visible. Photograph by Auledas, CC BY 4.0; local copy re-encoded."}
-![](images/jpg/fig13_real_jetson_orin.jpg){width="85%"}
-:::
-
 The stipulated thermal conditions reject candidate (b) of @tbl-13-placement-candidates. Suppose its permission path ran on a real-time cluster in the application SoC's clock and power domain at $f_{\text{nom}} =$ `{python} RejectedPlacementThrottle.f_nom_str`, costing $N_{\text{cycles}} =$ `{python} RejectedPlacementThrottle.n_cycles_str` cycles per tick, an assumed workload for this candidate rather than a measured comparison with the discrete controller. When the junction crosses $T_{\text{trip}} =$ `{python} RejectedPlacementThrottle.t_start_str`$\,^{\circ}\text{C}$, the governor drops the cluster to $f_{\text{throt}} =$ `{python} RejectedPlacementThrottle.f_throt_str` and the enforcer's cycle stretches to $t_{\text{exec,throt}} =$ `{python} RejectedPlacementThrottle.t_exec_throt_str`, missing the `{python} RejectedPlacementThrottle.deadline_str` deadline by `{python} RejectedPlacementThrottle.overrun_str` (a `{python} RejectedPlacementThrottle.overrun_pct_str` percent overrun) and far exceeding the declared bound on which every margin above the enforcer was sized. The discrete microcontroller runs on its own clock and rail, beyond the reach of that governor, and so would an on-die safety island with its own crystal and rail; the island would still share the die temperature, which its own qualification would have to bound.
 
 The overrun outlasts the load because the governor applies **state-dependent hysteresis**\index{Hysteresis!state-dependent}, restoring `{python} RejectedPlacementThrottle.f_nom_str` only after the junction cools to $T_{\text{clear}} =$ `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$ so that the clock does not oscillate around the trip line. With the policy halted and power back at `{python} RejectedPlacementThrottle.p_base_str` $\text{W}$, the junction relaxes toward its `{python} RejectedPlacementThrottle.t_target_str`$\,^{\circ}\text{C}$ baseline:
 $$T_j(t) = T_{j,\text{target}} + (T_{j,\text{start}} - T_{j,\text{target}}) e^{-t/\tau_{\text{th}}}$$ {#eq-placement-cooling-recovery}
-where $T_{j,\text{start}}$ is the junction temperature when throttling begins, $T_{j,\text{target}}$ is the baseline equilibrium, and $\tau_{\text{th}}$ is the package thermal time constant. Solving @eq-placement-cooling-recovery for the fall from `{python} RejectedPlacementThrottle.t_start_str` to `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$ gives $t_{\text{recov}} = \tau_{\text{th}} \ln[(T_{j,\text{start}} - T_{j,\text{target}})/(T_{\text{clear}} - T_{j,\text{target}})] =$ `{python} RejectedPlacementThrottle.t_recov_str`. That figure is a lower bound: a chassis warmed by a long shift raises the baseline the junction relaxes toward, and the slow poles then stretch the recovery. At the machine's `{python} RejectedPlacementThrottle.tick_str` tick, `{python} RejectedPlacementThrottle.ticks_exposed_str` scheduled ticks fall inside that cooldown, and a shared-die design would need a separately timed fallback active for every one of them.
+where $T_{j,\text{start}}$ is the junction temperature when throttling begins, $T_{j,\text{target}}$ is the baseline equilibrium, and $\tau_{\text{th}}$ is the package thermal time constant. Solving @eq-placement-cooling-recovery for the fall from `{python} RejectedPlacementThrottle.t_start_str` to `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$ gives $t_{\text{recov}} = \tau_{\text{th}} \ln[(T_{j,\text{start}} - T_{j,\text{target}})/(T_{\text{clear}} - T_{j,\text{target}})] =$ `{python} RejectedPlacementThrottle.t_recov_str`. That figure is a lower bound: a chassis warmed by a long shift raises the baseline the junction relaxes toward, and the slow poles then stretch the recovery. At the machine's `{python} RejectedPlacementThrottle.tick_str` tick, `{python} RejectedPlacementThrottle.ticks_exposed_str` scheduled ticks fall inside that cooldown, and a shared-die design would need a separately timed fallback active for every one of them. @Fig-13-thermal-hysteresis draws both halves of that result on their own time axes: the seconds-long cooldown and the microsecond overrun it holds in place.
+
+::: {#fig-13-thermal-hysteresis fig-env="figure" fig-pos="t" fig-cap="**A cooldown that outlasts the load**: Left, the junction relaxes from the `{python} RejectedPlacementThrottle.t_start_str`$\,^{\circ}\text{C}$ trip threshold toward its `{python} RejectedPlacementThrottle.t_target_str`$\,^{\circ}\text{C}$ baseline along @eq-placement-cooling-recovery, falling fastest at the moment the load stops and flattening afterward; the clock stays halved until the curve crosses `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$ at `{python} RejectedPlacementThrottle.t_recov_str`. Right, one tick drawn to scale: the same work that fits the deadline at `{python} RejectedPlacementThrottle.f_nom_str` overruns it by `{python} RejectedPlacementThrottle.overrun_str` at `{python} RejectedPlacementThrottle.f_throt_str`, on every one of the `{python} RejectedPlacementThrottle.ticks_exposed_str` ticks inside the cooldown. The scenario is stipulated, not measured." fig-alt="Two panels. Left: junction temperature versus time in seconds, an exponential cooling curve starting at 95 degrees Celsius at time zero, steepest at the start and flattening toward a 53 degree baseline, with dashed horizontal lines at 95 and 85 degrees; the interval until the curve crosses 85 degrees at 2.18 seconds is shaded and labeled 600 megahertz. Right: a horizontal time axis from 0 to 1,000 microseconds with two bars; the nominal bar at 1.2 gigahertz ends at 250 microseconds, and the throttled bar at 600 megahertz runs to 500 microseconds, its last 100 microseconds past a vertical deadline line at 400 microseconds."}
+
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THERMAL HYSTERESIS AND THE THROTTLED TICK (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-13-thermal-hysteresis
+# │
+# │ Goal: Show the cooldown's first-order shape and the overrun it sustains.
+# │ Show: left, T_j(t) = T_target + (T_trip - T_target) e^(-t/tau_th) from the
+# │       trip to past the clear crossing; right, the nominal and throttled
+# │       tick on a linear 0-1 ms axis with the deadline.
+# │ How: every value from RejectedPlacementThrottle (eq-placement-cooling-recovery).
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import viz
+from mlsysim.core.units import microsecond, second
+from mlsysim.fmt import check
+
+R = RejectedPlacementThrottle
+viz.set_book_style()
+import matplotlib.pyplot as plt
+
+C = viz.COLORS
+
+# ┌── 1. LOAD ─────────────────────────────────────────────────────────────────
+tau = R.tau_th.to(second).magnitude
+t_recov = R.t_recov.to(second).magnitude
+T0, Tc, Tb = R.t_start, R.t_clear, R.t_target
+nom = R.t_exec.to(microsecond).magnitude
+thr = R.t_exec_throt.to(microsecond).magnitude
+dl = R.deadline.to(microsecond).magnitude
+tick = R.tick.to(microsecond).magnitude
+
+# ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
+t = np.linspace(0.0, 2.0 * tau, 400)
+T = Tb + (T0 - Tb) * np.exp(-t / tau)
+
+# ┌── 3. GUARD ────────────────────────────────────────────────────────────────
+check(abs((Tb + (T0 - Tb) * np.exp(-t_recov / tau)) - Tc) < 1e-9, "The curve crosses T_clear at t_recov.")
+check(np.all(np.diff(np.diff(T)) > 0), "First-order cooling is convex: steepest at t = 0, then flattening.")
+
+# ┌── 4. PLOT ─────────────────────────────────────────────────────────────────
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3.8), gridspec_kw={"width_ratios": [1.05, 1.0]})
+
+ax1.axvspan(0, t_recov, color=C["RedL"], alpha=0.55, lw=0, zorder=1)
+ax1.text(t_recov / 2, 66, f"clock at {R.f_throt_str}", ha="center", va="center", rotation=90, fontsize=9, color=C["RedLine"])
+ax1.axhline(T0, color=C["RedLine"], lw=1.1, ls=(0, (5, 3)), zorder=2)
+ax1.axhline(Tc, color=C["GreenLine"], lw=1.1, ls=(0, (5, 3)), zorder=2)
+ax1.axhline(Tb, color=C["grid"], lw=1.1, ls=(0, (5, 3)), zorder=2)
+ax1.plot(t, T, color=C["primary"], lw=2.0, zorder=3)
+ax1.plot([t_recov], [Tc], "o", color=C["GreenLine"], ms=5, zorder=4)
+ax1.annotate(
+    f"clock restored\n$t_{{\\mathrm{{recov}}}}$ = {R.t_recov_str}",
+    xy=(t_recov, Tc),
+    xytext=(t_recov + 1.6, (T0 + Tc) / 2),
+    fontsize=9,
+    color=C["GreenLine"],
+    ha="left",
+    va="center",
+    arrowprops=dict(arrowstyle="-", color=C["GreenLine"], lw=0.8),
+)
+xr = t[-1]
+xl = 0.985 * xr
+ax1.text(xl, T0 + 1.0, "$T_{\\mathrm{trip}}$", ha="right", va="bottom", fontsize=9, color=C["RedLine"])
+ax1.text(xl, Tc - 1.0, "$T_{\\mathrm{clear}}$", ha="right", va="top", fontsize=9, color=C["GreenLine"])
+ax1.text(xl, Tb + 1.0, "$T_{j,\\mathrm{target}}$ (baseline)", ha="right", va="bottom", fontsize=9, color=C["primary"])
+ax1.set_xlim(0, xr)
+ax1.set_ylim(Tb - 4, T0 + 6)
+ax1.set_yticks([Tb, Tc, T0])
+ax1.set_xlabel("Time after the proposal load stops (s)")
+ax1.set_ylabel("Junction temperature (°C)")
+
+rows = [(1, nom, f"nominal, {R.f_nom_str}"), (0, thr, f"throttled, {R.f_throt_str}")]
+for y, dur, lab in rows:
+    inside = min(dur, dl)
+    ax2.barh(y, inside, left=0, height=0.5, color=C["BlueL"], edgecolor=C["BlueLine"], lw=1.0, zorder=3)
+    if dur > dl:
+        ax2.barh(y, dur - dl, left=dl, height=0.5, color=C["RedL"], edgecolor=C["RedLine"], lw=1.0, zorder=3)
+    ax2.text(8, y + 0.36, lab, ha="left", va="bottom", fontsize=9, color=C["primary"])
+ax2.text(nom / 2, 1, f"{nom:.0f} µs", ha="center", va="center", fontsize=9, color=C["primary"], zorder=4)
+ax2.annotate("", xy=(dl, 1), xytext=(nom, 1), arrowprops=dict(arrowstyle="<->", color=C["GreenLine"], lw=0.9), zorder=4)
+ax2.text((nom + dl) / 2, 1 - 0.08, f"slack\n{R.slack_str}", ha="center", va="top", fontsize=9, color=C["GreenLine"])
+ax2.text(dl / 2, 0, f"{dl:.0f} µs to the deadline", ha="center", va="center", fontsize=9, color=C["primary"], zorder=4)
+ax2.text(thr + 12, 0, f"+{R.overrun_str} overrun", ha="left", va="center", fontsize=9, color=C["RedLine"], zorder=4)
+ax2.axvline(dl, color=C["RedLine"], lw=1.2, zorder=5)
+ax2.text(dl + 10, 1.62, f"deadline, {R.deadline_str}", ha="left", va="bottom", fontsize=9, color=C["RedLine"])
+ax2.axvline(tick, color=C["grid"], lw=1.2, ls=(0, (4, 3)), zorder=2)
+ax2.text(tick - 8, 1.62, "next tick", ha="right", va="bottom", fontsize=9, color=C["primary"])
+ax2.set_xlim(0, tick + 10)
+ax2.set_ylim(-0.55, 1.95)
+ax2.set_yticks([])
+ax2.set_xticks([0, 200, 400, 600, 800, 1000])
+ax2.set_xlabel("Time within one tick (µs)")
+ax2.grid(axis="y", visible=False)
+plt.tight_layout()
+plt.show()
+```
+
+:::
 
 A stretched cycle on a shared die can also arise from **electrical power-rail coupling**\index{Power-rail coupling}, which operates on a completely different timescale. While the inductive rail droop of @sec-placement-resource-contention arrives within nanoseconds ($10^{-9}\,\text{s}$) of an accelerator current step, thermal coupling accumulates over seconds ($10^1\,\text{s}$) as heat diffuses through silicon, package substrate, and chassis heatsinks. Consequently, temperature-correlated delays direct investigation toward clock governance, while voltage-correlated delays direct it toward the supply path; correlation alone does not identify the cause. This behavior exposes a multi-tiered physical timescale hierarchy spanning many orders of magnitude across the machine:
 
@@ -837,9 +1076,7 @@ Because thermal mass and heat dissipation operate across seconds and hours, dyna
 
 ::: {#chk-placement-thermal-throttling-hysteresis .callout-checkpoint title="Junction temperature and clock throttling"}
 
-![](images/svg/chk_placement_thermal_throttling_hysteresis.svg){fig-alt="Dynamic timing diagram of thermal clock throttling hysteresis. Left: Junction temperature cooling curve showing that after halting cognitive inference at t=0, cooling from 95°C to the 85°C clearance threshold takes 2.18 seconds. Right: Comparison within a 1 millisecond control tick showing nominal execution at 1.2 GHz finishing in 250 microseconds with 150 microseconds of slack before a 400 microsecond deadline, vs. throttled execution at 600 MHz expanding to 500 microseconds, a 25 percent deadline overrun, while 2,175 scheduled ticks are exposed during cooling; a separate fallback must carry control." width=100%}
-
-The diagram shows the stipulated thermal scenario, not measured hardware behavior. Use it to check the consequences of the selected model:
+The cooldown and overrun in @fig-13-thermal-hysteresis follow from the stipulated thermal scenario, not from measured hardware behavior. Use them to check the consequences of the selected model:
 
 - [ ] **Thermal mass latency memory**: Can you explain why physical thermal mass acts as a long-duration memory on real-time task execution latency even after the offending cognitive workload has been terminated?
 - [ ] **Cooling recovery sizing**: Can you derive the clearance time $t_{\text{recov}}$ required for an SoC with thermal time constant $\tau_{\text{th}} =$ `{python} RejectedPlacementThrottle.tau_th_str` $\text{s}$ to cool from $T_{\text{trip}} =$ `{python} RejectedPlacementThrottle.t_start_str`$\,^{\circ}\text{C}$ to $T_{\text{clear}} =$ `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$ under a `{python} RejectedPlacementThrottle.t_target_str`$\,^{\circ}\text{C}$ baseline equilibrium?

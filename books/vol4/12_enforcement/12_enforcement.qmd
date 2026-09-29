@@ -512,7 +512,7 @@ The shaped stop spends more clearance than constant-deceleration braking, so the
 
 Speed is the one term the machine can still choose. With the currently accounted delay $\tau_{\text{delay}} =$ `{python} EnforcementStoppingBudget.tau_delay_str`, the jerk ramps act as `{python} EnforcementStoppingBudget.ramp_delay_str` of extra delay before braking at $a_{\text{brake}}$, so the ceiling is the positive root of a quadratic, `{python} EnforcementStoppingBudget.ceiling_str`. Below $a_{\text{brake}}^2/j_{\max}$ the stop never reaches $a_{\text{brake}}$ and its distance is no longer quadratic in $v$; MLSysIM then solves @eq-enforce-stopping-envelope numerically. We select `{python} EnforcementStoppingBudget.v_aisle_str` as a candidate below that ceiling. The listed terms then total `{python} EnforcementStoppingBudget.total_aisle_str`, leaving `{python} EnforcementStoppingBudget.spare_str` before any unaccounted delay or additional reserve.
 
-The observation-age term ends at dispatch, whereas the execution lease begins at admission. Let $\Delta_{\text{da}}$ denote elapsed dispatch-to-admission time not already charged in the listed intervals. The complete delay is $\tau_{\mathrm{true}}=\tau_{\text{delay}}+\Delta_{\text{da}}$, and the actual reservation adds $v\Delta_{\text{da}}$ to the table's subtotal. This interval includes any remaining inference, admission work, and waiting on that path; overlapping stages must not be charged twice. A refreshed observation can change the ledger only if the implementation actually supplies and qualifies it before activation.
+The observation-age term ends at dispatch, whereas the execution lease begins at admission. Let $\Delta_{\text{da}}$ denote elapsed dispatch-to-admission time not already charged in the listed intervals. The complete delay is $\tau_{\mathrm{true}}=\tau_{\text{delay}}+\Delta_{\text{da}}$, and the actual reservation adds $v\Delta_{\text{da}}$ to the table's subtotal. This interval includes any remaining inference, admission work, and waiting on that path; overlapping stages must not be charged twice. A refreshed observation can change the ledger only if the implementation actually supplies and qualifies it before activation. @Fig-12-capture-to-onset lays these intervals end to end on one time axis and reads the same axis as travel at the aisle speed.
 
 At the candidate speed, the entire unallocated allowance corresponds to `{python} EnforcementStoppingBudget.t_latest_str`. Equivalently, capture-to-admission must remain below `{python} EnforcementStoppingBudget.capture_to_admission_max_str` and capture-to-braking-onset below `{python} EnforcementStoppingBudget.capture_to_onset_max_str` to leave positive reserve under these assumptions. Equality spends all the remaining clearance. These are requirements to qualify, not measured achievements. Thus the calculation supports a useful design choice and a concrete timing acceptance test; it does not yet close permission for that speed. @Tbl-enforcement-stopping-budget and @fig-enforcement-stopping-budget show the accounted terms from which that test follows.
 
@@ -645,13 +645,178 @@ plt.show()
 
 :::
 
+::: {#fig-12-capture-to-onset fig-env="figure" fig-pos="t" fig-cap="**From capture to brake onset, in time and in travel**: The warehouse mobile manipulator's permission path at the `{python} EnforcementStoppingBudget.v_aisle_str` aisle speed, drawn to scale from the exposure midpoint of the frame that first shows the hazard. The observation age of `{python} EnforcementStoppingBudget.t_age_str` ends at dispatch; the hatched dispatch-to-admission interval is the allocation @sec-placement makes, not a qualified bound; the lease, one tick, one bus cycle, and drive onset follow admission. The row beneath reads the same axis as travel, so the `{python} EnforcementStoppingBudget.t_latest_str` timing allowance and the `{python} EnforcementStoppingBudget.spare_str` spare are one interval. Admission later than `{python} EnforcementStoppingBudget.capture_to_admission_max_str`, or onset later than `{python} EnforcementStoppingBudget.capture_to_onset_max_str`, spends clearance the budget does not have. The jerk-limited stop that follows onset runs past the right edge." fig-alt="Timing strip with five lanes labeled camera, perception, proposal, permission, and drive over a time axis in milliseconds. Exposure and readout bars start the camera lane, an observation-age bar ends at a dispatch marker, a hatched dispatch-to-admission bar ends at an admission marker, a lease bar ends at lease expiry followed by a short tick and bus bar, and a drive-onset bar ends at brake onset, after which a solid stop bar runs off the right edge. A bracket over the strip marks the timing allowance from dispatch to a dashed latest-admission line; a second dashed line marks the latest onset. A travel row beneath converts the axis to millimeters and brackets the same interval as the spare distance."}
+
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CAPTURE TO BRAKE ONSET (TIMING STRIP FIGURE)
+# │ Context: @fig-12-capture-to-onset
+# │ Goal:    show the permission path as time becoming distance, with the
+# │          unallocated timing allowance and the spare as one interval
+# │ Show:    exposure, readout, observation age, Delta_da (hatched), lease,
+# │          tick, bus, onset, the jerk-limited stop; the allowance bracket and
+# │          the latest admission and onset; travel at the aisle speed
+# │ How:     viz.capture_to_onset_strip reads every duration from AISLE
+# │          (Delta_da = AISLE.t_dispatch_to_admission); the allowance and the
+# │          spare come from EnforcementStoppingBudget; the stop from
+# │          calc_scurve_stop_time / _distance at the aisle speed
+# ├─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.physics.robotics import calc_scurve_stop_distance, calc_scurve_stop_time
+from mlsysim.fmt import check
+from mlsysim import viz
+import matplotlib.pyplot as plt
+
+AISLE = Embodied.Scenario.WarehouseAisle
+S = EnforcementStoppingBudget
+
+# ┌── 1. LOAD ─────────────────────────────────────────────────────────────────
+v_aisle = S.v_aisle  # category: chosen
+t_allow = S.t_latest  # category: derived (spare / v at the aisle speed)
+spare = S.spare  # category: derived
+t_stop = calc_scurve_stop_time(v_aisle, S.a_brake, S.j_brake)  # category: derived
+d_stop = calc_scurve_stop_distance(v_aisle, S.a_brake, S.j_brake)  # category: derived
+
+# ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
+strip = viz.capture_to_onset_strip(AISLE, v_aisle, t_allowance=t_allow, spare=spare, stop_time=t_stop, stop_distance=d_stop, xlim=(-14, 262))
+t_latest_adm = next(e.t for e in strip.events if e.label.startswith("latest admission"))
+t_latest_onset = next(e.t for e in strip.events if e.label.startswith("latest onset"))
+
+# ┌── 3. GUARD ────────────────────────────────────────────────────────────────
+check(abs(t_latest_adm - S.capture_to_admission_max.to(millisecond).magnitude) < 1e-9, "The strip's latest admission must match the budget cell.")
+check(abs(t_latest_onset - S.capture_to_onset_max.to(millisecond).magnitude) < 1e-9, "The strip's latest onset must match the budget cell.")
+check(AISLE.t_dispatch_to_admission < t_allow, "The allocated Delta_da must fit inside the timing allowance.")
+check(
+    abs((spare / v_aisle).to(millisecond).magnitude - t_allow.to(millisecond).magnitude) < 1e-9,
+    "The allowance and the spare are one interval at the aisle speed.",
+)
+
+# ┌── 4. PLOT ─────────────────────────────────────────────────────────────────
+fig, ax, axd = viz.plot_timing_strip(strip)
+plt.show()
+```
+
+:::
+
 The stopping model addresses a static obstacle at $D_{\text{clear}}$, such as a person who has stepped out from the rack and stopped or a dropped tote, so it assumes that the obstacle stays where it was when the stop began. A person who keeps walking toward the base through the whole stop closes the gap from the far side as well (@sec-memory-belief-through-occlusion), and counting that approach on top of the accounted terms would cap the base at `{python} EnforcementStoppingBudget.v_walk_str` at this rack end.
 
 The ceiling is this low because a moving obstacle charges the stop by its duration, not its distance. The person approaches at $v_h =$ `{python} EnforcementStoppingBudget.v_human_str` throughout $\tau_{\text{delay}} + T_{\text{stop}}(v)$, so the budget gains a term $v_h\,T_{\text{stop}}(v)$ that the static case never carried. Below $a_{\text{brake}}^2/j_{\max} =$ `{python} EnforcementStoppingBudget.v_plateau_str` the jerk-limited stop never reaches $a_{\text{brake}}$: it ramps deceleration up and straight back down, and its duration is $2\sqrt{v/j_{\max}}$, which shrinks far more slowly than $v/a_{\text{brake}}$ as speed falls. From `{python} EnforcementStoppingBudget.v_walk_str` the stop lasts `{python} EnforcementStoppingBudget.t_stop_walk_str`, against `{python} EnforcementStoppingBudget.t_stop_walk_const_str` for a constant-deceleration stop. The base itself travels only `{python} EnforcementStoppingBudget.brake_walk_str` while braking, but the person closes `{python} EnforcementStoppingBudget.closure_walk_str` in that time. Reaching the full deceleration from so low a speed would take a jerk of `{python} EnforcementStoppingBudget.jerk_rescaled_walk_str`, several times the bound the load is qualified for, and constant-deceleration braking with no jerk bound would allow `{python} EnforcementStoppingBudget.v_walk_const_str`. The jerk bound therefore costs little clearance at aisle speed and a large share of it at walking pace, which is why slowing down helps much less against a moving person than against a static obstacle.
 
 An aisle held to the walking-person ceiling would slow every run for an encounter that a crossing rule can keep out of the stop, so the selected operating concept requires an enforced crossing restriction, and @sec-frontier-residual-claims-register keeps open the premise the rule rests on, that no person approaches the rack end during a stop. Until the crossing restriction has supporting evidence, the faster operating mode remains a candidate. This calculation supports a static-obstacle stopping claim; it does not establish protection against a person who continues approaching.
 
-Later decisions can spend only the reserve left after dispatch-to-admission travel is charged. At the candidate aisle speed the pre-allocation ceiling is `{python} EnforcementStoppingBudget.t_latest_str`; takeover waiting in @sec-intervention-authority-transitions cannot claim that same time again. The credible deceleration binds only on floors with friction of at least `{python} EnforcementStoppingBudget.mu_min_str`, since $a=\min(a_{\text{brake}},\mu g)$, so on a floor inspected to `{python} EnforcementStoppingBudget.mu_inspected_str` the ceiling falls to `{python} EnforcementStoppingBudget.ceiling_inspected_str` (@sec-frontier-residual-claims-register).
+Later decisions can spend only the reserve left after dispatch-to-admission travel is charged. At the candidate aisle speed the pre-allocation ceiling is `{python} EnforcementStoppingBudget.t_latest_str`; takeover waiting in @sec-intervention-authority-transitions cannot claim that same time again. The credible deceleration binds only on floors with friction of at least `{python} EnforcementStoppingBudget.mu_min_str`, since $a=\min(a_{\text{brake}},\mu g)$, so on a floor inspected to `{python} EnforcementStoppingBudget.mu_inspected_str` the ceiling falls to `{python} EnforcementStoppingBudget.ceiling_inspected_str` (@sec-frontier-residual-claims-register). @Fig-12-stopping-vs-speed places the dry-floor, inspected-floor, and walking-person ceilings on one speed axis.
+
+::: {#fig-12-stopping-vs-speed fig-env="figure" fig-pos="t" fig-cap="**Stopping distance against speed, and the three ceilings**: The stacked bands build the dry-floor stop from the fixed allowances, the travel during the `{python} EnforcementStoppingBudget.tau_delay_str` pre-brake delay, constant-deceleration braking, and the extra travel of the jerk ramps. Delay travel grows linearly with speed and braking travel quadratically, so the total meets the `{python} EnforcementStoppingBudget.d_clear_str` clear distance at `{python} EnforcementStoppingBudget.ceiling_str`. The dashed curve lowers the deceleration to what a floor inspected to $\mu =$ `{python} EnforcementStoppingBudget.mu_inspected_str` supports, moving the ceiling to `{python} EnforcementStoppingBudget.ceiling_inspected_str`. The dotted curve adds the closure of a person walking toward the base through the delay and the stop, which charges the stop by its duration and caps speed at `{python} EnforcementStoppingBudget.v_walk_str`." fig-alt="Plot of stopping distance in millimeters against speed in meters per second. Four stacked bands, a flat band of fixed allowances, a linearly growing band of delay travel, a quadratic braking band, and a thin band of jerk-ramp travel, rise to a solid total curve. A dashed curve for a low-friction floor and a dotted curve for a walking person rise more steeply. A dashed horizontal line marks the clear distance, and three markers where the curves cross it are labeled with their speed ceilings."}
+
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STOPPING DISTANCE AGAINST SPEED (FIGURE)
+# │ Context: @fig-12-stopping-vs-speed
+# │ Goal:    show why speed, not delay, is the free term, and how floor and a
+# │          walking person move the ceiling
+# │ Show:    fixed allowances, v tau_delay, v^2/2a, the S-curve's jerk-ramp
+# │          travel; the inspected-floor and walking-person totals; D_clear;
+# │          the three ceilings
+# │ How:     calc_scurve_stop_distance / _time over a speed grid with the
+# │          EnforcementStoppingBudget inputs (a_brake, j_brake, tau_delay,
+# │          overheads, v_h, inspected-floor deceleration); ceilings read from
+# │          the budget cell and guarded against the plotted crossings
+# ├─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import *
+from mlsysim.physics.robotics import calc_scurve_stop_distance, calc_scurve_stop_time
+from mlsysim.fmt import check
+from mlsysim import viz
+
+AISLE = Embodied.Scenario.WarehouseAisle
+S = EnforcementStoppingBudget
+MPS = meter / second
+
+# ┌── 1. LOAD ─────────────────────────────────────────────────────────────────
+tau = S.tau_delay.to(second).magnitude  # category: derived
+fixed = AISLE.fixed_overhead.to(millimeter).magnitude  # category: derived (delta_loc + delta_margin + eps_track)
+d_clear = S.d_clear.to(millimeter).magnitude  # category: illustrative
+v_h = S.v_human.to(MPS).magnitude  # category: datasheet (ISO 13855 K)
+v_drive = S.v_drive.to(MPS).magnitude  # category: illustrative (drive limit)
+ceilings = {  # category: derived (budget cell)
+    "dry": S.ceiling.to(MPS).magnitude,
+    "inspected": S.ceiling_inspected.to(MPS).magnitude,
+    "walking": S.v_walk.to(MPS).magnitude,
+}
+
+# ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
+def d_s(v, a):
+    return calc_scurve_stop_distance(v * MPS, a, S.j_brake).to(millimeter).magnitude
+
+def t_s(v, a):
+    return calc_scurve_stop_time(v * MPS, a, S.j_brake).to(second).magnitude
+
+a_dry = S.a_brake.to(meter / second**2).magnitude
+v = np.linspace(0.0, 1.6, 321)
+delay = v * tau * 1000.0
+braking = v**2 / (2 * a_dry) * 1000.0
+ramps = np.array([d_s(x, S.a_brake) for x in v]) - braking
+total = fixed + delay + braking + ramps
+total_inspected = fixed + delay + np.array([d_s(x, S.a_inspected) for x in v])
+total_walking = total + v_h * (tau + np.array([t_s(x, S.a_brake) for x in v])) * 1000.0
+
+def total_at(x, case):
+    if case == "dry":
+        return fixed + x * tau * 1000 + d_s(x, S.a_brake)
+    if case == "inspected":
+        return fixed + x * tau * 1000 + d_s(x, S.a_inspected)
+    return fixed + x * tau * 1000 + d_s(x, S.a_brake) + v_h * (tau + t_s(x, S.a_brake)) * 1000
+
+# ┌── 3. GUARD ────────────────────────────────────────────────────────────────
+for case, vc in ceilings.items():
+    check(abs(total_at(vc, case) - d_clear) < 1e-3, f"The {case} curve must meet D_clear at its ceiling.")
+check(ceilings["walking"] < ceilings["inspected"] < ceilings["dry"] < v_drive, "Ceiling order: walking < inspected < dry < drive limit.")
+check(np.all(ramps >= -1e-9), "The jerk-limited stop never travels less than constant-deceleration braking.")
+
+# ┌── 4. PLOT ─────────────────────────────────────────────────────────────────
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 4.6))
+base = np.full_like(v, fixed)
+ax.fill_between(v, 0, base, color=COLORS["grid"], alpha=0.7, lw=0, label="fixed allowances", zorder=2)
+ax.fill_between(v, base, base + delay, color=COLORS["BrownL"], lw=0, label="pre-brake delay travel", zorder=2)
+ax.fill_between(v, base + delay, base + delay + braking, color=COLORS["BlueLine"], alpha=0.85, lw=0, label="constant-deceleration braking", zorder=2)
+ax.fill_between(v, base + delay + braking, total, color=COLORS["BlueL"], lw=0, label="jerk-ramp travel", zorder=2)
+ax.plot(v, total, color=COLORS["primary"], lw=1.6, label="total, dry floor", zorder=4)
+ax.plot(v, total_inspected, color=COLORS["primary"], lw=1.4, ls=(0, (5, 3)), label="total, inspected floor", zorder=4)
+ax.plot(v, total_walking, color=COLORS["primary"], lw=1.4, ls=(0, (1, 1.6)), label="total, person walking in", zorder=4)
+ax.axhline(d_clear, color=COLORS["RedLine"], lw=1.3, ls=(0, (6, 3)), zorder=3)
+ax.text(0.02, d_clear + 25, f"clear distance {d_clear / 1000:.2f} m", color=COLORS["RedLine"], fontsize=9, va="bottom")
+
+offsets = {"walking": (0.10, 180), "inspected": (-0.36, 200), "dry": (0.03, 200)}
+for case, vc in ceilings.items():
+    ax.plot([vc], [d_clear], "o", ms=6, mfc="white", mec=COLORS["RedLine"], mew=1.5, zorder=6)
+    ax.vlines(vc, 0, d_clear, color=COLORS["RedLine"], lw=0.8, ls=(0, (1, 2)), zorder=3)
+    dx, dy = offsets[case]
+    ax.annotate(
+        f"{case}: {vc:.2f} m/s",
+        xy=(vc, d_clear),
+        xytext=(vc + dx, d_clear + dy),
+        fontsize=9,
+        color=COLORS["RedLine"],
+        arrowprops=dict(arrowstyle="-", color=COLORS["RedLine"], lw=0.8),
+        zorder=6,
+    )
+
+ax.set_xlim(0, 1.6)
+ax.set_ylim(0, 1700)
+ax.set_xlabel("Speed at the start of the delay, $v$ (m/s)")
+ax.set_ylabel("Stopping distance (mm)")
+ax.legend(loc="upper left", fontsize=8.5, frameon=True, framealpha=0.95, edgecolor="none")
+plt.tight_layout()
+plt.show()
+```
+
+:::
 
 A stalled proposer would spend more than the whole remainder. Were the chunk lease of @sec-enforcement-authority-refuse left to the host to honor, a last proposal that kept its authority for `{python} EnforcementStoppingBudget.t_stall_str` instead of the `{python} EnforcementLeaseStop.lease_ms_str` lease would add `{python} EnforcementStoppingBudget.stall_added_str` to the stop and carry the base `{python} EnforcementStoppingBudget.stall_breach_str` past the clear distance at the rack end.
 
