@@ -64,7 +64,7 @@ class LiDARs(Registry):
         name="Ouster OS1-64",
         channels=64,
         scan_rate=20.0 * ureg.Hz,
-        max_range=120.0 * ureg.meter,
+        max_range=120.0 * ureg.meter,  # needs source: Rev7 sheet gives 170 m (80% target) and 90 m (10%)
         # 2026-09-29: the Rev7 datasheet gives data latency < 10 ms (was 25 ms,
         # unsupported); nominal_latency stores that upper bound.
         nominal_latency=10.0 * ureg.millisecond,

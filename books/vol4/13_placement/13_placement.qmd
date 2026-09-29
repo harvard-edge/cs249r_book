@@ -506,9 +506,12 @@ class PlacementLoadedRead:
 # │       f of the 135 µs tick is slowed by S, the WCET holds only for
 # │       f <= (1.85 - 1) / (S - 1): 4.3 percent at 21x, 0.28 percent at 300x.
 # │ How: registry WCET, deadline, and unloaded tick; slowdowns are published
-# │      measurements on other platforms (not the Orin), used as multipliers.
+# │      measurements on other platforms (not the Orin), used as multipliers;
+# │      calc_stall_share_breakeven (Amdahl's fixed-fraction model read as a
+# │      slowdown) for the break-even shares.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
+from mlsysim.physics import calc_partial_slowdown_stretch, calc_stall_share_breakeven
 from mlsysim.fmt import fmt, fmt_percent, fmt_multiple, check
 
 class PlacementInterference:
@@ -522,14 +525,15 @@ class PlacementInterference:
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     stretch_wcet = (wcet / unloaded).to("dimensionless").magnitude
     stretch_deadline = (deadline / unloaded).to("dimensionless").magnitude
-    f_mshr = (stretch_wcet - 1) / (s_mshr - 1)
-    f_wb = (stretch_wcet - 1) / (s_wb - 1)
-    f_mshr_deadline = (stretch_deadline - 1) / (s_mshr - 1)
+    f_mshr = calc_stall_share_breakeven(stretch_wcet, s_mshr)
+    f_wb = calc_stall_share_breakeven(stretch_wcet, s_wb)
+    f_mshr_deadline = calc_stall_share_breakeven(stretch_deadline, s_mshr)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(stretch_wcet - 250 / 135) < 1e-9 and abs(stretch_deadline - 400 / 135) < 1e-9, "250/135 and 400/135.")
     check(s_mshr > stretch_deadline and s_wb > 100 * stretch_wcet, "Measured slowdowns exceed the tick's absorbable stretch.")
     check(abs(f_mshr - 0.0426) < 5e-4 and abs(f_wb - 0.00285) < 5e-5, "Break-even stall shares: 4.3 and 0.28 percent.")
+    check(abs(calc_partial_slowdown_stretch(f_mshr, s_mshr) - stretch_wcet) < 1e-9, "At the break-even share the tick lands exactly on the WCET.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     stretch_wcet_str = fmt(stretch_wcet, precision=2)

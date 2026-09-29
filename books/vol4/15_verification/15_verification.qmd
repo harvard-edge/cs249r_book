@@ -1030,11 +1030,20 @@ Falsification answers whether a failure exists. Release often needs a different 
 # │       the cross-entropy proposal (mean 105.8 ms after 4 levels) needs about
 # │       2,700 runs, within 0.1 percent of the best exponential proposal.
 # │ How: closed forms for an exponential operational delay and an exponential
-# │      proposal; the expected (large-sample) cross-entropy iteration.
+# │      proposal; the expected (large-sample) cross-entropy iteration
+# │      (calc_monte_carlo_sample_size, calc_importance_sampling_exponential,
+# │      calc_cross_entropy_exponential_proposal,
+# │      calc_optimal_exponential_proposal_mean).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim.core.units import millisecond
 from mlsysim.physics.robotics import calc_zero_failure_sample_size
+from mlsysim.physics import (
+    calc_monte_carlo_sample_size,
+    calc_importance_sampling_exponential,
+    calc_cross_entropy_exponential_proposal,
+    calc_optimal_exponential_proposal_mean,
+)
 from mlsysim.fmt import fmt, fmt_int, fmt_sci, fmt_latency, fmt_percent, check
 
 class RareEventOvershoot:
@@ -1052,39 +1061,26 @@ class RareEventOvershoot:
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     gamma = float(t_exhaust.to(millisecond).magnitude)
     m0 = float(d_mean.to(millisecond).magnitude)
-    lam = 1.0 / m0
-    p_true = math.exp(-gamma / m0)  # P(D > T_latest) under the operational model
-    n_mc = (1.0 - p_true) / (p_true * rel_err**2)  # plain Monte Carlo runs for the target error
-    n_zero = calc_zero_failure_sample_size(1.0 - p_true, confidence=confidence)  # @sec-evaluation-trial-limits
     # Cross-entropy iteration (expected, large-sample form): raise the level to the
     # (1 - elite_share) quantile of the current proposal, refit the proposal mean
     # to the likelihood-weighted elite samples, which for this family is the
     # conditional mean E_p[D | D > level] = level + m0.
-    m_k = m0
-    levels = []
-    while True:
-        level = min(gamma, -m_k * math.log(elite_share))
-        levels.append(level)
-        m_k = level + m0
-        if level >= gamma:
-            break
-    m_ce = m_k
-    n_levels = len(levels)
-    eta = 1.0 / m_ce
-
-    def _second_moment(eta, lam=lam, gamma=gamma):
-        # E_q[w^2 1{D > gamma}] for p = Exp(lam), q = Exp(eta), eta < 2 lam
-        return lam**2 / (eta * (2 * lam - eta)) * math.exp(-(2 * lam - eta) * gamma)
-
-    relvar_ce = _second_moment(eta) / p_true**2 - 1.0  # per-sample relative variance
+    ce = calc_cross_entropy_exponential_proposal(t_exhaust, d_mean, elite_share)
+    levels = [lv.to(millisecond).magnitude for lv in ce["levels"]]
+    n_levels = ce["n_levels"]
+    m_ce = ce["proposal_mean"].to(millisecond).magnitude
+    is_ce = calc_importance_sampling_exponential(t_exhaust, d_mean, ce["proposal_mean"])
+    p_true = is_ce["failure_probability"]  # P(D > T_latest) under the operational model
+    n_mc = calc_monte_carlo_sample_size(p_true, rel_err)  # plain Monte Carlo runs for the target error
+    n_zero = calc_zero_failure_sample_size(1.0 - p_true, confidence=confidence)  # @sec-evaluation-trial-limits
+    relvar_ce = is_ce["relative_variance"]  # per-sample relative variance
     n_is = relvar_ce / rel_err**2
-    p_q_fail = math.exp(-gamma / m_ce)  # share of proposal draws that land in the failure set
-    ess_per_draw = eta * (2 * lam - eta) / lam**2  # expected (sum w)^2 / sum w^2 per draw
+    p_q_fail = is_ce["proposal_failure_share"]  # share of proposal draws that land in the failure set
+    ess_per_draw = is_ce["ess_per_draw"]  # expected (sum w)^2 / sum w^2 per draw
     n_ess = n_is * ess_per_draw
-    # Best exponential proposal: root of t eta^2 - (2 + 2 lam t) eta + 2 lam = 0 below 2 lam
-    bq = 2 + 2 * lam * gamma
-    eta_opt = (bq - math.sqrt(bq**2 - 8 * lam * gamma)) / (2 * gamma)
-    relvar_opt = _second_moment(eta_opt) / p_true**2 - 1.0
+    # Best exponential proposal (minimum second moment)
+    m_opt = calc_optimal_exponential_proposal_mean(t_exhaust, d_mean)
+    relvar_opt = calc_importance_sampling_exponential(t_exhaust, d_mean, m_opt)["relative_variance"]
     ce_penalty = relvar_ce / relvar_opt - 1.0
     speedup = n_mc / n_is
 

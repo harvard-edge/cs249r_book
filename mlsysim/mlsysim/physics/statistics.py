@@ -112,3 +112,169 @@ def calc_constraint_propagation_factor(stage_from, stage_to, base=2):
     if stage_to < stage_from:
         raise ValueError("stage_to must be greater than or equal to stage_from")
     return int(base ** (stage_to - stage_from))
+
+
+# ── Rare-event estimation: plain Monte Carlo and importance sampling ────────
+def calc_monte_carlo_sample_size(failure_probability, relative_error):
+    """Plain Monte Carlo draws needed to estimate a probability to a relative error.
+
+    Equation:
+        N = (1 - p) / (p * r^2)
+
+    The binomial estimator p_hat = k/N has relative standard error
+    sqrt((1 - p) / (N p)); solving for N at a target ``r`` gives the count.
+
+    Source: Owen, *Monte Carlo Theory, Methods and Examples* (2013): the
+    variance of a sample mean of Bernoulli draws, as used for rare events in
+    ch. 9.
+    """
+    if not (0.0 < failure_probability < 1.0):
+        raise ValueError("failure_probability must be strictly between 0 and 1.")
+    if relative_error <= 0.0:
+        raise ValueError("relative_error must be positive.")
+    return (1.0 - failure_probability) / (failure_probability * relative_error**2)
+
+
+def calc_importance_sampling_exponential(threshold, operational_mean, proposal_mean):
+    """Importance-sampling statistics for an exponential tail with an exponential proposal.
+
+    Operational model p = Exp(mean m0), failure when D > gamma, proposal
+    q = Exp(mean m_q) with likelihood ratio w = p/q. Writing lam = 1/m0 and
+    eta = 1/m_q (eta < 2 lam so the second moment is finite):
+
+        P_F                 = exp(-lam gamma)
+        E_q[w^2 1{D>gamma}] = lam^2 / (eta (2 lam - eta)) * exp(-(2 lam - eta) gamma)
+        relative variance   = E_q[w^2 1{D>gamma}] / P_F^2 - 1      (per draw)
+        ESS per draw        = E_q[w]^2 / E_q[w^2] = eta (2 lam - eta) / lam^2
+        P_q(D > gamma)      = exp(-eta gamma)
+
+    Draws for a relative standard error r are ``relative_variance / r**2``.
+    ``threshold``, ``operational_mean``, and ``proposal_mean`` are Pint
+    quantities of one dimension (or plain floats in one unit).
+
+    Source: likelihood-ratio estimator, its second moment, and the effective
+    sample size (sum w)^2 / sum w^2 from Owen 2013, ch. 9; the exponential
+    closed forms follow by integrating those expressions.
+    """
+    gamma, m0, mq = (float(getattr(x, "magnitude", x)) for x in _same_units(threshold, operational_mean, proposal_mean))
+    if gamma <= 0 or m0 <= 0 or mq <= 0:
+        raise ValueError("threshold and both means must be positive.")
+    lam, eta = 1.0 / m0, 1.0 / mq
+    if not eta < 2 * lam:
+        raise ValueError("proposal_mean must exceed half the operational mean (finite second moment).")
+    p_fail = math.exp(-lam * gamma)
+    second_moment = lam**2 / (eta * (2 * lam - eta)) * math.exp(-(2 * lam - eta) * gamma)
+    return {
+        "failure_probability": p_fail,
+        "second_moment": second_moment,
+        "relative_variance": second_moment / p_fail**2 - 1.0,
+        "ess_per_draw": eta * (2 * lam - eta) / lam**2,
+        "proposal_failure_share": math.exp(-eta * gamma),
+    }
+
+
+def calc_optimal_exponential_proposal_mean(threshold, operational_mean):
+    """Mean of the exponential proposal that minimizes importance-sampling variance.
+
+    Minimizing the second moment of ``calc_importance_sampling_exponential``
+    over eta gives the root below 2 lam of
+
+        gamma eta^2 - (2 + 2 lam gamma) eta + 2 lam = 0,
+
+    and the proposal mean is 1/eta. Returned in the units of ``threshold``.
+
+    Source: first-order condition on the exponential second moment (Owen
+    2013, ch. 9, exponential tilting of a light-tailed tail).
+    """
+    t_q, m_q = _same_units(threshold, operational_mean)
+    gamma, m0 = float(getattr(t_q, "magnitude", t_q)), float(getattr(m_q, "magnitude", m_q))
+    if gamma <= 0 or m0 <= 0:
+        raise ValueError("threshold and operational_mean must be positive.")
+    lam = 1.0 / m0
+    b = 2.0 + 2.0 * lam * gamma
+    eta = (b - math.sqrt(b**2 - 8.0 * lam * gamma)) / (2.0 * gamma)
+    mean = 1.0 / eta
+    units = getattr(t_q, "units", None)
+    return mean * units if units is not None else mean
+
+
+def calc_cross_entropy_exponential_proposal(threshold, operational_mean, elite_share):
+    """Expected (large-sample) cross-entropy iteration for an exponential tail.
+
+    From q_0 = p = Exp(m0), each round sets the level to the (1 - beta)
+    quantile of the current proposal, level = -m_k ln(beta) (capped at the
+    threshold), and refits the proposal mean to the likelihood-weighted
+    elite draws; for this family that is E_p[D | D > level] = level + m0.
+    Stops when the level reaches the threshold, so the final mean is
+    threshold + m0.
+
+    Returns a dict with ``levels`` (list, in the units of ``threshold``),
+    ``n_levels``, and ``proposal_mean``.
+
+    Source: Rubinstein and Kroese, *The Cross-Entropy Method* (Springer, 2004),
+    multilevel rare-event algorithm; the exponential refit is in closed form.
+    """
+    if not (0.0 < elite_share < 1.0):
+        raise ValueError("elite_share must be strictly between 0 and 1.")
+    t_q, m_q = _same_units(threshold, operational_mean)
+    gamma, m0 = float(getattr(t_q, "magnitude", t_q)), float(getattr(m_q, "magnitude", m_q))
+    if gamma <= 0 or m0 <= 0:
+        raise ValueError("threshold and operational_mean must be positive.")
+    units = getattr(t_q, "units", None)
+    m_k, levels = m0, []
+    while True:
+        level = min(gamma, -m_k * math.log(elite_share))
+        levels.append(level)
+        m_k = level + m0
+        if level >= gamma:
+            break
+    wrap = (lambda x: x * units) if units is not None else (lambda x: x)
+    return {"levels": [wrap(v) for v in levels], "n_levels": len(levels), "proposal_mean": wrap(m_k)}
+
+
+def _same_units(*values):
+    """Express Pint quantities in the first value's units; pass floats through."""
+    first = values[0]
+    units = getattr(first, "units", None)
+    if units is None:
+        return values
+    return tuple(v.to(units) for v in values)
+
+
+# ── Confidence in a structured safety argument ──────────────────────────────
+def calc_conjunctive_confidence(premise_confidences):
+    """Confidence in a claim that needs every one of several independent premises.
+
+    Equation:
+        P(claim) = prod_i p_i
+
+    The conjunction is no stronger than its weakest premise and, with more
+    than one premise below 1, strictly weaker.
+
+    Source: probability of the intersection of independent events, as applied
+    to conjunctive assurance arguments in Bloomfield and Littlewood 2003,
+    "Multi-legged arguments: the impact of diversity upon confidence in
+    dependability arguments" (DSN 2003).
+    """
+    ps = list(premise_confidences)
+    if not ps or any(not (0.0 <= p <= 1.0) for p in ps):
+        raise ValueError("premise_confidences must be a non-empty sequence of values in [0, 1].")
+    return math.prod(ps)
+
+
+def calc_multilegged_confidence(leg_confidences):
+    """Confidence in a claim supported by independent legs, any one of which suffices.
+
+    Equation:
+        P(claim) = 1 - prod_i (1 - p_i)
+
+    Holds only if the legs fail independently; common-cause failure collapses
+    the legs back into a conjunction.
+
+    Source: Bloomfield and Littlewood 2003 (DSN), multi-legged arguments under
+    the independence assumption.
+    """
+    ps = list(leg_confidences)
+    if not ps or any(not (0.0 <= p <= 1.0) for p in ps):
+        raise ValueError("leg_confidences must be a non-empty sequence of values in [0, 1].")
+    return 1.0 - math.prod(1.0 - p for p in ps)
