@@ -49,7 +49,11 @@ A proposed repair can be correct while the surrounding system applies it to the 
 
 A software engineering task asks for a repair to an intermittent race condition in a distributed key-value store. A foundation model can propose a change to the connection-pool locking logic, but the proposed patch leaves the repository untouched. Someone must inspect the relevant files, apply the change, run the compiler and tests, and decide whether the result satisfies the task. In a conversational interface, a human performs this work and returns selected observations to the model. In an agentic system, software coordinates these steps under delegated authority.
 
-The agent's existence moment occurs when the system closes this interaction loop. A model receives the task and available observations, proposes a next step, and receives feedback from its execution. The surrounding software, called the runtime, decides whether the proposed action is permitted and dispatches it through a tool. A tool is an interface to an operation in the environment, such as reading a file, applying a patch, or running a test. The model does not acquire the runtime's permissions merely by generating the name of an operation.
+The agent's existence moment occurs when the system closes this interaction loop. A model receives the task and available observations, proposes a next step, and receives feedback from its execution. The surrounding software, called the runtime, decides whether the proposed action is permitted and dispatches it through a tool. A tool is an interface to an operation in the environment, such as reading a file, applying a patch, or running a test. The model does not acquire the runtime's permissions merely by generating the name of an operation. @Fig-vol3-open-vs-closed-loop-control contrasts the two ways the repair loop can close.
+
+::: {#fig-vol3-open-vs-closed-loop-control fig-env="figure" fig-pos="htb" fig-cap="**A Person or a Runtime Closes the Loop**: In the conversational arrangement (A), the model answers and the developer runs every tool and carries each error back by hand. In the agentic arrangement (B), the runtime assembles context, receives the model's proposal, and dispatches only actions it grants; the model holds no authority, and verifier evidence returns to the runtime rather than to the model's own report." fig-alt="Two panels. Panel A, A Person Closes the Loop: a developer sends a prompt to a model endpoint and receives a patch, executes it in a local terminal, and re-pastes a compiler error to the endpoint along a dashed arrow. Panel B, A Runtime Closes the Loop: an agent runtime labeled grants every action sends context to a foundation model labeled holds no authority and receives a proposal, dispatches to an isolated sandbox that returns an observation, and the sandbox feeds verifiers whose evidence returns to the runtime along a dashed arrow."}
+![](images/svg/open_vs_closed_loop_control.svg)
+:::
 
 Following the repair task exposes how proposals, effects, and observations interact across turns. Execution begins when the runtime prepares a working copy of the repository and supplies the task description. The model proposes running the failing test. After authorizing that operation, the runtime invokes the test runner and records its result. When the test reports a deadlock, the runtime supplies the diagnostic output to the next model call, which proposes inspecting the connection-pool implementation. The returned source reveals the locking logic on which a repair must operate.
 
@@ -70,6 +74,18 @@ $$\tau = (s_0, a_0, o_1, s_1, a_1, o_2, \dots, s_T)$$
 represents this sequence. Here, $s_t$ is the recorded state available at a decision step, $a_t$ is a candidate action, and $o_{t+1}$ is the subsequent observation. The runtime's record must also distinguish whether it rejected, dispatched, or completed the proposed action. A rejected proposal does not imply an environmental effect, and a missing response does not prove that no effect occurred. The notation describes the order of the interaction; it does not imply that the recorded state contains everything about the environment.
 
 The trajectory is the systems management boundary because dependencies cross individual calls. The corrected patch depends on a compiler result from an earlier turn. Each edit must remain within the task's current permissions, and the cost of the failed attempt still belongs to the task. Ending a model request does not by itself finish the delegated work or settle an outstanding tool operation. The system must separately decide which state and resources the continuing task still needs.
+
+This boundary is why infrastructure built for independent requests cannot host a trajectory unchanged. Each assumption that makes a stateless service simple fails in a specific way once work spans turns, and each failure motivates a later part of the book. @Tbl-vol3-request-vs-trajectory pairs the request assumption with the trajectory's requirement and the chapter that owns the response.
+
+| Concern       | Stateless request assumption                 | Trajectory requirement                                                                | Developed in                                             |
+|:--------------|:---------------------------------------------|:--------------------------------------------------------------------------------------|:---------------------------------------------------------|
+| **Cost**      | Each call has a bounded, independent cost    | Cost accumulates across turns and includes failed attempts                            | @sec-vol3-context-engineering, @sec-vol3-agent-economics |
+| **Memory**    | State is discarded when the response returns | Context, serving state, and the workspace must survive between turns                  | @sec-vol3-kv-cache, @sec-vol3-long-term-memory           |
+| **Authority** | A credential is granted to the whole service | Each action is checked against a grant scoped to the task                             | @sec-vol3-tool-calling, @sec-vol3-sandboxes              |
+| **Recovery**  | A failed request can be retried              | Repeating an effect can duplicate it; recovery may require compensation               | @sec-vol3-durable-execution, @sec-vol3-failure-recovery  |
+| **Evidence**  | A success status ends the request            | A success status is one observation; acceptance needs an independent check            | @sec-vol3-evaluation                                     |
+| **Placement** | Any replica can serve any request            | Later turns benefit from reaching the retained serving state and the task's workspace | @sec-vol3-kv-cache                                       |
+: **Request Assumptions That a Trajectory Breaks**: Each row names a simplification that stateless services rely on, the requirement a multi-turn task places in its stead, and where the book develops the response. {#tbl-vol3-request-vs-trajectory tbl-colwidths="[12,28,36,24]"}
 
 An implementation can express the interaction as a short loop. The missing responsibilities become visible in @lst-vol3-naive-agent-loop, which dispatches whatever command it extracts from a model response and treats the response's completion marker as sufficient reason to stop. The listing is a failure example, not a recommended execution pattern.
 
@@ -94,7 +110,9 @@ These are familiar software-systems responsibilities applied at the lifetime of 
 
 ### Plausible output is not completion evidence {#sec-vol3-intro-fail-plausible}
 
-The repair loop can terminate with a fluent report even when the repository remains broken. A generated command can be syntactically valid yet target the wrong file; a test process can exit successfully because the proposed patch removed the failing assertion. This failure pattern is fail-plausible\index{Fail-plausible fault}: the output appears well formed and credible while the intended property remains unsatisfied. The term describes a failure the supervisor must anticipate, rather than a new fault class disjoint from arbitrary software failures.
+The repair loop can terminate with a fluent report even when the repository remains broken. A generated command can be syntactically valid yet target the wrong file; a test process can exit successfully because the proposed patch removed the failing assertion. This failure pattern is fail-plausible\index{Fail-plausible fault}: the output appears well formed and credible while the intended property remains unsatisfied. The classical fault models show why this pattern needs a name. A fail-stop component halts when it faults, so a supervisor detects the failure by the missing progress or the error it raises [@schlichting1983failstop]. A Byzantine component may behave arbitrarily, and tolerating it requires replication and agreement among independent replicas [@lamport1982byzantine].[^fn-failstop-byzantine-faults] Plausible output defeats the first defense because nothing halts, and it passes shallow monitors such as exit status and syntax checks; repeated samples from the same model are not independent replicas, because they can share the same mistake. The term describes a failure the supervisor must anticipate, rather than a new fault class disjoint from arbitrary software failures.
+
+[^fn-failstop-byzantine-faults]: **Fail-Stop and Byzantine Faults**: Schlichting and Schneider defined a fail-stop processor as one that halts on failure without first making an erroneous state transition, so that other processors can detect the halt [@schlichting1983failstop]. Lamport, Shostak, and Pease showed that reaching agreement when some components may send arbitrary, conflicting messages requires more than two-thirds of the components to be correct, the origin of the $3f+1$ replica bound for tolerating $f$ such faults [@lamport1982byzantine]. \index{Fault model!fail-stop}\index{Fault model!Byzantine}
 
 The model operates under zero ambient authority\index{Zero ambient authority} in the architecture developed here. Its output cannot grant permission to execute a command, alter the runtime's record, or declare acceptance. The runtime must obtain evidence about the environment through designated tools and checks. For our repair, that means distinguishing the patch text from the applied diff and distinguishing a model-written summary of the test run from the actual test result.
 
@@ -121,17 +139,27 @@ For the repair task, the goal $G$ includes preserving behavior outside the repor
 | **Completion Criteria**    | $\mathcal{K}_{\text{comp}}$  | Evidence and decision rule for accepting the result | Required regression checks and review decision   |
 : **Five-Part Task Specification Contract**: Each component answers a different question about the repair task. A goal does not grant authority, and an allowed action does not establish completion. {#tbl-contract-template tbl-colwidths="[20,18,30,32]"}
 
+Each component earns its place through the failure its absence permits. Without a negative scope in the goal, a patch can make the reported symptom disappear by removing the synchronization or the failing assertion. Without a designated environment, edits and installed dependencies can reach shared state, and no one can reproduce the result that was checked. Without an explicit action grant, dispatch inherits whatever the host process can do, as in @lst-vol3-naive-agent-loop. Without bounded observations, one unrestricted search can fill the next call's context. Without completion criteria, the model's own report becomes the only signal to stop.
+
 The environment need not be static. A diagnostic task may inspect a changing service, but its contract must then identify which observations describe which state and which changes fall outside the task's control. Likewise, an observation limit must distinguish an empty result from an incomplete one. If the runtime returns only part of a test log, the next model call needs to know that output was omitted; absence from the prompt is not evidence that an event never occurred.
 
 Resource limits and stopping rules accompany the five-part specification. A task needs a turn or time limit, a spending boundary where applicable, and a defined response to exhausted resources or missing evidence. Stopping after a budget runs out is not successful completion. The runtime may instead return an incomplete patch, record the unresolved check, and request a human decision. These requirements bound execution without changing the contract's five-component notation.
 
 Writing the contract also reveals what cannot yet be delegated. "Improve maintainability" does not become mechanically decidable because it appears in a structured field. The task owner must supply an operational criterion, designate a qualified reviewer, or retain that decision outside autonomous execution. A contract makes such limits explicit; it does not eliminate them.
 
+Later chapters implement each component. @Sec-vol3-tool-calling defines the permitted actions and the observations they return, @sec-vol3-sandboxes establishes the environment in which actions execute, @sec-vol3-agent-harness holds the goal, limits, and stopping rules for the running task, and @sec-vol3-evaluation develops the evidence that completion criteria require.
+
 ### The H·S·A exposure space {#sec-vol3-intro-hsa}
+
+::: {.column-margin}
+![](images/svg/hsa_locator_origin.svg){width="100%" fig-alt="H·S·A locator with no axis lit and the origin dot highlighted, marking a single model call."}
+
+*Agents depart from a single model call along horizon, state, and authority.*
+:::
 
 A contract defines what the task should accomplish and the limits within which it may proceed. The infrastructure needed to support that contract depends on what can go wrong during execution. An isolated model call reads a supplied context and returns a proposal. Extending it into a trajectory introduces exposure through the length of execution, the state carried along it, and the actions the system can take. The book names these dimensions Horizon, State, and Authority, or H·S·A\index{HSA exposure space@H·S·A exposure space}.
 
-Horizon $H$ counts sequential turns. A longer trajectory creates more opportunities for failed proposals, stale observations, and interruption, but turn count is not a clock. A short sequence containing a slow external operation can take longer than a sequence of many local calls. The runtime therefore needs both a turn boundary and an elapsed-time boundary when either can constrain the task.
+Horizon $H$ counts sequential turns. A longer trajectory creates more opportunities for failed proposals, stale observations, and interruption, and @sec-vol3-intro-horizon-arithmetic shows how quickly unchecked errors compound with it. Turn count is not a clock, however. A short sequence containing a slow external operation can take longer than a sequence of many local calls. The runtime therefore needs both a turn boundary and an elapsed-time boundary when either can constrain the task.
 
 State $S$ describes what persists beyond one call. At $S_0$, no task state carries across calls. At $S_1$, the system carries conversational working state, including the context and any retained serving state. At $S_2$, it also maintains task-local working artifacts, such as an isolated source tree. At $S_3$, it depends on durable state that outlives the session or is authoritative beyond the working copy, such as a shared repository or database. A task can use several of these at once. The distinction identifies what must be preserved, refreshed, or protected; it does not imply that every stored representation has equal authority.
 
@@ -169,11 +197,136 @@ The working-copy comparison separates preventing an unwanted action from decidin
 
 Mechanical enforcement establishes a particular boundary. A write restriction can exclude protected paths if every write goes through the enforcing mechanism and its isolation assumptions hold. It does not make the allowed files correct. Similarly, validating the syntax of a tool request does not establish that the request is authorized or appropriate. The property being enforced must remain narrower than the full task claim.
 
-Evidence supports the acceptance decision at several levels. A model's self-report states what it claims to have accomplished; it is not an independent observation of the result. Static checks establish selected properties without running the complete task. Visible tests exercise cases the agent can inspect, making them useful for diagnosis but also exposing the examples toward which a candidate can be fitted. Sealed tests withhold their cases and protect the checks from modification, reducing those opportunities without proving that the cases cover every failure. Formal proof can establish a specified property under an explicit model and assumptions, but does not establish that the specification captures everything the user intended. These levels describe the basis of a claim, not a universal ranking in which any check at one level dominates every check at another.
+Evidence supports the acceptance decision at several levels. A model's self-report states what it claims to have accomplished; it is not an independent observation of the result. The end-to-end argument supplies the systems reason [@saltzer1984endtoend]. A property of the complete task can be established only by a check at an endpoint that knows what the task requires; the correct operation of a lower layer, including fluent generation, cannot certify it. Static checks establish selected properties without running the complete task. Visible tests exercise cases the agent can inspect, making them useful for diagnosis but also exposing the examples toward which a candidate can be fitted. Sealed tests withhold their cases and protect the checks from modification, reducing those opportunities without proving that the cases cover every failure. Formal proof can establish a specified property under an explicit model and assumptions, but does not establish that the specification captures everything the user intended. These levels describe the basis of a claim, not a universal ranking in which any check at one level dominates every check at another.
 
 For the race-condition repair, passing a sequential test supplies evidence about the sequential case. Keeping that test sealed prevents the agent from editing or inspecting it; sealing does not turn it into a concurrency test. Exercising relevant concurrent behavior adds evidence for the reported defect, while review may still be needed to assess assumptions the tests do not cover. A deterministic verdict can therefore be repeatable and still incomplete. Separating test integrity from test coverage keeps acceptance claims within what the system measured.
 
 Some criteria require judgment rather than a complete executable predicate. An evaluator can assess those criteria against a stated rubric, with the uncertainty and decision authority recorded. That assessment does not replace mechanical permission checks. If the available evidence cannot meet the contract, the system must return an unresolved outcome or escalate rather than promote a plausible explanation into successful completion. Later evaluation methods quantify the reliability of these checks; the introductory requirement is to preserve what each one does and does not establish.
+
+### Reliability and cost over a horizon {#sec-vol3-intro-horizon-arithmetic}
+
+Checking intermediate results matters most when a task is long, and elementary probability shows why. Suppose each of $H$ sequential steps is correct with probability $1-\epsilon$, errors are independent, and nothing checks a step before the next one builds on it. The task then succeeds only if every step does, with probability
+
+$$\Pr(\text{success}) = (1-\epsilon)^{H}$$ {#eq-vol3-horizon-compounding}
+
+@Eq-vol3-horizon-compounding is the series-reliability formula for components that must all work, applied to the turns of a trajectory. Independence is a simplification. Correlated errors and partial recovery change the value, but they do not remove the exponential dependence on the horizon (notebook \ref{nbk-01-horizon-compounding}).
+
+```{python}
+#| label: calc-vol3-intro-horizon-compounding
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HORIZON COMPOUNDING FOR UNCHECKED STEPS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-horizon-compounding and @nbk-01-horizon-compounding.
+# │ Goal: Show task success falling with horizon at a fixed step accuracy.
+# │ Show: Success at two horizons; step error needed to hold a target.
+# │ How:  (1 - eps)^H with independent, unchecked steps.
+# │ Note: Hypothetical step accuracy, not a measured model property.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
+
+class HorizonCompounding:
+    # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
+    step_ok = 0.99  # hypothetical per-step probability of a correct step
+    h_short, h_long = 10, 100  # horizons in turns
+    target = 0.90  # task success rate to hold at the long horizon
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    eps = 1 - step_ok
+    p_short = step_ok**h_short
+    p_long = step_ok**h_long
+    eps_needed = 1 - target ** (1 / h_long)
+    eps_ratio = eps / eps_needed
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(p_long < 0.5 < target <= p_short, "Long horizon must fail most tasks; short must meet target")
+    check(eps_needed < eps and eps_ratio > 5, "Holding the target must need a much lower step error")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    step_ok_str = fmt_percent(step_ok, style="prose")
+    eps_str = fmt_percent(eps, style="prose")
+    h_short_str, h_long_str = fmt_int(h_short), fmt_int(h_long)
+    target_str = fmt_percent(target, style="prose")
+    p_short_str = fmt_percent(p_short, precision=1, style="prose")
+    p_long_str = fmt_percent(p_long, precision=1, style="prose")
+    eps_needed_str = fmt_percent(eps_needed, precision=1, style="prose")
+    eps_ratio_mult_str = fmt_multiple(eps_ratio, precision=1)
+```
+
+::: {#nbk-01-horizon-compounding .callout-notebook title="Horizon compounding"}
+
+**Problem**: Each step of a repair agent is correct with probability `{python} HorizonCompounding.step_ok_str`, independently, and no step is checked before the next one builds on it. What fraction of tasks succeed at horizons of `{python} HorizonCompounding.h_short_str` and `{python} HorizonCompounding.h_long_str` turns, and what per-step error rate would hold the longer horizon at `{python} HorizonCompounding.target_str` success?
+
+**Math**: By @eq-vol3-horizon-compounding, `{python} HorizonCompounding.p_short_str` of tasks succeed at `{python} HorizonCompounding.h_short_str` turns and `{python} HorizonCompounding.p_long_str` at `{python} HorizonCompounding.h_long_str` turns. Holding `{python} HorizonCompounding.target_str` at `{python} HorizonCompounding.h_long_str` turns requires $\epsilon = 1 - P_{\text{target}}^{1/H}$, about `{python} HorizonCompounding.eps_needed_str` per step, `{python} HorizonCompounding.eps_ratio_mult_str` lower than the assumed `{python} HorizonCompounding.eps_str`.
+
+**Systems insight**: Horizon, not step accuracy, sets task reliability. A step accuracy that looks excellent on a single call fails most long tasks, and a tenfold longer horizon demands roughly a tenfold lower per-step error to hold the same success rate. The engineering response is to check intermediate results, so that an error becomes a rejected step the runtime can retry or repair instead of a silent input to every later turn. That is the work of the mechanical bounds and acceptance evidence in principle \ref{pri-invariant-closure}.
+
+:::
+
+Checking converts a silent failure into a rejected attempt, and a rejected attempt still costs money. Suppose each attempt at a task is accepted with probability $p_{\text{acc}}$, independently of earlier attempts, and the runtime retries until one is accepted. The number of attempts is then geometric with mean $1/p_{\text{acc}}$. Each attempt costs $C_{\text{attempt}}$ in expectation, counting the tokens, tool time, verification, and review that a rejected attempt consumes as fully as an accepted one. The expected cost per accepted task is therefore
+
+$$C_{\text{eff}} = \frac{\mathbb{E}[C_{\text{attempt}}]}{p_{\text{acc}}}$$ {#eq-vol3-cost-per-accepted-task}
+
+A deployed runtime bounds its retries, so some tasks end without acceptance. The cohort ratio in @sec-vol3-intro-fallacies measures the same quantity from recorded spend and acceptance counts, and @sec-vol3-agent-economics develops the full account. The form of @eq-vol3-cost-per-accepted-task already shows which lever it rewards (notebook \ref{nbk-01-cost-per-accepted}).
+
+```{python}
+#| label: calc-vol3-intro-cost-per-accepted
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COST PER ACCEPTED TASK: TOKEN PRICE VS. ACCEPTANCE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-cost-per-accepted-task and @nbk-01-cost-per-accepted.
+# │ Goal: Compare halving token prices with raising acceptance probability.
+# │ Show: Baseline, both interventions, and the break-even acceptance.
+# │ How:  C_eff = E[C_attempt] / p_acc with retry until acceptance.
+# │ Note: Hypothetical prices and probabilities, not a provider schedule.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_usd, fmt_percent
+
+class CostPerAccepted:
+    # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
+    c_model = 1.30  # scenario USD of model tokens per attempt
+    c_other = 0.80  # scenario USD per attempt for sandbox, tests, and review
+    p_acc = 0.40  # probability an attempt is accepted
+    token_cut = 0.5  # fraction of token price removed by a cheaper tariff
+    p_acc_better = 0.60  # acceptance after a context or tool improvement
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    c_attempt = c_model + c_other
+    attempts = 1 / p_acc
+    c_eff = c_attempt / p_acc
+    c_attempt_cheap = c_model * (1 - token_cut) + c_other
+    c_eff_cheap = c_attempt_cheap / p_acc
+    c_eff_better = c_attempt / p_acc_better
+    p_breakeven = c_attempt / c_eff_cheap
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(c_eff_better < c_eff_cheap < c_eff, "Raising acceptance must beat the token cut here")
+    check(p_acc < p_breakeven < p_acc_better, "Break-even acceptance must lie between the two rates")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    c_model_str = fmt_usd(c_model, precision=2)
+    c_other_str = fmt_usd(c_other, precision=2)
+    c_attempt_str = fmt_usd(c_attempt, precision=2)
+    c_attempt_cheap_str = fmt_usd(c_attempt_cheap, precision=2)
+    p_acc_str = fmt_percent(p_acc, style="prose")
+    p_acc_better_str = fmt_percent(p_acc_better, style="prose")
+    p_breakeven_str = fmt_percent(p_breakeven, precision=1, style="prose")
+    attempts_str = fmt(attempts, precision=1)
+    c_eff_str = fmt_usd(c_eff, precision=2)
+    c_eff_cheap_str = fmt_usd(c_eff_cheap, precision=2)
+    c_eff_better_str = fmt_usd(c_eff_better, precision=2)
+```
+
+::: {#nbk-01-cost-per-accepted .callout-notebook title="Cheaper tokens or more acceptances"}
+
+**Problem**: An attempt at the repair task spends `{python} CostPerAccepted.c_model_str` on model tokens and `{python} CostPerAccepted.c_other_str` on the sandbox, tests, and review, and is accepted with probability `{python} CostPerAccepted.p_acc_str`. Which lowers cost per accepted task more: halving the token price, or raising acceptance to `{python} CostPerAccepted.p_acc_better_str` through a context or tool improvement?
+
+**Math**: The baseline attempt costs `{python} CostPerAccepted.c_attempt_str`, and the task needs `{python} CostPerAccepted.attempts_str` attempts on average, so @eq-vol3-cost-per-accepted-task gives `{python} CostPerAccepted.c_eff_str` per accepted task. Halving the token price lowers the attempt to `{python} CostPerAccepted.c_attempt_cheap_str` and the cost per accepted task to `{python} CostPerAccepted.c_eff_cheap_str`. Raising acceptance to `{python} CostPerAccepted.p_acc_better_str` at the original attempt cost gives `{python} CostPerAccepted.c_eff_better_str`. Acceptance needs to rise only to `{python} CostPerAccepted.p_breakeven_str` to match the halved token price.
+
+**Systems insight**: Raising acceptance can matter more than cheaper tokens. A price cut shrinks only the model's share of each attempt, while acceptance divides every component, including the environment and verification that each rejected attempt also consumes. Compare interventions by their effect on cost per accepted task under the same acceptance contract, not by the price of a token.
+
+:::
 
 ### Workflows vs. model-directed loops {#sec-vol3-intro-workflow-vs-loop}
 
@@ -237,7 +390,7 @@ For the repair task, we can follow the resulting evidence without confusing the 
 
 ### Resource costs of a turn {#sec-vol3-intro-accelerator-host}
 
-Running the test suite can take longer than generating the patch that requested it. During that wait, the task remains active even though it needs no new model output. The runtime must retain enough state to interpret the result when it arrives, but it need not retain every temporary computation used by the previous model call. Conversely, discarding reusable model state may make the next call more expensive. The task's logical lifetime and the lifetime of resources allocated to one invocation are separate engineering choices.
+Running the test suite can take longer than generating the patch that requested it. During that wait, the task remains active even though it needs no new model output. The runtime must retain enough state to interpret the result when it arrives, but it need not retain every temporary computation used by the previous model call. Conversely, discarding reusable model state may make the next call more expensive. The task's logical lifetime and the lifetime of resources allocated to one invocation are separate engineering choices. Retained serving state held idle while a slow tool runs is the tool-wait problem; @sec-vol3-kv-cache quantifies whether to keep, move, or drop that state, and @sec-vol3-agent-economics prices the choice per accepted task.
 
 The same distinction applies to context growth. Preserving a complete diagnostic for audit does not require sending every line to every subsequent call. Call latency, retained memory, tool time, and overall task cost must be measured separately before choosing what to keep, recompute, or summarize. Detailed retention policies depend on those costs; the ownership distinction is enough to identify the measurements they require.
 
@@ -259,16 +412,20 @@ The repair task needs a model to propose a change, selected context to inform it
 
 A model call provides the starting interface. Repeated calls produce working state, and tool interactions connect that state to an environment whose changes can outlast the call. The runtime must then supervise the whole trajectory and preserve enough evidence to assess its outcome. Only after that assessment can recorded trajectories support justified changes to the policy or the deployment. @Tbl-causal-spine maps this dependency sequence to the seven parts.
 
-| Part                                   | Governing Problem                                                                      | New Capability                                                                                |
-|:---------------------------------------|:---------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------|
-| **Part I: The Model**                  | A fallible model proposal consumes time and resources.                                 | Interpret the call contract and decide when additional inference is worthwhile.               |
-| **Part II: Agent Memory**              | Growing histories compete for limited context and can contain stale information.       | Manage the next call's context, its serving state, and information retained across tasks.     |
-| **Part III: Tool Use**                 | Proposed actions need permission, containment, and protection against untrusted input. | Define tool interactions, bound execution, and constrain misuse of legitimate access.         |
-| **Part IV: The Agent Runtime**         | A sequence of permitted actions can still stall, lose state, or fail its task.         | Supervise execution, survive interruption, recover from failures, and evaluate outcomes.      |
-| **Part V: Learning from Trajectories** | Execution records do not automatically constitute suitable learning data.              | Curate trajectories, teach demonstrated behavior, and improve policies using outcome rewards. |
-| **Part VI: Agents at Scale**           | Delegation and concurrency introduce coordination costs and shared resource limits.    | Compare multi-agent designs and provision resources per accepted task.                        |
-| **Part VII: Synthesis**                | Component-level guarantees leave obligations at their interfaces.                      | Follow an incident-remediation task through the system and justify its acceptance.            |
-: **Causal Dependency Spine**: Each part develops capabilities that the later parts use to govern, evaluate, improve, and scale complete trajectories. {#tbl-causal-spine tbl-colwidths="[24,38,38]"}
+| Part                                   | Governing Problem                                                                      | New Capability                                                                                | Exposure Addressed                        |
+|:---------------------------------------|:---------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------|:------------------------------------------|
+| **Part I: The Model**                  | A fallible model proposal consumes time and resources.                                 | Interpret the call contract and decide when additional inference is worthwhile.               | None yet; the single call is the origin   |
+| **Part II: Agent Memory**              | Growing histories compete for limited context and can contain stale information.       | Manage the next call's context, its serving state, and information retained across tasks.     | State                                     |
+| **Part III: Tool Use**                 | Proposed actions need permission, containment, and protection against untrusted input. | Define tool interactions, bound execution, and constrain misuse of legitimate access.         | Authority                                 |
+| **Part IV: The Agent Runtime**         | A sequence of permitted actions can still stall, lose state, or fail its task.         | Supervise execution, survive interruption, recover from failures, and evaluate outcomes.      | Horizon                                   |
+| **Part V: Learning from Trajectories** | Execution records do not automatically constitute suitable learning data.              | Curate trajectories, teach demonstrated behavior, and improve policies using outcome rewards. | None; changes the model, not the exposure |
+| **Part VI: Agents at Scale**           | Delegation and concurrency introduce coordination costs and shared resource limits.    | Compare multi-agent designs and provision resources per accepted task.                        | All three, multiplied                     |
+| **Part VII: Synthesis**                | Component-level guarantees leave obligations at their interfaces.                      | Follow an incident-remediation task through the system and justify its acceptance.            | All three, together                       |
+: **Causal Dependency Spine**: Each part develops capabilities that the later parts use to govern, evaluate, improve, and scale complete trajectories. The last column names the H·S·A exposure each part addresses. {#tbl-causal-spine tbl-colwidths="[20,30,30,20]"}
+
+The chapters follow the same sequence. In Part I, @sec-vol3-foundation-model establishes what a call reads, returns, and costs, and @sec-vol3-test-time-compute decides when additional inference improves the selected result. Part II closes the state exposure. @Sec-vol3-context-engineering selects what each call sees, @sec-vol3-kv-cache prices the serving state that context occupies, and @sec-vol3-long-term-memory governs what persists across sessions. Part III closes the authority exposure. @Sec-vol3-tool-calling separates validation, authorization, dispatch, and evidence of effect, @sec-vol3-sandboxes bounds what executing code can reach, and @sec-vol3-security addresses untrusted input that steers legitimate access. Part IV closes the horizon exposure. @Sec-vol3-agent-harness runs the loop under budgets and approvals, @sec-vol3-durable-execution preserves progress through interruption, @sec-vol3-failure-recovery repairs or compensates failed work, and @sec-vol3-evaluation measures the assembled system. Part V changes the model and moves no exposure. @Sec-vol3-trajectory-curation prepares records for a learning use, @sec-vol3-fine-tuning teaches demonstrated behavior, and @sec-vol3-rlvr optimizes against verifiable rewards. Part VI multiplies all three exposures. @Sec-vol3-multi-agent divides a task among agents, and @sec-vol3-agent-economics prices and provisions the system per accepted task. @Sec-vol3-conclusion then follows one task through every boundary.
+
+The same order governs how the book responds to a recurring failure. Interventions differ in cost and reversibility. Changing what the model sees is cheap and undone by the next edit; changing a tool interface or schema costs more; changing runtime policy affects every task the runtime serves; changing model weights is the most expensive and least reversible, because it alters behavior on tasks the failure never touched. The default order therefore tries context, then tools and schemas, then runtime policy, and changes weights only for the residual failure that survives them, on evaluation evidence. @Sec-vol3-flywheel-intervention-order develops this ordering as a default justified by cost and reversibility, not a sequence every failure must climb.
 
 Evaluation therefore appears before learning. A recorded action might have been permitted but unsuccessful; a successful final result might include an earlier failed attempt that taught the agent how to recover. The learning chapters need those distinctions to decide which records to retain and what behavior each record should teach. Similarly, coordination follows the complete single-agent system so that the value of additional agents can be compared against a capable baseline rather than an incomplete loop.
 
@@ -323,7 +480,7 @@ A repair may require several attempts before one passes the acceptance checks. T
 
 $$C_{\text{deliverable}} = \frac{\sum_{i \in \mathcal{T}_{\text{all}}} \left( C_{\text{inference}}^{(i)} + C_{\text{infra}}^{(i)} \right) + C_{\text{human}}}{N_{\text{verified\_successes}}}$$
 
-Here, $\mathcal{T}_{\text{all}}$ includes successful, failed, abandoned, and speculative attempts in the accounting cohort. The numerator combines inference and infrastructure costs with human intervention cost; $N_{\text{verified\_successes}}$ counts deliverables accepted under the stated evidence standard. Passing that standard does not imply complete correctness beyond what the checks establish. If no deliverables are accepted, the ratio is undefined and the incurred cost must still be reported. Comparing systems requires the same task cohort and acceptance standard, rather than a denominator chosen after observing which attempts succeeded.
+Here, $\mathcal{T}_{\text{all}}$ includes successful, failed, abandoned, and speculative attempts in the accounting cohort. The numerator combines inference and infrastructure costs with human intervention cost; $N_{\text{verified\_successes}}$ counts deliverables accepted under the stated evidence standard. Passing that standard does not imply complete correctness beyond what the checks establish. If no deliverables are accepted, the ratio is undefined and the incurred cost must still be reported. Comparing systems requires the same task cohort and acceptance standard, rather than a denominator chosen after observing which attempts succeeded. The ratio is the measured counterpart of the expected cost in @eq-vol3-cost-per-accepted-task.
 :::
 
 These distinctions place the engineering boundary around the whole task. Context must remain connected to current state, actions must remain within granted authority, and acceptance must rest on evidence with stated limits. The resulting system can be assessed by what it accomplishes within its constraints rather than by the fluency or length of its trajectory.
