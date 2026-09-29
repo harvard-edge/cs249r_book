@@ -347,7 +347,7 @@ A small urgent read can wait behind a large transfer even when the memory bus is
 
 [^fn-place-dram-bandwidth]: **DRAM bank conflicts**\index{DRAM!bank conflicts}: A different row in the same active bank may require precharge and activation before column service. Actual bank mapping, overlap, and scheduling determine the added delay.
 
-Each claimant's average demand follows from its transfer size and event rate. On a shared multi-channel LPDDR5x interface, camera DMA streams, weight fetches at the policy rate, the enforcer's reads, drive writes, cache writebacks, and logging together occupy a modest fraction of theoretical peak bandwidth on average. An engineer who inspects only that average concludes that most of the memory bus remains free. Memory crossbar arbiters and DRAM schedulers do not schedule average rates. They arbitrate discrete, bursty transactions, and two workloads with identical average throughput interfere with radically different latency profiles if one streams in small, sporadic packets while the other arrives in long, saturating blocks.
+Each claimant's average demand follows from its transfer size and event rate. On a shared multi-channel LPDDR5 interface, camera DMA streams, weight fetches at the policy rate, the enforcer's reads, drive writes, cache writebacks, and logging together occupy a modest fraction of theoretical peak bandwidth on average. An engineer who inspects only that average concludes that most of the memory bus remains free. Memory crossbar arbiters and DRAM schedulers do not schedule average rates. They arbitrate discrete, bursty transactions, and two workloads with identical average throughput interfere with radically different latency profiles if one streams in small, sporadic packets while the other arrives in long, saturating blocks.
 
 The memory wall in @sec-brain-cognitive-pipeline also matters to the permission path. Weight transfers that limit proposal throughput become competing requests if the two paths share a controller. Camera DMA and telemetry add bursts of their own. Their average rates cannot reveal how many transactions will already be queued when an urgent read arrives.
 
@@ -355,7 +355,7 @@ How long a safety read waits depends on transaction arbitration and DRAM schedul
 
 [^fn-hw-axi-burst]: **AXI4 transaction slicing and burst limits**\index{Hardware!AXI4 burst limits}: AXI4 permits INCR bursts of up to 256 beats and forbids a burst from crossing a 4,096-byte address boundary. An aligned $256\,\text{KiB}$ tile transferred using full-width 128-bit ($16$-byte), 256-beat INCR bursts therefore takes 64 transactions. Smaller beats, shorter bursts, or misalignment change that count. In the selected arbitration example, an urgent read waits for the currently granted burst to finish; that scheduling premise is not a universal AXI guarantee.
 
-Every memory request passes through four stages: the requester issues it, the interconnect arbiter grants it a slot, the memory controller queues it, and the target bank serves it. Each DRAM bank holds one open row in its **row buffer**. An LPDDR5 channel has 16 banks, organized into 4 bank groups at the highest data rates, or 8 banks in an optional mode that merges pairs [@steiner2022lpddr5]. A read to the open row (a *row hit*) needs only a column access. A read to a different row of the same bank (a *row conflict*) must first close the open row with a precharge ($t_{\text{RP}}$) and then open the new one with an activation ($t_{\text{RCD}}$). At the `{python} PlacementDramTiming.data_rate_str` MT/s data rate of the machine's application SoC, each of those steps takes `{python} PlacementDramTiming.t_rp_str` ns once rounded up to whole command-clock cycles, so a conflict adds `{python} PlacementDramTiming.t_conflict_str` ns [@luo2024ramulator]. Write recovery, bus turnaround, and bank-group spacing add further terms that @sec-appendix-systems-dram develops.
+Every memory request passes through four stages: the requester issues it, the interconnect arbiter grants it a slot, the memory controller queues it, and the target bank serves it. Each DRAM bank holds one open row in its **row buffer**. An LPDDR5 channel has 16 banks, organized into 4 bank groups at the highest data rates, or 8 banks without bank groups in an alternative mode [@steiner2022lpddr5]. A read to the open row (a *row hit*) needs only a column access. A read to a different row of the same bank (a *row conflict*) must first close the open row with a precharge ($t_{\text{RP}}$) and then open the new one with an activation ($t_{\text{RCD}}$). At the `{python} PlacementDramTiming.data_rate_str` MT/s data rate of the machine's application SoC, each of those steps takes `{python} PlacementDramTiming.t_rp_str` ns once rounded up to whole command-clock cycles, so a conflict adds `{python} PlacementDramTiming.t_conflict_str` ns [@luo2024ramulator]. Write recovery, bus turnaround, and bank-group spacing add further terms that @sec-appendix-systems-dram develops.
 
 The controller also decides the order of service. Controllers that use **first-ready, first-come-first-served (FR-FCFS)**\index{FR-FCFS scheduling!definition} scheduling serve ready row hits before older requests that need a new row, which maximizes throughput [@rixner2000memory]. A streaming accelerator supplies an unbroken run of row hits across its weight matrices, so an FR-FCFS scheduler can keep passing the safety core's sporadic read until an internal starvation counter expires. Under a FIFO queue that lets no later arrival pass the safety read, the idealized wait is
 $$t_{\text{queue}} = \sum_{k \in \mathcal{Q}} \frac{B_k}{\text{BW}_{\text{peak}}} + N_{\text{conflicts}} (t_{\text{RP}} + t_{\text{RCD}})$$ {#eq-placement-dram-queuing}
@@ -549,7 +549,7 @@ The notebook's arithmetic makes the shared die look safe, and that impression is
 
 A non-blocking cache tracks each outstanding miss in a *miss status holding register* (MSHR) and parks each dirty line it evicts in a *writeback buffer* until DRAM accepts it. Both structures are small and shared by every core behind the cache. When a streaming co-runner keeps them full, each miss of the victim core waits until an entry drains, so the victim's delay grows with its own miss count times the aggressor's drain time, not with the bytes it reads. Partitioning cache capacity does not help, because the partition divides the lines and leaves the MSHRs and the writeback buffer shared. Measured on commercial embedded multicores, MSHR contention raised a task's worst-case execution time by up to `{python} PlacementInterference.s_mshr_mult_str` with the cache partitioned [@valsan2016taming], and a deliberate attack on the writeback buffer slowed a victim on a dedicated core by more than `{python} PlacementInterference.s_wb_mult_str`, partitioned or not [@bechtel2019denial]. DRAM adds its own multiplier on top. An analytical bound for commercial controllers shows that each of the victim's requests can wait behind every request that other cores may place ahead of it in the same bank, a number set by queue depth and the reordering window rather than by average bandwidth [@kim2014bounding].
 
-These slowdowns were measured on other platforms, on victims whose time was mostly memory stall, so they cannot be charged to the enforcer directly. They can be charged to its memory-stall share. If a fraction $f$ of the unloaded tick waits on shared-cache misses and interference slows that fraction by a factor $S$ while the rest runs unchanged, the tick takes $t_{\text{unloaded}}[(1-f) + fS]$, and the declared bound survives only while
+These slowdowns were measured on other platforms, on victims whose time was mostly memory stall, so they cannot be charged to the enforcer directly. They can be charged to its memory-stall share. If a fraction $f$ of the unloaded tick waits on shared-cache misses and interference slows that fraction by a factor $S$ while the rest runs unchanged, the tick takes $t_{\text{unloaded}}[(1-f) + fS] = t_{\text{unloaded}}[1 + f(S-1)]$. Setting that no larger than $C_{\text{wcet}}$ and solving for $f$ shows that the declared bound survives only while
 $$f \le \frac{C_{\text{wcet}}/t_{\text{unloaded}} - 1}{S - 1}.$$
 At the MSHR-class `{python} PlacementInterference.s_mshr_mult_str`, the declared bound falls once more than `{python} PlacementInterference.f_mshr_pct_str` percent of the tick is miss stall, and the deadline once more than `{python} PlacementInterference.f_mshr_deadline_pct_str` percent is. At the writeback-buffer attack's `{python} PlacementInterference.s_wb_mult_str`, the threshold is `{python} PlacementInterference.f_wb_pct_str` percent. A constraint evaluation that touches tables in shared memory easily exceeds those fractions. The mechanism that threatens the declared bound is therefore miss handling in the shared cache, amplified by bank queueing, and the only placements that remove it are those whose tick runs from private memory: candidates (c) and (d) of @tbl-13-placement-candidates. On (a) and (b), the measured stall share on the target and a regulation mechanism that bounds $S$ (@sec-placement-isolation-decisions) are what a qualification must supply.
 
@@ -791,7 +791,7 @@ where $T_{j,\text{start}}$ is the junction temperature when throttling begins, $
 A stretched cycle on a shared die can also arise from **electrical power-rail coupling**\index{Power-rail coupling}, which operates on a completely different timescale. While the inductive rail droop of @sec-placement-resource-contention arrives within nanoseconds ($10^{-9}\,\text{s}$) of an accelerator current step, thermal coupling accumulates over seconds ($10^1\,\text{s}$) as heat diffuses through silicon, package substrate, and chassis heatsinks. Consequently, temperature-correlated delays direct investigation toward clock governance, while voltage-correlated delays direct it toward the supply path; correlation alone does not identify the cause. This behavior exposes a multi-tiered physical timescale hierarchy spanning many orders of magnitude across the machine:
 
 1. **$10^{-9}\,\text{s}$ (Nanoseconds)**: Simultaneous tensor core switching generates $L \cdot dI/dt$ inductive rail collapse, stretching CMOS gate delays under the $\alpha$-power law within individual clock cycles.
-2. **$10^{-6}\,\text{s}$ (Microseconds)**: AXI4 crossbar arbitration, head-of-line FIFO queueing, and DRAM row-buffer precharge and activation delays ($t_{\text{RP}} + t_{\text{RCD}}$) stall memory reads.
+2. **$10^{-6}\,\text{s}$ (Microseconds)**: AXI4 crossbar arbitration and head-of-line FIFO queueing stall memory reads, as row-buffer precharge and activation penalties ($t_{\text{RP}} + t_{\text{RCD}}$) of tens of nanoseconds each accumulate across a queue.
 3. **$10^{-4}\text{--}10^{-3}\,\text{s}$ (Sub-milliseconds to milliseconds)**: Sensor ingestion and CBF-QP invariant evaluation run inside the permission tick, and the EtherCAT cycle repeats every millisecond, although one frame for the machine's axes occupies the wire for only tens of microseconds.
 4. **$10^0\text{--}10^1\,\text{s}$ (Seconds)**: Macroscopic silicon die and package heatsink thermal capacitance stores dissipated energy, enforcing governor throttling hysteresis (at least `{python} RejectedPlacementThrottle.t_recov_str` in the example) that degrades thousands of control ticks.
 5. **$10^2\text{--}10^4\,\text{s}$ (Minutes to hours)**: Chassis thermal mass and battery Joule heating accumulate heat, shifting bay ambient temperature $T_{\text{ambient}}$ upward and eroding cooling headroom across a multi-hour shift.
@@ -958,7 +958,69 @@ For a stipulated workload with approximately constant chip power and chassis bas
 $$E_{\text{mission}} = (P_{\text{chip}} + P_{\text{chassis\_static}}) \times T_{\text{mission}}$$
 The relation requires a measured or explicitly assumed mission duration for each candidate. Dynamic actuation, conversion losses, retries, and idle intervals require additional accounting when they differ between candidates. It does not rank named platforms from peak operations per second or thermal design power. The proposal timing model of @sec-brain-cognitive-pipeline supplies the workload constraints; placement must test the compiled model, memory allocation, and cooling configuration together.
 
-Off-board services may supply proposals or background work only while their communication delays fit the relevant renewal and evidence windows. Disconnection must leave the local permission path and its qualified fallback available. Neither remote compute nor static compilation removes the local execution obligation.
+```{python}
+#| label: calc-placement-offload-admissibility
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OFF-BOARD INFERENCE AGAINST THE RENEWAL AND ADMISSION WINDOWS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-placement-isolation-decisions
+# │
+# │ Goal: Apply the offload admissibility rule to a published remote
+# │       vision-language-action deployment and to a published fog offload.
+# │ Show: the renewal window is the 60 ms lease less the 5 ms jitter allowance,
+# │       55 ms; the admission ceiling is 100.8 ms. RT-2's 5B model at about
+# │       5 Hz takes 200 ms per step (3.6x the renewal window, 2.0x the
+# │       ceiling); the 55B model at 1-3 Hz takes 333.3 ms at best. FogROS2 grasp
+# │       planning, 14 s locally and 1.2 s offloaded, lives on the task scale.
+# │ How: lease and jitter from PlacementMachine; ceiling from
+# │      PlacementTransport; remote rates and planning times are published
+# │      measurements (Brohan et al. 2023, Sec. 3.3; Ichnowski et al. 2023).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import ureg, millisecond, second, hertz
+from mlsysim.fmt import fmt, fmt_latency, fmt_frequency, check
+
+class PlacementOffload:
+    # ┌── 1. LOAD ───────────────────────────────────────────────────────────
+    lease = PlacementMachine.lease  # category: chosen
+    renewal_jitter = PlacementMachine.renewal_jitter  # category: chosen
+    t_ceiling = PlacementTransport.t_ceiling  # category: derived (spare / v)
+    f_rt2_5b = 5 * hertz  # category: measured (Brohan et al. 2023, Sec. 3.3: 5B model "around 5 Hz", cloud TPU over the network)
+    f_rt2_55b_max = 3 * hertz  # category: measured (Brohan et al. 2023, Sec. 3.3: 55B model 1-3 Hz; upper end)
+    t_grasp_local = 14 * second  # category: measured (Ichnowski et al. 2023, abstract: grasp planning 14 s)
+    t_grasp_fog = 1.2 * second  # category: measured (Ichnowski et al. 2023, abstract: 1.2 s with FogROS2)
+
+    # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
+    w_renew = (lease - renewal_jitter).to(millisecond)
+    t_step_5b = (1 / f_rt2_5b).to(millisecond)
+    t_step_55b = (1 / f_rt2_55b_max).to(millisecond)
+    ratio_renew = (t_step_5b / w_renew).to("dimensionless").magnitude
+    ratio_ceiling = (t_step_5b / t_ceiling).to("dimensionless").magnitude
+
+    # ┌── 3. GUARD ──────────────────────────────────────────────────────────
+    check(abs(w_renew.magnitude - 55.0) < 1e-9, "Renewal window: 60 ms lease less 5 ms jitter = 55 ms.")
+    check(abs(t_step_5b.magnitude - 200.0) < 1e-9, "5 Hz is 200 ms per step.")
+    check(t_step_5b > t_ceiling > w_renew, "The fastest published remote step exceeds both windows.")
+    check(abs(ratio_renew - 200 / 55) < 1e-9 and abs(ratio_ceiling - 1.98) < 0.01, "3.6x the renewal window, 2.0x the ceiling.")
+
+    # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
+    lease_str = fmt_latency(lease, unit=millisecond, precision=0)
+    w_renew_str = fmt_latency(w_renew, unit=millisecond, precision=0)
+    t_ceiling_str = fmt_latency(t_ceiling, unit=millisecond, precision=1)
+    f_rt2_5b_str = fmt_frequency(f_rt2_5b, precision=0)
+    t_step_5b_str = fmt_latency(t_step_5b, unit=millisecond, precision=0)
+    t_step_55b_str = fmt_latency(t_step_55b, unit=millisecond, precision=1)
+    ratio_renew_str = fmt(ratio_renew, precision=1)
+    ratio_ceiling_str = fmt(ratio_ceiling, precision=1)
+    t_grasp_local_str = fmt_latency(t_grasp_local, unit=second, precision=0)
+    t_grasp_fog_str = fmt_latency(t_grasp_fog, unit=second, precision=1)
+```
+
+Off-board compute obeys the same windows as the board link, with a longer delay that the machine does not control. An offloaded result is admissible only if the measured tail of its network round trip plus the tail of its remote processing fits inside the window the result feeds:
+$$t_{\text{net}}^{\text{tail}} + t_{\text{proc}}^{\text{tail}} \le W,$$
+where $W$ is the lease less its renewal-jitter allowance when the result renews authority, `{python} PlacementOffload.w_renew_str` on this machine, and the `{python} PlacementOffload.t_ceiling_str` dispatch-to-admission ceiling of \ref{nbk-placement-transport-budget} when it becomes an admitted chunk. Published practice shows how quickly the rule binds. RT-2 ran its vision-language-action models in a multi-TPU cloud service queried over the network; with that network in the loop, the 55-billion-parameter model ran at 1 to 3 Hz and the 5-billion-parameter model at about `{python} PlacementOffload.f_rt2_5b_str` [@brohan2023rt2]. At that rate one remote step takes `{python} PlacementOffload.t_step_5b_str`, which is `{python} PlacementOffload.ratio_renew_str` times the renewal window and `{python} PlacementOffload.ratio_ceiling_str` times the admission ceiling, and the larger model needs at least `{python} PlacementOffload.t_step_55b_str`. No faster network rescues either model, because the processing tail alone exceeds $W$. A remote model of that class can set goals or subtasks for the local chunk policy, which alone renews the lease. Work measured in seconds is the natural candidate for offload: FogROS2 moves ROS 2 nodes to cloud and fog servers and cut one grasp-planning computation from `{python} PlacementOffload.t_grasp_local_str` to `{python} PlacementOffload.t_grasp_fog_str` [@ichnowski2023fogros2], a speedup that shortens the next task and leaves the next tick untouched. Disconnection must leave the local permission path and its qualified fallback available. Neither remote compute nor static compilation removes the local execution obligation.
 
 The allocation now has explicit costs in reserved capacity, board transport, and mission energy. Its next obligation is evidence that those choices preserve the permission deadline and physical response under concurrent load.
 
@@ -1094,7 +1156,7 @@ The distance at stake in one tick is small, which makes the bound easy to underv
 
 A declared bound is a promise, and the engineer who signs the placement record needs a method that supports it. Four families of method exist, and each earns its bound from a different premise [@wilhelm2008worst].
 
-*Static analysis* never runs the task. It reconstructs the control-flow graph from the binary, bounds every loop, models the pipeline and caches by abstract interpretation to classify each access as a guaranteed hit, a guaranteed miss, or unknown, and then finds the longest feasible path with an integer linear program. Its bound is safe if the hardware model is faithful. That premise holds for the machine's microcontroller, an in-order lockstep core executing from tightly coupled memory with no shared cache, which is the platform class these tools were built for. It fails on a commercial multicore whose cache, interconnect, and memory controller behavior is undocumented and shared, where the model would have to include every co-runner.
+*Static analysis* never runs the task. It reconstructs the control-flow graph from the binary, bounds every loop, models the pipeline and caches by abstract interpretation to classify each access as a guaranteed hit, a guaranteed miss, or unknown, and then finds the longest feasible path with an integer linear program: each basic block's execution count is an unknown, loop bounds and flow conservation constrain the counts, and the program maximizes the sum of each count times that block's worst-case cost. Its bound is safe if the hardware model is faithful. That premise holds for the machine's microcontroller, an in-order lockstep core executing from tightly coupled memory with no shared cache, which is the platform class these tools were built for. It fails on a commercial multicore whose cache, interconnect, and memory controller behavior is undocumented and shared, where the model would have to include every co-runner.
 
 *Measurement-based analysis* runs the task on the target under the heaviest load the engineer can construct and adds an engineering margin to the high-water mark. It needs no hardware model, which is its appeal on complex platforms, and it guarantees nothing about states the tests missed; the stress campaign below exists to make that set of missed states as small as possible.
 

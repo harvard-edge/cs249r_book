@@ -85,6 +85,7 @@ from mlsysim.fmt import (
 )
 from mlsysim.physics.robotics import (
     calc_target_evidence_horizon,
+    calc_linear_invalidation_horizon,
     calc_latch_contact_stopping_profile,
     calc_contact_force,
 )
@@ -96,7 +97,6 @@ AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene;
 delta_t_stall_intent = 200.0 * millisecond  # category: illustrative (stalled proposer holds the mug target)
 delta_t_stall_arm = 200.0 * millisecond  # category: illustrative (unbraked contact interval)
 v_drift_slow = 20.0 * millimeter / second  # category: illustrative (slow-drift case in the figure)
-t_intent_tail = 650.0 * millisecond  # category: illustrative (high-tail intent inference, as in the figure)
 d_target_offset = 300.0 * millimeter  # category: illustrative (scenario assumption: gripper-to-handle distance at proposal)
 pi0_chunk_len = 50  # category: literature (Black et al. 2024, pi0: action chunk length H = 50)
 pi0_action_rate = 50.0 * hertz  # category: literature (Black et al. 2024, pi0: executed at up to 50 Hz)
@@ -108,12 +108,16 @@ t_forecast_long = 2.0 * second  # category: illustrative (multi-second planning 
 # Mug on the conveyor: untracked and tracked target-evidence horizons. Both
 # horizons charge the 3 mm initial error against the 15 mm tolerance.
 grasp_error_budget = (AISLE.grasp_tolerance - AISLE.grasp_initial_error).to(millimeter)
-tau_ev_untracked = calc_target_evidence_horizon(AISLE.grasp_tolerance, AISLE.grasp_initial_error, AISLE.v_conveyor).to(millisecond)
+# Linear root: Ch9's invalidation law T_inv = (E_max - E_0)/r (@eq-mem-linear-horizon).
+tau_ev_untracked = calc_linear_invalidation_horizon(AISLE.grasp_initial_error, AISLE.v_conveyor, AISLE.grasp_tolerance).to(millisecond)
 tau_ev_tracked = ((2 * grasp_error_budget / AISLE.a_conveyor_slip) ** 0.5).to(millisecond)
 t_intent_period = (1.0 / RM.intent_rate).to(millisecond)
 err_at_intent_period = (AISLE.grasp_initial_error + AISLE.v_conveyor * t_intent_period).to(millimeter)
 err_excess_at_period = (err_at_intent_period - AISLE.grasp_tolerance).to(millimeter)
-t_tail_overrun = (t_intent_tail - tau_ev_untracked).to(millisecond)
+# 2026-09-29 audit: the former 650 ms "illustrative tail" had no source; the
+# overrun now uses the computed intent latency (M2).
+t_infer_overrun = (RM.intent_inference_latency - tau_ev_untracked).to(millisecond)
+n_intent_tokens = RM.intent_model.action_dim  # values one intent evaluation decodes (Ch3)
 tau_ev_slow_drift = calc_target_evidence_horizon(AISLE.grasp_tolerance, AISLE.grasp_initial_error, v_drift_slow).to(millisecond)
 
 # Dynamic reachability: the TCP speed ceiling bounds the reach inside the tracked
@@ -163,7 +167,16 @@ check(abs(RM.tcp_speed_limit.to(meter / second).magnitude - 1.0) < 1e-9, "TCP sp
 check(abs(t_intent_period.magnitude - 500.0) < 1e-6, "2 Hz intent period is 500 ms")
 check(abs(err_at_intent_period.magnitude - 103.0) < 1e-6, "Error at the intent period")
 check(abs(tau_ev_slow_drift.magnitude - 600.0) < 1e-6, "Slow-drift horizon in the figure")
-check(abs(t_tail_overrun.magnitude - 590.0) < 1e-6, "Tail overrun past the untracked horizon is 590 ms")
+check(
+    abs(
+        tau_ev_untracked.magnitude
+        - calc_target_evidence_horizon(AISLE.grasp_tolerance, AISLE.grasp_initial_error, AISLE.v_conveyor).to(millisecond).magnitude
+    )
+    < 1e-9,
+    "Ch9 linear law and the evidence-horizon helper agree",
+)
+check(abs(t_infer_overrun.magnitude - 275.6) < 0.5, "Computed inference overruns the untracked horizon by about 276 ms")
+check(n_intent_tokens == 7, "Intent model decodes seven values")
 check(abs(d_reach_tracked.magnitude - 219.09) < 5e-3, "TCP reach inside the tracked horizon is 219 mm")
 check(abs(d_reach_untracked.magnitude - 60.0) < 1e-6, "TCP reach inside the untracked horizon is 60 mm")
 check(abs(t_transit_floor.magnitude - 300.0) < 1e-6, "Transit floor for the offset proposal is 300 ms")
@@ -198,8 +211,8 @@ class IntentLeaseArchetypes:
     err_excess_str = fmt_length(err_excess_at_period, unit=millimeter, precision=0)
     v_drift_slow_str = fmt_velocity(v_drift_slow, unit=millimeter / second, precision=0)
     tau_slow_drift_str = fmt_latency(tau_ev_slow_drift, unit=millisecond, precision=0)
-    t_intent_tail_str = fmt_latency(t_intent_tail, unit=millisecond, precision=0)
-    t_tail_overrun_str = fmt_latency(round(t_tail_overrun.magnitude) * millisecond, unit=millisecond, precision=0)
+    t_infer_overrun_str = fmt_latency(round(t_infer_overrun.magnitude) * millisecond, unit=millisecond, precision=0)
+    n_intent_tokens_str = fmt_int(n_intent_tokens)
     # Dynamic reachability on the arm
     d_reach_tracked_str = fmt_length(round(d_reach_tracked.magnitude) * millimeter, unit=millimeter, precision=0)
     d_reach_untracked_str = fmt_length(d_reach_untracked, unit=millimeter, precision=0)
@@ -676,11 +689,11 @@ For the red mug on the takeaway conveyor, the grounded target moves at `{python}
 
 A qualified local tracker changes the arithmetic. It re-measures the mug on every frame and follows the conveyor's velocity, so the conveyor speed no longer drives the error. The same `{python} IntentLeaseArchetypes.e0_str` initial error is still charged against the tolerance, which leaves `{python} IntentLeaseArchetypes.err_budget_str` for the residual slip of `{python} IntentLeaseArchetypes.a_slip_str`, an illustrative worst-case bound, to consume. Against that budget, residual slip alone sets the tracked evidence horizon that @sec-brain-cognitive-pipeline solves, `{python} IntentLeaseArchetypes.tau_tracked_str`. The tracker renews that evidence at its own rate, so the tracker's period plus latency is what must fit inside the horizon. The intent model only re-confirms which mug is meant, and each renewal it sends carries the tracker's fresh evidence rather than the frame the model last read. Whichever horizon applies caps the intent lease on this target (@sec-intent-lease).
 
-::: {#fig-10-lease-dynamics-tradeoff fig-env="figure" fig-pos="t" fig-cap="**Target-evidence horizon and early filters**: Panel (a) plots the bound $\tau_{\text{ev}}\le(r_{\text{tol}}-e_0)/v_{\text{drift}}$; its green region means only that the target remains within the task tolerance. An illustrative 650 ms high-tail inference cannot renew the 60 ms conveyor case. Panel (b) shows early rejection stages that precede the full path and stopping checks." fig-alt="Panel (a): target-evidence validity vs. drift speed, with 600 milliseconds at 20 millimeters per second and 60 milliseconds at 200 millimeters per second for a 15-millimeter tolerance and 3-millimeter initial error. Green means target evidence remains within this model's tolerance, not that motion is safe. Panel (b): sequence and evidence check, workspace prefilter, dynamic lower-bound check, and ambiguity gate leading to the planner. Full path and stopping clearance remain separate checks."}
+::: {#fig-10-lease-dynamics-tradeoff fig-env="figure" fig-pos="t" fig-cap="**Target-evidence horizon and early filters**: Panel (a) plots the bound $\tau_{\text{ev}}\le(r_{\text{tol}}-e_0)/v_{\text{drift}}$; its green region means only that the target remains within the task tolerance. The machine's computed 336 ms intent inference cannot renew the 60 ms conveyor case. Panel (b) shows early rejection stages that precede the full path and stopping checks." fig-alt="Panel (a): target-evidence validity vs. drift speed, with 600 milliseconds at 20 millimeters per second and 60 milliseconds at 200 millimeters per second for a 15-millimeter tolerance and 3-millimeter initial error. Green means target evidence remains within this model's tolerance, not that motion is safe. Panel (b): sequence and evidence check, workspace prefilter, dynamic lower-bound check, and ambiguity gate leading to the planner. Full path and stopping clearance remain separate checks."}
 ![](images/svg/fig10_lease_dynamics_tradeoff.svg){width="100%"}
 :::
 
-Coupling target-evidence validity to the reasoning model's cadence creates a drift hazard. Suppose a design ties the mug's evidence to the intent model's output rather than to a tracker, so the untracked `{python} IntentLeaseArchetypes.tau_untracked_str` horizon applies, and a single inference runs to a high-tail latency of `{python} IntentLeaseArchetypes.t_intent_tail_str`. Extending the target record to `{python} IntentLeaseArchetypes.t_intent_tail_str` solely to hide that delay would leave its estimate outside the declared error envelope for `{python} IntentLeaseArchetypes.t_tail_overrun_str`. The `{python} IntentLeaseArchetypes.tau_untracked_str` limit is an evidence-validity deadline, and only new evidence, checked again against the motion, can extend it; faster compute cannot.
+Coupling target-evidence validity to the reasoning model's cadence creates a drift hazard. Suppose a design ties the mug's evidence to the intent model's output rather than to a tracker, so the untracked `{python} IntentLeaseArchetypes.tau_untracked_str` horizon applies. Even a typical inference, at the computed `{python} IntentLeaseArchetypes.t_intent_infer_str`, outlasts that horizon, and a latency tail only adds to it. Extending the target record to `{python} IntentLeaseArchetypes.t_intent_infer_str` solely to hide that delay would leave its estimate outside the declared error envelope for `{python} IntentLeaseArchetypes.t_infer_overrun_str`. The `{python} IntentLeaseArchetypes.tau_untracked_str` limit is an evidence-validity deadline, and only new evidence, checked again against the motion, can extend it; faster compute cannot.
 
 Continuous tracking requires *fresh physical evidence*, not merely a new packet from the same stale frame. A renewal based on a new capture must arrive before the current evidence and admitted authority expire, with capture, processing, transfer, clock uncertainty, and permission time included in its budget. The simple condition $T_{\text{period}}+t_{\text{latency}}<\tau_{\text{ev}}$ is only a necessary scheduling check. When a fresh proposal arrives, the planner may compute a jerk-limited splice\index{Trajectory Generation!jerk-limited splice} from the measured state. It admits that splice only if the swept path, new evidence, and stopping reserve remain feasible; an abrupt target change can instead require refusal or a checked stop.
 
@@ -756,7 +769,7 @@ Reachability and corridor filters reject some impossible requests before plannin
 When a vision-language model\index{Vision-language model} or multimodal transformer outputs an $SE(3)$ target pose\index{SE(3) Kinematics} for a physical manipulator, that pose can fail in several distinct, physically hazardous ways:
 
 1. **Phantom Target (hallucination):** Attention concentrates on a specular glare, a shadow, or a transparent surface, and the pipeline predicts an object where none exists. Missing or corrupted depth returns then place the target in empty space or inside a transparent barrier, and an admitted proposal sends the arm into air or into glass.
-2. **Stale Target (Pipeline Latency / Temporal Drift):** The physical workpiece shifts on a conveyor, vibrates on a feeder tray, or is displaced by a human coworker while the multi-stage perception pipeline buffers, batches, and decodes frames. The machine's intent model takes `{python} IntentLeaseArchetypes.t_intent_infer_str` per inference, and its illustrative high tail reaches `{python} IntentLeaseArchetypes.t_intent_tail_str`; a chunked action stream can keep the arm moving throughout, but on the target the model last saw. The resulting proposal arrives downstream with mathematically valid coordinates that describe where the object *used to be* rather than where it *is*, consuming physical clearance before motion begins.
+2. **Stale Target (Pipeline Latency / Temporal Drift):** The physical workpiece shifts on a conveyor, vibrates on a feeder tray, or is displaced by a human coworker while the multi-stage perception pipeline buffers, batches, and decodes frames. The machine's intent model takes `{python} IntentLeaseArchetypes.t_intent_infer_str` per inference, longer than the `{python} IntentLeaseArchetypes.tau_untracked_str` untracked horizon before any tail latency is added; a chunked action stream can keep the arm moving throughout, but on the target the model last saw. The resulting proposal arrives downstream with mathematically valid coordinates that describe where the object *used to be* rather than where it *is*, consuming physical clearance before motion begins.
 3. **Semantic Ambiguity (Bimodal Posterior / Argmax Failure):** Two visually identical candidate objects (e.g., two red mugs) reside within the pick zone, and both score high because the detector scores each box independently. The calibrated prediction set holds both ($|\mathcal{C}| = 2$). Keeping only the top box or averaging the candidates' centroids commands an arbitrary choice or drives the end effector toward the empty midpoint between the objects, risking a dual-object collision.
 4. **Misclassified Affordance:** A bolted fixture is taken for a movable handle, or a thin-walled container for a robust one, and the requested grip force destroys it. The approach can be collision-free while the contact wrench is wrong.
 5. **Dynamic Unreachability (Kinematic Transit Shortfall):** A requested terminal move is geometrically within the static workspace manifold $\mathcal{W}$, but the transit time demanded by actuator velocity and acceleration limits exceeds the remaining sensor evidence window ($t_{\text{transit}} > t_{\text{intent\_exp}} - t_{\text{now}}$). The terminal request must be rejected or replaced with guarded stages supported by fresh observations; extending its old evidence deadline cannot make it feasible.
