@@ -21,6 +21,7 @@ Use the table to enter at the physical question being checked. For a first encou
 | Spatial sensor offsets or IMU-camera lever arms corrupt state estimation under rotation      | @sec-appendix-control-spatial      | Spatial coordinate transforms ($SE(3)$) and lever-arm acceleration propagation              |
 | Discrete sampling and transport latency erode control loop stability margins                 | @sec-appendix-control-zoh          | Discrete zero-order hold (ZOH) phase lag and latency margin penalties                       |
 | Physics simulation diverges, impacts exceed limits, or wheels spin out during maneuvers      | @sec-appendix-control-contact      | Contact complementarity, elastodynamic impact, and wheel slip boundaries                    |
+| A grasp slips under arm acceleration or crushes the object                                   | @sec-appendix-control-grasp        | Coulomb friction cones, minimum squeeze force, grasp map, and force closure                 |
 | Sensor occlusions or unobservable states cause state estimation uncertainty to diverge       | @sec-appendix-control-covariance   | Continuous Lyapunov covariance propagation and Lie derivative observability rank            |
 | Teleoperation or compliant contact chatters due to transport delay                           | @sec-appendix-control-passivity    | Passivity conditions, wave variables, and energy-bounded interaction                        |
 | Underactuated legged or humanoid robots balance dynamic momentum across multi-contact points | @sec-appendix-control-centroidal   | Centroidal momentum equations and hierarchical Whole-Body Control QP                        |
@@ -183,7 +184,7 @@ The baseline physics model cancels the dominant, known multi-body nonlinearities
 
 ### Linear quadratic regulator and algebraic riccati equations {#sec-appendix-control-lqr}
 
-In reinforcement learning, policy optimization searches for an action policy $\pi_{\boldsymbol{\theta}}(\mathbf{a} \mid \mathbf{s})$ that maximizes expected cumulative reward via trial-and-error sampling or learned critic networks $V_{\boldsymbol{\phi}}(\mathbf{s})$ / $Q_{\boldsymbol{\phi}}(\mathbf{s}, \mathbf{a})$, frequently struggling with high gradient variance, non-convex loss landscapes, and empirical stability failures. In contrast, for linear-quadratic physical dynamics, the **Linear Quadratic Regulator (LQR)**\index{Linear Quadratic Regulator!optimal control}\index{Algebraic Riccati Equation!continuous-time} provides the exact, analytical solution to the continuous-state Bellman optimality equation over an infinite time horizon.
+In reinforcement learning (@sec-training-rl-primer), policy optimization searches for an action policy $\pi_{\boldsymbol{\theta}}(\mathbf{a} \mid \mathbf{s})$ that maximizes expected cumulative reward via trial-and-error sampling or learned critic networks $V_{\boldsymbol{\phi}}(\mathbf{s})$ / $Q_{\boldsymbol{\phi}}(\mathbf{s}, \mathbf{a})$, frequently struggling with high gradient variance, non-convex loss landscapes, and empirical stability failures. In contrast, for linear-quadratic physical dynamics, the **Linear Quadratic Regulator (LQR)**\index{Linear Quadratic Regulator!optimal control}\index{Algebraic Riccati Equation!continuous-time} provides the exact, analytical solution to the continuous-state Bellman optimality equation over an infinite time horizon.
 
 The following matrix compares the computational mechanics of reinforcement learning with the analytical machinery of LQR:
 
@@ -265,7 +266,7 @@ $$ \mathbf{K}_d = \left( \mathbf{R} + \mathbf{B}_d^\top \mathbf{P} \mathbf{B}_d 
 
 ### The separation principle and linear quadratic Gaussian control
 
-In physical deployments, full-state access is rarely available; controllers must estimate $\hat{\mathbf{x}}$ from noisy sensor observations $\mathbf{y} = \mathbf{C}\mathbf{x} + \mathbf{v}$. Under a linear model with independent Gaussian white process and measurement noises of intensities $\mathbf Q_w$ and $\mathbf R_v$, the optimal continuous state estimator is the continuous-time **Kalman-Bucy filter** (@sec-appendix-control-covariance):\index{Kalman filter!optimal Bayesian estimation}\index{Linear Quadratic Gaussian!Separation Principle}
+In physical deployments, full-state access is rarely available; controllers must estimate $\hat{\mathbf{x}}$ from noisy sensor observations $\mathbf{y} = \mathbf{C}\mathbf{x} + \mathbf{v}$. Under a linear model with independent Gaussian white process and measurement noises of intensities $\mathbf Q_w$ and $\mathbf R_v$, the optimal continuous state estimator is the continuous-time **Kalman-Bucy filter** (@sec-appendix-control-covariance; the discrete filter the machine runs is in @sec-perception-state-estimation):\index{Kalman filter!optimal Bayesian estimation}\index{Linear Quadratic Gaussian!Separation Principle}
 $$ \dot{\hat{\mathbf{x}}}(t) = \mathbf{A}\hat{\mathbf{x}}(t) + \mathbf{B}\mathbf{u}(t) + \mathbf{L}\left(\mathbf{y}(t) - \mathbf{C}\hat{\mathbf{x}}(t)\right) $$
 where $\mathbf{y}(t) - \mathbf{C}\hat{\mathbf{x}}(t)$ is the **innovation** (the measurement residual), and the optimal Kalman observer gain is:
 $$ \mathbf{L} = \mathbf{P}_{\text{est}}\mathbf{C}^\top \mathbf{R}_v^{-1} $$
@@ -751,9 +752,11 @@ For fixed modeled compute and bus delays, the added phase lag near crossover is 
 
 ## Dynamic Reachability, Intent Envelopes, and Differential Games {#sec-appendix-control-reachability}
 
-Kinematic reachability characterizes the spatial set of configurations or end-effector poses an embodied system can reach over a given planning or intent horizon $\tau$.\index{Kinematic reachability!intent horizon}
+Kinematic reachability characterizes the spatial set of configurations or end-effector poses an embodied system can reach over a given planning or intent horizon.\index{Kinematic reachability!intent horizon}
 
 ### Forward kinematics and singularities {#sec-appendix-control-kinematics}
+
+@Sec-planning-handoff introduces forward kinematics, the Jacobian, and the singular pose on a planar two-link abstraction of the machine's arm, and @sec-planning-time-parameterization turns a path into a timed trajectory under torque and jerk bounds. This section states the general $n$-joint form those examples specialize.
 
 For an $n$-joint arm, the **forward-kinematics** map $f(q)$ sends joint coordinates $q\in\mathbb R^n$ to an end-effector pose $T_{WE}\in SE(3)$:\index{Forward kinematics!mapping}
 $$ T_{WE}=f(q). $$
@@ -982,7 +985,21 @@ Tractive force $F_x$ scales with the normal contact load $F_z$ through the longi
 $$ F_x(\lambda) = \mu_x(\lambda) F_z $$
 At low slip ratios ($|\lambda| < \lambda_{\text{peak}}$), where the peak depends on tire and surface conditions, tire or tread rubber shears elastically, and tractive force is approximately linear in slip: $F_x \approx C_x \lambda$, with longitudinal traction stiffness $C_x$. Beyond $\lambda_{\text{peak}}$, adhesion collapses into gross sliding friction: the slope $d\mu_x / d\lambda$ turns negative, which can destabilize a torque-controlled wheel-speed equilibrium. If an ungrounded policy commands drive motor torque exceeding peak traction ($F_{\text{cmd}} > \mu_{\text{peak}} F_z$), the wheel rapidly accelerates into the unstable slip regime ($d\omega/dt = (\tau - r F_x)/I_{\text{wheel}} > 0$). The resulting slip can reduce lateral authority or disturb yaw—a cyber-physical disconnect that cannot be detected by directional agreement or cosine similarity metrics that evaluate only vector angles while ignoring control magnitude.
 
+### Grasp mechanics: Friction cones and force closure {#sec-appendix-control-grasp}
+
+The nonadhesive contact model above lets a contact push but never pull, so a gripper holds an object only through friction. Coulomb's law bounds the tangential force $\mathbf{f}_t$ a contact can carry by the normal force $f_n$ pressing it, $\|\mathbf{f}_t\| \le \mu f_n$, where $\mu$ is the friction coefficient between finger and object. Every admissible contact force therefore lies inside a **friction cone**\index{Friction cone!grasp mechanics} about the contact normal, with half-angle $\arctan \mu$.
+
+A parallel-jaw hold shows the consequence with nothing beyond Newton's second law. Two fingers squeeze an object of mass $m$ on opposite vertical faces, each with normal force $f_n$. Friction at the two contacts must carry the weight and any upward acceleration $a_z$ the arm imposes while it moves:
+$$ 2\mu f_n \ge m\,(g + a_z) \quad\Longrightarrow\quad f_n \ge \frac{m\,(g + a_z)}{2\mu} $$ {#eq-appendix-control-squeeze}
+The required squeeze grows with the arm's acceleration and inversely with friction: halving $\mu$ doubles it. The object sets the other bound: a thin-walled cup or a ripe fruit deforms or breaks above some normal force. A grasp is feasible only when the interval between the two bounds is nonempty, and that interval is the band a guarded-contact check $f_{\min} \le \|\mathbf{f}_{\text{contact}}\| \le f_{\max}$ enforces (@sec-intent-grounded-affordances). Each term is a measurement the grasp needs: the object's mass, the friction coefficient of this finger material on this surface, the planned peak acceleration, and the crush force. Horizontal acceleration and the moment of an off-center load add terms of the same form.
+
+The general statement collects every contact into one linear map. A force $\mathbf{f}_i$ applied at contact $i$, located at $\mathbf{r}_i$ from the object's reference point, exerts on the object the wrench formed by the force and its moment $\mathbf{r}_i \times \mathbf{f}_i$. Stacking all contact forces into $\mathbf{f}$ gives the **grasp map**\index{Grasp map} $\mathbf{G}_{\text{grasp}}$, with object wrench $\mathbf{w}_{\text{obj}} = \mathbf{G}_{\text{grasp}}\mathbf{f}$ (the subscript keeps it distinct from the Kalman gain). A grasp has **force closure**\index{Force closure!definition} when every external wrench $\mathbf{w}_{\text{ext}}$ on the object can be balanced, $\mathbf{G}_{\text{grasp}}\mathbf{f} = -\mathbf{w}_{\text{ext}}$, by contact forces that all lie inside their friction cones [@lynch2017modern]. Approximating each cone by a few edge vectors makes the test finite: force closure holds when the origin lies strictly inside the convex hull of the primitive wrenches those edges generate. For two fingers in a plane, Nguyen's condition is its geometric form: the segment joining the contact points must lie inside both friction cones [@nguyen1988constructing]. In three dimensions, two point contacts cannot resist a torque about the line joining them; real fingertips resist it through torsional friction over a finite contact patch, the soft-finger contact model. Ferrari and Canny's quality measure, the radius of the largest origin-centered ball inside the hull, turns the yes-or-no test into the smallest disturbance the grasp is guaranteed to resist per unit of contact force [@ferrari1992planning].
+
+Force closure is qualitative. It says a balancing set of forces exists, not that the gripper can produce them within its force limit or without crushing the object, which is why the magnitude check of @eq-appendix-control-squeeze remains necessary for every grasp the machine admits.
+
 ## Continuous Covariance Propagation and Observability {#sec-appendix-control-covariance}
+
+The discrete Kalman filter and its extended form, which the machine actually runs on dated measurements, are developed in @sec-perception-state-estimation, and the consistency tests that decide whether a filter's reported covariance can be trusted are in @sec-perception-qualifying-error. This section treats the continuous-time limit, which shows how uncertainty grows between measurements.
 
 When sensors suffer line-of-sight dropouts or environmental occlusion, internal state estimators must project the physical state forward in time. Quantifying how rapidly estimation confidence degrades across blind intervals requires analyzing continuous error covariance dynamics and systems observability.
 

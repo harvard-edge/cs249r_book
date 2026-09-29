@@ -251,6 +251,7 @@ class MobileManipulators(Registry):
         wrist_camera=Sensors.Camera.Sony_IMX296,
         lidar=Sensors.LiDAR.Ouster_OS1_64,
         imu=Sensors.IMU.Bosch_BMI088,
+        safety_scanner=Sensors.SafetyScanner.Keyence_SZ_V32,   # representative certified AMR scanner
         intent_model=Models.Embodied.OpenVLA_7B,
         chunk_model=Models.Embodied.ACT_ALOHA,
         # Intent model: OpenVLA-7B with INT4 weight-only quantization (OpenVLA
@@ -344,6 +345,14 @@ class SiteScenarios(Registry):
         enforcer_unloaded=135.0 * ureg.microsecond,            # illustrative
         enforcer_wcet=250.0 * ureg.microsecond,                # chosen (declared)
         enforcer_deadline=400.0 * ureg.microsecond,            # chosen
+        # Dispatch-to-admission stages after inference (2026-09-29; were literals in
+        # three chapter cells). All illustrative allowances; the total is the
+        # t_dispatch_to_admission property (63.31 ms).
+        chunk_wire_bytes=4096 * ureg.byte,                     # illustrative (chunk + header + evidence epoch)
+        board_link_clock=25.0 * ureg.megahertz,                # illustrative (SPI, one bit per clock)
+        t_chunk_deserialize=2.0 * ureg.millisecond,            # illustrative
+        t_plan_validate=18.0 * ureg.millisecond,               # illustrative (whole-plan validation)
+        t_plan_activate=1.0 * ureg.millisecond,                # illustrative
         v_human_approach=sourced_qty(
             1.6 * (ureg.meter / ureg.second), pc.ISO_13855_APPROACH_SPEED,
             name="ISO 13855 walking approach speed K",
@@ -441,7 +450,11 @@ class SiteScenarios(Registry):
         t_handshake_request=10.0 * ureg.millisecond,           # chosen protocol budget
         t_handshake_acknowledge=5.0 * ureg.millisecond,        # chosen protocol budget
         t_handshake_confirm=15.0 * ureg.millisecond,           # chosen protocol budget
-        v_takeover_in_loop=0.8 * (ureg.meter / ureg.second),   # chosen slow-down, under the sourced in-loop ceiling (was 1.2)
+        # The in-loop slow-down is now derived (2026-09-29): the Delta_da-charged
+        # in-loop ceiling (0.797 m/s) rounded down to this chosen resolution, 0.75 m/s.
+        # Was a chosen 0.8 m/s, which missed its deadline by 5.0 ms once Delta_da
+        # was charged (and 1.2 m/s before M4).
+        v_takeover_resolution=0.05 * (ureg.meter / ureg.second),  # chosen
         v_takeover_out_of_loop=0.15 * (ureg.meter / ureg.second),  # chosen crawl, under the sourced out-of-loop ceiling (was 0.3)
         i_rail_transient=70.0 * ureg.ampere,                   # illustrative coincident inference + drive transient
         metadata=Metadata(provenance=pc.WAREHOUSE_AISLE_SCENARIO),

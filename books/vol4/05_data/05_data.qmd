@@ -249,6 +249,8 @@ class SyncDisplacement:
     clearance = 2.0 * millimeter  # latch clearance; scenario assumption; category: illustrative
     v_guarded = AISLE.v_latch_approach  # category: illustrative
     v_fast = AISLE.v_latch_high  # category: illustrative
+    t_skew_lo = 15.0 * millisecond  # full-frame rolling-shutter skew, fast readout; category: illustrative
+    t_skew_hi = 33.0 * millisecond  # full-frame rolling-shutter skew, one 30 Hz frame; category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     dx_transit = (v_transit * t_lag).to(millimeter)
@@ -257,12 +259,15 @@ class SyncDisplacement:
     transit_over_clearance = (dx_transit / clearance).to("").magnitude
     lag_max_guarded = (clearance / v_guarded).to(millisecond)
     lag_max_fast = (clearance / v_fast).to(millisecond)
+    dx_skew_transit = (v_transit * t_skew_hi).to(millimeter)
+    dx_skew_fast = (v_fast * t_skew_hi).to(millimeter)
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(dx_transit.magnitude - 17.5) < 1e-9, "Transit displacement should be 17.5 mm")
     check(dx_guarded < clearance, "The guarded approach should fit the clearance at this lag")
     check(dx_fast > clearance, "The faster approach should exceed the clearance at this lag")
     check(abs(lag_max_fast.magnitude - 20.0) < 1e-9, "Largest tolerable lag at 0.10 m/s should be 20 ms")
+    check(dx_skew_fast > clearance, "Worst-case rolling-shutter skew at 0.10 m/s should exceed the clearance")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     v_transit_str = fmt_velocity(v_transit, precision=2)
@@ -276,6 +281,10 @@ class SyncDisplacement:
     transit_over_clearance_mult_str = fmt_multiple(transit_over_clearance, precision=1)
     lag_max_guarded_str = fmt_latency(lag_max_guarded, unit=millisecond, precision=1)
     lag_max_fast_str = fmt_latency(lag_max_fast, unit=millisecond, precision=0)
+    t_skew_lo_str = fmt_latency(t_skew_lo, unit=millisecond, precision=0)
+    t_skew_hi_str = fmt_latency(t_skew_hi, unit=millisecond, precision=0)
+    dx_skew_transit_str = fmt_length(dx_skew_transit, unit=millimeter, precision=1)
+    dx_skew_fast_str = fmt_length(dx_skew_fast, unit=millimeter, precision=1)
 ```
 
 To quantify the physical hazard of temporal misalignment, consider the spatial tracking error $\Delta \mathbf{x}_{\text{sync}}$ injected into the dataset when an observation and an action are paired across an uncompensated phase lag $\Delta t_{\text{lag}}$:
@@ -300,8 +309,8 @@ The root of temporal corruption lies in conflating when an optical or electrical
 A severe and frequently overlooked visual artifact in physical AI pipelines is **rolling shutter skew**. Low-cost consumer sensors and webcams expose pixel rows sequentially rather than instantaneously. For a sensor with $H$ vertical scanlines and line readout duration $\tau_{\text{line}}$, the exposure midpoint of row $y \in [0, H-1]$ depends linearly on its vertical coordinate:
 $$t_{\text{row}}(y) = t_{\text{start}} + y \cdot \tau_{\text{line}} + \frac{\Delta t_{\text{exp}}}{2}.$$
 Across a full frame, the temporal skew between the top row ($y = 0$) and bottom row ($y = H - 1$) accumulates to:
-$$\Delta t_{\text{skew}} = (H - 1) \cdot \tau_{\text{line}} \approx 15\text{--}33\text{ ms}.$$
-When the robot arm or camera moves at $v = 0.50\text{ m/s}$, the bottom of the manipulator in the image is captured while the physical link has displaced by up to $16.5\text{ mm}$ relative to the top of the link in the same image frame! This geometric warping (the "jello effect") deforms straight edges into curved arcs and breaks rigid-body geometry.
+$$\Delta t_{\text{skew}} = (H - 1) \cdot \tau_{\text{line}},$$
+which for common sensors lies between about `{python} SyncDisplacement.t_skew_lo_str` and `{python} SyncDisplacement.t_skew_hi_str`, the upper end being one full frame period at 30 Hz. When the robot arm or camera moves at `{python} SyncDisplacement.v_transit_str`, the bottom of the manipulator in the image is captured while the physical link has moved up to `{python} SyncDisplacement.dx_skew_transit_str` relative to the top of the link in the same frame. Even at the faster latch approach of `{python} SyncDisplacement.v_fast_str`, the worst-case skew moves the gripper `{python} SyncDisplacement.dx_skew_fast_str` within one frame, more than the `{python} SyncDisplacement.clearance_str` clearance. This geometric warping (the "jello effect") deforms straight edges into curved arcs and breaks rigid-body geometry.
 
 Independent rolling shutters can depict the same moving arm at different poses within nominally simultaneous frames. Hardware-triggered global shutters simplify alignment; rolling shutters require a row-time model and a motion bound or correction. Sensor choice must follow the task tolerance rather than a universal requirement for one shutter type.
 

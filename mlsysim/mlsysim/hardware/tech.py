@@ -43,12 +43,26 @@ class MemoryTier(BaseModel):
     t_ck: Optional[Quantity] = None
     t_rcd: Optional[Quantity] = None
     t_rp: Optional[Quantity] = None               # per-bank precharge
+    # Analog minima the standard states in nanoseconds; the clocked timings
+    # above are these rounded up to whole command-clock cycles.
+    t_rcd_min: Optional[Quantity] = None
+    t_rp_min: Optional[Quantity] = None           # per-bank precharge minimum
+    t_rpab_min: Optional[Quantity] = None         # all-bank precharge minimum
+    channel_width: Optional[Quantity] = None      # data width of one channel (bits)
     metadata: Metadata = Field(default_factory=Metadata)
 
-    @field_validator("latency", "t_ck", "t_rcd", "t_rp", mode="after")
+    @field_validator("latency", "t_ck", "t_rcd", "t_rp", "t_rcd_min", "t_rp_min", "t_rpab_min",
+                     mode="after")
     @classmethod
     def _validate_latency(cls, v, info):
         return require_dimensionality(v, ureg.second, info.field_name)
+
+    @field_validator("channel_width", mode="after")
+    @classmethod
+    def _validate_channel_width(cls, v):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.bit, "channel_width")
 
     @field_validator("energy_per_access", mode="after")
     @classmethod
