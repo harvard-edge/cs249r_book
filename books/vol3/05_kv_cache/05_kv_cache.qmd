@@ -24,9 +24,9 @@
 \mlagentstack{0}{0}{0}{0}{100}{0}
 \end{marginfigure}
 
-*Attention state has a cost even when the agent is not generating.*
+_Why can an agent that is generating nothing still exhaust the memory of the machine serving it?_
 
-An agent's context becomes physical state when the serving system computes the keys and values used by attention. Retaining that state can spare later computation, but it occupies memory that other calls could use. Long contexts enlarge the claim; branches may duplicate it; tool waits can extend its lifetime without producing another token. The serving system must allocate this state as it grows, share compatible prefixes, and decide when to keep, move, or reconstruct paused state. The harness shapes these choices through the context it sends and the work it launches, even when a hosted service owns the allocation policy. In H·S·A terms, this chapter follows the physical cost of State as Horizon grows, and establishes how that cost constrains the work a serving system can support.
+Every token a model reads leaves behind computed state that later tokens attend to, and a serving system keeps that state rather than compute it again. The state occupies accelerator memory in proportion to the context an agent retains, and it occupies that memory for as long as the trajectory lives, including the seconds or minutes the agent spends waiting on a test, a search, or a person. Summed across many concurrent trajectories, this retained state can outweigh the model itself, so the number of agents a machine serves at once is set less by the model than by what the agents keep and how long they keep it. Treating the state as free produces deployments that look well provisioned and then queue, stall, or thrash under real agent traffic. Treating it as disposable throws away work that would have made the next turn cheap. The engineering problem is stewardship of a derived resource, deciding what to share among branches and turns that begin the same way, what to hold through a pause, what to move aside, and what to rebuild on demand. Those decisions live inside the serving system, yet agent builders shape them through the context they send and the waits they create, even on a hosted service they do not operate. In H·S·A terms, this is where State acquires a physical price that grows with Horizon, and that price bounds how much agent work a machine can carry.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -36,19 +36,18 @@ An agent's context becomes physical state when the serving system computes the k
 
 ::: {.callout-learning-objectives}
 
-- Estimate retained attention-state memory from model geometry, token count, and storage precision
-- Explain how block allocation and prefix sharing reduce unused and duplicated memory
+- Calculate retained attention-state memory and resident fit from model geometry, token count, and storage precision
+- Calculate the memory that block allocation and prefix sharing recover from full-cap reservation and duplicated prefixes
 - Distinguish compatible, available prefix reuse from the applicability of the underlying information
-- Evaluate scheduling and paused-state policies against memory pressure and resume latency
-- Interpret memory-fit bounds alongside workload, latency, and throughput measurements
+- Select a chunked-prefill token budget that bounds the gap between output tokens for ongoing requests
+- Evaluate keep, move, and recompute policies for paused state against memory pressure and resume latency
+- Analyze how residence time converts a memory-fit bound into a sustainable turn rate
 
 :::
 
-## The Footprint of Retained Attention State {#sec-vol3-kvcache-geometry}
+## Attention State as a Serving Resource {#sec-vol3-kvcache-introduction}
 
 The connection-pool repair (\ref{lhs-vol3-repair-agent}) has reached a candidate revision, r18. Its targeted reproducer passes, so the harness submits a fully serialized request of 32,768 tokens and then launches the broader integration test, which takes 45 seconds. Suppose the service keeps the request's attention state on the accelerator throughout that wait. The model generates nothing during the test, yet the retained state occupies memory that another request could use. Keeping it is a service policy, and this chapter prices that policy against its alternatives.
-
-@Sec-vol3-context-engineering established how the harness selects and refreshes the information in a call. The present question is what it costs to store and reuse the computation derived from those tokens. The application caller controls its submitted context and any cache controls the service exposes. The serving operator controls the allocator, placement, and retention policy. When the two are different organizations, as with a hosted model, the caller influences retention only through the controls the service exposes.
 
 ::: {.column-margin}
 ![](images/svg/hsa_locator_s.svg){width="100%" fig-alt="H·S·A locator with the State axis highlighted."}
@@ -56,7 +55,15 @@ The connection-pool repair (\ref{lhs-vol3-repair-agent}) has reached a candidate
 *State becomes a physical resource claim inside the serving system.*
 :::
 
-In the causal self-attention of the Transformer decoder, each new token attends to earlier tokens through their keys and values [@vaswani2017]. Recomputing those vectors at every decode step would repeat the projections of the whole prefix, so the serving system keeps them.[^fn-kv-memory-bound] @Sec-vol3-foundation-model-autoregressive introduced this stored state; its capacity, sharing, and lifetime are the subject of this chapter.
+The tools developed so far stop short of that decision. @Sec-vol3-context-engineering established how the harness selects and refreshes the information in a call, and @sec-vol3-foundation-model-cost priced a cached prefix as a cheaper line on the bill. Neither says how many bytes the computation derived from those tokens occupies, how many trajectories can hold such state at once, or what should happen to it while the agent waits on a tool. Those questions decide whether a node that serves one repair comfortably can serve dozens.
+
+This chapter builds the part of the serving system that manages retained attention state as it is sized, allocated, shared, scheduled, set aside during a pause, and planned for as capacity. Two parties share that work. The application caller controls its submitted context and any cache controls the service exposes. The serving operator controls the allocator, placement, and retention policy. When the two are different organizations, as with a hosted model, the caller influences retention only through the controls the service exposes, and the sections that follow note which party holds each lever.
+
+The chapter follows the state through its life. It first sizes the state a trajectory retains and the pool left once the weights are paid (@sec-vol3-kvcache-geometry). It then shows why reserving each request's largest possible size wastes that pool (@sec-vol3-kvcache-fragmentation) and how fixed-size blocks and shared prefixes recover it (@sec-vol3-kvcache-pagedattention). Reuse across turns comes next, with the conditions a prefix-cache hit must meet (@sec-vol3-kvcache-radix-tree), followed by the scheduling of new prompt work beside ongoing generation (@sec-vol3-kvcache-chunked-prefill) and the choice to keep, move, or drop state during a tool wait (@sec-vol3-kvcache-swapping). The final section turns these mechanisms into a capacity plan, where residence time rather than occupancy alone sets the rate a node sustains (@sec-vol3-kvcache-capacity-planning).
+
+## The Footprint of Retained Attention State {#sec-vol3-kvcache-geometry}
+
+The r18 request's 32,768 tokens do not reach the accelerator as text. In the causal self-attention of the Transformer decoder, each new token attends to earlier tokens through their keys and values [@vaswani2017]. Recomputing those vectors at every decode step would repeat the projections of the whole prefix, so the serving system keeps them.[^fn-kv-memory-bound] @Sec-vol3-foundation-model-autoregressive introduced this stored state; its capacity, sharing, and lifetime are the subject of this chapter.
 
 [^fn-kv-memory-bound]: **Memory-Limited Inference**: Keeping keys and values turns a quadratic recomputation into a memory claim, and that claim soon sets the limit. An analytical study of large-model inference found that sharing one key-value head across all query heads let the same deployment serve contexts more than an order of magnitude longer, because the retained state, not the arithmetic, bounded context length and batch size [@pope2023efficiently]. The rest of this chapter manages that claim. \index{KV cache!memory bound}
 
@@ -1086,7 +1093,7 @@ $$\bar{L} = \lambda \bar{W}$$ {#eq-vol3-littles-law}
 *   **Throughput** ($\lambda$): long-run arrival rate, equal to the completion rate when unfinished work does not accumulate.
 *   **Mean residence** ($\bar{W}$): average time an item holds its slot, counting every phase in which the slot stays allocated.
 
-**Pitfall**: *Counting only the busy phase of residence.* A slot held through a tool wait resides for the wait too, so leaving the wait out of $\bar{W}$ overstates the rate that memory can sustain.
+A slot held through a tool wait resides for the wait too, so leaving the wait out of $\bar{W}$ overstates the rate that memory can sustain.
 
 :::
 
@@ -1256,6 +1263,12 @@ Two runs report the same occupied fraction, but one holds mostly dormant prefixe
 The common errors promote a storage fact into a stronger claim about capacity, information, or performance. Each has a price on the chapter's reference node.
 
 ::: {.fallacy-pitfall}
+**Fallacy**: *Model size, not retained context, decides how many sequences a node can serve.*
+
+The weights are paid once, and on the reference node they leave a `{python} KvGeometry.kv_pool_str` pool for attention state. With the model unchanged, that pool holds `{python} KvGeometry.conc_short_str` unshared sequences at `{python} KvGeometry.ctx_short_str` tokens but only `{python} KvGeometry.conc_long_str` at `{python} KvGeometry.ctx_long_str` tokens (@sec-vol3-kvcache-geometry). Retained length is the capacity knob, and the harness sets it through the context it sends. A smaller model raises the count only as far as it shrinks $m_{\text{token}}$ or enlarges the pool.
+:::
+
+::: {.fallacy-pitfall}
 **Pitfall**: *Reserving every request's maximum context.*
 
 Static reservation sizes each allocation for the cap rather than the tokens present. With a `{python} StaticReservation.s_max_str`-token cap and a `{python} StaticReservation.mean_final_tokens_str`-token mean final length, only `{python} StaticReservation.efficiency_str` of each reservation holds state at completion, and the pool admits `{python} StaticReservation.reservations_str` sequences where paged allocation admits about `{python} PagedWaste.fit_paged_str` (@sec-vol3-kvcache-pagedattention). Allocate blocks as tokens arrive, and reserve ahead only the output growth that admission has promised.
@@ -1287,7 +1300,7 @@ Dropping the `{python} PausedStateChoice.state_str` repair state costs about `{p
 
 ## Summary {#sec-vol3-kv-cache-summary}
 
-The repair's selected context becomes a physical allocation only through the serving system's policy. Attention geometry determines the storage per token; blocks determine allocation granularity and sharing; prefix compatibility and availability determine which computation can be reused. Scheduling and paused-state policy then decide when that storage is occupied and what other work must wait. Whether the repair's evidence applies to the current source version remains the harness's question, answered by the context it sends.
+Retained attention state is a cache of computation, and like any cache it is priced twice, in the bytes it occupies and in the time it occupies them. Model geometry and retained length fix the bytes. Allocation granularity and sharing decide how many of those bytes are stranded or duplicated. Residence time, including every tool wait, converts what fits into what a node can sustain. Each policy the repair met, from block tables to leaf-first eviction to keeping, moving, or dropping paused state, trades one of those costs against work or delay elsewhere. None of them decides whether the cached computation still describes the task. That question stays with the harness, answered by the context it sends.
 
 @Tbl-vol3-kv-cache-key-equations collects the relations the chapter uses to size, share, schedule, and release that storage.
 
@@ -1308,11 +1321,11 @@ The repair's selected context becomes a physical allocation only through the ser
 
 ::: {.callout-takeaways title="Managing derived attention state"}
 
-* **Token state has a physical footprint**: For the chosen full-attention architecture and precision, retained length determines KV storage. A context that fits the model's interface can still exceed the deployment's available pool, and a node-wide estimate must respect per-device placement and runtime space.
+* **Retained length is the capacity knob**: With the weights fixed, resident fit falls in inverse proportion to retained context, from `{python} KvGeometry.conc_short_str` sequences at `{python} KvGeometry.ctx_short_str` tokens to `{python} KvGeometry.conc_long_str` at `{python} KvGeometry.ctx_long_str` on the reference node. A context that fits the model's interface can still exceed the deployment's pool.
 * **Physical blocks, not references, consume capacity**: Allocation rounds private state to blocks, while compatible shared state is stored once. Reclaiming a trajectory frees only the blocks that no remaining owner or unfinished operation requires.
 * **Reuse needs compatibility and availability**: Matching input permits reuse only when the appropriate state remains accessible under the service's sharing rules. A cache hit establishes neither source freshness nor task acceptance, so preserving a hit must not prevent a necessary context refresh.
 * **Retention and scheduling spend different resources**: Chunking work can protect ongoing decodes while delaying prompt completion. Keeping, moving, or reconstructing paused state exchanges memory residence for work and resume delay; the appropriate choice depends on competing demand and service constraints.
-* **Fit bounds need workload evidence**: A storage calculation establishes what can reside under explicit assumptions. Sustainable service also depends on execution, transfer, and queueing. Interpret occupancy through ownership and reclaimability, then test reuse and eviction policies against completed work and latency targets.
+* **A held wait taxes throughput**: A resident-fit count bounds occupancy, not rate. A slot held through a tool wait sustains fewer turns by the factor $1 + W_{\text{wait}}/W_{\text{gen}}$, so admission and eviction policies must be tested against completed work and latency targets, not occupied fraction.
 
 :::
 

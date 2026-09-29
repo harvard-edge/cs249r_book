@@ -26,7 +26,7 @@
 
 _When is another token, candidate, check, or model call worth its cost?_
 
-A bounded model call returns a candidate, but a difficult task may justify more work before the runtime selects a result. Longer reasoning can resolve implications of information already available; alternative candidates can expose a better solution; a check can reveal a defect and guide revision. These choices spend different amounts of time and resources, and their value depends on the task and the method used to select the final output. A larger candidate pool helps only when useful alternatives survive selection, while a high check score supplies a judgment whose relevance depends on the check's scope and reliability. The engineering problem is to allocate deliberation under explicit limits and determine whether the resulting gain justifies its cost. Candidate plans also depend on observations that can become stale, so revision must preserve valid work without carrying invalid assumptions forward. In H·S·A terms, deliberation consumes resources and can extend the horizon through additional model turns and governed tool interactions; it does not expand the agent's authority or turn a proposal into an accepted result. A bounded policy must therefore specify how it generates, selects, checks, and stops, including what happens when its budget ends without sufficient acceptance evidence.
+A foundation model answers in one pass, but the decisions that matter most in an agentic system rarely yield to one pass. A patch built on the first plausible diagnosis, a summary drawn from a single reading, or a configuration change proposed at first sight can each be improved by more work before anything is returned: a longer derivation, further candidates, or a check that observes what the system actually does. That work is a design variable, and unlike training it is paid again on every decision. Spent without a policy, it multiplies cost and delay while the returned result barely improves, because extra candidates help only when something can tell them apart, and a high score is only as trustworthy as the check behind it. Taking the question seriously turns deliberation into an allocation problem with a budget, a way to select, a source of evidence, and a rule for stopping, including an honest answer when the budget runs out and nothing has earned acceptance. The same discipline governs every later layer of an agent, since memory, tools, and the runtime all multiply the decisions that face this choice and all draw on the same finite allowance. In H·S·A terms, deliberation lengthens the horizon inside a single decision and consumes the resources that bound it, yet it never widens authority or turns a proposal into an accepted result.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -36,13 +36,12 @@ A bounded model call returns a candidate, but a difficult task may justify more 
 
 ::: {.callout-learning-objectives}
 
-- Explain how additional reasoning, alternative candidates, and new observations can each improve a bounded model decision.
-- Compare depth, breadth, and feedback by their resource use and sequential dependencies.
+- Compare depth, breadth, and feedback by the information each adds, the tokens it consumes, and its critical path.
 - Distinguish candidate availability from selected-output quality when evaluating voting, learned scoring, and task-specific checks.
 - Calculate accepted-set precision from stated checker error rates and explain how adaptive search can change those assumptions.
 - Represent a candidate plan as a dependency graph and identify which parts require revision after an observation changes.
 - Design stopping rules that enforce resource ceilings without treating budget exhaustion as acceptance evidence.
-- Evaluate deliberation policies under common budgets and permissions, including actual spend, output quality, abstentions, and deadline effects.
+- Evaluate competing deliberation policies under a common budget and deadline by pass probability, actual spend, and abstentions.
 
 :::
 
@@ -122,7 +121,9 @@ class ProbeAllocation:
 
 :::
 
-Test-time compute\index{Test-time compute} extends the bounded-call contract. The runtime allocates extra generation and checks, keeps a completed response distinct from a completed repair, and specifies both how much work is permitted and whether that work extends one candidate, explores alternatives, or conditions a revision on observations.
+What the repair agent has so far is the bounded model call of @sec-vol3-foundation-model-contract: one request, one candidate, and a status that reports whether generation finished. That contract cannot say whether a longer derivation, a second candidate, or a probe would have been the better use of the next second and the next dollar, and a finished response is not a finished repair. Test-time compute\index{Test-time compute} is the work a runtime spends around the call, with the model's weights fixed, to improve the candidate it finally returns. This chapter builds the runtime policy that spends it, deciding how much work a decision may consume, where that work goes, how its results are selected and checked, and when the search stops without mistaking an exhausted budget for success.
+
+The sections follow the order in which such a policy is assembled. @Sec-vol3-test-time-compute-computation-allocation separates three ways to spend work, along depth, breadth, and feedback, and prices each under one output ceiling. @Sec-vol3-test-time-compute-candidate-diversity asks when a larger pool yields a better selected candidate, and @sec-vol3-test-time-compute-verification asks how far a passing check can be trusted. @Sec-vol3-test-time-compute-planning-revision keeps candidate work reusable when an observation invalidates part of it. @Sec-vol3-test-time-compute-bounded-search bounds the whole search with ceilings and stopping rules, and @sec-vol3-test-time-compute-strategy-design compares complete policies under a shared deadline.
 
 ## Three Compute Allocation Axes {#sec-vol3-test-time-compute-computation-allocation}
 
@@ -1408,7 +1409,7 @@ A score orders candidates by one criterion, and argmax selection concentrates th
 
 ## Summary {#sec-vol3-ch3-summary}
 
-Test-time compute turns one bounded model call into a bounded policy for allocating work. Depth, breadth, and feedback offer different opportunities to improve a candidate, but selection determines which candidate survives, and checks provide evidence only within their scope. Revisable plans preserve useful work by tracking the observations on which it depends. Resource accounting and stopping rules bound the resulting search without converting an unfinished or high-scoring proposal into an accepted result. The engineering decision is whether the deployed policy improves the required outcome enough to justify its actual expenditure and delay.
+Test-time compute makes the cost of a decision a choice. The weights fix what a single call can do; the runtime decides how much more to spend, in what shape, and on what evidence the spending ends. Added work raises the probability of acceptance only through three links, and each can break independently. The work must bring in something the model lacked, the selector must recognize a better candidate once one exists, and the check must cover the property that acceptance requires. When any link fails, the attempt cost rises while $p_{	ext{acc}}$ does not, so $C_{	ext{eff}}$ worsens. A deliberation policy is therefore judged like any other runtime component, by the accepted results it delivers per unit of expenditure and delay under the deadline it actually faces.
 
 @Tbl-vol3-test-time-compute-key-equations collects the relations the chapter uses to price an allocation, judge a selector, bound a search, and decide when to stop.
 
@@ -1429,11 +1430,11 @@ Test-time compute turns one bounded model call into a bounded policy for allocat
 
 ::: {.callout-takeaways title="More work needs a bounded policy"}
 
-* **Allocation determines the shape of deliberation**: Depth adds sequential reasoning, breadth adds alternatives, and feedback conditions later attempts on observations. Their value depends on the task and selector; equal token allowances do not imply equal latency or equal quality.
-* **Availability is not selected success**: A useful candidate can exist in the pool and still be discarded. Evaluate the generator and selector together, and distinguish a scoped check pass from evidence that the complete task has succeeded.
-* **Checks have scope and error**: Accepted-set precision depends on candidate prevalence and checker behavior. Adaptive search can change both, so confidence measured on ordinary candidates need not survive optimization against the same score.
-* **Revision must follow dependencies**: When relevant evidence or assumptions change, reconsider the candidate work that depends on them, not necessarily every earlier step. Reuse requires valid assumptions, and changing a plan does not undo actions already taken in the environment.
-* **Limits change attainable outcomes**: A deadline removes unfinished branches and revisions from the policy's opportunities for success. Account for all expenditure, including failed tasks, and return an explicit unresolved outcome when no candidate meets the acceptance criteria.
+* **Observe when the question is empirical**: Extra tokens rework information already in the request; only an executed check adds new information. In the repair, generating one explanation took `{python} ProbeAllocation.time_mult_str` as long as the probe that separated the two hypotheses.
+* **A pool is only as good as its selector**: The pass@$k$ rate bounds what any selector can return; it is not selected success. Averaging the success rate over a mixed workload predicts `{python} BestOfN.naive_mix_str` for `{python} BestOfN.n_max_str` candidates where the pool delivers `{python} BestOfN.true_mix_str`, because no sample solves a task the model never solves.
+* **A pass inherits the base rate**: With `{python} CheckYield.p_str` of candidates valid, a check with `{python} CheckYield.eps_fa_str` false acceptance yields passes that are only `{python} CheckYield.precision_str` valid. Search that optimizes against the same score erodes even that.
+* **Revise along recorded dependencies**: When an observation invalidates an assumption, regenerate the work that depends on it rather than the whole plan. An unrecorded dependency lets stale work survive, and no revision undoes an action already taken.
+* **Budgets end searches, not uncertainty**: Charge every discarded candidate, check, and failed task to the cost per accepted task, and let the real deadline set the operating point. A ceiling reached without an accepted candidate yields an unresolved outcome, never the top scorer.
 
 :::
 

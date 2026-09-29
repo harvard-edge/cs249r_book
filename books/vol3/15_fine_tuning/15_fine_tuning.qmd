@@ -26,7 +26,7 @@
 
 _Why can training on a useful recovery record teach the model to repeat the mistake instead of the correction?_
 
-An agent trajectory interleaves the model's proposals with observations supplied by its environment. Even an admitted recovery record contains material the model should read rather than imitate. The training pipeline must preserve that distinction: a malformed proposal can explain the correction without becoming a desired response, and a test report can support the final answer without becoming text the model is trained to invent. Wrong targets, missing context, or unintended dependencies between examples can reduce a training loss while teaching the wrong behavior. The resulting weights also face situations different from the recorded ones, so faithful training still needs evaluation in the running system. Through the H·S·A lens, fine-tuning moves none of the three exposures. It changes the policy that proposes actions, while the horizon, state, and authority bounds that earlier parts built stay with the runtime that enforces them.
+Fine-tuning changes the model itself, and its effects persist in every call the policy makes afterward. A clearer context, a corrected tool schema, or a stricter runtime check can each be tested against the failing cases and withdrawn in a single release. A weight change needs a corpus, a training run, and a fresh evaluation, and it is undone only by another release. The records that feed it also differ from the text a language model first learned from. An agent trajectory has two authors. The model proposes calls and reports, and the environment answers with results, errors, and refusals. A recovery record interleaves a mistake, the evidence that exposed it, and the correction, and only part of that record is behavior the policy should learn to produce. A pipeline that blurs these roles can lower its training loss while teaching the policy to repeat the mistake or to invent the tool output it should have waited for, and the loss curve never shows the difference. Taking the distinction seriously turns fine-tuning from a routine training job into a discipline of choosing targets, preserving what each response was conditioned on, and demanding closed-loop evidence before release. It also fixes where learning sits in the agent. Training moves none of the H·S·A exposures; it changes the policy that proposes actions, while the horizon, state, and authority bounds enforced by the runtime hold whatever the new weights propose.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -36,18 +36,18 @@ An agent trajectory interleaves the model's proposals with observations supplied
 
 ::: {.callout-learning-objectives}
 
-- Distinguish failures that fine-tuning can repair from those that belong in context, tool schemas, or the runtime
-- Construct model inputs that preserve intended conditioning and identify declared transformations
+- Assign agent behavior to weights, context, or runtime, and decide when a failure warrants a weight change
+- Construct model inputs that preserve intended conditioning and price per-invocation serialization in training tokens
 - Map admitted response spans to causal token targets, observation masks, and termination policy
 - Compare loss weighting and construct batches without unintended cross-example dependencies
-- Design state-distribution and schema-coverage tests for the deployed policy
-- Distinguish imitation and preference objectives using compatible conditioning and justified comparisons
+- Calculate imitation regret bounds on reference and learner states to decide when on-policy labeling pays
+- Calculate preference margins and gradient weights, and distinguish what a comparison measures from task acceptance
 - Select behavior sources and parameter artifacts using explicit resource and version accounting
 - Evaluate a versioned policy for release while preserving runtime enforcement and scoped acceptance criteria
 
 :::
 
-## Scope and Behavioral Boundaries of Supervised Fine-Tuning {#sec-vol3-fine-tuning-scope}
+## When a Recovery Record Becomes Training Data {#sec-vol3-fine-tuning-introduction}
 
 ::: {.column-margin}
 ![](images/svg/hsa_locator_origin.svg){width="100%" fig-alt="H·S·A locator with no axis highlighted and the origin dot highlighted in purple."}
@@ -55,7 +55,15 @@ An agent trajectory interleaves the model's proposals with observations supplied
 *Fine-tuning reshapes each model call but leaves every exposure to the runtime.*
 :::
 
-The curation pipeline has admitted a recovery demonstration from the repair agent (\ref{lhs-vol3-repair-agent}) to `repair_demonstrations_v1`. In that hypothetical record, a malformed edit proposal was refused before dispatch, the model inspected the schema, and a corrected edit produced candidate `ws_r20`. The selected policy responses are the schema inspection request, the corrected edit, and the scoped final report. The malformed proposal and the delivered check result remain context. Curation has justified those selections, and this chapter turns them into training examples and a parameter update.
+The curation pipeline has admitted a recovery demonstration from the repair agent (\ref{lhs-vol3-repair-agent}) to `repair_demonstrations_v1`. In that hypothetical record, a malformed edit proposal was refused before dispatch, the model inspected the schema, and a corrected edit produced candidate `ws_r20`. The selected policy responses are the schema inspection request, the corrected edit, and the scoped final report. The malformed proposal and the delivered check result remain context. Curation has justified those selections and recorded them as a target policy, `recovery_targets_v1`.
+
+An admitted record is not yet something a training job can consume. The event log holds what the runtime retained, in the order it happened, with the model's messages and the environment's replies side by side. A loader that treats every model message as a target trains the malformed proposal along with its correction. One that trains every token asks the model to predict test output it will never have to write. One that mixes this record with unrelated examples in a shared buffer can let those examples read the repair's file contents. Each of these mistakes lowers a training loss, and none of them shows up in it. The evaluation contract built so far measures a running agent, and the curation contract decides which responses are worth learning; neither says how a selected response becomes a gradient.
+
+This chapter builds that path, from an admitted record to an identified, evaluated policy update. It starts by fixing what a weight change can and cannot alter, which bounds everything that follows. It then turns the record into model inputs that reproduce what each selected response was conditioned on, a loss mask that trains those responses and nothing else, and batches whose weighting and boundaries leave the learning problem unchanged. A faithful update still meets states and interfaces its corpus never showed, so the chapter next measures that coverage gap and the data that closes it. Three further choices, the objective, the source of the behavior, and the parameter artifact that is trained and shipped, can each change independently. The chapter ends with the evidence a candidate needs before it replaces the policy in service.
+
+@Sec-vol3-fine-tuning-scope sorts agent behavior among weights, context, and runtime. @Sec-vol3-fine-tuning-serialization, @sec-vol3-fine-tuning-loss-masking, and @sec-vol3-fine-tuning-batching build the training example, its targets, and its batches. @Sec-vol3-fine-tuning-exposure-bias and @sec-vol3-fine-tuning-schemas address the states and schemas the trained policy meets on its own. @Sec-vol3-fine-tuning-dpo, @sec-vol3-fine-tuning-distillation, and @sec-vol3-fine-tuning-peft take the objective, the behavior source, and the parameter artifact in turn. @Sec-vol3-fine-tuning-benchmarking evaluates the candidate, and @sec-vol3-fine-tuning-synthesis assembles the whole path into a training manifest for the repair policy.
+
+## Scope and Behavioral Boundaries of Supervised Fine-Tuning {#sec-vol3-fine-tuning-scope}
 
 Changing weights is the right intervention only for a particular kind of failure. The intervention ordering of @sec-vol3-flywheel-intervention-order tries cheap, reversible fixes first: the context the model receives, then the tool schemas it calls against, then the runtime checks around it. Each of those can be tested against the failing cases and reverted in one release. A weight change needs a corpus, a training run, and a fresh evaluation before it can be trusted, and it is undone only by another release. Fine-tuning is therefore the intervention for the residual failure that survives those fixes, a recurring behavior pattern that evidence attributes to the policy rather than to missing information or a missing check. Verified trajectory post-training (principle \ref{pri-vol3-trajectory-post-training})\index{Principle!verified trajectory post-training} makes that comparison part of admitting a record for learning. The ordering is a default justified by cost and reversibility; @sec-vol3-fine-tuning-distillation treats the case where training is cheaper than carrying the same guidance in every prompt.
 
@@ -617,7 +625,7 @@ $$J(\pi)-J(\pi^*)\le \min\{H,\;uH\epsilon_\pi\}.$$ {#eq-vol3-linear-regret-bound
 * **Disagreement rates** ($\epsilon_E$, $\epsilon_\pi$): probability of an action other than the reference's, averaged over reference-visited or learner-visited states.
 * **Deviation disadvantage**\index{Deviation disadvantage!definition} ($u\ge0$): the largest extra expected cost of one deviation followed by reference recovery, an assumption about the task rather than a measured retry count.
 
-**Pitfall**: *The same error rate carries different horizon penalties.* At $H=$ `{python} DistributionBounds.horizon_str` and a `{python} DistributionBounds.error_str` disagreement rate, the reference-state bound is `{python} DistributionBounds.expert_str` cost units and the learner-state bound with $u=$ `{python} DistributionBounds.u_str` is `{python} DistributionBounds.local_str`, a gap of `{python} DistributionBounds.gap_mult_str`, which is $H/u$. The linear bound holds only while $u$ stays independent of $H$; one action that can spoil the rest of the task makes $u$ grow with $H$ and restores the quadratic dependence.
+The same error rate therefore carries different horizon penalties. At $H=$ `{python} DistributionBounds.horizon_str` and a `{python} DistributionBounds.error_str` disagreement rate, the reference-state bound is `{python} DistributionBounds.expert_str` cost units and the learner-state bound with $u=$ `{python} DistributionBounds.u_str` is `{python} DistributionBounds.local_str`, a gap of `{python} DistributionBounds.gap_mult_str`, which is $H/u$. The linear bound holds only while $u$ stays independent of $H$; one action that can spoil the rest of the task makes $u$ grow with $H$ and restores the quadratic dependence.
 
 :::
 
@@ -1107,7 +1115,7 @@ The training pipeline can optimize its stated objective while departing from the
 
 ::: {.fallacy-pitfall}
 
-**Fallacy:** *Every model response in an accepted trajectory is a desirable training target.*
+**Fallacy**: *Every model response in an accepted trajectory is a desirable training target.*
 
 The repair demonstration includes a malformed proposal that was refused before dispatch; it explains the correction and is the one call the policy should never learn to emit. In the inventory of notebook \ref{nbk-15-gradient-budget-and-compute-allocation}, the refused positions number `{python} SelectedTargetAccounting.unselected_str`, `{python} SelectedTargetAccounting.unselected_vs_selected_str` as many as the `{python} SelectedTargetAccounting.selected_response_str` selected response targets, and an all-response mask would put that much imitation weight on the malformed call. Implement the admitted selection (@sec-vol3-fine-tuning-loss-masking), keep the refused proposal and the observations as context, and check the causal alignment.
 
@@ -1115,7 +1123,7 @@ The repair demonstration includes a malformed proposal that was refused before d
 
 ::: {.fallacy-pitfall}
 
-**Pitfall:** *Treating efficient batching as a change with no learning consequences.*
+**Pitfall**: *Treating efficient batching as a change with no learning consequences.*
 
 Packing the batch of notebook \ref{nbk-vol3-packing-occupancy} raises occupancy from `{python} PackingOccupancy.padded_pct_str` to `{python} PackingOccupancy.packed_pct_str`, and an ordinary causal mask over that packed buffer would let each short example attend to the long one before it. Normalization moves weight just as far. Token averaging gives the long example `{python} PackingOccupancy.coefficient_ratio_mult_str` the short one's weight, and example averaging gives them equal weight. Use block-diagonal attention with per-example positions and label shifts (@sec-vol3-fine-tuning-batching), declare the aggregation rule, and measure throughput on the actual kernel before claiming a speedup.
 
@@ -1123,7 +1131,7 @@ Packing the batch of notebook \ref{nbk-vol3-packing-occupancy} raises occupancy 
 
 ::: {.fallacy-pitfall}
 
-**Fallacy:** *Recovery examples and schema perturbations make a fine-tuned agent robust to the states it will meet.*
+**Fallacy**: *Recovery examples and schema perturbations make a fine-tuned agent robust to the states it will meet.*
 
 These examples extend coverage, and the guarantee depends on where the error is measured. At a horizon of `{python} DistributionBounds.horizon_str` and a `{python} DistributionBounds.error_str` disagreement rate, theorem \ref{thrm-15-imitation-regret} bounds excess cost at `{python} DistributionBounds.expert_str` units on reference states and `{python} DistributionBounds.local_str` on learner states, and the smaller figure holds only while each deviation's disadvantage stays near one. Label learner-visited states, keep schema transformations coherent with calls and observations (@sec-vol3-fine-tuning-schemas), and test the resulting policy under held-out shifts.
 
@@ -1131,7 +1139,7 @@ These examples extend coverage, and the guarantee depends on where the error is 
 
 ::: {.fallacy-pitfall}
 
-**Pitfall:** *Reading a preference pair's logistic score as the probability that the preferred repair succeeds.*
+**Pitfall**: *Reading a preference pair's logistic score as the probability that the preferred repair succeeds.*
 
 In notebook \ref{nbk-15-preference-margin}, the same log-probabilities give a logistic score of `{python} PreferenceMargin.preference_score_str` at $\beta=$ `{python} PreferenceMargin.beta_str` and `{python} PreferenceMargin.preference_score_doubled_str` at $\beta=$ `{python} PreferenceMargin.beta_doubled_str`. A quantity that moves with a hyperparameter measures fit to one comparison, and the margin can grow by suppressing the dispreferred record as easily as by favoring the preferred one. Acceptance probability comes from closed-loop trials (@sec-vol3-fine-tuning-benchmarking).
 
@@ -1139,7 +1147,7 @@ In notebook \ref{nbk-15-preference-margin}, the same log-probabilities give a lo
 
 ::: {.fallacy-pitfall}
 
-**Fallacy:** *Training a small fraction of the parameters shrinks training memory in proportion.*
+**Fallacy**: *Training a small fraction of the parameters shrinks training memory in proportion.*
 
 In notebook \ref{nbk-15-adapter-state-inventory}, the adapters hold `{python} AdapterStateInventory.parameter_fraction_str` of the parameters, yet the adapter run keeps `{python} AdapterStateInventory.lora_fraction_str` of the full run's parameter state, a `{python} AdapterStateInventory.reduction_mult_str` reduction set by bytes per parameter rather than by the parameter fraction. The frozen base weights stay resident and make up `{python} AdapterStateInventory.base_share_str` of what remains, and activations and workspace come on top for both methods. Size an adapter run from the frozen base's representation and a measured activation footprint (@sec-vol3-fine-tuning-peft).
 
@@ -1147,7 +1155,7 @@ In notebook \ref{nbk-15-adapter-state-inventory}, the adapters hold `{python} Ad
 
 ::: {.fallacy-pitfall}
 
-**Pitfall:** *Promoting the artifact with the lowest recorded loss.*
+**Pitfall**: *Promoting the artifact with the lowest recorded loss.*
 
 An all-token dashboard for the example of notebook \ref{nbk-15-gradient-budget-and-compute-allocation} averages over `{python} SelectedTargetAccounting.stored_str` positions per example, `{python} SelectedTargetAccounting.observation_share_str` of them observation text, while a selected-token objective averages over `{python} SelectedTargetAccounting.selected_response_str`; the two numbers answer different questions. Even a comparable improvement measures fit to recorded prefixes. Evaluate the identified serving configuration on scoped acceptance, $C_{\text{eff}}$, schema behavior, and retained capabilities (@sec-vol3-fine-tuning-benchmarking), and keep every runtime check in place whatever the training result.
 
@@ -1155,9 +1163,7 @@ An all-token dashboard for the example of notebook \ref{nbk-15-gradient-budget-a
 
 ## Summary {#sec-vol3-fine-tuning-summary}
 
-Trajectory fine-tuning turns admitted learning material into an identified policy update. For the repair demonstration, that means conditioning the selected schema request, corrected edit, and final report on their appropriate evidence while leaving the malformed proposal and delivered check result as context. Serialization, target alignment, loss aggregation, and batching determine what the update actually teaches. Distribution and schema tests then ask whether the resulting behavior extends beyond those recorded inputs.
-
-The objective, behavior source, and parameter artifact remain separate choices. Preference training needs justified comparisons; distillation changes the source or conditioning of examples; adapters change which parameters are trained and packaged. Their combined result is a versioned candidate whose behavior and cost per accepted task are evaluated under the intended runtime.
+Trajectory fine-tuning changes the policy itself, and every decision in this chapter serves one requirement, that the update teach the lesson curation admitted and nothing else. A trajectory mixes the policy's responses with the environment's replies, so a loss computed over the wrong positions, under the wrong prefixes, or with the wrong batch weighting can fall while the behavior it teaches drifts. Even a faithful update is fitted on recorded prefixes. Its value is settled only by closed-loop evidence on the states the policy reaches on its own, under the same runtime that bounds every proposal it makes.
 
 The quantitative decisions of the chapter rest on the relations collected in @tbl-vol3-15_fine_tuning-key-equations.
 
@@ -1178,13 +1184,13 @@ The quantitative decisions of the chapter rest on the relations collected in @tb
 
 ::: {.callout-takeaways title="Preserve the lesson from record to release"}
 
-* **Construct the intended conditioning**: Reconstruct available delivered inputs or identify a reviewed transformation. Preserve the evidence each selected response needs, exclude later information, and bind the serialized artifact to its tokenizer, template, and source lineage.
-* **Train selected predictions, not whole exchanges**: Map admitted response spans to causally aligned token targets. Keep observations available as context, check that active targets exist, and declare how genuine response endings and truncated material are handled.
-* **Make weighting and dependencies explicit**: Token averaging and example averaging weight a long example differently by the ratio of selected-token counts, `{python} PackingOccupancy.coefficient_ratio_mult_str` in the worked batch. Packed examples need block-diagonal attention and per-example positions, and packing's gain is occupancy until a kernel measurement shows the speedup.
-* **Label the states the policy visits**: Imitation measured on reference states carries a horizon penalty of $H^2\epsilon_E$ against $uH\epsilon_\pi$ on learner states. Long-horizon agents need labeled learner-visited states, fault-injected recoveries, and coherent schema variation, each evaluated under held-out shifts.
-* **Justify the comparison before optimizing it**: Imitation and preference learning use different evidence. A preference needs compatible conditioning and an admitted judgment; its margin measures fit to one comparison under one $\beta$, and any change to the scoring inputs invalidates a cached reference.
-* **Separate behavior sources from parameter packaging**: Distillation moves procedure, never contracts, and is evaluated with the student's actual short prompt. An adapter cuts parameter state by the ratio of trainable to frozen bytes per parameter, `{python} AdapterStateInventory.reduction_mult_str` in the worked inventory, because the frozen base stays resident.
-* **Release evidence applies to an identified policy**: Rank candidates on closed-loop acceptance and $C_{\text{eff}}$ under the complete serving configuration against a relevant baseline. Changed weights change what the policy requests; the runtime keeps its authority, and a rollback leaves earlier effects to settlement and compensation.
+* **Weights hold procedure, never contracts**: Training changes what the policy proposes, not what the runtime permits. Stable procedure can move into the weights, while schemas, permissions, and any guidance that changes faster than a training and evaluation cycle stay in context, and enforcement stays in the runtime.
+* **A trajectory has two authors; train one**: Observations stay in the input as context but receive no direct loss. An unmasked average dilutes each selected target by the inverse of its share, `{python} SelectedTargetAccounting.dilution_without_mult_str` in the worked inventory, and teaches the policy to invent tool results.
+* **A loader can change the lesson without changing the loss**: Later evidence in a prefix, a shifted label, or a causal mask across packed examples each redefines the prediction problem. Normalization is a choice too, since token averaging gives a long trajectory `{python} PackingOccupancy.coefficient_ratio_mult_str` the weight of a short one in the worked batch.
+* **Where error is measured sets the horizon penalty**: The same `{python} DistributionBounds.error_str` disagreement over `{python} DistributionBounds.horizon_str` steps bounds excess cost at `{python} DistributionBounds.expert_str` units on reference states and `{python} DistributionBounds.local_str` on learner states, so long-horizon agents need labels on the states they actually visit.
+* **A preference score measures one comparison**: A pair's logistic score moves with $\beta$ and can rise by suppressing the dispreferred record, so it measures fit to that comparison, never the probability that a repair is accepted.
+* **Adapters cut state by bytes, not parameter fraction**: Training `{python} AdapterStateInventory.parameter_fraction_str` of the parameters still keeps `{python} AdapterStateInventory.lora_fraction_str` of the parameter state, because the frozen base stays resident. The lever is the frozen base's representation, not the adapter rank.
+* **Release on closed-loop acceptance, not loss**: A candidate is promoted on task acceptance, $C_{\text{eff}}$, schema behavior, and retained capability under its full serving configuration. Rollback selects an earlier policy for future work and leaves effects already dispatched to settlement and compensation.
 
 :::
 
