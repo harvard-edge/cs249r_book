@@ -58,9 +58,9 @@ The repair agent has inspected the connection-pool implementation, but the first
 
 The runtime has several ways to spend additional work before choosing a patch. It can permit a longer derivation of the locking sequence, request alternatives that change different parts of the implementation, or run a targeted test that records whether a waiting worker receives the return notification. These choices buy different things. More reasoning can expose a contradiction in the supplied source. Another sample can discover an approach absent from the first candidate. An instrumented test can provide an observation about an execution that neither candidate has observed.
 
-The distinction matters because computation, observation, and acceptance evidence are not interchangeable. A model can revise an earlier conclusion within a generation, even though the earlier text remains in its prefix. Extra computation may improve an answer using information already present. It cannot, merely by describing a test, establish what an unperformed test would have reported. Likewise, a real test result supports the property and conditions that the test exercised; it does not certify every behavior of the repaired program.
+Computation, observation, and acceptance evidence buy different things. Extra computation improves an answer using information already present; within one generation the model can revise an earlier conclusion even though the earlier text remains in its prefix. Only an executed test reports what the program does, and its result supports exactly the property and conditions that the test exercised.
 
-Suppose the targeted test controls the ordering of a waiting worker and a returning connection. Its trace shows the connection becoming available while the waiter remains blocked past the notification point. This observation directs attention toward the notification path. The agent can use it to construct and check a revised candidate without treating either the original explanation or the new diagnosis as permission to modify a production service. @Fig-vol3-diagnostic-tree sets this sequence beside the alternative of carrying the first explanation straight into a patch.
+Suppose the targeted test controls the ordering of a waiting worker and a returning connection. Its trace shows the connection becoming available while the waiter remains blocked past the notification point. This observation directs attention toward the notification path, and the agent uses it to construct and check a revised candidate; neither diagnosis is permission to modify a production service. @Fig-vol3-diagnostic-tree sets this sequence beside the alternative of carrying the first explanation straight into a patch.
 
 ::: {#fig-vol3-diagnostic-tree fig-env="figure" fig-pos="htb" fig-cap="**Committing to a Hypothesis versus Checking It**: Both paths start from the same connection-pool failure. On the left, generation builds on the timeout explanation without any observation that separates it from a missed notification, so the patch can hide the symptom while the defect remains. On the right, a targeted test orders a waiting worker and a returning connection, and its observation contradicts the timeout explanation before any edit. The revised candidate passes the reproducer, which still falls short of task acceptance." fig-alt="Two columns below a box stating that a request waits after a connection becomes available. Left column, labeled commit to the first hypothesis: one hypothesis that the timeout is too short, generation that builds on it with no new evidence, and a timeout patch applied unchecked, ending in a box reading symptom masked, notification defect remains. Right column, labeled check before committing: two hypotheses held, timeout too short and missed notification, a targeted test that orders a blocked waiter and a returning connection and observes the waiter still blocked, and a revised candidate that notifies a waiter on return, ending in a box reading reproducer passes, acceptance still pending. A dashed arrow labeled contradicts H1 runs from the test to the left column."}
 ![](images/svg/diagnostic_tree.svg)
@@ -112,25 +112,35 @@ class ProbeAllocation:
 
 ::: {#nbk-03-probe-versus-generation .callout-notebook title="A probe versus a longer answer"}
 
-**Problem**: A prepared diagnostic test takes `{python} ProbeAllocation.probe_time_str`. A proposed explanation contains `{python} ProbeAllocation.answer_tokens_str` output tokens. How do their time allowances compare, and what does that comparison establish?
+**Problem**: A prepared diagnostic test takes `{python} ProbeAllocation.probe_time_str`. A proposed explanation contains `{python} ProbeAllocation.answer_tokens_str` output tokens. How long does the explanation take to generate relative to the test?
 
-**Model**: Reuse the illustrative output allowance from @sec-vol3-foundation-model-cost, `{python} ProbeAllocation.token_time_str` per token. This is a registry-derived work estimate, not a measured service rate or universal latency floor. The hypothetical output price is `{python} ProbeAllocation.output_price_str` per million tokens. The calculation excludes prompt processing, queueing, transport, test preparation, and the later call that reads the observation.
+**Variables**: The illustrative output allowance from @sec-vol3-foundation-model-cost is `{python} ProbeAllocation.token_time_str` per token, a registry-derived estimate rather than a measured service rate. The hypothetical output price is `{python} ProbeAllocation.output_price_str` per million tokens. Prompt processing, queueing, transport, test preparation, and the later call that reads the observation are excluded.
 
-**Calculation**: The explanation has a generation allowance of `{python} ProbeAllocation.answer_time_str` and an output charge of `{python} ProbeAllocation.answer_cost_str`. Its allowance is `{python} ProbeAllocation.time_mult_str` the prepared test's execution time.
+**Math**: `{python} ProbeAllocation.answer_tokens_str` tokens at `{python} ProbeAllocation.token_time_str` each take `{python} ProbeAllocation.answer_time_str` and cost `{python} ProbeAllocation.answer_cost_str` in output charges. Dividing by the test's `{python} ProbeAllocation.probe_time_str` gives `{python} ProbeAllocation.time_mult_str`.
 
-**Interpretation**: In this scenario, a short test can supply a missing observation before a long explanation finishes. The ratio does not establish an end-to-end speedup or show that reasoning is useless. If the test requires costly preparation, fails to reproduce the fault, or does not distinguish the hypotheses, its value changes. The runtime should choose work that addresses the current uncertainty, then account for the complete path to an accepted result.
+**Systems insight**: When the open question is what the program does, an observation is two to three orders of magnitude cheaper in time than more generation. The probe wins whenever its preparation plus run time stays below the explanation's `{python} ProbeAllocation.answer_time_str` and its outcome separates the competing hypotheses; a test that cannot reproduce the fault buys nothing at any price. Spend on the operation that resolves the current uncertainty.
 
 :::
 
-Test-time compute therefore extends the bounded-call contract rather than replacing it. The runtime allocates extra generation and checks while preserving the distinction between a completed response and a completed repair. The allocation must specify not only how much work is permitted, but whether that work extends one candidate, explores alternatives, or conditions a revision on observations.
+Test-time compute extends the bounded-call contract. The runtime allocates extra generation and checks, keeps a completed response distinct from a completed repair, and specifies both how much work is permitted and whether that work extends one candidate, explores alternatives, or conditions a revision on observations.
 
 ## Three Compute Allocation Axes {#sec-vol3-test-time-compute-computation-allocation}
 
 For the connection-pool repair, a longer explanation, several alternative patches, and a generate–test–revise loop can consume similar output budgets while producing different dependencies. The explanation must finish its sequential generation. Independent alternatives may run concurrently. A revision that uses a test result must wait for that result. These dependencies determine which work belongs on the critical path and which state must remain available.
 
-Depth extends computation within a candidate, breadth explores multiple candidates, and feedback supplies observations to a later revision. A **test-time deliberation rollout**\index{Test-time deliberation rollout!definition}\index{Deliberation!rollout definition} is one bounded candidate-generation path, possibly including checks and observation-conditioned revisions. A policy can combine the axes, for example by generating several candidates, checking each, and extending only a promising one. The model's weights remain fixed during this work.
+**Depth**\index{Depth axis!definition} extends computation within a candidate, **breadth**\index{Breadth axis!definition} explores multiple candidates, and **feedback**\index{Feedback axis!definition} supplies observations to a later revision. A **test-time deliberation rollout**\index{Test-time deliberation rollout!definition}\index{Deliberation!rollout definition} is one bounded candidate-generation path, possibly including checks and observation-conditioned revisions. A policy can combine the axes, for example by generating several candidates, checking each, and extending only a promising one. The model's weights remain fixed during this work, and every axis draws on one allowance.
 
-@Fig-vol3-allocation-axes separates these dependencies before assigning them a resource budget. A candidate path is not an execution permit; any operation used to check it still passes through the runtime's ordinary controls.
+::: {#dfn-vol3-test-time-compute-budget .callout-definition title="Test-time compute budget"}
+
+***Test-time compute budget***\index{Test-time compute budget!definition} is the per-decision allowance of processed and generated tokens, model calls, checks, and elapsed time that a runtime may spend, with the model's weights fixed, before it must select a candidate, abstain, or escalate.
+
+1.  **Significance**: The budget sets the attempt cost in the cost per accepted task, $C_{\text{eff}} = \mathbb{E}[C_{\text{attempt}}]/p_{\text{acc}}$ (@eq-vol3-cost-per-accepted-task), and deliberation earns its place only when it raises $p_{\text{acc}}$ faster than it raises the attempt cost.
+2.  **Distinction**: Training compute changes the weights once for every future task; test-time compute is spent again on every decision, and a model's internal reasoning allowance is only one of its control surfaces beside external calls and checks.
+3.  **Common pitfall**: Treating the ceiling as the expected spend, or treating an exhausted budget as evidence that the best remaining candidate is acceptable.
+
+:::
+
+@Fig-vol3-allocation-axes separates these dependencies before assigning them a resource budget. Any operation used to check a candidate path passes through the runtime's ordinary permission controls.
 
 ::: {#fig-vol3-allocation-axes fig-env="figure" fig-pos="htb" fig-cap="**Three compute allocation topologies**: Depth extends one candidate; breadth exposes separate sampled candidate paths followed by selection; feedback makes a later candidate depend on an observed check result. The arrows show dependencies, not guaranteed latency, cost, or correctness." fig-alt="Three panels labeled Depth, Breadth, and Feedback. Depth connects an input through two reasoning segments to a candidate. Breadth branches an input into three sample streams that converge on a selector. Feedback connects a candidate to a governed check or tool, then an observation, then a revised candidate."}
 ![](images/svg/three_compute_allocation_axes.svg)
@@ -140,11 +150,11 @@ Depth extends computation within a candidate, breadth explores multiple candidat
 
 Depth allows a model to generate intermediate steps before returning its final proposal. For the repair, those steps might trace lock acquisition, connection return, and waiter notification through the supplied source. Later generated tokens can use the earlier derivation to identify an inconsistent assumption or construct a different proposal. The benefit comes from additional computation over the available information, not from changing the underlying model.
 
-Generation still follows the conditional process established in @sec-vol3-foundation-model-autoregressive. Extending one response creates a longer dependent sequence and generally increases its generation allowance. The exact elapsed time depends on the service, including its decoding implementation and load. A longer trace is neither a guarantee of greater accuracy nor evidence that the proposed patch has run. The runtime must also reserve enough of the call's output budget for a complete usable candidate; exhausting that budget leaves the invocation subject to the same status-first handling as any other call.
+Generation still follows the conditional process established in @sec-vol3-foundation-model-autoregressive. Extending one response lengthens a dependent sequence, so its generation time grows about linearly with the added tokens under a fixed serving configuration (principle \ref{pri-vol3-memory-bandwidth-decoding}). A longer trace is evidence of more computation, not of a patch having run. The runtime must also reserve enough of the call's output budget for a complete usable candidate; exhausting that budget leaves the invocation subject to the same status-first handling as any other call.
 
 ### Parallel sampling along the breadth axis
 
-Breadth spends work on alternative candidates. The runtime might request several repairs from the same source excerpt and task description, using the sampling controls of @sec-vol3-foundation-model-autoregressive. Conditional on a fixed request and independent random draws, these samples can be statistically independent while still sharing a systematic limitation, such as assigning little probability to a correct notification protocol. Independence does not imply that the candidates cover useful alternatives.
+Breadth spends work on alternative candidates. The runtime might request several repairs from the same source excerpt and task description, using the sampling controls of @sec-vol3-foundation-model-autoregressive. Conditional on a fixed request and independent random draws, these samples can be statistically independent while still sharing a systematic limitation, such as assigning little probability to a correct notification protocol. Independent draws can all miss the useful alternative.
 
 Separate candidates need not wait for one another, so breadth exposes concurrency. Concurrency is cheap in latency because of how decoding uses the accelerator. At small batch sizes, each decode step is dominated by reading the model weights, so memory bandwidth sets a floor on step time (principle \ref{pri-vol3-memory-bandwidth-decoding}). A batch of $N$ streams reads those weights once per step for all of them. Spending $N$ candidates' worth of tokens along the depth axis therefore multiplies the generation path by about $N$, while spending them across $N$ concurrent streams leaves it near the duration of the longest candidate. The advantage holds only while the batch remains bound by weight reads and fits in memory.
 
@@ -154,21 +164,21 @@ $$
 M_{\text{KV}}^{\text{breadth}} \propto P + \sum_{n=1}^{N} K_n
 $$
 
-when the $P$-token prompt is stored once and shared, and as $NP + \sum_n K_n$ when it is not. @Sec-vol3-kvcache-radix-tree develops how a service shares such prefixes. When the combined state exceeds capacity, the service must run candidates in waves, and the breadth path degrades from the longest candidate toward the sum of all of them. With resource contention, individual durations can also increase. Shared prompt processing and billing discounts are separate implementation and pricing questions, not automatic consequences of sending identical prompts.
+when the $P$-token prompt is stored once and shared, and as $NP + \sum_n K_n$ when it is not. @Sec-vol3-kvcache-radix-tree develops how a service shares such prefixes. When the combined state exceeds capacity, the service must run candidates in waves, and the breadth path degrades from the longest candidate toward the sum of all of them. With resource contention, individual durations can also increase. Whether identical prompts share processing or earn a billing discount depends on the service.
 
-Breadth also produces more candidates to retain and assess. It is useful only if the system can choose among them or use their differences to guide further work. A pool containing a good patch does not ensure that the runtime selects it. That distinction makes selection part of the compute policy rather than a free final step.
+Breadth also produces more candidates to retain and assess, and it pays only when the system can choose among them or use their differences to guide further work. A pool that contains a good patch still needs a selector that finds it, so selection is part of the compute policy, not a free final step.
 
 ### Observation-conditioned revision along the feedback axis
 
 Feedback changes the next request using observations from a check or other permitted operation. The repair agent generates a patch, the runtime arranges a bounded test, and the next call receives a diagnostic such as the blocked waiter's trace. The observation constrains the next candidate more directly than a request to produce a different explanation of the same input.
 
-The check can report failure, passage, or an inconclusive outcome. Failure may identify a specific defect; passage supports the covered property under the exercised conditions. Neither outcome is automatically the task's final acceptance decision. Even diagnostic execution is a real action that consumes resources and must remain within the task's permissions. Calling it part of deliberation does not make its effects hypothetical.
+The check reports failure, passage, or an inconclusive outcome. Failure can identify a specific defect; passage supports the covered property under the exercised conditions; the task's acceptance decision remains a separate step. Diagnostic execution is a real action: it consumes resources, stays within the task's permissions, and has real effects even when it serves deliberation.
 
 Feedback adds dependencies: a revision cannot use a result that has not arrived. If the runtime retains every earlier proposal and observation in the next request, input length also grows. With initial input length $P_1$, candidate lengths $K_j$, and observation lengths $|O_j|$, this append-only policy gives
 
 $$P_r = P_1 + \sum_{j=1}^{r-1}(K_j + |O_j|)$$
 
-The equation describes a context policy, not a requirement to resend everything. Selecting shorter observations or removing obsolete proposals changes both the cost and the information available to the revision. For now, the allocation policy must count the representation it actually sends.
+The equation describes one context policy. Sending shorter observations or dropping obsolete proposals lowers the cost and also changes what the revision can see, a choice @sec-vol3-context-engineering develops; the allocation policy counts the representation it actually sends.
 
 ### Comparing allocations under one output ceiling
 
@@ -238,12 +248,17 @@ class AllocationAxes:
     depth_cost = depth_input * price_in + depth_output * price_out
     breadth_cost = breadth_input * price_in + breadth_output * price_out
     feedback_cost = feedback_input * price_in + feedback_output * price_out
+    path_ratio = (depth_time / breadth_time).to(ureg.dimensionless).magnitude
+    bill_ratio = (breadth_cost / depth_cost).to(ureg.dimensionless).magnitude
+    breadth_premium = breadth_input - depth_input  # (N - 1) P re-read prompt tokens
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(depth_output == breadth_output == ceiling, "Depth and breadth exhaust ceiling")
     check(feedback_output < ceiling, "Feedback uses less than the output ceiling")
     check(feedback_input == 16_380, "Append-only feedback input accounting")
     check(depth_time > feedback_time > breadth_time, "Scenario critical-path ordering")
+    check(breadth_premium == (candidates - 1) * prompt, "Breadth premium is the re-read prompt")
+    check(bill_ratio > 1 and path_ratio > 1, "Breadth buys path length with bill")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
     prompt_str = fmt_int(prompt)
@@ -267,22 +282,27 @@ class AllocationAxes:
     depth_cost_str = fmt_usd(depth_cost, precision=5)
     breadth_cost_str = fmt_usd(breadth_cost, precision=5)
     feedback_cost_str = fmt_usd(feedback_cost, precision=5)
+    path_mult_str = fmt_multiple(path_ratio, precision=0)
+    bill_mult_str = fmt_multiple(bill_ratio, precision=1)
+    breadth_premium_str = fmt_int(breadth_premium)
 ```
 
 ::: {#nbk-03-matched-budget-axes .callout-notebook title="One decision, three allocations"}
 
 **Problem**: A repair request starts with `{python} AllocationAxes.prompt_str` input tokens and a common ceiling of `{python} AllocationAxes.ceiling_str` generated tokens. How do depth, breadth, and feedback spend that allowance?
 
-**Assumptions**: Reuse the illustrative per-token allowance from the preceding example. Breadth has capacity for `{python} AllocationAxes.candidates_str` concurrent streams at that same rate. Each short candidate uses `{python} AllocationAxes.candidate_tokens_str` generated tokens. Feedback uses `{python} AllocationAxes.rounds_str` rounds, each followed by a `{python} AllocationAxes.check_time_str` check returning `{python} AllocationAxes.report_str` tokens. Later feedback requests append earlier candidates and reports. Hypothetical prices are `{python} AllocationAxes.price_in_str` per million input tokens and `{python} AllocationAxes.price_out_str` per million output tokens, without cache discounts. Generation allowances omit prefill, queueing, and transport; the feedback allowance additionally includes its checks. The bill counts model tokens only.
+**Variables**: Reuse the illustrative per-token allowance from the preceding example. Breadth has capacity for `{python} AllocationAxes.candidates_str` concurrent streams at that same rate. Each short candidate uses `{python} AllocationAxes.candidate_tokens_str` generated tokens. Feedback uses `{python} AllocationAxes.rounds_str` rounds, each followed by a `{python} AllocationAxes.check_time_str` check returning `{python} AllocationAxes.report_str` tokens. Later feedback requests append earlier candidates and reports. Hypothetical prices are `{python} AllocationAxes.price_in_str` per million input tokens and `{python} AllocationAxes.price_out_str` per million output tokens, without cache discounts. Generation allowances omit prefill, queueing, and transport; the feedback allowance additionally includes its checks. The bill counts model tokens only.
 
 | Allocation |                                 Input tokens |                                 Output tokens |              Generation and included checks |                            Model-token bill |
 |:-----------|---------------------------------------------:|----------------------------------------------:|--------------------------------------------:|--------------------------------------------:|
 | Depth      |    `{python} AllocationAxes.depth_input_str` |    `{python} AllocationAxes.depth_output_str` |    `{python} AllocationAxes.depth_time_str` |    `{python} AllocationAxes.depth_cost_str` |
 | Breadth    |  `{python} AllocationAxes.breadth_input_str` |  `{python} AllocationAxes.breadth_output_str` |  `{python} AllocationAxes.breadth_time_str` |  `{python} AllocationAxes.breadth_cost_str` |
 | Feedback   | `{python} AllocationAxes.feedback_input_str` | `{python} AllocationAxes.feedback_output_str` | `{python} AllocationAxes.feedback_time_str` | `{python} AllocationAxes.feedback_cost_str` |
-: **Allocation accounting under a common output ceiling**: Equal ceilings do not imply equal actual spend. These allowances are not complete end-to-end task latencies or costs. {#tbl-vol3-allocation-tradeoffs}
+: **Allocation accounting under a common output ceiling**: Equal ceilings produce unequal spend. Allowances omit prefill, queueing, selection, and tool charges. {#tbl-vol3-allocation-tradeoffs}
 
-**Interpretation**: In @tbl-vol3-allocation-tradeoffs, breadth shortens the generation path under the stipulated concurrency, but it also pays to read the prompt for each candidate and leaves selection unfinished. Feedback generates fewer tokens than the ceiling permits, yet it waits for checks and pays for growing inputs. Depth reads the prompt once but puts its generation on one dependent path. No success rates have been assumed, so the arithmetic establishes no quality ranking. A complete comparison must include selection, acceptance checks, tool charges, and observed outcomes under common task constraints.
+**Math**: In @tbl-vol3-allocation-tradeoffs, depth generates all `{python} AllocationAxes.ceiling_str` tokens on one path; breadth generates `{python} AllocationAxes.candidate_tokens_str` on each of `{python} AllocationAxes.candidates_str` concurrent paths, so its path is `{python} AllocationAxes.path_mult_str` shorter, while reading the prompt `{python} AllocationAxes.candidates_str` times adds `{python} AllocationAxes.breadth_premium_str` input tokens and makes its bill `{python} AllocationAxes.bill_mult_str` that of depth. Feedback's input over $R$ rounds is $RP + (K+|O|)\,R(R-1)/2$, or `{python} AllocationAxes.feedback_input_str` tokens at $R$ = `{python} AllocationAxes.rounds_str`, because each round re-reads every earlier candidate and report.
+
+**Systems insight**: Breadth trades bill for path length, and the entire premium is the $(N-1)P$ re-read prompt. The knob is the prompt-to-output ratio: a long repository context makes breadth's premium grow linearly with both $N$ and $P$, while a short prompt or a shared prefix (@sec-vol3-kvcache-radix-tree) removes most of it. Feedback lands between the other two on time and bill and is the only row that buys new information. No success rates enter this arithmetic, so it ranks resources, not quality.
 
 :::
 
@@ -292,21 +312,31 @@ A model service may expose an internal reasoning allowance, while the runtime ca
 
 ### Reasoning models and generation allowances {#sec-vol3-test-time-compute-reasoning-models}
 
-**Reasoning models**\index{Reasoning model} are trained with reinforcement learning on tasks whose answers can be checked, such as mathematics with known answers and code with tests. They learn to produce long intermediate traces that propose, check, and backtrack within one generation [@openai2024o1; @deepseekai2025deepseekr1]. Three consequences follow for the runtime. Reasoning tokens are output tokens, generated and metered like any other whether or not the interface displays them. A reasoning-budget field on the call makes depth a per-call allocation that the runtime controls rather than a fixed property of the model. Trained reasoning still draws only on the request and the weights. The model can recheck arithmetic inside its trace, but it cannot observe whether a patch passes a test it never ran.
+**Reasoning models**\index{Reasoning model!definition} are trained with reinforcement learning on tasks whose answers can be checked, such as mathematics with known answers and code with tests. They learn to produce long intermediate traces that propose, check, and backtrack within one generation [@openai2024o1; @deepseekai2025deepseekr1]. Three consequences follow for the runtime. Reasoning tokens are output tokens, generated and metered like any other whether or not the interface displays them. A reasoning-budget field on the call makes depth a per-call allocation that the runtime controls rather than a fixed property of the model. Trained reasoning still draws only on the request and the weights. The model can recheck arithmetic inside its trace, but it cannot observe whether a patch passes a test it never ran.
 
-Models trained this way use an internal allowance differently from models trained primarily for short responses, so budget calibration is model-specific. A larger allowance may permit a useful derivation or self-correction, but it does not grant access to observations absent from the request. Similarly, a runtime can expose its candidate and check records without gaining direct access to the model's internal computation. Observable records support diagnosis of the policy; they do not by themselves prove the candidate correct.
+Models trained this way use an internal allowance differently from models trained primarily for short responses, so budget calibration is model-specific. A larger allowance buys derivation and self-correction over the request's information, never new observations. The runtime's own candidate and check records are what it can inspect, and they support diagnosis of the policy rather than proof of the candidate.
 
-Because depth is a per-call budget, the runtime can allocate it by difficulty. @snell2024scaling compared ways of spending a fixed test-time budget, from sequential revision of one candidate to parallel sampling and search guided by a process verifier, and found that the best allocation depended on how hard the problem was for the base model. On easier problems, sequential revision made the better use of the budget. On harder problems, a mix that added parallel exploration or search did better. On the hardest problems, neither approach produced much gain. In a comparison matched on total FLOPs, a compute-optimal allocation let a smaller model outperform a model 14 times larger, but only on problems where the smaller model already had a non-trivial success rate; on the hardest problems, spending the same FLOPs on the larger model was more effective. Test-time compute therefore helps most where the model already succeeds some of the time.
+Because depth is a per-call budget, the runtime can allocate it task by task, and the useful question becomes what each kind of spending buys on problems of different difficulty.
+
+::: {#exmp-03-compute-optimal-allocation .callout-example title="Compute-optimal test-time allocation"}
+
+**Scenario**: @snell2024scaling compared ways of spending a fixed test-time budget, from sequential revision of one candidate to parallel sampling and search guided by a process verifier, on problems binned by how hard they were for the base model.
+
+**Diagnosis**: On easier problems, sequential revision made the better use of the budget. On harder problems, a mix that added parallel exploration or search did better. On the hardest problems, neither approach produced much gain. In a comparison matched on total FLOPs, a compute-optimal allocation let a smaller model outperform a model 14 times larger, but only on problems where the smaller model already had a non-trivial success rate; on the hardest problems, spending the same FLOPs on the larger model was more effective.
+
+**Systems lesson**: Test-time compute multiplies an existing success rate rather than creating one. Route budget by estimated difficulty, and send tasks whose base success is near zero to a stronger model or to escalation instead of to more samples.
+
+:::
 
 A runtime cannot observe difficulty directly, so it approximates this allocation with cheap signals obtained before committing a large budget: whether two or three short samples agree, whether a fast static check passes, and how earlier tasks of the same class fared. Decisions whose signals agree receive a small allowance and one candidate. Decisions whose signals disagree receive a larger allowance or a search. Decisions still unresolved after a bounded spend are escalated rather than given more tokens. Each signal is a proxy for difficulty, and its value for routing must be measured on held-out tasks like any other predictor.
 
-The choice need not be internal reasoning or external search. A candidate may receive enough depth to express a coherent repair, then compete with alternatives or undergo a targeted test. Long tool delays increase feedback's critical path, while weak checks reduce the information feedback contributes. The appropriate allocation depends on the task, model, available checks, and resource limits. These trade-offs motivate measured policy comparisons rather than a universal rule favoring one axis. The check a runtime uses to accept candidates at test time is also the kind of signal that reinforcement learning from verifiable rewards trains against. A check good enough to gate a commit here is a candidate reward in @sec-vol3-rlvr, and its blind spots carry over to training.
+Internal reasoning and external search combine. A candidate may receive enough depth to express a coherent repair, then compete with alternatives or undergo a targeted test. Long tool delays lengthen feedback's critical path, and weak checks shrink the information feedback contributes, so the allocation is a measured policy choice per task class. The check a runtime uses to accept candidates at test time is also the kind of signal that reinforcement learning from verifiable rewards trains against. A check good enough to gate a commit here is a candidate reward in @sec-vol3-rlvr, and its blind spots carry over to training.
 
 ::: {#chk-03-compute-allocation-axes .callout-checkpoint title="Choosing an allocation"}
 
-- [ ] **Information**: Can you distinguish an improvement derived from supplied source code from a new observation of program execution?
-- [ ] **Concurrency**: If the service admits only one candidate at a time, which advantage of breadth in the notebook disappears?
-- [ ] **Accounting**: Why can policies with the same output ceiling have different input bills and actual generated-token counts?
+- [ ] **Information**: For the connection-pool repair, which axis can separate a short timeout from a missed notification, and why can the other two not?
+- [ ] **Concurrency**: If the service admits only one candidate at a time, how long does the notebook's breadth allocation take to generate, and which allocation then has the shortest path?
+- [ ] **Breadth premium**: How many extra input tokens does four-way breadth read compared with depth for a `{python} AllocationAxes.prompt_str`-token prompt, and what happens to that premium when the repository context grows eightfold?
 - [ ] **Evidence**: If a revised patch passes a targeted test, what additional information determines whether the task may stop?
 
 :::
@@ -323,23 +353,33 @@ Two questions separate the generation policy from the selection policy. Does the
 
 Different strings need not represent different approaches. Renaming variables or rewriting a loop can leave the same faulty notification handling intact. For the repair task, alternatives are useful when they explore plausible causes or repairs that the available checks can distinguish. A change to the notification path and a longer timeout test different hypotheses; several differently worded explanations of the same timeout change may add little.
 
-This limitation should not be confused with statistical dependence. With the task, prompt, model, and sampling policy fixed, separate generations using independent random draws can be independent and identically distributed even though the model often repeats the same mistake. If nearly all probability mass favors timeout changes, independent sampling mostly produces timeout changes. Sharing a model or prompt does not, by itself, violate independence.
+This limitation differs from statistical dependence. With the task, prompt, model, and sampling policy fixed, separate generations using independent random draws are independent and identically distributed even when the model often repeats the same mistake: if nearly all probability mass favors timeout changes, independent sampling mostly produces timeout changes.
 
 Across a collection of tasks, shared limitations still matter. A model may solve familiar tasks frequently and unfamiliar tasks rarely. Repeated attempts on the same difficult task then fail together more often than an analysis using the average success rate across all tasks would predict. Independence conditional on a fixed task does not justify treating every attempt across a mixed workload as a draw with one common success probability. Feedback-conditioned generation changes the distribution again: later candidates depend on what earlier checks revealed.
 
-The runtime can change sampling settings or ask candidates to investigate different plausible hypotheses while preserving the original requirements. Neither technique guarantees an improvement. More variation can introduce irrelevant approaches, malformed outputs, or violations of constraints that every solution must satisfy. The useful comparison is whether the altered generation policy improves the delivered result under the same resource limits, not whether its outputs look more different.
+The runtime can change sampling settings or ask candidates to investigate different plausible hypotheses while preserving the original requirements. More variation can also introduce irrelevant approaches, malformed outputs, or violations of constraints that every solution must satisfy, so the test of a diversification technique is whether it improves the delivered result under the same resource limits.
 
-Structural and behavioral comparisons can help avoid redundant work. Normalizing variable names can identify some superficial code differences; running candidates against the same test inputs can reveal repeated observed behavior. Neither establishes general program equivalence. Matching syntax trees establishes only the structural relation defined by the normalization, and matching test outcomes establishes agreement only on those tests. Deduplicating candidates is justified when the chosen relation preserves the property being evaluated, rather than merely hiding inconvenient disagreement.
+Structural and behavioral comparisons remove redundant work. Normalizing variable names identifies some superficial code differences; running candidates against the same test inputs reveals repeated observed behavior. Each establishes a bounded relation, syntactic equivalence under the normalization or agreement on those tests, and deduplication is sound when that relation preserves the property being evaluated.
 
 ### Choosing a selection policy
 
-A selector may use direct checks, answer agreement, learned ranking, or a combination. These are alternatives whose usefulness depends on the task and the available evidence, not mandatory stages in one universal pipeline.
+A selector may use direct checks, answer agreement, learned ranking, or a combination. The task and the available evidence determine which apply; they are alternatives, not fixed stages of one pipeline.
 
-Direct checks compare a candidate with explicit requirements. A parser can reject malformed code; a type checker can establish properties within its type system; a test harness can measure behavior on specified inputs. These checks have different scopes. A patch that compiles has not thereby repaired the bug, and passing a regression test does not establish that every relevant execution is correct. Candidate execution remains a governed action, so tests must use the isolation and permissions appropriate to the task.
+Direct checks compare a candidate with explicit requirements. A parser can reject malformed code; a type checker can establish properties within its type system; a test harness can measure behavior on specified inputs. Each has its own scope: compiling says nothing about the notification bug, and a regression test covers the executions it runs. Candidate execution remains a governed action, so tests use the isolation and permissions appropriate to the task.
 
-Answer agreement is useful when outputs have a meaningful comparison rule. Self-consistency samples reasoning paths and aggregates their final answers [@wang2022self]. For a numerical problem, the runtime can normalize the answer representation and choose the most frequent answer. Agreement is evidence about the sampled distribution, not proof of correctness: several paths can reproduce the same misconception. For code repairs, textual voting is usually a poor comparison rule, and agreement on a finite set of observed behaviors has the coverage limits just described. A correct minority candidate should not be discarded solely because it differs from the others.
+Answer agreement is useful when outputs have a meaningful comparison rule. **Self-consistency**\index{Self-consistency!definition} samples several reasoning paths and returns the most frequent final answer [@wang2022self]. For a numerical problem, the runtime normalizes the answer representation and takes the plurality. Agreement is evidence about the sampled distribution: several paths can reproduce the same misconception. For code repairs, textual voting is a poor comparison rule, agreement on observed behaviors carries the coverage limits just described, and a correct minority candidate deserves a direct check rather than a vote.
 
-A learned ranker or model-based judge can compare candidates when direct checks cover only part of the task. It might score explanatory adequacy or prioritize patches for expensive testing. Its score remains an estimate whose relevance must be evaluated on the intended task distribution. Ranking asks which candidate looks better according to the scoring rule; acceptance asks whether there is sufficient evidence to return a candidate under the task's criteria. The highest score in a weak pool does not answer the acceptance question.
+A learned ranker or model-based judge can compare candidates when direct checks cover only part of the task. It might score explanatory adequacy or prioritize patches for expensive testing. Its score remains an estimate whose relevance must be evaluated on the intended task distribution. Ranking asks which candidate looks better according to the scoring rule; acceptance asks whether there is sufficient evidence to return a candidate under the task's criteria. The highest score in a weak pool does not answer the acceptance question. A selector that answers it needs a check with a verdict, not a ranking.
+
+::: {#dfn-vol3-verifier-guided-selection .callout-definition title="Verifier-guided selection"}
+
+***Verifier-guided selection***\index{Verifier-guided selection!definition}\index{Verifier!definition} is a selection policy that returns a candidate only when a **verifier**, a check whose criteria and observations the candidate cannot modify, passes it, and abstains when no candidate passes.
+
+1.  **Significance**: Its success rate is capped by pass@$k$, the chance the pool holds a passing candidate, and the share of its selections that are correct is the verifier's precision on that pool; together they set $p_{\text{acc}}$ in the cost per accepted task.
+2.  **Distinction**: Voting selects what the generator produces most often and learned ranking selects what a scorer prefers; only a verifier's verdict can justify returning a candidate instead of abstaining.
+3.  **Common pitfall**: Treating the verifier's pass as task acceptance; the verdict covers the checked property, and its false acceptance rate grows in importance as the pool's valid-candidate rate falls.
+
+:::
 
 The hypothetical repair pool in @tbl-vol3-candidate-diversity illustrates why these distinctions affect the result. The checks are deliberately incomplete: the reproducer exercises the known failure, while other workloads remain untested.
 
@@ -352,11 +392,11 @@ The hypothetical repair pool in @tbl-vol3-candidate-diversity illustrates why th
 
 : **Evidence for candidate selection**: A hypothetical repair pool separates the proposed mechanism, the observed result, and the conclusion each check supports. {#tbl-vol3-candidate-diversity tbl-colwidths="[12,25,30,33]"}
 
-The runtime can compose checks according to their cost and their ability to eliminate unsuitable candidates. A relatively cheap structural check may save expensive execution or model-scoring work. That ordering is a design choice, not a guarantee that every static check is cheap or every learned check is expensive. Tests can dominate latency, and a learned judge may need to read the prompt, the candidate, and supporting observations. Comparing all candidates jointly can have a different cost from scoring each independently. Selection therefore belongs in the deliberation budget from the start.
+The runtime can compose checks according to their cost and their ability to eliminate unsuitable candidates. A relatively cheap structural check can save expensive execution or model-scoring work, but the ordering follows measured costs, not check categories. Tests can dominate latency, and a learned judge may need to read the prompt, the candidate, and supporting observations. Comparing all candidates jointly can have a different cost from scoring each independently. Selection therefore belongs in the deliberation budget from the start.
 
 ### Candidate availability under pass@$k$ {#sec-vol3-test-time-compute-pass-at-k}
 
-**pass@$k$**\index{Pass at k} measures the probability that at least one of $k$ sampled candidates passes the specified tests [@chen2021evaluating]. It measures availability in the pool, not the success rate of the output a deployed selector returns.
+**pass@$k$**\index{Pass at k!definition} measures the probability that at least one of $k$ sampled candidates passes the specified tests [@chen2021evaluating]. It measures availability in the pool, not the success rate of the output a deployed selector returns.
 
 For a fixed task and fixed generation policy, suppose independent samples each pass the tests with probability $p$. The probability that all $k$ samples fail is $(1-p)^k$, so
 
@@ -375,41 +415,117 @@ $$
 
 with the numerator taken as zero when $n-c<k$. Under independent, identically distributed sampling for the fixed task, this estimates the probability that a fresh pool of $k$ candidates contains a test-passing member without bias. Benchmark results average these estimates over tasks [@chen2021evaluating].
 
-The relationship to deployed selection follows from the event being measured. If the selector must return an unchanged member of the same pool, it cannot return a test-passing candidate when the pool contains none. Its probability of returning a test-passing candidate is therefore at most pass@$k$, counting abstention as no returned pass. A selector that always finds a passing member whenever one exists reaches this ceiling. Measuring the ceiling does not establish that the deployed selector can reach it, or that the required checks fit the deployment budget.
+The relationship to deployed selection follows from the event being measured. If the selector must return an unchanged member of the same pool, it cannot return a test-passing candidate when the pool contains none. Its probability of returning a test-passing candidate is therefore at most pass@$k$, counting abstention as no returned pass. A selector that always finds a passing member whenever one exists reaches this ceiling; whether the deployed selector does, within the deployment's checking budget, is a separate measurement.
 
-The scope of the predicate matters. Passing these tests is not interchangeable with satisfying the complete task requirements. Nor does the ceiling describe a selector that repairs candidates or synthesizes a new one, because that policy generates additional artifacts. Report candidate availability alongside selected-output performance under the relevant criterion. @Sec-vol3-evaluation develops the broader distinction between a pool-level metric and reliability over repeated system runs.
+The predicate is passing these tests, which is narrower than satisfying the complete task requirements, and the ceiling covers only selectors that return an unchanged pool member; a selector that repairs candidates or synthesizes a new one generates additional artifacts. Report candidate availability alongside selected-output performance under the relevant criterion. @Sec-vol3-evaluation develops the broader distinction between a pool-level metric and reliability over repeated system runs.
+
+Breadth has a price that pass@$k$ makes easy to compute. In **best-of-$N$ sampling**\index{Best-of-N sampling!definition}, the runtime generates $N$ candidates for one decision and returns one that its selector admits. The notebook below prices that pool against the simplest alternative, generating one candidate at a time and stopping at the first pass, under the most favorable selection assumption: the verifier is the acceptance check itself.
+
+```{python}
+#| label: calc-vol3-best-of-n-price
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE PRICE OF A LARGER POOL (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: nbk-03-best-of-n-pool-price; fallacies (mixed-workload pass@N).
+# │ Goal: Compare parallel best-of-N with stop-at-first-pass sequential retry
+# │       at the same success probability.
+# │ Show: pass@N, marginal gain of the last candidate, candidates per success.
+# │ How: IID candidates for a fixed task; the verifier is the acceptance check;
+# │      a perfect selector returns a passing member whenever one exists.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+class BestOfN:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p = 0.30  # hypothetical per-candidate pass probability for a fixed task
+    pools = (1, 2, 4, 8)  # pool sizes compared
+    p_easy = 0.60  # hypothetical mixed workload: half the tasks pass at this rate
+    p_hard = 0.0  # hypothetical mixed workload: the other half never pass
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_max = pools[-1]
+    pass_at = []
+    for n in pools:
+        pass_at.append(1 - (1 - p) ** n)
+    pass_max = pass_at[-1]
+    last_gain = p * (1 - p) ** (n_max - 1)
+    parallel_per_success = n_max / pass_max
+    seq_candidates = pass_max / p  # expected attempts, stop at first pass, cap n_max
+    seq_per_success = seq_candidates / pass_max  # reduces to 1 / p
+    cost_ratio = parallel_per_success / seq_per_success
+    p_mix = (p_easy + p_hard) / 2
+    naive_mix = 1 - (1 - p_mix) ** n_max
+    true_mix = ((1 - (1 - p_easy) ** n_max) + (1 - (1 - p_hard) ** n_max)) / 2
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(pass_at == sorted(set(pass_at)), "pass@N rises with N")
+    check(abs(seq_per_success - 1 / p) < 1e-12, "Sequential retry costs 1/p per success")
+    check(cost_ratio > 2, "Parallel pool costs over twice as much per success")
+    check(abs(p_mix - p) < 1e-12, "Mixed workload has the same average rate")
+    check(true_mix < naive_mix - 0.3, "Averaging p overstates mixed-workload pass@N")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    p_str = fmt_percent(p, precision=0, style="prose")
+    n_max_str = fmt_int(n_max)
+    pools_str = MarkdownStr(", ".join(str(n) for n in pools[:-1]) + ", and " + str(pools[-1]))
+    pass_1_str = fmt_int(round(100 * pass_at[0]))
+    pass_2_str = fmt_int(round(100 * pass_at[1]))
+    pass_4_str = fmt_int(round(100 * pass_at[2]))
+    pass_max_str = fmt_percent(pass_max, precision=1, style="prose")
+    last_gain_pts_str = fmt(last_gain * 100, precision=1)
+    parallel_per_success_str = fmt(parallel_per_success, precision=1)
+    seq_candidates_str = fmt(seq_candidates, precision=2)
+    seq_per_success_str = fmt(seq_per_success, precision=1)
+    cost_mult_str = fmt_multiple(cost_ratio, precision=1)
+    p_easy_str = fmt_percent(p_easy, precision=0, style="prose")
+    naive_mix_str = fmt_percent(naive_mix, precision=1, style="prose")
+    true_mix_str = fmt_percent(true_mix, precision=1, style="prose")
+```
+
+::: {#nbk-03-best-of-n-pool-price .callout-notebook title="The price of a larger pool"}
+
+**Problem**: Each candidate repair passes the task's verifier with probability $p$, independently for this task, and the verifier is the acceptance check. How many candidates per accepted repair does a parallel pool of $N$ spend, compared with sequential retry that stops at the first pass and gives up after $N$ attempts?
+
+**Variables**: $p$ = `{python} BestOfN.p_str` (hypothetical); pools of `{python} BestOfN.pools_str` candidates; a selector that returns a passing member whenever one exists.
+
+**Math**: The formula pass@$N = 1-(1-p)^N$ gives `{python} BestOfN.pass_1_str`, `{python} BestOfN.pass_2_str`, `{python} BestOfN.pass_4_str`, and `{python} BestOfN.pass_max_str` for those pools. The last of `{python} BestOfN.n_max_str` candidates adds $p(1-p)^{N-1}$, only `{python} BestOfN.last_gain_pts_str` percentage points. The parallel pool always spends `{python} BestOfN.n_max_str` candidates, or `{python} BestOfN.parallel_per_success_str` per accepted repair. Sequential retry fails only when all `{python} BestOfN.n_max_str` attempts fail, so it reaches the same `{python} BestOfN.pass_max_str`, yet it spends on average $[1-(1-p)^N]/p$ = `{python} BestOfN.seq_candidates_str` candidates, or $1/p$ = `{python} BestOfN.seq_per_success_str` per accepted repair.
+
+**Systems insight**: At equal success, the parallel pool costs `{python} BestOfN.cost_mult_str` as much per accepted repair; what it buys is one round instead of an expected `{python} BestOfN.seq_candidates_str` sequential generate-and-check rounds. Breadth buys latency, not cost: in $C_{\text{eff}} = \mathbb{E}[C_{\text{attempt}}]/p_{\text{acc}}$ it raises $p_{\text{acc}}$ per round but raises the attempt cost faster. Size $N$ as the smallest pool whose pass@$N$ meets the target within the rounds the deadline allows, and stop growing it once the next candidate's gain is worth less than its cost.
+
+:::
 
 ### Paying for selection and evidence
 
 Increasing breadth can make a useful candidate more likely to appear, but it also creates more material to inspect. Under a fixed budget, spending everything on generation may leave too little time to distinguish the candidates. A smaller pool with informative checks can outperform a larger pool with weak selection; the reverse is possible when generation coverage is the limiting factor. The comparison requires measuring the whole policy.
 
-Checker errors require a separate analysis from candidate availability. More candidates can create more opportunities to encounter a false pass without necessarily increasing the probability that the selected output is wrong. That probability also depends on the candidate distribution, the check's conditional error rates, and the rule for choosing among candidates that pass. If search adapts to exploit a scoring rule, those conditions may change. Breadth alone is not a theorem that reliability must improve or collapse.
+Checker errors need their own analysis. More candidates create more opportunities to encounter a false pass, yet the probability that the selected output is wrong depends on the candidate distribution, the check's conditional error rates, and the rule for choosing among passing candidates, and search that adapts to a scoring rule changes those conditions.
 
 The next design choice is where to obtain evidence. A final-result check may be sufficient for one task; another may benefit from checking an intermediate assumption before investing in its continuation. The next section examines outcome and process checks, including what their errors imply for an accepted candidate.
 
 ## Process Verification {#sec-vol3-test-time-compute-verification}
 
-The selector needs evidence that distinguishes a promising candidate from a merely plausible one. For the connection-pool repair, compiling a patch establishes that it satisfies the compiler's checks; it does not establish that waiting workers are notified when a connection returns. A targeted concurrent test supplies different evidence, but its schedules may still miss the suspected synchronization defect. Each check answers a bounded question. The allocation decision is which question to ask, when to ask it, and how its answer should change the remaining search.
+The selector needs evidence that distinguishes a promising candidate from a merely plausible one. For the connection-pool repair, compiling a patch establishes that it satisfies the compiler's checks, while whether waiting workers are notified when a connection returns needs a different check. A targeted concurrent test supplies different evidence, but its schedules may still miss the suspected synchronization defect. Each check answers a bounded question. The allocation decision is which question to ask, when to ask it, and how its answer should change the remaining search.
 
 ### Outcome and step-level evidence
 
-An *outcome check* assesses a completed candidate against a criterion, such as whether the repaired service passes a regression test. An outcome reward model instead predicts a score for the completed candidate. The distinction concerns where feedback is assigned, not necessarily what the evaluator sees: a learned outcome scorer can inspect the full reasoning trajectory as well as the final answer.
+An **outcome check**\index{Outcome check!definition} assesses a completed candidate against a criterion, such as whether the repaired service passes a regression test. An **outcome reward model**\index{Outcome reward model!definition} instead predicts a score for the completed candidate. The distinction concerns where feedback is assigned, not necessarily what the evaluator sees: a learned outcome scorer can inspect the full reasoning trajectory as well as the final answer.
 
-Step-level checks assess intermediate claims or transitions. In the repair task, a check might test whether a waiting worker receives the return notification before the agent implements a proposed timeout increase. If a controlled observation contradicts the timeout explanation, the runtime can redirect generation before spending the rest of the budget on its implementation. A learned process scorer can similarly help rank or prune partial reasoning, although a low score is fallible evidence rather than proof that a branch cannot succeed. Process supervision[^fn-prm-step-labels] assigns feedback to intermediate reasoning steps, unlike supervision of final outcomes [@lightman2023let].
+Step-level checks assess intermediate claims or transitions. In the repair task, a check might test whether a waiting worker receives the return notification before the agent implements a proposed timeout increase. If a controlled observation contradicts the timeout explanation, the runtime can redirect generation before spending the rest of the budget on its implementation. A learned process scorer can similarly rank or prune partial reasoning, and a low score is fallible evidence that a branch will fail. **Process supervision**\index{Process supervision!definition}[^fn-prm-step-labels] assigns feedback to intermediate reasoning steps rather than to final outcomes [@lightman2023let].
 
 [^fn-prm-step-labels]: **Step-Level Labels (PRM800K)**: Outcome labels for code can be produced automatically by running tests. Step labels require a judgment on each intermediate step, and the PRM800K dataset used to train the process reward model of @lightman2023let contains about 800,000 human step-level labels. That labeling cost is one reason learned process scorers are scarcer than outcome checks. \index{Process reward model!labeling cost}
 
 ::: {#dfn-process-reward-model .callout-definition title="Process reward model (PRM)"}
 
-A **process reward model** assigns learned scores to intermediate steps of a candidate trajectory, conditioned on the task and the available preceding context.
+***Process reward model***\index{Process reward model!definition} is a learned scorer that assigns a value to each intermediate step of a candidate trajectory, conditioned on the task and the preceding steps.
 
-1. **Significance**: Step-level scores can guide which partial candidates receive additional generation budget.
-2. **Application**: A search policy may lower the priority of a branch whose proposed reasoning step receives a poor score.
-3. **Common pitfall**: Treating a favorable step score as proof of task success, or assuming that every low-scoring step invalidates the completed solution.
+1.  **Significance**: Step scores let search prune a branch before it spends a full candidate's generation budget, which is what keeps beam and tree search within a finite budget (@sec-vol3-test-time-compute-tree-growth).
+2.  **Distinction**: An outcome reward model scores only the completed candidate; a process reward model assigns credit at every step, so it can redirect generation earlier but needs step-level labels that cost far more to collect than test outcomes.
+3.  **Common pitfall**: Treating a favorable step score as evidence of task success; a process reward model ranks and prunes, and occupies no closure evidence level.
 
 :::
 
-Neither granularity is uniformly preferable. An outcome check can detect interactions that look harmless step by step. A process check can locate an error earlier, but checking too frequently consumes resources and can discard useful branches. The relevant benefit is avoided downstream work or better selection, weighed against checking cost and mistaken rejections.
+Each granularity catches failures the other misses. An outcome check can detect interactions that look harmless step by step. A process check can locate an error earlier, but checking too frequently consumes resources and can discard useful branches. The relevant benefit is avoided downstream work or better selection, weighed against checking cost and mistaken rejections.
 
 The input scope matters as much as the number of checks. Consider a scorer that reads the task input of $S_0$ tokens and the candidate's prefix after each of its $J$ steps, each step adding $\ell$ tokens. Rescoring each growing prefix from scratch, without reusing the computation from the previous step, costs
 
@@ -417,7 +533,7 @@ $$
 \sum_{j=1}^{J}\left(S_0 + j\,\ell\right) = J S_0 + \frac{J(J+1)}{2}\,\ell
 $$ {#eq-vol3-prm-rescoring}
 
-scorer input tokens, which grows quadratically in the number of steps. The beam-search notebook later in this chapter (\ref{nbk-03-compute-allocation-and-latency-trade-offs}) bills exactly the sum in @eq-vol3-prm-rescoring, with $S_0$ excluded, for every retained prefix. Incremental evaluation may reduce that repetition when the evaluator and serving interface support prefix reuse; a model that requires the complete candidate cannot automatically be used this way. Check scheduling therefore needs an explicit account of inputs, calls, and latency.
+scorer input tokens, which grows quadratically in the number of steps. The beam-search notebook later in this chapter (\ref{nbk-03-compute-allocation-and-latency-trade-offs}) bills exactly the sum in @eq-vol3-prm-rescoring, with $S_0$ excluded, for every retained prefix. Incremental evaluation removes the quadratic term when the evaluator and serving interface support prefix reuse; a scorer that requires the complete candidate pays it in full. Check scheduling therefore needs an explicit account of inputs, calls, and latency.
 
 @Tbl-vol3-verifier-classes compares four common kinds of check by what they examine and what their verdicts can support. The last column places each on the closure evidence levels of @sec-vol3-intro-invariant-closure. A learned scorer, however accurate on its evaluation set, occupies no closure evidence level. It ranks candidates and certifies none.
 
@@ -430,11 +546,11 @@ scorer input tokens, which grows quadratically in the number of steps. The beam-
 
 : **Kinds of check and the claims they support**: Learned scorers order candidates; compilers and sealed suites establish bounded properties. None dominates the others on every task, and a deterministic verdict remains incomplete outside its coverage. {#tbl-vol3-verifier-classes tbl-colwidths="[17,17,18,20,11,17]"}
 
-No fixed hierarchy of learned models, compilers, and tests supplies the best allocation for every task. The choice depends on which failure the task cannot tolerate and which check can observe it.
+The right check for a task is the one that can observe the failure the task cannot tolerate.
 
 ### Precision depends on the candidate pool
 
-The preceding chapter separated structural validity from task acceptance. Search adds another question: among the candidates that pass a particular check, how many actually satisfy the task? Define the event $\mathrm{Valid}$ as satisfying the stipulated task specification and $\mathrm{PASS}$ as receiving the check's positive result. Let $p=P(\mathrm{Valid})$ be the valid-candidate rate in the pool being evaluated, $\alpha=P(\mathrm{PASS}\mid\neg\mathrm{Valid})$ the false acceptance rate, and $\beta=P(\neg\mathrm{PASS}\mid\mathrm{Valid})$ the false rejection rate. Here “acceptance” names a checker error category, not permission to deploy a patch.
+The preceding chapter separated structural validity from task acceptance. Search adds another question: among the candidates that pass a particular check, how many actually satisfy the task? Define the event $\mathrm{Valid}$ as satisfying the stipulated task specification and $\mathrm{PASS}$ as receiving the check's positive result. Let $p=P(\mathrm{Valid})$ be the valid-candidate rate in the pool being evaluated, $\alpha=P(\mathrm{PASS}\mid\neg\mathrm{Valid})$ the **false acceptance rate**\index{False acceptance rate!definition}, and $\beta=P(\neg\mathrm{PASS}\mid\mathrm{Valid})$ the **false rejection rate**\index{False rejection rate!definition}. Here “acceptance” names a checker error category, not permission to deploy a patch.
 
 The probability of a positive result is $q=p(1-\beta)+(1-p)\alpha$. Bayes' rule gives the precision of those positive results:
 
@@ -443,7 +559,7 @@ $$
 =\frac{p(1-\beta)}{p(1-\beta)+(1-p)\alpha}.
 $$ {#eq-vol3-verifier-precision}
 
-A small false acceptance rate can still leave substantial error among passing candidates when most proposals are invalid. This is a base-rate effect, not a statement that every difficult task has a low $p$. The rates must describe the relevant task class, generator, and checking conditions; a pooled accuracy figure from another setting does not supply them.
+A small false acceptance rate can still leave substantial error among passing candidates when most proposals are invalid, the base-rate effect familiar from diagnostic testing. The rates must be measured for the relevant task class, generator, and checking conditions.
 
 @Eq-vol3-verifier-precision describes the passing population. Turning it into a claim about the *selected* candidate requires a selection policy. Consider independent, identically distributed candidate-and-check outcomes for a fixed task, with fixed conditional check-error rates. Generate a fixed batch, order it independently of candidate quality and check results, and select the first passing candidate in that order. Abstain if none passes. Conditional on a selection, its precision is $\Pi_V$: reaching a later position means earlier candidates failed, which under these independence assumptions does not change that candidate's validity conditional on passing. Choosing the highest continuous score instead selects on the scorer's errors as well as on quality, which @sec-vol3-test-time-compute-selection-pressure analyzes.
 
@@ -486,6 +602,10 @@ class CheckYield:
     conditional_loss = defect_given_selection * incident_loss
     task_loss = wrong_selection * incident_loss
     output_bill = (n * tokens_per_candidate * output_price).to(USD)
+    # Sensitivity: halve the false acceptance rate, or double the valid rate.
+    precision_half_alpha = valid_pass / (valid_pass + (1 - p) * alpha / 2)
+    precision_double_p = 2 * p * (1 - beta) / (2 * p * (1 - beta) + (1 - 2 * p) * alpha)
+    loss_to_bill = (task_loss / output_bill).to(ureg.dimensionless).magnitude
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     assert isinstance(n, int) and n > 0
@@ -518,6 +638,8 @@ class CheckYield:
     assert output_bill >= 0 * USD
     assert 0 * USD <= task_loss <= conditional_loss <= incident_loss
     assert math.isclose(task_loss.to(USD).magnitude, (any_selection * conditional_loss).to(USD).magnitude)
+    assert precision < precision_half_alpha < 1 and precision < precision_double_p < 1
+    assert loss_to_bill > 100
 
     # ┌── 4. OUTPUT (Human-Readable Outputs) ───────────────────────────────────
     n_str = fmt_int(n)
@@ -539,19 +661,22 @@ class CheckYield:
     conditional_loss_str = fmt_usd(conditional_loss, precision=2)
     task_loss_str = fmt_usd(task_loss, precision=2)
     bill_str = fmt_usd(output_bill, precision=2)
+    precision_half_alpha_str = fmt_percent(precision_half_alpha, precision=1, style="prose")
+    precision_double_p_str = fmt_percent(precision_double_p, precision=1, style="prose")
+    loss_to_bill_str = fmt_int(round(loss_to_bill))
 ```
 
 ::: {#nbk-03-compute-overhead-and-yield-under .callout-notebook title="Yield and risk under asymmetric verifier error"}
 
 **Problem**: A repair policy generates all `{python} CheckYield.n_str` candidates before selection. It uses the first-passing rule above and abstains when no candidate passes. What does additional breadth buy, and what risk remains?
 
-**Variables**: These are hypothetical rates, not measurements. Each candidate contains `{python} CheckYield.tokens_str` tokens, billed at `{python} CheckYield.price_str` per million output tokens. The valid-candidate rate is `{python} CheckYield.p_str`, false rejection is `{python} CheckYield.beta_str`, and false acceptance is `{python} CheckYield.alpha_str`. Suppose a separately authorized deployment policy deploys the selected candidate without further checking. A defective deployment incurs `{python} CheckYield.loss_str` in incident loss. For this calculation alone, valid deployments and abstentions incur no incident loss; the example does not price missed repairs or delay.
+**Variables**: All rates are hypothetical. Each candidate contains `{python} CheckYield.tokens_str` tokens, billed at `{python} CheckYield.price_str` per million output tokens. The valid-candidate rate is `{python} CheckYield.p_str`, false rejection is `{python} CheckYield.beta_str`, and false acceptance is `{python} CheckYield.alpha_str`. Suppose a separately authorized deployment policy deploys the selected candidate without further checking. A defective deployment incurs `{python} CheckYield.loss_str` in incident loss. For this calculation alone, valid deployments and abstentions incur zero incident loss, and missed repairs and delay are left unpriced.
 
 **Math**: The expected passing counts are `{python} CheckYield.valid_passes_str` valid candidates and `{python} CheckYield.invalid_passes_str` invalid candidates, totaling `{python} CheckYield.passes_str`. @Eq-vol3-verifier-precision yields `{python} CheckYield.precision_str` precision. Conditional on making a selection, the probability of a defective selection is therefore `{python} CheckYield.defect_str`, with expected incident loss `{python} CheckYield.conditional_loss_str` per selected deployment.
 
 The probability of any selection is $1-(1-q)^N$, or `{python} CheckYield.coverage_str`; the policy abstains on `{python} CheckYield.abstention_str` of batches. Multiplying selection coverage by conditional defect probability gives `{python} CheckYield.wrong_str` defective selections per task attempt and `{python} CheckYield.task_loss_str` expected incident loss per attempt, including abstentions. Generating the entire batch costs `{python} CheckYield.bill_str` in output charges. Input charges, checking, and other operational costs are omitted. A sequential policy that stops generation at the first pass would have a different generation bill.
 
-**Systems insight**: Cheap generation does not make a weak acceptance policy economical. Under these assumptions, incident loss dominates the output bill. A better check can improve the trade-off, but reducing false rejection also has value when missing a valid repair is costly. Choosing an acceptance threshold requires those losses, not just the price of tokens.
+**Systems insight**: Expected incident loss per attempt is about `{python} CheckYield.loss_to_bill_str` times the output bill, so the acceptance policy, not the token price, sets the cost of this task. Precision responds to two knobs of similar strength: halving the false acceptance rate raises it from `{python} CheckYield.precision_str` to `{python} CheckYield.precision_half_alpha_str`, and doubling the valid-candidate rate raises it to `{python} CheckYield.precision_double_p_str`. More candidates move neither. At a low base rate, spend on whichever of a better generator or a stricter check is cheaper, and price false rejections too when a missed valid repair is costly.
 
 :::
 
@@ -559,7 +684,7 @@ At fixed $p$, $\alpha$, and $\beta$, increasing $N$ does *not* change $\Pi_V$. I
 
 ### When search changes the checking problem {#sec-vol3-test-time-compute-selection-pressure}
 
-The fixed-distribution calculation is a baseline, not a guarantee for adaptive search. A policy that repeatedly revises candidates to improve a score changes the candidate distribution. Selecting extreme scores can also concentrate on regions where the evaluator is poorly calibrated. The original estimates of $p$, $\alpha$, and $\beta$ may no longer describe the candidates being selected. Optimization against imperfect measures can fail through distinct mechanisms, including noisy measurements and changes in the relationship between a proxy and the desired outcome [@manheim2018categorizing]. Manheim and Garrabrant distinguish three that matter here. *Regressional* Goodhart arises because a noisy score partly measures its own error. *Extremal* Goodhart arises because a relationship between score and quality measured on ordinary candidates need not hold at the extremes that search reaches. *Adversarial* Goodhart arises when a candidate can influence the measurement itself.
+The fixed-distribution calculation is the baseline, and adaptive search moves away from it. A policy that repeatedly revises candidates to improve a score changes the candidate distribution. Selecting extreme scores can also concentrate on regions where the evaluator is poorly calibrated. The original estimates of $p$, $\alpha$, and $\beta$ may no longer describe the candidates being selected. Optimization against imperfect measures can fail through distinct mechanisms, including noisy measurements and changes in the relationship between a proxy and the desired outcome [@manheim2018categorizing]. Manheim and Garrabrant distinguish three that matter here. *Regressional* Goodhart arises because a noisy score partly measures its own error. *Extremal* Goodhart arises because a relationship between score and quality measured on ordinary candidates need not hold at the extremes that search reaches. *Adversarial* Goodhart arises when a candidate can influence the measurement itself.
 
 ```{python}
 #| label: calc-vol3-argmax-selection
@@ -627,11 +752,11 @@ for large $N$. In units of $\sigma$, the exact expectation is about `{python} Ar
 ![](images/svg/goodhart_divergence.svg)
 :::
 
-Rare gaps in a check follow the same compounding as pass@$k$. If a fraction $\eta$ of candidates exploit something the check does not examine, a pool of $N$ contains at least one such candidate with probability $1-(1-\eta)^N$. A gap present in `{python} ArgmaxSelection.gap_rate_str` of candidates, too rare to notice when testing one candidate at a time, appears in a pool of `{python} ArgmaxSelection.n_large_str` with probability `{python} ArgmaxSelection.gap_present_str`. If the exploit also scores well, selection finds it. These mechanisms do not establish a universal search budget beyond which quality must collapse, but they do mean that a check's accuracy on ordinary candidates overstates its accuracy on the candidates that search selects.
+Rare gaps in a check follow the same compounding as pass@$k$. If a fraction $\eta$ of candidates exploit something the check does not examine, a pool of $N$ contains at least one such candidate with probability $1-(1-\eta)^N$. A gap present in `{python} ArgmaxSelection.gap_rate_str` of candidates, too rare to notice when testing one candidate at a time, appears in a pool of `{python} ArgmaxSelection.n_large_str` with probability `{python} ArgmaxSelection.gap_present_str`. If the exploit also scores well, selection finds it. The design rule follows: a check's accuracy on ordinary candidates overstates its accuracy on the candidates that search selects, and the gap widens with pool size.
 
-For the connection-pool task, suppose the notification path is defective. A test-pass score can increase because a patch repairs that path, or because it removes the assertion that detects a worker remaining blocked after a connection returns. Both changes can improve the measured score; only the first addresses the hypothesized defect. This example motivates a separation between the candidate under evaluation and the criteria used to evaluate it. The candidate should not be able to redefine the authoritative test or manufacture its reported result. A candidate that executes in the same process as the test can go further and replace the assertion routine itself at run time, which is adversarial Goodhart in its most direct form; @sec-vol3-rlvr-rewards examines such exploits where training amplifies them. Isolation and enforcement belong to @sec-vol3-sandboxes; here the allocation consequence is that extra checking work is useful only if its evidence remains meaningful.
+For the connection-pool task, suppose the notification path is defective. A test-pass score can increase because a patch repairs that path, or because it removes the assertion that detects a worker remaining blocked after a connection returns. Both changes improve the measured score; only the first addresses the hypothesized defect. The candidate under evaluation must therefore be separated from the criteria that evaluate it, so that it can neither redefine the authoritative test nor manufacture its reported result. A candidate that executes in the same process as the test can go further and replace the assertion routine itself at run time, which is adversarial Goodhart in its most direct form; @sec-vol3-rlvr-rewards examines such exploits where training amplifies them. Isolation and enforcement belong to @sec-vol3-sandboxes; here the allocation consequence is that checking work pays only while its evidence stays trustworthy.
 
-Protecting the evaluator does not make its coverage complete. A sealed test suite can miss an untested schedule, and a learned scorer can favor a persuasive but invalid explanation. Evaluation must therefore examine the outputs selected by the actual search policy at the proposed budgets, including false acceptances and abstentions, rather than extrapolating a check's accuracy on ordinary candidates. More independent evidence may justify acceptance; another correlated score may add little.
+Protecting the evaluator leaves its coverage unchanged: a sealed test suite can miss an untested schedule, and a learned scorer can favor a persuasive but invalid explanation. Evaluation therefore examines the outputs selected by the actual search policy at the proposed budgets, including false acceptances and abstentions. More independent evidence can justify acceptance; another correlated score adds little.
 
 Useful checking also produces information that later reasoning can reuse: which hypothesis was contradicted, which candidate version passed a test, and under which assumptions. A revised patch may invalidate an earlier result even if much of its text is unchanged. The next section makes those dependencies explicit so that a search policy can revise a candidate without treating every previous observation as either permanently valid or entirely disposable.
 
@@ -639,7 +764,7 @@ Useful checking also produces information that later reasoning can reuse: which 
 
 A check can challenge more than the final answer. Suppose the repair agent has proposed a diagnosis, a patch, and a plan for checking the connection-pool change. A targeted test then contradicts the diagnosis. Regenerating every part of the proposal would repeat work, but preserving every part would retain conclusions built on a rejected premise. The runtime needs to identify which candidate artifacts depend on that premise before choosing the scope of another model call.
 
-A **revisable candidate plan** makes those dependencies explicit. It represents proposed work and the evidence supporting it, not a record that the proposed operations have already happened. The useful distinction is between regenerating an entire candidate and regenerating the parts whose support has changed. Neither choice establishes that the revised candidate is correct; the relevant checks still have to evaluate it.
+A **revisable candidate plan**\index{Revisable candidate plan!definition} makes those dependencies explicit. It records proposed work and the evidence supporting it, not operations already performed, so the runtime can regenerate only the parts whose support has changed instead of the entire candidate. The revised parts still face the same checks.
 
 ### Making candidate dependencies explicit {#sec-vol3-test-time-compute-plan-graph}
 
@@ -654,35 +779,35 @@ Consider the earlier candidate that attributes the connection-pool failure to an
 | API compatibility notes | Task constraints and public API declaration | Restrictions that every acceptable repair must preserve           |
 : **Dependencies within a repair candidate**: Each row names the inputs needed to interpret its artifact. A separate compatibility branch can be retained only while its own inputs remain applicable. {#tbl-vol3-candidate-plan-dependencies}
 
-The controlled waiter-and-return test shows a connection becoming available while the waiter remains blocked past the notification point. That observation undermines the timeout diagnosis as an adequate explanation of the observed failure and directs attention toward a missed return notification. The timeout-increasing patch and its check selection depend on the old diagnosis, so they require reconsideration as well. The source excerpt need not be regenerated if the file has not changed. The API compatibility notes may also remain useful if the task constraints and API declaration are unchanged. The next request can therefore ask for a revised diagnosis, patch, and check selection while supplying the still-applicable inputs. The new diagnosis still needs checking; identifying lost support is not proof of its replacement.
+The controlled waiter-and-return test shows a connection becoming available while the waiter remains blocked past the notification point. That observation undermines the timeout diagnosis as an adequate explanation of the observed failure and directs attention toward a missed return notification. The timeout-increasing patch and its check selection depend on the old diagnosis, so they require reconsideration as well. The source excerpt keeps its support while the file is unchanged, and the API compatibility notes keep theirs while the task constraints and API declaration are unchanged. The next request therefore asks for a revised diagnosis, patch, and check selection while supplying the still-applicable inputs, and the new diagnosis faces its own checks.
 
-These dependencies have to be recorded and checked; drawing a graph does not discover them automatically. An apparently separate compatibility branch may depend on the same source declaration as the patch. If that declaration changes, both branches can become stale. A graph with missing edges can preserve unsupported conclusions just as an unstructured outline can. The representation is worthwhile when its maintenance cost is lower than the repeated generation and checking it helps avoid.
+The runtime has to record and check these dependencies, because a graph with missing edges preserves unsupported conclusions as readily as an unstructured outline. An apparently separate compatibility branch may depend on the same source declaration as the patch; if that declaration changes, both branches become stale. The representation pays when its maintenance cost is lower than the repeated generation and checking it avoids.
 
 ### Tying evidence to its conditions {#sec-vol3-test-time-compute-precondition-invalidation}
 
-The runtime must distinguish a rejected claim from an observation that no longer applies. A failed targeted test can contradict the claim that a particular patch fixes the tested behavior. An earlier passing result for a different patch is not made historically false by the new failure. It simply does not establish that the current patch passes. This distinction prevents a stored success from becoming evidence for a candidate that was never checked.
+The runtime must distinguish a rejected claim from an observation that no longer applies. A failed targeted test can contradict the claim that a particular patch fixes the tested behavior. An earlier passing result for a different patch remains a true record of that patch and says nothing about the current one. Keeping the two apart prevents a stored success from becoming evidence for a candidate that was never checked.
 
-For the repair task, a test observation should identify the source or patch version, test version, relevant build or environment configuration, and check that produced it. A file-read observation similarly refers to the file contents actually read, not to whatever later occupies the same path. When a relevant input changes, the runtime marks affected artifacts as no longer supported for the current candidate and follows the recorded dependencies to identify further artifacts needing review. If artifact $v$ loses support, the set needing review is its descendants, $\text{Desc}(v) = \{u \mid v \rightsquigarrow u\}$, where $v \rightsquigarrow u$ means a directed path leads from $v$ to $u$. A breadth-first traversal computes this set in $O(|V| + |E|)$ time for a graph with $|V|$ artifacts and $|E|$ dependency edges. Artifacts outside the set keep their support, which is what lets an independent branch such as the compatibility notes survive. For graphs of the size in @tbl-vol3-candidate-plan-dependencies, the traversal costs far less than generating a single token, so the price of dependency tracking lies in recording the edges correctly, not in using them. @Fig-vol3-plan-revision traces this computation for the repair candidate and the scoped regeneration that follows it.
+For the repair task, a test observation should identify the source or patch version, test version, relevant build or environment configuration, and check that produced it. A file-read observation similarly refers to the file contents actually read, not to whatever later occupies the same path. When a relevant input changes, the runtime marks affected artifacts as unsupported for the current candidate and follows the recorded dependencies to identify further artifacts needing review. If artifact $v$ loses support, the set needing review is its descendants, $\text{Desc}(v) = \{u \mid v \rightsquigarrow u\}$, where $v \rightsquigarrow u$ means a directed path leads from $v$ to $u$. A breadth-first traversal computes this set in $O(|V| + |E|)$ time for a graph with $|V|$ artifacts and $|E|$ dependency edges. Artifacts outside the set keep their support, which is what lets an independent branch such as the compatibility notes survive. For graphs of the size in @tbl-vol3-candidate-plan-dependencies, the traversal costs far less than generating a single token, so the price of dependency tracking lies in recording the edges correctly. @Fig-vol3-plan-revision traces this computation for the repair candidate and the scoped regeneration that follows it.
 
 ::: {#fig-vol3-plan-revision fig-env="figure" fig-pos="htb" fig-cap="**Invalidation and Scoped Regeneration**: In (A), the waiter-and-return test contradicts the timeout diagnosis. Following the recorded dependency edges marks the patch and check selection for review, while the recorded inputs and the separately derived API notes keep their support. In (B), a new request supplies that supported frontier and regenerates only the diagnosis, patch, and check selection. The graph records candidate artifacts, not executed operations, and each replacement must still pass its own checks. The test inventory that also feeds check selection is omitted." fig-alt="Two stacked panels with the same dependency graph. Inputs on the left are source excerpt, failure observation, waiter-return test, and API declaration. In panel A, source excerpt and failure observation feed a diagnosis marked timeout too short, which feeds a patch candidate and then a check selection, both drawn with dashed red borders and labeled needs review. The waiter-return test points to the diagnosis with a dashed red arrow labeled contradicts. The API declaration feeds API notes labeled support kept. A text line reads Desc of diagnosis equals patch and check selection. In panel B, a dashed region labeled regenerated contains diagnosis prime labeled missed notification, patch candidate prime labeled notify on return, and check selection prime labeled ordering test, while the inputs and API notes are labeled retained."}
 ![](images/svg/fig-vol3-plan-revision.svg)
 :::
 
-Version identities help make this decision reproducible, but they are not a complete account of validity. A test that depends on a changing external service may cease to support the current task even when its local files have identical versions. Conversely, an unrelated file edit need not invalidate a result whose relevant inputs and execution conditions are unchanged. Reuse rests on the assumptions of the observation, including what the check covered and what it omitted, rather than on age or filename alone.
+Version identities make this decision reproducible, and the observation's assumptions complete it. A test that depends on a changing external service may cease to support the current task even when its local files have identical versions. Conversely, an unrelated file edit need not invalidate a result whose relevant inputs and execution conditions are unchanged. Reuse rests on the assumptions of the observation, including what the check covered and what it omitted, rather than on age or filename alone.
 
-The graph remains a representation of candidate artifacts and their support. Reading files, applying patches, and running tests are real operations governed by the runtime's permissions and resource limits. A sandbox test is still an executed action. Deleting a candidate node does not undo a file edit, release an external resource, or reverse any other effect. Execution and recovery mechanisms must account for those effects separately; a smaller regeneration request cannot provide that guarantee.
+The graph represents candidate artifacts and their support; reading files, applying patches, and running tests, even in a sandbox, are real operations governed by the runtime's permissions and resource limits. Deleting a candidate node leaves a file edit, an external resource, or any other effect in place, so execution and recovery mechanisms account for those effects separately (@sec-vol3-failure-recovery).
 
 ### Choosing the revision scope {#sec-vol3-test-time-compute-revision-mechanics}
 
 A local revision request supplies the current task constraints, the retained inputs relevant to the change, the observation that challenges the candidate, and the artifacts to replace. In the example, it asks for a new explanation and corresponding patch and check selection, not a fresh statement of unchanged API requirements. The runtime then checks that the replacements agree with the retained artifacts and that their dependency claims are adequate. A locally coherent replacement can still conflict with the rest of the candidate.
 
-Revision scope falls into three tiers, ordered by how much support the new evidence removes. A *local repair* replaces one artifact while preserving what its dependents rely on, such as a corrected command that yields the same output, so the dependency graph is unchanged. A *subgraph resynthesis* replaces the artifact and its descendants. The request supplies the still-supported frontier and asks the model to bridge from it to the downstream requirements that remain unchanged; the repair example, which replaces the diagnosis, patch, and check selection while keeping the source excerpt and compatibility notes, is this tier. When an observation falsifies a premise of the task itself, such as a missing capability or a revoked permission, no revision of the candidate can restore support. Deliberation then stops and the task is reported as unresolved or escalated under its contract rather than given more generation. @Fig-vol3-hierarchical-revision arranges the three tiers as two questions the runtime asks about the new evidence.
+Revision scope falls into three tiers, ordered by how much support the new evidence removes. A **local repair**\index{Local repair!definition} replaces one artifact while preserving what its dependents rely on, such as a corrected command that yields the same output, so the dependency graph is unchanged. A **subgraph resynthesis**\index{Subgraph resynthesis!definition} replaces the artifact and its descendants. The request supplies the still-supported frontier and asks the model to bridge from it to the downstream requirements that remain unchanged; the repair example, which replaces the diagnosis, patch, and check selection while keeping the source excerpt and compatibility notes, is this tier. When an observation falsifies a premise of the task itself, such as a missing capability or a revoked permission, no revision of the candidate can restore support. Deliberation then stops and the task is reported as unresolved or escalated under its contract rather than given more generation. @Fig-vol3-hierarchical-revision arranges the three tiers as two questions the runtime asks about the new evidence.
 
 ::: {#fig-vol3-hierarchical-revision fig-env="figure" fig-pos="htb" fig-cap="**Choosing the Revision Scope**: Two questions about the new evidence select among three responses. If the artifact's dependents still have what they need, a local repair replaces it alone. If they do not but the task's premises hold, subgraph resynthesis replaces the artifact and its descendants. If a premise has failed, deliberation stops and the task is reported unresolved or escalated. The tiers order responses by how much support the evidence removes; they do not make the smallest edit the preferred one." fig-alt="Flowchart. A box reading new evidence removes support from an artifact leads to a diamond asking whether dependents' needs are still met. Yes leads down to a card labeled local repair: replace one artifact, dependency graph unchanged, for example a corrected command with the same output. No leads right to a second diamond asking whether task premises still hold. Yes leads to a card labeled subgraph resynthesis: replace the artifact and its descendants, bridge from the supported frontier, the connection-pool repair. No leads to a red card labeled stop deliberation: no revision restores support, report unresolved or escalate under the contract. An arrow along the bottom runs from less support removed to more support removed."}
 ![](images/svg/hierarchical_revision_mechanics.svg)
 :::
 
-Local revision is an option, not a rule that the smallest edit is always best. If the diagnosis changes the meaning of the task, the dependency record is unreliable, or most of the candidate shares the rejected assumption, full regeneration may be easier to evaluate. It also has a cost: unchanged material must be produced again, and the new candidate can introduce differences beyond the original defect. The decision compares the scope of lost support with the generation and checking work needed to restore it.
+Local revision is the cheapest option, not always the best. If the diagnosis changes the meaning of the task, the dependency record is unreliable, or most of the candidate shares the rejected assumption, full regeneration may be easier to evaluate. It also has a cost: unchanged material must be produced again, and the new candidate can introduce differences beyond the original defect. The decision compares the scope of lost support with the generation and checking work needed to restore it.
 
 ```{python}
 #| label: lego-candidate-plan-revision
@@ -730,21 +855,21 @@ class PlanRevision:
 
 **Problem**: Suppose a candidate contains `{python} PlanRevision.total_nodes_str` nodes, each requiring `{python} PlanRevision.tokens_per_node_str` generated tokens. New evidence leaves `{python} PlanRevision.replacement_nodes_str` nodes needing replacement. How much output does scoped regeneration avoid if either approach produces a candidate adequate for the same subsequent checks?
 
-**Calculation**: Multiplying the complete node count by the output per node gives `{python} PlanRevision.full_output_str` tokens for full regeneration. Multiplying the replacement count by the same output allowance gives `{python} PlanRevision.local_output_str` tokens for scoped regeneration. The scoped request generates `{python} PlanRevision.output_share_str` of the full request's output, avoiding `{python} PlanRevision.avoided_share_str` of that output under the equal-node-size assumption.
+**Math**: Multiplying the complete node count by the output per node gives `{python} PlanRevision.full_output_str` tokens for full regeneration. Multiplying the replacement count by the same output allowance gives `{python} PlanRevision.local_output_str` tokens for scoped regeneration. The scoped request generates `{python} PlanRevision.output_share_str` of the full request's output, avoiding `{python} PlanRevision.avoided_share_str` of that output under the equal-node-size assumption.
 
-**Interpretation**: This comparison counts newly generated plan tokens, not total task cost. The scoped request still needs enough input to interpret retained constraints, and both approaches incur integration and checking costs. Shorter output can reduce generation work, but the token ratio alone does not establish the end-to-end latency ratio or the quality of the repair. It says nothing about whether any previously executed action should be repeated.
+**Systems insight**: Scoped regeneration saves exactly the fraction of the plan that keeps its support. The saving shrinks linearly as the contradicted premise reaches more descendants and vanishes when every node depends on it, so once most of the plan shares the rejected assumption, full regeneration costs little more and is easier to check. The count covers generated plan tokens only; input to interpret retained constraints, integration, and checking are charged to both options.
 
 :::
 
-The example isolates the benefit of changing less generated material. Whether that benefit survives in a complete system depends on the cost of maintaining dependencies, constructing the scoped input, and checking the replacement. Those costs belong in the same evaluation as the avoided output; they are not free consequences of using a graph. A candidate plan that must outlive one decision becomes live plan state, which @sec-vol3-agent-harness manages during execution and @sec-vol3-durable-execution preserves across failures.
+The example isolates the benefit of changing less generated material. Whether that benefit survives in a complete system depends on the cost of maintaining dependencies, constructing the scoped input, and checking the replacement, all of which belong in the same evaluation as the avoided output. A candidate plan that must outlive one decision becomes live plan state, which @sec-vol3-agent-harness manages during execution and @sec-vol3-durable-execution preserves across failures.
 
 ### Bounding repeated revision {#sec-vol3-test-time-compute-replanning-thrashing}
 
 A candidate can be revised repeatedly without becoming better supported. The model may alternate between diagnoses, produce cosmetically different patches, or respond to an irrelevant warning by regenerating useful material. The runtime should ask what changed in the evidence or assumptions and which claim the revision is intended to resolve. A warning matters when it affects that claim; its severity label alone does not decide whether the candidate remains valid.
 
-Revision therefore needs a remaining allowance for calls, tokens, checks, and elapsed time. Each admitted revision consumes that allowance, including unsuccessful local edits. Exhausting it stops further search or routes the unresolved task through an authorized handoff; it does not turn the current candidate into an accepted result. Repeated equivalent proposals under unchanged conditions can be a reason to stop earlier, but a similar proposal under changed conditions is not necessarily the same failed attempt. There is no universal ratio of revisions to actions that determines useful progress.
+Revision therefore needs a remaining allowance for calls, tokens, checks, and elapsed time. Each admitted revision consumes that allowance, including unsuccessful local edits. Exhausting it stops further search or routes the unresolved task through an authorized handoff, and the current candidate stays unaccepted. Repeated equivalent proposals under unchanged conditions are a signal to stop early; a similar proposal under changed conditions is a new attempt.
 
-Explicit dependencies let the runtime reuse support that remains applicable and focus generation where it does not. They do not guarantee progress or replace execution recovery. The next question is how to allocate a finite allowance across such revisions, competing candidates, and their checks. That requires an account of the work already spent and the work still admitted by the search policy.
+Explicit dependencies let the runtime reuse support that remains applicable and focus generation where it does not. The next question is how to allocate a finite allowance across such revisions, competing candidates, and their checks. That requires an account of the work already spent and the work still admitted by the search policy.
 
 ## Search Stopping Criteria {#sec-vol3-test-time-compute-bounded-search}
 
@@ -752,19 +877,19 @@ The repair agent can generate another complete patch, extend a partial candidate
 
 ### Where search prunes candidates
 
-Flat sampling generates a bounded set of complete candidates before selecting among them. In best-of-$N$, the runtime admits at most $N$ candidates and applies a selector to the completed, eligible outputs. The requests do not depend on one another, so available service capacity can shorten elapsed time through concurrency. Independence in the task graph does not guarantee simultaneous execution or an unchanged per-request generation rate. Flat sampling also postpones semantic pruning until a complete candidate exists, which can spend tokens on a candidate that an earlier check would have rejected.
+Flat sampling generates a bounded set of complete candidates before selecting among them. In best-of-$N$, the runtime admits at most $N$ candidates and applies a selector to the completed, eligible outputs. The requests are independent, so available service capacity shortens elapsed time through concurrency, to the extent the service actually runs them together at an unchanged rate. Flat sampling also postpones semantic pruning until a complete candidate exists, which can spend tokens on a candidate that an earlier check would have rejected.
 
-Beam expansion makes that earlier decision explicit. The runtime retains partial candidates up to a fixed beam width, generates a bounded number of extensions of each retained candidate, scores the extensions, and retains the next beam. When a frontier contains fewer candidates than the beam width, it expands only those present; the root is not a full beam. Scores can combine learned estimates with checks available at that stage. The retained beam limits which candidates receive further generation, but it does not bound all live state to that many objects. Before pruning, the new extensions can number the beam width times the extensions per candidate, alongside their scores and retained ancestors.
+**Beam search**\index{Beam search!definition} makes that earlier decision explicit. The runtime retains partial candidates up to a fixed beam width, generates a bounded number of extensions of each retained candidate, scores the extensions, and retains the next beam. When a frontier contains fewer candidates than the beam width, it expands only those present; the root is not a full beam. Scores can combine learned estimates with checks available at that stage. The retained beam bounds which candidates receive further generation, not all live state: before pruning, the new extensions can number the beam width times the extensions per candidate, alongside their scores and retained ancestors.
 
-Early pruning exchanges generation work for selection work and a stronger dependence on intermediate judgments. If the scorer discards a prefix that would have led to a good repair, this bounded run will not recover that prefix unless its policy explicitly permits revisiting it. Conversely, rejecting an invalid partial patch can avoid completing and testing it. The useful comparison is the cost and quality of these decisions, not a claim that pruning itself improves correctness.
+Early pruning exchanges generation work for selection work and a stronger dependence on intermediate judgments. If the scorer discards a prefix that would have led to a good repair, this bounded run will not recover that prefix unless its policy explicitly permits revisiting it. Conversely, rejecting an invalid partial patch avoids completing and testing it. Pruning pays when these decisions cost less than the generation they avoid and discard few prefixes that would have succeeded.
 
-An adaptive tree policy need not expand every retained candidate equally. Tree search over intermediate reasoning steps [@yao2023tree] can allocate another extension or rollout to a branch whose score is promising, whose outcome remains uncertain, or whose failure would clarify another decision. Monte Carlo tree search is one way to maintain visit counts and estimated returns for this allocation. A widely used selection rule, introduced with the AlphaGo system [@silver2016mastering], descends from the root choosing at each partial candidate $s$ the extension $a$ that maximizes
+An adaptive tree policy need not expand every retained candidate equally. Tree search over intermediate reasoning steps [@yao2023tree] can allocate another extension or rollout to a branch whose score is promising, whose outcome remains uncertain, or whose failure would clarify another decision. **Monte Carlo tree search**\index{Monte Carlo tree search!definition} is one way to maintain visit counts and estimated returns for this allocation. A widely used selection rule, introduced with the AlphaGo system [@silver2016mastering], descends from the root choosing at each partial candidate $s$ the extension $a$ that maximizes
 
 $$
 Q(s,a) + c\,P(a \mid s)\,\frac{\sqrt{\sum_{a'} N(s,a')}}{1 + N(s,a)},
 $$ {#eq-vol3-puct}
 
-where $Q(s,a)$ is the mean value observed after that extension, $N(s,a)$ its visit count, $P(a \mid s)$ a prior over extensions, for a language model its probability of proposing that step, and $c$ a constant that trades exploiting high values against exploring plausible, rarely visited extensions. After the runtime evaluates a new leaf and obtains value $V$, each edge on the path updates $N \leftarrow N + 1$ and $Q \leftarrow Q + (V - Q)/N$, a running mean. When $V$ comes from a learned scorer, the $Q$ term of @eq-vol3-puct inherits the selection drift of @eq-vol3-argmax-noise, and the rule steers visits toward edges whose estimates are high partly because they are noisy. The tree's value here is a policy choice about where to spend the next unit of work, not a correctness guarantee inherited from another search domain. Noisy scores, changing observations, and a finite budget still constrain what the search can establish. A more elaborate tree is useful only if its allocation decisions justify their additional evaluation and state-management costs.
+where $Q(s,a)$ is the mean value observed after that extension, $N(s,a)$ its visit count, $P(a \mid s)$ a prior over extensions, for a language model its probability of proposing that step, and $c$ a constant that trades exploiting high values against exploring plausible, rarely visited extensions. After the runtime evaluates a new leaf and obtains value $V$, each edge on the path updates $N \leftarrow N + 1$ and $Q \leftarrow Q + (V - Q)/N$, a running mean. When $V$ comes from a learned scorer, the $Q$ term of @eq-vol3-puct inherits the selection drift of @eq-vol3-argmax-noise, and the rule steers visits toward edges whose estimates are high partly because they are noisy. The tree decides where to spend the next unit of work; noisy scores, changing observations, and a finite budget bound what it can establish, and it pays only when its allocation decisions justify their evaluation and state-management costs.
 
 @Fig-vol3-search-topologies draws the three structures side by side, and @tbl-vol3-search-topologies summarizes where each structure prunes and what state it must hold. Sharing a common prefix among branches is a serving mechanism developed in @sec-vol3-kvcache-radix-tree; the last column records only whether a structure's branches can use it.
 
@@ -840,7 +965,7 @@ class PrunedTree:
     generated_saving_str = fmt_percent(generated_saving, precision=1, style="prose")
 ```
 
-Pruning is what keeps a search tree finite in practice. A tree that expands every node into `{python} PrunedTree.wide_b_str` children for `{python} PrunedTree.wide_depth_str` steps holds `{python} PrunedTree.wide_leaves_str` leaves, far beyond any per-task budget. Suppose instead that each node proposes $b$ children and a step check rejects each child independently with probability $p_{\text{prune}}$. The expected number of surviving children per node, the **effective branching factor**\index{Effective branching factor}, is
+Pruning is what keeps a search tree finite in practice. A tree that expands every node into `{python} PrunedTree.wide_b_str` children for `{python} PrunedTree.wide_depth_str` steps holds `{python} PrunedTree.wide_leaves_str` leaves, far beyond any per-task budget. Suppose instead that each node proposes $b$ children and a step check rejects each child independently with probability $p_{\text{prune}}$. The expected number of surviving children per node, the **effective branching factor**\index{Effective branching factor!definition}, is
 
 $$
 b_{\text{eff}} = b\,(1 - p_{\text{prune}}).
@@ -935,6 +1060,12 @@ class SearchLedger:
     flat_token_cost = flat_prompt_tokens * count * price_in + flat_output_tokens * count * price_out
     beam_token_cost = beam_prompt_tokens * count * price_in + beam_output_tokens * count * price_out + scorer_tokens * count * price_score
     output_saving = 1 - beam_output_tokens / flat_output_tokens
+    # Break-even: the input-price fraction (e.g. under prefix caching) at which
+    # the beam's output saving net of scoring pays for its repeated input.
+    out_saving_usd = ((flat_output_tokens - beam_output_tokens) * count * price_out).to(USD)
+    scorer_usd = (scorer_tokens * count * price_score).to(USD)
+    input_premium_usd = ((beam_prompt_tokens - flat_prompt_tokens) * count * price_in).to(USD)
+    breakeven_input_share = ((out_saving_usd - scorer_usd) / input_premium_usd).to(ureg.dimensionless).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(frontier_counts == [3, 9, 12, 12], "Root expansion precedes a full beam")
@@ -945,6 +1076,7 @@ class SearchLedger:
     check(beam_waves == 7 and flat_waves == 2, "Apply generation concurrency to each stage")
     check(abs(output_saving - 0.4375) < 1e-12, "Beam generates fewer output tokens in this scenario")
     check(beam_token_cost > flat_token_cost, "Repeated inputs reverse the token-charge ranking")
+    check(0 < breakeven_input_share < 1, "Beam breaks even only at a discounted input price")
     check(22 * second < flat_elapsed < 23 * second, "Flat timing subtotal remains in its stated range")
     check(19 * second < beam_elapsed < 21 * second, "Beam timing subtotal remains in its stated range")
 
@@ -981,6 +1113,9 @@ class SearchLedger:
     flat_token_cost_str = fmt_usd(flat_token_cost, precision=4)
     beam_token_cost_str = fmt_usd(beam_token_cost, precision=4)
     output_saving_pct_str = fmt_percent(output_saving, precision=2, style="prose")
+    input_premium_usd_str = fmt_usd(input_premium_usd, precision=3)
+    out_saving_usd_str = fmt_usd(out_saving_usd, precision=3)
+    breakeven_input_share_str = fmt_percent(breakeven_input_share, precision=1, style="prose")
 ```
 
 ::: {#nbk-03-compute-allocation-and-latency-trade-offs .callout-notebook title="Flat sampling vs. bounded beam expansion"}
@@ -995,25 +1130,25 @@ Hypothetical prices per million tokens are `{python} SearchLedger.price_in_str` 
 
 The beam expands frontiers of `{python} SearchLedger.frontier_counts_str` extensions in successive stages. Adding these counts gives `{python} SearchLedger.beam_segments_str` newly generated segments; multiplying by the segment length gives `{python} SearchLedger.beam_output_tokens_str` output tokens. After each stage it retains at most the beam width. For each request, generator input is the common prompt plus the preceding generated segments; summing across requests gives `{python} SearchLedger.beam_prompt_tokens_str` input tokens. The scorer instead reads each complete generated prefix, including its new segment. Summing each stage's extension count times its prefix length gives `{python} SearchLedger.scorer_tokens_str` scorer-input tokens. Generation requires `{python} SearchLedger.beam_waves_str` waves of one-segment requests; serial scoring adds `{python} SearchLedger.beam_scoring_time_s_str`; the final survivors fit in `{python} SearchLedger.beam_test_waves_str` test wave. Applying the same duration and price arithmetic gives `{python} SearchLedger.beam_elapsed_s_str` and `{python} SearchLedger.beam_token_cost_str`.
 
-**Systems insight**: Subtracting the beam-to-flat output ratio from one gives `{python} SearchLedger.output_saving_pct_str` fewer output tokens, yet the beam incurs higher token charges because its extra calls repeatedly supply the task prompt and retained prefixes. Under the stipulated schedule, its shorter generation waves also produce a lower timing subtotal. Neither result establishes better patch quality, and omitted prefill can change the latency comparison. Prefix reuse, different concurrency, or length-dependent scoring would require recomputing the corresponding account rather than changing every cost by the same factor.
+**Systems insight**: The beam generates `{python} SearchLedger.output_saving_pct_str` fewer output tokens, worth `{python} SearchLedger.out_saving_usd_str`, but resupplying the task prompt and retained prefixes to every extension costs `{python} SearchLedger.input_premium_usd_str` more in input, so its token bill is the higher one. The knob is the price of repeated input: the beam's bill falls below flat sampling's only when input tokens cost less than `{python} SearchLedger.breakeven_input_share_str` of list price, the regime a prefix cache creates (@sec-vol3-kvcache-radix-tree). Its shorter generation waves already give it the lower timing subtotal under this schedule, before omitted prefill is added back. Quality is not in this ledger; the choice between the two rests on the check results each produces.
 
 :::
 
 ### Admission limits and pending work
 
-A task-wide quota must constrain new admissions, not merely notice an overrun after concurrent requests complete. Before dispatching an extension, the runtime reserves its allowed output and any bounded check or tool work needed by the policy. Spent work plus outstanding reservations must remain within the relevant ceiling. Unused allowance becomes available again only when the runtime has sufficient evidence that the corresponding request can incur no further charge. If the service provides no enforceable bound or trustworthy settlement information, the runtime cannot promise an exact global spending limit from local bookkeeping alone.
+A task-wide quota constrains new admissions before dispatch, because an overrun noticed after concurrent requests complete has already been spent. Before dispatching an extension, the runtime reserves its allowed output and any bounded check or tool work needed by the policy. Spent work plus outstanding reservations must remain within the relevant ceiling. Unused allowance becomes available again only when the runtime has sufficient evidence that the corresponding request can incur no further charge. An exact global spending limit therefore requires the service to provide an enforceable bound or trustworthy settlement information; local bookkeeping alone supplies an estimate.
 
-The same policy must distinguish depth from time. A depth limit bounds sequential extensions or tool steps, while a deadline bounds how long the task owner will wait. At the deadline, the runtime stops admitting work, stops using late results for the expired decision, and requests cancellation where supported. A local cancellation does not prove immediate remote termination or resource reclamation. Pending operations remain in the ledger until their status is resolved; this is the same boundary established by the normalized call statuses.
+The same policy must distinguish depth from time. A depth limit bounds sequential extensions or tool steps, while a deadline bounds how long the task owner will wait. At the deadline, the runtime stops admitting work, stops using late results for the expired decision, and requests cancellation where supported. A local cancellation is a request, not proof of remote termination, so pending operations remain in the ledger until their status is resolved; this is the same boundary established by the normalized call statuses.
 
-Resource exhaustion ends search without relaxing acceptance. A completed candidate may still fail the task's checks, and a high score is not permission to dispatch an action. If no retained result meets the acceptance criteria, the system reports an incomplete outcome, abstains, or escalates under the contract. A truncated candidate does not become eligible merely because every other branch also ran out of tokens. Mechanical limits bound expenditure independently of the model's request to continue, as required by the invariant closure principle (\ref{pri-invariant-closure}).
+Resource exhaustion ends search without relaxing acceptance. A completed candidate may still fail the task's checks, and a high score is not permission to dispatch an action. If no retained result meets the acceptance criteria, the system reports an incomplete outcome, abstains, or escalates under the contract, even when every branch ran out of tokens. Mechanical limits bound expenditure independently of the model's request to continue, as required by the invariant closure principle (\ref{pri-invariant-closure}).
 
 ### Early exit and the value of continuation
 
-Some tasks seek the first result that meets stated acceptance criteria. This objective is satisficing. Once a candidate satisfies the required evidence standard and any approval conditions, the policy can stop searching for alternatives. A compiler pass alone does not establish that the race condition is fixed; it supports only the property the compiler checked. Stopping candidate generation also does not establish that a proposed repair has been authorized, applied, or accepted in the target environment.
+Some tasks seek the first result that meets stated acceptance criteria, an objective called **satisficing**\index{Satisficing!definition}. Once a candidate satisfies the required evidence standard and any approval conditions, the policy stops searching for alternatives. A compiler pass supports only the property the compiler checked, and stopping generation leaves authorization, application, and acceptance in the target environment as separate steps.
 
 An optimization objective can justify further work even after a candidate becomes acceptable. A task might prefer a smaller patch or lower runtime overhead within its remaining budget. Conversely, a candidate with a rising learned score may not justify further work if held-out evaluation shows that such score increases rarely improve accepted outcomes. The stopping rule must therefore state what benefit it values rather than assume that any passing check makes additional work worthless.
 
-Marginal stopping compares the estimated benefit of the next admissible action with its additional cost. During an unresolved repair, the runtime does not know the true success probability it would obtain after another attempt. It needs estimates calibrated on held-out tasks with comparable conditions, or observable progress signals whose predictive value has been tested. A changed diagnostic or a newly passing regression check can inform such an estimate, but neither directly measures a probability of complete correctness. The estimate remains conditional on the policy and checker distribution used for calibration.
+**Marginal stopping**\index{Marginal stopping!definition} compares the estimated benefit of the next admissible action with its additional cost. During an unresolved repair, the runtime does not know the true success probability it would obtain after another attempt. It needs estimates calibrated on held-out tasks with comparable conditions, or observable progress signals whose predictive value has been tested. A changed diagnostic or a newly passing regression check can inform such an estimate, but neither directly measures a probability of complete correctness. The estimate remains conditional on the policy and checker distribution used for calibration.
 
 Written as a rule, let $\hat P_m$ be the calibrated estimate of the probability of an accepted result after $m$ units of admitted work, and $C_m$ the cumulative cost of that work. Marginal stopping halts when
 
@@ -1029,7 +1164,7 @@ The three stopping conditions apply in a fixed precedence. Hard ceilings on toke
 ![](images/svg/search_stopping_boundaries.svg)
 :::
 
-Uncertain benefit estimates do not override hard limits. They guide how the runtime allocates the resources still available and when it elects to stop early. If no useful continuation remains, the outcome must still preserve the distinction between an accepted deliverable and an unfinished candidate. A bounded policy combines this decision with explicit treatment of pending work rather than equating the end of computation with the end of the task.
+Benefit estimates guide how the runtime allocates the resources the hard limits leave and when it elects to stop early. When no useful continuation remains, the outcome still distinguishes an accepted deliverable from an unfinished candidate, and pending work stays in the ledger: the end of computation is not the end of the task.
 
 ::: {#chk-03-search-topologies .callout-checkpoint title="Accounting for a bounded search"}
 
@@ -1037,11 +1172,12 @@ The ledger and stopping policy must account for work even when it produces no ac
 
 - [ ] **Input budget**: Using the notebook's prompt length and expansion counts, can you estimate the input tokens spent on common prompts alone and explain why they exceed flat sampling's input count?
 - [ ] **Pending work**: Which requests must remain reserved when the runtime reaches its deadline but remote cancellation is unconfirmed?
+- [ ] **Stopping precedence**: A search has nearly exhausted its token ceiling, holds a candidate that passes the sealed suite, and still estimates a marginal gain above $\epsilon_{\text{stop}}$. Which rule decides, and what does the runtime do next?
 - [ ] **Acceptance evidence**: What evidence would justify stopping with an accepted repair, and what should the runtime return if only the highest learned score is available?
 
 :::
 
-The search structure determines where the policy can spend work, while the ledger and stopping rules bound what it may spend and return. None of these choices alone establishes which policy produces better accepted outcomes. That judgment requires comparing complete policies under the same task conditions and resource ceilings, including the attempts that end without an accepted result.
+The search structure determines where the policy can spend work, while the ledger and stopping rules bound what it may spend and return. Which policy produces better accepted outcomes is settled by comparing complete policies under the same task conditions and resource ceilings, including the attempts that end without an accepted result.
 
 ## Deliberation Strategy Evaluation {#sec-vol3-test-time-compute-strategy-design}
 
@@ -1055,7 +1191,7 @@ A system-design comparison asks a different question. It may compare a stronger 
 
 The evaluation must follow all assigned tasks, including failures and unfinished searches. Report final selected-output quality under an evaluator that is not merely the score optimized during search. Distinguish false acceptance from refusal or abstention, and distinguish both from running out of time. When reporting checker errors, state the denominator: the fraction of incorrect candidates that pass a check differs from the fraction of accepted outputs that are incorrect. Repeated trials should expose uncertainty and task-to-task variation rather than present a point estimate as a guarantee.
 
-Actual expenditure includes unsuccessful branches, repeated input, selection, checks, and work still billed after cancellation. Divide total cohort cost by the number of tasks meeting the stated acceptance criterion to obtain cost per accepted task; do not average only the costs of successful runs. Report latency distributions alongside this ratio, including the fraction completing within the deadline. A low average can hide a policy whose sequential revisions make its slowest tasks unusable.
+Actual expenditure includes unsuccessful branches, repeated input, selection, checks, and work still billed after cancellation. Dividing total cohort cost by the number of tasks meeting the stated acceptance criterion gives the cost per accepted task, the cohort form of $C_{\text{eff}}$ (@eq-vol3-cost-per-accepted-task); averaging only the costs of successful runs understates it by the failed attempts. Report latency distributions alongside this ratio, including the fraction completing within the deadline. A low average can hide a policy whose sequential revisions make its slowest tasks unusable.
 
 ### A deadline changes the policy
 
@@ -1114,6 +1250,10 @@ class StrategyComparison:
     c_time = c_rounds * round_time
     max_c_time = rounds * round_time
     requested_time = max_rounds * round_time
+    a_bill_per_pass = a_cost / a_pass  # model bill per suite-passing task
+    b_bill_per_pass = b_cost / b_pass
+    c_bill_per_pass = c_cost / c_pass
+    b_over_a = (b_bill_per_pass / a_bill_per_pass).to(ureg.dimensionless).magnitude
 
     # ┌── 3. GUARD (Validate Assumptions & Bounds) ─────────────────────────
     assert rounds == 2  # this notebook's conditional revision model has two rounds
@@ -1126,6 +1266,7 @@ class StrategyComparison:
     assert rounds <= check_ceiling
     assert max(b_input, prompt + revision_input) <= input_ceiling
     assert max(b_output, rounds * output) <= output_ceiling
+    assert a_bill_per_pass < c_bill_per_pass < b_bill_per_pass
 
     # ┌── 4. OUTPUT (Typed Prose Strings) ──────────────────────────────────
     prompt_str = fmt_int(prompt)
@@ -1159,6 +1300,10 @@ class StrategyComparison:
     a_per_pass_str = fmt_int(a_output / a_pass)
     b_per_pass_str = fmt_int(b_output / b_pass)
     c_per_pass_str = fmt_int(c_output / c_pass)
+    a_bill_per_pass_str = fmt_usd(a_bill_per_pass, precision=4)
+    b_bill_per_pass_str = fmt_usd(b_bill_per_pass, precision=4)
+    c_bill_per_pass_str = fmt_usd(c_bill_per_pass, precision=4)
+    b_over_a_mult_str = fmt_multiple(b_over_a, precision=1)
 ```
 
 ::: {#nbk-03-strategy-comparison .callout-notebook title="Three policies, one deadline"}
@@ -1175,42 +1320,48 @@ Each initial request contains `{python} StrategyComparison.prompt_str` input tok
 
 **Math**: Feedback's deadline-censored pass probability is $p+(1-p)q$, or `{python} StrategyComparison.c_pass_str`; its expected number of rounds is $1+(1-p)$, or `{python} StrategyComparison.c_rounds_str`. Expected expenditure is `{python} StrategyComparison.c_input_str` input tokens, `{python} StrategyComparison.c_output_str` output tokens, and `{python} StrategyComparison.c_rounds_str` tests, with a model bill of `{python} StrategyComparison.c_cost_str`. Expected completion time is `{python} StrategyComparison.c_time_str`, and the maximum is `{python} StrategyComparison.max_c_time_str`. The remaining `{python} StrategyComparison.c_no_pass_str` of runs return no accepted candidate. They are budget-limited outcomes, not omitted trials or successful third attempts. Generated tokens per suite-passing task are about `{python} StrategyComparison.a_per_pass_str`, `{python} StrategyComparison.b_per_pass_str`, and `{python} StrategyComparison.c_per_pass_str` for A, B, and C, respectively.
 
-**Systems insight**: Breadth spends more parallel work to increase the chance of a passing candidate without adding sequential rounds. Feedback uses fewer expected tokens here but adds a dependency on the previous check. Its uncompleted third round contributes neither a result nor a success probability. Model bills exclude test infrastructure, so they are partial costs; the reported test counts remain necessary. None of these stipulated suite-pass rates determines false acceptance or true repair quality, which require separate evaluation.
+**Systems insight**: Per suite-passing task, the model bill is `{python} StrategyComparison.a_bill_per_pass_str` for A, `{python} StrategyComparison.c_bill_per_pass_str` for C, and `{python} StrategyComparison.b_bill_per_pass_str` for B, `{python} StrategyComparison.b_over_a_mult_str` that of a single candidate. Feedback lifts the pass rate from `{python} StrategyComparison.initial_pass_str` to `{python} StrategyComparison.c_pass_str` for a small premium per success; breadth reaches `{python} StrategyComparison.b_pass_str` at the highest cost per success. The deadline is the knob that chooses between them: with room for only one `{python} StrategyComparison.round_time_str` round, breadth is the only way past `{python} StrategyComparison.initial_pass_str`; with room for two, feedback buys most of the gain cheaply; its third round, needing `{python} StrategyComparison.requested_time_str`, contributes nothing inside a `{python} StrategyComparison.deadline_str` deadline. Add each option's test count before comparing total cost per accepted task, and measure false acceptance separately, since a suite pass is not a repair.
 
 :::
 
 ### Choosing an operating point
 
-No policy in the notebook is universally best. One candidate is cheapest, breadth has the highest stipulated suite-pass probability, and feedback offers an intermediate probability at intermediate expected expenditure but greater latency. A useful policy need not improve every metric over every simpler policy. A configuration is dominated only if another feasible configuration is at least as good on every chosen objective and strictly better on one. The remaining configurations offer trade-offs, from which the task's quality, risk, cost, and latency requirements determine an operating point.
+Each policy in the notebook wins on some metric. One candidate is cheapest, breadth has the highest stipulated suite-pass probability, and feedback offers an intermediate probability at intermediate expected expenditure but greater latency. A useful policy need not improve every metric over every simpler policy. A configuration is dominated only if another feasible configuration is at least as good on every chosen objective and strictly better on one. The remaining configurations offer trade-offs, from which the task's quality, risk, cost, and latency requirements determine an operating point.
 
 This comparison also shows why probabilities must be calibrated under the deployed policy. Independent breadth draws do not justify substituting an informal "effective candidate count" into an exact probability formula. A revision's success probability is conditional on the failures and diagnostics that reach it. A deadline can remove later revisions from the deployed policy altogether. Held-out evaluation must preserve these conditions, including stopping behavior, rather than extrapolate an uncensored search curve into a constrained deployment.
 
 ## Fallacies and Pitfalls {#sec-vol3-test-time-compute-fallacies}
 
-The common errors in deliberation design confuse additional work with the result that work is meant to improve. These distinctions remain important even when a policy performs well on average.
+The common errors in deliberation design confuse additional work with the result that work is meant to improve, and each has a price that the chapter's own arithmetic makes visible.
 
 ::: {.fallacy-pitfall}
 **Fallacy**: *More generated tokens necessarily produce a better answer.*
 
-Additional reasoning can resolve a difficult implication using information already in the prompt, but it can also repeat a mistaken premise. Token count measures expenditure, not progress. Compare the final selected output under the same task conditions, and retain extra reasoning only where its measured benefit justifies the added cost or latency.
+Additional reasoning resolves implications of information already in the prompt, and it can just as easily elaborate a mistaken premise. When the open question is what the program does, generation is the slow way to find out: the `{python} ProbeAllocation.answer_tokens_str`-token explanation of @sec-vol3-test-time-compute-insufficient-response takes `{python} ProbeAllocation.answer_time_str`, `{python} ProbeAllocation.time_mult_str` the `{python} ProbeAllocation.probe_time_str` test that supplies the missing observation. Token count measures expenditure, not progress; keep extra reasoning only where its measured gain in selected-output quality justifies its latency.
 :::
 
 ::: {.fallacy-pitfall}
 **Pitfall**: *Treating independent samples as independent capabilities.*
 
-Separate random draws from a fixed model can satisfy a sampling assumption while sharing the same limitations across tasks. A large candidate pool may still miss a needed fact or contain only superficially different approaches. Measure useful candidate availability and the selector's ability to recover it, rather than infer either from sample count alone.
+Draws that are independent for one task still share the model's blind spots across tasks, so pass@$k$ computed from a workload's average success rate overstates what a pool delivers (@sec-vol3-test-time-compute-candidate-diversity). A workload in which half the tasks pass at `{python} BestOfN.p_easy_str` and half never pass averages `{python} BestOfN.p_str`, the rate of notebook \ref{nbk-03-best-of-n-pool-price}; substituting that average predicts `{python} BestOfN.naive_mix_str` for a pool of `{python} BestOfN.n_max_str`, while the true pool success is `{python} BestOfN.true_mix_str`, because no number of samples solves the tasks the model never solves. Compute pass@$k$ per task and average the results.
 :::
 
 ::: {.fallacy-pitfall}
-**Fallacy**: *The highest-scoring candidate has completed the task.*
+**Fallacy**: *A check with a low false acceptance rate makes almost every pass trustworthy.*
 
-A score orders candidates according to a particular criterion. A test pass establishes the tested property under the tested conditions. Neither expands authority nor supplies evidence for requirements the evaluator does not cover. If no candidate meets the task's acceptance criteria, reaching the search limit does not make the highest scorer acceptable.
+Precision depends on the base rate of valid candidates as much as on the check (@eq-vol3-verifier-precision). With a `{python} CheckYield.alpha_str` false acceptance rate, a `{python} CheckYield.beta_str` false rejection rate, and `{python} CheckYield.p_str` of candidates valid, only `{python} CheckYield.precision_str` of passing candidates are valid, and a first-pass selector returns a defective repair on `{python} CheckYield.wrong_str` of attempts (notebook \ref{nbk-03-compute-overhead-and-yield-under}). On hard tasks, the generator's valid rate is as much a lever on precision as the check itself.
 :::
 
 ::: {.fallacy-pitfall}
 **Pitfall**: *Charging only for the final answer.*
 
-Discarded candidates, repeated context, diagnostics, and selection all consume resources. Parallel execution can shorten elapsed time while increasing total work, and canceled requests may continue to incur cost. Charge the whole search to the assigned task and count unsuccessful tasks when estimating the cost of producing accepted results.
+Discarded candidates, repeated context, diagnostics, and selection all consume resources, and canceled requests may continue to incur cost. Parallel breadth in notebook \ref{nbk-03-strategy-comparison} returns one `{python} StrategyComparison.output_str`-token candidate but bills `{python} StrategyComparison.b_output_str` output tokens per task and `{python} StrategyComparison.b_per_pass_str` per suite-passing task; the beam in notebook \ref{nbk-03-compute-allocation-and-latency-trade-offs} reads `{python} SearchLedger.beam_prompt_tokens_str` input tokens to produce a single survivor. Charge the whole search, including unsuccessful tasks, to the cost per accepted task.
+:::
+
+::: {.fallacy-pitfall}
+**Fallacy**: *The highest-scoring candidate has completed the task.*
+
+A score orders candidates by one criterion, and argmax selection concentrates that criterion's errors in the winner: with Gaussian scoring noise, the selected candidate's expected error is about `{python} ArgmaxSelection.shift_large_str` standard deviations at `{python} ArgmaxSelection.n_large_str` candidates (@eq-vol3-argmax-noise), and a check gap present in `{python} ArgmaxSelection.gap_rate_str` of candidates appears in `{python} ArgmaxSelection.gap_present_str` of such pools. A top score supplies neither authority nor evidence for requirements the evaluator does not cover, and reaching the search limit leaves an unaccepted top scorer unaccepted.
 :::
 
 ## Summary {#sec-vol3-ch3-summary}
