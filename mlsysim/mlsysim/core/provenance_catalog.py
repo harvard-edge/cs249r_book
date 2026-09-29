@@ -1514,7 +1514,11 @@ PATTERSON_CARBON_2021 = _lit(
     "Patterson et al. (2021), Carbon Emissions and Large Neural Network Training",
     url="https://arxiv.org/abs/2104.10350",
     verified=_V,
-    notes="GPT-3 training: 1,287 MWh and 552 tCO2e (net, metric tonnes).",
+    notes=(
+        "GPT-3 training (Table 4 / App. A): 10,000 V100 GPUs (NVIDIA-suggested count), "
+        "24.6 TFLOP/s per GPU measured by OpenAI, ~14.8 days derived, 330 W system power "
+        "per GPU, PUE 1.10, 1,287 MWh, 552.1 tCO2e (net, metric tonnes)."
+    ),
 )
 
 # --- Model papers ---
@@ -1699,6 +1703,17 @@ DGX_H100_USER_GUIDE_PHYSICAL = _ds(
     "https://docs.nvidia.com/dgx/dgxh100-user-guide/introduction-to-dgxh100.html",
     verified=_V,
     notes="Four third-generation NVSwitch chips; 18 fourth-generation NVLink links per GPU; system weight 287.6 lb (130.45 kg).",
+)
+
+DGX_H100_USER_GUIDE_POWER = _ds(
+    "prov:nvidia-dgx-h100-user-guide-power",
+    "NVIDIA DGX H100/H200 User Guide: hardware overview, power supplies and networking",
+    "https://docs.nvidia.com/dgx/dgxh100-user-guide/introduction-to-dgxh100.html",
+    verified="2026-09-29",
+    notes=("Six 3.3 kW PSUs (3300 W @ 200-240 V, 16 A) in 4+2 redundancy; 10.2 kW max system power; "
+           "runs at reduced performance on three PSUs, boots only with at least three. Networking: eight "
+           "single-port ConnectX-7 InfiniBand cards (compute) plus two dual-port ConnectX-7 Ethernet cards "
+           "(storage/in-band); nics_per_node counts only the eight compute cards."),
 )
 
 # --- Composed systems ---

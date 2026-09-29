@@ -1045,12 +1045,13 @@ Hardware still shaped what could be learned. In 2012, storing AlexNet's 60 milli
 # │
 # │ Goal: Quantify the scale of modern foundation model training.
 # │ Show: The infrastructure challenge defined by 175 billion parameters and zettaFLOP scale.
-# │ How: Retrieve GPT-3 specifications and calculate training ZFLOPs.
+# │ How: Retrieve GPT-3 specifications and calculate training ZFLOPs; V100
+# │      GPU-years from the training_*_ref run (Patterson et al. 2021).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
 from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory, fmt_params, fmt_tokens, check, MarkdownStr
-from mlsysim.core.units import Bparam, ZFLOPs, byte, GB
+from mlsysim.core.units import Bparam, ZFLOPs, byte, GB, count, year
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT3Scale:
@@ -1062,6 +1063,8 @@ class GPT3Scale:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     model = Models.Language.GPT3
     training_tokens = Models.Language.GPT3.training_tokens
+    train_accel = model.training_accelerators_ref
+    train_days = model.training_days_ref
     avg_token_bytes = 1.4
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
@@ -1069,10 +1072,13 @@ class GPT3Scale:
     params_b = model.parameters.to(Bparam).magnitude
     training_zflops = model.training_ops.to(ZFLOPs).magnitude
     data_volume = training_tokens * avg_token_bytes * byte
+    gpu_years = (train_accel.to(count).magnitude * train_days).to(year).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(params_b == 175, f"GPT-3 should be 175 billion parameters, got {params_b}")
     check(tokens_b == 300, f"GPT-3 training should be 300B tokens, got {tokens_b}")
+    check(380 < gpu_years < 430, f"GPT-3 reference run should be ~400 V100 GPU-years, got {gpu_years:.0f}")
+    check(model.training_hardware_label == "V100", "prose names V100 time; the GPT-3 reference run must be the V100 run")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_billion_str = fmt_params(
@@ -1085,9 +1091,10 @@ class GPT3Scale:
     gpt3_training_zflops_str = fmt_int(training_zflops, commas=False)
     data_scale_gb_str = fmt_memory(data_volume, unit=GB, precision=0, commas=False)
     gpt3_training_tokens_billion_str = fmt_tokens(training_tokens, scale="billion", scale_style="word", precision=0, commas=False)
+    gpt3_v100_gpu_years_str = fmt_count(round(gpu_years), commas=True, label="V100 GPU-year")
 ```
 
-Deep learning effectively traded the feature engineering bottleneck for a new **compute bottleneck**\index{Compute bottleneck!definition}. Models like GPT-3\index{GPT-3!training scale} (`{python} GPT3Scale.gpt3_params_billion_str` parameters) illustrate the scale of this new challenge. @brown2020language report training on about `{python} GPT3Scale.gpt3_training_tokens_billion_str` tokens from filtered web text, books, and Wikipedia. Using the book's dense-training approximation ($C \approx 6 \times N \times D$, accounting for 2 FLOPs per parameter on the forward pass and 4 on the backward pass, derived in @sec-model-training), that parameter-token scale implies roughly `{python} GPT3Scale.gpt3_training_zflops_str` zettaFLOPs of compute ($1\text{ zettaFLOP} = 10^{21}\text{ FLOPs}$). The token dataset itself occupies roughly `{python} GPT3Scale.data_scale_gb_str`. Because the original paper does not specify the exact hardware cluster, translating this compute budget into hardware time represents roughly 350 to 400 accelerator-years on contemporary cloud GPUs (e.g., NVIDIA V100s), serving as an illustrative systems estimate rather than a recorded benchmark. The primary engineering challenge shifted from describing a cat's ear to coordinating large-scale distributed training without failure.
+Deep learning effectively traded the feature engineering bottleneck for a new **compute bottleneck**\index{Compute bottleneck!definition}. Models like GPT-3\index{GPT-3!training scale} (`{python} GPT3Scale.gpt3_params_billion_str` parameters) illustrate the scale of this new challenge. @brown2020language report training on about `{python} GPT3Scale.gpt3_training_tokens_billion_str` tokens from filtered web text, books, and Wikipedia. Using the book's dense-training approximation ($C \approx 6 \times N \times D$, accounting for 2 FLOPs per parameter on the forward pass and 4 on the backward pass, derived in @sec-model-training), that parameter-token scale implies roughly `{python} GPT3Scale.gpt3_training_zflops_str` zettaFLOPs of compute ($1\text{ zettaFLOP} = 10^{21}\text{ FLOPs}$). The token dataset itself occupies roughly `{python} GPT3Scale.data_scale_gb_str`. The original paper does not report the cluster size, but a later reconstruction from measured per-GPU throughput puts the run at roughly `{python} GPT3Scale.gpt3_v100_gpu_years_str` [@patterson2021carbon], an estimate rather than a recorded log. The primary engineering challenge shifted from describing a cat's ear to coordinating large-scale distributed training without failure.
 
 Each major transition in AI history traces back to a shifting physical constraint rather than algorithmic invention alone. @Tbl-ai-evolution-strengths compares the four major eras across their core reasoning strengths, binding systems bottlenecks, and operational data requirements.
 
@@ -1127,7 +1134,7 @@ Expert systems invested engineering effort in encoding domain knowledge; deep le
 # │ Goal: Preserve a quantitative scale anchor without presenting undisclosed
 # │       GPT-4 training details as official facts.
 # │ Show: A common public-estimate regime for GPT-4-class training scale.
-# │ How: Compare an illustrative 25,000 reference-GPU, 90-day run with the
+# │ How: Compare an illustrative 25,000 reference-GPU, 100-day run with the
 # │      mlsysim GPT-4-class GPU-day reference anchor.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1151,8 +1158,8 @@ class GPT4ScaleEstimate:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(a100_gpu_days_m > 1.0, "GPT-4-class public estimate should be million-GPU-day scale.")
     check(
-        0.8 <= estimate_ratio <= 1.1,
-        "Illustrative reference-GPU x days estimate should be near the mlsysim GPU-day anchor. The two differ by ~10%, so the prose states the shape of the estimate rather than printing it as an exact product.",
+        abs(estimate_ratio - 1) < 0.01,
+        "Reference GPUs x days must equal the GPT-4 GPU-day anchor (registry validator enforces this).",
     )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────

@@ -2264,7 +2264,7 @@ The elastic job completes in approximately `{python} ElasticVsRigid.elastic_tota
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Elastic-scaling constraints paragraph immediately below.
 # │
-# │ Goal: Bound the 175B job's whole-node elastic range by two registry tiers.
+# │ Goal: Bound the 175B job's elastic range by two registry tiers.
 # │ Show: 128 nodes (1,024 GPUs) down to 32 nodes (256 GPUs); 8-way TP per node.
 # │ How:  Scenarios.DenseLLMPretrainingReference.system (max) and
 # │       Systems.Clusters.Research_256 (min); both use 8-GPU nodes.
@@ -2289,7 +2289,102 @@ class ElasticNodeRange:
     min_gpus_str = fmt(min_sys.total_accelerators, precision=0)
 ```
 
-The scheduler cannot treat every job as elastic. The most significant constraint is incompatibility with model parallelism. Elastic scaling is fundamentally a data-parallel operation: the scheduler adds or removes replicas of the model, changing the global batch size but keeping the model architecture constant. For a 175B-parameter job that relies on `{python} ElasticNodeRange.tp_degree_str`-way tensor parallelism within each node, elasticity operates strictly at the node level. The job can scale between `{python} ElasticNodeRange.max_nodes_str` nodes (`{python} ElasticNodeRange.max_gpus_str` GPUs) and `{python} ElasticNodeRange.min_nodes_str` nodes (`{python} ElasticNodeRange.min_gpus_str` GPUs) in whole-node steps, changing the data-parallel degree. It cannot elastically remove a single GPU from a tensor-parallel group; doing so would require re-sharding the model weights, equivalent to a full checkpoint-and-restart cycle. Pipeline parallelism permits limited elasticity in principle, but adding or removing stages forces a recalculation of the pipeline schedule that often negates the benefit.
+```{python}
+#| echo: false
+#| label: lego-elastic-scaling-curve
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ELASTIC SCALING CURVE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Elastic-scaling constraints paragraph immediately below,
+# │          @fig-fleet-orchestration-scaling-efficiency-curve, and the
+# │          paragraph that introduces it.
+# │
+# │ Goal: Model eta_scaling for the 175B reference job from 64 to 4,096 GPUs.
+# │ Show: 89 -> 69 percent; the pipeline bubble dominates the losses at scale,
+# │       while throughput still rises at every step.
+# │ How:  DistributedModel sweep; TP = node size; PP = smallest power of two
+# │       that fits mixed-precision Adam state in HBM; fixed global batch from
+# │       Brown et al. (2020). Each sweep point is an unregistered in-memory
+# │       copy of the Training_1K fleet (HDR InfiniBand at every size).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature, ReferenceStats, Scenarios, Systems
+from mlsysim.solvers import DistributedModel
+from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_percent
+
+class ElasticScalingCurve:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    scenario = Scenarios.DenseLLMPretrainingReference  # GPT-3 175B on DGX H100 + HDR IB
+    model = scenario.workload
+    fleet = scenario.system
+    min_sys = Systems.Clusters.Research_256  # policy minimum (matches ElasticNodeRange)
+    local_eff = float(ReferenceStats.TrainingScaleProfiles.LocalComputeEfficiency)
+    batch_tokens = float(Literature.TrainingRuns.Gpt3BatchTokens)  # Brown et al. (2020), Table 2.1
+    seq_len = model.context_length
+    gpus_per_node = fleet.node.accelerators_per_node
+    hbm = fleet.node.accelerator.memory.capacity
+    sweep_doublings = 7  # scenario assumption: 64 ... 4,096 GPUs
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    state_bytes = 2 * BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE  # 16 B/param mixed-precision Adam
+    tp = gpus_per_node  # TP confined to one node
+    pp = 1
+    while (model.parameters.magnitude * state_bytes / (tp * pp)).to(GiB) > hbm:
+        pp *= 2  # smallest pipeline depth that fits HBM
+    replica = tp * pp
+    # Class scope: explicit loops, because comprehensions cannot see class variables.
+    gpu_counts = []
+    for _i in range(sweep_doublings):
+        gpu_counts.append(replica * 2**_i)
+    max_dp = gpu_counts[-1] // replica
+    batch_seqs = int(batch_tokens / seq_len) // max_dp * max_dp  # divisible by every DP degree
+    rows = []
+    for _n in gpu_counts:
+        _dp = _n // replica
+        _r = DistributedModel().solve(
+            model,
+            fleet.model_copy(update={"count": _n // gpus_per_node}),
+            batch_size=batch_seqs,
+            precision="fp16",
+            efficiency=local_eff,
+            tp_size=tp,
+            pp_size=pp,
+            microbatch_count=batch_seqs // _dp,  # scenario assumption: one sequence per micro-batch
+            overlap_comm=True,
+            seq_len=seq_len,
+        )  # scenario assumption: solver default 85% DP overlap
+        _step = _r.step_latency_total.to("s").magnitude
+        _tp = _r.tp_communication_latency.to("s").magnitude / _step
+        _bub = _r.pipeline_bubble_latency.to("s").magnitude / _step
+        rows.append(
+            dict(n=_n, eff=_r.scaling_efficiency, thr=_r.effective_throughput.magnitude, tp=_tp, bub=_bub, dp=1 - _r.scaling_efficiency - _tp - _bub)
+        )
+    win_min = min_sys.total_accelerators
+    win_max = fleet.total_accelerators
+    i_min = gpu_counts.index(win_min)
+    i_max = gpu_counts.index(win_max)
+    thr_gain = rows[-1]["thr"] / rows[i_max]["thr"]
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(pp == 8 and replica == 64, f"replica: expected TP8 x PP8 = 64 GPUs, got {tp}x{pp}")
+    check(batch_seqs == 1536, f"global batch: expected 1,536 sequences, got {batch_seqs}")
+    for _a, _b in zip(rows, rows[1:]):
+        check(_a["eff"] >= _b["eff"], "efficiency must not rise with scale")
+        check(_a["thr"] < _b["thr"], "throughput must still rise with scale")
+    check(rows[-1]["bub"] > rows[-1]["tp"], "pipeline bubble should dominate losses at the top of the sweep")
+    for _a, _b in zip(rows, rows[1:]):
+        check(_a["tp"] >= _b["tp"], "prose says the tensor-parallel share never rises above its small-scale value")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    tp_str = fmt(tp, precision=0, commas=False)
+    pp_str = fmt(pp, precision=0, commas=False)
+    replica_str = fmt_count(replica, commas=False, label="GPU")
+    batch_seqs_str = fmt(batch_seqs, precision=0, commas=True)
+    eff_min_str = fmt_percent(round(rows[i_min]["eff"], 2), precision=0, commas=False, style='prose')
+    eff_max_str = fmt_percent(round(rows[i_max]["eff"], 2), precision=0, commas=False, style='prose')
+    eff_top_str = fmt_percent(round(rows[-1]["eff"], 2), precision=0, commas=False, style='prose')
+    tp_share_str = fmt_percent(round(rows[0]["tp"], 2), precision=0, commas=False, style='prose')
+    top_gpus_str = fmt_count(gpu_counts[-1], commas=True, label="GPU")
+    thr_gain_mult_str = fmt_multiple(thr_gain, precision=1, commas=False)
+```
+
+The scheduler cannot treat every job as elastic. The most significant constraint is incompatibility with model parallelism. Elastic scaling is fundamentally a data-parallel operation: the scheduler adds or removes replicas of the model, changing the global batch size but keeping the model architecture constant. For a 175B-parameter job that relies on `{python} ElasticNodeRange.tp_degree_str`-way tensor parallelism within each node and `{python} ElasticScalingCurve.pp_str` pipeline stages across nodes, elasticity operates at the granularity of a whole model replica of `{python} ElasticScalingCurve.replica_str`. The job can scale between `{python} ElasticNodeRange.max_nodes_str` nodes (`{python} ElasticNodeRange.max_gpus_str` GPUs) and `{python} ElasticNodeRange.min_nodes_str` nodes (`{python} ElasticNodeRange.min_gpus_str` GPUs) one replica at a time, changing the data-parallel degree. It cannot elastically remove a single GPU from a tensor-parallel group; doing so would require re-sharding the model weights, equivalent to a full checkpoint-and-restart cycle. Pipeline parallelism permits limited elasticity in principle, but adding or removing stages forces a recalculation of the pipeline schedule that often negates the benefit.
 
 The transition cost also constrains the scheduler's resize frequency. Each scaling event can interrupt useful work while the framework reconstructs its communication group and restores or redistributes state. The duration must be measured for the chosen runtime and checkpoint path. The scheduler must amortize this cost over the subsequent run duration, so small resize increments are only worthwhile if the job will run at the new scale for significantly longer than the transition window; @sec-fleet-orchestration-elastic-policies works through the thrashing regime this rule rules out.
 
@@ -2297,173 +2392,111 @@ The transition cost also constrains the scheduler's resize frequency. Each scali
 
 The scheduler uses the declared $[N_{\text{min}}, N_{\text{max}}]$ range to choose when a job starts and how its allocation changes. Starting at the minimum can reduce queue delay; expanding into newly idle capacity can increase progress; shrinking can release borrowed capacity without terminating the logical job. Notebook \ref{nbk-fleet-orchestration-elastic-scaling-decision} compares these choices by the work completed over the same time window.
 
-Each action must respect the framework contract. The most consequential of the three is **graceful preemption**\index{Graceful Preemption!definition}: when higher-priority work arrives, the scheduler first shrinks an elastic job toward $N_{\text{min}}$, reclaiming whole-node increments at the next resize boundary, and resorts to checkpoint-and-preempt only when the final viable group itself must yield. The multi-tenancy policies of @sec-fleet-orchestration-multi-tenancy rely on this primitive when owners reclaim borrowed capacity. Scaling curves and transition costs determine whether the extra progress repays the disruption. Because batch changes can affect convergence, a throughput gain alone does not establish that the job reaches its target model quality sooner.
+Each action must respect the framework contract. The most consequential of the three is **graceful preemption**\index{Graceful Preemption!definition}: when higher-priority work arrives, the scheduler first shrinks an elastic job toward $N_{\text{min}}$, reclaiming whole replicas at the next resize boundary, and resorts to checkpoint-and-preempt only when the final viable group itself must yield. The multi-tenancy policies of @sec-fleet-orchestration-multi-tenancy rely on this primitive when owners reclaim borrowed capacity. Scaling curves and transition costs determine whether the extra progress repays the disruption. Because batch changes can affect convergence, a throughput gain alone does not establish that the job reaches its target model quality sooner.
 
 ### Elastic scaling policies {#sec-fleet-orchestration-elastic-policies}
 
-Adding resources to a running job does not always accelerate time-to-convergence. The naive assumption that throughput scales linearly with worker count collapses under the weight of communication overhead, requiring the scheduler to enforce elastic scaling policies based on empirical efficiency curves rather than resource availability alone. A job's scaling efficiency\index{Scaling Efficiency!operating regimes} $\eta_{\text{scaling}}(k)$, defined as the ratio of observed throughput at $k$ workers to the ideal linear speedup, typically exhibits three distinct phases: a linear phase where compute dominates communication, a sublinear phase where gradient synchronization can no longer be hidden behind compute, and a saturation phase where the AllReduce ring becomes the bottleneck. A scheduler that blindly assigns available GPUs to a job in the saturation phase wastes cluster capacity that could have cleared the queue; conversely, running a job below its **minimum viable scale**\index{Minimum Viable Scale!definition} forces it to hold onto memory and network leases for disproportionately low progress.
+Adding resources to a running job does not always accelerate time-to-convergence. The naive assumption that throughput scales linearly with worker count collapses under the weight of communication and synchronization overhead, requiring the scheduler to enforce elastic scaling policies based on empirical efficiency curves rather than resource availability alone. A job's scaling efficiency\index{Scaling Efficiency!operating regimes} $\eta_{\text{scaling}}(k)$, defined as the ratio of observed throughput at $k$ workers to the ideal linear speedup, typically passes through three regimes: a near-linear regime where per-worker computation dwarfs every fixed per-step cost, a sublinear regime where pipeline fill and drain and the unhidden part of gradient synchronization become a visible share of each step, and a saturation regime where those fixed costs rival the shrinking computation itself. A scheduler that blindly assigns available GPUs to a job in the saturation regime wastes cluster capacity that could have cleared the queue. Conversely, a job held below its **minimum viable scale**\index{Minimum Viable Scale!definition} runs each worker efficiently yet cannot finish within its deadline or declared resource contract.
 
 ::: {.column-margin}
-![](images/svg/vol2_fleet_orchestration_margin_002.svg){width="100%" fig-alt="Elastic scaling curve with linear, sublinear, and saturation phases."}
+![](images/svg/vol2_fleet_orchestration_margin_002.svg){width="100%" fig-alt="Elastic scaling curve with linear, sublinear, and saturation regimes."}
 
 *Elastic scaling's benefit flattens into saturation.*
 :::
 
-The constructed scenario in @fig-fleet-orchestration-scaling-efficiency-curve separates an efficiency curve from an admission policy. Its assumed efficiency declines as worker count grows; the displayed $[256, 1024]$ range is a policy choice, not an interval derived from these efficiencies alone. A minimum allocation could follow from a completion deadline or the job's declared resource contract. It does not follow from insufficient per-worker computation at smaller scale: with fixed global work, fewer workers generally perform more work each. The upper limit likewise requires comparing additional useful progress with resize cost and the value of serving queued jobs. A real scheduler must obtain those inputs from profiling and the workload's quality target.
+The modeled scenario in @fig-fleet-orchestration-scaling-efficiency-curve separates an efficiency curve from an admission policy. For the 175B reference job, efficiency falls from `{python} ElasticScalingCurve.eff_min_str` at `{python} ElasticNodeRange.min_gpus_str` GPUs to `{python} ElasticScalingCurve.eff_max_str` at `{python} ElasticNodeRange.max_gpus_str` GPUs and `{python} ElasticScalingCurve.eff_top_str` at `{python} ElasticScalingCurve.top_gpus_str`, yet quadrupling from `{python} ElasticNodeRange.max_gpus_str` to `{python} ElasticScalingCurve.top_gpus_str` still raises throughput `{python} ElasticScalingCurve.thr_gain_mult_str`. Tensor-parallel communication shrinks along with each worker's computation, so its share of the step never rises above `{python} ElasticScalingCurve.tp_share_str`. The decline comes instead from pipeline fill and drain and unhidden gradient synchronization, which take roughly fixed time per step while each worker's share of the batch shrinks. The displayed $[256, 1024]$ range is therefore a policy choice, not an interval derived from these efficiencies alone. A minimum allocation could follow from a completion deadline or the job's declared resource contract. It does not follow from insufficient per-worker computation at smaller scale: with fixed global work, fewer workers generally perform more work each. The upper limit likewise requires comparing additional useful progress with resize cost and the value of serving queued jobs. A real scheduler must obtain those inputs from profiling and the workload's quality target.
 
-::: {#fig-fleet-orchestration-scaling-efficiency-curve fig-env="figure" fig-pos="htb" fig-cap="**Illustrative scaling efficiency curve and elastic operating range**: Constructed scaling efficiency ($\eta_{\text{scaling}}$) across cluster sizes from 64 to 4,096 GPUs. The colored regions illustrate progressively weaker scaling. The marked allocation window is an assumed policy; efficiency alone establishes neither its minimum nor its maximum. Lower efficiency does not imply that adding workers reduces throughput." fig-alt="Constructed scaling efficiency curve plotting scaling efficiency percentage against GPU count from 64 to 4,096 GPUs, highlighting linear, sublinear, and saturation zones with minimum and maximum viable scale boundaries."}
+::: {#fig-fleet-orchestration-scaling-efficiency-curve fig-env="figure" fig-pos="htb" fig-cap="**Modeled scaling efficiency and elastic operating range**: (a) Scaling efficiency ($\eta_{\text{scaling}}$) of the 175B reference job from 64 to 4,096 GPUs, computed with `{python} ElasticScalingCurve.tp_str`-way tensor parallelism within each DGX H100 node, `{python} ElasticScalingCurve.pp_str` pipeline stages, HDR InfiniBand, and a fixed global batch of `{python} ElasticScalingCurve.batch_seqs_str` sequences. The shaded window is an assumed admission policy; efficiency alone establishes neither its minimum nor its maximum. (b) Share of each step lost to tensor-parallel communication, pipeline bubble, and exposed gradient synchronization. Lower efficiency does not imply that adding workers reduces throughput." fig-alt="Two-panel chart. Left, a line of modeled scaling efficiency against GPU count on a log scale from 64 to 4,096 GPUs, declining gently and then more steeply, with a shaded policy window from 256 to 1,024 GPUs. Right, stacked bars of the share of step time lost to tensor-parallel communication, pipeline bubble, and exposed gradient synchronization at each GPU count; the tensor-parallel share stays nearly flat while the pipeline bubble grows fastest."}
 
-```{=latex}
-\begin{tikzpicture}[
-    >=Stealth,
-    font=\small
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ELASTIC SCALING CURVE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-fleet-orchestration-scaling-efficiency-curve
+# │
+# │ Goal: Plot the modeled efficiency of the 175B reference job with the
+# │       assumed policy window, and break down where each step's time goes.
+# │ Show: (a) efficiency vs GPUs on a log axis; (b) stacked lost-time shares.
+# │ How:  Plot ElasticScalingCurve.rows; no values are computed here.
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+import numpy as np
+import matplotlib.pyplot as plt
+from binder.tools.figures import style as book_style
+
+book_style.set_book_style()
+COLORS = book_style.COLORS
+fig, (ax, ax2) = plt.subplots(1, 2, figsize=(10, 4.5), gridspec_kw={"width_ratios": [1.25, 1]})
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+_esc = ElasticScalingCurve
+n = np.array([r["n"] for r in _esc.rows])
+eff = np.array([r["eff"] for r in _esc.rows])
+tick_labels = [f"{v:,}" for v in n]
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+# (a) Efficiency with the assumed admission window shaded.
+ax.axvspan(_esc.win_min, _esc.win_max, color=COLORS["grid"], alpha=0.45, lw=0)
+ax.axhline(1.0, color=COLORS["secondary"], ls="--", lw=1)
+ax.plot(n, eff, color=COLORS["BlueLine"], lw=2, marker="o", ms=5, zorder=3)
+for x, y in zip(n, eff):
+    ax.annotate(f"{y * 100:.0f}%", (x, y), textcoords="offset points", xytext=(0, -14), ha="center", fontsize=8, color=COLORS["primary"])
+
+# (b) Share of each step lost, by source. Series differ by hatch as well as color.
+loss_series = [
+    ("tp", "Tensor-parallel comm.", COLORS["OrangeLine"], None),
+    ("bub", "Pipeline bubble", COLORS["VioletLine"], "//"),
+    ("dp", "Exposed gradient sync", COLORS["OrangeL"], ".."),
 ]
+x = np.arange(len(n))
+bottom = np.zeros(len(n))
+for key, label, color, hatch in loss_series:
+    v = np.array([r[key] for r in _esc.rows])
+    ax2.bar(
+        x, v, bottom=bottom, color=color, label=label, width=0.7, hatch=hatch, edgecolor="white" if hatch != ".." else COLORS["OrangeLine"], lw=0.5
+    )
+    bottom += v
 
-    % Provide colors if not defined
-    \providecolor{ForestGreen}{RGB}{34,139,34}
-    \providecolor{NavyBlue}{RGB}{20,45,110}
-    \providecolor{Amber}{RGB}{217,119,6}
-    \providecolor{BurntOrange}{RGB}{210,105,30}
-    \providecolor{BrickRed}{RGB}{180,30,30}
-    \providecolor{SlateGrey}{RGB}{112,128,144}
-    \providecolor{LightGrey}{RGB}{245,247,250}
-    \providecolor{BorderGrey}{RGB}{203,213,225}
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.text(n[-1] * 1.2, 1.008, "Ideal linear scaling", ha="right", va="bottom", fontsize=8, color=COLORS["secondary"])
+ax.text(
+    (_esc.win_min * _esc.win_max) ** 0.5,
+    0.53,
+    f"Assumed policy window\n[{_esc.win_min:,}, {_esc.win_max:,}] GPUs",
+    ha="center",
+    fontsize=8,
+    color=COLORS["primary"],
+)
+ax.set_xscale("log", base=2)
+ax.set_xticks(n)
+ax.set_xticklabels(tick_labels, fontsize=8)
+ax.minorticks_off()
+ax.set_xlim(n[0] / 1.3, n[-1] * 1.3)
+ax.set_ylim(0.5, 1.05)
+ax.set_yticks([0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
+ax.set_yticklabels([f"{t:.0%}" for t in [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]])
+ax.set_xlabel("GPUs (log scale)")
+ax.set_ylabel(r"Scaling efficiency $\eta_{\mathrm{scaling}}$")
+ax.set_title("(a)", loc="left", fontsize=10)
 
-    % =========================================================================
-    % LEFT PANEL: Scaling Efficiency Plot
-    % Origin at (0,0).
-    % X: 64 (0), 128 (1.6), 256 (3.2), 512 (4.8), 1024 (6.4), 2048 (8.0), 4096 (9.6)
-    % Y: 0.0 to 1.0 (0 to 6.0 cm)
-    % =========================================================================
+top = bottom.max() * 1.15
+ax2.set_xticks(x)
+ax2.set_xticklabels(tick_labels, fontsize=8)
+ax2.set_ylim(0, top)
+_yt = np.arange(0, top, 0.1)
+ax2.set_yticks(_yt)
+ax2.set_yticklabels([f"{t:.0%}" for t in _yt])
+ax2.set_xlabel("GPUs")
+ax2.set_ylabel("Share of step time lost")
+_h, _l = ax2.get_legend_handles_labels()  # list top of stack first
+ax2.legend(_h[::-1], _l[::-1], loc="upper left", fontsize=8, frameon=True, framealpha=0.95)
+ax2.grid(axis="x", visible=False)
+ax2.set_title("(b)", loc="left", fontsize=10)
 
-    % Background zone fills
-    % Zone 1: Linear (Compute) [0 to 3.2]
-    \fill[ForestGreen!6!white] (0, 0) rectangle (3.2, 6.2);
-    % Zone 2: Sublinear (Mixed) [3.2 to 6.4]
-    \fill[Amber!6!white] (3.2, 0) rectangle (6.4, 6.2);
-    % Zone 3: Saturation (Comm) [6.4 to 10.2]
-    \fill[BrickRed!6!white] (6.4, 0) rectangle (10.2, 6.2);
-
-    % Horizontal grid lines (dashed)
-    \foreach \y/\val in {1.2/0.2, 2.4/0.4, 3.6/0.6, 4.8/0.8} {
-        \draw[dashed, SlateGrey!30, line width=0.6pt, dash pattern=on 3pt off 3pt] (0, \y) -- (10.2, \y);
-        \node[font=\scriptsize\color{SlateGrey!90!black}, anchor=east] at (-0.15, \y) {\val};
-    }
-    \node[font=\scriptsize\color{SlateGrey!90!black}, anchor=east] at (-0.15, 0) {0.0};
-    \node[font=\scriptsize\color{SlateGrey!90!black}, anchor=east] at (-0.15, 6.0) {1.0};
-
-    % Ideal linear line at y = 6.0
-    \draw[dashed, SlateGrey!60, line width=0.9pt, dash pattern=on 4pt off 3pt] (0, 6.0) -- (10.2, 6.0);
-    \node[font=\scriptsize\color{SlateGrey!80!black}, anchor=south east] at (10.15, 6.08) {Ideal Linear ($E = 1.0$)};
-
-    % Vertical zone boundary dashed lines
-    \draw[dashed, BurntOrange!90!black, line width=1.1pt, dash pattern=on 4pt off 3pt] (3.2, 0) -- (3.2, 6.2);
-    \draw[dashed, BrickRed!90!black, line width=1.1pt, dash pattern=on 4pt off 3pt] (6.4, 0) -- (6.4, 6.2);
-
-    % Region Badges at bottom
-    \node[draw=ForestGreen!40, fill=ForestGreen!15, rounded corners=3pt, font=\scriptsize\bfseries\color{ForestGreen!85!black}, inner xsep=6pt, inner ysep=3pt] at (1.6, 0.45) {Linear (Compute)};
-    \node[draw=Amber!50, fill=Amber!15, rounded corners=3pt, font=\scriptsize\bfseries\color{BurntOrange!95!black}, inner xsep=6pt, inner ysep=3pt] at (4.8, 0.45) {Sublinear (Mixed)};
-    \node[draw=BrickRed!40, fill=BrickRed!15, rounded corners=3pt, font=\scriptsize\bfseries\color{BrickRed!90!black}, inner xsep=6pt, inner ysep=3pt] at (8.3, 0.45) {Saturation (Comm)};
-
-    % Axes
-    \draw[SlateGrey!70, line width=1.0pt] (0, 0) -- (10.2, 0);
-    \draw[SlateGrey!70, line width=1.0pt] (0, 0) -- (0, 6.2);
-
-    % Y-axis ticks
-    \foreach \y in {0, 1.2, 2.4, 3.6, 4.8, 6.0} {
-        \draw[SlateGrey!70, line width=0.8pt] (0, \y) -- (-0.1, \y);
-    }
-
-    % X-axis ticks and labels
-    \draw[SlateGrey!70, line width=0.8pt] (0, 0) -- (0, -0.1) node[below=2pt, font=\scriptsize\color{SlateGrey!90!black}] {64};
-    \draw[SlateGrey!70, line width=0.8pt] (1.6, 0) -- (1.6, -0.1) node[below=2pt, font=\scriptsize\color{SlateGrey!90!black}] {128};
-    \draw[SlateGrey!70, line width=0.8pt] (3.2, 0) -- (3.2, -0.1) node[below=2pt, font=\scriptsize\bfseries\color{black!90}] {256};
-    \draw[SlateGrey!70, line width=0.8pt] (4.8, 0) -- (4.8, -0.1) node[below=2pt, font=\scriptsize\color{SlateGrey!90!black}] {512};
-    \draw[SlateGrey!70, line width=0.8pt] (6.4, 0) -- (6.4, -0.1) node[below=2pt, font=\scriptsize\bfseries\color{black!90}] {1,024};
-    \draw[SlateGrey!70, line width=0.8pt] (8.0, 0) -- (8.0, -0.1) node[below=2pt, font=\scriptsize\color{SlateGrey!90!black}] {2,048};
-    \draw[SlateGrey!70, line width=0.8pt] (9.6, 0) -- (9.6, -0.1) node[below=2pt, font=\scriptsize\color{SlateGrey!90!black}] {4,096};
-
-    % Axis Titles
-    \node[font=\footnotesize\bfseries\color{black!85}, rotate=90] at (-0.95, 3.1) {Scaling Efficiency $E(k)$};
-    \node[font=\footnotesize\bfseries\color{black!85}] at (5.1, -0.95) {GPU Worker Count (Log Scale)};
-
-    % Coordinates for points
-    \coordinate (P64) at (0, 5.76);
-    \coordinate (P128) at (1.6, 5.64);
-    \coordinate (P256) at (3.2, 5.40);
-    \coordinate (P512) at (4.8, 4.86);
-    \coordinate (P1024) at (6.4, 4.08);
-    \coordinate (P2048) at (8.0, 3.12);
-    \coordinate (P4096) at (9.6, 2.52);
-
-    % Straight segments with rounded joins
-    \draw[line width=2.4pt, line cap=round, line join=round, ForestGreen!85!black] (P64) -- (P128) -- (P256);
-    \draw[line width=2.4pt, line cap=round, line join=round, BurntOrange!90!black] (P256) -- (P512) -- (P1024);
-    \draw[line width=2.4pt, line cap=round, line join=round, BrickRed] (P1024) -- (P2048) -- (P4096);
-
-    % Point Markers and Labels
-    \fill[ForestGreen!85!black] (P64) circle (3pt);
-    \node[font=\scriptsize\bfseries\color{ForestGreen!85!black}, anchor=north] at ($(P64) + (0, -0.15)$) {96\%};
-
-    \fill[ForestGreen!85!black] (P128) circle (3pt);
-    \node[font=\scriptsize\bfseries\color{ForestGreen!85!black}, anchor=north] at ($(P128) + (0, -0.15)$) {94\%};
-
-    \fill[BurntOrange!90!black] (P256) circle (3pt);
-    \node[fill=Amber!6!white, inner sep=1.5pt, rounded corners=1pt,
-          font=\scriptsize\bfseries\color{BurntOrange!90!black}, anchor=north] at ($(P256) + (0, -0.15)$) {90\%};
-
-    \fill[BurntOrange!90!black] (P512) circle (3pt);
-    \node[font=\scriptsize\bfseries\color{BurntOrange!90!black}, anchor=north] at ($(P512) + (0, -0.15)$) {81\%};
-
-    \fill[BrickRed] (P1024) circle (3pt);
-    \node[fill=BrickRed!6!white, inner sep=1.5pt, rounded corners=1pt,
-          font=\scriptsize\bfseries\color{BrickRed}, anchor=north] at ($(P1024) + (0, -0.15)$) {68\%};
-
-    \fill[BrickRed] (P2048) circle (3pt);
-    \node[font=\scriptsize\bfseries\color{BrickRed}, anchor=north] at ($(P2048) + (0, -0.15)$) {52\%};
-
-    \fill[BrickRed] (P4096) circle (3pt);
-    \node[font=\scriptsize\bfseries\color{BrickRed}, anchor=north] at ($(P4096) + (0, -0.15)$) {42\%};
-
-    % =========================================================================
-    % RIGHT PANEL: Enforced Elastic Range & Saturation Trap Cards
-    % =========================================================================
-
-    % Card 1: Enforced Elastic Range
-    \node[draw=ForestGreen!50, fill=ForestGreen!4!white, rounded corners=6pt, line width=1.0pt,
-          minimum width=5.0cm, minimum height=2.9cm, anchor=north west] (card1) at (10.9, 6.2) {};
-
-    \node[font=\small\bfseries\color{ForestGreen!85!black}, anchor=north west] at (11.15, 5.95) {Enforced Elastic Range};
-    \node[font=\Large\bfseries\color{NavyBlue!90!black}, anchor=north west] at (11.15, 5.50) {[256, 1024] GPUs};
-
-    \node[font=\scriptsize\bfseries\color{black!85}, anchor=north west] at (11.15, 4.75) {Min scale: 256 GPUs};
-    \node[font=\tiny\color{black!70}, anchor=north west] at (11.15, 4.45) {Minimum follows the job admission contract};
-
-    \node[font=\scriptsize\bfseries\color{black!85}, anchor=north west] at (11.15, 3.95) {Max scale: 1,024 GPUs};
-    \node[font=\tiny\color{black!70}, anchor=north west] at (11.15, 3.65) {Maximum reserves capacity for queued jobs};
-
-    % Card 2: Saturation Trap
-    \node[draw=BrickRed!40, fill=BrickRed!3!white, rounded corners=6pt, line width=1.0pt,
-          minimum width=5.0cm, minimum height=3.35cm, anchor=north west] (card2) at (10.9, 3.1) {};
-
-    \node[font=\small\bfseries\color{BrickRed!90!black}, anchor=north west] at (11.15, 2.85) {Saturation Trap};
-    \node[font=\scriptsize\bfseries\color{BrickRed!90!black}, anchor=north west] at (11.15, 2.45) {At 4,096 GPUs, efficiency drops to 42\%.};
-
-    \node[font=\tiny\color{black!75}, anchor=north west] at (11.15, 2.05) {42\% of ideal linear throughput};
-    \node[font=\tiny\color{black!75}, anchor=north west] at (11.15, 1.75) {does not identify the source of lost efficiency.};
-
-    % Divider
-    \draw[draw=BrickRed!20, line width=0.8pt] (11.15, 1.45) -- (15.65, 1.45);
-
-    \node[font=\scriptsize\bfseries\color{black!85}, anchor=north west] at (11.15, 1.25) {Scheduler Action:};
-    \node[font=\tiny\color{black!75}, anchor=north west] at (11.15, 0.95) {Withhold nodes $>$1,024 to};
-    \node[font=\tiny\color{black!75}, anchor=north west] at (11.15, 0.70) {clear pending queue backlog.};
-
-    % Marginal Utility Policy button
-    \node[draw=BrickRed!25, fill=BrickRed!12, rounded corners=3pt, font=\scriptsize\bfseries\color{BrickRed!90!black},
-          minimum width=4.5cm, inner sep=3.5pt] at (13.4, 0.15) {Marginal Utility Policy};
-
-\end{tikzpicture}
+plt.tight_layout()
+plt.show()
+plt.close()
 ```
 
 :::
@@ -2555,7 +2588,7 @@ class ElasticScaling:
 
 Consider a large language model training job with a target batch size that requires `{python} ElasticScaling.es_peak_gpus_str` A100s for the highest throughput among the configurations considered. Three scheduling strategies are evaluated over a window of `{python} ElasticScaling.es_window_h_str`.
 
-**Given**: Throughput at `{python} ElasticScaling.es_gpus_128_str` is `{python} ElasticScaling.es_tp_128_str` epoch/hour (baseline). Throughput at `{python} ElasticScaling.es_gpus_256_str` is `{python} ElasticScaling.es_tp_256_str` epochs/hour (`{python} ElasticScaling.es_eff_256_pct_str` scaling efficiency). Throughput at `{python} ElasticScaling.es_s2_gpus_str` is `{python} ElasticScaling.es_tp_512_str` epochs/hour (`{python} ElasticScaling.es_eff_512_pct_str` scaling efficiency). Re-scaling cost is `{python} ElasticScaling.es_rescale_min_str` (`{python} ElasticScaling.es_rescale_hours_str`) to checkpoint, re-shard, and restart.
+**Given**: Throughput at `{python} ElasticScaling.es_gpus_128_str` is `{python} ElasticScaling.es_tp_128_str` epoch/hour (baseline). Throughput at `{python} ElasticScaling.es_gpus_256_str` is `{python} ElasticScaling.es_tp_256_str` epochs/hour (`{python} ElasticScaling.es_eff_256_pct_str` scaling efficiency relative to that baseline). Throughput at `{python} ElasticScaling.es_s2_gpus_str` is `{python} ElasticScaling.es_tp_512_str` epochs/hour (`{python} ElasticScaling.es_eff_512_pct_str` scaling efficiency). Re-scaling cost is `{python} ElasticScaling.es_rescale_min_str` (`{python} ElasticScaling.es_rescale_hours_str`) to checkpoint, re-shard, and restart.
 
 **Strategy 1 -- immediate start (no scaling)**: The job starts immediately with `{python} ElasticScaling.es_s1_gpus_str` and runs for the full `{python} ElasticScaling.es_window_h_str`. Total work: `{python} ElasticScaling.es_s1_math` epochs.
 

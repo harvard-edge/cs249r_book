@@ -46,6 +46,13 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
         nics_per_node=8,
+        # Power (added 2026-09-29): pc.DGX_H100_USER_GUIDE_POWER -- six 3.3 kW PSUs in
+        # 4+2 redundancy, 10.2 kW max. nics_per_node counts the eight compute
+        # ConnectX-7 IB cards; the two dual-port storage/in-band Ethernet cards are excluded.
+        psus_per_node=6,
+        psu_redundancy=2,
+        psu_rating=3.3 * kilowatt,
+        max_power=10.2 * kilowatt,
         host_memory=2 * TiB,
         host_cpu="Dual Intel Xeon Platinum 8480C",
         host_cpu_cores=112,

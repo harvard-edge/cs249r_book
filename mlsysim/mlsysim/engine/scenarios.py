@@ -254,9 +254,14 @@ class Scenarios:
     )
 
     # --- CLOUD WORLD ---
+    # Teaching mission, H100 era. Frontier_8K (8,192 H100, ~26K A100-equivalents
+    # of dense BF16 peak) is the H100 restatement of the GPT-4-class run;
+    # SemiAnalysis (2023) estimates the same pre-training at ~8,192 H100 for
+    # ~55 days. The historical A100 fleet lives on
+    # Models.Language.GPT4.training_*_ref.
     FrontierTraining = Scenario(
         name="Frontier LLM Training",
-        description="Pre-training a GPT-4-class frontier model on a massive fleet.",
+        description="Pre-training a GPT-4-class frontier model on an 8,192-GPU H100 fleet.",
         application="Frontier Training",
         workload=_Models.Language.GPT4,
         system=_Clusters.Frontier_8K,

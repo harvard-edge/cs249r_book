@@ -10,15 +10,10 @@ from ..core import provenance_catalog as pc
 # --- Facility cooling tiers (PUE / WUE anchors for appendices) ---
 PUE_LIQUID_COOLED = sourced(1.06, pc.UPTIME_PUE_2022, name="PUE (Liquid-Cooled)", description="Best-in-class liquid-cooled AI datacenter PUE.")
 PUE_BEST_AIR = sourced(1.12, pc.UPTIME_PUE_2022, name="PUE (Best Air-Cooled)", description="Best-in-class air-cooled hyperscale datacenter PUE.")
-PUE_TYPICAL = sourced(1.40, pc.UPTIME_PUE_2022, name="PUE (Industry Average)", description="Industry average traditional datacenter PUE.")
+PUE_TYPICAL = sourced(1.55, pc.UPTIME_PUE_2022, name="PUE (Industry Average)", description="Global average annual data center PUE reported by the Uptime Institute 2022 survey.")
 PUE_SIMPLE_AIR = sourced(1.50, pc.UPTIME_PUE_2022, name="PUE (Simple Air)", description="Simple air-cooled datacenter PUE tier.")
 PUE_LEGACY = sourced(1.58, pc.UPTIME_PUE_2022, name="PUE (Legacy Air-Cooled)", description="Older enterprise datacenter PUE tier.")
 PUE_STATE_OF_ART = sourced(1.10, pc.UPTIME_PUE_2022, name="PUE (state of art)", description="Highly optimized modern datacenter PUE benchmark.")
-# Added 2026-09-28. Uptime Institute's published 2022 global average annual PUE
-# (1.55). Kept separate from PUE_TYPICAL (1.40), which vol1 reads and which is
-# NOT changed here; reconciling the two "industry average" tiers is an open
-# author/modeler decision.
-PUE_UPTIME_SURVEY_2022_AVERAGE = sourced(1.55, pc.UPTIME_PUE_2022, name="PUE (Uptime 2022 global survey average)", description="Global average annual PUE reported by the Uptime Institute 2022 data center survey.")
 WUE_AIR_COOLED = sourced(0.5, pc.WUE_ANCHORS, name="WUE (air-cooled)", description="Water usage effectiveness for air-cooled facilities.")
 WUE_EVAPORATIVE = sourced(1.8, pc.WUE_ANCHORS, name="WUE (evaporative)", description="Water usage effectiveness for evaporative cooling.")
 WUE_LIQUID = sourced(0.0, pc.WUE_ANCHORS, name="WUE (liquid-cooled)", description="Closed-loop liquid cooling (near-zero WUE).")
@@ -37,9 +32,6 @@ class FacilityCooling(Registry):
     SimpleAir = CoolingProfile(name="Simple Air-Cooled", pue=PUE_SIMPLE_AIR, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
     Legacy = CoolingProfile(name="Legacy Air-Cooled", pue=PUE_LEGACY, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
     StateOfArt = CoolingProfile(name="State of Art", pue=PUE_STATE_OF_ART, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
-    # Added 2026-09-28: survey-average anchor. wue follows the Typical tier's
-    # evaporative assumption (the survey reports PUE only).
-    UptimeSurvey2022Average = CoolingProfile(name="Uptime 2022 Survey Average", pue=PUE_UPTIME_SURVEY_2022_AVERAGE, wue=WUE_EVAPORATIVE, metadata=Metadata(provenance=pc.UPTIME_PUE_2022))
 
 
 # Regional grid carbon intensity (gCO2/kWh) with typical facility PUE/WUE — leaf
