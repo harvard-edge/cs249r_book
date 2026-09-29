@@ -1101,6 +1101,12 @@ class TestReliabilityModel:
         result = solver.solve(cluster, job_duration_hours=100.0)
         assert result.failure_probability > 0
 
+    def test_redundant_psus_drop_out_of_series_sum(self):
+        """DGX H100 PSUs are 4+2 redundant (pc.DGX_H100_USER_GUIDE_POWER), so the node
+        MTBF is GPU 8/50k + NIC 8/150k only: 4,687.5 h, and 1/128 of that at 1,024 GPUs."""
+        result = ReliabilityModel().solve(Systems.Clusters.Training_1K, 720)
+        assert result.fleet_mtbf.m_as("hour") == pytest.approx(4687.5 / 128, rel=1e-3)
+
     def test_larger_cluster_higher_failure_prob(self):
         """Larger cluster should have higher failure probability for the same job."""
         solver = ReliabilityModel()

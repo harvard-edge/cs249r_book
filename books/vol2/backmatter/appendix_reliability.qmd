@@ -58,7 +58,9 @@ class ReliabilityFoundations:
     node = Systems.Nodes.DGX_H100
     n_gpus_per_node = node.accelerators_per_node
     n_nics_per_node = node.nics_per_node
-    n_psus_per_node = node.psus_per_node
+    n_psus_per_node = node.psus_per_node  # physical count (6)
+    n_psus_redundant = node.psu_redundancy  # M in the N+M supply (2)
+    n_series_psus = node.series_psus  # PSUs whose single failure stops the node (0)
 
     # Level 3: Cluster Sizes
     cluster_sizes = [
@@ -89,7 +91,7 @@ class ReliabilityFoundations:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Level 4: Ratios & Rework (MTBF Cascade)
-    node_mtbf = calc_mtbf_node(gpu_mttf, n_gpus_per_node, nic_mttf, n_nics_per_node, psu_mttf, n_psus_per_node)
+    node_mtbf = calc_mtbf_node(gpu_mttf, n_gpus_per_node, nic_mttf, n_nics_per_node, psu_mttf, n_series_psus)
 
     # Step 2: FIT rates (1 FIT = 1 failure per 10^9 device-hours)
     gpu_fit = BILLION / gpu_mttf
@@ -120,7 +122,7 @@ class ReliabilityFoundations:
     overhead_ckpt = (ckpt_write_time_s / tau_opt_s).to_base_units().magnitude
     overhead_failure = (t_recovery_total_s / cluster_mtbf_10k_s).to_base_units().magnitude
 
-    n_clocks_per_node = n_gpus_per_node + n_nics_per_node + n_psus_per_node
+    n_clocks_per_node = n_gpus_per_node + n_nics_per_node + n_series_psus
     mtbf_256_days = (node_mtbf / (Systems.Clusters.Research_256.total_accelerators // n_gpus_per_node)).to(day)
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -132,6 +134,8 @@ class ReliabilityFoundations:
     gpus_per_node_str = fmt(n_gpus_per_node, precision=0, commas=False)
     nics_per_node_str = fmt(n_nics_per_node, precision=0, commas=False)
     psus_per_node_str = fmt(n_psus_per_node, precision=0, commas=False)
+    psus_required_str = fmt(n_psus_per_node - n_psus_redundant, precision=0, commas=False)
+    psus_redundant_str = fmt(n_psus_redundant, precision=0, commas=False)
     clocks_per_node_str = fmt(n_clocks_per_node, precision=0, commas=False)
     mtbf_256_days_str = fmt(mtbf_256_days.magnitude, precision=1, commas=False)
     ckpt_bpp_value = ckpt_bpp.to(byte / param).magnitude
@@ -160,6 +164,7 @@ class ReliabilityFoundations:
         return calc_availability_stacked(cls.avail_single, k)
 
 # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+check(ReliabilityFoundations.n_series_psus == 0, "Prose says the DGX H100's redundant PSUs add no clocks to the series sum")
 check(ReliabilityFoundations.cluster_mtbf_10k < 5.0 * hour, "10K cluster MTBF mismatch")
 check(ReliabilityFoundations.tau_opt_s > 5 * minute, "Young-Daly interval too short")
 check(
@@ -289,11 +294,11 @@ Each component in isolation appears highly reliable; a GPU lasts `{python} Compo
 
 ### The MTBF cascade {#sec-appdx-reliability-foundations-mtbf-cascade}
 
-The following model treats a compute node as a series system: any modeled component failure interrupts it. Redundant power supplies, spare links, and recoverable device errors require a different failure model. For independent components with constant failure rates, @eq-mtbf-node sums the individual rates into the node-level failure rate:
+The following model treats a compute node as a series system, in which any modeled component failure interrupts it. A component enters the sum only when its failure alone stops the node, so redundant power supplies, spare links, and recoverable device errors stay out of it. For independent components with constant failure rates, @eq-mtbf-node sums the individual rates into the node-level failure rate:
 
 $$ \frac{1}{\text{MTBF}_{\text{node}}} = \frac{n_{\text{gpu}}}{\text{MTTF}_{\text{gpu}}} + \frac{n_{\text{nic}}}{\text{MTTF}_{\text{nic}}} + \frac{n_{\text{psu}}}{\text{MTTF}_{\text{psu}}} + \cdots $$ {#eq-mtbf-node}
 
-Think of each component as a ticking clock counting down to failure. A DGX H100 node with `{python} ReliabilityFoundations.gpus_per_node_str` GPUs, `{python} ReliabilityFoundations.nics_per_node_str` network interface cards (NICs), and `{python} ReliabilityFoundations.psus_per_node_str` PSUs has `{python} ReliabilityFoundations.clocks_per_node_str` independent clocks, and the node fails when the first clock reaches zero. More clocks mean a shorter expected wait.
+Think of each component as a ticking clock counting down to failure. A DGX H100 node with `{python} ReliabilityFoundations.gpus_per_node_str` GPUs and `{python} ReliabilityFoundations.nics_per_node_str` network interface cards (NICs) has `{python} ReliabilityFoundations.clocks_per_node_str` independent clocks, and the node fails when the first clock reaches zero. More clocks mean a shorter expected wait. The node's `{python} ReliabilityFoundations.psus_per_node_str` power supply units (PSUs) add no clocks. They run as a `{python} ReliabilityFoundations.psus_required_str`+`{python} ReliabilityFoundations.psus_redundant_str` redundant set, so the node keeps full performance with `{python} ReliabilityFoundations.psus_redundant_str` of them failed, and a failed unit is normally replaced long before enough others fail to stop the node.
 
 For a cluster of $N_{\text{nodes}}$ identical nodes, the same logic applies one level up, as @eq-mtbf-cluster shows:
 
@@ -366,7 +371,7 @@ for n_gpus in R.cluster_sizes:
 | **`{python} mtbf_data[4]["gpus"]`** | `{python} mtbf_data[4]["nodes"]` | `{python} mtbf_data[4]["mtbf"]` | `{python} mtbf_data[4]["per_day"]` |
 | **`{python} mtbf_data[5]["gpus"]`** | `{python} mtbf_data[5]["nodes"]` | `{python} mtbf_data[5]["mtbf"]` | `{python} mtbf_data[5]["per_day"]` |
 
-: **Cluster MTBF by Scale**: As cluster size grows, the aggregate MTBF shrinks proportionally. At `{python} ReliabilityFoundations.canonical_cluster_gpus_str` GPUs, failures occur every few hours; at `{python} ReliabilityFoundations.mega_cluster_gpus_str` GPUs, they occur continuously. Node configuration (DGX H100): `{python} ReliabilityFoundations.gpus_per_node_str` GPUs, `{python} ReliabilityFoundations.nics_per_node_str` NICs, `{python} ReliabilityFoundations.psus_per_node_str` PSUs per node. {#tbl-mtbf-cluster}
+: **Cluster MTBF by Scale**: As cluster size grows, the aggregate MTBF shrinks proportionally. At `{python} ReliabilityFoundations.canonical_cluster_gpus_str` GPUs, failures occur every few hours; at `{python} ReliabilityFoundations.mega_cluster_gpus_str` GPUs, they occur continuously. Node configuration (DGX H100): `{python} ReliabilityFoundations.gpus_per_node_str` GPUs and `{python} ReliabilityFoundations.nics_per_node_str` NICs per node in the series sum; its `{python} ReliabilityFoundations.psus_per_node_str` PSUs are `{python} ReliabilityFoundations.psus_required_str`+`{python} ReliabilityFoundations.psus_redundant_str` redundant and add no term. {#tbl-mtbf-cluster}
 
 The transition from hundreds of GPUs to tens of thousands is a qualitative regime shift. At `{python} ReliabilityFoundations.research_cluster_gpus_str` GPUs, about `{python} ReliabilityFoundations.mtbf_256_days_str` days pass between failures. At `{python} ReliabilityFoundations.canonical_cluster_gpus_str` GPUs, the cluster expects multiple failures per shift. At `{python} ReliabilityFoundations.mega_cluster_gpus_str` GPUs, failures are a continuous background condition, and the system is never fully healthy.
 
@@ -538,7 +543,7 @@ from mlsysim.fmt import fmt_bandwidth, fmt_memory, fmt_time
 # │
 # │ Goal: Compute optimal checkpoint interval τ_opt for 175B model on 10K-GPU cluster;
 # │       show scaling to 20K GPUs.
-# │ Show: ~13 min optimal interval, ~X% checkpoint overhead, shorter interval at 20K GPUs.
+# │ Show: ~14 min optimal interval, ~X% checkpoint overhead, shorter interval at 20K GPUs.
 # │ How: calc_young_daly_interval(T_write_s, MTBF_system_s) from R.ckpt_write_time_s and R.cluster_mtbf_10k_s.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -870,7 +875,7 @@ class ReliabilitySummaryRecap:
         Systems.Reliability.Nic.mttf_hours,
         Systems.Nodes.DGX_H100.nics_per_node,
         Systems.Reliability.Psu.mttf_hours,
-        Systems.Nodes.DGX_H100.psus_per_node,
+        Systems.Nodes.DGX_H100.series_psus,  # 0: 4+2 redundant PSUs
     )
     cluster_mtbf_10k = node_mtbf / Systems.Clusters.Training_10K.count
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────

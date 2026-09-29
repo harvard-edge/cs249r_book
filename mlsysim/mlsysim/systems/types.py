@@ -140,6 +140,12 @@ class Node(BaseModel):
     intra_node_bw: Quantity
     nics_per_node: int = 1
     psus_per_node: int = 2
+    # PSU redundancy (added 2026-09-29). psu_redundancy is M in an N+M supply: the
+    # PSUs that may fail with the node still at full performance. The default 0 makes
+    # every PSU a single point of failure (the series model's historical behavior).
+    psu_redundancy: int = 0
+    psu_rating: Optional[Quantity] = None   # per-PSU output rating
+    max_power: Optional[Quantity] = None    # maximum system power draw
     host_memory: Optional[Quantity] = None
     host_cpu: Optional[str] = None
     host_cpu_cores: Optional[int] = None
@@ -176,6 +182,39 @@ class Node(BaseModel):
         if v is None:
             return v
         return require_unit_family(v, ureg.bit / ureg.second, "host_memory_bw", "data")
+
+    @field_validator("psu_rating", "max_power", mode="after")
+    @classmethod
+    def _validate_power_fields(cls, v, info):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.watt, info.field_name)
+
+    @model_validator(mode="after")
+    def _validate_psu_redundancy(self):
+        if not 0 <= self.psu_redundancy < self.psus_per_node:
+            raise ValueError(
+                f"psu_redundancy ({self.psu_redundancy}) must satisfy "
+                f"0 <= psu_redundancy < psus_per_node ({self.psus_per_node})"
+            )
+        if self.psu_redundancy > 0 and self.psu_rating is not None and self.max_power is not None:
+            n_required = self.psus_per_node - self.psu_redundancy
+            if n_required * self.psu_rating < self.max_power:
+                raise ValueError(
+                    f"{n_required} required PSUs x {self.psu_rating} cannot carry max_power "
+                    f"{self.max_power}; the {n_required}+{self.psu_redundancy} redundancy claim is inconsistent"
+                )
+        return self
+
+    @property
+    def series_psus(self) -> int:
+        """PSUs whose single failure stops the node (the n_psu term of a series MTBF sum).
+
+        With M >= 1 hot-replaceable spares, a PSU-driven outage needs M+1 concurrent failures
+        inside one repair window. For MTTF 1e5 h and a one-day repair that rate is ~1e-10/h
+        for 4+2, about 1e-6 of a DGX node's GPU+NIC rate, so the term is dropped.
+        """
+        return 0 if self.psu_redundancy > 0 else self.psus_per_node
 
 
 class RackProfile(BaseModel):

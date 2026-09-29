@@ -148,7 +148,7 @@ Between 2012 and the mid-2020s, public and third-party estimates place training 
 # │ Context: @sec-vol2-introduction-scale-moment
 # │
 # │ Goal: Quantify GPT-4 training scale and failure frequency.
-# │ Show: illustrative ~25k-GPU, 90-day scenario; ~1 failure every 2 hours.
+# │ Show: illustrative ~25k-GPU, 100-day scenario; ~1 failure every 2 hours.
 # │ How: cluster_mtbf_hours = calc_mtbf_cluster(gpu_mtbf_hours, num_gpus).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -197,7 +197,7 @@ class Gpt4TrainingScenario:
 *Fleet reliability collapses as node count climbs.*
 :::
 
-Consider a GPT-4-class training scenario using a hypothetical `{python} Gpt4TrainingScenario.hw_name_str` cluster of `{python} Gpt4TrainingScenario.gpt4_gpus_str` running for `{python} Gpt4TrainingScenario.gpt4_days_str`. These values are illustrative rather than disclosed by OpenAI [@openai2023gpt4]. In a cluster of this size, the probability of at least one failure over an interval $t$ becomes a binding constraint. With independent, exponentially distributed failures and system mean time between failures (MTBF) $\text{MTBF}_{\text{system}}$, that probability is $\Pr(\text{failure before } t) = 1 - e^{-t/\text{MTBF}_{\text{system}}}$. The worked example in notebook \ref{nbk-introduction-scale-reliability} establishes the arithmetic for one cluster; @sec-appdx-reliability-foundations-mtbf-cascade formalizes the MTBF cascade\index{MTBF!cascade} that governs failure rates across multi-thousand-GPU fleets, so a reader can predict the interruption cadence for any fleet size.
+Consider a GPT-4-class training scenario using a hypothetical `{python} Gpt4TrainingScenario.hw_name_str` cluster of `{python} Gpt4TrainingScenario.gpt4_gpus_str` running for `{python} Gpt4TrainingScenario.gpt4_days_str`. These values follow a third-party estimate [@semianalysisGPT4] rather than an OpenAI disclosure [@openai2023gpt4]. In a cluster of this size, the probability of at least one failure over an interval $t$ becomes a binding constraint. With independent, exponentially distributed failures and system mean time between failures (MTBF) $\text{MTBF}_{\text{system}}$, that probability is $\Pr(\text{failure before } t) = 1 - e^{-t/\text{MTBF}_{\text{system}}}$. The worked example in notebook \ref{nbk-introduction-scale-reliability} establishes the arithmetic for one cluster; @sec-appdx-reliability-foundations-mtbf-cascade formalizes the MTBF cascade\index{MTBF!cascade} that governs failure rates across multi-thousand-GPU fleets, so a reader can predict the interruption cadence for any fleet size.
 
 ::: {#nbk-introduction-scale-reliability .callout-notebook title="Scale and reliability"}
 
@@ -380,14 +380,14 @@ class TpuV4PodScenario:
 # │ Context: @sec-vol2-introduction-scale-moment
 # │
 # │ Goal: Provide GPT-3 training compute and model size statistics.
-# │ Show: ~175B parameters; ~3.14e23 FLOPs; V100 peak lower-bound days.
-# │ How: pulling model constants from MLSysIM and deriving the V100 lower bound
-# │      from training FLOPs / (accelerators × V100 peak FLOP/s).
+# │ Show: ~175B parameters; ~3.14e23 FLOPs; reported V100 count and duration
+# │       (Patterson et al. 2021); achieved per-GPU rate.
+# │ How: pulling model constants from MLSysIM and deriving the achieved rate
+# │      from training FLOPs / (accelerators × days).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from math import ceil
 from mlsysim import Hardware
-from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_params, fmt_sci_flops, fmt_time
+from mlsysim.fmt import check, fmt, fmt_count, fmt_flop_rate, fmt_memory, fmt_params, fmt_sci_flops, fmt_time
 
 class Gpt3TrainingScenario:
     """GPT-3 training and model statistics."""
@@ -397,35 +397,40 @@ class Gpt3TrainingScenario:
     params = params_q.to(param).magnitude
     ops = Models.Language.GPT3.training_ops.to(Models.Language.GPT3.training_ops.units).magnitude
     training_accelerators_q = Models.Language.GPT3.training_accelerators_ref
+    training_days_q = Models.Language.GPT3.training_days_ref
+    hw_label = Models.Language.GPT3.training_hardware_label
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params / BILLION
     gradient_q = params * BYTES_FP32  # FP32 gradients
     training_accelerators = training_accelerators_q.to(count).magnitude
-    v100_peak_min_days_q = (Models.Language.GPT3.training_ops / (training_accelerators * Hardware.Cloud.V100.compute.peak_flops)).to(day)
+    achieved_rate_q = (Models.Language.GPT3.training_ops / (training_accelerators * training_days_q)).to(TFLOPs / second)
+    mfu = (achieved_rate_q / Hardware.Cloud.V100.compute.peak_flops).to('').magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(params_b == 175, f"GPT-3 should be 175B params, got {params_b}")
-    check(training_accelerators == 1024, f"GPT-3 training reference should be 1024 accelerators, got {training_accelerators}")
-    check(v100_peak_min_days_q.magnitude > 28, "V100 peak lower bound should exceed 28 days")
+    check(training_accelerators == 10000, f"GPT-3 training reference should be 10,000 accelerators, got {training_accelerators}")
+    check(24 < achieved_rate_q.magnitude < 25.5, f"must reproduce Patterson's measured 24.6 TFLOP/s per GPU, got {achieved_rate_q.magnitude:.1f}")
+    check(mfu < 1, f"reference run cannot exceed V100 peak, got MFU {mfu:.2f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt_params(params_q, scale="B", precision=0, commas=False)
     gpt3_training_ops_str = fmt_sci_flops(ops * flop)
     gpt3_gradient_gb_str = fmt_memory(gradient_q, unit=GB, precision=0, commas=False)
-    gpt3_accelerators_str = fmt_count(training_accelerators, label="V100 GPU", plural_label="V100 GPUs")
-    gpt3_v100_peak_min_days_str = fmt_time(ceil(v100_peak_min_days_q.magnitude), day, precision=0, style='word')
+    gpt3_accelerators_str = fmt_count(training_accelerators, label=f"{hw_label} GPU", plural_label=f"{hw_label} GPUs")
+    gpt3_days_str = fmt_time(round(training_days_q.to(day).magnitude), day, precision=0, style='word')
+    gpt3_rate_str = fmt_flop_rate(achieved_rate_q, unit=TFLOPs / second, precision=1, commas=False)
 ```
 
-GPT-3\index{GPT-3!training compute} consumed an estimated `{python} Gpt3TrainingScenario.gpt3_training_ops_str` during training on V100 GPUs in a Microsoft high-bandwidth cluster [@brown2020language]. The surrounding Microsoft infrastructure for this era reached roughly `{python} LandmarkTrainingRuns.msft_openai_gpus_str`, which is the cluster-size anchor used in @fig-cluster-size-explosion [@microsoft2020openaiSupercomputer; @patterson2021carbon]. PaLM\index{PaLM!TPU scale} trained on `{python} LandmarkTrainingRuns.palm_chips_str` TPU v4 chips for roughly 60 days, consuming approximately `{python} TrainingComputeLandmarks.palm_flops_oom_math` FLOPs [@chowdhery2022palm]. OpenAI's GPT-4\index{GPT-4!training compute scenario} report did not disclose model size, training hardware, or training compute, so the GPT-4-class scenario in this section should be read as illustrative rather than a published configuration [@openai2023gpt4]. These examples sit within the rapid training-compute growth trend\index{Training!compute evolution} documented by earlier compute-trend studies [@amodei2018ai; @sevilla2022]. @Tbl-training-compute-evolution makes the scale shift explicit: training budgets move from single-machine experiments into distributed systems where hardware count, wall-clock time, and operational coordination are part of the model design.
+GPT-3\index{GPT-3!training compute} consumed an estimated `{python} Gpt3TrainingScenario.gpt3_training_ops_str` during training on V100 GPUs in a Microsoft high-bandwidth cluster [@brown2020language]. A later carbon accounting pairs that budget with `{python} Gpt3TrainingScenario.gpt3_accelerators_str` sustaining about `{python} Gpt3TrainingScenario.gpt3_rate_str` each, or roughly `{python} Gpt3TrainingScenario.gpt3_days_str` of training [@patterson2021carbon]. The same Microsoft system of roughly `{python} LandmarkTrainingRuns.msft_openai_gpus_str` is the cluster-size anchor used in @fig-cluster-size-explosion [@microsoft2020openaiSupercomputer]. PaLM\index{PaLM!TPU scale} trained on `{python} LandmarkTrainingRuns.palm_chips_str` TPU v4 chips for roughly 60 days, consuming approximately `{python} TrainingComputeLandmarks.palm_flops_oom_math` FLOPs [@chowdhery2022palm]. OpenAI's GPT-4\index{GPT-4!training compute scenario} report did not disclose model size, training hardware, or training compute, so the GPT-4-class scenario in this section should be read as illustrative rather than a published configuration [@openai2023gpt4]. These examples sit within the rapid training-compute growth trend\index{Training!compute evolution} documented by earlier compute-trend studies [@amodei2018ai; @sevilla2022]. @Tbl-training-compute-evolution makes the scale shift explicit: training budgets move from single-machine experiments into distributed systems where hardware count, wall-clock time, and operational coordination are part of the model design.
 
-| **Model**                | **Year** |                            **GPUs/TPUs**                            |                          **Training Time**                           |                           **Estimated FLOPs**                           |
-|:-------------------------|:--------:|:-------------------------------------------------------------------:|:--------------------------------------------------------------------:|:-----------------------------------------------------------------------:|
-| **AlexNet**              |   2012   |           `{python} LandmarkTrainingRuns.alexnet_gpus_str`          |        `{python} LandmarkTrainingRuns.alexnet_days_range_str`        |       ~`{python} TrainingComputeLandmarks.alexnet_flops_oom_math`       |
-| **BERT-Large**           |   2018   |            `{python} LandmarkTrainingRuns.bert_tpus_str`            |            `{python} LandmarkTrainingRuns.bert_days_str`             |                                ~$10^{20}$                               |
-| **GPT-3**                |   2020   |   `{python} Gpt3TrainingScenario.gpt3_accelerators_str` (run est.)  | at least `{python} Gpt3TrainingScenario.gpt3_v100_peak_min_days_str` |          `{python} Gpt3TrainingScenario.gpt3_training_ops_str`          |
-| **PaLM**                 |   2022   |            `{python} LandmarkTrainingRuns.palm_tpus_str`            |                               ~60 days                               |         ~`{python} TrainingComputeLandmarks.palm_flops_oom_math`        |
-| **GPT-4-class scenario** |   2023   | `{python} Gpt4TrainingScenario.gpt4_gpus_approx_str` (illustrative) | `{python} Gpt4TrainingScenario.gpt4_days_approx_str` (illustrative)  | ~`{python} TrainingComputeLandmarks.gpt4_class_flops_oom_math` scenario |
+| **Model**                | **Year** |                            **GPUs/TPUs**                            |                          **Training Time**                          |                           **Estimated FLOPs**                           |
+|:-------------------------|:--------:|:-------------------------------------------------------------------:|:-------------------------------------------------------------------:|:-----------------------------------------------------------------------:|
+| **AlexNet**              |   2012   |           `{python} LandmarkTrainingRuns.alexnet_gpus_str`          |        `{python} LandmarkTrainingRuns.alexnet_days_range_str`       |       ~`{python} TrainingComputeLandmarks.alexnet_flops_oom_math`       |
+| **BERT-Large**           |   2018   |            `{python} LandmarkTrainingRuns.bert_tpus_str`            |            `{python} LandmarkTrainingRuns.bert_days_str`            |                                ~$10^{20}$                               |
+| **GPT-3**                |   2020   |   `{python} Gpt3TrainingScenario.gpt3_accelerators_str` (run est.)  |            ~`{python} Gpt3TrainingScenario.gpt3_days_str`           |          `{python} Gpt3TrainingScenario.gpt3_training_ops_str`          |
+| **PaLM**                 |   2022   |            `{python} LandmarkTrainingRuns.palm_tpus_str`            |                               ~60 days                              |         ~`{python} TrainingComputeLandmarks.palm_flops_oom_math`        |
+| **GPT-4-class scenario** |   2023   | `{python} Gpt4TrainingScenario.gpt4_gpus_approx_str` (illustrative) | `{python} Gpt4TrainingScenario.gpt4_days_approx_str` (illustrative) | ~`{python} TrainingComputeLandmarks.gpt4_class_flops_oom_math` scenario |
 
 : **Training compute evolution**: Growth in hardware scale and training duration across published landmarks and an illustrative GPT-4-class scenario, showing why distributed systems become central as training budgets move from `{python} TrainingComputeLandmarks.alexnet_flops_oom_math`-scale to the largest training runs. {#tbl-training-compute-evolution}
 
@@ -3427,7 +3432,7 @@ Single-machine diagnostic skills remain necessary at scale, but the engineering 
 
 :::
 
-The governing principle is that scale can move the binding constraint outside the node. A local speedup is therefore evidence about one component, not yet evidence that the fleet makes more useful progress. Engineering judgment requires tracing that change through communication, coordination, and the mission's operating constraints before accepting it as an improvement.
+The premise of this book is that scale can move the binding constraint outside the node. A local speedup is therefore evidence about one component, not yet evidence that the fleet makes more useful progress. Engineering judgment requires tracing that change through communication, coordination, and the mission's operating constraints before accepting it as an improvement.
 
 ::: {.callout-chapter-connection title="From requirements to silicon"}
 
