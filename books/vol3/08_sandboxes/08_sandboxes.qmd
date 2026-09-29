@@ -57,13 +57,27 @@ Consider a threat variant of the connection-pool repair. The coding agent reads 
 *Authority bounded beneath the model, limiting what code can change, read, and send.*
 :::
 
-The typed action contract from @sec-vol3-tool-calling requires more than that tool-name check. A sufficiently specific adapter can reject the proposed operation before dispatch. A general-purpose command runner must also constrain what the code can actually reach after dispatch: it cannot rely on the command description to prevent a subprocess from opening another file or socket. Sandboxing carries the task's limits into the execution environment.
+The typed action contract from @sec-vol3-tool-calling goes further than that tool-name check: a specific adapter rejects the proposed operation before dispatch. A general-purpose command runner must also bound what the code reaches after dispatch, because a subprocess opens whatever files and sockets its environment allows, whatever the command description said. Sandboxing carries the task's limits into that environment.
 
 ### Untrusted input and execution reach {#sec-vol3-sandboxes-cohabitation}
 
-The README attempt is indirect prompt injection: attacker-controlled material encountered as task data attempts to redirect the agent's behavior [@greshake2023not]. @Sec-vol3-security-threat-model develops why a model cannot reliably separate such text from its instructions, and @sec-vol3-security-evaluation shows how the resulting attack success rate is measured; this chapter needs only the consequence that the rate is not zero. Message roles and provenance labels can distinguish instructions from observations in the interface, but they do not enforce filesystem or network access. The runtime must preserve its resource boundary even when the model follows the planted instruction. The same unsafe proposal can arise without an attacker, through a wrong path, an unintended command, or a mistaken choice of target.
+The README attempt is **indirect prompt injection**\index{Indirect prompt injection}: attacker-controlled material encountered as task data attempts to redirect the agent's behavior [@greshake2023not]. @Sec-vol3-security-threat-model develops why a model cannot reliably separate such text from its instructions, and @sec-vol3-security-evaluation shows how the resulting attack success rate is measured; this chapter needs only the consequence that the rate is above zero. Message roles and provenance labels distinguish instructions from observations in the interface, while filesystem and network access are enforced elsewhere. The runtime must therefore hold its resource boundary even when the model follows the planted instruction. The same unsafe proposal also arises without an attacker, through a wrong path, an unintended command, or a mistaken target. A shipped coding agent has already demonstrated the gap this chapter closes.
 
-Three conditions support this particular disclosure path: untrusted content steers the proposal, the executing code can read the credential, and a channel can deliver it to the endpoint. Blocking the read or the outbound request defeats that path. Keeping the credential outside the execution environment removes that particular secret from its reach. None of these statements means that the environment contains no other sensitive information or that every harmful action requires all three conditions. The source repository itself may be private, and a destructive local edit needs no network channel.
+::: {#ws-08-gemini-cli-allow-list-2025 .callout-war-story title="Gemini CLI allow-list bypass (2025)"}
+
+**Context**: Google released the Gemini CLI coding agent on June 25, 2025, and on June 27 Tracebit reported that a repository could make it run commands the user never saw [@cox2025gemini]. The CLI asked the user before running a shell command and let the user approve a command such as `grep` for later reuse.
+
+**Mechanism**: The injected instructions sat inside the full text of the GNU General Public License in a repository's `README.md`, where the model read them and a human reviewer was unlikely to. They led the agent to run an innocuous `grep`, which the user approved, and then a chained command that began with `grep` and appended `env | curl` to a remote server. The allow-list check extracted only the root command with cursory validation, so the chained command matched the approved `grep`. A long run of whitespace inside the command hid the appended part from the confirmation display.
+
+**Impact**: The proof of concept silently sent the process's environment variables, which can hold secrets, to the attacker's server with the full authority of the user's shell. Google first triaged the report as P2/S4 and reclassified it as P1/S1 on July 23.
+
+**Fix**: Version 0.1.14, released July 25, 2025, shows the complete command and requires approval for each additional binary it invokes. Tracebit also recommends running agentic tools in their sandboxing modes wherever possible.
+
+**Systems lesson**: A check on the command text is an admission filter; what the admitted process reads and sends is bounded only by the environment it runs in. That environment was the user's own shell, so one approved `grep` could read every secret the shell held and send it wherever the user's network reached.
+
+:::
+
+The incident and the README scenario share three conditions: untrusted content steers the proposal, the executing code can read a secret, and a channel can deliver it. Denying the read or the outbound request breaks that path, and keeping the credential outside the execution environment removes that secret from reach. The three conditions describe this disclosure path rather than every harm. The source repository itself may be private, and a destructive local edit needs no network channel.
 
 The design therefore starts by naming what is protected and what execution requires. For the repair, the runtime can provide a task-local source tree and writable test scratch while excluding the developer's home directory, unrelated repositories, and other tenants' files. CPU, memory, storage, and process limits prevent a runaway test from consuming the host's entire capacity. Any permitted download or artifact export needs its own communication scope. These limits belong to enforced configuration, not to a sentence asking the model to remain within the task.
 
@@ -77,11 +91,11 @@ The design therefore starts by naming what is protected and what execution requi
 
 :::
 
-A threat model must also say which failures it considers. Ordinary application errors, hostile code inside the environment, and compromise of the mechanism enforcing isolation are different cases. A boundary that contains a faulty test program need not withstand a defect in its own trusted components. Choosing an envelope requires identifying those components and shared resources, not simply labeling execution “sandboxed.”
+A threat model also names the failures it covers. Ordinary application errors, hostile code inside the environment, and compromise of the isolation mechanism itself are three different cases. A boundary that contains a faulty test program may still fall to a defect in its own trusted components, so choosing an envelope starts by naming those components and the resources they share.
 
 ### Blast radius by authority level {#sec-vol3-sandboxes-blast-radius}
 
-The authority levels of H·S·A describe what the task may do, not which sandbox implementation it must use. @Tbl-vol3-sandboxes-authority-radius applies those levels to the consequences the runtime must consider. The rows identify design obligations; the actual mechanisms depend on the workload and threat model.
+The authority levels of H·S·A describe what the task may do; the sandbox implementation follows from the workload and threat model. @Tbl-vol3-sandboxes-authority-radius maps each level to the consequences the runtime governs and the obligations they create.
 
 | Authority level                                       | Exposure within the granted scope                                                            | Containment and control obligations                                                                                              |
 |:------------------------------------------------------|:---------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------|
@@ -92,23 +106,23 @@ The authority levels of H·S·A describe what the task may do, not which sandbox
 
 : **Authority and execution exposure**: Task authority identifies consequences to govern, not a universal choice of isolation technology. Resource limits and mediated access remain necessary across the levels. {#tbl-vol3-sandboxes-authority-radius tbl-colwidths="[25,33,42]"}
 
-Read access deserves emphasis because the README attempt needed no mutation of the credential file. Protecting a file from writes does not prevent its contents from leaving. At the other end, containing a command does not make its permitted external effect harmless. A payment or production change occurs outside the disposable workspace. Approval establishes permission under the applicable policy; it does not by itself establish that the chosen action meets the user's goal.
+Read access deserves emphasis because the README attempt needed no write to the credential file: write protection keeps a file intact, and only read and egress policy keep its contents in place. At the other end, a payment or production change lands outside the disposable workspace, so containing the command leaves its permitted external effect untouched. Approval at that boundary establishes permission under policy; whether the action meets the user's goal is a separate check.
 
-Containment beneath the model (principle \ref{pri-vol3-zero-trust-sandboxing}) requires the execution boundary to be enforced outside the code being constrained. An isolation mechanism must be implemented by a layer below the code it controls [@saltzer2009], which is the same reason the invariant closure principle (\ref{pri-invariant-closure}) places mechanical bounds below the model. A model-side measure lowers the probability of a bad proposal, while only a check the proposal cannot modify bounds what it can do. In the README case, a filesystem policy can deny the credential read, and an egress policy can reject the diagnostics destination. These controls address different parts of the path. They need not fail independently, and some harm can occur through an allowed channel without either boundary being escaped. @Fig-vol3-threat-model traces the injected request and a permitted one through the same three enforcement points. The system should record what it actually blocked or observed rather than infer safety from the absence of an error report.
+Containment beneath the model (principle \ref{pri-vol3-zero-trust-sandboxing}) requires the execution boundary to be enforced outside the code being constrained. An isolation mechanism must be implemented by a layer below the code it controls [@saltzer2009], which is the same reason the invariant closure principle (\ref{pri-invariant-closure}) places mechanical bounds below the model. A model-side measure lowers the probability of a bad proposal, while only a check the proposal cannot modify bounds what it can do. In the README case, a filesystem policy denies the credential read and an egress policy rejects the diagnostics destination. The two controls act on different parts of the path and can share a failure cause, and harm through an allowed channel escapes neither. @Fig-vol3-threat-model traces the injected request and a permitted one through the same three enforcement points. The runtime records what each boundary actually blocked or observed, since an absent error report is not evidence of safety.
 
 ::: {#fig-vol3-threat-model fig-env="figure" fig-pos="htb" fig-cap="**Where Each Boundary Acts**: Two requests steered by the same README text cross mediation, the execution envelope, and egress. The injected `run_shell` request is admitted because it is well typed, then stopped where it tries to read the credential. The dashed segment marks that the destination policy would also refuse its upload, a check on a different part of the path rather than an independent backup. The second request passes every check because each of its steps is permitted, so its disclosure reaches the approved service without any boundary being escaped." fig-alt="Five columns labeled model proposal, mediation, execution envelope, egress, and outside the runtime, crossed by two horizontal lanes. In the first lane, an injected run_shell request is admitted by tool admission, marked read denied by the filesystem policy, and marked upload denied by the destination policy after a dashed arrow; the diagnostics endpoint is marked not reached. In the second lane, a submit_report request carrying private source is admitted, allowed to read, and sent, and red arrows reach an approved service marked disclosure."}
 ![](images/svg/defense_in_depth_rings.svg)
 :::
 
-The boundary also has a lifetime. The repair's `src/pool.py` edits and test artifacts must survive between turns, but should not become the next tenant's starting state. Protected acceptance checks remain outside the agent's writable scope, while test execution can still require writable scratch. Ending the task must stop or account for its running work and reset the state covered by the execution contract. As Tool Calling established, a cancellation request is not proof that work ended, and even confirmed termination does not reverse an external effect.
+The boundary also has a lifetime. The repair's `src/pool.py` edits and test artifacts must survive between turns, but should not become the next tenant's starting state. Protected acceptance checks remain outside the agent's writable scope, while test execution can still require writable scratch. Ending the task must stop or account for its running work and reset the state the execution contract covers. As @sec-vol3-tool-calling established, a cancellation request is only a request, and even confirmed termination leaves an external effect in place.
 
-The chapter develops these obligations in sequence. First, it examines why executing arbitrary code inside the supervisor's own interpreter does not supply the required boundary. Scoped capabilities and credential brokering then describe how authority reaches execution without unnecessarily exposing secrets. Envelope choice and task-local workspaces bound what code shares and preserves; egress governs its channels; reset and provisioning maintain those boundaries across successive tasks. The first engineering decision is therefore where the untrusted code runs relative to the software enforcing its limits.
+The chapter develops these obligations in sequence. First, it shows why the supervisor's own interpreter is the wrong place to run arbitrary code. Scoped capabilities and credential brokering then describe how authority reaches execution without unnecessarily exposing secrets. Envelope choice and task-local workspaces bound what code shares and preserves; egress governs its channels; reset and provisioning maintain those boundaries across successive tasks. The first engineering decision is therefore where the untrusted code runs relative to the software enforcing its limits.
 
 ## Why Restricted Globals Are Not an Execution Boundary {#sec-vol3-sandboxes-in-process-failure}
 
-A data-analysis agent writes Python to summarize a CSV file. The runtime could execute that code inside its own interpreter, supplying only the data and a few helper functions. This avoids starting another interpreter and reuses loaded libraries. It also places the generated code beside the supervisor's state, connections, and credentials. Removing names from the script's globals does not separate those resources from the code that runs.
+A data-analysis agent writes Python to summarize a CSV file. The runtime could execute that code inside its own interpreter, supplying only the data and a few helper functions. This avoids starting another interpreter and reuses loaded libraries. It also places the generated code beside the supervisor's state, connections, and credentials. Removing names from the script's globals leaves those resources in the same process as the code that runs.
 
-The distinction is between restricting an interface and enforcing an execution boundary. The tool checks from the preceding chapter can admit a request to analyze the CSV. They do not make arbitrary code inside that request safe to execute with the supervisor's reach.
+The distinction is between restricting an interface and enforcing an execution boundary. The tool checks from @sec-vol3-tool-calling admit a request to analyze the CSV; the arbitrary code inside that request still executes with the supervisor's reach.
 
 ### Names are not the reachable object graph
 
@@ -132,7 +146,7 @@ expression = "total.__globals__"
 
 This example assumes an ordinary user-defined Python function and unrestricted attribute access in the evaluated expression. The returned namespace can contain references the supervisor did not intend to expose, including imported modules or application state. Which further operations become reachable depends on those objects and the process's permissions. The failure is already visible before any file is opened: the claimed interface boundary did not hold.
 
-Rejecting this attribute would block this particular expression. That is different from establishing that all accepted programs are confined. A filter that removes selected names must also account for the objects it supplies and the operations available through them. The engineer needs a defined language and access policy, not a growing list of forbidden spellings.
+Rejecting this attribute blocks this one expression; confining every accepted program is a far stronger property. A filter that removes selected names must also account for every object it supplies and every operation reachable through them. The engineer needs a defined language and access policy, not a growing list of forbidden spellings.
 
 The reason is a result, not a matter of diligence. By Rice's theorem [@rice1953classes], every nontrivial property of what a program in a Turing-complete language computes is undecidable, and "this program eventually reaches a process-launching object" is such a property. A name or syntax-tree filter therefore cannot be both complete and permissive enough for real analysis code. Attribute names can be assembled at run time, as in `getattr(obj, "__" + "globals" + "__")`, and the classes loaded in the process remain reachable by walking from any literal's type to the universal base class and enumerating its subclasses. Confinement has to come from what the code can reach, not from what its text says.
 
@@ -142,25 +156,37 @@ Restricted languages remain useful. A purpose-built expression evaluator can acc
 
 The analysis may call a native library to parse an image, manipulate an array, or execute a numerical kernel. If that library runs inside the supervisor process, its memory accesses occur in the same address space as the interpreter and control state. A memory-safety defect can corrupt that shared state or terminate the process. If a defect permits arbitrary native execution, the attacker can attempt operations under the process's existing credentials and controls.
 
-This is a process-level failure, not automatic kernel compromise. A system call requests work from the kernel, which still applies its access checks and other restrictions. Crossing into kernel execution for that request is normal operating-system behavior. Compromising the kernel or another protected process requires a further failure or an already available right. Nevertheless, losing the supervisor's process can already expose its in-memory secrets, disrupt other tasks it manages, or destroy its ability to enforce the tool contract.
+This is a process-level failure. System calls from the compromised process still pass the kernel's access checks, and reaching the kernel or another protected process takes a further failure or an already available right. Losing the supervisor's process is costly on its own, however: it can expose in-memory secrets, disrupt the other tasks the supervisor manages, and end its enforcement of the tool contract.
 
 The practical question is which components must remain correct for confinement to hold. In-process evaluation can make the interpreter, exposed helper objects, native dependencies, and supervisor state part of the same failure domain. Restricting a script's names leaves those dependencies in place.
 
 ### Shared authority and shared resources
 
-The code also inherits the execution context in which its operations run. Reachable open files, database clients, or network connections may convey authority that was never intended for the analysis task. Moving execution to another process separates address spaces, but does not necessarily narrow that authority: a worker running under the developer's identity may still open the developer's files, and inherited handles can preserve access even when names are hidden. The runtime must decide which identities, handles, files, and communication channels the worker receives.
+The code also inherits the execution context in which its operations run. Reachable open files, database clients, or network connections may convey authority never intended for the analysis task. Moving execution to another process separates address spaces while leaving that authority intact: a worker running under the developer's identity can still open the developer's files, and inherited handles preserve access even when names are hidden. The runtime must decide which identities, handles, files, and communication channels the worker receives.
 
-Availability needs an enforced boundary as well. Code can consume CPU indefinitely or allocate excessive memory without reading a secret or opening a socket. Permitted file writes and process creation can exhaust storage or process capacity. A namespace filter supplies no budget for these operations. If execution shares the supervisor's process, terminating the offending process also terminates the supervisor; a timeout recorded by that supervisor is not, by itself, a way to stop the computation.
+Availability needs an enforced boundary as well. Code can consume CPU indefinitely or allocate excessive memory without reading a secret or opening a socket. Permitted file writes and process creation can exhaust storage or process capacity. Budgets for these operations come from the execution boundary, never from a namespace filter. If execution shares the supervisor's process, stopping the computation means terminating the supervisor with it.
 
-The design therefore needs accounting and controls appropriate to the workload: CPU and elapsed-time limits, memory bounds, and limits on process creation, storage, and output where those operations are available. The controller must remain able to observe and intervene when the worker stops cooperating. Enforcement may throttle, reject further work, or terminate execution, and the result must report what actually happened. As Tool Calling established, termination does not undo effects already issued.
+The design therefore needs accounting and controls appropriate to the workload: CPU and elapsed-time limits, memory bounds, and limits on process creation, storage, and output where those operations are available. The controller must remain able to observe and intervene when the worker stops cooperating. Enforcement throttles, rejects further work, or terminates execution, and the result reports what actually happened; termination leaves effects already issued in place (@sec-vol3-tool-calling-idempotency).
 
-For arbitrary tool code, the runtime should choose an execution boundary that protects its control state and enforces the task's resource and access limits. @Sec-vol3-sandboxes-microvms compares the available envelopes and their assumptions; no single mechanism follows merely from the label “native code.” First, the design needs to state which authority may cross that boundary. A separate worker with the supervisor's full credentials is a separate process, but it is not yet a task-scoped grant.
+For arbitrary tool code, the runtime should choose an execution boundary that protects its control state and enforces the task's resource and access limits. @Sec-vol3-sandboxes-microvms compares the available envelopes and their assumptions. First, the design states which authority may cross that boundary: a separate worker with the supervisor's full credentials is a separate process, not yet a task-scoped grant.
 
 ## Capabilities and Credentials {#sec-vol3-sandboxes-least-privilege}
 
-Moving execution into another process separates its memory from the supervisor's, but does not necessarily narrow its authority. A subprocess running under the developer's account may still read that account's private files or use inherited connections. In the README attack, the task needs repository access, not the developer's credentials. The runtime must carry that distinction into the resources available to the executing code.
+A separate process, as the previous section showed, still carries its identity's authority. In the README attack the task needs repository access, not the developer's credentials, and the runtime must carry that distinction into the resources the executing code can reach.
 
-A privileged service that uses its own authority to fulfill an insufficiently scoped request can become a *confused deputy* [@hardy1988confused]. The problem is not that identity-based access control must be coarse: an access control list can express narrow permissions. The failure is allowing the request to exercise the service's broader authority instead of the authority delegated for this task. Capabilities provide one way to make that delegation explicit [@saltzer1975; @miller2006robust]. @Tbl-vol3-ambient-vs-capability contrasts the two ways of deciding what a process may touch.
+A privileged service that uses its own authority to fulfill an insufficiently scoped request can become a *confused deputy*\index{Confused deputy} [@hardy1988confused]. Identity-based access control can express narrow permissions through an access control list; the failure is letting the request exercise the service's broader authority instead of the authority delegated for this task. That failure comes naturally under **ambient authority**\index{Ambient authority!definition}, the identity-derived reach that ordinary processes run with. Capabilities make the delegation explicit instead [@saltzer1975; @miller2006robust].
+
+::: {#dfn-capability .callout-definition title="Capability"}
+
+A ***capability***\index{Capability!definition} is an unforgeable reference that both designates a resource and authorizes specific operations on it, so that holding the reference is the permission to use it.
+
+1. **Significance**: It lets the runtime hand executing code exactly the objects and operations of the task grant, bounding the code's blast radius by what it was given rather than by what its identity can reach.
+2. **Distinction**: Under ambient authority a process can reach everything its identity may touch, named globally; under capabilities the default reach is empty, and every access goes through a reference the holder received.
+3. **Common pitfall**: Treating a plain identifier, or a token the model can read and rewrite, as a capability. Without a protected binding the holder can forge or substitute a broader reference.
+
+:::
+
+@Tbl-vol3-ambient-vs-capability contrasts the two ways of deciding what a process may touch.
 
 | Dimension               | Ambient authority (identity and access control lists)         | Capability-based authority                                   |
 |:------------------------|:--------------------------------------------------------------|:-------------------------------------------------------------|
@@ -175,9 +201,9 @@ A privileged service that uses its own authority to fulfill an insufficiently sc
 
 ### Represent and enforce a scoped grant
 
-A capability is an unforgeable authority reference designating resources and permitted operations. It may be a protected handle checked by a runtime or kernel, or a token verified by a service. It need not be a signed string visible to the model. The implementation must prevent the holder from fabricating broader rights or substituting another task's reference; a plain identifier with no protected binding does not provide that property.
+A capability may be a protected handle checked by a runtime or kernel, or a token verified by a service; it need not be a string visible to the model at all. Either way, the implementation prevents the holder from fabricating broader rights or substituting another task's reference.
 
-Use $C=(R,O,P,E)$ as an abstract description of a grant: rights $R$, objects $O$, additional conditions $P$, and expiry $E$. This tuple describes authority, not a required token encoding. The conditions can associate different operations with different objects and bind use to a task or recipient. Listing read and write among the rights does not mean both apply to every listed object.
+Use $C=(R,O,P,E)$ as an abstract description of a grant: rights $R$, objects $O$, additional conditions $P$, and expiry $E$. The tuple describes authority independent of any token encoding. Its conditions can pair different operations with different objects and bind use to a task or recipient, so read and write listed among the rights need not both apply to every listed object.
 
 The tuple becomes operational as a check. A proposed access $a$ names an operation, a target, and its arguments. The enforcement point admits it at time $t$ only if every condition in @eq-vol3-capability-verdict holds:
 
@@ -198,19 +224,19 @@ For the repair, @tbl-vol3-scoped-repair-grant separates the resources an executi
 
 : **A scoped repair grant**: Different resources require different rights; authority over one row does not authorize the excluded use in another. {#tbl-vol3-scoped-repair-grant}
 
-The grant also has a lifetime and enforced limits on execution and output. It permits the repair to make progress while separating writable candidate artifacts from the machinery used to assess them. Tests may need writable temporary files; protecting acceptance checks does not require making every test output read-only.
+The grant also has a lifetime and enforced limits on execution and output. It permits the repair to make progress while separating writable candidate artifacts from the machinery used to assess them. Tests keep their writable temporary files; protecting the acceptance checks means protecting their implementation and reported results.
 
-The binding between the grant and execution is the essential step. The runtime associates the admitted operation with its actual task, resolves the requested resource within that scope, and checks the required right and current conditions. Resource naming must resist indirection or concurrent changes that could redirect an allowed path to a different object. The version precondition from Tool Calling remains a separate check: authority to edit `src/pool.py` does not establish that its current version matches the proposal.
+The binding between the grant and execution is the essential step. The runtime associates the admitted operation with its actual task, resolves the requested resource within that scope, and checks the required right and current conditions. Resource naming must resist indirection or concurrent changes that could redirect an allowed path to a different object. The version precondition from @sec-vol3-tool-calling remains a separate check: authority to edit `src/pool.py` says nothing about whether its current version matches the proposal.
 
-The executing code must then be unable to bypass the policy by opening another path, using an inherited handle, or contacting an unrestricted service directly. This can require restricted mounts, process identities, mediated interfaces, or other controls supplied by the envelope. The guest need not attach a capability token to every system call if the enforcement layer has already bound its accessible resources to the grant. What matters is the resulting reach, not whether a token appears in the request.
+The executing code must then be unable to bypass the policy by opening another path, using an inherited handle, or contacting an unrestricted service directly. This can require restricted mounts, process identities, mediated interfaces, or other controls supplied by the envelope. Once the enforcement layer has bound the guest's accessible resources to the grant, the guest need not attach a token to every system call; what matters is the resulting reach.
 
 On Linux, the supervisor can act as a policy compiler. It verifies the grant, then translates the permitted paths and operations into kernel-enforced rules before it starts the worker. Landlock [@linux2024landlock], a Linux security module, lets an unprivileged process irreversibly restrict the filesystem hierarchies and network ports it and its descendants can access; a `seccomp-bpf` filter restricts which system calls the process may make and with which scalar arguments. The supervisor installs both, together with restricted mounts and an unprivileged identity, and then calls `execve` on the tool. The worker runs under limits the kernel enforces on every open and connect, without knowing the grant's format and without being able to remove the rules it inherited. Filtering on system-call numbers cannot inspect the contents of pointer arguments safely, which is why path restrictions belong to a mechanism that resolves paths inside the kernel rather than to the system-call filter.
 
-Admission also cannot know every resource cost in advance. An input-size check can reject an oversized request before execution, but CPU time, memory, output, and storage consumption require accounting while work runs. The corresponding limits need defined responses, such as denying further allocation, throttling, or requesting termination. These are enforcement obligations, not predictions supplied by the grant's description.
+Admission also cannot know every resource cost in advance. An input-size check can reject an oversized request before execution, but CPU time, memory, output, and storage consumption require accounting while work runs. The corresponding limits need defined responses, such as denying further allocation, throttling, or requesting termination.
 
 ### Attenuate delegated authority
 
-Attenuation creates a grant that permits no more than its parent. Writing $\mathcal{A}(C)$ for the accesses allowed by a grant, the relation requires
+**Attenuation**\index{Attenuation!definition} derives a grant that permits no more than its parent. Writing $\mathcal{A}(C)$ for the accesses allowed by a grant, the relation requires
 
 $$
 C_{\text{child}}\sqsubseteq C_{\text{parent}}
@@ -238,17 +264,17 @@ $$ {#eq-vol3-macaroon-chain}
 
 The verifier recomputes the chain of @eq-vol3-macaroon-chain from its root key and admits a request only if every caveat is satisfied. A holder of the child cannot remove a caveat without the prior code $\sigma_{i-1}$, which the chain does not reveal, so a subagent or tool worker can narrow authority offline but cannot widen the token it received.
 
-This relation constrains derived authority; it does not imply that every permission in a trajectory must shrink forever. A task can move from inspection to an authorized edit or test phase under an explicit policy. Nor does deriving a read-only child revoke a broader parent that the same holder retained. If a phase transition is intended to remove write authority, the runtime must withdraw or disable the earlier grant and deal with access already opened under it. Delegation must also preserve aggregate budgets: issuing several children must not silently multiply the parent's resource allowance. @Fig-vol3-capability-attenuation draws both constructions, the checked derivation with its retained parent and the caveat chain of @eq-vol3-macaroon-chain.
+This relation constrains derived authority; a trajectory can still move from inspection to an authorized edit or test phase under explicit policy. Deriving a read-only child also leaves a broader parent that the same holder retained fully usable. If a phase transition is meant to remove write authority, the runtime withdraws or disables the earlier grant and deals with access already opened under it. Delegation must also preserve aggregate budgets: several children together receive at most the parent's resource allowance. @Fig-vol3-capability-attenuation draws both constructions, the checked derivation with its retained parent and the caveat chain of @eq-vol3-macaroon-chain.
 
 ::: {#fig-vol3-capability-attenuation fig-env="figure" fig-pos="htb" fig-cap="**Attenuation and What It Leaves Behind**: Panel A derives two children from the edit grant. The test grant is rejected because it requests execute, which the parent never held, even though its expiry is earlier. The scan grant is valid because every component is narrower. Deriving it does not remove the edit grant, so a worker that retains the parent can still write until the runtime withdraws it. Panel B shows the chained-caveat alternative, in which each holder narrows a token offline by folding a caveat into the next code, and only a verifier holding the issuer's key can check the whole chain." fig-alt="Two panels. Panel A, deriving a grant: a parent grant C_edit with rights read and write over repo/ has two derived children. C_test, requesting read and execute over repo/, is marked rejected because execute is not in the parent's rights. C_scan, with read over repo/src/pool.py, is marked valid. A strip below states that the worker keeps C_edit, so write stays usable until it is withdrawn. Panel B, appending a caveat: an issuer holding key k computes sigma 0, a holder appends caveat c1 for the prefix repo/src/ to compute sigma 1, a holder appends caveat c2 for read rights to compute sigma 2, and a verifier recomputes the chain from k and checks every caveat."}
 ![](images/svg/capability-attenuation.svg)
 :::
 
-The useful question is therefore not simply “is the child narrower?” It is “which grants and resource handles can this worker still exercise?” That question applies equally to a helper process inside one trajectory and to a delegated agent; coordination does not change the meaning of authority.
+The useful question is therefore “which grants and resource handles can this worker still exercise?”, a stronger test than “is the child narrower?” It applies equally to a helper process inside one trajectory and to a delegated agent, since coordination leaves the meaning of authority unchanged.
 
 ### End authority deliberately
 
-An expiry states when a grant should cease to authorize use. It does not close an existing file descriptor, stop a running process, or cancel a request already accepted by another service. Revocation likewise needs an enforcement mechanism, such as a mediated reference whose current status is checked, combined with control over ongoing work where the policy requires it.
+An expiry states when a grant stops authorizing new use. Closing an open file descriptor, stopping a running process, and cancelling a request another service already accepted are separate actions, so revocation needs an enforcement mechanism, such as a mediated reference whose current status is checked on each use, together with control over ongoing work where policy requires it.
 
 Suppose the repair's edit phase ends while a worker still holds a writable source handle. Rejecting new edit requests alone leaves that handle as a possible write path. The transition must stop or constrain the worker, revoke the usable reference where supported, or move subsequent work into an appropriately restricted execution context. The runtime must record what it has actually confirmed rather than equating a changed policy record with completed revocation.
 
@@ -258,22 +284,22 @@ External effects have their own boundary. A broker can stop accepting new reques
 
 A repair worker holds read and write access to the candidate source. It derives a read-only grant for `src/pool.py`, retains the original grant, and opens a writable handle before the edit phase expires.
 
-- [ ] Has the worker lost its write authority merely by deriving the child? Which references still matter?
-- [ ] Could the child add test-execution permission while shortening its lifetime and still be an attenuation?
-- [ ] What must the runtime address when the edit grant expires if the writable handle or a remote operation remains active?
-- [ ] How can the test phase retain writable scratch while keeping the acceptance machinery outside the worker's writable scope?
+- [ ] **Derived vs. retained grants**: List every reference through which the worker can still write after deriving the child. Which of them must the runtime withdraw to end write authority?
+- [ ] **Attenuation test**: A proposed child adds test execution and shortens the expiry. Apply the component-wise check of $C_{\text{child}} \sqsubseteq C_{\text{parent}}$ and decide whether it is an attenuation of the edit grant.
+- [ ] **Expiry**: When the edit grant expires, the writable handle and one brokered fetch are still open. Decide what the runtime must do with each before it may record revocation as complete.
+- [ ] **Test-phase grant**: Write the tuple $(R, O, P, E)$ for a test phase that keeps writable scratch while the acceptance machinery stays outside the worker's writable scope.
 
 :::
 
 ### Credential brokering {#sec-vol3-sandboxes-credential-brokering}
 
-Scoped access still leaves a placement decision: must the executing code possess the credential used by an external service? Putting a repository token in the guest's environment or filesystem makes it available to code that can read those locations. A credential broker instead holds the selected secret outside the guest and uses it on behalf of an authorized request.
+Scoped access still leaves a placement decision: must the executing code possess the credential used by an external service? Putting a repository token in the guest's environment or filesystem makes it available to code that can read those locations. A **credential broker**\index{Credential broker!definition} instead holds the selected secret outside the guest and uses it on behalf of an authorized request.
 
 For example, the repair worker requests a fetch from its approved private repository through a host-owned source-service adapter. The broker checks the bound task identity, repository, operation, destination, and current grant, then performs the credentialed request without returning the credential. Permission to fetch does not permit a push or access to another repository. The worker can cause a narrowly authorized use of the credential without possessing the credential itself.
 
-Brokering requires a supported mediation arrangement. An application adapter can make the upstream request directly; a proxy can attach credentials only where it can legitimately inspect and modify the relevant protocol exchange. A signing service likewise needs to authorize what it signs, not merely conceal its key. The egress section develops how the runtime constrains routes that might bypass these interfaces. If a tool genuinely requires a credential inside the guest, a narrowly scoped, short-lived credential reduces exposure but does not eliminate possession risk.
+Brokering requires a supported mediation arrangement. An application adapter can make the upstream request directly; a proxy can attach credentials only where it can legitimately inspect and modify the relevant protocol exchange. A signing service likewise needs to authorize what it signs, not merely conceal its key. The egress section develops how the runtime constrains routes that might bypass these interfaces. If a tool genuinely requires a credential inside the guest, a narrowly scoped, short-lived credential shrinks the scope and window of exposure, while the guest still possesses it for that window.
 
-Keeping selected credentials outside the guest removes one valuable target from the README attack. It does not make an environment dump or repository content nonsensitive, and a brokered operation can still be misused within its permitted scope. Secret placement, access permission, and the appropriateness of an allowed request are distinct concerns. Security develops the latter problem; this chapter establishes where authority resides and how execution is confined to it.
+Keeping selected credentials outside the guest removes the most valuable target from the README attack, and from the environment dump in the Gemini CLI incident. The environment and repository content remain sensitive, and a brokered operation can still be misused within its permitted scope. Secret placement, access permission, and the appropriateness of an allowed request are three distinct concerns; @sec-vol3-security develops the last, and this chapter establishes where authority resides and how execution is confined to it.
 
 Capabilities and brokering specify the resources the runtime intends to expose. They depend on enforcement that the running code cannot bypass or modify under the stated threat model. The next section compares execution envelopes by what they share with the host and which components must uphold that boundary.
 
@@ -291,7 +317,7 @@ An ***isolation envelope***\index{Isolation envelope!definition} is the enforced
 
 :::
 
-The **trusted computing base** is the set of components whose correct operation the claimed protection depends on. Changing envelopes changes that set and the interfaces exposed to untrusted code. Fewer interfaces can simplify review, but counting system calls or source lines does not yield a numerical probability of escape. The useful comparison asks which failures the design contains, which components remain trusted, and which interfaces the workload requires. @Fig-vol3-isolation-spectrum previews the four envelopes developed below by the component a system call from untrusted code reaches first and the calls that finally reach the host kernel.
+The **trusted computing base**\index{Trusted computing base!definition} is the set of components whose correct operation the claimed protection depends on. Changing envelopes changes that set and the interfaces exposed to untrusted code. Fewer interfaces can simplify review, but counting system calls or source lines does not yield a numerical probability of escape. The useful comparison asks which failures the design contains, which components remain trusted, and which interfaces the workload requires. @Fig-vol3-isolation-spectrum previews the four envelopes developed below by the component a system call from untrusted code reaches first and the calls that finally reach the host kernel.
 
 ::: {#fig-vol3-isolation-spectrum fig-env="figure" fig-pos="htb" fig-cap="**Where a System Call Lands**: Amber boxes run untrusted code, purple boxes are trusted mediators, and the host kernel closes every column. A shared-kernel container sends every call to the host kernel through a filter. A user-space kernel traps and emulates each call and makes a reduced set of host calls. A microVM's guest kernel handles ordinary calls natively, and only device I/O exits to the monitor. Restricted bytecode has no system-call instruction and reaches the host only through imported functions. The columns differ in which interface untrusted code can reach, not in a ranked probability of escape." fig-alt="Four columns labeled shared-kernel container, user-space kernel, microVM, and restricted bytecode, each ending in a host kernel box. In the container column, an arrow labeled every call, filtered runs from the workload process straight to the host kernel. In the user-space kernel column, the workload process sends every call to a user-space kernel that emulates it and makes reduced host calls. In the microVM column, guest processes make native system calls to a guest kernel inside a dashed guest region, and a VM exit for device I/O reaches the monitor and hypervisor, which makes host calls. In the restricted bytecode column, a module in linear memory reaches a runtime with host imports only through imported functions."}
 ![](images/svg/isolation_spectrum_v2.svg)
@@ -299,13 +325,13 @@ The **trusted computing base** is the set of components whose correct operation 
 
 ### Shared and interposed kernels {#sec-vol3-sandboxes-gvisor-vs-microvm}
 
-A **shared-kernel container** confines host processes using configured operating-system controls. Namespaces restrict views of resources, access controls and system-call filters restrict operations, and resource controllers bound consumption. The host kernel still handles the permitted calls. A reachable vulnerability in that kernel can threaten the boundary, but an ordinary system call is not itself a compromise. Container isolation depends on both the kernel and the selected configuration; packaging code as an image does not establish either.
+A **shared-kernel container**\index{Shared-kernel container!definition} confines host processes using configured operating-system controls. Namespaces restrict views of resources, access controls and system-call filters restrict operations, and resource controllers bound consumption. The host kernel still handles the permitted calls, so a reachable vulnerability in that kernel threatens the boundary. Container isolation is exactly as strong as the host kernel and the selected configuration; packaging code as an image supplies neither.
 
-A **user-space kernel** interposes another implementation of the application's operating-system interface. For example, gVisor's Sentry reimplements application system calls in a memory-safe user-space process and obtains underlying services through a restricted set of host calls, while a separate file proxy, the Gofer, mediates filesystem access so the Sentry never holds host file descriptors directly [@google2019gvisor]. Applications depend on the interfaces that this implementation supports, so compatibility must be checked against the actual toolchain. This adds a mediation boundary rather than eliminating the host kernel or the need to constrain exposed resources.
+A **user-space kernel**\index{User-space kernel!definition} interposes another implementation of the application's operating-system interface. For example, gVisor's Sentry reimplements application system calls in a memory-safe user-space process and obtains underlying services through a restricted set of host calls, while a separate file proxy, the Gofer, mediates filesystem access so the Sentry never holds host file descriptors directly [@google2019gvisor]. Applications depend on the interfaces that this implementation supports, so compatibility must be checked against the actual toolchain. This adds a mediation boundary in front of the host kernel; the exposed resources still need their own constraints.
 
 ### A separate guest kernel
 
-A **microVM** places a guest kernel and its applications behind a hardware-virtualization boundary\index{Sandboxes!hardware virtualization} managed by a virtual machine monitor (VMM). Application system calls normally reach the guest kernel; host interaction goes through the configured virtualization and I/O interfaces. Gaining control of the guest kernel is therefore different from gaining control of the host. The protection still depends on the monitor, hypervisor, hardware, and exposed device and host-service interfaces. It is not immunity to implementation defects or misuse of permitted I/O.
+A **microVM**\index{MicroVM!definition} places a guest kernel and its applications behind a hardware-virtualization boundary\index{Sandboxes!hardware virtualization} managed by a virtual machine monitor (VMM). Application system calls normally reach the guest kernel; host interaction goes through the configured virtualization and I/O interfaces. Gaining control of the guest kernel is therefore different from gaining control of the host. The protection depends on the monitor, hypervisor, hardware, and exposed device and host-service interfaces, including defects in them and misuse of the I/O they permit.
 
 The separation comes from the processor. With hardware virtualization extensions, the CPU runs the hypervisor in VMX root operation and the entire guest, kernel and applications alike, in VMX non-root operation. Ordinary instructions in non-root operation execute natively, including the guest's own system-call instruction, which enters the guest kernel without involving the host. Sensitive operations, such as writing control registers, reprogramming interrupt controllers, or touching a device register the hypervisor has not mapped, cause a VM exit, in which the processor saves the guest's state in a structure the hypervisor owns, the virtual machine control structure (VMCS), and transfers control to the hypervisor. Memory is translated in two stages. The guest's page tables map guest virtual addresses to guest physical addresses, and extended (or nested) page tables that only the hypervisor can modify map guest physical addresses to host physical memory:
 
@@ -315,17 +341,17 @@ $$
 
 A guest that gains full control of its kernel can rewrite the first mapping at will, but it cannot change the second, so it still cannot address a host frame the hypervisor did not map for it. That is the precise sense in which controlling the guest kernel differs from controlling the host.
 
-Firecracker\index{Firecracker!microVM isolation} [@agache2020firecracker] is one example of a reduced-device VMM using Linux KVM. It omits the PCI bus, ACPI tables, and firmware, exposes only a few paravirtual devices (block, network, virtual socket, and a serial console) over memory-mapped I/O, and loads the guest kernel directly, which shrinks both the device code an attacker can reach and the time to start a guest. Its design also makes a useful boundary explicit: the VMM supplies virtual network devices, but host integration must enforce egress filtering. A virtual machine does not supply the task's network policy merely by existing [@firecracker2024design].
+Firecracker\index{Firecracker!microVM isolation} [@agache2020firecracker] is one example of a reduced-device VMM using Linux KVM. It omits the PCI bus, ACPI tables, and firmware, exposes only a few paravirtual devices (block, network, virtual socket, and a serial console) over memory-mapped I/O, and loads the guest kernel directly, which shrinks both the device code an attacker can reach and the time to start a guest. Its design also makes a useful boundary explicit: the VMM supplies virtual network devices, and the host integration enforces egress filtering, so the task's network policy comes from that integration rather than from the virtual machine [@firecracker2024design].
 
 ### Restricted bytecode and host imports {#sec-vol3-sandboxes-wasm}
 
-A **bytecode sandbox** runs code compiled to an execution format whose runtime enforces restrictions on memory access and control flow. WebAssembly, for example, confines a module to linear-memory regions whose accesses the runtime bounds-checks or surrounds with unmapped guard pages, and the module has no system-call instruction at all; it reaches its embedding only through the functions the host imports into it [@haas2017bringing]. Those bounds do not make every object inside the module memory-safe, and an allowed host function can still perform a consequential operation. The WebAssembly System Interface (WASI) applies the capability model of @sec-vol3-sandboxes-least-privilege directly. The host preopens specific directory handles at instantiation, every file open is resolved relative to one of those handles, and a path that escapes it, such as `../../etc/passwd`, fails with a not-capable error rather than reaching the host filesystem.
+A **bytecode sandbox**\index{Bytecode sandbox!definition} runs code compiled to an execution format whose runtime enforces restrictions on memory access and control flow. WebAssembly, for example, confines a module to linear-memory regions whose accesses the runtime bounds-checks or surrounds with unmapped guard pages, and the module has no system-call instruction at all; it reaches its embedding only through the functions the host imports into it [@haas2017bringing]. Those bounds protect the host from the module rather than objects inside the module from one another, and an allowed host function still performs whatever consequential operation it implements. The WebAssembly System Interface (WASI) applies the capability model of @sec-vol3-sandboxes-least-privilege directly. The host preopens specific directory handles at instantiation, every file open is resolved relative to one of those handles, and a path that escapes it, such as `../../etc/passwd`, fails with a not-capable error rather than reaching the host filesystem.
 
 This option is useful when the workload can target the supported format and needs only a small set of host operations. A parser given an input buffer and an output interface need not receive filesystem or network access. Supplying a broad host import would expand its reach again. The runtime, compiler, and imported functions remain part of the protection's trusted implementation; execution time and memory growth still need limits.
 
 ### Where the system-call cost falls {#sec-vol3-sandboxes-syscall-tax}
 
-The four envelopes differ not only in what they share but in where each request for an operating-system service is handled, and that decides both compatibility and cost. Every mediated call pays up to three terms:
+The four envelopes differ not only in what they share but in where each request for an operating-system service is handled, and that decides both compatibility and cost. Every mediated call pays up to three terms, the envelope's **system-call tax**\index{System-call tax!definition}:
 
 $$
 T_{\text{syscall}} = T_{\text{trap}} + T_{\text{filter}} + T_{\text{switch}}
@@ -359,9 +385,9 @@ The contrast that matters for coding agents is between the middle two rows. Buil
 
 The choice follows from three properties of the action. The first is the code it runs. Pure computation over supplied inputs fits restricted bytecode, arbitrary Linux programs need a user-space kernel or a microVM, and a shared-kernel container fits code that is trusted or reviewed, or work with no secrets and no other tenant's state in reach. The second is the authority it holds. At $A_1$ the envelope is the whole guarantee, since nothing else stands between model-written code and the host, so untrusted native code receives its own guest kernel. At $A_2$ and $A_3$ the envelope must be paired with the broker and the approval gate, because no envelope can contain an effect that lands in an external system. The third is duration, the horizon exposure at work. A start cost that dwarfs a millisecond parser call becomes negligible across a trajectory that reuses its envelope for many turns, as Notebook \ref{nbk-08-envelope-amortization} shows.
 
-Applied to the three workloads, the rule gives three answers. The parser runs in a fresh bytecode sandbox per call. The repair holds one microVM for its whole trajectory, or a user-space kernel if its toolchain's interfaces are supported and the measured cost is acceptable. The customer binary runs in a microVM that holds no credentials and has egress denied; if its requirements cannot be met within such a boundary, it is rejected or moved to a suitable execution service, not given broader host access merely to make it run. Each answer is a configuration, not a label, and holds only for the mounts, devices, routes, and limits actually applied.
+Applied to the three workloads, the rule gives three answers. The parser runs in a fresh bytecode sandbox per call. The repair holds one microVM for its whole trajectory, or a user-space kernel if its toolchain's interfaces are supported and the measured cost is acceptable. The customer binary runs in a microVM that holds no credentials and has egress denied; a binary whose requirements exceed that boundary is rejected or sent to a suitable execution service rather than granted broader host access. Each answer is a configuration and holds for the mounts, devices, routes, and limits actually applied.
 
-Every option also needs resource governance. A program can exhaust CPU time, memory, process slots, storage, or output capacity without escaping. Limits must cover the resources charged to the workload, including applicable host-side helpers, not just what the guest reports. The supervisor must remain able to observe limits and intervene. A quota bounds a specified quantity; it does not eliminate contention on every shared cache, device, or service. Tests should include excessive allocation and runaway output alongside denied resource access, with the expected disposition recorded.
+Every option also needs resource governance. A program can exhaust CPU time, memory, process slots, storage, or output capacity without escaping. Limits cover the resources charged to the workload, host-side helpers included, as the host measures them rather than as the guest reports them, and the supervisor stays able to observe and intervene. A quota bounds a specified quantity; contention on shared caches, devices, and services remains and needs its own measurement. Tests should include excessive allocation and runaway output alongside denied resource access, with the expected disposition recorded.
 
 On Linux, cgroups v2 [@linux2024cgroupv2] supplies these controls for a whole process tree, whether that tree is a container's workload or a microVM's monitor and helper threads. `cpu.max` grants a quota of CPU time per period, and the kernel throttles the group for the rest of a period once the quota is spent. `pids.max` bounds process creation. Memory has graduated limits. Above `memory.high` the kernel throttles allocating threads and forces reclaim rather than killing anything, while reaching `memory.max` without successful reclaim invokes the out-of-memory killer inside the group. The graduation matters because a kill destroys the task's in-memory state without a chance to record it. Pressure stall information (PSI) [@linux2024psi] reports the share of time in which some or all of the group's threads were stalled waiting for memory, CPU, or I/O, and a supervisor can register a threshold and be woken when it is crossed. The supervisor can then compact, checkpoint, or deliberately terminate the task and report a resource failure, instead of learning about the problem from a process that has already disappeared.
 
@@ -392,12 +418,18 @@ class EnvelopeAmortization:
     per_call_total = per_call_setup + useful_work
     per_trajectory_total = setup + useful_work
     setup_saved = per_call_setup - setup
+    reuse_speedup = (per_call_total / per_trajectory_total).to("dimensionless").magnitude
+    setup_share = (setup / (setup + work_per_call)).to("dimensionless").magnitude
+    overhead_cap = 0.10  # decision threshold: setup at most this share of a fresh call
+    work_for_cap = setup * (1 - overhead_cap) / overhead_cap  # W >= S(1-c)/c
 
     # 3. GUARD: equal-work ledger and independently checked totals.
     check(useful_work == Q_(300, "ms"), "Same useful work in both designs")
     check(per_call_total == Q_(1800, "ms"), "Per-call setup plus useful work")
     check(per_trajectory_total == Q_(315, "ms"), "One setup plus useful work")
     check(setup_saved == per_call_total - per_trajectory_total, "Only setup differs")
+    check(setup_share > 0.5, "Setup dominates each fresh call at these inputs")
+    check(abs(work_for_cap.to("ms").magnitude - 135) < 1e-9, "Cap work is S(1-c)/c")
 
     # 4. OUTPUT: unit-aware displays for all numerical inputs and results.
     calls_str = fmt_int(calls)
@@ -408,39 +440,43 @@ class EnvelopeAmortization:
     per_call_total_str = fmt_time(per_call_total, unit="ms", precision=0)
     per_trajectory_total_str = fmt_time(per_trajectory_total, unit="ms", precision=0)
     setup_saved_str = fmt_time(setup_saved, unit="ms", precision=0)
+    reuse_speedup_mult_str = fmt_multiple(reuse_speedup, precision=1)
+    setup_share_str = fmt_percent(setup_share, precision=1, style="prose")
+    overhead_cap_str = fmt_percent(overhead_cap, precision=0, style="prose")
+    work_for_cap_str = fmt_time(work_for_cap, unit="ms", precision=0)
 ```
 
 ::: {#nbk-08-envelope-amortization .callout-notebook title="Paying setup once or repeatedly"}
 
-**Problem**: A hypothetical trajectory performs `{python} EnvelopeAmortization.calls_str` sequential parser calls, each requiring `{python} EnvelopeAmortization.work_per_call_str` of useful execution. Suppose preparing the selected envelope through readiness for useful work costs `{python} EnvelopeAmortization.setup_str`. Compare preparing a fresh envelope for every call with retaining one envelope for this trajectory. Hold useful execution time equal; no platform performance claim is implied.
+**Problem**: A hypothetical trajectory performs `{python} EnvelopeAmortization.calls_str` sequential parser calls, each requiring `{python} EnvelopeAmortization.work_per_call_str` of useful execution, and preparing the envelope through readiness for useful work costs `{python} EnvelopeAmortization.setup_str` in the chapter's illustrative sandbox profile. How much elapsed time does a fresh envelope per call add over one envelope retained for the trajectory, and at what per-call work does the fresh envelope become affordable?
 
-**Math**: For $N$ calls, setup time $S$, and useful work $W$ per call, the included elapsed components are $N(S+W)$ for fresh-per-call execution and $S+NW$ for trajectory reuse. Both perform `{python} EnvelopeAmortization.useful_work_str` of useful work. Fresh-per-call execution adds `{python} EnvelopeAmortization.per_call_setup_str` of setup, totaling `{python} EnvelopeAmortization.per_call_total_str`. Trajectory reuse adds one `{python} EnvelopeAmortization.setup_str` setup, totaling `{python} EnvelopeAmortization.per_trajectory_total_str`. The difference is `{python} EnvelopeAmortization.setup_saved_str` of avoided setup.
+**Math**: For $N$ calls, setup time $S$, and useful work $W$ per call, fresh-per-call execution takes $N(S+W)$ and trajectory reuse takes $S+NW$. Both perform `{python} EnvelopeAmortization.useful_work_str` of useful work. Fresh-per-call execution adds `{python} EnvelopeAmortization.per_call_setup_str` of setup, totaling `{python} EnvelopeAmortization.per_call_total_str`; reuse adds one `{python} EnvelopeAmortization.setup_str` setup, totaling `{python} EnvelopeAmortization.per_trajectory_total_str`, a `{python} EnvelopeAmortization.reuse_speedup_mult_str` difference. Setup is $S/(S+W)$ = `{python} EnvelopeAmortization.setup_share_str` of every fresh call. Holding setup to at most `{python} EnvelopeAmortization.overhead_cap_str` of a fresh call requires $W \ge S(1-c)/c$ for a cap $c$, here `{python} EnvelopeAmortization.work_for_cap_str` of work per call.
 
-**Decision**: This comparison isolates one cost, not total task latency. It excludes model calls, queueing, teardown, state transfer, and any performance changes caused by retaining state. Fresh envelopes require an explicit way to pass needed task data; reuse allows process state and modifications from earlier calls to influence later calls. Retaining an envelope for one task therefore needs a stated within-task trust and lifetime policy. It does not justify reassigning that state to another tenant or weakening access controls. Pooling and verified reset in @sec-vol3-sandboxes-pooling address a different question: how to provide ready capacity without inheriting a previous lease's mutable state.
+**Systems insight**: The ratio $W/S$ decides the envelope's lifetime. Calls with at least `{python} EnvelopeAmortization.work_for_cap_str` of useful work can afford a fresh envelope each; below that, retain one envelope for the trajectory and pay setup once. The price of reuse is a within-task trust policy, since state from earlier calls reaches later ones. Reuse never crosses tenants: ready capacity for the next task comes from pooling and verified reset (@sec-vol3-sandboxes-pooling). The comparison counts setup and useful work only, excluding model calls, queueing, and teardown.
 
 :::
 
 ### Device access extends the boundary {#sec-vol3-sandboxes-gpu}
 
-If the repair or analysis needs an accelerator, choosing its CPU envelope is not the end of the decision. The design must identify which driver and device interfaces the workload can reach, how device memory and compute capacity are assigned, which failures can affect neighboring tenants, and how device state is reset before reassignment. A remote accelerator service can replace direct device access with a narrower request interface, but its service-side isolation and admission controls then become part of the system contract.
+If the repair or analysis needs an accelerator, the device joins the boundary decision. The design must identify which driver and device interfaces the workload can reach, how device memory and compute capacity are assigned, which failures can affect neighboring tenants, and how device state is reset before reassignment. A remote accelerator service can replace direct device access with a narrower request interface, but its service-side isolation and admission controls then become part of the system contract.
 
-Direct device access also requires attention to direct memory access (DMA), through which a device reads or writes system memory. CPU address-space isolation alone does not describe that path. The Linux VFIO documentation [@linux2024vfio] explains why device assignment uses I/O memory-management protection and why the isolation unit depends on device and interconnect topology. Neither an advertised hardware partition nor exclusive allocation by itself specifies every driver, fault, capacity, and reset property. Verify those properties for the actual deployment instead of transferring a CPU-only guarantee to its accelerator.
+Direct device access also requires attention to direct memory access (DMA), through which a device reads or writes system memory. CPU address-space isolation leaves that path uncovered. The Linux VFIO documentation [@linux2024vfio] explains why device assignment uses I/O memory-management protection and why the isolation unit depends on device and interconnect topology. An advertised hardware partition or an exclusive allocation leaves driver, fault, capacity, and reset properties to verify for the actual deployment, because a CPU-side guarantee stops at the accelerator.
 
 The selected envelope now has a defined execution boundary, resource policy, and lifetime. The repair's files have their own continuity requirement: later tests need the candidate edits and permitted artifacts from earlier turns. That requirement can be implemented independently of whether a particular process or envelope remains alive. The next section develops the task-local workspace and the rules for retaining and exporting its contents.
 
 ## The Agent Workspace {#sec-vol3-sandboxes-cow}
 
-The repair needs files to outlive individual tool calls. An edit produces candidate `r18`; a later command compiles it; another runs the targeted test and leaves a report. Starting a new process for each command need not lose those files if each process receives the same task workspace. Conversely, keeping a process alive does not specify which files it may change. The runtime needs a workspace policy separately from its choice of execution envelope.
+The repair needs files to outlive individual tool calls. An edit produces candidate `r18`; a later command compiles it; another runs the targeted test and leaves a report. Starting a new process for each command need not lose those files if each process receives the same task workspace. Conversely, a live process says nothing about which files it may change. The runtime needs a workspace policy separately from its choice of execution envelope.
 
-That policy identifies the source baseline, the task's private modifications, permitted scratch space, and outputs eligible for retention. The developer's ordinary checkout should not become the working directory of arbitrary generated commands merely because it is convenient. For this repair, source edits and build artifacts belong to a designated task workspace. Protected acceptance checks and their trusted reporting machinery remain outside the agent's writable scope. Checks may still need writable scratch; protecting their implementation does not mean forbidding every write they perform.
+That policy identifies the source baseline, the task's private modifications, permitted scratch space, and outputs eligible for retention. Arbitrary generated commands run in a designated task workspace, never in the developer's ordinary checkout, and for this repair the source edits and build artifacts live there. Protected acceptance checks and their trusted reporting machinery remain outside the agent's writable scope, while their scratch output stays writable.
 
 ### Share a base, keep modifications private
 
-A full private copy is a simple way to provision a workspace, but repeatedly copying an unchanged repository and toolchain can be expensive. Copy-on-write separates the unchanged base from modifications made by each task. The runtime pins the base version and exposes a task-specific writable view. Reads can use unchanged base contents; a modification acquires private storage according to the implementation's copying rules. Another task should not inherit those modifications merely because it uses the same base.
+A full private copy is a simple way to provision a workspace, but repeatedly copying an unchanged repository and toolchain can be expensive. Copy-on-write separates the unchanged base from modifications made by each task. The runtime pins the base version and exposes a task-specific writable view. Reads use unchanged base contents; a modification acquires private storage according to the implementation's copying rules, and tasks sharing a base never see each other's modifications.
 
-A layered filesystem illustrates the mechanism. A read-only lower tree supplies the baseline, while a private upper tree supplies additions and replacements. The merged view presents the result to the program. Deleting a lower-layer name requires a marker that hides it, rather than deleting the shared original. Linux OverlayFS calls such a marker a *whiteout*. Its copy-up and directory operations also involve metadata, so the upper tree is not simply a ready-to-submit source patch. The kernel's OverlayFS documentation [@linux2024overlayfs] describes these distinctions.
+A **layered filesystem**\index{Layered filesystem!definition} illustrates the mechanism. A read-only lower tree supplies the baseline, while a private upper tree supplies additions and replacements. The merged view presents the result to the program. Deleting a lower-layer name requires a marker that hides it, rather than deleting the shared original. Linux OverlayFS calls such a marker a *whiteout*. Its copy-up and directory operations also involve metadata, so the upper tree is not simply a ready-to-submit source patch. The kernel's OverlayFS documentation [@linux2024overlayfs] describes these distinctions.
 
-Copy-on-write is a storage choice, not an additional permission grant or a complete isolation boundary. The envelope must still prevent access to another task's private storage and unauthorized writes to the base. A microVM may use a private disk snapshot rather than a host-mounted overlay. Which data and caches are actually shared depends on that arrangement; sharing an image does not establish that every guest shares one host page-cache copy.
+Copy-on-write is a storage choice; keeping tasks out of each other's private storage and off the base remains the envelope's job. A microVM may use a private disk snapshot instead of a host-mounted overlay, and which data and caches are actually shared, down to whether guests share one host page-cache copy, depends on that arrangement.
 
 ### Price the first modification
 
@@ -474,6 +510,8 @@ class WorkspaceCost:
     file_copy = trajectories * fixture
     block_copy = trajectories * block
     logical_changes = trajectories * modified_per_workspace
+    file_vs_block = (fixture / block).to("dimensionless").magnitude
+    file_vs_block_rounded = round(file_vs_block, -3)  # display to the nearest thousand
 
     # GUARD: Separate requested mutations from payload-copy accounting.
     check(abs(file_copy.to(GB).magnitude - 38.4) < 1e-12, "File-copy total")
@@ -482,6 +520,7 @@ class WorkspaceCost:
     check(block_copy < file_copy, "Copy granularity changes copied payload")
     check(abs(full_copy.to(GB).magnitude - 76.8) < 1e-9, "Full-copy provisioning total")
     check(abs(copy_vs_overlay - 60) < 1e-9, "Copy payload is base image over written bytes")
+    check(file_vs_block > 1e4, "Copying unit, not edit size, sets first-write payload")
 
     # OUTPUT: Typed quantities and shared formatters for the notebook.
     trajectories_str = fmt_count(trajectories * count)
@@ -499,6 +538,7 @@ class WorkspaceCost:
     file_copy_str = fmt_memory(file_copy, unit=GB, precision=1)
     block_copy_str = fmt_memory(block_copy, unit=MB, precision=2)
     logical_changes_str = fmt_memory(logical_changes, unit=byte, precision=0)
+    file_vs_block_mult_str = fmt_multiple(file_vs_block_rounded, precision=0, commas=True)
 ```
 
 ::: {#nbk-08-workspace-copy-vs-overlay .callout-notebook title="Provisioning by copy, and the granularity of a first modification"}
@@ -509,9 +549,9 @@ class WorkspaceCost:
 
 **First modification**: Each of `{python} WorkspaceCost.trajectories_str` independent workspaces initially shares an unchanged `{python} WorkspaceCost.fixture_str` binary fixture. Each task overwrites `{python} WorkspaceCost.modified_str` byte within that fixture. Compare two hypothetical implementations: the first copies the entire file's payload into private storage before modifying it; the second copies only the one `{python} WorkspaceCost.block_str` block containing the update. Assume that block was shared before the update and that no other block needs copying. Neither implementation uses a copy offload or compression in this accounting.
 
-**Calculation**: File-granularity copying moves `{python} WorkspaceCost.trajectories_str` × `{python} WorkspaceCost.fixture_str` = `{python} WorkspaceCost.file_copy_str` of payload. Under the stipulated block-copy rule, the corresponding total is `{python} WorkspaceCost.trajectories_str` × `{python} WorkspaceCost.block_str` $\approx$ `{python} WorkspaceCost.block_copy_str`. Both support the same `{python} WorkspaceCost.logical_changes_str` of requested logical changes.
+**Math**: File-granularity copying moves `{python} WorkspaceCost.trajectories_str` × `{python} WorkspaceCost.fixture_str` = `{python} WorkspaceCost.file_copy_str` of payload. Under the stipulated block-copy rule, the corresponding total is `{python} WorkspaceCost.trajectories_str` × `{python} WorkspaceCost.block_str` $\approx$ `{python} WorkspaceCost.block_copy_str`. Both support the same `{python} WorkspaceCost.logical_changes_str` of requested logical changes, and the file-granularity payload is about `{python} WorkspaceCost.file_vs_block_mult_str` larger.
 
-**Systems insight**: The first-write cost follows the copying unit, not just the size of the edit. These totals count payload copied under the two assumptions, excluding metadata and the update itself; they are not physical device-write counts. Caching, allocation, journaling, and the storage implementation affect actual traffic and latency, so a sequential-rate division gives only a lower bound on time, never an estimate of it.
+**Systems insight**: Two ratios set the storage bill. Provisioning cost scales with the base size over the bytes each task writes (`{python} WorkspaceCost.copy_vs_overlay_mult_str` here), so copy-on-write wins whenever tasks change a small fraction of what they can see and loses its advantage as that fraction approaches one. First-write cost scales with the fixture size over the copying unit (about `{python} WorkspaceCost.file_vs_block_mult_str` here), independent of the edit's size, so large mutable fixtures belong on block-granular storage and large immutable ones stay read-only. The totals count payload only; metadata, journaling, and caching add traffic, so the drive-time figures are lower bounds.
 
 :::
 
@@ -521,21 +561,21 @@ Private storage still needs limits. Bound allocated bytes and file counts, accou
 
 ### Own the workspace lifetime {#sec-vol3-sandboxes-lease}
 
-A workspace lease binds the workspace to its task, owner, permitted operations, and lifetime. The runtime records which envelope, jobs, and access channels can use it. This permits the repair's edits and selected caches to remain available across turns without silently making them available to the next tenant. A new process can receive the same workspace under that lease; a new unrelated task requires its own authorized state.
+A **workspace lease**\index{Workspace lease!definition} binds the workspace to its task, owner, permitted operations, and lifetime. The runtime records which envelope, jobs, and access channels can use it. This permits the repair's edits and selected caches to remain available across turns without silently making them available to the next tenant. A new process can receive the same workspace under that lease; a new unrelated task requires its own authorized state.
 
-The lease is an ownership and lifetime contract, not a duplicate-execution guarantee. Renewing or replacing it does not establish whether an earlier tool operation took effect. Nor does expiry prove that a running test stopped or an existing file handle became unusable. The runtime must enforce the end of access on the resources it controls, including already running work. The retry and pending-job distinctions from @sec-vol3-tool-calling-idempotency and @sec-vol3-tool-calling-async still apply.
+The lease is an ownership and lifetime contract. Whether an earlier tool operation took effect, and whether a running test or open handle has stopped, are separate facts; the runtime establishes the latter by enforcing the end of access on the resources it controls, including already running work. The retry and pending-job distinctions from @sec-vol3-tool-calling-idempotency and @sec-vol3-tool-calling-async still apply.
 
 Before discarding private state, preserve only outputs the task permits to leave. For the repair, that may mean a patch relative to the pinned baseline, the resulting source version, and selected check records. Export from a stable view after relevant writers have stopped or from an appropriate snapshot, so the patch and reported version describe the same state. Resolve and validate eligible paths and artifact types within that view; a generated link must not turn an approved export into a read of an unrelated host file.
 
 Do not archive the raw upper tree as though it were the deliverable. Deletion markers, renames, metadata, generated files, caches, and possible sensitive contents need interpretation and filtering. An exported patch is a proposed deliverable, not proof of acceptance; check records must retain which source and checks they describe. Any later application to a shared repository still needs its own authorization and action-time preconditions.
 
-The remaining private state can then be discarded under the reset policy developed in @sec-vol3-sandboxes-pooling. Detaching a filesystem view does not by itself reclaim its resources or establish that it is ready for another tenant. Crash-survival requirements for the workspace and its trajectory record belong to @sec-vol3-durable-execution.
+The remaining private state is then discarded under the reset policy developed in @sec-vol3-sandboxes-pooling. Crash-survival requirements for the workspace and its trajectory record belong to @sec-vol3-durable-execution.
 
-Controlled artifact export governs one path out of the workspace. It does not govern every outbound channel available to code running inside it. Source files and test artifacts may remain sensitive even when brokered credentials never enter the workspace. The next section therefore constrains network access independently of storage continuity.
+Controlled artifact export governs one path out of the workspace; code running inside it has others. Source files and test artifacts may remain sensitive even when brokered credentials never enter the workspace. The next section therefore constrains network access independently of storage continuity.
 
 ## Egress Control {#sec-vol3-sandboxes-network}
 
-Return to the injected README with credential brokering in place. The command cannot read the broker's credential from the guest, but it can still read source files needed for the repair. Sending those files to an unintended recipient would disclose information without escaping the workspace or stealing a key. **Egress control** governs the channels through which executing code communicates outside its envelope. It must constrain the actual communication path, not depend on the code choosing to use a preferred client.
+Return to the injected README with credential brokering in place. The command cannot read the broker's credential from the guest, but it can still read source files needed for the repair. Sending those files to an unintended recipient would disclose information without escaping the workspace or stealing a key. **Egress control**\index{Egress control!definition} governs the channels through which executing code communicates outside its envelope. It must constrain the actual communication path, not depend on the code choosing to use a preferred client.
 
 ### Enforce the path outside the guest
 
@@ -543,7 +583,7 @@ A task that needs no external communication can run without an outbound network 
 
 For a networked guest, this means enforcing its permitted routes and protocols outside the guest's control. Direct sockets, additional interfaces, alternate address families, name-resolution services, and host services reachable through local channels all belong in the reachability review. A local host adapter that forwards arbitrary requests can bypass an otherwise effective network filter. The boundary must cover such forwarding as well as ordinary packets.
 
-Setting `HTTP_PROXY` or `HTTPS_PROXY` configures clients that honor those settings. It does not prevent a program from ignoring them and opening a direct connection. Likewise, a packet filter sees destination addresses; it cannot tell whether the program obtained an address from a hostname or typed the address literally. Network enforcement constrains reachable endpoints, while a higher-level mediator interprets the requested service and operation. Testing the design therefore includes attempted bypasses, not merely a successful request through the preferred proxy. @Fig-vol3-network-egress applies the two enforcement points to four requests from the guest.
+Setting `HTTP_PROXY` or `HTTPS_PROXY` configures only the clients that honor those settings; a program can ignore them and open a direct connection. Likewise, a packet filter sees destination addresses; it cannot tell whether the program obtained an address from a hostname or typed the address literally. Network enforcement constrains reachable endpoints, while a higher-level mediator interprets the requested service and operation. Testing the design therefore includes attempted bypasses, not merely a successful request through the preferred proxy. @Fig-vol3-network-egress applies the two enforcement points to four requests from the guest.
 
 ::: {#fig-vol3-network-egress fig-env="figure" fig-pos="htb" fig-cap="**Two Enforcement Points Outside the Guest**: The packet filter sees only addresses and ports, so it admits connections to the mediator and drops a direct socket or a lookup sent toward an outside resolver, whatever name the program had in mind. The mediator interprets the request. It resolves its own fixed destinations, admits the repository fetch, and adds the brokered credential, while a push or a request for another repository fails the operation grant at the same hostname. A mediator can inspect or change methods, paths, and bodies only if it makes the upstream request itself or terminates TLS; a proxy that merely forwards encrypted traffic cannot." fig-alt="Four columns labeled guest with no default route, packet filter that sees addresses and ports, mediator that binds name, operation, and fields, and outside the guest. Four requests leave the guest. A fetch of the approved repository passes the filter to the adapter, is admitted by the mediator, and reaches the approved repository with a credential added by the mediator. A push or request for another repository passes the filter but is marked operation denied at the mediator. A direct socket to a literal address is marked dropped at the filter, and a metadata or other host is marked not reached. An arbitrary name lookup from the guest is marked no resolver route at the filter, and an external DNS server is marked not reached."}
 ![](images/svg/network_egress_defense_in_depth.svg)
@@ -551,7 +591,7 @@ Setting `HTTP_PROXY` or `HTTPS_PROXY` configures clients that honor those settin
 
 ### Separate destination, operation, and data
 
-Permission to contact a service answers only one part of the disclosure question. A source-hosting service may offer repository reads, pushes, issue comments, and public uploads under the same hostname. The task's permission to fetch its repository does not authorize those other operations. Even a permitted operation can carry information the task should not send. @Tbl-vol3-egress-filtering separates these decisions.
+Permission to contact a service answers only one part of the disclosure question. A source-hosting service may offer repository reads, pushes, issue comments, and public uploads under the same hostname. Permission to fetch the task's repository covers that one operation, and even a permitted operation can carry information the task should not send. @Tbl-vol3-egress-filtering separates these decisions.
 
 | Policy scope           | Question                                                              | What the restriction does not establish                     |
 |:-----------------------|:----------------------------------------------------------------------|:------------------------------------------------------------|
@@ -563,37 +603,37 @@ Permission to contact a service answers only one part of the disclosure question
 
 The host-owned source-service adapter introduced with credential brokering is one concrete design. It binds a fetch to the task's identity, approved repository, read operation, and current grant before using the external credential. The guest receives the authorized source, not the credential itself. A request to push a branch or access another repository fails that operation contract even if the destination hostname is unchanged. The adapter must also restrict request fields that could turn a nominal fetch into an arbitrary data submission; the operation's name alone is not an enforcement mechanism.
 
-A general-purpose proxy offers less semantic structure. If it relays encrypted traffic without inspecting its contents, it cannot enforce rules about hidden methods, paths, headers, or bodies. A design that inspects those fields or injects an authorization header needs a supported arrangement, such as a host-owned adapter making the request or a proxy that terminates and reestablishes TLS. The latter changes the trust and compatibility requirements for clients, including clients that pin certificates. Merely forwarding a TLS connection does not let the proxy modify its encrypted headers.
+A general-purpose proxy offers less semantic structure. If it relays encrypted traffic without inspecting its contents, it cannot enforce rules about hidden methods, paths, headers, or bodies. A design that inspects those fields or injects an authorization header needs a supported arrangement, such as a host-owned adapter making the request or a proxy that terminates and reestablishes TLS. The latter changes the trust and compatibility requirements for clients, including clients that pin certificates.
 
 ### Keep name resolution inside the policy
 
 An approved name must lead to an approved connection. A destination check made before a separate, uncontrolled DNS lookup can approve one address while the client later reaches another. The mediator must bind its destination decision to the addresses actually used, cover enabled address families, and reject resolved targets outside the permitted scope. Redirects likewise require a new destination decision, or must be disabled when that decision cannot be enforced.
 
-Host-local, private-network, and link-local destinations deserve explicit treatment because they may expose services unrelated to the task. Some cloud metadata services can return credentials when the environment's configuration and caller access permit it; they are not universal credential dispensers. The relevant containment question is whether the task should reach that service at all. A blanket rule for public internet traffic is insufficient when an allowed request can be redirected toward a host management service.
+Host-local, private-network, and link-local destinations deserve explicit treatment because they may expose services unrelated to the task. Some cloud metadata services return credentials when the environment's configuration and caller access permit it. The containment question is whether the task should reach that service at all, and a rule written only for public internet traffic misses an allowed request redirected toward a host management service.
 
-DNS is itself an outbound channel. If a guest can submit arbitrary names to a recursive resolver, information encoded in those names can reach an external authoritative server even when ordinary web requests are blocked. Resolution must therefore use a controlled path and a task-appropriate name policy. A service adapter can resolve its own fixed destinations without accepting arbitrary lookup names from the guest. Where guest lookups are needed, allowing an entire domain subtree can still leave the subdomain labels available to carry data. Query-rate limits and suspicious-name detection may reduce or expose misuse, but neither establishes that the channel carries no sensitive information.
+DNS is itself an outbound channel. If a guest can submit arbitrary names to a recursive resolver, information encoded in those names can reach an external authoritative server even when ordinary web requests are blocked. Resolution must therefore use a controlled path and a task-appropriate name policy. A service adapter can resolve its own fixed destinations without accepting arbitrary lookup names from the guest. Where guest lookups are needed, allowing an entire domain subtree can still leave the subdomain labels available to carry data. Query-rate limits and suspicious-name detection reduce and expose misuse; they bound the channel's rate, not what it carries.
 
 ### Recognize disclosure through a permitted channel
 
 Suppose the repair task may submit a bounded diagnostic report to an approved internal service. The runtime correctly confines execution, contacts the approved destination, and invokes the permitted report operation. An injected instruction nevertheless causes the agent to include private source code in the report. Every containment boundary can work as specified while the report discloses information beyond the task's intended scope.
 
-Narrow fields, payload limits, and content checks can reduce this opportunity. A secret scanner can identify patterns it recognizes, but source code, customer information, or transformed secrets need not match those patterns. Allowlisting the recipient is not a proof that every body sent there is harmless. The broader problem of adversarial influence and information flowing through otherwise permitted actions belongs to @sec-vol3-security. Here the requirement is to make each channel's reach and enforcement limits explicit, rather than claim that network isolation eliminates disclosure.
+Narrow fields, payload limits, and content checks can reduce this opportunity. A secret scanner identifies the patterns it recognizes, and source code, customer information, or transformed secrets need not match them. The broader problem of adversarial influence and information flowing through otherwise permitted actions belongs to @sec-vol3-security. Here the requirement is to make each channel's reach and enforcement limits explicit.
 
-These channels also have a lifetime. When the workspace lease ends, its identity must no longer authorize new requests, and the runtime must account for existing connections and pending brokered work. Closing a channel does not retract information already delivered or undo an external effect. Preparing an envelope for another task therefore requires more than discarding its files. The next section combines that reset obligation with the cost of keeping execution environments ready for use.
+These channels also have a lifetime. When the workspace lease ends, its identity must no longer authorize new requests, and the runtime must account for existing connections and pending brokered work. Closing a channel leaves information already delivered and effects already issued where they are, so preparing an envelope for another task takes more than discarding its files. The next section combines that reset obligation with the cost of keeping execution environments ready for use.
 
 ## Sandbox Pools and Reset {#sec-vol3-sandboxes-pooling}
 
-The repair trajectory needs its edited `src/pool.py` and test artifacts across turns. The next tenant needs neither those files nor any process, socket, or permission left by that trajectory. Pooling must preserve this distinction while reducing the wait for a new environment. A ready reserve can absorb arrivals, but an environment whose lease has ended is not ready merely because its last tool returned.
+The repair trajectory needs its edited `src/pool.py` and test artifacts across turns. The next tenant needs neither those files nor any process, socket, or permission left by that trajectory. Pooling must preserve this distinction while reducing the wait for a new environment. A ready reserve absorbs arrivals, and an environment whose lease has ended rejoins it only after reset, whatever its last tool returned.
 
 Two extremes bracket the design. A fresh envelope for every tool call shares no mutable state between calls but pays the full start cost on every call and must pass the workspace across each boundary explicitly. A persistent environment reused across tasks costs nothing to start, and everything accumulates in it, including whatever an injected instruction managed to plant. A pool sits between them. It keeps initialized instances in standby, leases one to a trajectory for the trajectory's whole life (@sec-vol3-sandboxes-lease), and when the lease ends treats the instance as tainted until something outside the guest has returned it to a known state or destroyed it.
 
 ### The reset contract {#sec-vol3-sandboxes-pooling-reset}
 
-Reset establishes the conditions under which an execution environment may serve a new lease. Its scope includes more than the workspace directory. A command can leave a background process, an open connection, modified runtime state, or work pending in a host service. Deleting the files the agent was expected to change does not account for those objects. Ordinary operating-system features are enough to hide state from such a cleanup: a daemon that double-forked away from the task's process group, an abstract Unix socket with no file on disk, a token in the kernel keyring, a scheduled job, or a modified `git` or `pytest` earlier on the search path.
+A **reset contract**\index{Reset contract!definition} states the conditions under which an execution environment may serve a new lease and the state that reset must cover, which extends well beyond the workspace directory. A command can leave a background process, an open connection, modified runtime state, or work pending in a host service. Deleting the files the agent was expected to change does not account for those objects. Ordinary operating-system features are enough to hide state from such a cleanup: a daemon that double-forked away from the task's process group, an abstract Unix socket with no file on disk, a token in the kernel keyring, a scheduled job, or a modified `git` or `pytest` earlier on the search path.
 
-The supervisor therefore removes an ending lease from service before cleanup begins. It stops accepting new work under that lease and revokes or fences its usable authority. It must then stop or drain the owned execution, including descendants and pending host-side work covered by the boundary. A deadline or cancellation request initiates this process; neither proves that the work stopped. If termination or separation from a reusable resource cannot be established, that resource stays unavailable rather than returning to the pool.
+The supervisor therefore removes an ending lease from service before cleanup begins. It stops accepting new work under that lease and revokes or fences its usable authority. It must then stop or drain the owned execution, including descendants and pending host-side work covered by the boundary. A deadline or cancellation request initiates this process; confirmation that the work stopped comes from the enforcement layer. If termination or separation from a reusable resource cannot be established, that resource stays unavailable rather than returning to the pool.
 
-Once writers are quiescent, the supervisor preserves the outputs permitted by the task's export policy. For the repair, this can include the candidate diff and bounded test artifacts tied to their source revision. It does not mean copying every modified file or treating a successful export as repair acceptance. An implementation that exports before execution stops needs an equivalent consistency boundary so that ongoing writes cannot silently alter what the export describes.
+Once writers are quiescent, the supervisor preserves the outputs permitted by the task's export policy. For the repair, this can include the candidate diff and bounded test artifacts tied to their source revision. An implementation that exports before execution stops needs an equivalent consistency boundary so that ongoing writes cannot silently alter what the export describes.
 
 The supervisor next discards or restores the mutable state included in its reset contract and checks readiness before assigning a new owner. @Fig-vol3-sandbox-pool-lifecycle places this sequence in the pool's lifecycle. @Tbl-vol3-reset-architectures separates the state domains that a single “reset complete” message can otherwise obscure.
 
@@ -612,7 +652,7 @@ The supervisor next discards or restores the mutable state included in its reset
 
 Destroying an execution instance and constructing a replacement from a trusted baseline avoids relying on a list of files and process names to scrub. Restoring an existing instance can also satisfy a declared reset contract, but only if restoration covers its mutable state and the separately managed resources have the required disposition. Restoring guest memory and processor registers alone says nothing about a host-side request queue or an external database update. No reset turns a previously sent request into a request that never happened; unresolved effects retain the uncertainty established in @sec-vol3-tool-calling-idempotency.
 
-The useful asymmetry is between finding a known residue and establishing coverage. One leftover can disprove reset, while a successful scan for known leftovers cannot prove that every mutable object was handled. Readiness checks should therefore test a defined teardown or restoration contract, not substitute for one. A failed check or incomplete teardown removes the instance from service for destruction, repair, or further investigation.
+The useful asymmetry is between finding a known residue and establishing coverage. One leftover can disprove reset, while a successful scan for known leftovers cannot prove that every mutable object was handled. Readiness checks should therefore test a defined teardown or restoration contract rather than stand in for one. A failed check or incomplete teardown removes the instance from service for destruction, repair, or further investigation.
 
 ### Provisioning from a trusted baseline {#sec-vol3-sandboxes-pooling-snapshots}
 
@@ -624,11 +664,11 @@ A common mechanism maps the snapshot's memory file into each new instance with p
 
 [^fn-ksm-sidechannel-risks]: **Content-dependent memory sharing**\index{Memory deduplication!cross-tenant timing}: Sharing a selected read-only baseline differs from dynamically merging private pages because their contents happen to match. With cross-tenant content-based merging, a copy-on-write delay can reveal that a matching page exists elsewhere, creating a timing channel. A pool's memory ledger must therefore state which pages may be shared; baseline sharing is not a general guarantee against timing channels.
 
-Lazy restoration defers loading some state until it is used. That can shorten admission while moving work into the first useful command, particularly when many newly admitted instances request pages together. Compare time to usable task execution as well as time to return a lease handle. Readiness, memory sharing, and restoration latency are separate properties; none follows solely from calling the mechanism a snapshot.
+Lazy restoration defers loading some state until it is used. That can shorten admission while moving work into the first useful command, particularly when many newly admitted instances request pages together. Compare time to usable task execution as well as time to return a lease handle. Readiness, memory sharing, and restoration latency are separate properties, each measured on its own.
 
 ### Pool dimensioning under bursty traffic {#sec-vol3-sandboxes-pooling-queueing}
 
-A pool keeps clean, unassigned instances in standby. Admission consumes one standby and binds it to a task. Provisioning replenishes the reserve, while an ended lease remains unavailable until the reset contract is satisfied. The policy must say whether waiting tasks take precedence over rebuilding standby, how many restores may run concurrently, and what happens when execution or memory capacity is exhausted. Otherwise, a reserve count has no operational meaning.
+A pool keeps a **standby reserve**\index{Standby reserve!definition}, or warm pool, of clean, unassigned instances. Admission consumes one standby and binds it to a task. Provisioning replenishes the reserve, while an ended lease remains unavailable until the reset contract is satisfied. The policy must say whether waiting tasks take precedence over rebuilding standby, how many restores may run concurrently, and what happens when execution or memory capacity is exhausted. Those choices give a reserve count its operational meaning.
 
 Long-run occupancy and short-run readiness answer different questions. Little's law, introduced for resident attention state in @sec-vol3-kv-workload-dynamics, applies unchanged to leases. Under stable flow with admitted arrival rate $\lambda$ and mean lease duration $T_{\text{hold}}$, the mean number of active leases is
 
@@ -676,6 +716,10 @@ Notebook \ref{nbk-08-reserve-from-arrival-rate} applies these three equations to
 import math
 from mlsysim import *
 
+def poisson_tail(mu, s):
+    """P(more than s Poisson arrivals with mean mu)."""
+    return 1 - sum(math.exp(-mu) * mu**k / math.factorial(k) for k in range(s + 1))
+
 class SandboxPoolReserve:
     # 1. LOAD: illustrative coding-agent sandbox profile plus scenario inputs.
     profile = Agents.Coding.SWE_Bench_Runner
@@ -687,6 +731,7 @@ class SandboxPoolReserve:
     m_standby = 8 * MB  # scenario: private state per standby instance
     reserve = 1  # standby instances evaluated
     target_miss = 1e-3  # design target for finding standby empty
+    slow_factor = 10  # scenario: a cold boot an order of magnitude slower than restore
 
     # 2. EXECUTE: Little's law, Poisson tail for a reserve of one, memory ledger.
     n_active = (arrival_rate * t_hold).to("dimensionless").magnitude
@@ -696,10 +741,25 @@ class SandboxPoolReserve:
     m_pool = (m_guest + n_active * m_dirty + reserve * m_standby).to(GB)
     cow_ratio = (m_private / m_pool).to("dimensionless").magnitude
 
+    # Sensitivity: the largest restore time a reserve of one tolerates (bisection
+    # on the Poisson tail), and the reserve a slower restore would need.
+    lo, hi = 0.0, 1.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if poisson_tail(mid, reserve) < target_miss else (lo, mid)
+    t_init_max = (lo / arrival_rate).to("ms")
+    mu_slow = mu_init * slow_factor
+    reserve_slow = 1
+    while poisson_tail(mu_slow, reserve_slow) >= target_miss:
+        reserve_slow += 1
+
     # 3. GUARD: invariants the prose relies on.
     check(abs(n_active - 600) < 1e-9, "Little's law: 2/s times 300 s")
     check(p_dry < target_miss, "A reserve of one meets the stockout target")
     check(m_pool < m_private, "Copy-on-write sharing uses less memory than private images")
+    check(abs(poisson_tail(mu_init, reserve) - p_dry) < 1e-12, "Tail helper matches closed form")
+    check(t_init < t_init_max < 2 * t_init, "Reserve of one has less than 2x restore margin")
+    check(reserve_slow == 3, "Tenfold slower restore needs a reserve of three")
 
     # 4. OUTPUT: formatted displays.
     t_init_str = fmt_time(t_init, unit="ms", precision=0)
@@ -715,6 +775,10 @@ class SandboxPoolReserve:
     m_private_str = fmt_memory(m_private, unit=GB, precision=1)
     m_pool_str = fmt_memory(m_pool, unit=GB, precision=1)
     cow_ratio_mult_str = fmt_multiple(cow_ratio, precision=1)
+    t_init_max_str = fmt_time(Q_(math.floor(t_init_max.magnitude), "ms"), unit="ms", precision=0)  # floored: conservative
+    slow_factor_mult_str = fmt_multiple(slow_factor, precision=0)
+    mu_slow_str = fmt(mu_slow, precision=1)
+    reserve_slow_str = fmt_int(reserve_slow)
 ```
 
 ::: {#nbk-08-reserve-from-arrival-rate .callout-notebook title="Sizing a pool from its arrival rate"}
@@ -723,7 +787,7 @@ class SandboxPoolReserve:
 
 **Math**: By @eq-vol3-pool-active, active leases average $\lambda T_{\text{hold}}$ = `{python} SandboxPoolReserve.arrival_rate_str` per second × `{python} SandboxPoolReserve.t_hold_str` = `{python} SandboxPoolReserve.n_active_str`. Arrivals during one restore average $\lambda T_{\text{init}}$ = `{python} SandboxPoolReserve.mu_init_str`, far too small a mean for the normal approximation in @eq-vol3-pool-reserve, so the Poisson tail is read directly. A reserve of one runs dry only if two or more arrive within one restore, with probability $1 - e^{-\lambda T_{\text{init}}}(1 + \lambda T_{\text{init}}) \approx$ `{python} SandboxPoolReserve.p_dry_str`, below the target. Private guest images for every active lease would occupy about `{python} SandboxPoolReserve.m_private_str`. With copy-on-write, @eq-vol3-pool-memory gives about `{python} SandboxPoolReserve.m_pool_str`, `{python} SandboxPoolReserve.cow_ratio_mult_str` less.
 
-**Systems insight**: With fast snapshot restore, the standby reserve that absorbs steady arrivals is small. The dominant cost of strong isolation is resident memory for active leases, which grows with trajectory duration through $T_{\text{hold}}$, and copy-on-write sharing is what keeps a fleet of per-trajectory microVMs affordable. The result assumes steady Poisson arrivals, a fixed restore time, and no reclamation delay; a burst violates the first assumption, which is why the next notebook treats it separately.
+**Systems insight**: Horizon, not tool latency, sets the bill. Active leases and their resident memory grow linearly in $T_{\text{hold}}$, so doubling trajectory length doubles the memory term, while copy-on-write sharing is what keeps a fleet of per-trajectory microVMs affordable. The reserve is governed instead by $\lambda T_{\text{init}}$ and is sharply sensitive to it: a reserve of one meets the target only while restore stays below about `{python} SandboxPoolReserve.t_init_max_str`, and a `{python} SandboxPoolReserve.slow_factor_mult_str` slower cold boot ($\lambda T_{\text{init}}$ = `{python} SandboxPoolReserve.mu_slow_str`) needs a reserve of `{python} SandboxPoolReserve.reserve_slow_str`. Because every attempt holds its sandbox for $T_{\text{hold}}$, sandbox residency is part of $\mathbb{E}[C_{\text{attempt}}]$ in the cost per accepted task $C_{\text{eff}}$ (@sec-vol3-intro-horizon-arithmetic), and a rejected attempt pays it again. The estimate assumes steady Poisson arrivals and prompt reclamation; the next notebook treats a burst.
 
 :::
 
@@ -755,6 +819,8 @@ class SandboxPoolSizing:
     last_admission = admission_rounds * restore_time
     reserve_rounds = math.ceil(reserve / restore_workers)
     reserve_ready = last_admission + reserve_rounds * restore_time
+    workers_doubled = 2 * restore_workers  # sensitivity: twice the restore concurrency
+    last_admission_doubled = math.ceil(queued / workers_doubled) * restore_time
     instances = burst + reserve
     active_total = burst * active_private
     standby_total = reserve * standby_private
@@ -765,6 +831,7 @@ class SandboxPoolSizing:
     check(queued == 8 and admission_rounds == 4, "Reserve supplies initial admissions")
     check(last_admission == 60 * ms, "Queued work precedes reserve rebuilding")
     check(reserve_ready == 90 * ms, "Reserve replenishment takes two further rounds")
+    check(last_admission_doubled == 30 * ms, "Doubling workers halves the drain")
     check(resident_budget == 2208 * MiB, "All stated residency terms are charged")
 
     # 4. OUTPUT — every displayed quantity has a named formatted export.
@@ -777,6 +844,8 @@ class SandboxPoolSizing:
     last_admission_str = fmt_time(last_admission, unit="ms", precision=0)
     reserve_rounds_str = fmt_count(reserve_rounds * count)
     reserve_ready_str = fmt_time(reserve_ready, unit="ms", precision=0)
+    workers_doubled_str = fmt_count(workers_doubled * count)
+    last_admission_doubled_str = fmt_time(last_admission_doubled, unit="ms", precision=0)
     instances_str = fmt_count(instances * count)
     shared_str = fmt_memory(shared_resident, unit=MB, precision=2)
     active_private_str = fmt_memory(active_private, unit=MB, precision=2)
@@ -801,53 +870,75 @@ For an illustrative memory allowance at that final state, suppose immutable resi
 
 `{python} SandboxPoolSizing.shared_str` shared + `{python} SandboxPoolSizing.active_total_str` active-private + `{python} SandboxPoolSizing.standby_total_str` standby-private + `{python} SandboxPoolSizing.control_total_str` control + `{python} SandboxPoolSizing.headroom_str` headroom $\approx$ `{python} SandboxPoolSizing.resident_budget_str`.
 
-The private-state terms include resident writable workspace pages in this scenario; they are not charged again as a separate workspace term. This is a pool-residency allowance, not total host memory. Rounded display values must not replace exact byte accounting when enforcing a memory limit. Host operating-system and broker services, uncounted storage caches, persistent disk capacity, and accelerator memory are excluded. Transient restore buffers must fit a separately checked allowance, such as the stated headroom, rather than being assumed free. The calculation does not establish peak residency under arbitrary task allocation.
+The private-state terms include resident writable workspace pages, so the workspace is charged once. The total is a pool-residency allowance: host and broker services, storage caches, disk, and accelerator memory sit outside it, transient restore buffers must fit the stated headroom, and enforcement uses exact byte counts rather than the rounded display.
 
-**Systems insight**: The reserve controls which tasks start immediately; restoration capacity controls how the waiting queue drains and how soon standby recovers. A larger reserve spends idle capacity to absorb a larger initial burst. More restore workers help only while the assumed concurrent restore time and resource limits still hold. Different arrival patterns, failures, and lease durations require a new calculation or workload measurement, not a stockout guarantee inferred from this trace.
+**Systems insight**: The reserve decides how many tasks start at once; restore concurrency decides how fast the rest drain. The last admission waits $\lceil (B - S)/w \rceil \, T_{\text{restore}}$ for a burst $B$, reserve $S$, and $w$ workers, so `{python} SandboxPoolSizing.workers_doubled_str` workers instead of `{python} SandboxPoolSizing.workers_str` cut the wait from `{python} SandboxPoolSizing.last_admission_str` to `{python} SandboxPoolSizing.last_admission_doubled_str`, provided restores do not slow under the added concurrency. Each added standby admits one more task immediately and costs `{python} SandboxPoolSizing.standby_private_str` of idle private memory. The trace is deterministic; a different arrival pattern needs its own calculation.
 
 :::
 
 An empty reserve should therefore produce a declared wait, rejection, or deferral, not permission to hand out an unreset environment. Admission also checks capacity for active work and restoration. An instance awaiting teardown may consume memory without contributing usable standby, so reset delays belong in capacity measurements alongside restore latency and lease duration.
 
+::: {#chk-08-pool-sizing .callout-checkpoint title="Sizing and reclaiming a pool"}
+
+The pool equations and the reset contract answer each of these.
+
+- [ ] **Active-lease estimate**: Arrivals double while trajectories become half as long. Estimate the change in mean active leases, and name which term of @eq-vol3-pool-memory moves.
+- [ ] **Reserve sensitivity**: A cold boot replaces snapshot restore and takes an order of magnitude longer. Estimate $\lambda T_{\text{init}}$ from the inputs of Notebook \ref{nbk-08-reserve-from-arrival-rate} and decide whether a reserve of one still meets the stockout target.
+- [ ] **Reset coverage**: A reclaimed instance passed a scan for leftover files, but a daemon from the previous lease still holds a socket. Which state domain of @tbl-vol3-reset-architectures failed, and may the instance return to standby?
+
+:::
+
 ### Sandboxes as evaluation and rollout substrate {#sec-vol3-sandboxes-substrate}
 
-The same lifecycle supports controlled evaluation and training rollouts. A pinned environment and a verified reset reduce contamination from previous attempts, while protected acceptance machinery prevents candidate edits from redefining their own checks. Tests can still have writable scratch and controlled output. Neither a clean workspace nor a protected grader establishes that the checks cover the task adequately; external services, randomness, toolchain versions, and resource conditions can also affect results. @Sec-vol3-evaluation develops the acceptance and comparison methods that use this execution substrate.
+The same lifecycle supports controlled evaluation and training rollouts. A pinned environment and a verified reset reduce contamination from previous attempts, while protected acceptance machinery prevents candidate edits from redefining their own checks. Tests can still have writable scratch and controlled output. Whether the checks cover the task adequately is a separate question, and external services, randomness, toolchain versions, and resource conditions can also move results. @Sec-vol3-evaluation develops the acceptance and comparison methods that use this execution substrate.
 
 Pooling makes this environment available under an explicit provisioning policy. Its contribution is bounded execution with task-local continuity and a stated reset boundary, not proof that a contained action was appropriate or that a rollout succeeded. Those distinctions also identify the misconceptions that can undermine the chapter's mechanisms when they are assembled.
 
 ## Fallacies and Pitfalls {#sec-vol3-sandboxes-fallacies}
 
-Containment depends on the boundary actually enforced, not the name of the mechanism. The following mistakes confuse a useful restriction with a stronger guarantee it does not supply.
+Containment depends on the boundary actually enforced and on the capacity provisioned to enforce it. The following mistakes confuse a useful restriction with a stronger guarantee, or a startup number with the cost of isolation.
 
 ::: {.fallacy-pitfall}
 **Fallacy**: *Removing dangerous names removes the process's authority.*
 
-Restricted globals can hide familiar entry points without removing reachable objects, open handles, or native code from the interpreter's address space. A deliberately restricted language can be useful, but evaluating arbitrary code in the supervisor with a smaller name dictionary is not the same boundary. Resource exhaustion must also be bounded outside the executing code.
+Restricted globals hide familiar entry points while reachable objects, open handles, and native code stay in the interpreter's address space (@sec-vol3-sandboxes-in-process-failure). One attribute, `total.__globals__`, recovers the supervisor's module namespace from an allowed helper, and Rice's theorem rules out a filter that is both complete and permissive. A deliberately restricted language is a different design with its own guarantees; arbitrary code in the supervisor's process shares its failure domain, and its resource consumption must be bounded outside that process.
 :::
 
 ::: {.fallacy-pitfall}
 **Pitfall**: *Choosing an envelope from a platform label alone.*
 
-A container shares a host kernel; a microVM introduces a guest kernel and a monitor boundary. Those differences matter, but neither name specifies all mounts, devices, network routes, resource limits, or trusted components. Compare the actual configuration against the workload and threat. Lower startup latency is a cost result, not evidence of stronger isolation.
+A container shares a host kernel; a microVM introduces a guest kernel and a monitor boundary (@sec-vol3-sandboxes-microvms). Neither name specifies the mounts, devices, network routes, resource limits, or trusted components actually configured, and those decide reach. The Gemini CLI incident (\ref{ws-08-gemini-cli-allow-list-2025}) had an approval dialog and an allow-list and still ran in the user's own shell. Compare the configuration against the workload and threat, and read lower startup latency as a cost result rather than evidence of stronger isolation.
 :::
 
 ::: {.fallacy-pitfall}
-**Fallacy**: *An empty workspace proves that a used envelope is ready for another tenant.*
+**Fallacy**: *The cost of strong isolation is its startup latency.*
 
-Files are only part of the state. Running work, handles, network sessions, broker identities, and attached storage or devices may outlive a directory cleanup. The reset contract must cover the state the next lease could inherit and confirm readiness before reuse. Restoring guest memory alone does not reset everything around the guest or reverse an external effect.
+Snapshot restore makes startup small: `{python} SandboxPoolReserve.t_init_str` in the illustrative profile. The larger cost is residency over the horizon. At `{python} SandboxPoolReserve.arrival_rate_str` trajectories per second with `{python} SandboxPoolReserve.t_hold_str` leases, `{python} SandboxPoolReserve.n_active_str` leases are active at once, and even with copy-on-write sharing they hold about `{python} SandboxPoolReserve.m_pool_str` of resident memory; private guest images would need `{python} SandboxPoolReserve.m_private_str` (Notebook \ref{nbk-08-reserve-from-arrival-rate}). Budget sandboxes by memory-seconds per trajectory, which grow with $T_{\text{hold}}$, not by boot time.
 :::
 
 ::: {.fallacy-pitfall}
 **Pitfall**: *Treating an allowed destination as approval of everything sent there.*
 
-A destination rule narrows the outbound channel but does not determine whether a request body is appropriate. Brokering can keep the credential out of the guest while still allowing code to request its use. A permitted upload can therefore disclose task data without stealing a key or escaping the envelope. That residual misuse is different from bypassing the network boundary.
+A destination rule narrows the outbound channel; whether a request body is appropriate is a separate decision (@tbl-vol3-egress-filtering). Brokering keeps the credential out of the guest while still letting code request its use, so a permitted upload can disclose task data without stealing a key or escaping the envelope. That residual misuse is an information-flow problem for @sec-vol3-security, not a network-boundary bypass.
+:::
+
+::: {.fallacy-pitfall}
+**Fallacy**: *An empty workspace proves that a used envelope is ready for another tenant.*
+
+Files are only one of the four state domains in @tbl-vol3-reset-architectures. A double-forked daemon, an abstract socket, a keyring token, or a shadowed `git` on the search path survives a directory cleanup, and one such leftover disproves reset while a clean scan proves nothing about coverage. The reset contract names the state the next lease could inherit, destroys or restores it, and verifies the contract before reuse; no reset reverses an external effect already issued.
+:::
+
+::: {.fallacy-pitfall}
+**Pitfall**: *Sizing the standby reserve from a restore time measured on an idle host.*
+
+The reserve depends on $\lambda T_{\text{init}}$ through a steep Poisson tail. In the illustrative profile, a reserve of one meets a `{python} SandboxPoolReserve.target_miss_str` stockout target only while restore stays below about `{python} SandboxPoolReserve.t_init_max_str`, and a `{python} SandboxPoolReserve.slow_factor_mult_str` slower cold boot needs a reserve of `{python} SandboxPoolReserve.reserve_slow_str`. Restores that slow under concurrent load or lazy page faults move $T_{\text{init}}$ out of that range silently, so measure restore time at the concurrency the burst produces (Notebook \ref{nbk-08-sizing-a-pre-warmed-microvm-pool}).
 :::
 
 ## Summary {#sec-vol3-sandboxes-summary}
 
 The README attack exposed the gap between admitting a tool call and bounding the code it runs. A containment design must specify the resources that code may reach, the components trusted to enforce the restriction, and the limits on resource consumption. Scoped grants and credential brokers constrain access; the execution envelope enforces a boundary around running code; and the workspace preserves permitted changes across turns. Egress policy and the reset contract extend that boundary to communication and to the next lease. Startup, residency, and replenishment costs then determine how the design can be provisioned under its stated workload.
 
-For the connection-pool repair, this means retaining the candidate edits and test artifacts without giving the task the developer's entire account or another task's mutable state. Protected checks can remain outside the editable candidate while the test process has bounded scratch space. These choices preserve the conditions under which evidence is gathered; they do not make the targeted r18 pass sufficient to accept the whole repair.
+For the connection-pool repair, this means retaining the candidate edits and test artifacts without giving the task the developer's entire account or another task's mutable state. Protected checks can remain outside the editable candidate while the test process has bounded scratch space. These choices preserve the conditions under which evidence is gathered; accepting the whole repair still takes more than the targeted r18 pass (@sec-vol3-evaluation).
 
 ::: {.callout-takeaways title="Containment includes reach and lifetime"}
 
