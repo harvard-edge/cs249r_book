@@ -55,7 +55,7 @@ An agent trajectory interleaves the model's proposals with observations supplied
 *Fine-tuning reshapes each model call but leaves every exposure to the runtime.*
 :::
 
-The curation pipeline has admitted a recovery demonstration to `repair_demonstrations_v1`. In that hypothetical record, a malformed edit proposal was refused before dispatch, the model inspected the schema, and a corrected edit produced candidate `ws_r20`. The selected policy responses are the schema inspection request, the corrected edit, and the scoped final report. The malformed proposal and the delivered check result remain context. Curation has justified those selections, and this chapter turns them into training examples and a parameter update.
+The curation pipeline has admitted a recovery demonstration from the repair agent (\ref{lhs-vol3-repair-agent}) to `repair_demonstrations_v1`. In that hypothetical record, a malformed edit proposal was refused before dispatch, the model inspected the schema, and a corrected edit produced candidate `ws_r20`. The selected policy responses are the schema inspection request, the corrected edit, and the scoped final report. The malformed proposal and the delivered check result remain context. Curation has justified those selections, and this chapter turns them into training examples and a parameter update.
 
 Changing weights is the right intervention only for a particular kind of failure. The intervention ordering of @sec-vol3-flywheel-intervention-order tries cheap, reversible fixes first: the context the model receives, then the tool schemas it calls against, then the runtime checks around it. Each of those can be tested against the failing cases and reverted in one release. A weight change needs a corpus, a training run, and a fresh evaluation before it can be trusted, and it is undone only by another release. Fine-tuning is therefore the intervention for the residual failure that survives those fixes, a recurring behavior pattern that evidence attributes to the policy rather than to missing information or a missing check. Verified trajectory post-training (principle \ref{pri-vol3-trajectory-post-training}) makes that comparison part of admitting a record for learning. The ordering is a default justified by cost and reversibility; @sec-vol3-fine-tuning-distillation treats the case where training is cheaper than carrying the same guidance in every prompt.
 
@@ -75,7 +75,7 @@ Every response the model produces is a function of two inputs, the weights and t
 
 : **Responsibilities of Weights, Context, and Runtime**: Weights hold procedure, context holds the current contract, and the runtime enforces that contract whatever the model proposes. {#tbl-vol3-fine-tuning-scope}
 
-A model can memorize a schema during training; the allocation holds because memory is not a reliable source of the current contract. A changed tool interface may require a new argument, and a revoked permission stays revoked however often training demonstrated the old action. Learning to consult the supplied contract improves proposals, and the runtime's check remains the authority.
+Memorizing a schema during training does not change this allocation, because memory is not a reliable source of the current contract. A changed tool interface may require a new argument, and a revoked permission stays revoked however often training demonstrated the old action. Learning to consult the supplied contract improves proposals, and the runtime's check remains the authority.
 
 The sorting rules out a tempting description of fine-tuning as compiling the prompt into the weights. Only the procedural part of a prompt, such as a debugging checklist or few-shot recovery examples, can move into the weights, and moving it saves those tokens on every turn, the technique @sec-vol3-fine-tuning-distillation develops. The contractual part must stay, because removing it leaves the model guessing at the facts of the current task. A prompt sentence that states a permission is contract as well; the check that enforces the permission belongs to the runtime and moves into neither prompt nor weights.
 
@@ -83,17 +83,13 @@ Fine-tuning does change which tools the model requests, how long it investigates
 
 ### Separate the adaptation choices
 
-The remaining design choices answer different questions. The objective specifies the training signal: imitation rewards selected responses, while preference learning compares alternatives under a justified preference. The behavior source specifies where examples and their conditioning come from, such as reviewed collection runs or a teacher configuration. The parameter artifact specifies what is trained and released, such as full weights or an adapter associated with a base model. The three choices combine freely, so a single adapter can carry a preference objective trained on teacher-generated examples.
-
-Context distillation, developed in @sec-vol3-fine-tuning-distillation, illustrates a change to the behavior source and conditioning: the teacher receives instructions that the student will not receive. Such a transformation needs its own justification and evaluation.
+The remaining design choices answer different questions. The objective specifies the training signal. Imitation rewards selected responses, while preference learning compares alternatives under a justified preference. The behavior source specifies where examples and their conditioning come from, such as reviewed collection runs or a teacher configuration. The parameter artifact specifies what is trained and released, such as full weights or an adapter associated with a base model. The three choices combine freely, so a single adapter can carry a preference objective trained on teacher-generated examples. @Sec-vol3-fine-tuning-dpo, @sec-vol3-fine-tuning-distillation, and @sec-vol3-fine-tuning-peft take them in turn.
 
 Before any of these choices can yield a meaningful update, the admitted record must become a model input. Serialization establishes the tokens and visible context; masking selects the predictions to train; batching controls their weighting and dependencies. The resulting policy then needs tests of the states and schemas it encounters, followed by evaluation of an identified release artifact. The next section begins with the first of those obligations: constructing the input on which each selected response is conditioned.
 
 ## Serializing Trajectories {#sec-vol3-fine-tuning-serialization}
 
-The admitted repair demonstration contains a malformed edit proposal, its refusal, a schema inspection, and a corrected edit. A training loader that deletes the refusal changes the problem the correction answers. A loader that places the later passing check before the edit gives the model evidence that was unavailable when it chose the edit. Curation selected useful responses; serialization must construct the inputs under which those responses are to be learned.
-
-The admitted view preserves the correction lesson under its declared redaction, including a substituted path that was never executed, and the training example carries that redaction status forward.
+The admitted repair demonstration contains a malformed edit proposal, its refusal, a schema inspection, and a corrected edit. A training loader that deletes the refusal changes the problem the correction answers. A loader that places the later passing check before the edit gives the model evidence that was unavailable when it chose the edit. Curation selected useful responses; serialization must construct the inputs under which those responses are to be learned. Those inputs include the record's declared redaction, a substituted path that was never executed, so the training example carries that redaction status forward.
 
 ### Construct the input for each selected response
 
@@ -131,13 +127,11 @@ In schematic form, one multi-turn tool-calling example has the following shape. 
 <|assistant|> ...
 ```
 
-Here `c2` returns before `c1`, and the identifiers keep each result bound to its request. The `<|end_turn|>` marker is the policy's own act of yielding control to the runtime; everything between `<|tool|>` and `<|end|>` is observation.
+Here `c2` returns before `c1`, and the identifiers keep each result bound to its request. Presentation order follows the input assembly rather than completion order, and reordering calls whose arguments or observations depend on one another changes the problem, so any reordering is a declared data transformation with its own justification. The `<|end_turn|>` marker is the policy's own act of yielding control to the runtime; everything between `<|tool|>` and `<|end|>` is observation.
 
 Call the illustrative artifact `serialization_v1`. Its manifest binds the admitted record and target-selection version to the chosen rendering configuration and maps each selected response span into the resulting tokens. Rendering or redaction can move token boundaries, so every offset is rechecked against the final rendering. Decode or inspect the completed examples to verify the task context, call/result associations, selected response boundaries, and real termination markers. An example with missing content or a failed alignment check is dropped from this use rather than patched with invented content.
 
 Role markers describe the input protocol, and the runtime enforces authority. Under reserved tokens and textual delimiters alike, generated text that resembles a tool message remains model output, and serialization never promotes it into an observation. The proposal/effect distinction from @sec-vol3-foundation-model-role holds under every training format.
-
-Parallel calls need the same care. Preserve call identifiers and the input assembly decisions that determine which results a subsequent response could use. Presentation order follows the input assembly rather than completion order, and reordering calls whose arguments or observations depend on one another changes the problem. Any reordering is therefore a declared data transformation with its own justification.
 
 ```{python}
 #| label: calc-vol3-per-turn-expansion
@@ -218,15 +212,17 @@ In a causal language model, logits produced after input position $t-1$ predict t
 
 : **The Causal Label Shift at a Tool Boundary**: Selection belongs to the predicted token, not the token whose hidden state produces the prediction. Actual boundary spellings follow the versioned template. {#tbl-vol3-mask-causal-shift}
 
-Let $z_{t-1,v}$ denote the logit for vocabulary token $v$ produced from $x_{<t}$, using an ordinary softmax and no label smoothing. Differentiating @eq-vol3-sft-masked-objective gives
+Let $o_{t-1,v}$ denote the logit for vocabulary token $v$ produced from $x_{<t}$, using an ordinary softmax and no label smoothing. Differentiating @eq-vol3-sft-masked-objective gives
 
-$$\frac{\partial\mathcal{L}_{\mathrm{SFT}}}{\partial z_{t-1,v}}=\frac{m_t}{N_{\mathrm{active}}}\left(P_\theta(v\mid x_{<t})-\mathbf{1}\{v=x_t\}\right).$$
+$$\frac{\partial\mathcal{L}_{\mathrm{SFT}}}{\partial o_{t-1,v}}=\frac{m_t}{N_{\mathrm{active}}}\left(P_\theta(v\mid x_{<t})-\mathbf{1}\{v=x_t\}\right).$$
 
 When $m_t=0$, that next-token prediction supplies no direct loss derivative. The token still shapes later selected predictions through attention, and gradients from those later losses update the parameters that encode it. A masked observation is read and learned from, but never imitated. That is the precise content of observation loss masking (principle \ref{pri-vol3-action-masked-loss}).
 
-The mask exists because a trajectory has two authors. Unmasked training asks one set of weights to fit two conditional distributions. One is the policy, $P(a_t\mid s_t)$, which maps what the agent has seen to its next response. The other is an environment model, $P(s_{t+1}\mid s_t,a_t)$, which predicts what a shell, compiler, or service will return. In an agent with real tools the second is redundant, because the tool is present at every turn and returns its own output. Fitting it anyway has two costs. The first is **loss dilution**\index{Loss dilution!definition}. Under token averaging, unmasking raises the denominator from $N_{\mathrm{active}}$ to nearly $T$, so each selected target's coefficient falls by the selected share of the input, which notebook \ref{nbk-15-gradient-budget-and-compute-allocation} computes for one example. The remaining weight goes to observation text such as paths, identifiers, and log lines, much of which no policy could predict. The second is **role confusion**\index{Role confusion!definition}. A model trained to predict the text that follows a call learns that tool-like output follows a call. At deployment it can then continue past its own call with an invented result instead of emitting the terminator that yields the turn. The runtime rejects such a turn, because generated text is model output rather than an observation (@sec-vol3-fine-tuning-serialization), and each rejection spends a turn of the budget. @Fig-vol3-loss-masking lays the mask over the repair example's segments and separates the two paths by which a token reaches the parameters.
+The mask exists because a trajectory has two authors. Unmasked training asks one set of weights to fit two conditional distributions. One is the policy, $P(a_t\mid s_t)$, which maps what the agent has seen to its next response. The other is an environment model, $P(s_{t+1}\mid s_t,a_t)$, which predicts what a shell, compiler, or service will return. In an agent with real tools the second is redundant, because the tool is present at every turn and returns its own output.
 
-::: {#fig-vol3-loss-masking fig-env="figure" fig-pos="htb" fig-cap="**Observation Loss Masking**: The mask over the serialized repair example. Only the corrected tool call and the final response carry $m_t=1$ and receive a direct loss term. The prompt, task, refused proposal, rejection message, and tool result carry $m_t=0$, yet every one of them is still read through attention, so gradients from later selected targets update the parameters that encode it. Selecting only policy responses fits the policy's conditional distribution; unmasking the observations would also ask the same weights to fit the environment's." fig-alt="Seven serialized segments in a row: prompt and tool contracts, task statement, refused proposal, rejection message, corrected tool call, tool result, and final response with end token. Below each is its loss mask, zero for all except the corrected tool call and the final response, which are one. A direct loss row marks only those two as imitated. A context row spans all segments, stating they are read through attention and updated by gradients of later selected targets. At the bottom, one box pairs selected targets with the policy P of a t given s t, and a dashed box pairs unmasked observations with the environment P of s t plus 1 given s t and a t."}
+Fitting the environment model anyway has two costs. The first is **loss dilution**\index{Loss dilution!definition}. Under token averaging, unmasking raises the denominator from $N_{\mathrm{active}}$ to nearly $T$, so each selected target's coefficient falls by the selected share of the input, which notebook \ref{nbk-15-gradient-budget-and-compute-allocation} computes for one example. The remaining weight goes to observation text such as paths, identifiers, and log lines, much of which no policy could predict. The second is **role confusion**\index{Role confusion!definition}. A model trained to predict the text that follows a call learns that tool-like output follows a call. At deployment it can then continue past its own call with an invented result instead of emitting the terminator that yields the turn. The runtime rejects such a turn, because generated text is model output rather than an observation (@sec-vol3-fine-tuning-serialization), and each rejection spends a turn of the budget. @Fig-vol3-loss-masking lays the mask over the repair example's segments and separates the two paths by which a token reaches the parameters.
+
+::: {#fig-vol3-loss-masking fig-env="figure" fig-pos="htb" fig-cap="**Observation Loss Masking**: The mask over a simplified view of the serialized repair example that omits the schema request (selected) and its returned schema (context). Of the segments shown, only the corrected tool call and the final response carry $m_t=1$ and receive a direct loss term. The prompt, task, refused proposal, rejection message, and tool result carry $m_t=0$, yet every one of them is still read through attention, so gradients from later selected targets update the parameters that encode it. Selecting only policy responses fits the policy's conditional distribution; unmasking the observations would also ask the same weights to fit the environment's." fig-alt="Seven serialized segments in a row: prompt and tool contracts, task statement, refused proposal, rejection message, corrected tool call, tool result, and final response with end token. Below each is its loss mask, zero for all except the corrected tool call and the final response, which are one. A direct loss row marks only those two as imitated. A context row spans all segments, stating they are read through attention and updated by gradients of later selected targets. At the bottom, one box pairs selected targets with the policy P of a t given s t, and a dashed box pairs unmasked observations with the environment P of s t plus 1 given s t and a t."}
 ![](images/svg/fig-vol3-loss-masking.svg)
 :::
 
@@ -343,13 +339,13 @@ class SelectedTargetAccounting:
 
 The repair demonstration needs no private or hidden reasoning trace. Where a dataset includes authorized generated rationale, its treatment is a separate choice. Selecting rationale as in @tbl-vol3-reasoning-mask-regimes trains the policy to predict that text. Masking it retains the same conditioning information but removes its direct prediction loss. Removing it changes the input and therefore the conditional prediction problem.
 
-For a supplied prefix $c$, retained rationale $r$, and response tokens $a_1,\ldots,a_K$, response-only supervision trains factors $P_\theta(a_j\mid c,r,a_{<j})$. A deployment that supplies no $r$ instead uses $P_\theta(a_j\mid c,a_{<j})$. These are different conditional problems, so removing rationale during training is a declared distillation experiment, measured on the second problem.
+For a supplied prefix $c$, retained rationale $\rho$, and response tokens $a_1,\ldots,a_n$, response-only supervision trains factors $P_\theta(a_j\mid c,\rho,a_{<j})$. A deployment that supplies no $\rho$ instead uses $P_\theta(a_j\mid c,a_{<j})$. These are different conditional problems, so removing rationale during training is a declared distillation experiment, measured on the second problem.
 
-| Treatment                                        | Input and direct targets                                      | Serving question to evaluate                                                                          |
-|:-------------------------------------------------|:--------------------------------------------------------------|:------------------------------------------------------------------------------------------------------|
-| Select reviewed rationale                        | Retain $[c,r,a]$; selected $r$ and $a$ positions receive loss | Does generated rationale improve the declared outcomes enough to justify its output and latency cost? |
-| Retain rationale as context only                 | Retain $[c,r,a]$; only selected $a$ positions receive loss    | How will appropriate rationale become available, and how do errors in it affect the response?         |
-| Remove rationale under a reviewed transformation | Use $[c,a]$; selected $a$ positions receive loss              | Does the policy perform adequately without the removed conditioning information?                      |
+| Treatment                                        | Input and direct targets                                            | Serving question to evaluate                                                                          |
+|:-------------------------------------------------|:--------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------|
+| Select reviewed rationale                        | Retain $[c,\rho,a]$; selected $\rho$ and $a$ positions receive loss | Does generated rationale improve the declared outcomes enough to justify its output and latency cost? |
+| Retain rationale as context only                 | Retain $[c,\rho,a]$; only selected $a$ positions receive loss       | How will appropriate rationale become available, and how do errors in it affect the response?         |
+| Remove rationale under a reviewed transformation | Use $[c,a]$; selected $a$ positions receive loss                    | Does the policy perform adequately without the removed conditioning information?                      |
 
 : **Rationale Treatment Changes Targets or Inputs**: The choice requires a compatible serving protocol and evaluation, not a universal model-size threshold. {#tbl-vol3-reasoning-mask-regimes}
 
@@ -373,7 +369,7 @@ After truncation, transformation, or splitting, recompute both the target alignm
 
 :::
 
-The mask now identifies which positions contribute direct loss and preserves the input needed to predict them. Training a batch introduces two further decisions: how much weight each example receives and whether packed examples can access one another's context. Those decisions must preserve the target contract rather than silently redefine it.
+The mask now identifies which positions contribute direct loss and preserves the input needed to predict them, one example at a time. A training step combines many examples of very different lengths, and the way it combines them must preserve that target contract rather than silently redefine it.
 
 ## Sequence Packing and Cross-Trajectory Contamination Prevention {#sec-vol3-fine-tuning-batching}
 
@@ -381,12 +377,12 @@ The repair demonstration now has a serialized input and selected response target
 
 ### Loss normalization across variable-length examples
 
-Let a batch contain $B$ examples. Example $j$ has stored length $T_j$, including context, and $N_{\mathrm{active},j}>0$ selected target tokens under the preceding section's mask. Let $\ell_j$ be its mean masked negative log-likelihood. Two batch objectives are
+Let a batch contain $M$ examples. Example $j$ has stored length $T_j$, including context, and $N_{\mathrm{active},j}>0$ selected target tokens under the preceding section's mask. Let $\ell_j$ be its mean masked negative log-likelihood. Two batch objectives are
 
 $$\mathcal L_{\mathrm{token}}=
-\sum_{j=1}^{B}\frac{N_{\mathrm{active},j}}{\sum_{k=1}^{B}N_{\mathrm{active},k}}\ell_j,$$ {#eq-vol3-loss-token}
+\sum_{j=1}^{M}\frac{N_{\mathrm{active},j}}{\sum_{k=1}^{M}N_{\mathrm{active},k}}\ell_j,$$ {#eq-vol3-loss-token}
 
-$$\mathcal L_{\mathrm{example}}=\frac{1}{B}\sum_{j=1}^{B}\ell_j.$$ {#eq-vol3-loss-example}
+$$\mathcal L_{\mathrm{example}}=\frac{1}{M}\sum_{j=1}^{M}\ell_j.$$ {#eq-vol3-loss-example}
 
 **Token averaging**\index{Token averaging!definition} in @eq-vol3-loss-token assigns equal coefficients to selected token losses. **Example averaging**\index{Example averaging!definition} in @eq-vol3-loss-example assigns equal coefficients to example means. Both count selected targets, never context or padding. A record with no selected targets supplies no $\ell_j$ and is excluded from either objective.
 
@@ -394,8 +390,8 @@ The coefficients weight losses; gradient magnitudes also depend on prediction er
 
 | Property                             | Token averaging                                      | Example averaging             |
 |:-------------------------------------|:-----------------------------------------------------|:------------------------------|
-| Coefficient on example mean $\ell_j$ | $N_{\mathrm{active},j}/\sum_k N_{\mathrm{active},k}$ | $1/B$                         |
-| Coefficient on a selected token loss | $1/\sum_k N_{\mathrm{active},k}$                     | $1/(B N_{\mathrm{active},j})$ |
+| Coefficient on example mean $\ell_j$ | $N_{\mathrm{active},j}/\sum_k N_{\mathrm{active},k}$ | $1/M$                         |
+| Coefficient on a selected token loss | $1/\sum_k N_{\mathrm{active},k}$                     | $1/(M N_{\mathrm{active},j})$ |
 | Quantity treated equally             | Selected token losses                                | Example mean losses           |
 
 : **Loss normalization for variable-length examples**: Equal coefficients specify the objective, not equal gradient norms or equal representation of underlying tasks. {#tbl-vol3-loss-normalization-comparison}
@@ -414,10 +410,10 @@ The coefficients in @tbl-vol3-loss-normalization-comparison must survive impleme
 
 :::
 
-For example, the repaired connection-pool trace and an unrelated lookup can occupy the same buffer, and the lookup must never read the repair's file contents or tool observations. Let $i$ and $j$ denote buffer positions, $Q_i$ and $K_j$ their query and key vectors, and $d$ the attention-head dimension. The pre-softmax attention scores enforce both causality and example membership:
+For example, the repaired connection-pool trace and an unrelated lookup can occupy the same buffer, and the lookup must never read the repair's file contents or tool observations. Let $i$ and $j$ denote buffer positions, $Q_i$ and $K_j$ their query and key vectors, and $d$ the attention-head dimension. The pre-softmax attention scores $\mathrm{score}_{i,j}$ enforce both causality and example membership:
 
-$$A_{i,j}=\begin{cases}
-Q_iK_j^T/\sqrt d & \text{if }\operatorname{example}(i)=\operatorname{example}(j)\text{ and }j\le i,\\
+$$\mathrm{score}_{i,j}=\begin{cases}
+Q_iK_j^{\top}/\sqrt d & \text{if }\operatorname{example}(i)=\operatorname{example}(j)\text{ and }j\le i,\\
 -\infty & \text{otherwise}.
 \end{cases}$$ {#eq-vol3-block-diagonal-attention}
 
@@ -496,13 +492,13 @@ For the separate target-count illustration, token averaging gives coefficients $
 
 ### Position conventions and equivalence checks
 
-An implementation must also preserve the model's intended position convention. A common convention resets positions at each example boundary. For zero-based buffer offsets $c_k$ and $c_{k+1}$,
+An implementation must also preserve the model's intended position convention. A common convention resets positions at each example boundary. For zero-based buffer offsets $b_k$ and $b_{k+1}$ bounding example $k$,
 
-$$\operatorname{pos}[t]=t-c_k\quad\text{for }t\in[c_k,c_{k+1}).$$
+$$\operatorname{pos}[t]=t-b_k\quad\text{for }t\in[b_k,b_{k+1}).$$
 
-For rotary position embeddings (RoPE), resetting is a convention rather than a mathematical requirement. In the fixed-frequency formulation, position $i$ applies a rotation $R_i$ to a query or key. Shifting both positions by a common offset $c$ leaves their relative rotation unchanged:
+For rotary position embeddings (RoPE), resetting is a convention rather than a mathematical requirement. In the fixed-frequency formulation, position $i$ applies a rotation $R_i$ to a query or key. Shifting both positions by a common offset $b$ leaves their relative rotation unchanged:
 
-$$R_{i+c}^{T}R_{j+c}=R_{j-i}=R_i^TR_j.$$
+$$R_{i+b}^{\top}R_{j+b}=R_{j-i}=R_i^{\top}R_j.$$
 
 A common offset therefore leaves within-example attention scores unchanged, a consequence of the relative-position construction in [the RoFormer paper](https://arxiv.org/html/2104.09864v5). Absolute-position features, position-dependent scaling, and numerical precision can still break equivalence for a particular model, and the following test detects them.
 
@@ -511,6 +507,8 @@ The correctness test compares selected-token logits and the declared loss for th
 ## Exposure Bias and On-Policy Data {#sec-vol3-fine-tuning-exposure-bias}
 
 Serialization and masking preserve the demonstrated decision problem; deployment decides which decision problems the policy actually meets. A policy trained by teacher forcing never sees its own mistakes among its inputs. In text generation a mistake only drifts the phrasing, but in an agent it also changes the environment, so after one call departs from the demonstration the next observation, and every input after it, can come from a state the corpus never covered.
+
+For the connection-pool repair, suppose a fresh bounded trial encounters a version conflict rather than the malformed-argument rejection in `trace_r19_01_redacted_v1`. Repeating the previously accepted edit without obtaining compatible evidence answers a different problem from the demonstrated correction. The conditional-update guard blocks the stale write, and the trial spends its allowance without completing the repair. This hypothetical probe names a state worth collecting and labeling.
 
 ::: {#dfn-15-exposure-bias .callout-definition title="Exposure bias"}
 
@@ -522,9 +520,7 @@ Serialization and masking preserve the demonstrated decision problem; deployment
 
 :::
 
-Offline data can include recoveries, and a policy that departs from the demonstration can return to a familiar state or find another valid solution. Exposure bias is therefore a question of how well the corpus covers the states the trained policy itself visits.
-
-For the connection-pool repair, suppose a fresh bounded trial encounters a version conflict rather than the malformed-argument rejection in `trace_r19_01_redacted_v1`. Repeating the previously accepted edit without obtaining compatible evidence answers a different problem from the demonstrated correction. The conditional-update guard blocks the stale write, and the trial spends its allowance without completing the repair. This hypothetical probe names a state worth collecting and labeling.
+Offline data can include recoveries, and a policy that departs from the demonstration can return to a familiar state or find another valid solution. Exposure bias is therefore a question of how well the corpus covers the states the trained policy itself visits, including states like that version conflict.
 
 ### State the distribution behind an error rate
 
@@ -602,7 +598,7 @@ $$J(\pi)-J(\pi^*)\le \min\{H,\;uH\epsilon_\pi\}.$$ {#eq-vol3-linear-regret-bound
 
 The quadratic term has a direct reading. Couple the environment randomness of the two policies until they first choose different actions. The probability of any such divergence is at most the sum of disagreement probabilities along the reference process, $H\epsilon_E$, and a divergence can affect as much as the whole remaining horizon. The coupling argument makes no assumption about the learner's error rate after it first diverges. @Sec-vol3-appendix-math-compounding-error derives the reference-state bound by coupling and the learner-state bound through telescoping policy comparisons.
 
-@Sec-vol3-intro-horizon-arithmetic showed unchecked step errors compounding as $(1-\epsilon)^H$ at run time. Theorem \ref{thrm-15-imitation-regret} is the training-side counterpart, in which imitation measured on the wrong distribution pays a second factor of $H$. Recovery records help exactly insofar as they move the measured error onto learner-visited states and keep $u$ small, and a corpus alone cannot show that either assumption holds. A separate special case takes task cost to be disagreement itself, giving $J(\pi)=H\epsilon_\pi$; that identity describes only that cost.
+@Sec-vol3-intro-horizon-arithmetic showed unchecked step errors compounding as $(1-\epsilon)^H$ at run time. Theorem \ref{thrm-15-imitation-regret} is the training-side counterpart, in which imitation measured on the wrong distribution pays a second factor of $H$. Recovery records help exactly insofar as they move the measured error onto learner-visited states and keep $u$ small, and a corpus alone cannot show that either assumption holds.
 
 ::: {#nbk-15-quantifying-trajectory-collapse-and-dagger .callout-notebook title="The same error rate under different assumptions"}
 
@@ -618,7 +614,7 @@ The quadratic term has a direct reading. Couple the environment randomness of th
 
 ### Label states the policy actually visits
 
-**Dataset Aggregation (DAgger)**\index{DAgger!definition} collects trajectories under successive learned policies, obtains reference actions at the states they visit, aggregates those labeled examples, and retrains [@ross2011reduction]. The result is **on-policy data**\index{On-policy data!definition}, examples drawn from the state distribution of the policy being trained. Executing a learner action and requesting its reference label are different operations, and early rounds mix them. In round $k$ the collector executes the reference action with probability $\beta_k$ and the learner's action otherwise, decaying $\beta_k$ toward zero so the collected states shift gradually toward the learner's own distribution. That shift is what moves the measured error onto learner states and makes the learner-state bound of theorem \ref{thrm-15-imitation-regret} the applicable one.
+**Dataset Aggregation (DAgger)**\index{DAgger!definition} collects trajectories under successive learned policies, obtains reference actions at the states they visit, aggregates those labeled examples, and retrains [@ross2011reduction]. The result is **on-policy data**\index{On-policy data!definition}, examples drawn from the state distribution of the policy being trained. Executing a learner action and requesting its reference label are different operations, and early rounds mix them. In round $k$ the collector executes the reference action with probability $\lambda_k$ and the learner's action otherwise, decaying $\lambda_k$ toward zero so the collected states shift gradually toward the learner's own distribution. That shift is what moves the measured error onto learner states and makes the learner-state bound of theorem \ref{thrm-15-imitation-regret} the applicable one.
 
 For an agent system, the practical question is whether an authorized labeler can supply a justified response at a newly encountered decision. Collect beyond detected errors, since a superficially successful step can also be poorly grounded. The labeler, usually a stronger model or a larger test-time budget, produces a proposal like any other, and a wrong label trains recovery in the wrong direction. Each corrected action therefore passes admission before it enters the corpus. The pipeline continues the trajectory from the corrected action in a sandbox and keeps the label only if the task's verifier accepts the outcome, under the consumer-specific predicates of @sec-vol3-trajectory-curation. Preserve the actual observations and current tool contract, and retain unavailable or disputed labels explicitly. An accepted continuation shows that the label works, while other actions may work as well.
 
@@ -626,7 +622,7 @@ Retraining changes the policy and can change the states it visits again. Evaluat
 
 **Fault injection**\index{Fault injection!training data} supplies a complementary source of declared conditions. The injected error is an observation with $m_t=0$; the diagnosis and the corrective call are selected targets with $m_t=1$. That places direct loss on exactly the off-path decision a demonstrated path never exercises. The correction targets must retain matching observations and effect semantics, including the distinction between a refusal before dispatch and a lost acknowledgment after a possible effect. Fault injection covers the failures the fixture anticipates, and on-policy collection covers the ones only the policy's own behavior reveals. Reinforcement learning from verifiable rewards (RLVR) differs from both, because it learns from fresh reward-scored outcomes and needs no corrective reference action at each state (@sec-vol3-rlvr). @Fig-vol3-exposure-bias-dagger contrasts training on recorded reference states with this collection loop.
 
-::: {#fig-vol3-exposure-bias-dagger fig-env="figure" fig-pos="htb" fig-cap="**Exposure Bias and On-Policy Labeling**: Training only on recorded reference states (a) leaves any state the learner reaches after a deviation without a recorded correction, and the applicable bound, @eq-vol3-quadratic-derivation, grows with $H^2\epsilon_E$. Each labeling round (b) runs the current policy, mixed with the reference at probability $\beta_k$, labels the states it visits, keeps a label only if the sandbox continuation passes the verifier, aggregates, and retrains. A fault-injected record masks the injected error and selects the diagnosis and corrective call. The bound in @eq-vol3-linear-regret-bound applies only when error is measured on learner states and each deviation's disadvantage is bounded by $u$; aggregation broadens coverage but does not by itself make the training and learner distributions equal." fig-alt="Two stacked panels. Panel a shows a chain of states s 1, s 2, s 3 through s H inside a region labeled states in the corpus. A red arrow from s 2 labeled learner deviates leads to a dashed uncovered state box, then to a dotted box reading no recorded correction. Beside it, a box states that error is measured on reference states and gives the bound J of pi minus J of pi star at most the minimum of H and H squared epsilon E. Panel b shows a loop of six boxes: run policy pi k in sandbox with reference at probability beta k, learner-visited states plus injected faults, labeler proposes corrective action, continue in sandbox with verifier accepts, aggregate admitted labels, and retrain pi k plus 1, with a next round arrow back to the start. Below, a fault-injected record has an injected error with mask zero and a diagnosis and corrective call with mask one. A box states error on learner states with deviation cost at most u and gives the bound minimum of H and u H epsilon pi."}
+::: {#fig-vol3-exposure-bias-dagger fig-env="figure" fig-pos="htb" fig-cap="**Exposure Bias and On-Policy Labeling**: Training only on recorded reference states (a) leaves any state the learner reaches after a deviation without a recorded correction, and the applicable bound, @eq-vol3-quadratic-derivation, grows with $H^2\epsilon_E$. Each labeling round (b) runs the current policy, mixed with the reference at probability $\lambda_k$, labels the states it visits, keeps a label only if the sandbox continuation passes the verifier, aggregates, and retrains. A fault-injected record masks the injected error and selects the diagnosis and corrective call. The bound in @eq-vol3-linear-regret-bound applies only when error is measured on learner states and each deviation's disadvantage is bounded by $u$; aggregation broadens coverage but does not by itself make the training and learner distributions equal." fig-alt="Two stacked panels. Panel a shows a chain of states s 1, s 2, s 3 through s H inside a region labeled states in the corpus. A red arrow from s 2 labeled learner deviates leads to a dashed uncovered state box, then to a dotted box reading no recorded correction. Beside it, a box states that error is measured on reference states and gives the bound J of pi minus J of pi star at most the minimum of H and H squared epsilon E. Panel b shows a loop of six boxes: run policy pi k in sandbox with reference at probability lambda k, learner-visited states plus injected faults, labeler proposes corrective action, continue in sandbox with verifier accepts, aggregate admitted labels, and retrain pi k plus 1, with a next round arrow back to the start. Below, a fault-injected record has an injected error with mask zero and a diagnosis and corrective call with mask one. A box states error on learner states with deviation cost at most u and gives the bound minimum of H and u H epsilon pi."}
 ![](images/svg/dagger_fault_injection.svg)
 :::
 
@@ -692,11 +688,11 @@ Declare whether the deployment question concerns new tasks with familiar schemas
 
 Measure full schema conformance under the actual validator, appropriate tool choice, and accepted task outcomes separately. A call can use the current keys yet select the wrong resource, exceed its grant, or fail to solve the task. Compare augmented and unaugmented training under a declared budget and evaluate retained familiar-interface capability as well as the chosen transfer condition. Keep unobserved outcomes and uncertainty visible.
 
-Schema variation is a training-data choice measured like any other, and the runtime validates the current contract and enforces authority whatever the training result. The next section changes a different part of adaptation: instead of specifying only which responses to imitate, it uses justified preferences between compatible alternatives.
+Schema variation is a training-data choice measured like any other, and the runtime validates the current contract and enforces authority whatever the training result. Preference optimization, the next section's subject, goes beyond specifying which responses to imitate and trains on justified preferences between compatible alternatives.
 
 ## Trajectory Preference Optimization {#sec-vol3-fine-tuning-dpo}
 
-Imitation teaches selected responses; a preference comparison teaches a relative choice. Suppose two independently collected continuations of the connection-pool repair begin with the same available information. Both produce acceptable repairs, but one performs unnecessary repeated checks. A declared criterion might prefer the less costly continuation without labeling the other incorrect. Conversely, the earlier malformed proposal `e2` and later correction `e4` in the recovery demonstration are not automatically such a pair: the correction follows additional observations. The compatible alternatives and supporting assessment must come from the preference artifact admitted in @sec-vol3-trajectory-curation.
+Imitation teaches selected responses; a preference comparison teaches a relative choice. Suppose two independently collected continuations of the connection-pool repair begin with the same available information. Both produce acceptable repairs, but one performs unnecessary repeated checks. A declared criterion might prefer the less costly continuation without labeling the other incorrect. Conversely, the earlier malformed proposal `e2` and later correction `e4` in the recovery demonstration are not automatically such a pair, because the correction follows additional observations. The compatible alternatives and supporting assessment must come from the preference artifact admitted in @sec-vol3-trajectory-curation.
 
 ### From a comparison to a loss
 
@@ -704,7 +700,7 @@ Let $c$ identify the common comparison context and criterion, and let $\tau_w$ a
 
 For each record, let $h_t$ be the rendered prefix actually used to predict token $x_t$, and let $\mathcal A(\tau)$ contain the policy-token positions selected by the preference objective. Define the reference-relative score
 
-$$s_\theta(\tau;c)=\sum_{t\in\mathcal A(\tau)}
+$$\Delta_\theta(\tau;c)=\sum_{t\in\mathcal A(\tau)}
 \log\frac{\pi_\theta(x_t\mid h_t)}{\pi_{\mathrm{ref}}(x_t\mid h_t)}.$$
 
 The observations in $h_t$ condition subsequent predictions and carry no policy likelihood. Selection is specific to the comparison. The dispreferred response is scored to form a contrast and never becomes an imitation target, and an SFT mask reused unchanged would drop exactly the unselected decisions a preference often concerns.
@@ -712,13 +708,13 @@ The observations in $h_t$ condition subsequent predictions and carry no policy l
 **Direct preference optimization (DPO)**\index{Direct preference optimization!definition} uses a logistic loss on the difference of policy/reference log ratios [@rafailov2023dpo]. With $\sigma(z)=1/(1+e^{-z})$, positive scale $\beta$, and dataset $\mathcal D$ of admitted comparisons, the corresponding selected-token objective is
 
 $$\mathcal L_{\mathrm{DPO}}=-\mathbb E_{(c,\tau_w,\tau_l)\sim\mathcal D}
-\log\sigma\!\left(\beta[s_\theta(\tau_w;c)-s_\theta(\tau_l;c)]\right).$$ {#eq-vol3-dpo-trajectory}
+\log\sigma\!\left(\beta[\Delta_\theta(\tau_w;c)-\Delta_\theta(\tau_l;c)]\right).$$ {#eq-vol3-dpo-trajectory}
 
 The standard DPO derivation concerns complete responses to the same input under a preference model and a reference-regularized objective. Its reward reparameterization contains an input-dependent constant that cancels in the comparison, so the implied reward is identified only up to that constant. Scoring selected spans of a trajectory is a training surrogate built on that derivation and justified by the evaluation it passes.
 
 If all policy-generated positions of a complete interaction are scored, shared environment dynamics and initial conditions make environmental factors cancel in the policy/reference probability ratio *for that same recorded interaction*. Between the two alternatives the observations differ, so they still shape each score through its conditioning, and a change of context can reverse the preference.
 
-For one pair, write the **preference margin**\index{Preference margin!definition} $z=\beta(s_w-s_l)$. Differentiating @eq-vol3-dpo-trajectory with the reference fixed gives
+For one pair, write the **preference margin**\index{Preference margin!definition} $z=\beta(\Delta_w-\Delta_l)$, with $\Delta_w$ and $\Delta_l$ the two records' scores. Differentiating @eq-vol3-dpo-trajectory with the reference fixed gives
 
 $$\nabla_\theta\ell=-\beta\sigma(-z)
 \left(\sum_{t\in\mathcal A(\tau_w)}\nabla_\theta\log\pi_\theta(x_t\mid h_t)
@@ -836,9 +832,9 @@ Distillation fixes the source or conditioning of examples, independently of the 
 
 The same admitted examples can support different parameter artifacts. Full fine-tuning updates all base-model parameters and produces a new weight version. **Parameter-efficient fine-tuning**\index{Parameter-efficient fine-tuning!definition} freezes the base and trains a small added parameter set, an **adapter**\index{Adapter!definition}, that is released alongside it. For separately maintained agent roles, a compact adapter simplifies storage and versioning. It shares the process, base weights, and granted authority of whatever serves it, so it isolates nothing between roles.
 
-**Low-rank adaptation (LoRA)**\index{Low-rank adaptation!definition} expresses the change to a selected matrix through two trainable factors [@hu2021lora]. Using column-vector inputs, let $W_0\in\mathbb{R}^{d_{\mathrm{out}}\times d_{\mathrm{in}}}$ be frozen and define
+**Low-rank adaptation (LoRA)**\index{Low-rank adaptation!definition} expresses the change to a selected matrix through two trainable factors [@hu2021lora]. Let $W_0\in\mathbb{R}^{d_{\mathrm{out}}\times d_{\mathrm{in}}}$ be a frozen matrix acting on column-vector inputs, and define
 
-$$h = Wx,\qquad W=W_0+\frac{\alpha}{r}BA,\qquad
+$$W=W_0+\frac{\alpha}{r}BA,\qquad
 B\in\mathbb{R}^{d_{\mathrm{out}}\times r},\quad
 A\in\mathbb{R}^{r\times d_{\mathrm{in}}}.$$
 
@@ -945,7 +941,7 @@ class AdapterStateInventory:
 
 **Problem**: A hypothetical model contains `{python} AdapterStateInventory.base_count_str` base parameters. The run attaches rank-`{python} AdapterStateInventory.rank_str` adapters to `{python} AdapterStateInventory.matrices_str` matrices in each of `{python} AdapterStateInventory.layers_str` layers. Each selected matrix has `{python} AdapterStateInventory.output_str` output coordinates and `{python} AdapterStateInventory.input_str` input coordinates. No other parameters are trained in the adapter case. What parameter-state memory does this save compared with training every base parameter?
 
-For each trainable parameter, assume a weight using `{python} AdapterStateInventory.weight_bytes_str`, a gradient using `{python} AdapterStateInventory.gradient_bytes_str`, a separate master weight using `{python} AdapterStateInventory.master_bytes_str`, and two optimizer moments each using `{python} AdapterStateInventory.moment_bytes_str`. Frozen parameters retain only their weight copy. This is one declared implementation convention, not a requirement of every optimizer or framework. Count one unsharded resident copy of each array; display capacities in decimal MB and GB.
+For each trainable parameter, assume a weight using `{python} AdapterStateInventory.weight_bytes_str`, a gradient using `{python} AdapterStateInventory.gradient_bytes_str`, a separate higher-precision master weight that the optimizer updates, using `{python} AdapterStateInventory.master_bytes_str`, and two optimizer moments (running averages of the gradient and its square) each using `{python} AdapterStateInventory.moment_bytes_str`. Frozen parameters retain only their weight copy. This is one declared implementation convention, not a requirement of every optimizer or framework. Count one unsharded resident copy of each array; display capacities in decimal MB and GB.
 
 **Math**: Each adapted matrix adds $r(d_{\mathrm{in}}+d_{\mathrm{out}})$ parameters, so the adapters contain `{python} AdapterStateInventory.layers_str` $\times$ `{python} AdapterStateInventory.matrices_str` $\times$ `{python} AdapterStateInventory.rank_str` $\times$ (`{python} AdapterStateInventory.input_str` $+$ `{python} AdapterStateInventory.output_str`) $=$ `{python} AdapterStateInventory.parameter_str` parameters, `{python} AdapterStateInventory.parameter_fraction_str` of the base. The convention assigns `{python} AdapterStateInventory.per_parameter_str` of state to each trainable parameter and `{python} AdapterStateInventory.frozen_bytes_str` to each frozen one. @Tbl-vol3-sft-memory-breakdown inventories the resulting arrays.
 
@@ -977,7 +973,7 @@ Rollback selects a previously approved compatible configuration for future admis
 
 ## Evaluating a Fine-Tuned Agent {#sec-vol3-fine-tuning-benchmarking}
 
-The trained artifact changes the policy's proposals. Evaluation determines whether those changes improve the complete agent under its intended operating conditions. The corpus manifest and training configuration explain how the artifact was produced, and closed-loop trials show how its own decisions behave. We now apply the evidence contract of @sec-vol3-evaluation to the specific changes this chapter can introduce.
+A checkpoint trained on the repair corpus can report a lower loss than the policy it would replace and still repair fewer connection-pool leaks. The corpus manifest and training configuration explain how the artifact was produced; only closed-loop trials show how its own decisions behave. The evidence contract of @sec-vol3-evaluation governs those trials, and this section specializes it to the changes fine-tuning can introduce.
 
 ### Comparable loss and closed-loop performance {#sec-vol3-fine-tuning-eval-decoupling}
 
