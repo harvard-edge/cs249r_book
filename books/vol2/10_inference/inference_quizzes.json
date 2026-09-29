@@ -15,7 +15,7 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Serving Cost Dominance Law (CapEx vs OpEx)",
+            "Serving cost dominance principle (one-time vs. recurring expense)",
             "Triggers for distributed inference (Memory, Throughput, Latency)",
             "The serving tax breakdown and zero-copy serialization",
             "Training vs inference operational inversion",
@@ -29,7 +29,7 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A production recommendation model costs $50,000 to train (one-time CapEx) and serves 10,000 QPS continuously for 2 years (730 days) at an operational cost of $10 per million queries. According to the Serving Cost Dominance Law, what is the ratio of lifetime serving cost to training cost?",
+            "question": "A production recommendation model costs $50,000 to train (a one-time expense) and serves 10,000 QPS continuously for 2 years (730 days) at an operational cost of $10 per million queries. According to the serving cost dominance principle, what is the ratio of lifetime serving cost to training cost?",
             "choices": [
               "Approximately $1.3\\times$",
               "Approximately $126.1\\times$",
@@ -37,7 +37,7 @@
               "Approximately $630.7\\times$"
             ],
             "answer": "The correct answer is B. The model serves $10{,}000 \\times 86{,}400 \\times 730 = 6.3072 \\times 10^{11}$ queries. At $10^{-5}$ dollars per query, serving costs 6,307,200 dollars, or approximately 126.1 times the 50,000-dollar training cost. The other ratios miscount accumulated queries or unit cost. This result depends on the specified sustained traffic, lifetime, and price rather than a universal cost ratio.",
-            "learning_objective": "Calculate the lifetime economic leverage of inference operational expenditures (OpEx) relative to training capital expenditures (CapEx)."
+            "learning_objective": "Calculate the lifetime economic leverage of recurring inference expense relative to one-time training expense."
           },
           {
             "question_type": "SHORT",
@@ -278,6 +278,72 @@
       }
     },
     {
+      "section_id": "#sec-inference-scale-weight-quantization-serving-097b",
+      "section_title": "Weight Quantization for Serving",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "LLM activation outlier problem (0.1% channels)",
+            "GPTQ layer-by-layer second-order Hessian error compensation",
+            "AWQ activation-aware salient channel protection",
+            "SmoothQuant W8A8 difficulty migration and prefill vs decode speedup",
+            "QuaRot rotation-based outlier elimination via Hadamard transforms",
+            "Hardware Tensor Core support (Hopper FP8 vs Ampere INT8)",
+            "Runtime serving contract and memory headroom"
+          ],
+          "question_strategy": "Test algorithmic differences between compensation (GPTQ), protection (AWQ), migration (SmoothQuant), and rotation (QuaRot), along with hardware speedup realities.",
+          "difficulty_progression": "Advances from outlier mechanics and speedup differences to mathematical formulations, rotation transforms, and execution pipelines.",
+          "integration": "Connects PTQ algorithms directly to GPU hardware paths (Tensor Cores, HBM bandwidth) and serving cost reductions.",
+          "ranking_explanation": "Crucial optimization section explaining how low-precision representations alter memory, bandwidth, and compute bottlenecks."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "How does SmoothQuant enable efficient 8-bit weight and 8-bit activation (W8A8) inference, and why is its speedup significantly higher during prefill than during decode?",
+            "choices": [
+              "It prunes 50% of model weights using structured sparsity, accelerating decode but having no effect on prefill.",
+              "It divides activations by a per-channel scale $s$ and multiplies weights by $s$, moving quantization difficulty toward weights; compute-bound prefill can benefit from native INT8 arithmetic while decode remains sensitive to memory traffic",
+              "It rotates the coordinate basis using randomized Walsh-Hadamard matrices, eliminating memory bandwidth bottlenecks during decode.",
+              "It converts floating-point weights into binary spikes, enabling single-cycle bitwise operations during token generation."
+            ],
+            "answer": "The correct answer is B. The equivalent transform is $XW=(X\\operatorname{diag}(s)^{-1})(\\operatorname{diag}(s)W)$. It smooths activation outliers while increasing weight range, enabling an INT8 path when calibration preserves quality. Compute-bound prefill can benefit from higher arithmetic throughput; memory-bound decode depends on bytes moved and conversion costs. Speedup is workload-dependent, not guaranteed by the transform alone.",
+            "learning_objective": "Analyze the mathematical mechanism of SmoothQuant W8A8 quantization and contrast its performance gains during prefill versus decode phases."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "What is the core algorithmic distinction between Generalized Post-Training Quantization (GPTQ) and Activation-Aware Weight Quantization (AWQ)?",
+            "choices": [
+              "GPTQ quantizes activations while leaving weights in FP16; AWQ quantizes weights while leaving activations in FP32.",
+              "GPTQ requires full model retraining for 100 epochs; AWQ is an online dynamic quantization method with no calibration.",
+              "GPTQ compensates residual quantization error across remaining unquantized columns using inverse Hessian information ($H^{-1}$); AWQ protects salient weight channels based on activation magnitudes without error feedback.",
+              "GPTQ applies only to convolutional vision models; AWQ applies exclusively to sparse recommendation embedding tables."
+            ],
+            "answer": "The correct answer is C. GPTQ performs layer-by-layer second-order error compensation: as each weight column is rounded to discrete grid points, the residual error is propagated to unquantized columns using the inverse Hessian matrix ($H = X^T X$). In contrast, AWQ observes activation magnitudes on a calibration set, identifies the top ~1% most salient channels, and scales those specific weight channels up prior to quantization to preserve precision without requiring iterative error compensation.",
+            "learning_objective": "Compare the algorithmic formulations and error-mitigation strategies of GPTQ versus AWQ."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain how QuaRot uses a data-free orthogonal rotation to reduce activation outliers, why its full quantization pipeline can still require calibration, and what runtime cost the rotation introduces.",
+            "answer": "An orthogonal rotation preserves $XW=(XH)(H^TW)$ while spreading large activation coordinates across dimensions. The rotation can be chosen without calibration data, but a QuaRot pipeline using GPTQ still uses calibration activations to quantize weights. Inline Hadamard transforms add runtime work; their cost and W4A4 quality must be evaluated on the deployed model and workload.",
+            "learning_objective": "Explain the theoretical foundation of rotation-based quantization (QuaRot) and its operational trade-offs."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Modern NVIDIA Hopper (H100) GPUs provide native Tensor Core instruction acceleration for FP8 (E4M3/E5M2) delivering a $2\\times$ compute throughput multiplier over FP16, whereas Ampere (A100) Tensor Cores do not natively support FP8 execution.",
+            "answer": "True. H100 Tensor Cores support native FP8 and advertise twice the dense arithmetic throughput of their FP16 path, while A100 lacks native FP8 Tensor Core instructions. This is a hardware ceiling, not an automatic twofold application speedup or a guarantee of preserved model quality.",
+            "learning_objective": "Identify native Tensor Core precision support across NVIDIA Ampere and Hopper accelerator architectures."
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the sequential steps in the GPTQ column-wise layer quantization pipeline:\n(1) Compute the Hessian matrix $H = 2 X^T X$ from calibration activations\n(2) Perform Cholesky decomposition on the inverse Hessian matrix $H^{-1}$\n(3) Round the current column weights to the nearest discrete quantized grid\n(4) Calculate the residual quantization error vector for the column\n(5) Propagate compensation updates to all remaining unquantized columns using the Cholesky inverse weights",
+            "answer": "The correct sequence is (1) -> (2) -> (3) -> (4) -> (5).\n- (1) Pass calibration data through the model to compute activation cross-products and form the Hessian matrix $H$.\n- (2) Compute the inverse Hessian and factor it via Cholesky decomposition to enable stable triangular error updates.\n- (3) Round the target column's continuous weights to the nearest low-bit quantized values.\n- (4) Compute the quantization error difference between original and rounded column weights.\n- (5) Propagate the scaled error vector to remaining unquantized columns to adjust their values before subsequent quantization steps.",
+            "learning_objective": "Structure the computational workflow of GPTQ layer-by-layer second-order quantization."
+          }
+        ]
+      }
+    },
+    {
       "section_id": "#sec-inference-scale-model-sharding-inference-82b3",
       "section_title": "Model Sharding for Inference",
       "quiz_data": {
@@ -495,72 +561,6 @@
       }
     },
     {
-      "section_id": "#sec-inference-scale-weight-quantization-serving-097b",
-      "section_title": "Weight Quantization for Serving",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "LLM activation outlier problem (0.1% channels)",
-            "GPTQ layer-by-layer second-order Hessian error compensation",
-            "AWQ activation-aware salient channel protection",
-            "SmoothQuant W8A8 difficulty migration and prefill vs decode speedup",
-            "QuaRot rotation-based outlier elimination via Hadamard transforms",
-            "Hardware Tensor Core support (Hopper FP8 vs Ampere INT8)",
-            "Runtime serving contract and memory headroom"
-          ],
-          "question_strategy": "Test algorithmic differences between compensation (GPTQ), protection (AWQ), migration (SmoothQuant), and rotation (QuaRot), along with hardware speedup realities.",
-          "difficulty_progression": "Advances from outlier mechanics and speedup differences to mathematical formulations, rotation transforms, and execution pipelines.",
-          "integration": "Connects PTQ algorithms directly to GPU hardware paths (Tensor Cores, HBM bandwidth) and serving cost reductions.",
-          "ranking_explanation": "Crucial optimization section explaining how low-precision representations alter memory, bandwidth, and compute bottlenecks."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "How does SmoothQuant enable efficient 8-bit weight and 8-bit activation (W8A8) inference, and why is its speedup significantly higher during prefill than during decode?",
-            "choices": [
-              "It prunes 50% of model weights using structured sparsity, accelerating decode but having no effect on prefill.",
-              "It divides activations by a per-channel scale $s$ and multiplies weights by $s$, moving quantization difficulty toward weights; compute-bound prefill can benefit from native INT8 arithmetic while decode remains sensitive to memory traffic",
-              "It rotates the coordinate basis using randomized Walsh-Hadamard matrices, eliminating memory bandwidth bottlenecks during decode.",
-              "It converts floating-point weights into binary spikes, enabling single-cycle bitwise operations during token generation."
-            ],
-            "answer": "The correct answer is B. The equivalent transform is $XW=(X\\operatorname{diag}(s)^{-1})(\\operatorname{diag}(s)W)$. It smooths activation outliers while increasing weight range, enabling an INT8 path when calibration preserves quality. Compute-bound prefill can benefit from higher arithmetic throughput; memory-bound decode depends on bytes moved and conversion costs. Speedup is workload-dependent, not guaranteed by the transform alone.",
-            "learning_objective": "Analyze the mathematical mechanism of SmoothQuant W8A8 quantization and contrast its performance gains during prefill versus decode phases."
-          },
-          {
-            "question_type": "MCQ",
-            "question": "What is the core algorithmic distinction between Generalized Post-Training Quantization (GPTQ) and Activation-Aware Weight Quantization (AWQ)?",
-            "choices": [
-              "GPTQ quantizes activations while leaving weights in FP16; AWQ quantizes weights while leaving activations in FP32.",
-              "GPTQ requires full model retraining for 100 epochs; AWQ is an online dynamic quantization method with no calibration.",
-              "GPTQ compensates residual quantization error across remaining unquantized columns using inverse Hessian information ($H^{-1}$); AWQ protects salient weight channels based on activation magnitudes without error feedback.",
-              "GPTQ applies only to convolutional vision models; AWQ applies exclusively to sparse recommendation embedding tables."
-            ],
-            "answer": "The correct answer is C. GPTQ performs layer-by-layer second-order error compensation: as each weight column is rounded to discrete grid points, the residual error is propagated to unquantized columns using the inverse Hessian matrix ($H = X^T X$). In contrast, AWQ observes activation magnitudes on a calibration set, identifies the top ~1% most salient channels, and scales those specific weight channels up prior to quantization to preserve precision without requiring iterative error compensation.",
-            "learning_objective": "Compare the algorithmic formulations and error-mitigation strategies of GPTQ versus AWQ."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Explain how QuaRot uses a data-free orthogonal rotation to reduce activation outliers, why its full quantization pipeline can still require calibration, and what runtime cost the rotation introduces.",
-            "answer": "An orthogonal rotation preserves $XW=(XH)(H^TW)$ while spreading large activation coordinates across dimensions. The rotation can be chosen without calibration data, but a QuaRot pipeline using GPTQ still uses calibration activations to quantize weights. Inline Hadamard transforms add runtime work; their cost and W4A4 quality must be evaluated on the deployed model and workload.",
-            "learning_objective": "Explain the theoretical foundation of rotation-based quantization (QuaRot) and its operational trade-offs."
-          },
-          {
-            "question_type": "TF",
-            "question": "True or False: Modern NVIDIA Hopper (H100) GPUs provide native Tensor Core instruction acceleration for FP8 (E4M3/E5M2) delivering a $2\\times$ compute throughput multiplier over FP16, whereas Ampere (A100) Tensor Cores do not natively support FP8 execution.",
-            "answer": "True. H100 Tensor Cores support native FP8 and advertise twice the dense arithmetic throughput of their FP16 path, while A100 lacks native FP8 Tensor Core instructions. This is a hardware ceiling, not an automatic twofold application speedup or a guarantee of preserved model quality.",
-            "learning_objective": "Identify native Tensor Core precision support across NVIDIA Ampere and Hopper accelerator architectures."
-          },
-          {
-            "question_type": "ORDER",
-            "question": "Order the sequential steps in the GPTQ column-wise layer quantization pipeline:\n(1) Compute the Hessian matrix $H = 2 X^T X$ from calibration activations\n(2) Perform Cholesky decomposition on the inverse Hessian matrix $H^{-1}$\n(3) Round the current column weights to the nearest discrete quantized grid\n(4) Calculate the residual quantization error vector for the column\n(5) Propagate compensation updates to all remaining unquantized columns using the Cholesky inverse weights",
-            "answer": "The correct sequence is (1) -> (2) -> (3) -> (4) -> (5).\n- (1) Pass calibration data through the model to compute activation cross-products and form the Hessian matrix $H$.\n- (2) Compute the inverse Hessian and factor it via Cholesky decomposition to enable stable triangular error updates.\n- (3) Round the target column's continuous weights to the nearest low-bit quantized values.\n- (4) Compute the quantization error difference between original and rounded column weights.\n- (5) Propagate the scaled error vector to remaining unquantized columns to adjust their values before subsequent quantization steps.",
-            "learning_objective": "Structure the computational workflow of GPTQ layer-by-layer second-order quantization."
-          }
-        ]
-      }
-    },
-    {
       "section_id": "#sec-inference-scale-case-studies-9689",
       "section_title": "Case Studies",
       "quiz_data": {
@@ -669,7 +669,7 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Serving Cost Dominance Law synthesis (CapEx vs OpEx)",
+            "Serving cost dominance principle synthesis (one-time vs. recurring expense)",
             "Prefill (compute-bound) vs Decode (memory-bandwidth bound) physical split",
             "Matching batching and sharding primitives to model architecture",
             "Budgeting the distribution serving tax within P99 SLOs"
@@ -684,9 +684,9 @@
             "question_type": "MCQ",
             "question": "Which statement best captures the central physical and economic synthesis of inference at scale presented in the chapter?",
             "choices": [
-              "Inference costs are fixed one-time CapEx expenditures, while training costs scale continuously with user traffic.",
+              "Inference costs are a fixed one-time expense, while training costs scale continuously with user traffic.",
               "All inference workloads should be served using static batching on single-GPU instances to eliminate network communication.",
-              "Serving cost compounds continuously as OpEx; decode throughput is physically bound by HBM bandwidth ($D_{\\text{vol}} / \\text{BW}$), requiring co-design of iteration schedulers, paged memory managers, and sharding topologies.",
+              "Serving cost recurs with traffic throughout deployment; decode throughput is physically bound by HBM bandwidth ($D_{\\text{vol}} / \\text{BW}$), requiring co-design of iteration schedulers, paged memory managers, and sharding topologies.",
               "Multi-tenancy isolation can be safely omitted if GPUs are upgraded to Blackwell architectures."
             ],
             "answer": "The correct answer is C. For the high-traffic, small-batch LLM setting, serving cost accumulates with completed work over the deployment lifetime, and weight/KV traffic often limits decode. Efficient operation coordinates scheduling, cache allocation, sharding, and routing under latency and quality constraints. Cost dominance and bandwidth limitation depend on traffic, model, and serving regime; neither is universal across all inference workloads.",
@@ -700,9 +700,9 @@
           },
           {
             "question_type": "FILL",
-            "question": "The economic principle stating that lifetime model serving operational costs (OpEx) compound continuously and typically dwarf one-time training capital expenditures (CapEx) by orders of magnitude is known as the ____ Law.",
-            "answer": "Serving Cost Dominance (or Serving Cost Dominance Law). The Serving Cost Dominance Law highlights that inference efficiency improvements provide continuous financial return over a model's entire deployment lifetime.",
-            "learning_objective": "Identify the Serving Cost Dominance Law governing the lifetime economics of machine learning systems."
+            "question": "The economic principle stating that recurring lifetime serving expense can exceed one-time training expense by orders of magnitude is known as the ____ principle.",
+            "answer": "Serving cost dominance. The serving cost dominance principle highlights that inference efficiency improvements provide continuous financial return over a model's entire deployment lifetime.",
+            "learning_objective": "Identify the serving cost dominance principle governing the lifetime economics of machine learning systems."
           }
         ]
       }

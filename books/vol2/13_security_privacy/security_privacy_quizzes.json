@@ -3,8 +3,8 @@
     "source_file": "books/vol2/13_security_privacy/13_security_privacy.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 11,
-    "sections_with_quizzes": 11,
+    "total_sections": 12,
+    "sections_with_quizzes": 12,
     "sections_without_quizzes": 0
   },
   "sections": [
@@ -17,13 +17,12 @@
           "focus_areas": [
             "Algorithmic attack surface vs traditional perimeter security",
             "Persistent learning vs transient processing",
-            "Hardware isolation tax in secure multi-tenancy",
             "Security vs privacy definitions and threat models",
             "Layered defense hierarchy across the ML stack"
           ],
-          "question_strategy": "Examine foundational definitions, hardware throughput costs of multi-tenant isolation, and the fundamental differences between software security and data privacy.",
-          "difficulty_progression": "Begins with algorithmic surface reasoning, tests quantitative isolation tax, evaluates DP sensitivity scaling on sample means, and structures the layered defense hierarchy.",
-          "integration": "Links fleet-level serving infrastructure with governance, security definitions, and hardware-level partitioning overheads.",
+          "question_strategy": "Examine foundational definitions and the fundamental differences between software security and data privacy.",
+          "difficulty_progression": "Begins with algorithmic surface reasoning, evaluates DP sensitivity scaling on sample means, and structures the layered defense hierarchy.",
+          "integration": "Links fleet-level serving infrastructure with governance and security definitions.",
           "ranking_explanation": "Essential opening section establishing the core vocabulary, mathematical trade-offs, and structural attack surfaces for the entire chapter."
         },
         "questions": [
@@ -38,12 +37,6 @@
             ],
             "answer": "The correct answer is A. Traditional IT security protects the infrastructure perimeter through access control, transport encryption, and firewalls. However, ML systems introduce an orthogonal algorithmic attack surface: properly authenticated API queries containing crafted inputs leverage the model's learned parameters directly to elicit memorized data or reconstruct decision boundaries. The assertion regarding unencrypted tensors confuses transport-layer security with model-layer information leakage. The claim about JSON payload inspection confuses firewall protocol parsing with semantic model exploitation. The assertion regarding rate limiting confuses stream accounting with algorithmic leakage.",
             "learning_objective": "Analyze why traditional network perimeter defenses fail to prevent algorithmic attacks on ML models."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Two hypothetical serving configurations use the same allocated accelerator capacity, models, request mix, and latency target. The baseline sustains 1,000 tokens/s and the configuration with additional security controls sustains 850 tokens/s. Explain what this 15% capacity loss establishes and why comparing a whole GPU against a smaller MIG partition would not isolate security overhead.",
-            "answer": "The matched scenario requires capacity planning around a 15% throughput loss; it does not measure a universal isolation cost or identify a particular mechanism. A whole-GPU versus smaller-partition comparison also changes available compute and memory capacity. MIG partitioning can affect pooling and fragmentation, which must be distinguished from execution overhead; it does not inherently imply secure context switching. Measure the actual configuration under its stated security boundary.",
-            "learning_objective": "Evaluate the trade-offs of hardware-level GPU partitioning in multi-tenant ML serving."
           },
           {
             "question_type": "TF",
@@ -267,6 +260,70 @@
             "question": "True or False: A model compromised by a backdoor attack (such as BadNets) will exhibit a noticeable drop in validation accuracy on standard, clean test datasets, allowing automated validation pipelines to flag the compromise before deployment.",
             "answer": "False. A backdoor can preserve clean validation accuracy while activating only on a particular trigger. Clean-set evaluation therefore cannot establish that a model is free of backdoors. Attack success and detectability depend on the trigger, data, model, and training procedure; targeted testing and provenance controls provide additional evidence.",
             "learning_objective": "Evaluate the stealth characteristics of backdoor poisoning attacks during standard model validation."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-security-privacy-fleet-trust-boundaries",
+      "section_title": "Fleet-Internal Trust Boundaries",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Breakdown point of mean gradient aggregation",
+            "Traffic cost of robust aggregation vs. ring AllReduce",
+            "Confidentiality of unencrypted RDMA collective traffic",
+            "Residual state and prefix-cache timing channels on shared accelerators",
+            "Attestation and key custody as coordination costs"
+          ],
+          "question_strategy": "Test whether readers can place each fleet-internal control on the boundary it protects and on the C³ axis it spends.",
+          "difficulty_progression": "Moves from the quantitative traffic ratio of robust aggregation to fabric confidentiality, cross-tenant channels, isolation capacity measurement, and the Fleet Law placement of attestation.",
+          "integration": "Connects collective communication, multi-tenant serving, and fault-tolerant restart with the chapter's threat model.",
+          "ranking_explanation": "Establishes the trust boundaries inside the fleet that API-facing defenses never see."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A data-parallel job with 64 workers replaces the mean computed by ring AllReduce with a coordinate-wise median so that one compromised worker cannot steer the update. Approximately how does per-worker gradient traffic change?",
+            "choices": [
+              "It rises by about 32 times, because each worker must gather the 63 individual gradients instead of sending and receiving about twice the gradient size in the ring.",
+              "It is unchanged, because the median can be computed inside the reduce-scatter phase of the ring.",
+              "It roughly doubles, because each gradient must be sent once for the median and once for the mean.",
+              "It falls, because the median discards outlier gradients before they are transmitted."
+            ],
+            "answer": "The correct answer is A. Ring AllReduce computes a sum, so each worker moves about $2(N-1)/N$ times the gradient size and never sees an individual gradient. A median needs every individual gradient, so each worker receives $(N-1)M$ bytes, a ratio of $N/2$, or 32 at $N = 64$. A median is not a sum and cannot be accumulated in reduce-scatter. The doubling choice ignores that the median needs all $N-1$ peers' gradients. Discarding outliers happens after the gradients arrive, so it cannot reduce traffic.",
+            "learning_objective": "Quantify the communication cost that robust aggregation imposes on data-parallel training."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Two hypothetical serving configurations use the same allocated accelerator capacity, models, request mix, and latency target. The baseline sustains 1,000 tokens/s and the configuration with additional security controls sustains 850 tokens/s. Explain what this 15% capacity loss establishes and why comparing a whole GPU against a smaller MIG partition would not isolate security overhead.",
+            "answer": "The matched scenario requires capacity planning around a 15% throughput loss; it does not measure a universal isolation cost or identify a particular mechanism. A whole-GPU versus smaller-partition comparison also changes available compute and memory capacity. MIG partitioning can affect pooling and fragmentation, which must be distinguished from execution overhead; it does not inherently imply secure context switching. Measure the actual configuration under its stated security boundary.",
+            "learning_objective": "Evaluate how to measure the capacity cost of multi-tenant isolation controls under a matched resource budget."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: In common configurations, RDMA transports move collective traffic between accelerator memories without encryption, so the confidentiality of gradients on a training fabric rests on the fabric's physical and administrative isolation.",
+            "answer": "True. RDMA was designed for fabrics inside one administrative domain, and common deployments do not encrypt its payloads. That assumption holds for a dedicated cluster in one facility and weakens when training spans buildings, shares switches with other tenants, or runs on rented capacity. Encrypting the traffic moves cost into $T_{\\text{comm}}$ unless the adapter or link layer encrypts at full line rate.",
+            "learning_objective": "Identify the confidentiality assumption behind unencrypted collective communication."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A multi-tenant LLM service shares one prefix cache across all tenants. What can a tenant who measures time to first token learn, and which control closes the channel?",
+            "choices": [
+              "Whether another tenant recently sent the same prompt prefix; scoping the cache per tenant closes the channel at the cost of a lower hit rate.",
+              "The model weights of the serving replica; encrypting the weights at rest closes the channel.",
+              "Another tenant's API key; mutual TLS between client and gateway closes the channel.",
+              "The exact output tokens of other tenants; rounding output probabilities closes the channel."
+            ],
+            "answer": "The correct answer is A. A cache hit returns the first token measurably sooner than a miss, so response timing reveals whether a prefix was recently processed for someone else. Per-tenant cache scoping removes the shared state at the price of lost reuse. Weight encryption at rest protects stored artifacts, not a timing difference at serving time. Mutual TLS authenticates peers but does not hide cache behavior. Output rounding limits extraction through probabilities and does not affect time to first token.",
+            "learning_objective": "Analyze how shared serving state creates cross-tenant timing channels."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why remote attestation and key delivery for a 128-node training job appear in $T_{\\text{sync}}$ and in the recovery path of the Fleet Law rather than in steady-state throughput.",
+            "answer": "Attestation and key delivery happen at job launch, elastic rescale, and every restart from checkpoint, when nodes must prove their boot chain, firmware, driver, and workload image before receiving wrapped keys. Each event is small, but at fleet scale the events recur, so their latency adds to the restart cost every failure pays and to the coordination term. Between those events the attested nodes compute and communicate at full rate, so steady-state throughput is largely unaffected.",
+            "learning_objective": "Place fleet attestation and key custody costs on the coordination axis of the Fleet Law."
           }
         ]
       }
@@ -529,7 +586,7 @@
     },
     {
       "section_id": "#sec-security-privacy-practical-roadmap-8f3a",
-      "section_title": "Security and Privacy Maturity Model",
+      "section_title": "Selecting and Sequencing Defenses",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {

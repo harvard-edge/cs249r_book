@@ -403,7 +403,79 @@ A real-time chatbot prioritizes latency (time-to-first-token under 200 ms, inter
 
 For the same 70B language model, a latency-oriented configuration might use small batches and speculative decoding to reduce the time a request waits for tokens. A throughput-oriented configuration might use larger batches and INT4 weights to amortize weight reads and free memory for concurrent requests. These are candidate operating points, not guaranteed improvements. The larger batch can increase aggregate throughput while lengthening each request's token intervals, and reduced precision is usable only if the model still meets its quality criterion.
 
-The comparison requires completed throughput and per-request latency measured together under the same request-length distribution and a stated offered load. Cost per output token then follows from the occupied replica's hourly cost and its measured aggregate output rate. A tensor-parallel replica produces one shared output stream per request, so its aggregate token rate must not be counted once for every participating GPU. Only this consistent accounting can establish whether lower cost compensates for higher latency at the application's chosen operating point.
+```{python}
+#| echo: false
+#| label: frontier-operating-points
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EFFICIENCY-FRONTIER OPERATING POINTS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: efficiency-frontier paragraph in
+# │          @sec-performance-engineering-efficiency-frontier.
+# │
+# │ Goal: Put numbers on the latency-oriented and throughput-oriented operating
+# │       points of the recurring 70B deployment.
+# │ Show: bandwidth-only decode step, aggregate token rate, and cost per million
+# │       output tokens at batch 1 and at the serving profile's batch limit.
+# │ How: per-GPU bytes per step = FP16 weight shard + B x per-GPU KV cache at the
+# │      profile context length; step = bytes / HBM bandwidth; cost = replica
+# │      GPU-hours / tokens. Floors on latency, ceilings on throughput.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_memory, fmt_multiple, fmt_rate, fmt_time, fmt_usd
+
+class FrontierOperatingPoints:
+    """Bandwidth-only latency, throughput, and cost at two batch sizes."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    model = Models.Language.Llama2_70B
+    profile = ReferenceStats.ServingProfiles
+    tensor_parallel_degree = int(profile.PrecisionDividendTensorParallelDegree)
+    context_tokens = int(profile.PrecisionDividendContextLengthTokens)
+    batch_latency = 1
+    batch_throughput = int(profile.PrecisionDividendOptimizedPolicyBatchLimit)
+    hbm_bw = Hardware.Cloud.H100.memory.bandwidth
+    gpu_hour = Infrastructure.Pricing.Cloud.GpuInferencePerHour.rate
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    weight_shard = model.size_in_bytes(BYTES_FP16) / tensor_parallel_degree
+    kv_request = calc_kv_cache_size(model.layers, model.kv_heads, model.hidden_dim // model.heads, context_tokens, 1, bytes_per_elem=BYTES_FP16)
+    kv_request_per_gpu = kv_request / tensor_parallel_degree
+    bytes_lat = weight_shard + batch_latency * kv_request_per_gpu
+    bytes_thr = weight_shard + batch_throughput * kv_request_per_gpu
+    step_lat = (bytes_lat / hbm_bw).to(ms)
+    step_thr = (bytes_thr / hbm_bw).to(ms)
+    tps_lat = (batch_latency / step_lat).to(1 / second).magnitude
+    tps_thr = (batch_throughput / step_thr).to(1 / second).magnitude
+    replica_rate = (tensor_parallel_degree * gpu_hour).to(USD / hour).magnitude
+    cost_lat = replica_rate / (tps_lat * 3600) * 1e6  # dollars per million output tokens
+    cost_thr = replica_rate / (tps_thr * 3600) * 1e6
+    cost_ratio = cost_lat / cost_thr
+    latency_ratio = (step_thr / step_lat).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(batch_throughput == 32, "Throughput point should use the profile's 32-request batch limit")
+    check(cost_ratio > 10, "Batching should cut cost per token by more than an order of magnitude")
+    check(1 < latency_ratio < 2, "Batching should lengthen each token interval by less than 2x here")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    context_tokens_str = fmt_int(context_tokens, commas=True)
+    batch_throughput_str = fmt_int(batch_throughput, commas=False)
+    bytes_lat_gb_str = fmt_memory(bytes_lat, unit=GB, precision=1, commas=False)
+    bytes_thr_gb_str = fmt_memory(bytes_thr, unit=GB, precision=1, commas=False)
+    step_lat_ms_str = fmt_time(step_lat, ms, precision=1, commas=False)
+    step_thr_ms_str = fmt_time(step_thr, ms, precision=1, commas=False)
+    tps_lat_str = fmt_rate(round(tps_lat), "tokens/s", precision=0, commas=True)
+    tps_thr_str = fmt_rate(round(tps_thr, -1), "tokens/s", precision=0, commas=True)
+    gpu_hour_str = fmt_usd(gpu_hour.to(USD / hour).magnitude, precision=2, commas=False)
+    cost_lat_str = fmt_usd(round(cost_lat), precision=0, commas=False)
+    cost_thr_str = fmt_usd(cost_thr, precision=2, commas=False)
+    cost_ratio_mult_str = fmt_multiple(round(cost_ratio), precision=0, commas=False)
+    latency_ratio_mult_str = fmt_multiple(latency_ratio, precision=1, commas=False)
+```
+
+A bandwidth-only estimate shows how far apart those two points sit. Take the FP16 weights of the chapter's recurring 70B deployment, sharded across eight GPUs, and let every request hold a full `{python} FrontierOperatingPoints.context_tokens_str`-token KV cache. At batch one, each GPU streams about `{python} FrontierOperatingPoints.bytes_lat_gb_str` per decode step, so a step takes at least `{python} FrontierOperatingPoints.step_lat_ms_str` and the replica emits at most `{python} FrontierOperatingPoints.tps_lat_str`. At a batch of `{python} FrontierOperatingPoints.batch_throughput_str` requests, each GPU streams `{python} FrontierOperatingPoints.bytes_thr_gb_str`, the step stretches to `{python} FrontierOperatingPoints.step_thr_ms_str`, and aggregate output rises to about `{python} FrontierOperatingPoints.tps_thr_str`. At `{python} FrontierOperatingPoints.gpu_hour_str` per GPU-hour, the cost of a million output tokens falls from about `{python} FrontierOperatingPoints.cost_lat_str` to `{python} FrontierOperatingPoints.cost_thr_str`, roughly `{python} FrontierOperatingPoints.cost_ratio_mult_str` cheaper, while each request waits only `{python} FrontierOperatingPoints.latency_ratio_mult_str` as long between tokens. Both operating points are bounds rather than predictions. Launch overhead, communication, and queueing lengthen every step and move both operating points.
+
+The real comparison therefore requires completed throughput and per-request latency measured together under the same request-length distribution and a stated offered load. Cost per output token then follows from the occupied replica's hourly cost and its measured aggregate output rate. A tensor-parallel replica produces one shared output stream per request, so its aggregate token rate must not be counted once for every participating GPU. Only this consistent accounting can establish whether lower cost compensates for higher latency at the application's chosen operating point.
 
 ### The memory wall {#sec-performance-engineering-memory-wall-physics}
 
@@ -486,19 +558,7 @@ class MemoryWallScenario:
 
 An NVIDIA H100\index{H100!memory hierarchy} delivers `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str` of FP8 compute at a `{python} MemoryWallScenario.h100_tdp_w_str` thermal design power budget but only `{python} MemoryWallScenario.h100_hbm_bw_tb_per_s_str` of memory bandwidth. If an operation achieves an arithmetic intensity below `{python} MemoryWallScenario.h100_ridge_fp8_str`, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the memory wall, and it defines the landscape within which all performance engineering operates.
 
-The memory wall represents a physical constraint. Off-chip transfers traverse interconnects and memory interfaces that on-chip reuse can avoid, but their energy cost depends on technology, transfer width, and the measurement boundary. A per-access SRAM estimate cannot be divided by a different-width DRAM transaction estimate to obtain a same-value energy ratio. HBM provides capacity (the H100 offers `{python} MemoryWallScenario.h100_mem_gb_str`), while nearby storage offers lower latency and opportunities for reuse. Models need large parameter and state stores, yet only a fraction of those data can remain close to each compute unit.
-
-::: {.column-margin}
-![](images/svg/vol2_performance_engineering_margin_001.svg){width="100%" fig-alt="Memory path from thread-local registers through on-chip SRAM to off-chip HBM; a note requires matched transfer sizes for energy comparisons."}
-
-*Compare access energy only on matched transfer boundaries.*
-:::
-
-The capacity-bandwidth tension shapes the optimization space. Operator fusion reduces the number of trips to HBM\index{Memory Wall!bandwidth bottleneck} by combining operations so that intermediate results stay in SRAM. Precision engineering reduces the number of bytes per trip by representing values in FP8 or INT4 instead of FP16. Tiling strategies restructure algorithms to maximize data reuse within SRAM. Graph compilers automate these transformations. Each technique attacks a different term in the same fundamental equation: minimize the ratio of bytes moved to operations performed.
-
-### The GPU memory hierarchy {#sec-performance-engineering-memory-hierarchy}
-
-The physical structure of a GPU memory system dictates the limits of data movement. @Tbl-performance-engineering-memory-hierarchy summarizes the four levels by scale, access cost, and the optimization constraint each one imposes.
+@Sec-appdx-dam-taxonomy-memory-hierarchy recaps the accelerator memory hierarchy that sits behind this gap. For performance engineering, what matters is the constraint each level places on a kernel's schedule, which @tbl-performance-engineering-memory-hierarchy summarizes for the H100.
 
 | **Level**                            | **Scale on H100**                                                                                                                                                               | **Access cost**                                                                                                               | **Optimization constraint**                                                                                                                                                                                                                          |
 |:-------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -509,26 +569,29 @@ The physical structure of a GPU memory system dictates the limits of data moveme
 
 : **GPU memory hierarchy constraints**: Faster GPU storage is smaller, closer to the compute units, and more explicitly managed, while HBM supplies capacity at much higher latency and energy cost. {#tbl-performance-engineering-memory-hierarchy tbl-colwidths="[17,24,24,35]"}
 
-@Tbl-performance-engineering-memory-hierarchy makes register pressure a first-class design constraint in custom GPU kernels, whether written in CUDA or in a tile-level language such as Triton (@sec-performance-engineering-triton): tile size controls both arithmetic intensity and register demand. It also explains why shared memory and L2 reuse matter so much for attention. If KV cache entries or fused intermediates remain on chip, the kernel avoids the slow, high-energy HBM round trip that dominates low-arithmetic-intensity operations.
+@Tbl-performance-engineering-memory-hierarchy makes register pressure a first-class design constraint in custom GPU kernels, whether written in CUDA or in a tile-level language such as Triton (@sec-performance-engineering-triton), because tile size controls both arithmetic intensity and register demand. It also explains why shared memory and L2 reuse matter so much for attention. If KV cache entries or fused intermediates remain on chip, the kernel avoids the slow, high-energy HBM round trip that dominates low-arithmetic-intensity operations.
 
-The energy cost of data movement\index{Energy efficiency!data movement cost} also affects fleet economics. Estimating interface power requires a consistent energy-per-byte measurement multiplied by the transferred bytes per second, with any static or device-level power accounted for separately. Operator fusion can remove intermediate HBM transfers, but its energy benefit depends on the traffic actually avoided and any additional on-chip work. A bandwidth ceiling alone therefore cannot establish memory power or fleet-wide energy savings.
+The optimization problem therefore reduces to data placement, keeping the data that the compute units need in the fastest memory that can hold it. When a kernel reads a tensor from HBM, processes it, and writes the result back to HBM, the round trip dominates execution time for any operation with low arithmetic intensity. The chapter's levers each attack part of that round trip. Operator fusion\index{Memory Wall!bandwidth bottleneck} reduces the number of trips by keeping intermediate results in SRAM, tiling restructures an algorithm to maximize reuse within SRAM, precision engineering reduces the bytes per trip by representing values in FP8 or INT4 instead of FP16, and graph compilers automate these transformations. Each lowers the ratio of bytes moved to operations performed.
 
-The performance engineering challenge reduces to a data placement problem (@fig-performance-engineering-gpu-memory-hierarchy): keep the data that the compute units need in the fastest memory that can hold it. When a kernel reads a tensor from HBM, processes it, and writes the result back to HBM, the HBM round-trip dominates execution time for any operation with low arithmetic intensity. Every technique here shares the same goal: keeping data closer to compute for longer.
+### The roofline model {#sec-performance-engineering-roofline}
 
-::: {#fig-performance-engineering-gpu-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**GPU memory hierarchy and data movement**: Visual hierarchy from fast on-chip registers and SRAM down through L2 cache to off-chip HBM3. Latency grows from a register access to off-chip transfers; the capacity and reuse boundaries determine where intermediates can remain. Energy comparisons additionally require matched transfer sizes and technologies." fig-alt="Pyramid diagram of GPU memory hierarchy from registers at the top through shared memory and L2 cache to HBM at the base, with capacity, bandwidth, and latency metrics per level."}
-![](images/svg/gpu-memory-hierarchy.svg)
+The memory wall becomes a diagnostic instrument once each kernel is placed on the roofline model[^fn-roofline-williams-origin] [@williams2009]. @Sec-appdx-dam-taxonomy-roofline states the bound in @eq-appdx-dam-roofline. A kernel with arithmetic intensity $I$ attains at most $\min(R_{\text{peak}}, I \times \text{BW})$, and the ridge point $I_{\text{ridge}} = R_{\text{peak}}/\text{BW}$\index{Roofline Model!ridge point} separates memory-bound\index{Memory-Bound} kernels on its left from compute-bound\index{Compute-Bound} kernels on its right. Performance engineering needs four refinements of that bound: the distinction between algorithmic and measured intensity, the movement of the ridge with precision and hardware generation, the placement of production kernels relative to the ridge, and the way batch size walks decode across it.
 
+::: {.column-margin .margin-pointer}
+↩ The roofline formulation and hardware arithmetic intensity ceilings are derived in @sec-compute-roofline.
 :::
 
-::: {#psp-performance-engineering-analogy-scholars-library .callout-perspective title="Analogy: The scholar's library"}
+[^fn-roofline-williams-origin]: **Roofline model**\index{Roofline Model!performance engineering}: The original paper framed the model for multicore CPUs [@williams2009]; the same two-ceiling diagram extends directly to accelerators.
 
-The GPU memory hierarchy parallels a scholar researching in a library. Registers (`{python} MemoryWallScenario.register_total_mib_str`)\index{Register!GPU working memory} represent working memory, granting instant access but holding only a few values at once. Shared memory (SRAM)\index{SRAM!scratchpad capacity} functions as a desk, reached in a single stride but accommodating only a few open references. The L2 cache (`{python} MemoryWallScenario.l2_cache_mb_str`)\index{Cache!GPU L2} acts as a book cart beside the desk, adding a modest retrieval delay while holding a moderate working set. Finally, off-chip HBM (`{python} MemoryWallScenario.h100_mem_gb_str`)\index{HBM!bandwidth ceiling} is the library basement: it holds every volume the scholar could ever need, but every retrieval requires hundreds of nanoseconds of round-trip travel. Performance engineering is the art of minimizing trips to the basement.\index{Memory Wall!memory hierarchy analogy}
+::: {#dfn-performance-engineering-arithmetic-intensity .callout-definition title="Arithmetic intensity"}
+
+***Arithmetic intensity***\index{Arithmetic Intensity!performance engineering} $(I)$ is the ML workload ratio of floating-point operations performed to the number of bytes transferred from memory (FLOP per byte).
+
+1.  **Significance**: It characterizes the computational density of a workload. It is the independent variable in the roofline model\index{Roofline Model!operational intensity}, determining whether a system operates in the bandwidth-bound ($\text{BW}$)\index{Roofline Model!memory bandwidth ceiling} or compute-bound\index{Roofline Model!compute ceiling}\index{Compute-Bound} ($R_{\text{peak}}$) regime.
+2.  **Distinction**: Unlike peak throughput (a hardware property), arithmetic intensity has two useful forms. *Algorithmic intensity* counts the data movement required by an idealized algorithm under a stated memory model; *measured intensity* divides executed FLOPs by observed traffic at a named memory boundary, such as HBM. The latter includes tiling, cache behavior, fusion, padding, and redundant transfers.
+3.  **Common pitfall**: Arithmetic intensity is not a fixed property of a model. Batch size can change algorithmic reuse, while fusion and tiling primarily change measured HBM intensity by keeping intermediates on chip. A roofline point is interpretable only when its FLOP convention and memory boundary match the ceilings on the same plot.
 
 :::
-
-### The widening gap {#sec-performance-engineering-widening-gap}
-
-The memory wall is not static; in the accelerator generations compared here, compute throughput has grown faster than off-chip memory bandwidth. Memory bandwidth improves more slowly because the physics of off-chip signaling and the economics of HBM manufacturing limit how fast data can leave the chip.
 
 ```{python}
 #| echo: false
@@ -536,8 +599,8 @@ The memory wall is not static; in the accelerator generations compared here, com
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ WIDENING MEMORY WALL TABLE (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-widening-gap, its caption, and the @sec-performance-engineering-widening-gap
-# │          prose that follows it.
+# │ Context: @tbl-widening-gap, its caption, @fig-roofline-model caption, and the
+# │          ridge-point prose in @sec-performance-engineering-roofline.
 # │
 # │ Goal: Compute the per-generation FP16 peak, HBM bandwidth, and ridge point
 # │       (ridge = peak_flops / bandwidth), plus the V100->B200 compute-growth,
@@ -606,54 +669,9 @@ class WideningGap:
     )
 ```
 
-@Tbl-widening-gap quantifies how the hardware balance shifts across accelerator generations. The key column is the ridge point: as compute grows faster than bandwidth, more operators need higher arithmetic intensity just to remain compute-bound.
+@Fig-roofline-model draws the bound for the H100 at its FP8 Tensor Core rate and places four representative workloads on it. Left of the ridge, only more bandwidth or fewer bytes per operation raises a kernel's ceiling; right of it, only a faster or better-utilized datapath helps.
 
-| **GPU**  | **Year** |             **Peak FP16 (TFLOP/s)**              |              **HBM BW (TB/s)**              |      **Ridge Point (FLOP/byte)**      |
-|:---------|:--------:|:------------------------------------------------:|:-------------------------------------------:|:-------------------------------------:|
-| **V100** |   2017   | `{python} WideningGap.v100_peak_tflop_per_s_str` | `{python} WideningGap.v100_bw_tb_per_s_str` | `{python} WideningGap.v100_ridge_str` |
-| **A100** |   2020   | `{python} WideningGap.a100_peak_tflop_per_s_str` | `{python} WideningGap.a100_bw_tb_per_s_str` | `{python} WideningGap.a100_ridge_str` |
-| **H100** |   2022   | `{python} WideningGap.h100_peak_tflop_per_s_str` | `{python} WideningGap.h100_bw_tb_per_s_str` | `{python} WideningGap.h100_ridge_str` |
-| **B200** |   2024   | `{python} WideningGap.b200_peak_tflop_per_s_str` | `{python} WideningGap.b200_bw_tb_per_s_str` | `{python} WideningGap.b200_ridge_str` |
-
-: **The widening memory wall**: Compute throughput has increased `{python} WideningGap.compute_growth_mult_str` from V100 to B200 over seven years, while memory bandwidth has increased only `{python} WideningGap.bw_growth_mult_str`. The ridge point has roughly doubled overall (V100 to B200), pulling more workloads into the memory-bound regime over time, though the per-generation movement is not monotonic (B200 sits slightly below H100). {#tbl-widening-gap}
-
-In @tbl-widening-gap, the ridge point increased from `{python} WideningGap.v100_ridge_str` FLOP/byte on the V100 to `{python} WideningGap.b200_ridge_str` FLOP/byte on the B200, about a `{python} WideningGap.ridge_ratio_mult_str` increase. An operation with arithmetic intensity of 200 FLOP/byte was compute-bound on the V100 and A100, but memory-bound on the H100 and B200. Performance engineering techniques targeting memory efficiency, fusion, precision, and tiling therefore become more important as the ridge point rises, not less. The systems lesson is not that one named kernel lasts forever, but that reducing exposed memory traffic becomes more valuable when compute grows faster than bandwidth.
-
-### The roofline model {#sec-performance-engineering-roofline}
-
-The roofline model[^fn-roofline-williams-origin] [@williams2009] and arithmetic intensity provide the framework for diagnosing whether a workload is compute-bound or memory-bound on a given accelerator, anchored by the accelerator's ridge point. At fleet scale, the model exposes how the ridge point shifts across hardware generations, how FP8 moves it, where production ML workloads fall relative to it, and how batch size walks a workload across it. The model plots achievable performance as a function of arithmetic intensity, the ratio of floating-point operations to bytes transferred from memory, and the intersection of the two regimes is the ridge point.
-
-::: {.column-margin .margin-pointer}
-↩ The roofline formulation and hardware arithmetic intensity ceilings are derived in @sec-compute-roofline.
-:::
-
-[^fn-roofline-williams-origin]: **Roofline model**\index{Roofline Model!performance engineering}: The original paper framed the model for multicore CPUs [@williams2009]; the same two-ceiling diagram extends directly to accelerators.
-
-::: {#dfn-performance-engineering-arithmetic-intensity .callout-definition title="Arithmetic intensity"}
-
-***Arithmetic intensity***\index{Arithmetic Intensity!performance engineering} $(I)$ is the ML workload ratio of floating-point operations performed to the number of bytes transferred from memory (FLOP per byte).
-
-1.  **Significance**: It characterizes the computational density of a workload. It is the independent variable in the roofline model\index{Roofline Model!operational intensity}, determining whether a system operates in the bandwidth-bound ($\text{BW}$)\index{Roofline Model!memory bandwidth ceiling} or compute-bound\index{Roofline Model!compute ceiling}\index{Compute-Bound} ($R_{\text{peak}}$) regime.
-2.  **Distinction**: Unlike peak throughput (a hardware property), arithmetic intensity has two useful forms. *Algorithmic intensity* counts the data movement required by an idealized algorithm under a stated memory model; *measured intensity* divides executed FLOPs by observed traffic at a named memory boundary, such as HBM. The latter includes tiling, cache behavior, fusion, padding, and redundant transfers.
-3.  **Common pitfall**: Arithmetic intensity is not a fixed property of a model. Batch size can change algorithmic reuse, while fusion and tiling primarily change measured HBM intensity by keeping intermediates on chip. A roofline point is interpretable only when its FLOP convention and memory boundary match the ceilings on the same plot.
-
-:::
-
-For a given accelerator with peak compute $R_{\text{peak}}$ (in FLOP/s) and peak memory bandwidth $\text{BW}$ (in bytes/s), @eq-performance-roofline gives the achievable performance of a workload with arithmetic intensity $I$ (in FLOP/byte):
-
-$$
-\text{Achievable FLOP/s} = \min(R_{\text{peak}}, \; \text{BW} \times I)
-$$ {#eq-performance-roofline}
-
-@Eq-ridge-point locates the ridge point\index{Roofline Model!ridge point} where these two limits intersect:
-
-$$
-I_{\text{ridge}} = \frac{R_{\text{peak}}}{\text{BW}}
-$$ {#eq-ridge-point}
-
-Workloads with $I < I_{\text{ridge}}$ are memory-bound\index{Memory-Bound}\index{Memory-Bound!bandwidth ceiling}: their performance is limited by how fast data can be loaded, not how fast it can be processed. Workloads with $I > I_{\text{ridge}}$ are compute-bound\index{Compute-Bound!tensor core saturation}: the arithmetic units are the bottleneck. @Fig-roofline-model illustrates this relationship graphically.
-
-::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The roofline model**: Achievable performance (y-axis) as a function of arithmetic intensity (x-axis) on a log-log plot. The sloped line represents the memory bandwidth ceiling; the flat line represents the compute ceiling at the labeled precision (FP8 tensor-core throughput on H100, approximately `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str`); their intersection is the ridge point at roughly `{python} MemoryWallScenario.h100_ridge_fp8_str` for FP8. Most transformer inference operations fall in the memory-bound region (left of the ridge point), while large batched GEMMs fall in the compute-bound region (right). The corresponding FP16 ridge point is roughly `{python} WideningGap.h100_ridge_str` FLOP/byte (`{python} WideningGap.h100_peak_flops_str` divided by `{python} WideningGap.h100_bw_str`)." fig-alt="Log-log roofline plot with diagonal memory-bandwidth ceiling and horizontal compute ceiling labeled at FP8 throughput around 2,000 TFLOP/s. Ridge point around 600 FLOP/byte. Workload markers: LLM decode and element-wise ops on the left (memory-bound), large GEMM on the right (compute-bound)."}
+::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The roofline model**: Achievable performance (y-axis) as a function of arithmetic intensity (x-axis) on a log-log plot. The sloped line represents the memory bandwidth ceiling; the flat line represents the compute ceiling at the labeled precision (FP8 tensor-core throughput on H100, approximately `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str`); their intersection is the ridge point at roughly `{python} MemoryWallScenario.h100_ridge_fp8_str` for FP8. Most transformer inference operations fall in the memory-bound region (left of the ridge point), while large batched GEMMs fall in the compute-bound region (right). The corresponding FP16 ridge point is roughly `{python} WideningGap.h100_ridge_str` FLOP/byte (`{python} WideningGap.h100_peak_flops_str` divided by `{python} WideningGap.h100_bw_str`)." fig-alt="Log-log roofline plot with diagonal memory-bandwidth ceiling and horizontal compute ceiling labeled at FP8 throughput around 2,000 TFLOP/s. Ridge point around 600 FLOP/byte. Four workload markers sit at rising intensity: batch-one decode far below the slope, then long-prompt prefill, transformer training at batch 512, and ResNet convolution training nearest the ridge."}
 ```{=latex}
 \begin{tikzpicture}[
     >=Stealth,
@@ -799,216 +817,24 @@ Workloads with $I < I_{\text{ridge}}$ are memory-bound\index{Memory-Bound}\index
 ```
 :::
 
-The ridge point of the NVIDIA H100 at FP16 precision follows directly from the same peak-compute and bandwidth values used in @tbl-widening-gap:
+The ridge point of the NVIDIA H100 at FP16 precision follows directly from the peak-compute and bandwidth values that @tbl-widening-gap lists for it:
 
 `{python} WideningGap.h100_ridge_display_math`
 
-```{python}
-#| echo: false
-#| label: roofline-ridge-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ROOFLINE RIDGE POINT COMPARISON
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-performance-engineering-roofline—ridge point prose comparison
-# │
-# │ Goal: Verify and expose ridge-point values (FLOP/s divided by BW in FLOP/byte) for
-# │       A100 FP16 (~153), H100 FP16 (~295), and H100 FP8 (~591) to explain why
-# │       each new generation makes more workloads memory-bound.
-# │ Show: ~153 FLOP/byte (A100), ~295 (H100 FP16), ~591 (H100 FP8)—inline prose.
-# │ How: Extract precomputed ridge quantities from PerformanceSetup; keep them
-# │       as FLOP/byte quantities through guards, then format scalar magnitudes.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
+Any operation with an arithmetic intensity below that value is memory-bound on the H100 at FP16. FP8 doubles the Tensor Core rate to `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str` while bandwidth stays at `{python} MemoryWallScenario.h100_hbm_bw_tb_per_s_str`, so the ridge rises to about `{python} MemoryWallScenario.h100_ridge_fp8_str`. Because FP8 also halves the bytes per operand, a kernel whose traffic scales with operand width keeps its position relative to the ridge. Lower precision helps a memory-bound kernel through the bandwidth term, by moving more values per second, rather than by carrying it across the ridge.
 
-# ┌── LEGO ───────────────────────────────────────────────
-class RooflineRidgeCalc:
-    """Ridge point comparison across A100/H100 FP16/FP8."""
+The ridge also moves across hardware generations. In the accelerator generations of @tbl-widening-gap, compute throughput has grown faster than off-chip memory bandwidth, because the physics of off-chip signaling and the economics of HBM manufacturing limit how fast data can leave the chip. As the ridge rises, more operators need higher arithmetic intensity just to remain compute-bound.
 
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim import Hardware
+| **GPU**  | **Year** |             **Peak FP16 (TFLOP/s)**              |              **HBM BW (TB/s)**              |      **Ridge Point (FLOP/byte)**      |
+|:---------|:--------:|:------------------------------------------------:|:-------------------------------------------:|:-------------------------------------:|
+| **V100** |   2017   | `{python} WideningGap.v100_peak_tflop_per_s_str` | `{python} WideningGap.v100_bw_tb_per_s_str` | `{python} WideningGap.v100_ridge_str` |
+| **A100** |   2020   | `{python} WideningGap.a100_peak_tflop_per_s_str` | `{python} WideningGap.a100_bw_tb_per_s_str` | `{python} WideningGap.a100_ridge_str` |
+| **H100** |   2022   | `{python} WideningGap.h100_peak_tflop_per_s_str` | `{python} WideningGap.h100_bw_tb_per_s_str` | `{python} WideningGap.h100_ridge_str` |
+| **B200** |   2024   | `{python} WideningGap.b200_peak_tflop_per_s_str` | `{python} WideningGap.b200_bw_tb_per_s_str` | `{python} WideningGap.b200_ridge_str` |
 
-    h_a100 = Hardware.Cloud.A100
-    h_h100 = Hardware.Cloud.H100
+: **The widening memory wall**: Compute throughput has increased `{python} WideningGap.compute_growth_mult_str` from V100 to B200 over seven years, while memory bandwidth has increased only `{python} WideningGap.bw_growth_mult_str`. The ridge point has roughly doubled overall (V100 to B200), pulling more workloads into the memory-bound regime over time, though the per-generation movement is not monotonic (B200 sits slightly below H100). {#tbl-widening-gap}
 
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_ridge = h_a100.ridge_point().to(flop / byte)
-    h100_ridge_fp16 = h_h100.ridge_point().to(flop / byte)
-    h100_ridge_fp8 = h_h100.ridge_point("fp8").to(flop / byte)
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import check, fmt_bandwidth
-
-    check(h100_ridge_fp16 > a100_ridge, "H100 FP16 ridge should exceed A100 FP16 ridge")
-    check(h100_ridge_fp8 > h100_ridge_fp16, "H100 FP8 ridge should exceed H100 FP16 ridge")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_int, fmt_qty_int
-
-    a100_ridge_str = fmt_arithmetic_intensity(a100_ridge, unit=flop / byte, precision=None, commas=False)
-    h100_fp16_ridge_str = fmt_arithmetic_intensity(h100_ridge_fp16, unit=flop / byte, precision=None, commas=False)
-    h100_fp8_ridge_str = fmt_arithmetic_intensity(h100_ridge_fp8, unit=flop / byte, precision=None, commas=False)
-
-    a100_fp16_tflop_per_s_str = fmt_qty_int(h_a100.compute.peak_flops, TFLOP / second, commas=False)
-    a100_hbm_bw_tb_per_s_str = fmt_bandwidth(h_a100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
-    h100_fp8_tflop_per_s_str = fmt_qty_int(h_h100.compute.precision_flops["fp8"], TFLOP / second, commas=False)
-    h100_hbm_bw_tb_per_s_str = fmt_bandwidth(h_h100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
-```
-
-Any operation with an arithmetic intensity below `{python} RooflineRidgeCalc.h100_fp16_ridge_str` is memory-bound on the H100 at FP16. At FP8 precision, where compute doubles to `{python} RooflineRidgeCalc.h100_fp8_tflop_per_s_str` and bandwidth remains `{python} RooflineRidgeCalc.h100_hbm_bw_tb_per_s_str`, the ridge point rises to approximately `{python} RooflineRidgeCalc.h100_fp8_ridge_str`. The A100, with `{python} RooflineRidgeCalc.a100_fp16_tflop_per_s_str` and `{python} RooflineRidgeCalc.a100_hbm_bw_tb_per_s_str`, has a lower ridge point of approximately `{python} RooflineRidgeCalc.a100_ridge_str` at FP16.
-
-@Fig-shifting-roofline overlays the roofline models for four GPU generations on a single log-log plot, making the generational ridge-point shift tabulated in @tbl-widening-gap visible at a glance. An operation like naive self-attention, with an arithmetic intensity near 10 FLOP/byte, is memory-bound on every generation, sitting more than an order of magnitude below each ridge point. More critically, operations near 200 FLOP/byte, such as some matrix multiplications and fused blocks, can change regime as hardware changes. The same kernel can change performance regime across hardware generations, a fact that demands re-profiling whenever hardware is upgraded.
-
-::: {#fig-shifting-roofline fig-env="figure" fig-pos="htb" fig-cap="**The shifting roofline across GPU generations**: Overlaid FP16/BF16 roofline models for V100 through B200 show the ridge point growing from `{python} WideningGap.v100_ridge_str` to `{python} WideningGap.b200_ridge_str` FLOP/byte. Operations near 200 FLOP/byte can change regime as the roofline shifts. The same kernel can change performance regime across hardware generations." fig-alt="Log-log roofline plot for V100, A100, H100, B200 with ridge points and example ML operations marked."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ SHIFTING ROOFLINE (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-shifting-roofline—roofline across GPU generations
-# │
-# │ Goal: Overlay rooflines for V100–B200; show ridge point growth 139→281;
-# │       mark ops moving from compute-bound to memory-bound.
-# │ Show: Log-log; four rooflines; ridge points; example ops.
-# │ How: Peak TFLOP/s, HBM BW; ridge = TFLOP/s/BW; book_style.setup_plot().
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Overlay rooflines for V100–B200; show ridge point growth 139→281;
-import numpy as np
-import matplotlib.pyplot as plt
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(9, 6))
-
-# GPU specifications: (name, peak FP16 TFLOP/s, HBM BW TB/s, color)
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-gpus = [
-    (
-        "V100",
-        Hardware.Cloud.V100.compute.peak_flops.to(TFLOPs / second).magnitude,
-        Hardware.Cloud.V100.memory.bandwidth.to(TB / second).magnitude,
-        COLORS["VioletLine"],
-    ),
-    (
-        "A100",
-        Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs / second).magnitude,
-        Hardware.Cloud.A100.memory.bandwidth.to(TB / second).magnitude,
-        COLORS["BlueLine"],
-    ),
-    (
-        "H100",
-        Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs / second).magnitude,
-        Hardware.Cloud.H100.memory.bandwidth.to(TB / second).magnitude,
-        COLORS["GreenLine"],
-    ),
-    (
-        "B200",
-        Hardware.Cloud.B200.compute.peak_flops.to(TFLOPs / second).magnitude,
-        Hardware.Cloud.B200.memory.bandwidth.to(TB / second).magnitude,
-        COLORS["OrangeLine"],
-    ),
-]
-
-ai_range = np.logspace(0, 4, 500)  # 1 to 10000 FLOP/byte
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-label_pos = {
-    "V100": (10, -25, "left", "bottom"),
-    "A100": (13, -23, "left", "bottom"),
-    "H100": (5, -25, "left", "bottom"),
-    "B200": (8, -7, "left", "top"),
-}
-
-for name, peak_tflops, bw_tbs, color in gpus:
-    bw_bytes = bw_tbs * TRILLION
-    peak_flops = peak_tflops * TRILLION
-    ridge = peak_flops / bw_bytes
-
-    attainable_tflops = np.minimum(peak_tflops, bw_tbs * ai_range)
-
-    ax.plot(ai_range, attainable_tflops, color=color, linewidth=2.0, label=f"{name}")
-
-    ax.plot(ridge, peak_tflops, "o", color=color, markersize=8, zorder=5)
-
-    # 👉 individual control
-    dx, dy, ha, va = label_pos[name]
-
-    ax.annotate(
-        f"{name} ridge\n{ridge:.0f} FLOP/byte",
-        xy=(ridge, peak_tflops),
-        xytext=(dx, dy),
-        textcoords="offset points",
-        fontsize=7.5,
-        color=color,
-        fontweight="bold",
-        ha=ha,
-        va=va,
-    )
-
-# Example ML operations as vertical dashed lines
-ops = [
-    ("LayerNorm\n(~5 FLOP/byte)", 5, "bottom"),
-    ("Attention (naive)\n(~10 FLOP/byte)", 10, "bottom"),
-    ("MatMul (large)\n(~200 FLOP/byte)", 200, "bottom"),
-]
-
-for label, ai_val, va_pos in ops:
-    ax.axvline(x=ai_val, color=COLORS["primary"], linestyle=":", linewidth=1.0, alpha=0.5)
-    ax.text(
-        ai_val,
-        0.8,
-        label,
-        fontsize=7,
-        color=COLORS["primary"],
-        ha="center",
-        va="bottom",
-        rotation=0,
-        bbox=dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8),
-    )
-
-# Arrow annotation for ridge shift
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.annotate("", xy=(281, 2250), xytext=(141, 140), arrowprops=dict(arrowstyle="->", color="crimson", lw=1.0, linestyle="-"))
-
-ax.text(
-    105,
-    600,
-    "Ridge point shifted\n~2× in 7 years",
-    fontsize=8,
-    color="crimson",
-    fontweight="bold",
-    ha="center",
-    va="center",
-    bbox=dict(boxstyle="round,pad=0.5", facecolor="#fadadd", edgecolor="crimson", alpha=0.8),
-)
-
-ax.set_xscale("log")
-ax.set_yscale("log")
-ax.set_xlabel("Arithmetic Intensity (FLOP/byte)")
-ax.set_ylabel("Attainable Performance (TFLOP/s)")
-ax.set_xlim(1, 10000)
-ax.set_ylim(0.5, 10000)
-ax.legend(
-    loc='lower right',
-    fontsize=8,
-    frameon=True,
-    facecolor='white',
-    framealpha=0.95,
-    edgecolor='gray',
-    fancybox=True,
-    title="GPU Generation",
-    borderpad=0.6,
-)
-
-plt.tight_layout()
-plt.show()
-plt.close()
-```
-
-:::
+In @tbl-widening-gap, the ridge point increased from `{python} WideningGap.v100_ridge_str` FLOP/byte on the V100 to `{python} WideningGap.b200_ridge_str` FLOP/byte on the B200, about a `{python} WideningGap.ridge_ratio_mult_str` increase. An operation with arithmetic intensity of 200 FLOP/byte was compute-bound on the V100 and A100, but memory-bound on the H100 and B200. Performance engineering techniques targeting memory efficiency, fusion, precision, and tiling therefore become more important as the ridge point rises, not less. The systems lesson is not that one named kernel lasts forever, but that reducing exposed memory traffic becomes more valuable when compute grows faster than bandwidth. Because the same kernel can change regime when the hardware under it changes, a hardware upgrade calls for re-profiling rather than an assumed speedup.
 
 ### Workload placement on the roofline {#sec-performance-engineering-workload-placement}
 
@@ -1047,6 +873,10 @@ class WorkloadIntensityCalc:
     # LLM decode: one request, 4096-wide hidden state
     decode_batch = 1
     decode_hidden = 4096
+    # Attention: one head of the Llama 2 70B shape at the table's 2,048-token sequence
+    attn_model = Models.Language.Llama2_70B
+    attn_head_dim = attn_model.hidden_dim // attn_model.heads
+    attn_seq = 2048  # scenario assumption: sequence length of the table row
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # GEMM: 2*M*C*K FLOPs, load A + B, then store C
@@ -1064,10 +894,35 @@ class WorkloadIntensityCalc:
     decode_bytes_val = (decode_hidden * decode_hidden + decode_batch * decode_hidden) * bytes_per_elem
     decode_intensity_val = (decode_flops_val / decode_bytes_val).to(flop / byte).magnitude
 
+    # Attention per head: QK^T and PV each cost 2 * S^2 * d_h FLOPs.
+    # Unfused prefill writes and rereads the S x S score and probability matrices
+    # (4 S^2 elements) and moves Q, K, V, and the output once (4 S d_h elements),
+    # the same accounting as FlashAttentionSavings. Tiled prefill keeps the scores
+    # on chip; decode reads the K and V caches (2 S d_h elements) for one query.
+    S_attn, d_h = attn_seq, attn_head_dim
+    attn_prefill_flops = 4 * S_attn * S_attn * d_h * flop
+    attn_unfused_bytes = (4 * S_attn * S_attn + 4 * S_attn * d_h) * bytes_per_elem
+    attn_tiled_bytes = 4 * S_attn * d_h * bytes_per_elem
+    attn_decode_flops = 4 * S_attn * d_h * flop
+    attn_decode_bytes = 2 * S_attn * d_h * bytes_per_elem
+    attn_unfused_intensity = (attn_prefill_flops / attn_unfused_bytes).to(flop / byte).magnitude
+    attn_tiled_intensity = (attn_prefill_flops / attn_tiled_bytes).to(flop / byte).magnitude
+    attn_decode_intensity = (attn_decode_flops / attn_decode_bytes).to(flop / byte).magnitude
+    # Grouped-query attention: query heads sharing one cached K/V head reuse each byte read.
+    attn_gqa_group = attn_model.heads // attn_model.kv_heads
+    attn_decode_gqa_intensity = attn_gqa_group * attn_decode_intensity
+    h100_ridge = Hardware.Cloud.H100.ridge_point().to(flop / byte).magnitude
+
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(gemm_intensity > 100, f"GEMM should have high AI, got {gemm_intensity:.1f}")
     check(elem_intensity < 5, f"Element-wise should have low AI, got {elem_intensity:.1f}")
     check(decode_intensity_val < 5, f"Decode should be memory-bound, got {decode_intensity_val:.1f}")
+    check(attn_head_dim == 128, "Llama 2 70B head dimension should be 128")
+    check(
+        attn_decode_intensity < 2 < attn_unfused_intensity < h100_ridge < attn_tiled_intensity,
+        "Attention should be memory-bound unfused and in decode, compute-bound when tiled",
+    )
+    check(attn_decode_gqa_intensity < h100_ridge / 10, "GQA decode attention should stay far below the ridge")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gemm_intensity_str = fmt_arithmetic_intensity(gemm_flops / gemm_bytes, precision=1, commas=False)
@@ -1075,6 +930,13 @@ class WorkloadIntensityCalc:
     decode_intensity_str = fmt_arithmetic_intensity(decode_flops_val / decode_bytes_val, precision=None, commas=False)
     # Table cell (@tbl-arithmetic-intensity): comma-grouped integer with the unit.
     gemm_intensity_table_str = fmt_arithmetic_intensity(round(gemm_intensity) * flop / byte, unit=flop / byte, precision=0, commas=True)
+    attn_seq_str = fmt_int(attn_seq, commas=True)
+    attn_head_dim_str = fmt_int(attn_head_dim, commas=False)
+    attn_unfused_str = fmt_arithmetic_intensity(round(attn_unfused_intensity) * flop / byte, unit=flop / byte, precision=0, commas=False)
+    attn_tiled_str = fmt_arithmetic_intensity(round(attn_tiled_intensity) * flop / byte, unit=flop / byte, precision=0, commas=True)
+    attn_decode_str = fmt_arithmetic_intensity(round(attn_decode_intensity) * flop / byte, unit=flop / byte, precision=0, commas=False)
+    attn_gqa_group_str = fmt_int(attn_gqa_group, commas=False)
+    attn_decode_gqa_str = fmt_arithmetic_intensity(round(attn_decode_gqa_intensity) * flop / byte, unit=flop / byte, precision=0, commas=False)
     # GEMM work and operand traffic for the prose above.
     gemm_flops_billion_str = fmt(gemm_flops.to(flop).magnitude / 1e9, precision=1, commas=False)
     gemm_bytes_mb_str = fmt_memory(gemm_bytes, unit=MB, precision=1, commas=False)
@@ -1086,16 +948,20 @@ Element-wise operations\index{Element-wise operation!memory-bound bottleneck} te
 
 Autoregressive large language model (LLM) decoding\index{LLM!autoregressive decoding bottleneck} at batch size one represents the extreme case. Each decoding step reads the entire weight matrix (gigabytes of data) to produce a single output token. With a hidden dimension of 4096 and batch size 1, the arithmetic intensity is approximately `{python} WorkloadIntensityCalc.decode_intensity_str`, deep in the memory-bound regime. The arithmetic intensity explains why LLM token generation achieves a tiny fraction of peak FLOP/s: the GPU spends nearly all its time reading weights, not multiplying them. Recommendation serving in the style of Archetype B (DLRM at Scale) sits at the same low end for a different reason: an embedding lookup gathers rows from multi-terabyte tables and performs little more than a sum over them, so its intensity falls below one FLOP per byte and its cost is set by memory and network bandwidth rather than by Tensor Cores.
 
-@Tbl-arithmetic-intensity reveals the central pattern behind these examples: batched GEMM can reach the compute-bound regime, but attention, element-wise work, and batch-1 decode sit below the ridge point and are governed by bytes moved rather than FLOPs advertised.
+Attention sits in either regime depending on phase and implementation, which is why a single intensity figure for it misleads. Each head performs $4S^2 d_h$ FLOPs for its two matrix products. For the Llama 2 70B head dimension $d_h =$ `{python} WorkloadIntensityCalc.attn_head_dim_str` and a sequence of $S =$ `{python} WorkloadIntensityCalc.attn_seq_str` tokens, an unfused prefill kernel that writes and rereads the $S{\times}S$ score and probability matrices in FP16 reaches only about `{python} WorkloadIntensityCalc.attn_unfused_str`, below the ridge even though the work is matrix multiplication. A tiled kernel that keeps the scores on chip moves only $Q$, $K$, $V$, and the output, which raises the intensity to $S/2$, about `{python} WorkloadIntensityCalc.attn_tiled_str`. Decode attention reads a head's entire KV cache to serve one query and sits near `{python} WorkloadIntensityCalc.attn_decode_str` however the kernel is tiled. Grouped-query attention, which Llama 2 70B uses, lets `{python} WorkloadIntensityCalc.attn_gqa_group_str` query heads share each cached head and so raises decode intensity only to about `{python} WorkloadIntensityCalc.attn_decode_gqa_str`, still far below the ridge.
+
+@Tbl-arithmetic-intensity reveals the central pattern behind these examples: batched GEMM and tiled prefill attention can reach the compute-bound regime, but unfused attention, element-wise work, and batch-1 decode sit below the ridge point and are governed by bytes moved rather than FLOPs advertised.
 
 | **Operation**                      |                  **Arithmetic Intensity**                  | **H100 FP16 Regime** | **Primary Bottleneck** |
 |:-----------------------------------|:----------------------------------------------------------:|:--------------------:|:----------------------:|
 | **GEMM ($4096{\times}4096$)**      | ~`{python} WorkloadIntensityCalc.gemm_intensity_table_str` |    Compute-bound     | Tensor core throughput |
-| **Self-Attention (seq=2048)**      |                     ~50--200 FLOP/byte                     |     Memory-bound     |     HBM bandwidth      |
+| **Attention prefill, unfused**     |     ~`{python} WorkloadIntensityCalc.attn_unfused_str`     |     Memory-bound     |     HBM bandwidth      |
+| **Attention prefill, tiled**       |      ~`{python} WorkloadIntensityCalc.attn_tiled_str`      |    Compute-bound     | Tensor core throughput |
+| **Attention decode (KV read)**     |     ~`{python} WorkloadIntensityCalc.attn_decode_str`      |     Memory-bound     |     HBM bandwidth      |
 | **Element-wise (GELU, LayerNorm)** |                      ~1--3 FLOP/byte                       |     Memory-bound     |     HBM bandwidth      |
 | **LLM Decode (batch=1)**           |                      ~1--2 FLOP/byte                       |     Memory-bound     |     HBM bandwidth      |
 
-: **Arithmetic intensity of common ML operations**: Many transformer inference operations, aside from large batched GEMMs, fall below the H100's ridge point and are therefore memory-bound. Performance engineering focuses on reducing the memory traffic of these operations. {#tbl-arithmetic-intensity}
+: **Arithmetic intensity of common ML operations**: Many transformer inference operations, aside from large batched GEMMs and tiled prefill attention, fall below the H100's ridge point and are therefore memory-bound. Attention rows use one head at a `{python} WorkloadIntensityCalc.attn_seq_str`-token sequence with head dimension `{python} WorkloadIntensityCalc.attn_head_dim_str` in FP16. Performance engineering focuses on reducing the memory traffic of the memory-bound operations. {#tbl-arithmetic-intensity}
 
 The workload comparison explains why peak FLOP/s alone cannot predict small-batch decode performance. When weight streaming dominates, memory bandwidth limits token generation, while memory capacity constrains the requests that can be batched. Larger batches can reuse weights across requests and move the workload toward the compute ceiling; the serving regime determines how far that shift remains useful.
 
@@ -1472,9 +1338,9 @@ An engineer spends two weeks rewriting a PyTorch module into a custom CUDA kerne
 
 ::: {#psp-performance-engineering-physics-profiling-heisenberg-effect .callout-perspective title="The physics of profiling (the Heisenberg effect)"}
 
-Observing a distributed ML system fundamentally alters its behavior. Gathering high-resolution telemetry (such as tracking every CUDA kernel launch or memory allocation) consumes PCIe bandwidth, CPU cycles, and memory capacity. In heavily optimized serving pipelines, the overhead of profiling can artificially induce the very latency spikes the engineer is trying to diagnose. This "Heisenberg Effect" requires a deliberate strategy: deploying low-overhead, sampling-based telemetry for continuous production monitoring, and only enabling high-fidelity, synchronous tracing in isolated diagnostic environments.
+Observing a distributed ML system fundamentally alters its behavior. Gathering high-resolution telemetry (such as tracking every CUDA kernel launch or memory allocation) consumes PCIe bandwidth, CPU cycles, and memory capacity. In heavily optimized serving pipelines, the overhead of profiling can artificially induce the very latency spikes the engineer is trying to diagnose. This observer effect requires a deliberate strategy: deploying low-overhead, sampling-based telemetry for continuous production monitoring, and only enabling high-fidelity, synchronous tracing in isolated diagnostic environments.
 
-Profiling options matter. In PyTorch, recording tensor shapes can retain tensor references, inhibit optimizations that depend on reference counts, and introduce extra copies. Allocation-history recording instead tracks allocator events and carries its own metadata overhead; it should not be assumed to preserve every activation tensor. An engineer should record the enabled options, compare instrumented and uninstrumented runs, and use traces to explain execution structure while measuring production latency with instrumentation overhead controlled.
+The cost is measurable. The PyTorch profiler\index{Profiling!observer effect} adds roughly 10--20 percent overhead when it records full traces with memory profiling enabled, and Nsight Systems adds less but still perturbs scheduling. Profiling options matter as well. In PyTorch, recording tensor shapes can retain tensor references, inhibit optimizations that depend on reference counts, and introduce extra copies. Allocation-history recording instead tracks allocator events and carries its own metadata overhead; it should not be assumed to preserve every activation tensor. An engineer should record the enabled options, compare instrumented and uninstrumented runs, and use traces to explain execution structure while measuring production latency with instrumentation overhead controlled.
 
 :::
 
@@ -1694,7 +1560,7 @@ For example, an application trace may reveal missed token-latency targets; frame
 
 ### Key performance metrics {#sec-performance-engineering-metrics}
 
-Metrics are not interchangeable; each answers a different bottleneck question. Model FLOPs utilization and model bandwidth utilization (MBU) diagnose useful hardware work, time-to-first-token (TTFT) and inter-token latency (ITL) diagnose serving latency, and throughput exposes capacity under batching. Understanding their relationships and trade-offs is essential for performance engineering.
+Metrics are not interchangeable; each answers a different bottleneck question. Model FLOPs utilization (MFU) and model bandwidth utilization (MBU) diagnose useful hardware work, time-to-first-token (TTFT) and inter-token latency (ITL) diagnose serving latency, and throughput exposes capacity under batching. Understanding their relationships and trade-offs is essential for performance engineering.
 
 @Tbl-performance-engineering-key-metrics maps the common metrics to the bottleneck question each one answers.
 
@@ -1711,7 +1577,7 @@ Metrics are not interchangeable; each answers a different bottleneck question. M
 
 ### Using the roofline for diagnosis {#sec-performance-engineering-roofline-diagnosis}
 
-The metric choice in @tbl-performance-engineering-key-metrics reflects the fundamental bottleneck shift between training and inference: model FLOPs utilization (MFU) is usually the right training-efficiency lens, while MBU is often the right inference-efficiency lens when decode is limited by HBM traffic. The roofline model from @sec-performance-engineering-roofline becomes a diagnostic tool when combined with profiling data. Diagnosis follows three steps:
+The metric choice in @tbl-performance-engineering-key-metrics reflects the fundamental bottleneck shift between training and inference. MFU is usually the right training-efficiency lens, while MBU is often the right inference-efficiency lens when decode is limited by HBM traffic. The roofline model from @sec-performance-engineering-roofline becomes a diagnostic tool when combined with profiling data. Diagnosis follows three steps:
 
 1. Measure the achieved FLOP/s and memory bandwidth for a kernel using Nsight Compute.\index{Profiling!Nsight Compute}
 2. Compute measured arithmetic intensity from executed FLOPs and observed bytes at the same memory boundary used for the bandwidth ceiling (FLOP/byte). Compare it with the algorithmic estimate to expose extra traffic.\index{Roofline Model!profiling verification}
@@ -1721,34 +1587,16 @@ A kernel that falls far below both the compute ceiling and the bandwidth ceiling
 
 ```{python}
 #| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Roofline diagnosis — LayerNorm profiling example.
-class RooflineProfilingRecap:
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_fp16_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.H100.ridge_point(), unit=flop / byte, precision=1, commas=False)
-```
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate
-
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Roofline diagnosis — LayerNorm profiling example.
-class MemoryWallProfilingRecap:
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_hbm_bw_tb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
-```
-
-```{python}
-#| echo: false
 from mlsysim.fmt import fmt_arithmetic_intensity, fmt_bandwidth, fmt_flop_rate, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Roofline diagnosis — LayerNorm profiling example.
 class LayerNormRoofline:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    achieved_flops = 5 * (TFLOPs / second)  # ~1.8 FLOP/byte at 2.8 TB/s, consistent with @tbl-arithmetic-intensity
-    achieved_bw = 2.8 * (TB / second)
+    achieved_flops = 5 * (
+        TFLOPs / second
+    )  # scenario assumption: Nsight Compute reading; ~1.8 FLOP/byte at 2.8 TB/s, consistent with @tbl-arithmetic-intensity
+    achieved_bw = 2.8 * (TB / second)  # scenario assumption: achieved bandwidth reading
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     arithmetic_intensity_q = achieved_flops / achieved_bw
@@ -1760,7 +1608,7 @@ class LayerNormRoofline:
     arithmetic_intensity_str = fmt_arithmetic_intensity(arithmetic_intensity_q, precision=1, commas=False)
     bandwidth_utilization_pct_str = fmt_percent(bandwidth_utilization, precision=1, commas=False, style="prose")
 ```
-Consider a concrete example: a LayerNorm kernel profiled on an H100 reports `{python} LayerNormRoofline.achieved_tflop_per_s_str` of achieved compute and `{python} LayerNormRoofline.achieved_tb_per_s_str` of achieved memory bandwidth. Its arithmetic intensity is `{python} LayerNormRoofline.achieved_tflop_per_s_str` / `{python} LayerNormRoofline.achieved_tb_per_s_str` $\approx$ `{python} LayerNormRoofline.arithmetic_intensity_str`. The H100's ridge point is approximately `{python} RooflineProfilingRecap.h100_fp16_ridge_str` at FP16. Since `{python} LayerNormRoofline.arithmetic_intensity_str` is far below `{python} RooflineProfilingRecap.h100_fp16_ridge_str`, the kernel is strictly memory-bound. Its achieved `{python} LayerNormRoofline.achieved_tb_per_s_str` (`{python} LayerNormRoofline.bandwidth_utilization_pct_str` of the H100's `{python} MemoryWallProfilingRecap.h100_hbm_bw_tb_per_s_str` peak bandwidth) confirms it is operating near the physical limit of the memory subsystem. The diagnosis is clear: further FLOP-level optimizations will yield little gain; performance can only be improved materially by reducing data movement, either through fusion (eliminating the HBM round-trip) or precision reduction (halving the bytes per element).
+Consider a concrete example: a LayerNorm kernel profiled on an H100 reports `{python} LayerNormRoofline.achieved_tflop_per_s_str` of achieved compute and `{python} LayerNormRoofline.achieved_tb_per_s_str` of achieved memory bandwidth. Its arithmetic intensity is `{python} LayerNormRoofline.achieved_tflop_per_s_str` / `{python} LayerNormRoofline.achieved_tb_per_s_str` $\approx$ `{python} LayerNormRoofline.arithmetic_intensity_str`. The H100's ridge point is approximately `{python} RooflineDiagnostic.ridge_str` at FP16. Since `{python} LayerNormRoofline.arithmetic_intensity_str` is far below `{python} RooflineDiagnostic.ridge_str`, the kernel is strictly memory-bound. Its achieved `{python} LayerNormRoofline.achieved_tb_per_s_str` (`{python} LayerNormRoofline.bandwidth_utilization_pct_str` of the H100's `{python} MemoryWallScenario.h100_hbm_bw_tb_per_s_str` peak bandwidth) confirms it is operating near the physical limit of the memory subsystem. The diagnosis is clear: further FLOP-level optimizations will yield little gain; performance can only be improved materially by reducing data movement, either through fusion (eliminating the HBM round-trip) or precision reduction (halving the bytes per element).
 
 ### PyTorch profiler workflow {#sec-performance-engineering-pytorch-profiler}
 
@@ -1931,19 +1779,7 @@ A common trap is optimizing based on microbenchmarks rather than end-to-end trac
 
 :::
 
-Profiling itself can also perturb the system being measured. The PyTorch profiler\index{Profiling!observer effect} adds approximately 10--20 percent overhead when recording full traces with memory profiling enabled. Nsight Systems adds less overhead but still affects scheduling. Run warmup steps before active measurement, and discount the first few profiled iterations where JIT compilation or CUDA context initialization may dominate.
-
-### Profiling at scale {#sec-performance-engineering-profiling-scale}
-
-Profiling a single GPU is straightforward; profiling a distributed system with hundreds or thousands of GPUs introduces unique challenges. The volume of trace data grows linearly with the number of GPUs: a 5-second Nsight Systems trace for one GPU is approximately 500 MB; the same trace for 1,000 GPUs would be 500 GB, impractical to store or analyze.
-
-Production systems address this through hierarchical profiling\index{Hierarchical Profiling!system metrics}. At the top level, application-level metrics (MFU, throughput, step time) are collected continuously from every GPU with negligible overhead. These aggregate metrics detect when performance degrades. When a degradation is detected, targeted profiling\index{Targeted Profiling!windowed trace analysis} is triggered on a representative subset of GPUs (typically one GPU per pipeline stage, per data-parallel group) for a short window (a few training steps). The resulting traces are analyzed to identify the specific bottleneck.
-
-Another approach is statistical profiling\index{Statistical Profiling!kernel time distribution}, where each GPU randomly samples a small fraction of its kernels for detailed timing. Over many training steps, the aggregated samples provide a statistically accurate picture of the kernel time distribution without the overhead of full tracing. The approach is analogous to the sampling profilers (like Linux `perf`) used in traditional systems engineering, adapted for the GPU context.
-
-The most challenging profiling scenario is intermittent stragglers: GPUs that are occasionally slow due to thermal throttling, memory errors, or network congestion, but fast most of the time. These stragglers may not appear in a short profiling window but can reduce training throughput by 10--20 percent over hours. Detecting them requires continuous per-GPU step-time monitoring with statistical anomaly detection, a form of profiling infrastructure that operates at the monitoring layer rather than the kernel layer.
-
-Profiling tools provide the measurement foundation for all optimization work. Without measurement, performance engineering degenerates into guesswork. With measurement, it becomes a systematic discipline guided by quantitative evidence.
+Profiling turns optimization from guesswork into a discipline guided by quantitative evidence. A trace from one device, however, cannot show how a fleet behaves.
 
 ## Measurement at Scale {#sec-performance-engineering-measurement-scale}
 
@@ -1953,14 +1789,15 @@ Profiling tools provide the measurement foundation for all optimization work. Wi
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MEASUREMENT SCALE BOUNDARY (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Opening sentence of @sec-performance-engineering-measurement-scale.
+# │ Context: Opening paragraphs of @sec-performance-engineering-measurement-scale.
 # │
 # │ Goal: Name the node-to-cluster scaling step with registry-backed counts.
-# │ Show: 8 GPUs (one DGX H100 node) to 1,024 GPUs (the reference cluster).
+# │ Show: 8 GPUs (one DGX H100 node) to 1,024 GPUs (the reference cluster);
+# │       ~512 GB of trace data for one 5-second window across the cluster.
 # │ How: Systems.Nodes.DGX_H100.accelerators_per_node and
 # │      Scenarios.DenseLLMPretrainingReference.system.total_accelerators.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_count
+from mlsysim.fmt import check, fmt_count, fmt_memory
 
 class MeasurementScaleBoundary:
     """Node-to-cluster GPU counts for the fleet-measurement opening."""
@@ -1968,9 +1805,11 @@ class MeasurementScaleBoundary:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     node_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
     cluster_gpus = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
+    trace_per_gpu = 500 * MB  # scenario assumption: 5-second Nsight Systems trace of one GPU
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     nodes_in_cluster = cluster_gpus // node_gpus
+    trace_fleet = (trace_per_gpu * cluster_gpus).to(GB)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(nodes_in_cluster >= 100, "Cluster should span over a hundred nodes, so node-local traces miss fabric effects")
@@ -1978,11 +1817,21 @@ class MeasurementScaleBoundary:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     node_gpus_str = fmt_count(node_gpus, label="GPU")
     cluster_gpus_str = fmt_count(cluster_gpus, label="GPU")
+    trace_per_gpu_str = fmt_memory(trace_per_gpu, unit=MB, precision=0, commas=False)
+    trace_fleet_str = fmt_memory(round(trace_fleet.magnitude) * GB, unit=GB, precision=0, commas=False)
 ```
 
-When scaling from `{python} MeasurementScaleBoundary.node_gpus_str` to `{python} MeasurementScaleBoundary.cluster_gpus_str`, new sources of overhead emerge that are invisible in local traces. Fleet measurements determine whether optimizing a local kernel is warranted in the first place. A profiler can explain why one kernel stalls; it cannot by itself say whether thousands of accelerators are converting power, memory bandwidth, and network time into useful model progress. The measurement contract introduced at the outset must therefore cover both the local execution boundary and global efficiency metrics that capture computation, communication, and hardware variability.
+When scaling from `{python} MeasurementScaleBoundary.node_gpus_str` to `{python} MeasurementScaleBoundary.cluster_gpus_str`, new sources of overhead emerge that are invisible in local traces. Fleet measurements determine whether optimizing a local kernel is warranted in the first place. A profiler can explain why one kernel stalls; it cannot by itself say whether thousands of accelerators are converting power, memory bandwidth, and network time into useful model progress.
 
-Before two measurements can support an optimization claim, they must share a reproducible measurement contract. Benchmark suites formalize this principle by fixing workload, quality, and measurement rules before comparing systems [@mattson2020mlperf; @reddi2020]. The contract fixes the workload envelope, including model, input and output length distributions, batch or concurrency, data distribution, and quality criterion; records hardware topology, accelerator clocks and power limits, software versions, precision, and compiler settings; and states the timing and synchronization boundaries. Cold-start compilation and cache-filling trials must remain separate from warmed steady-state trials. Each reported point needs repeated trials with a dispersion statistic, an output-equivalence or quality check, and latency percentiles at a named offered load. Without those controls, a speedup can come from different work, different machine state, asynchronous timing, or a shifted quality or service-level objective (SLO) rather than from the proposed optimization.
+Local profiling tools also stop scaling at this boundary. The volume of trace data grows linearly with the number of GPUs. A 5-second Nsight Systems trace for one GPU is roughly `{python} MeasurementScaleBoundary.trace_per_gpu_str`, so the same window across `{python} MeasurementScaleBoundary.cluster_gpus_str` would produce about `{python} MeasurementScaleBoundary.trace_fleet_str`, impractical to store or analyze.
+
+Production systems address this through hierarchical profiling\index{Hierarchical Profiling!system metrics}. At the top level, application-level metrics (MFU, throughput, step time) are collected continuously from every GPU with negligible overhead. These aggregate metrics detect when performance degrades. When a degradation is detected, targeted profiling\index{Targeted Profiling!windowed trace analysis} is triggered on a representative subset of GPUs (typically one GPU per pipeline stage, per data-parallel group) for a short window (a few training steps). The resulting traces are analyzed to identify the specific bottleneck.
+
+Another approach is statistical profiling\index{Statistical Profiling!kernel time distribution}, where each GPU randomly samples a small fraction of its kernels for detailed timing. Over many training steps, the aggregated samples provide a statistically accurate picture of the kernel time distribution without the overhead of full tracing. The approach is analogous to the sampling profilers (like Linux `perf`) used in traditional systems engineering, adapted for the GPU context.
+
+The most challenging profiling scenario is intermittent stragglers: GPUs that are occasionally slow due to thermal throttling, memory errors, or network congestion, but fast most of the time. These stragglers may not appear in a short profiling window but can reduce training throughput by 10--20 percent over hours. Detecting them requires continuous per-GPU step-time monitoring with statistical anomaly detection, a form of profiling infrastructure that operates at the monitoring layer rather than the kernel layer.
+
+Fleet measurement also needs a reproducible measurement contract, one that covers both the local execution boundary and the global efficiency metrics that capture computation, communication, and hardware variability. Without a shared contract, two measurements cannot support an optimization claim. Benchmark suites formalize this principle by fixing workload, quality, and measurement rules before comparing systems [@mattson2020mlperf; @reddi2020]. The contract fixes the workload envelope, including model, input and output length distributions, batch or concurrency, data distribution, and quality criterion; records hardware topology, accelerator clocks and power limits, software versions, precision, and compiler settings; and states the timing and synchronization boundaries. Cold-start compilation and cache-filling trials must remain separate from warmed steady-state trials. Each reported point needs repeated trials with a dispersion statistic, an output-equivalence or quality check, and latency percentiles at a named offered load. Without those controls, a speedup can come from different work, different machine state, asynchronous timing, or a shifted quality or service-level objective (SLO) rather than from the proposed optimization.
 
 | **Contract field**       | **Evidence to report**                                                                                                           | **Failure prevented**                                               |
 |:-------------------------|:---------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------|
@@ -2176,7 +2025,7 @@ Operator fusion assigns the recipe to a single chef who keeps the ingredients on
 
 ### The kernel launch problem {#sec-performance-engineering-kernel-launch}
 
-Each GPU kernel launch involves overhead: the CPU must prepare launch parameters, dispatch to the GPU command queue, and the GPU must schedule thread blocks across its streaming multiprocessors (SMs). For a small element-wise operation on an accelerator such as an H100, this overhead can be 5--20 $\mu$s, a time during which a memory-bound kernel might have already completed its useful work. When a transformer layer comprises dozens of small operations (add, multiply, normalize, activate), the cumulative launch overhead becomes significant.
+Each GPU kernel launch involves overhead: the CPU must prepare launch parameters, dispatch to the GPU command queue, and the GPU must schedule thread blocks across its streaming multiprocessors (SMs). For a small element-wise operation on an accelerator such as an H100, this overhead runs to several microseconds per launch, a time during which a memory-bound kernel might have already completed its useful work. When a transformer layer comprises dozens of small operations (add, multiply, normalize, activate), the cumulative launch overhead becomes significant.
 
 Each unfused kernel must also materialize its output in HBM. For the sequence $\mathbf{Y} = \text{LayerNorm}(\text{GELU}(\mathbf{X}\mathbf{W} + \mathbf{b}))$, execution without fusion demands three round trips through off-chip memory. The GEMM kernel\index{GEMM!kernel} reads $\mathbf{X}$ and $\mathbf{W}$ from HBM, computes $\mathbf{X}\mathbf{W} + \mathbf{b}$, and writes the intermediate result $\mathbf{Z}_1$ back to memory. The GELU kernel\index{GELU!kernel} must then read $\mathbf{Z}_1$ from HBM, evaluate $\text{GELU}(\mathbf{Z}_1)$, and write a second intermediate tensor $\mathbf{Z}_2$. Finally, the LayerNorm kernel\index{LayerNorm!kernel} reads $\mathbf{Z}_2$ from HBM, applies normalization, and writes the final output $\mathbf{Y}$ to HBM.
 
@@ -2201,7 +2050,7 @@ Each unfused kernel must also materialize its output in HBM. For the sequence $\
 # │      Ops.RuntimeOverheads.KernelLaunch.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_multiple, fmt_time_range
+from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_multiple, fmt_time, fmt_time_range
 
 class FusionTrafficCalc:
     """HBM traffic from unfused intermediate tensors."""
@@ -2231,6 +2080,7 @@ class FusionTrafficCalc:
     launch_layer_high = (kernels_per_layer * launch_high).to(microsecond)
     launch_pass_low = (launch_layer_low * num_layers).to(ms)
     launch_pass_high = (launch_layer_high * num_layers).to(ms)
+    layer_decode_time = (RooflineDiagnostic.decode_time / num_layers).to(microsecond)  # batch-one, bandwidth-bound
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(1.5 < traffic_ratio < 2.0, f"Fusion should cut full traffic by 1.5-2x, got {traffic_ratio:.2f}")
@@ -2238,6 +2088,7 @@ class FusionTrafficCalc:
     check(120 * MB < traffic_bytes < 150 * MB, f"Expected ~134 MB traffic, got {traffic_bytes.to(MB).magnitude:.1f} MB")
     check(launch_low < launch_high, "Launch range must be ordered")
     check(launch_pass_low > 2 * RooflineDiagnostic.decode_time, "Launch total should be several times the bandwidth-bound decode step")
+    check(launch_layer_low > 2 * layer_decode_time, "Per-layer dispatch should exceed the layer's bandwidth-bound decode time")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     traffic_ratio_mult_str = fmt_multiple(traffic_ratio, precision=1, commas=False)
@@ -2252,6 +2103,7 @@ class FusionTrafficCalc:
     launch_range_us_str = fmt_time_range(launch_low, launch_high, microsecond, precision=0)
     launch_layer_range_us_str = fmt_time_range(launch_layer_low, launch_layer_high, microsecond, precision=0)
     launch_pass_range_ms_str = fmt_time_range(launch_pass_low, launch_pass_high, ms, precision=0)
+    layer_decode_us_str = fmt_time(round(layer_decode_time.magnitude) * microsecond, microsecond, precision=0, commas=False)
 ```
 
 Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $Y$.\index{Intermediate tensor!materialization overhead} For the Llama 2 70B shape (hidden dimension `{python} FusionTrafficCalc.hidden_dim_str`) at a batch of `{python} FusionTrafficCalc.batch_size_str` tokens in FP16, each intermediate tensor is `{python} FusionTrafficCalc.tensor_mb_str`. The unfused execution materializes `{python} FusionTrafficCalc.materialized_mb_str` of intermediate tensors and performs `{python} FusionTrafficCalc.traffic_mb_str` of intermediate HBM traffic, writing and then rereading each tensor. A fused kernel avoids that traffic entirely by holding $Z_1$ and $Z_2$ in registers or shared memory within the SM. @Fig-fusion-before-after contrasts these two execution paths, making the HBM traffic savings visible.
@@ -2261,7 +2113,9 @@ Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $
 
 :::
 
-The diagram removes four one-way intermediate transfers (@fig-fusion-before-after). Including one read each of $X$ and $W$ and one write of $Y$, the stated dimensions yield a `{python} FusionTrafficCalc.traffic_ratio_mult_str` byte reduction\index{Kernel Fusion!bandwidth scaling}, ignoring the small bias and normalization vectors. Cache reuse, tile reloads, and workspace can change actual traffic. Memory bandwidth is only half the problem. In a naive implementation without operator fusion, executing one transformer layer requires roughly 50 separate kernel launches. If each launch incurs a 10-microsecond overhead, the system spends 500 microseconds purely on dispatch latency. If the actual arithmetic execution of the layer takes only 2 milliseconds, the launch overhead consumes 20 percent of the total wall-clock time, leaving the GPU compute units idle for one-fifth of the inference cycle. This "launch-bound" regime limits the benefits of faster hardware; doubling the GPU's FLOP/s does nothing to reduce the 500-microsecond fixed cost. Operator fusion addresses this by compiling these 50 discrete operations into a small handful of fused kernels, often reducing the count to 5--10 launches, thereby reclaiming the lost cycles and shifting the workload away from dispatch overhead and back toward the hardware limits captured by the roofline model.
+The diagram removes four one-way intermediate transfers (@fig-fusion-before-after). Including one read each of $X$ and $W$ and one write of $Y$, the stated dimensions yield a `{python} FusionTrafficCalc.traffic_ratio_mult_str` byte reduction\index{Kernel Fusion!bandwidth scaling}, ignoring the small bias and normalization vectors. Cache reuse, tile reloads, and workspace can change actual traffic.
+
+Memory bandwidth is only half the problem. An eager transformer decoder layer issues `{python} FusionTrafficCalc.kernels_per_layer_str` or more separate kernels, and at `{python} FusionTrafficCalc.launch_range_us_str` per launch the host spends `{python} FusionTrafficCalc.launch_layer_range_us_str` of each layer on dispatch alone. In batch-one decode of the 70B example, the same layer's bandwidth-bound GPU work takes only about `{python} FusionTrafficCalc.layer_decode_us_str`, so the accelerator finishes each kernel long before the host can submit the next. In this launch-bound\index{Kernel Launch!launch-bound regime} regime, faster hardware buys nothing, because doubling FLOP/s or bandwidth leaves the fixed dispatch cost untouched. Operator fusion attacks the cost by collapsing a layer's many operations into a handful of kernels, and graph replay (@sec-performance-engineering-cuda-graphs) attacks the submission cost of the kernels that remain.
 
 Fusion nevertheless has a resource ceiling. A larger fused kernel keeps more live values in registers and often reserves more shared memory per thread block.\index{Register!register pressure in fusion} Either demand can reduce the number of resident warps, lowering occupancy and the latency-hiding capacity of the SM; excessive register demand can also spill values into local memory\index{Register!spill to local memory} backed by the cache hierarchy or HBM. Fusion is profitable only when the avoided launches and HBM intermediates outweigh this loss of occupancy, spill traffic, and any duplicated computation. Kernel evaluation must therefore compare measured HBM bytes, register and shared-memory use, achieved occupancy, spill transactions, and end-to-end time rather than treating fewer launches as sufficient evidence.
 
@@ -2283,7 +2137,7 @@ An orthogonal technique for reducing the overhead term in the iron law is CUDA g
 
 [^fn-cuda-graphs-constraint]: **CUDA graphs**\index{CUDA Graphs!definition}: Graph capture records a sequence of GPU work and its dependencies for later replay [@nvidia2026cudaGraphs]. Replay requires a capture-compatible operation graph and valid referenced storage; it does not require numerically identical results. Dynamic control flow, shapes, or allocations can instead require graph variants, graph updates, or uncaptured regions. Repetitive decode shapes are often easier to capture than heterogeneous prefill shapes.
 
-In standard PyTorch execution, each kernel launch requires the CPU to push a command to the GPU's command queue. For a transformer decoder layer with `{python} FusionTrafficCalc.kernels_per_layer_str` or more kernels, this CPU-to-GPU roundtrip (typically `{python} FusionTrafficCalc.launch_range_us_str` per launch) accumulates to `{python} FusionTrafficCalc.launch_layer_range_us_str` per layer. For the `{python} FusionTrafficCalc.num_layers_str`-layer 70B example, host-side kernel submission alone totals roughly `{python} FusionTrafficCalc.launch_pass_range_ms_str` per forward pass, and whatever part of it the GPU cannot hide behind running kernels lands on the critical path. That total is several times the `{python} RooflineDiagnostic.decode_ms_str` bandwidth-bound decode step computed in notebook \ref{nbk-performance-engineering-roofline-diagnostic}, which is why eager decode is often launch-bound before it is bandwidth-bound.
+In standard PyTorch execution, each kernel launch requires the CPU to push a command to the GPU's command queue, and @sec-performance-engineering-kernel-launch put that cost at `{python} FusionTrafficCalc.launch_layer_range_us_str` per decoder layer. For the `{python} FusionTrafficCalc.num_layers_str`-layer 70B example, host-side kernel submission alone totals roughly `{python} FusionTrafficCalc.launch_pass_range_ms_str` per forward pass, and whatever part of it the GPU cannot hide behind running kernels lands on the critical path. That total is several times the `{python} RooflineDiagnostic.decode_ms_str` bandwidth-bound decode step computed in notebook \ref{nbk-performance-engineering-roofline-diagnostic}, which is why eager decode, submitted one kernel at a time, can be launch-bound before it is bandwidth-bound.
 
 CUDA Graphs address this by recording a sequence of GPU operations (kernel launches and memory copies) into a replayable graph. The recording happens once during a warmup phase. On subsequent iterations, one replay request submits the recorded graph and avoids rebuilding the launch sequence operation by operation. Replay still incurs host, driver, graph-launch, synchronization, and device scheduling costs, so the saved fraction must be measured for the captured region.
 
@@ -2782,12 +2636,12 @@ The first inference-side precision decision is how to shrink weights while prote
 ***Block-wise quantization***\index{Block-wise Quantization!definition}\index{Quantization!block-wise} is an ML quantization scheme that partitions a weight tensor into nonoverlapping groups of $G_{\text{block}}$ elements and assigns each group its own scale. An affine scheme uses $s_i = (x_{\max,i} - x_{\min,i}) / (2^b - 1)$ together with an offset or zero point; a symmetric scheme centers the range at zero and needs only scale metadata. The metadata examples below assume symmetric scale-only quantization.
 
 1.  **Significance**: With block size $G_{\text{block}} = 64$ and $b = 4$ bits, weights compress from 16 bits to 4 bits (a 4$\times$ memory reduction) while each FP16 scale adds $16/64 = 0.25$ bits per weight. This yields an effective bit-width of $4.25$ bits per weight: 6.25 percent overhead relative to the INT4 payload, or about 1.6 percent of the original FP16 weight size.
-2.  **Distinction**: Unlike Per-Tensor Quantization\index{Quantization!per-tensor}, which applies a single scale across the entire weight matrix and forces that scale to accommodate outlier values at the cost of wasting precision on the majority of near-zero weights, Block-wise Quantization contains outlier damage within individual blocks, preventing a single extreme value from degrading quantization fidelity for the whole tensor.
+2.  **Distinction**: Unlike per-tensor quantization\index{Quantization!per-tensor}, which applies a single scale across the entire weight matrix and forces that scale to accommodate outlier values at the cost of wasting precision on the majority of near-zero weights, block-wise quantization contains outlier damage within individual blocks, preventing a single extreme value from degrading quantization fidelity for the whole tensor.
 3.  **Common pitfall**: A frequent misconception is that block size is a free hyperparameter. Smaller blocks ($G_{\text{block}} = 32$) reduce quantization error but double the metadata overhead vs. $G_{\text{block}} = 64$. At $G_{\text{block}} = 16$, the scale adds 1 bit per weight: 25 percent overhead relative to the INT4 payload, or 6.25 percent of the original FP16 weight size.
 
 :::
 
-The structural contrast between per-tensor and block-wise quantization is illustrated in @fig-performance-engineering-block-quantization. In per-tensor quantization, a single outlier expands the scaling factor across the entire tensor, quantizing the majority of weights to zero and destroying precision. In block-wise quantization, the outlier's dynamic-range penalty is strictly contained within its local group, preserving high-resolution representation for the surrounding weights.
+The metadata price stays small across formats\index{Block-wise Quantization!storage overhead}. An INT8 scheme with one FP32 scale per 128 weights adds $32/128 = 0.25$ bits per weight, about 3 percent of its payload, so block-wise scaling isolates outliers without the bandwidth penalty of a higher-precision format. The structural contrast between per-tensor and block-wise quantization is illustrated in @fig-performance-engineering-block-quantization. In per-tensor quantization, a single outlier expands the scaling factor across the entire tensor, quantizing the majority of weights to zero and destroying precision. In block-wise quantization, the outlier's dynamic-range penalty is strictly contained within its local group, preserving high-resolution representation for the surrounding weights.
 
 ::: {#fig-performance-engineering-block-quantization fig-env="figure" fig-pos="htb" fig-cap="**Block-wise versus per-tensor quantization**: Under per-tensor scaling (left), an extreme outlier weight forces a wide scale factor that crushes normal weights to zero and destroys precision. Under block-wise quantization (right), weights are partitioned into independent groups, strictly isolating outlier damage to a single block and preserving full INT8 dynamic range across remaining parameters." fig-alt="Side-by-side comparison of per-tensor quantization with crushed precision versus block-wise quantization with localized outlier containment and preserved dynamic range."}
 ![](images/svg/block-quantization.svg)
@@ -3023,7 +2877,7 @@ SmoothQuant\index{SmoothQuant}\index{SmoothQuant!activation-weight migration} [@
 
 These techniques place the outlier-handling cost in different stages: runtime decomposition, weight calibration, or a preprocessing transformation. The choice must satisfy both the quality budget and the execution path available on the target hardware. An INT4 weight representation can save HBM traffic even when a GPU kernel dequantizes it for FP16 arithmetic; an INT8 representation\index{Quantization!INT8 representation} can also use integer arithmetic when a compatible kernel and device support it. The later weight-only and weight-activation comparison separates these bandwidth and compute benefits.
 
-The storage cost for block-wise quantization\index{Block-wise Quantization!storage overhead} is small. With the definition's INT4 blocks of 64 weights, one FP16 scale adds 6.25 percent to the INT4 payload; an INT8 scheme with one FP32 scale per 128 weights adds about 3 percent. This small overhead allows block-wise quantization to isolate the destructive impact of outliers, preserving the effective dynamic range for the 99 percent of normal weights, without the bandwidth penalty of higher-precision formats. At the extreme end of the deployment spectrum, quantization moves from an optimization to a physical necessity. A mobile or federated deployment provides that limiting case: when the device has only a few gigabytes of memory shared with the rest of the phone, or far less below that, precision is no longer a tuning knob after the model is chosen; it is part of the feasibility test.
+Every method in this survey trades some calibration or runtime cost for bandwidth, and at the extreme end of the deployment spectrum quantization moves from an optimization to a physical necessity. A mobile or federated deployment provides that limiting case. When the device has only a few gigabytes of memory shared with the rest of the phone, or far less below that, precision is no longer a tuning knob after the model is chosen; it is part of the feasibility test.
 
 ::: {#lhs-performance-engineering-archetype-c-federated-mobilenet-tinyml-survival .callout-lighthouse title="Archetype C (Federated MobileNet): Precision as feasibility"}
 
@@ -3532,20 +3386,6 @@ TensorRT performs kernel autotuning\index{Kernel Autotuning!hardware benchmarkin
 
 The trade-off for TensorRT's aggressive optimization is reduced flexibility and high compilation cost. Build time depends on model size, tactic search, and hardware. By default, an engine targets a particular hardware and shape profile; compatibility modes can broaden supported hardware, and dynamic-shape profiles admit a declared range. Changes outside the engine’s supported contract require a new build. This makes TensorRT a common fit for stable, high-volume production deployments, while `torch.compile` is often a better fit for development and lower-volume services where rapid iteration matters more than extracting the last percentage of throughput.
 
-### Compilation overhead and trade-offs {#sec-performance-engineering-compilation-overhead}
-
-Compilation is worthwhile when repeated executions recover the build and warmup cost before the model or its execution shapes change. Build costs span orders of magnitude, from seconds or minutes of `torch.compile` warmup to tens of minutes for a TensorRT engine of a 70B model, so the break-even replay count differs just as widely. Long-running training jobs and high-volume services offer many reuses; short-lived model versions and heterogeneous requests may not. The comparison must include the frequency of recompilation as well as the speed of warmed kernels.
-
-Graph breaks, the capture interruptions introduced by unsupported program behavior, divide the regions over which a compiler can fuse operators and plan memory. Many small regions can therefore retain the launch and transfer costs that motivated compilation. Refactoring unsupported control flow can enlarge those regions, but the maintenance cost belongs in the optimization decision.
-
-Shape specialization creates a related trade-off. Kernels specialized for a narrow shape range can exploit more fixed information, while symbolic dimensions or a broader supported range accommodate variable batches and sequence lengths. The appropriate choice follows the production shape distribution and replay frequency, which also determine how much autotuning effort is justified.
-
-### Compilation modes and backends {#sec-performance-engineering-compilation-modes}
-
-`torch.compile` mode selection is an amortization decision\index{torch.compile!mode selection}: spend more compile time only when the workload will replay stable shapes enough times to recover that cost. The `default` mode is the development baseline, applying standard optimizations such as element-wise fusion, memory planning, and pretuned kernel selection with compilation times suitable for iteration. The `reduce-overhead` mode targets launch-bound regions and can use CUDA Graphs (discussed in @sec-performance-engineering-cuda-graphs) to reduce repeated submission overhead when stable shapes permit capture. The `max-autotune` mode is the production specialization choice, benchmarking multiple tile sizes, thread-block configurations, and memory-access patterns per operation to select the fastest kernel; its longer compile cost is justified only when a stable deployment will reuse the optimized graph enough times to recover that cost.
-
-Backend choice follows the same constraint: the more stable and deployment-specific the workload, the more specialized the runtime can be. TorchInductor (the default) generates Triton kernels for GPU and C++ for CPU. For deployment-specific optimization, the model can be exported through `torch.export` to an intermediate representation that can be consumed by TensorRT, Open Neural Network Exchange (ONNX) Runtime, or other inference-specialized runtimes. Each backend applies its own optimization passes on top of the common graph-level transformations.
-
 ### The Triton language {#sec-performance-engineering-triton}
 
 Between hand-written CUDA and fully automated graph compilers sits Triton\index{Triton!kernel programming},[^fn-triton-tiled-compiler] a Python-based language for writing GPU kernels. Triton occupies a middle ground: the programmer specifies the algorithm (tiling strategy, fusion pattern) while Triton handles low-level concerns (thread block scheduling, memory coalescing, shared memory management).
@@ -3674,6 +3514,77 @@ Starting from an original time per token of `{python} CompilationDividend.tpt_eq
 **Systems insight**: `torch.compile` delivers a `{python} CompilationDividend.speedup_mult_str` speedup by fusing element-wise operations and reducing launch overhead, without touching the GEMM kernels. The remaining bottleneck is now the GEMM itself (`{python} CompilationDividend.gemm_share_str` of step time), indicating that further improvement requires either precision reduction or batching.
 
 :::
+
+### Compilation overhead and trade-offs {#sec-performance-engineering-compilation-overhead}
+
+Compilation is worthwhile when repeated executions recover the build and warmup cost before the model or its execution shapes change. Build costs span orders of magnitude, from seconds or minutes of `torch.compile` warmup to tens of minutes for a TensorRT engine of a 70B model, so the break-even replay count differs just as widely. Long-running training jobs and high-volume services offer many reuses; short-lived model versions and heterogeneous requests may not. The compilation dividend above makes the break-even concrete.
+
+```{python}
+#| echo: false
+#| label: compilation-break-even
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMPILATION BREAK-EVEN (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-performance-engineering-compilation-overhead, following the
+# │          compilation dividend notebook.
+# │
+# │ Goal: Convert the dividend's per-token saving into the number of tokens,
+# │       and minutes of single-stream generation, that repay a build.
+# │ Show: ~3 ms saved per token; ~20 k tokens to repay a 1-minute default
+# │       build; ~300 k tokens (~26 min) to repay a 15-minute max-autotune build.
+# │ How: break-even tokens = build time / per-token saving; minutes at the
+# │      compiled token rate. Build times are scenario assumptions.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_count, fmt_time
+
+class CompilationBreakEven:
+    """Tokens and minutes of generation needed to repay a compilation cost."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    build_default = 1 * minute  # scenario assumption: default-mode warmup for the 13B graph
+    build_autotune = 15 * minute  # scenario assumption: max-autotune search for the same graph
+    saved_per_token = (CompilationDividend._tpt - CompilationDividend.new_time_ms) * ms
+    compiled_rate = CompilationDividend.new_tps / second
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    tokens_default = (build_default / saved_per_token).to("").magnitude
+    tokens_autotune = (build_autotune / saved_per_token).to("").magnitude
+    minutes_autotune = (tokens_autotune / compiled_rate).to(minute)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(tokens_autotune > 10 * tokens_default, "A longer search needs proportionally more replays to repay")
+    check(10 * minute < minutes_autotune < 60 * minute, "Autotune build should repay within an hour of single-stream generation")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    saved_per_token_str = fmt_time(saved_per_token, ms, precision=1, commas=False)
+    build_default_str = fmt_time(build_default, minute, precision=0, commas=False)
+    build_autotune_str = fmt_time(build_autotune, minute, precision=0, commas=False)
+    tokens_default_str = fmt_count(round(tokens_default, -3), commas=True)
+    tokens_autotune_str = fmt_count(round(tokens_autotune, -4), commas=True)
+    minutes_autotune_str = fmt_time(round(minutes_autotune.magnitude) * minute, minute, precision=0, commas=False)
+```
+
+In that scenario, compilation saves about `{python} CompilationBreakEven.saved_per_token_str` per generated token. A `max-autotune` search of about `{python} CompilationBreakEven.build_autotune_str`, the mode the dividend assumed, is repaid after roughly `{python} CompilationBreakEven.tokens_autotune_str` tokens, or about `{python} CompilationBreakEven.minutes_autotune_str` of continuous single-stream generation at the compiled rate. A default-mode build of about `{python} CompilationBreakEven.build_default_str` would need only about `{python} CompilationBreakEven.tokens_default_str` tokens if it captured the same saving. A model version that serves traffic for days repays either build many times over. A service that recompiles for each new shape bucket every few minutes may never repay the longer search, which is why the recompilation rate belongs in the decision alongside the speed of the warmed kernels. @Tbl-performance-engineering-compiler-tradeoffs summarizes how the common compilation paths trade build cost against shape flexibility.
+
+| **Compilation path**           | **Build cost**                    | **Shape flexibility**                           | **Specialization depth**                       | **Typical fit**                       |
+|:-------------------------------|:----------------------------------|:------------------------------------------------|:-----------------------------------------------|:--------------------------------------|
+| **`torch.compile` (default)**  | Seconds to minutes                | High; graph breaks and recompiles on new shapes | Element-wise fusion, memory planning           | Development and changing models       |
+| **`torch.compile` (autotune)** | Minutes to tens of minutes        | Moderate; tuned per shape bucket                | Autotuned tiles and launch configurations      | Stable shapes with long replay        |
+| **XLA (JAX)**                  | Minutes per shape signature       | Low; new shapes or dtypes respecialize          | Whole-region fusion, layout, and sharding      | Static-graph training and TPU serving |
+| **TensorRT engine**            | Tens of minutes for a large model | Low; declared shape profiles only               | Per-kernel tactic search, calibrated precision | Stable, high-volume inference         |
+
+: **Compilation trade-offs**: Deeper specialization raises build cost and narrows the shapes a compiled artifact accepts, so the right path depends on how long a model version and its shape distribution stay fixed. Build costs are orders of magnitude for a large model, not measurements. {#tbl-performance-engineering-compiler-tradeoffs tbl-colwidths="[20,18,22,22,18]"}
+
+Graph breaks, the capture interruptions introduced by unsupported program behavior, divide the regions over which a compiler can fuse operators and plan memory. Many small regions can therefore retain the launch and transfer costs that motivated compilation. Refactoring unsupported control flow can enlarge those regions, but the maintenance cost belongs in the optimization decision.
+
+Shape specialization creates a related trade-off. Kernels specialized for a narrow shape range can exploit more fixed information, while symbolic dimensions or a broader supported range accommodate variable batches and sequence lengths. The appropriate choice follows the production shape distribution and replay frequency, which also determine how much autotuning effort is justified.
+
+### Compilation modes and backends {#sec-performance-engineering-compilation-modes}
+
+`torch.compile` mode selection is an amortization decision\index{torch.compile!mode selection}: spend more compile time only when the workload will replay stable shapes enough times to recover that cost. The `default` mode is the development baseline, applying standard optimizations such as element-wise fusion, memory planning, and pretuned kernel selection with compilation times suitable for iteration. The `reduce-overhead` mode targets launch-bound regions and can use CUDA Graphs (discussed in @sec-performance-engineering-cuda-graphs) to reduce repeated submission overhead when stable shapes permit capture. The `max-autotune` mode is the production specialization choice, benchmarking multiple tile sizes, thread-block configurations, and memory-access patterns per operation to select the fastest kernel; its longer compile cost is justified only when a stable deployment will reuse the optimized graph enough times to recover that cost.
+
+Backend choice follows the same constraint: the more stable and deployment-specific the workload, the more specialized the runtime can be. TorchInductor (the default) generates Triton kernels for GPU and C++ for CPU. For deployment-specific optimization, the model can be exported through `torch.export` to an intermediate representation that can be consumed by TensorRT, Open Neural Network Exchange (ONNX) Runtime, or other inference-specialized runtimes. Each backend applies its own optimization passes on top of the common graph-level transformations.
 
 Graph compilation automates what manual kernel engineering achieves for individual operations, applying it systematically across the entire model graph. It also exposes a boundary: compilers can reorganize known operations, but they cannot invent a different computation. Algorithmic transformations cross that boundary.
 
@@ -3819,7 +3730,7 @@ class SpeculativeExpectation:
     alpha_high_str = fmt(alpha_high, precision=2, commas=False)
     alpha_low_str = fmt(alpha_low, precision=1, commas=False)
     emitted_high_str = fmt(emitted_high, precision=1, commas=False)
-    emitted_low_str = fmt(emitted_low, precision=1, commas=False)
+    emitted_low_str = fmt_int(round(emitted_low), commas=False)
 ```
 
 The payoff can be stated in one quantity. Under a simplified model in which each drafted position is accepted independently with probability $\alpha_{\text{acc}}$, a round emits its accepted prefix plus one target-sampled token (the correction at the first rejection, or the extra token after full acceptance). @Eq-speculative-expected-tokens gives the expected output of one verification round with $K$ drafted tokens:
@@ -3837,6 +3748,70 @@ Speculative decoding pays off when the draft model is cheap and its proposed tok
 A mixture-of-experts architecture\index{MoE!performance engineering} can increase total parameter capacity without activating every feed-forward parameter for every token [@fedus2022switch; @lepikhin2021gshard]. Sparse activation changes the relation between total parameters and per-token arithmetic, but it does not guarantee higher quality or lower latency than a dense model at a fixed resource budget. The comparison must hold model quality, batch and sequence distributions, hardware topology, and service objectives constant.
 
 A standard MoE transformer layer replaces the feed-forward network with multiple parallel "expert" FFNs\index{MoE!conditional computation} and a lightweight Router\index{Router!mixture of experts} (also called a gating network) that selects which experts process each token. That architecture shifts the performance problem from dense matrix throughput to routing, memory residency, and load balance. When experts are distributed across GPUs, expert parallelism\index{MoE!expert parallelism} places different experts on different devices, and an AllToAll exchange\index{MoE!all-to-all communication} moves each token's hidden state to its assigned expert before returning the result. The active-parameter savings are valuable only if that routing traffic and any expert imbalance\index{MoE!expert load imbalance} remain smaller than the dense compute they replace.
+
+```{python}
+#| echo: false
+#| label: moe-napkin
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MOE ROUTING NAPKIN MATH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-performance-engineering-moe, before the metrics paragraph.
+# │
+# │ Goal: Compare the FFN FLOPs that top-k routing skips per token and layer
+# │       with the AllToAll dispatch/combine bytes it adds, then with the fixed
+# │       per-collective launch cost.
+# │ Show: ~176 M params per expert per layer; ~2.1 GFLOP skipped per token per
+# │       layer; ~33 KB moved; ~2.1 us of peak compute vs ~73 ns of NVLink
+# │       transfer; ~10 us of launch per layer, repaid only at ~5 tokens.
+# │ How: expert size = (total - active) / (E - k) / layers from the registry's
+# │      Mixtral 8x7B; FLOPs = 2 x params; bytes = 2 x k x d x 2 (dispatch +
+# │      combine, FP16); launch from Ops.RuntimeOverheads.KernelLaunch.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_count, fmt_flops, fmt_memory, fmt_multiple, fmt_time
+
+class MoeNapkin:
+    """Per-token FLOPs skipped by top-k routing versus AllToAll cost."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    m = Models.Language.Mixtral_8x7B
+    experts = m.experts
+    top_k = m.active_experts_per_token
+    layers = m.layers
+    d_model = m.hidden_dim
+    peak = Hardware.Cloud.H100.compute.peak_flops
+    link_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
+    launch = Ops.RuntimeOverheads.KernelLaunch
+    alltoalls_per_layer = 2  # dispatch and combine
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    expert_params = (m.parameters - m.active_parameters) / (experts - top_k) / layers
+    skipped_flops = 2 * (experts - top_k) * expert_params.to(param).magnitude * flop
+    routed_bytes = 2 * top_k * d_model * BYTES_FP16  # dispatch + combine, FP16
+    skipped_time = (skipped_flops / peak).to(microsecond)
+    transfer_time = (routed_bytes / link_bw).to(nanosecond)
+    launch_per_layer = (alltoalls_per_layer * launch).to(microsecond)
+    breakeven_tokens = (launch_per_layer / (skipped_time - transfer_time)).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(experts == 8 and top_k == 2, "Mixtral routes each token to 2 of 8 experts")
+    check((skipped_time / transfer_time).to("").magnitude > 10, "Skipped compute should dwarf the transfer time")
+    check(2 < breakeven_tokens < 10, "Fixed launch cost should need a handful of tokens to repay")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    experts_str = fmt_count(experts, commas=False)
+    top_k_str = fmt_count(top_k, commas=False)
+    expert_params_m_str = fmt_int(round(expert_params.to(param).magnitude / 1e6), commas=False)
+    skipped_gflop_str = fmt_flops(skipped_flops, unit=GFLOP, precision=1, commas=False)
+    routed_kb_str = fmt_memory(routed_bytes, unit=KB, precision=1, commas=False)
+    skipped_time_us_str = fmt_time(skipped_time, microsecond, precision=1, commas=False)
+    transfer_time_ns_str = fmt_time(round(transfer_time.magnitude) * nanosecond, nanosecond, precision=0, commas=False)
+    ratio_mult_str = fmt_multiple(round((skipped_time / transfer_time).to("").magnitude), precision=0, commas=False)
+    launch_per_layer_us_str = fmt_time(launch_per_layer, microsecond, precision=0, commas=False)
+    breakeven_tokens_str = fmt_count(round(breakeven_tokens), commas=False)
+```
+
+A per-token estimate shows where that balance actually tips. Mixtral 8x7B [@jiang2024mixtral] routes each token to `{python} MoeNapkin.top_k_str` of `{python} MoeNapkin.experts_str` experts, and each expert holds about `{python} MoeNapkin.expert_params_m_str` million parameters per layer. Skipping the other experts saves about `{python} MoeNapkin.skipped_gflop_str` per token per layer, roughly `{python} MoeNapkin.skipped_time_us_str` of H100 FP16 peak compute. Routing costs the dispatch and combine of the token's hidden state, about `{python} MoeNapkin.routed_kb_str` in FP16, which crosses NVLink in about `{python} MoeNapkin.transfer_time_ns_str`, roughly `{python} MoeNapkin.ratio_mult_str` less time than the compute it replaces. Bytes are therefore not the binding cost; the fixed cost of each exchange is. Two AllToAll launches per layer add about `{python} MoeNapkin.launch_per_layer_us_str`, which a layer repays in compute terms only when it routes about `{python} MoeNapkin.breakeven_tokens_str` or more tokens at once, before counting any imbalance that leaves one expert's device finishing last. At batch-one decode, where the FFN is bandwidth-bound rather than compute-bound, the saving instead takes the form of expert weights that never leave HBM, so the comparison shifts from skipped FLOPs to skipped bytes.
 
 For performance engineering, the local question is whether active-parameter savings exceed the costs of routing and communication over the workload envelope. Report the number of experts, experts selected per token, expert capacity, token distribution, routing imbalance, dispatch and combine bytes, AllToAll time, dropped or rerouted tokens, and the achieved quality and latency target. Sparse activation improves the iron-law budget only when inactive experts stay off the critical path and routing does not create a larger communication or straggler term.
 
@@ -4062,6 +4037,7 @@ Without overlap, the training step requires `{python} OverlapCalc.step_no_overla
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Plot compute budget, comm overhead, overlap efficiency vs GPU count;
 import numpy as np
+from binder.tools.figures import style as book_style
 
 fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(10, 6))
 
@@ -4471,17 +4447,30 @@ Consider a 70B-parameter model on a node of eight H100 GPUs connected by NVLink.
 #| echo: false
 # ┌── LEGO ────────────────────────────────────────────────────────────────
 # │ Context: Constructed decode budget; assumptions, not measured timings.
+# │ Shares and cuts are chosen so every interval is exact to 0.1 ms.
 # │ The interval split is a scenario input. The cell also exposes how far the
 # │ budget sits above the bandwidth-only floor (RooflineDiagnostic) and how
 # │ its AllReduce interval compares with the per-collective estimate
 # │ (NvlinkH100), so the prose can explain both gaps. Speculation reuses
 # │ SpeculativeExpectation (@eq-speculative-expected-tokens).
-from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_time
+from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_percent, fmt_time
+
+def _budget_cell(value_ms):
+    """Millisecond table cell: whole values bare, otherwise one decimal (exact for this budget)."""
+    value_ms = round(value_ms, 1)
+    if float(value_ms).is_integer():
+        return fmt_int(int(value_ms), commas=False)
+    return fmt(value_ms, precision=1, commas=False)
 
 class DecodeBudgetExample:
     # ┌── 1. LOAD (Scenario assumptions) ──────────────────────────────────
     baseline_ms = 85.0
-    baseline = [baseline_ms * 0.38, baseline_ms * 0.24, baseline_ms * 0.14, baseline_ms * 0.12, baseline_ms * 0.12]
+    baseline_shares = [0.40, 0.24, 0.12, 0.12, 0.12]  # GEMM, attention, element-wise, AllReduce, launch/runtime
+    baseline = [total * share for total, share in zip([baseline_ms] * len(baseline_shares), baseline_shares)]
+    gemm_cut = 0.45  # round 1: assumed reduction in exposed GEMM time from INT4 weights
+    attention_cut = 0.25  # round 2: assumed reduction in exposed attention time from tiling
+    fused_elementwise_ms = 3.4  # round 2: assumed fused element-wise interval
+    replay_overhead_ms = 2.0  # round 2: assumed graph-replay launch and runtime interval
     draft_ms = 4.0
     acceptance = SpeculativeExpectation.alpha_high
     candidates = SpeculativeExpectation.draft_len
@@ -4491,11 +4480,11 @@ class DecodeBudgetExample:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     round1 = baseline.copy()
-    round1[0] *= 0.55  # Assumed 45 percent reduction in exposed GEMM time.
+    round1[0] *= 1 - gemm_cut
     round2 = round1.copy()
-    round2[1] *= 0.70  # Assumed 30 percent reduction in exposed attention time.
-    round2[2] = 3.4  # Assumed fused element-wise interval, milliseconds.
-    round2[4] = 2.0  # Assumed graph replay / runtime overhead, milliseconds.
+    round2[1] *= 1 - attention_cut
+    round2[2] = fused_elementwise_ms
+    round2[4] = replay_overhead_ms
     totals = [sum(baseline), sum(round1), sum(round2)]
     emitted = SpeculativeExpectation.emitted_high
     speculative_ms = (draft_ms + totals[2]) / emitted
@@ -4508,10 +4497,16 @@ class DecodeBudgetExample:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(totals[0] - 85.0) < 1e-9, "Baseline budget should total 85 ms")
-    check(abs(totals[1] - 70.465) < 1e-9, "Round-one budget should total 70.465 ms")
-    check(abs(totals[2] - 47.645) < 1e-9, "Round-two budget should total 47.645 ms")
+    check(abs(totals[1] - 69.7) < 1e-9, "Round-one budget should total 69.7 ms")
+    check(abs(totals[2] - 49.6) < 1e-9, "Round-two budget should total 49.6 ms")
+    check(totals[2] < 50, "Round two should meet the 50 ms illustrative objective")
+    check(
+        all(abs(round(sum(round(v, 1) for v in col), 1) - round(t, 1)) < 1e-9 for col, t in zip([baseline, round1, round2], totals)),
+        "Displayed one-decimal cells must sum to each displayed total",
+    )
     check(baseline_over_floor > 10, "Baseline should sit more than an order of magnitude above the bandwidth floor")
     check(allreduce_per_collective_us > 10 * collective_estimate_us, "Budgeted AllReduce should exceed the launch-plus-transfer estimate")
+    check(baseline[4] * ms < FusionTrafficCalc.launch_pass_low, "Exposed launch interval should sit below the eager submission total")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     baseline_ms_str = fmt_time(round(totals[0]) * ms, millisecond, precision=0, commas=False)
@@ -4523,42 +4518,58 @@ class DecodeBudgetExample:
     allreduce_per_collective_us_str = fmt_time(round(allreduce_per_collective_us) * microsecond, microsecond, precision=0, commas=False)
     collective_estimate_us_str = fmt_time(round(collective_estimate_us) * microsecond, microsecond, precision=0, commas=False)
     allreduce_estimate_ms_str = fmt_time(allreduce_estimate_ms * ms, millisecond, precision=1, commas=False)
+    launch_ms_str = fmt_time(baseline[4] * ms, millisecond, precision=1, commas=False)
+    gemm_cut_pct_str = fmt_percent(gemm_cut, precision=0, commas=False, style="prose")
+    attention_cut_pct_str = fmt_percent(attention_cut, precision=0, commas=False, style="prose")
+    fused_elementwise_ms_str = fmt_time(fused_elementwise_ms * ms, millisecond, precision=1, commas=False)
+    replay_overhead_ms_str = fmt_time(replay_overhead_ms * ms, millisecond, precision=0, commas=False)
+    draft_ms_str = fmt_time(draft_ms * ms, millisecond, precision=0, commas=False)
+    round1_total_ms_str = fmt_time(round(totals[1], 1) * ms, millisecond, precision=1, commas=False)
+    round2_total_ms_str = fmt_time(round(totals[2], 1) * ms, millisecond, precision=1, commas=False)
+    emitted_str = fmt(emitted, precision=2, commas=False)
+    speculative_ms_str = fmt_time(speculative_ms * ms, millisecond, precision=2, commas=False)
+    speedup_str = fmt(speedup, precision=2, commas=False)
+    # Constructed-budget table cells (milliseconds, one decimal; the guard above checks each column sums to its total).
+    b_cells = [_budget_cell(v) for v in baseline]
+    r1_cells = [_budget_cell(v) for v in round1]
+    r2_cells = [_budget_cell(v) for v in round2]
+    total_cells = [_budget_cell(v) for v in totals]
 ```
 
 #### Baseline measurement {#sec-performance-engineering-case-baseline}
 
 The deployment uses FP16 weights and tensor parallelism across `{python} KVCacheAnalysis.tensor_parallel_degree_str` GPUs. Its weights occupy `{python} KVCacheAnalysis.weight_fp16_total_gb_str`, or approximately `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` per GPU. The maximum batch size\index{Batch Size!maximum} also depends on cache capacity and serving policy; it cannot be inferred from weight storage alone.
 
-The assumed baseline decode budget is `{python} DecodeBudgetExample.baseline_ms_str`, about `{python} DecodeBudgetExample.baseline_over_floor_mult_str` the bandwidth-only step of `{python} RooflineDiagnostic.decode_ms_str` computed in notebook \ref{nbk-performance-engineering-roofline-diagnostic}. That gap, not the weight-streaming floor, is what eager dispatch, unfused kernels, and exposed synchronization must explain; the intervals below apportion the whole budget among those causes. @Tbl-performance-engineering-case-budget keeps every round on that same absolute-time boundary. In an actual Nsight Systems trace\index{Nsight Systems!decode trace breakdown}, overlapping work must not be counted twice when constructing this budget.
+The assumed baseline decode budget is `{python} DecodeBudgetExample.baseline_ms_str`, about `{python} DecodeBudgetExample.baseline_over_floor_mult_str` the bandwidth-only step of `{python} RooflineDiagnostic.decode_ms_str` computed in notebook \ref{nbk-performance-engineering-roofline-diagnostic}. That gap, not the weight-streaming floor, is what eager dispatch, unfused kernels, and exposed synchronization must explain; the intervals below apportion the whole budget among those causes. The budget assumes a runtime that already hides part of host submission behind running kernels, so its exposed launch and runtime interval of `{python} DecodeBudgetExample.launch_ms_str` sits below the `{python} FusionTrafficCalc.launch_pass_range_ms_str` that one-kernel-at-a-time submission would cost per forward pass (@sec-performance-engineering-cuda-graphs). @Tbl-performance-engineering-case-budget keeps every round on that same absolute-time boundary. In an actual Nsight Systems trace\index{Nsight Systems!decode trace breakdown}, overlapping work must not be counted twice when constructing this budget.
 
-| **Exposed interval (ms)**   |                                          **Baseline** |                                   **After precision** |                           **After fusion and replay** |
-|:----------------------------|------------------------------------------------------:|------------------------------------------------------:|------------------------------------------------------:|
-| GEMM                        |   `{python} f'{DecodeBudgetExample.baseline[0]:.3f}'` |     `{python} f'{DecodeBudgetExample.round1[0]:.3f}'` |     `{python} f'{DecodeBudgetExample.round2[0]:.3f}'` |
-| Attention                   |   `{python} f'{DecodeBudgetExample.baseline[1]:.3f}'` |     `{python} f'{DecodeBudgetExample.round1[1]:.3f}'` |     `{python} f'{DecodeBudgetExample.round2[1]:.3f}'` |
-| Element-wise operations     |   `{python} f'{DecodeBudgetExample.baseline[2]:.3f}'` |     `{python} f'{DecodeBudgetExample.round1[2]:.3f}'` |     `{python} f'{DecodeBudgetExample.round2[2]:.3f}'` |
-| AllReduce                   |   `{python} f'{DecodeBudgetExample.baseline[3]:.3f}'` |     `{python} f'{DecodeBudgetExample.round1[3]:.3f}'` |     `{python} f'{DecodeBudgetExample.round2[3]:.3f}'` |
-| Launch and runtime overhead |   `{python} f'{DecodeBudgetExample.baseline[4]:.3f}'` |     `{python} f'{DecodeBudgetExample.round1[4]:.3f}'` |     `{python} f'{DecodeBudgetExample.round2[4]:.3f}'` |
-| **Total**                   | **`{python} f'{DecodeBudgetExample.totals[0]:.3f}'`** | **`{python} f'{DecodeBudgetExample.totals[1]:.3f}'`** | **`{python} f'{DecodeBudgetExample.totals[2]:.3f}'`** |
+| **Exposed interval (ms)**   |                                      **Baseline** |                               **After precision** |                       **After fusion and replay** |
+|:----------------------------|--------------------------------------------------:|--------------------------------------------------:|--------------------------------------------------:|
+| GEMM                        |         `{python} DecodeBudgetExample.b_cells[0]` |        `{python} DecodeBudgetExample.r1_cells[0]` |        `{python} DecodeBudgetExample.r2_cells[0]` |
+| Attention                   |         `{python} DecodeBudgetExample.b_cells[1]` |        `{python} DecodeBudgetExample.r1_cells[1]` |        `{python} DecodeBudgetExample.r2_cells[1]` |
+| Element-wise operations     |         `{python} DecodeBudgetExample.b_cells[2]` |        `{python} DecodeBudgetExample.r1_cells[2]` |        `{python} DecodeBudgetExample.r2_cells[2]` |
+| AllReduce                   |         `{python} DecodeBudgetExample.b_cells[3]` |        `{python} DecodeBudgetExample.r1_cells[3]` |        `{python} DecodeBudgetExample.r2_cells[3]` |
+| Launch and runtime overhead |         `{python} DecodeBudgetExample.b_cells[4]` |        `{python} DecodeBudgetExample.r1_cells[4]` |        `{python} DecodeBudgetExample.r2_cells[4]` |
+| **Total**                   | **`{python} DecodeBudgetExample.total_cells[0]`** | **`{python} DecodeBudgetExample.total_cells[1]`** | **`{python} DecodeBudgetExample.total_cells[2]`** |
 
 : **Constructed decode budget**: Assumed nonoverlapping critical-path intervals for one request. Each column sums to its decode-step duration; none is an empirical performance claim. {#tbl-performance-engineering-case-budget}
 
 #### Optimization round 1 precision engineering {#sec-performance-engineering-case-round1}
 
-The first experiment targets weight-read traffic. INT4 quantization reduces the raw weight representation relative to FP16, although scale metadata, dequantization, and kernel choice affect runtime. Assume that quality validation succeeds and that exposed GEMM time falls by 45 percent, with all other intervals unchanged. The resulting step takes `{python} f'{DecodeBudgetExample.totals[1]:.3f}'` ms, still above the objective. A large local reduction has removed only the corresponding fraction of the baseline's GEMM interval.
+The first experiment targets weight-read traffic. INT4 quantization reduces the raw weight representation relative to FP16, although scale metadata, dequantization, and kernel choice affect runtime. Assume that quality validation succeeds and that exposed GEMM time falls by `{python} DecodeBudgetExample.gemm_cut_pct_str`, with all other intervals unchanged. The resulting step takes `{python} DecodeBudgetExample.round1_total_ms_str`, still above the objective. A large local reduction has removed only the corresponding fraction of the baseline's GEMM interval.
 
 INT8 KV cache compression is a separate candidate. The capacity calculation in @sec-performance-engineering-quant-strategies estimates its storage benefit, but that benefit does not establish an attention speedup. Applying it requires another quality check and a new profile; the first-round column grants it no unmeasured latency benefit.
 
 #### Optimization round 2 operator fusion {#sec-performance-engineering-case-round2}
 
-The second experiment targets\index{Operator Fusion!case study} exposed attention, element-wise work, and launch gaps. Assume a validated tiled-attention implementation reduces the attention interval by 30 percent, fusion reduces element-wise work to 3.4 ms, and graph replay reduces launch and runtime overhead to 2 ms. These are explicit scenario assumptions, not guaranteed effects of FlashAttention or `torch.compile`. In practice, each intervention would be tested separately before the combined configuration is retained.
+The second experiment targets\index{Operator Fusion!case study} exposed attention, element-wise work, and launch gaps. Assume a validated tiled-attention implementation reduces the attention interval by `{python} DecodeBudgetExample.attention_cut_pct_str`, fusion reduces element-wise work to `{python} DecodeBudgetExample.fused_elementwise_ms_str`, and graph replay reduces launch and runtime overhead to `{python} DecodeBudgetExample.replay_overhead_ms_str`. These are explicit scenario assumptions, not guaranteed effects of FlashAttention or `torch.compile`. In practice, each intervention would be tested separately before the combined configuration is retained.
 
-The total becomes `{python} f'{DecodeBudgetExample.totals[2]:.3f}'` ms, meeting the illustrative batch-one decode objective while still sitting about `{python} DecodeBudgetExample.final_over_floor_mult_str` above the bandwidth-only floor, so the objective is met with most of the original gap still in place. Communication remains `{python} DecodeBudgetExample.allreduce_ms_str`, unchanged in absolute time even though its share of the shorter step grows. Spread across the `{python} DecodeBudgetExample.allreduces_per_step_str` AllReduces of an `{python} DecodeBudgetExample.n_layers_str`-layer step, that interval implies about `{python} DecodeBudgetExample.allreduce_per_collective_us_str` of exposed time per collective, against roughly `{python} DecodeBudgetExample.collective_estimate_us_str` of launch and transfer in the estimate of @sec-performance-engineering-overlap, or about `{python} DecodeBudgetExample.allreduce_estimate_ms_str` per step. In this constructed budget the difference stands for host synchronization around each eager-mode collective, which leaves communication as a candidate for a later experiment. A shifted percentage alone does not establish that communication became slower. This result says nothing yet about time to first token or throughput under concurrent arrivals.
+The total becomes `{python} DecodeBudgetExample.round2_total_ms_str`, meeting the illustrative batch-one decode objective while still sitting about `{python} DecodeBudgetExample.final_over_floor_mult_str` above the bandwidth-only floor, so the objective is met with most of the original gap still in place. Communication remains `{python} DecodeBudgetExample.allreduce_ms_str`, unchanged in absolute time even though its share of the shorter step grows. Spread across the `{python} DecodeBudgetExample.allreduces_per_step_str` AllReduces of an `{python} DecodeBudgetExample.n_layers_str`-layer step, that interval implies about `{python} DecodeBudgetExample.allreduce_per_collective_us_str` of exposed time per collective, against roughly `{python} DecodeBudgetExample.collective_estimate_us_str` of launch and transfer in the estimate of @sec-performance-engineering-overlap, or about `{python} DecodeBudgetExample.allreduce_estimate_ms_str` per step. In this constructed budget the difference stands for host synchronization around each eager-mode collective, which leaves communication as a candidate for a later experiment. A shifted percentage alone does not establish that communication became slower. This result says nothing yet about time to first token or throughput under concurrent arrivals.
 
 #### Optimization round 3 speculative decoding {#sec-performance-engineering-case-round3}
 
-Speculation offers a different way to amortize target-model execution. Assume a draft model proposes $K =$ `{python} SpeculativeExpectation.draft_len_str` tokens in 4 ms, target verification takes the round-two decode duration, and each candidate is independently accepted with probability $\alpha_{\text{acc}} =$ `{python} SpeculativeExpectation.alpha_high_str`. Verification cost and acceptance are workload assumptions that must be measured for a real draft/target pair.
+Speculation offers a different way to amortize target-model execution. Assume a draft model proposes $K =$ `{python} SpeculativeExpectation.draft_len_str` tokens in `{python} DecodeBudgetExample.draft_ms_str`, target verification takes the round-two decode duration, and each candidate is independently accepted with probability $\alpha_{\text{acc}} =$ `{python} SpeculativeExpectation.alpha_high_str`. Verification cost and acceptance are workload assumptions that must be measured for a real draft/target pair.
 
-Applying @eq-speculative-expected-tokens, the scenario emits `{python} f'{DecodeBudgetExample.emitted:.3f}'` tokens per round on average. Dividing draft-plus-verification time by that expectation gives `{python} f'{DecodeBudgetExample.speculative_ms:.2f}'` ms per emitted token, an amortized `{python} f'{DecodeBudgetExample.speedup:.2f}'`-fold improvement over the round-two duration. Tokens arrive in blocks; this average does not establish the longest visible pause or an inter-token latency percentile.
+Applying @eq-speculative-expected-tokens, the scenario emits `{python} DecodeBudgetExample.emitted_str` tokens per round on average. Dividing draft-plus-verification time by that expectation gives `{python} DecodeBudgetExample.speculative_ms_str` per emitted token, an amortized `{python} DecodeBudgetExample.speedup_str`-fold improvement over the round-two duration. Tokens arrive in blocks; this average does not establish the longest visible pause or an inter-token latency percentile.
 
 Batching can consume the spare compute that made verification economical. No batch-size crossover follows from the batch-one budget. @Sec-inference-scale shows how a controller uses measured crossover curves, offered load, and cache state to select a serving policy.
 
@@ -4654,36 +4665,9 @@ A serving system may achieve excellent average inter-token latency (30 ms) while
 
 ## Summary {#sec-performance-engineering-summary}
 
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Chapter summary — roofline and FlashAttention recap.
-class RooflineSummaryRecap:
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_fp16_ridge = Hardware.Cloud.H100.ridge_point().to(flop / byte)
-    h100_fp16_ridge_str = fmt_arithmetic_intensity(h100_fp16_ridge, unit=flop / byte, precision=1, commas=False)
-```
-Performance engineering closes the gap between a model's theoretical efficiency and its hardware implementation\index{Performance Engineering!hardware-software efficiency gap} by systematically optimizing the terms of the single-machine iron law recalled from @sec-vol2-introduction-fleet-law (@eq-iron-law-perf): total execution time $T$ is governed by data movement ($D_{\text{vol}} / \text{BW}$), compute execution ($O / (R_{\text{peak}} \cdot \eta_{\text{hw}})$), and latency overhead ($L_{\text{lat}}$). On modern accelerators like the NVIDIA H100, where the FP16 ridge point of the roofline model sits at `{python} RooflineSummaryRecap.h100_fp16_ridge_str`, small-batch autoregressive decode is often bound by the memory wall ($D_{\text{vol}} / \text{BW}$).
+Performance engineering closes the gap between a model's theoretical efficiency and its hardware implementation\index{Performance Engineering!hardware-software efficiency gap} by systematically optimizing the terms of the single-machine iron law recalled from @sec-vol2-introduction-fleet-law (@eq-iron-law-perf): total execution time $T$ is governed by data movement ($D_{\text{vol}} / \text{BW}$), compute execution ($O / (R_{\text{peak}} \cdot \eta_{\text{hw}})$), and latency overhead ($L_{\text{lat}}$). On modern accelerators like the NVIDIA H100, where the FP16 ridge point of the roofline model sits at `{python} RooflineDiagnostic.ridge_str`, small-batch autoregressive decode is often bound by the memory wall ($D_{\text{vol}} / \text{BW}$).
 
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Chapter summary — FlashAttention recap.
-class FlashAttentionSummaryRecap:
-    from mlsysim import Models
-
-    m = Models.Language.Llama2_70B
-    seq_len = 8192
-    head_dim = m.hidden_dim // m.heads
-    bytes_per_elem = BYTES_FP16
-    naive_attn_bytes_per_head = 4 * seq_len * seq_len * bytes_per_elem + 4 * seq_len * head_dim * bytes_per_elem
-    flash_attn_bytes_per_head = (3 + 1) * seq_len * head_dim * bytes_per_elem
-    savings_ratio = (naive_attn_bytes_per_head / flash_attn_bytes_per_head).to("").magnitude
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    savings_mult_str = fmt_multiple(round(savings_ratio), commas=False, precision=0)
-```
-
-Fusion and precision act on data movement ($D_{\text{vol}}/\text{BW}$) through different mechanisms. Operator fusion avoids intermediate HBM transfers, while FlashAttention tiles attention into SRAM without materializing the quadratic $\mathcal{O}(S^2)$ score and probability matrices. Its persistent workspace grows as $\mathcal{O}(S)$, but actual HBM traffic includes tile reloads. The simplified 8K sequence example gives a `{python} FlashAttentionSummaryRecap.savings_mult_str` traffic ratio under its idealized accounting assumptions. Lower-precision weights and cache state reduce payload size $D_{\text{vol}}$ and can expand feasible batch capacity.
+Fusion and precision act on data movement ($D_{\text{vol}}/\text{BW}$) through different mechanisms. Operator fusion avoids intermediate HBM transfers, while FlashAttention tiles attention into SRAM without materializing the quadratic $\mathcal{O}(S^2)$ score and probability matrices. Its persistent workspace grows as $\mathcal{O}(S)$, but actual HBM traffic includes tile reloads. The simplified 8K sequence example gives a `{python} FlashAttentionSavings.savings_mult_str` traffic ratio under its idealized accounting assumptions. Lower-precision weights and cache state reduce payload size $D_{\text{vol}}$ and can expand feasible batch capacity.
 
 Overhead ($L_{\text{lat}}$) requires a different intervention. Graph compilers fuse eligible operations and plan memory, while CUDA Graphs amortize host submission for stable captured regions. Communication-computation overlap can hide inter-GPU AllReduce latency only when independent work is ready and resource interference does not erase the gain.
 
@@ -4695,8 +4679,8 @@ In the Fleet Law's terms (@eq-fleet-law), fusion, precision, compilation, and al
 
 ::: {.callout-takeaways title="Match the software to the silicon"}
 
-* **Bytes often bind small-batch decode**: The chapter's weight-streaming example sits below the FP16 ridge point\index{Memory Wall!bytes per FLOP} of `{python} RooflineSummaryRecap.h100_fp16_ridge_str`. Larger batches and prefill can change that regime, so the active workload determines whether reducing HBM traffic or improving compute execution helps.
-* **Locality and replay address different costs**: Operator fusion\index{Locality!operator fusion} and FlashAttention avoid intermediate transfers; CUDA Graphs reduce repeated host submission. The 8K attention example gives a `{python} FlashAttentionSummaryRecap.savings_mult_str` ratio under simplified traffic assumptions, while actual traffic and speedup depend on the implementation.
+* **Bytes often bind small-batch decode**: The chapter's weight-streaming example sits below the FP16 ridge point\index{Memory Wall!bytes per FLOP} of `{python} RooflineDiagnostic.ridge_str`. Larger batches and prefill can change that regime, so the active workload determines whether reducing HBM traffic or improving compute execution helps.
+* **Locality and replay address different costs**: Operator fusion\index{Locality!operator fusion} and FlashAttention avoid intermediate transfers; CUDA Graphs reduce repeated host submission. The 8K attention example gives a `{python} FlashAttentionSavings.savings_mult_str` ratio under simplified traffic assumptions, while actual traffic and speedup depend on the implementation.
 * **Precision buys bandwidth with risk**: FP8, INT8, and INT4 increase effective bandwidth and batch capacity only when outliers, scale factors, and quality checks are managed.\index{Quantization!bandwidth multiplication} Quantization is a systems contract between numerical format, kernel implementation, serving memory, and acceptable model behavior.
 * **Algorithms change the workload's operating point**: Speculative decoding and mixture-of-experts change the work performed per emitted token,\index{Roofline Model!algorithmic shift} but add draft, routing, AllToAll, and load-balancing costs. Savings count only when useful work completes sooner under the same quality and service constraints.
 * **Reprofiling tests whether gains survive**: Bottleneck displacement\index{Profiling!iterative discipline} makes each optimization a new experiment. Compare the same workload, timing boundary, quality criterion, and offered load before and after a change; kernel gains become fleet gains only when the complete execution path improves.
