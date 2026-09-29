@@ -48,6 +48,12 @@ A model can propose a useful repair and still return it too late, stop before th
 
 ## The Model Invocation Boundary {#sec-vol3-foundation-model-role}
 
+::: {.column-margin}
+![](images/svg/hsa_locator_origin.svg){width="100%" fig-alt="H·S·A locator with all three axes gray and only the origin dot highlighted in purple."}
+
+*A single call runs one turn, carries no state, and holds zero ambient authority.*
+:::
+
 The repair agent needs to inspect the connection-pool implementation before proposing a change. A model call can return `read_file("src/pool.py")`, but that response neither reads the file nor proves that the path exists. The runtime must recognize a proposed tool request, decide whether the task permits it, and supply the resulting observation to a later call. Following this small interaction makes the model's interface concrete without confusing it with the complete agent.
 
 Three responsibilities participate in the call. The foundation model computes a distribution over possible continuations of the supplied input. The inference service evaluates the model, applies supported generation settings, and reports the response and invocation outcome. The agent runtime chooses the request, manages the task's remaining resources, and decides how to handle the returned candidate. These responsibilities need not occupy separate machines, processes, or privilege domains. Their interfaces must nevertheless preserve the distinction between generated content and a decision to act on it.
@@ -98,6 +104,12 @@ usage: {input_tokens: S, output_tokens: K}
 
 Here, `kind` determines how to interpret the payload. The normalized `status` reports that generation completed under the adapter's contract, and `stop_reason` retains the reason that the service yielded control. The `usage` record reports input and output counts when available; missing accounting must remain explicit rather than becoming zero usage. A text response claiming that the file has already been inspected would still be a model-authored claim. Neither its wording nor a successful network response substitutes for an observation from the file-reading operation.
 
+@Fig-vol3-model-call-surface assembles these records into one call and shows where each of the model's outputs goes next.
+
+::: {#fig-vol3-model-call-surface fig-env="figure" fig-pos="htb" fig-cap="**The Model Call Surface**: The request carries messages, tool definitions, and limits into a model with frozen weights, which returns a proposal with a stop reason and usage counts. Every arrow out of the response lands in the agent runtime. The runtime validates and authorizes a tool call before anything runs, returns the result as a new message for the next call, sends a finished answer to verification, and quarantines output cut off at its limit." fig-alt="Diagram with a request box listing messages, tools, and limits, an arrow to a model box that samples one token per step with frozen weights, and an arrow to a response box listing text, tool calls, stop reason, and usage. Below, an agent runtime box routes on stop reason: a tool call goes to validate and authorize, then run in sandbox, then back to the request as a tool message; end of turn goes to verify; output limit goes to quarantine."}
+![](images/svg/model_call_surface.svg)
+:::
+
 ### From proposal to the next observation
 
 To act on the returned request, the runtime first checks invocation status and payload form. It then checks the proposed file access against the task's current authority before invoking the tool. Advertising `read_file` does not authorize every possible path, and placing a path in a string field does not establish that the file is within the permitted workspace. Tool execution remains a distinct operation outside the model call.
@@ -128,7 +140,7 @@ Returning the connection-pool source and a compiler diagnostic can make the next
 
 ### Tokens in the serialized request
 
-A tokenizer\index{Tokenization!model requests} maps text into identifiers from a finite vocabulary. Subword methods represent frequent fragments compactly while breaking unfamiliar words and identifiers into smaller pieces [@sennrich2016subword]. Byte-pair encoding\index{Byte-pair encoding} learns repeated combinations of smaller units; other tokenizers use different segmentation rules. A token may represent a word, part of a word, whitespace, punctuation, or a combination of these. Token boundaries therefore need not coincide with the boundaries of a source-code identifier or a JSON field.
+A tokenizer\index{Tokenization!model requests} maps text into identifiers from a finite vocabulary. Subword methods represent frequent fragments compactly while breaking unfamiliar words and identifiers into smaller pieces [@sennrich2016subword]. Byte-pair encoding\index{Byte-pair encoding} learns repeated combinations of smaller units; other tokenizers use different segmentation rules. A token may represent a word, part of a word, whitespace, punctuation, or a combination of these. Token boundaries therefore need not coincide with the boundaries of a source-code identifier or a JSON field. Under one widely used byte-pair vocabulary (`cl100k_base`), the line `def get_user_id():` encodes as five tokens beginning with `def` (identifier 755), while the same line indented by four spaces encodes as six: three spaces (262), then ` def` with its leading space attached (711), then the same four remaining tokens. A compiler's lexer sees the same keyword in both lines; the model receives two different token identifiers, and indentation alone changed the count.
 
 For our inspection request, the string `src/pool.py` is a path argument at the tool interface but a sequence of tokens at the model interface. Changing the path, adding indentation, or escaping the source inside a structured message can change that sequence. These effects depend on the vocabulary and serialization. Punctuation does not universally require a separate token, and JSON does not have one fixed token penalty relative to prose or a delimiter-based format. The engineering response is to count the representation that will be sent rather than infer its length from a supposed character-to-token ratio.
 
@@ -413,7 +425,7 @@ $$P(\text{Defective} \mid \text{PASS}) = \frac{\alpha_{\text{model}} \cdot \epsi
 
 Substituting the assumed rates gives `{python} CandidateCheckerPosterior.substitution_math`. The checker improves the candidate pool, but `{python} CandidateCheckerPosterior.posterior_pct_str` of its passing results still violate the named property. Repeating the check does not justify multiplying independent error probabilities; its conditional behavior on the surviving candidates would also have to be known.
 
-A sound checker for that exact property would have zero false acceptance under its assumptions. Determinism alone does not supply soundness, and soundness for schema membership does not extend to patch behavior. The engineering decision depends on which property the check establishes and what uncertainty the task contract permits.
+A sound checker for that exact property would have zero false acceptance under its assumptions. Determinism alone does not supply soundness, and soundness for schema membership does not extend to patch behavior. The engineering decision depends on which property the check establishes and what uncertainty the task contract permits, the separation the verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) makes a standing obligation.
 
 :::
 
@@ -449,7 +461,7 @@ The prompt tokens $\mathbf{x} = (x_1, x_2, \dots, x_S)$ encode the serialized me
 
 `ModelID` identifies the model and serving configuration requested through `model_config`. Recording a mutable service alias is not equivalent to pinning an immutable model revision. The sampling settings $\mathbf{\Theta}_{\text{sample}}$, such as temperature and top-$p$, describe the selection rule. Together with the serialized input and returned output, the resolved configuration helps explain a call; it does not by itself promise exact regeneration.
 
-The `limits` fields set the output allowance $K_{\max}$ and the local waiting deadline $T_{\max}$. The runtime also checks the input-plus-output bound against the service's supported limits. Some interfaces expose an additional reasoning allowance or count internal reasoning tokens against an output quota. The adapter must record that accounting convention; returned text length alone may not measure the consumed allowance. These are interface-specific resource controls, not a universal extra field every model must provide.
+The `limits` fields set the output allowance $K_{\max}$ and the local waiting deadline $T_{\max}$. The service and runtime enforce these bounds mechanically instead of relying on the model to respect them, as the invariant closure principle (\ref{pri-invariant-closure}) requires. The runtime also checks the input-plus-output bound against the service's supported limits. Some interfaces expose an additional reasoning allowance or count internal reasoning tokens against an output quota. The adapter must record that accounting convention; returned text length alone may not measure the consumed allowance. These are interface-specific resource controls, not a universal extra field every model must provide.
 
 The stop sequences $\mathcal{S}$ identify configured generation boundaries where supported. Encountering one ends generation according to the service's matching rules, but does not prove that the preceding bytes form valid JSON or a complete program. A stop marker that occurs inside an argument can end a response before its syntax closes. The runtime therefore records the actual stop reason and validates the candidate independently.
 
@@ -520,6 +532,56 @@ Streaming optionally exposes response content before generation finishes. A deli
 
 Rejection and cancellation remain distinct events. If a monitor rejects the stream, the runtime records `REJECTED` and may request cancellation to limit further work. If an operator cancels an otherwise acceptable call, the local outcome is `CANCELED`. In either case, withholding the payload from tools is a decision the runtime can enforce locally. Remote cessation and resource reclamation depend on the serving system receiving and honoring the request; closing a connection alone supplies no proof of either.
 
+```{python}
+#| label: lego-stream-cancel
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GENERATION WORK SPARED BY EARLY CANCELLATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-foundation-model-contract, streaming and cancellation;
+# │          @fig-vol3-streaming-cancellation.
+# │ Goal: Bound the decode work a honored cancel request can avoid.
+# │ Show: 4,000 skipped decode steps; their time at the reference output floor.
+# │ How: (K_max - t_cut) steps times the weight-transfer floor per output token,
+# │      the same floor that CallPrice uses in @sec-vol3-foundation-model-cost.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import BYTES_INT8
+from mlsysim.fmt import check, fmt_count, fmt_time
+
+class StreamCancel:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    model = Models.Language.Llama3_70B
+    accel = Hardware.Cloud.H100
+    weight_bytes = BYTES_INT8
+    k_cap = 4_096  # scenario: output allowance of the canceled call (as drawn in the figure)
+    k_cut = 96  # scenario: decode step at which the stream monitor rejects (as drawn)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_dec = ((model.parameters / ureg.param * weight_bytes) / accel.memory.bandwidth).to(second)
+    cancel_steps = k_cap - k_cut
+    cancel_s = cancel_steps * t_dec
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(cancel_steps == 4_000, "The figure labels 4,000 decode steps not run")
+    check(cancel_s > 10 * second, "Early cancellation should spare tens of seconds of decode")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    k_cap_str = fmt_count(k_cap)
+    k_cut_str = fmt_count(k_cut)
+    cancel_steps_str = fmt_count(cancel_steps)
+    t_dec_ms_str = fmt_time(t_dec, unit=ms, precision=3)
+    cancel_s_str = fmt_time(cancel_s, unit=second, precision=1)
+```
+
+@Fig-vol3-streaming-cancellation traces this sequence for a call with an output allowance of `{python} StreamCancel.k_cap_str` tokens. The validator rejects at decode step $t_{\text{cut}} =$ `{python} StreamCancel.k_cut_str`, when the proposal introduces a key the schema does not allow, and the runtime then requests cancellation.
+
+::: {#fig-vol3-streaming-cancellation fig-env="figure" fig-pos="htb" fig-cap="**Reject, Then Cancel**: The runtime's stream validator advances a parser state as each prefix arrives and holds the output rather than acting on it. At step `{python} StreamCancel.k_cut_str` the proposal introduces a key outside the schema, so the runtime records a rejection, discards the partial proposal, and sends a cancel request. The runtime outcomes on the left hold regardless of the service; the service outcomes on the right hold only if the service receives and honors the cancel request." fig-alt="Sequence diagram with an agent runtime lane on the left, a token stream lane in the middle, and a model service lane on the right. Decode steps 1 and 2 deliver an opening brace and a query key, each accepted by a parser transition and held. Steps 3 to 95 continue. Decode step 96 delivers a force key, and the runtime marks the stream rejected with status REJECTED, discards the partial proposal, and sends a cancel request; the service lane shows decoding stopping at step 96 of up to 4,096. Summary boxes list runtime outcomes, partial proposal never dispatched, rejection recorded, error returned next turn, and service outcomes, up to 4,000 decode steps not run, request leaves the batch, KV cache memory released."}
+![](images/svg/streaming_token_cancellation.svg)
+:::
+
+The saving is an upper bound that the runtime cannot enforce alone. If the service honors the request, it skips up to $K_{\max} - t_{\text{cut}}$ = `{python} StreamCancel.cancel_steps_str` decode steps. At the reference output floor of `{python} StreamCancel.t_dec_ms_str` per generated token priced in @sec-vol3-foundation-model-cost, those steps represent up to `{python} StreamCancel.cancel_s_str` of generation work, and the call's attention state stops growing and becomes eligible for release. If the service ignores the request, the runtime still withholds the payload, but the service spends the full allowance.
+
 A bounded nonstreaming call can enforce the same candidate-admission rule. Streaming changes how early the runtime can observe content and request a stop, not whether incomplete content becomes actionable. The request limits, normalized outcome, and separate checks together govern one invocation without making a claim about completed task success. Grammar constraints can reduce structural failures during generation, but they must preserve this distinction between a legal prefix and a completed candidate.
 
 ## Grammar-Guided Decoding {#sec-vol3-foundation-model-grammar-constrained}
@@ -552,6 +614,12 @@ $$p_{t, i} = \frac{\exp(z_{t, i}')}{\sum_{j \in \mathcal{V}} \exp(z_{t, j}')} = 
 
 Illegal tokens receive zero probability, while the remaining scores determine which legal continuation is selected. The engine then updates the parsing state using the selected token. This argument assumes a nonempty allowed set with a valid normalization, correct token decoding, and a sampler that respects the mask. If the constraints and other sampling filters leave no admissible choice, the service must report a failure rather than silently remove the constraint.
 
+@Fig-vol3-grammar-constrained-fsm arranges this loop into three stages: compile the schema once, mask the logits at every step, then sample and advance the parser state.
+
+::: {#fig-vol3-grammar-constrained-fsm fig-env="figure" fig-pos="htb" fig-cap="**Grammar-Constrained Decoding**: A tool schema compiles once into an automaton whose states each carry a token mask. At every step the mask sets illegal tokens to $-\infty$ before normalization, so only a legal continuation can be drawn, and the drawn token advances the automaton. The logit values are illustrative: a fluent but illegal continuation can outscore the legal one and still receive zero probability. A precomputed per-state mask suits a finite-state constraint; nested structures need additional parser state. The last panel lists what the mask leaves unchecked." fig-alt="Three-panel diagram. Panel 1, compile the tool schema: a JSON argument schema with query and limit fields, an automaton with states q_0, q_1, q_2, and final state q_F, and per-state bitmasks B of q. Panel 2, mask the logits: four candidate tokens SELECT, I think, opening brace, and Sure with scores, three marked masked and the opening brace allowed, and a note that masked tokens get zero probability. Panel 3, sample and advance: the emitted token is the opening brace, the automaton moves from q_0 to q_1, the next legal tokens are query and limit, and a box lists what the mask does not check: whether the table exists, whether the values are right, and whether the call is authorized."}
+![](images/svg/grammar_constrained_decoding_fsm.svg)
+:::
+
 Completion requires an additional condition. The parser must reach an accepting state, meaning that the generated text satisfies the whole required structure, and termination must obey the interface's completion rule. An end-of-sequence token cannot be accepted as successful structural completion while a required field remains unfinished. Maintaining legal prefixes therefore establishes a conditional guarantee about completed outputs; it does not guarantee that every call finishes within its budget. @Sec-vol3-appendix-math-dfa formalizes the token-to-parser transitions and the accepting-state argument for readers implementing this constraint.
 
 Suppose the service reaches its output ceiling while generating the arguments, after `{"path":"src/po`. The prefix remains compatible with the schema, but the envelope has `status: TRUNCATED`, and `payload` contains only the unfinished proposal. The runtime cannot dispatch it as a completed `tool_request`, even if a repair parser could add quotes and braces. Those inserted characters would create a different candidate without completing the original invocation. A fragment may still be retained for diagnosis under the status-first handling rule. Grammar constraints do not override the quarantining invariant (principle \ref{pri-02-quarantining-invariant}).
@@ -569,7 +637,7 @@ A complete object can satisfy the grammar and still name the wrong file. For the
 | **Authorization bounds**  | No authority is granted by generated text              | Runtime permission decision for the proposed operation        | Successful execution or task acceptance |
 : **Verification dimension boundaries**: A completed constrained output can establish membership in the enforced output language. The remaining claims require their own checks and evidence. {#tbl-vol3-verification-dimensions tbl-colwidths="[20,24,29,27]"}
 
-The exact guarantee depends on the language the implementation enforces. A JSON grammar establishes JSON syntax; a compiler for a supported schema can additionally restrict required properties, enumerated values, and other encoded conditions. Unsupported schema features, an incorrect constraint compiler, or a mismatch between the producer's and consumer's interpretations breaks the argument. The runtime must know which constraints are enforced and validate the received payload against its actual interface. A syntactically valid string remains insufficient evidence for properties never represented in the constraint.
+The exact guarantee depends on the language the implementation enforces. A JSON grammar establishes JSON syntax; a compiler for a supported schema can additionally restrict required properties, enumerated values, and other encoded conditions. Unsupported schema features, an incorrect constraint compiler, or a mismatch between the producer's and consumer's interpretations breaks the argument. The runtime must know which constraints are enforced and validate the received payload against its actual interface. A syntactically valid string remains insufficient evidence for properties never represented in the constraint. The mask is a mechanical bound below the model in the sense of the invariant closure principle (\ref{pri-invariant-closure}): it closes syntax without the model's cooperation, and it leaves acceptance to evidence gathered above the model.
 
 Schema design also determines whether the model can express missing information. If the only legal response requires a file path, every completed response must contain one, even when the supplied context gives no basis for choosing a file. The mask does not discover that missing evidence; it removes alternatives outside the prescribed shape. A schema that admits an `unknown` variant can represent insufficient information without requiring an invented path. An `error` variant can represent a reported problem. These are alternatives inside the model-authored payload, not new invocation statuses and not observations that a tool has already failed.
 
@@ -672,10 +740,15 @@ class CallPrice:
     t_diff = (s0 + dm_diff) * t_pre + k_diff * t_dec
     speedup = t_full / t_diff
     pass_diff = syntax_ok * fix_rate
+    ratio = (t_dec / t_pre).to("").magnitude
+    ratio_closed = (accel.compute.precision_flops["fp8"] * weight_bytes / (2 * ureg.flop * accel.memory.bandwidth)).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(t_pre > 0 * second and t_dec > 0 * second, "Positive work allowances")
     check(call1_dec > call1_pre, "Output dominates this first-turn estimate")
+    check(ratio > 100, f"Decode floor should exceed prefill floor by two orders of magnitude, got {ratio:.0f}")
+    check(abs(ratio - ratio_closed) / ratio < 0.01, "Ratio must match pi*b/(2*beta), as in the appendix")
+    check(abs((t_dec - StreamCancel.t_dec).to(second).magnitude) < 1e-12, "Cancellation uses the same output floor")
     check(sent_nocache >= sent_cache >= s0, "Prefix reuse cannot add prefill work")
     check(input_share > 0.95, "Input dominates this scenario's token count")
     check(t_full > deadline > t_diff, "Scenario estimates straddle the deadline")
@@ -685,6 +758,7 @@ class CallPrice:
     params_str = fmt_count(model.parameters, scale="B", precision=1)
     t_pre_us_str = fmt_time(t_pre, unit=microsecond, precision=2)
     t_dec_ms_str = fmt_time(t_dec, unit=ms, precision=3)
+    ratio_str = fmt_int(ratio)
     s0_str = fmt_count(s0)
     delta_str = fmt_count(delta)
     k_turn_str = fmt_count(k_turn)
@@ -718,7 +792,15 @@ class CallPrice:
     pass_diff_math = fmt_math(rf"{syntax_ok:.2f}\times {fix_rate:.2f}={pass_diff:.2f}")
 ```
 
-For an initial estimate, we can separate an input-processing allowance from an output-generation allowance. The reference configuration uses a dense model with `{python} CallPrice.params_str` parameters and 8-bit weights. Under idealized assumptions, the input allowance is `{python} CallPrice.t_pre_us_str` per prompt token and the output allowance is `{python} CallPrice.t_dec_ms_str` per generated token. These values come from the registry's arithmetic-rate and weight-transfer estimates, respectively; @sec-vol3-appendix-inference-roofline derives their hardware assumptions. They are not measured service rates or universal input/output price ratios.
+For an initial estimate, we can separate an input-processing allowance from an output-generation allowance, because the two are set by different physical limits. A dense model with $P$ parameters performs about $2P$ operations per token. Prefill shares each weight read across all $S$ prompt positions, so a long enough prompt keeps the accelerator near its peak arithmetic rate $\pi$. Ordinary decode for one stream produces one token per pass and must read the full weight payload of $Pb$ bytes, with $b$ bytes per parameter, through memory bandwidth $\beta$ at every step:
+
+$$t_{\text{prefill}} \approx \frac{2P}{\pi}, \qquad t_{\text{decode}} \ge \frac{P b}{\beta}$$ {#eq-vol3-fm-token-floors}
+
+Dividing the two floors cancels the model size:
+
+$$\frac{t_{\text{decode}}}{t_{\text{prefill}}} \approx \frac{\pi \, b}{2 \beta}$$ {#eq-vol3-fm-floor-ratio}
+
+The reference configuration uses a dense model with `{python} CallPrice.params_str` parameters and 8-bit weights on one accelerator. @Eq-vol3-fm-token-floors gives an input allowance of `{python} CallPrice.t_pre_us_str` per prompt token and an output allowance of `{python} CallPrice.t_dec_ms_str` per generated token, so @eq-vol3-fm-floor-ratio puts one output token at about `{python} CallPrice.ratio_str` prompt tokens. That ratio is why output length governs latency (principle \ref{pri-vol3-memory-bandwidth-decoding}). It holds for weight-dominated, unbatched decode against peak-rate prefill, and it is not a measured service rate or a price ratio; @sec-vol3-appendix-inference-roofline derives both floors and states their conditions.
 
 The estimate charges each input token once at the input allowance and reserves one output allowance for each generated token. This is a coarse work budget, not the timestamp decomposition above: the input allowance excludes token delivery, while the output allowance includes a slot for the first token even though a conventional prefill pass can already supply its distribution. It omits queueing, transfers, attention-dependent work, and implementation overhead. It also assumes ordinary generation without speculative acceleration. Those simplifications make the estimate useful for comparing output volumes, not for certifying a deadline.
 
@@ -749,6 +831,8 @@ With prompt-prefix reuse, fresh prefill covers `{python} CallPrice.cached_math` 
 **Systems insight**: Reuse changes the amount of repeated input computation, not the effective context supplied to each decision. The calculation is an idealized work comparison, not a promise that one accelerator can retain every prefix or sustain the reference rate throughout a long trajectory. Cache eviction, longer attention computations, and service scheduling change the realized saving.
 
 :::
+
+The notebook's two totals answer different questions. Latency is what one trajectory experiences. Each call waits for the previous observation, so the trajectory cannot batch its own dependent calls, and every output token remains a sequential step on its critical path even when the server shares that step with other trajectories. Work is what the serving system experiences. When one weight read serves many concurrent streams, the amortized time per generated token falls toward the arithmetic floor $2P/\pi$ of @eq-vol3-fm-token-floors, the same as a prompt token's, and processing work then tracks the total number of tokens processed (@sec-vol3-appendix-inference-roofline). For an append-only agent that total is mostly re-sent input. Output length therefore sets a trajectory's latency, while uncached repeated input sets most of its work, provided the server sustains large batches and the attention-state capacity they require.
 
 The saved computation has a storage cost. Retaining a longer prefix consumes more KV capacity, and retaining it during a tool wait prevents that memory from serving other requests. Eviction loses reusable computation, not the repository changes or runtime records from which the next context can be reconstructed. Context layout and KV retention therefore require separate decisions: one selects the evidence the model receives; the other decides whether storing derived computation is worth its cost.
 
@@ -826,7 +910,7 @@ For a second, explicitly hypothetical calculation, suppose the localized calls c
 
 The result, `{python} CallPrice.pass_diff_pct_str`, follows from an applicability rate and a conditional test-pass rate. It assumes neither that those events are independent nor that passing the checks proves every property of the repair. If some calls miss their deadline or produce invalid structure, the calculation must include those failures too.
 
-**Systems insight**: Emitting unchanged content can consume the budget needed to obtain a usable proposal. A localized representation removes that work only by adding an applicability requirement. The estimate identifies a candidate design to measure; the decision still depends on observed completion, applicability, acceptance evidence, and total resource use.
+**Systems insight**: Emitting unchanged content can consume the budget needed to obtain a usable proposal, because each output token costs about `{python} CallPrice.ratio_str` times a prompt token at the reference floors (principle \ref{pri-vol3-memory-bandwidth-decoding}). A localized representation removes that work only by adding an applicability requirement. The estimate identifies a candidate design to measure; the decision still depends on observed completion, applicability, acceptance evidence, and total resource use.
 
 :::
 
@@ -878,7 +962,7 @@ Each correction preserves a boundary between observations. Resource use describe
 
 ## Summary {#sec-vol3-foundation-model-summary}
 
-The repair agent's model call reads a bounded representation of the task and returns a candidate with an invocation outcome. Messages, advertised tools, generation limits, and sampling settings define the request; they do not transfer the runtime's authority to the model. The response contract preserves the distinction between a final-answer candidate, a tool proposal, and an incomplete or failed generation. The runtime still owns the decision to authorize an effect and the evidence required to accept a result.
+The repair agent's model call reads a bounded representation of the task and returns a candidate with an invocation outcome. Messages, advertised tools, generation limits, and sampling settings define the request; they do not transfer the runtime's authority to the model. The response contract preserves the distinction between a final-answer candidate, a tool proposal, and an incomplete or failed generation. The runtime still owns the decision to authorize an effect and the evidence required to accept a result, the division of responsibility that the invariant closure principle (\ref{pri-invariant-closure}) fixes for every later chapter.
 
 ::: {.callout-takeaways title="A model call is a bounded proposal interface"}
 
