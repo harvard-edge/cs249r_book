@@ -89,10 +89,10 @@
             "Asymmetric vulnerability of IEEE 754 floating-point representations (sign vs exponent vs mantissa)",
             "Fleet-scale fault rates: defective processors and memory errors as routine operating conditions",
             "Permanent datapath defects (stuck-at faults) that corrupt results without crashing",
-            "Layered detection (ECC and CRC, screening, statistical checks, gray-failure detection) and why DMR/TMR does not transfer to fleet training"
+            "Layered detection (ECC and CRC, screening, statistical checks, gray-failure detection)"
           ],
           "question_strategy": "Evaluate how physical faults surface as fleet symptoms and which detection layer and recovery action each one calls for.",
-          "difficulty_progression": "Starts with persistence classification, examines floating-point bit vulnerability, contrasts safety-critical modular redundancy with fleet economics, names gray failures, and analyzes stuck-at datapath faults.",
+          "difficulty_progression": "Starts with persistence classification, examines floating-point bit vulnerability, names gray failures, and analyzes stuck-at datapath faults.",
           "integration": "Connects physical circuit defects to software-level gradient divergence, preparing students for fault injection and verification.",
           "ranking_explanation": "Tier 1 technical section providing the foundational hardware taxonomy referenced throughout detection and recovery sections."
         },
@@ -116,12 +116,6 @@
             "learning_objective": "Analyze the vulnerability of floating-point numerical representations to single-bit hardware upsets."
           },
           {
-            "question_type": "SHORT",
-            "question": "Safety-critical embedded systems use dual or triple modular redundancy to detect or mask hardware faults. Explain why the same approach does not transfer to a 10,000-GPU training fleet, and describe how fleets spend redundancy instead.",
-            "answer": "Dual and triple modular redundancy run every computation two or three times, paying 100 or 200 percent hardware overhead so that a single wrong output is caught or outvoted within one control deadline. That price is reasonable for a small vehicle computer where one wrong output is dangerous. For fleet training it would double or triple the cost of the most expensive computation the organization runs, to guard against corruption events that arrive far less often than once per step and that rollback to a clean checkpoint can repair. Fleets therefore spend redundancy selectively: screening removes defective devices, cheap statistical checks run continuously, hot spares absorb drained nodes, and full recomputation is reserved for suspected corruption.",
-            "learning_objective": "Evaluate why full modular redundancy is uneconomic for fleet training and how selective redundancy replaces it."
-          },
-          {
             "question_type": "FILL",
             "question": "A node that stays alive and keeps answering heartbeats but runs slowly or erratically, so that timeouts never fire, is said to suffer a ____ failure.",
             "answer": "The correct answer is gray (a gray failure). Because the node never stops responding, fail-stop detection through heartbeats and timeouts cannot catch it; the fleet must detect it through straggler analysis and performance evidence instead.",
@@ -138,6 +132,57 @@
             ],
             "answer": "The correct answer is D. A stuck-at fault in a Tensor Core arithmetic datapath corrupts the specific matrix tiles computed by the defective lane, producing a repeatable, biased output every time the affected unit executes. Because the GPU continues processing instructions without throwing an exception or crashing the host OS, training loss may decline normally for hundreds of steps before accumulated gradient bias causes loss divergence or degraded evaluation metrics. The other descriptions incorrectly describe fail-stop behavior, kernel panics, or transparent host fallback.",
             "learning_objective": "Compare the manifestation of permanent datapath faults in specialized accelerator matrix units against scalar processor faults."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-ft-sdc-verification",
+      "section_title": "Check-and-Verify Defenses Against Silent Data Corruption",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "SDC cumulative risk across 100,000+ GPU fleets and repeated collective reductions",
+            "Check-and-verify invariants: CRC digests, gradient checksums, redundant reductions",
+            "Why full modular redundancy (DMR/TMR) does not transfer to fleet training and how fleets spend redundancy selectively",
+            "Transition from fail-stop crash detection to Byzantine verification in training pipelines"
+          ],
+          "question_strategy": "Test the mathematical inevitability of SDC at scale and evaluate concrete verification mechanisms.",
+          "difficulty_progression": "Calculates fleet SDC exposure, analyzes checksum verification mechanisms, contrasts safety-critical modular redundancy with fleet economics, and tests Byzantine principles.",
+          "integration": "Connects collective communication in distributed training to Byzantine fault tolerance.",
+          "ranking_explanation": "Tier 2 specialized section covering the critical check-and-verify paradigm for silent data corruption."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "In a 100,000-GPU training cluster where each device has an illustrative SDC probability of $10^{-6}$ per GPU-hour, what is the expected SDC exposure and failure cadence during continuous AllReduce training with 2-second step times?",
+            "choices": [
+              "The cluster experiences roughly 55.6 GPU-hours of exposure per 2-second step, resulting in an expected SDC event approximately every 18,000 steps (every ~10 hours).",
+              "The cluster experiences an SDC event on every single step because 100,000 GPUs exceed the reliability threshold.",
+              "The cluster experiences an SDC event once every 1,000 days because $10^{-6}$ is negligible for 2-second steps.",
+              "The cluster experiences an SDC event exactly every 50,000 hours regardless of cluster size."
+            ],
+            "answer": "The correct answer is A. For a 2-second step ($2/3600 = 1/1800$ hours), 100,000 GPUs accumulate $100{,}000 / 1800 \\approx 55.56$ GPU-hours of exposure per step. With an individual rate of $10^{-6}$ per GPU-hour, the probability of at least one SDC per step is $1 - (1 - 10^{-6})^{55.56} \\approx 5.56 \\times 10^{-5}$. The expected number of steps between SDC events is $1 / (5.56 \\times 10^{-5}) \\approx 18{,}000$ steps, which equals $18{,}000 \\times 2 / 3600 = 10$ hours. The single-step claim exaggerates probability by orders of magnitude. The 1,000-day and 50,000-hour options ignore the $100{,}000\\times$ fleet accumulation factor.",
+            "learning_objective": "Calculate how silent data corruption risk compounds across fleet-scale collective communication operations."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain what gradient checksums and redundant computation can each detect during AllReduce, and why checksums alone cannot establish the arithmetic correctness of every worker contribution.",
+            "answer": "Checksums can detect changed bytes in transport or storage, and digests of supposedly identical reduced buffers can expose disagreement. A worker can compute an incorrect gradient and then checksum those incorrect bytes successfully. Detecting that arithmetic fault requires independent recomputation, replay, invariants, or statistical evidence. Those checks can block suspect updates within their coverage; they are not a universal guarantee against arbitrary faulty workers.",
+            "learning_objective": "Design check-and-verify mechanisms to detect silent data corruption during distributed collective reductions."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Safety-critical embedded systems use dual or triple modular redundancy to detect or mask hardware faults. Explain why the same approach does not transfer to a 10,000-GPU training fleet, and describe how fleets spend redundancy instead.",
+            "answer": "Dual and triple modular redundancy run every computation two or three times, paying 100 or 200 percent hardware overhead so that a single wrong output is caught or outvoted within one control deadline. That price is reasonable for a small vehicle computer where one wrong output is dangerous. For fleet training it would double or triple the cost of the most expensive computation the organization runs, to guard against corruption events that arrive far less often than once per step and that rollback to a clean checkpoint can repair. Fleets therefore spend redundancy selectively: screening removes defective devices, cheap statistical checks run continuously, hot spares absorb drained nodes, and full recomputation is reserved for suspected corruption.",
+            "learning_objective": "Evaluate why full modular redundancy is uneconomic for fleet training and how selective redundancy replaces it."
+          },
+          {
+            "question_type": "FILL",
+            "question": "A component that remains active but sends arbitrary, corrupted, or conflicting data requires ____ fault tolerance reasoning rather than only fail-stop detection.",
+            "answer": "Byzantine. Such faults require explicit assumptions about faulty participants and independent validation; ordinary byte-integrity checks alone cannot prove that a local gradient was computed correctly.",
+            "learning_objective": "Apply Byzantine fault tolerance principles to protect parameter updates against silent data corruption."
           }
         ]
       }
@@ -189,50 +234,6 @@
             "question": "A preprocessing change silently truncates prompts and discards the system prompt. Sequence the reliability gates in the order that should catch the defect, from earliest and cheapest to the final proof that recovery works:\n(1) A fault-injection test showing that the resulting alert blocks publication or rolls back to a known-good state\n(2) A boundary unit test asserting that tokenizer limits, system prompts, and masks survive preprocessing\n(3) An integration replay that follows one recorded batch through loading, sharding, collation, and model input construction",
             "answer": "The correct sequence is (2) -> (3) -> (1).\n- (2) The boundary unit test catches the tokenizer defect before any distributed execution.\n- (3) Integration replay confirms that batch shapes and metadata survive the full input path.\n- (1) Fault injection demonstrates that, if corruption does slip through, the detector fires and recovery satisfies its objectives before corrupted state commits.",
             "learning_objective": "Design a layered software validation pipeline in which each gate exercises a specific invariant and authorizes a specific decision."
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-ft-sdc-verification",
-      "section_title": "Check-and-Verify Defenses Against Silent Data Corruption",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "SDC cumulative risk across 100,000+ GPU fleets and repeated collective reductions",
-            "Check-and-verify invariants: CRC digests, gradient checksums, redundant reductions",
-            "Transition from fail-stop crash detection to Byzantine verification in training pipelines"
-          ],
-          "question_strategy": "Test the mathematical inevitability of SDC at scale and evaluate concrete verification mechanisms.",
-          "difficulty_progression": "Calculates fleet SDC exposure, analyzes checksum verification mechanisms, and tests Byzantine principles.",
-          "integration": "Connects collective communication in distributed training to Byzantine fault tolerance.",
-          "ranking_explanation": "Tier 2 specialized section covering the critical check-and-verify paradigm for silent data corruption."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "In a 100,000-GPU training cluster where each device has an illustrative SDC probability of $10^{-6}$ per GPU-hour, what is the expected SDC exposure and failure cadence during continuous AllReduce training with 2-second step times?",
-            "choices": [
-              "The cluster experiences roughly 55.6 GPU-hours of exposure per 2-second step, resulting in an expected SDC event approximately every 18,000 steps (every ~10 hours).",
-              "The cluster experiences an SDC event on every single step because 100,000 GPUs exceed the reliability threshold.",
-              "The cluster experiences an SDC event once every 1,000 days because $10^{-6}$ is negligible for 2-second steps.",
-              "The cluster experiences an SDC event exactly every 50,000 hours regardless of cluster size."
-            ],
-            "answer": "The correct answer is A. For a 2-second step ($2/3600 = 1/1800$ hours), 100,000 GPUs accumulate $100{,}000 / 1800 \\approx 55.56$ GPU-hours of exposure per step. With an individual rate of $10^{-6}$ per GPU-hour, the probability of at least one SDC per step is $1 - (1 - 10^{-6})^{55.56} \\approx 5.56 \\times 10^{-5}$. The expected number of steps between SDC events is $1 / (5.56 \\times 10^{-5}) \\approx 18{,}000$ steps, which equals $18{,}000 \\times 2 / 3600 = 10$ hours. The single-step claim exaggerates probability by orders of magnitude. The 1,000-day and 50,000-hour options ignore the $100{,}000\\times$ fleet accumulation factor.",
-            "learning_objective": "Calculate how silent data corruption risk compounds across fleet-scale collective communication operations."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Explain what gradient checksums and redundant computation can each detect during AllReduce, and why checksums alone cannot establish the arithmetic correctness of every worker contribution.",
-            "answer": "Checksums can detect changed bytes in transport or storage, and digests of supposedly identical reduced buffers can expose disagreement. A worker can compute an incorrect gradient and then checksum those incorrect bytes successfully. Detecting that arithmetic fault requires independent recomputation, replay, invariants, or statistical evidence. Those checks can block suspect updates within their coverage; they are not a universal guarantee against arbitrary faulty workers.",
-            "learning_objective": "Design check-and-verify mechanisms to detect silent data corruption during distributed collective reductions."
-          },
-          {
-            "question_type": "FILL",
-            "question": "A component that remains active but sends arbitrary, corrupted, or conflicting data requires ____ fault tolerance reasoning rather than only fail-stop detection.",
-            "answer": "Byzantine. Such faults require explicit assumptions about faulty participants and independent validation; ordinary byte-integrity checks alone cannot prove that a local gradient was computed correctly.",
-            "learning_objective": "Apply Byzantine fault tolerance principles to protect parameter updates against silent data corruption."
           }
         ]
       }
@@ -722,7 +723,7 @@
           {
             "question_type": "SHORT",
             "question": "During the training of Meta's OPT-175B model on 992 A100 GPUs, describe how the team addressed both physical hardware failures and mathematical loss spikes.",
-            "answer": "For physical hardware failures (at least 35 manual and an estimated 70+ automatic restarts over two months from ECC memory errors, GPU lockups, and host cycling), Meta implemented asynchronous checkpointing to CPU memory that reduced save overhead from 12% to under 3%, combined with automated log-freshness monitoring. For mathematical loss spikes (numerical divergence and gradient overflow), the team rolled back to an earlier clean checkpoint and resumed training with a reduced learning rate (operating at roughly two-thirds of GPT-3's learning rate) to stabilize the optimization trajectory.",
+            "answer": "For physical hardware failures (at least 35 manual and an estimated 70+ automatic restarts over two months from ECC memory errors, network issues, and lost GPUs), the team relied on restart from the latest checkpoint, with train-log freshness monitoring (a 15-minute threshold, later relaxed to one hour) bounding how long a silent hang could idle the cluster. For mathematical loss spikes (numerical divergence and gradient overflow), the team rolled back to an earlier clean checkpoint and resumed with a reduced learning rate (ultimately roughly two-thirds of GPT-3's rate). The two remedies differ, which is why the run had to retain checkpoint history rather than only its newest snapshot.",
             "learning_objective": "Compare physical hardware fault recovery and algorithmic numerical divergence recovery in large-scale LLM training."
           },
           {

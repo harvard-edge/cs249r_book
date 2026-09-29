@@ -2,9 +2,9 @@
 
 Parts I and II built the fleet, coordinated its distributed state, and executed the training run. But training a model is only the opening chapter of its lifecycle; production deployment is the true test of operational accountability. Part III shifts the focus from the single, massive training run orchestrated across a dedicated cluster to the deployed fleet: the thousands of geographically distributed servers that answer requests in real time, the billions of edge devices that run and adapt models locally, and the operational machinery that keeps every deployed version accountable. The transition changes the engineering constraints. A training run must finish a coordinated workload; a deployed fleet must sustain useful throughput on a dynamic request stream while meeting latency targets, keep models current as data and devices change, and govern how each change reaches production.
 
-A serving fleet depends on the runtime behavior of each replica: its execution time and memory footprint determine how many requests it can accept and how much capacity the fleet must provision. Part III therefore begins with performance engineering, revisiting the roofline model (@sec-appdx-dam-taxonomy), precision choices, and kernel execution to explain their consequences for fleet capacity and latency. Inference at scale uses that runtime foundation to coordinate request queues, batching, and distributed model state. Edge intelligence extends the argument to heterogeneous fleets with intermittent connectivity, including federated learning that coordinates training while data remains on participating devices. Production operations then governs rollout, monitoring, and recovery across the deployed fleet.
+A serving fleet depends on the runtime behavior of each replica, whose execution time and memory footprint determine how many requests it can accept and how much capacity the fleet must provision. Part III therefore begins with performance engineering, revisiting the roofline model (@sec-appdx-dam-taxonomy), precision choices, and kernel execution to explain their consequences for fleet capacity and latency. Inference at scale uses that runtime foundation to coordinate request queues, batching, and distributed model state. Edge intelligence extends the argument to heterogeneous fleets with intermittent connectivity, including federated learning that coordinates training while data remains on participating devices. Production operations then governs rollout, monitoring, and recovery across the deployed fleet.
 
-The principles below preview the serving constraints that performance engineering and inference at scale make quantitative; edge adaptation and fleet operations bring constraints of their own, which their chapters develop. Autoregressive generation produces each new token from the preceding tokens; a key-value cache retains intermediate attention state so the system can reuse it. A serving replica is one deployed copy of the model, potentially spread across devices. The chapters turn these concepts into capacity and latency models rather than assuming that local efficiency alone guarantees an efficient fleet.
+The principles below preview the constraints that each chapter of Part III makes quantitative, from the single serving replica through the edge fleet to the release process that governs them all. Autoregressive generation produces each new token from the preceding tokens; a key-value cache retains intermediate attention state so the system can reuse it. A serving replica is one deployed copy of the model, potentially spread across devices. The chapters turn these concepts into capacity and latency models rather than assuming that local efficiency alone guarantees an efficient fleet.
 
 The first constraint is imposed by the mechanics of generation itself.
 
@@ -33,6 +33,27 @@ At scale, routing policy becomes another lever for protecting latency.
 **Invariant**: In the idealized process that sequentially places $R$ independent requests into $R$ replicas, with each request sampling replicas independently and uniformly at random, querying two replicas and selecting the least-loaded one reduces the maximum load from the one-choice bound $\Theta(\log R / \log \log R)$ to $\Theta(\log \log R)$ with high probability.
 
 **Implication**: Simple randomized load-balancing algorithms produce dramatically lower maximum-load bounds with $\mathcal{O}(1)$ coordination overhead. Under serving queueing assumptions, the lower maximum load translates into reduced tail latency at scale.
+
+:::
+
+Moving learning onto phones and other battery-powered devices adds a constraint that no data-center scheduler faces. The device belongs to its user, so background learning runs only when the device can spare it.
+
+::: {#pri-participation-selects-population .callout-principle title="The participation selection principle"}
+
+**Invariant**: An edge device contributes to on-device or federated learning only in windows its admission policy accepts, when the predicted update energy fits the remaining energy slack, the added power stays within the thermal limit, and foreground latency still meets its deadline (@eq-edge-background-admission). Those conditions correlate with hardware class, charging habits, and connectivity, so the population a shared model learns from is the admitted population, not the deployed one.
+
+**Implication**: The admission policy that protects each device also selects the training population, which makes admission a fairness decision as well as a resource decision. A fleet must measure participation and completion rates per device and user cohort against the deployed population and correct the skew through stratified selection, participation quotas, or reweighting. Loosening admission is not a remedy, because it spends the energy, thermal, and latency budgets the policy exists to protect.
+
+:::
+
+Whether a model is trained in the data center or across a population of devices, every change must eventually be released to the deployed fleet, and at fleet scale that release needs a single standard of evidence.
+
+::: {#pri-evaluation-contract .callout-principle title="The evaluation contract principle"}
+
+**Invariant**: At fleet scale, a release decision is valid only when all of its evidence refers to one versioned evaluation contract that pins the model and its dependencies, the workload, the metrics and statistical design, the acceptance thresholds, the rollback conditions, and the accountable owners. Reliability under that contract is a vector of budgets over availability, latency, freshness, and quality. With $b_i$ denoting the fraction of observations that violate target $i$ divided by the violating fraction that target allows, the service is inside its reliability envelope only when
+$$ \max_i b_i \le 1 . $$
+
+**Implication**: No single accuracy number can authorize a release. Averaging the dimensions would hide a quality regression behind perfect uptime, and evidence gathered on different datasets, load profiles, or configurations certifies no single candidate. Thresholds and rollback conditions are fixed before exposure, an exhausted budget in any dimension stops promotion, and a change that leaves the contract's validated envelope reopens the decision.
 
 :::
 

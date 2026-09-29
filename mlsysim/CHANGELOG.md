@@ -65,6 +65,13 @@ Release body. Omit any section that has no entries for a given release.
   - `calc_inductive_pdn_voltage_droop`: Fast inductive power distribution network (PDN) $L \cdot di/dt$ voltage droop under transient current steps.
   - `calc_intervention_takeover_budget`: Human takeover reaction time, out-of-loop drift displacement, and total safety stopping distance.
   - `calc_architectural_shield_dilution`: Reliability dilution across layered runtime defense shields.
+- **Sensor and Actuator Registries (`mlsysim.sensors`, `mlsysim.actuators`)**: Added two extension registries alongside `Embodied`. `Sensors` covers `Camera`, `IMU`, and `LiDAR` entries; `Actuators` covers joint and wheel drives (`FramelessMotor`, `HarmonicDrive`, `HubMotor`, `QuasiDirectDrive`, `Servo`, and the composed `PandaClassJoint`).
+- **Drivetrain Braking Physics (`mlsysim.physics.drivetrain`)**: Added a module that checks a requested deceleration for a wheeled base against three independent ceilings:
+  - `calc_traction_deceleration_limit` / `calc_required_friction`: Tire-floor Coulomb friction ceiling, and the friction a given deceleration demands.
+  - `calc_tipover_deceleration_limit` / `calc_max_cg_height_ratio`: Tip-over ceiling about the leading support, and the largest center-of-gravity height ratio a deceleration tolerates.
+  - `calc_drive_torque_deceleration_limit`: Ceiling set by wheel torque at the drive current limit, including reflected rotating mass.
+  - `calc_drive_voltage_headroom`: Bus voltage left over after back-EMF at speed.
+  - `calc_braking_limits`: Combines the three ceilings and reports the binding one and whether the request passes.
 - **Physical AI SI Units (`mlsysim.core.units`)**: Added exported aliases and quantities for `millimeter`, `mm`, `newton`, `N`, `volt`, `V`, `millivolt`, `mV`, `ampere`, `A`, `milliampere`, `mA`, `ohm`, `milliohm`, `radian`, `rad`, `hertz`, `Hz`.
 - **Provenance Catalog (`mlsysim.core.provenance_catalog`)**: Integrated verifiable engineering sources and datasheets for all embodied platforms and parameters.
 
