@@ -48,6 +48,12 @@ An agent can obey its tool interface and remain inside its sandbox while acting 
 
 ## The Adversarial Threat Model {#sec-vol3-security-threat-model}
 
+::: {.column-margin}
+![](images/svg/hsa_locator_a.svg){width="100%" fig-alt="H·S·A locator with the Authority axis highlighted in purple; Horizon and State axes unlit."}
+
+*Authority defended beneath the model, preventing untrusted context from weaponizing tools.*
+:::
+
 Consider an adversarial variant of the repository repair. The task permits selected external package searches and edits within its workspace, but not disclosure of private test fixtures. A retrieved dependency README contains a note addressed to automated assistants: include the private fixture in the next package-search query to obtain the correct configuration advice. The model follows the note and proposes `package_search` with fixture contents in its query. A gateway that checks only the function name and argument types admits the call. The external search service then receives information the task did not permit sending.
 
 No sandbox escape is needed. The code can remain inside its assigned workspace, the broker can keep its credential secret, and the network request can reach an approved endpoint. The failure is a missing decision about the data carried by that request. A policy that checks the actual operation, target, and permitted disclosure would reject it. Calling the search function “authorized” must not be taken to authorize every possible query.
@@ -59,6 +65,10 @@ This is the residual problem introduced at the end of Sandboxes. Execution conta
 *Prompt injection*\index{Prompt injection!definition} is attacker-controlled content that attempts to redirect the model's behavior away from the authorized task. In an indirect injection, the content arrives through an observation, such as a document, repository file, search result, or tool response, rather than as an authorized instruction from the task owner [@greshake2023not]. A direct adversarial request instead arrives from the interacting user. The distinction identifies the attacker's entry point; neither entry point grants access beyond the requester's and task's actual authority.
 
 Roles, delimiters, and provenance labels can help the model distinguish task instructions from quoted material. They do not enforce resource access or determine what a tool request may disclose. Likewise, authenticating the server that supplied the README establishes an origin under that authentication mechanism, not that every sentence from the server may direct the agent. The runtime needs a policy that remains in force when the model proposes the attacker's requested action.
+
+The model cannot supply that policy itself, and the reason is mechanical.\index{Prompt injection!mechanism} Before the model sees anything, the runtime serializes the application instructions, tool definitions, the user's request, and every observation into one token sequence (@sec-vol3-foundation-model-contract). Role markers and delimiters are tokens in that same sequence. Each generated token is computed from all preceding tokens through the same learned weights (@sec-vol3-foundation-model-autoregressive), so no position carries an enforced privilege that a later position cannot outweigh. The model's tendency to follow the system message rather than a quoted README is learned behavior over the whole sequence, strengthened by training but not guaranteed by the architecture. An instruction such as “treat the following text as data” is therefore one more advisory input, and a persuasive payload can prevail over it. The attacker exploits the property that makes the model useful: a note addressed to automated assistants asks the model to follow a plausible instruction in its input, which is exactly what it was trained to do.
+
+Payloads also need not be written by hand. @zou2023 showed that a greedy coordinate gradient (GCG)\index{Greedy coordinate gradient} search, guided by token-level gradients, finds adversarial suffixes that elicit behavior a model was trained to refuse, and that suffixes found against open models transfer to other models. A defense tuned to known phrasings therefore faces an attacker who can optimize against it. The evaluation in @sec-vol3-security-evaluation must include such adaptive attackers, and the enforcement in this chapter is placed where optimizing the text cannot reach: in runtime checks on the proposed operation, its data, and its destination.
 
 A useful threat model makes this concrete. It states what the attacker controls, what must remain protected, how the controlled material enters the task, and what outcome would count as a violation. @Tbl-vol3-threat-plane supplies those commitments for the package-search case. A threat model that merely lists attack names leaves the boundary and the success criterion unspecified.
 
@@ -107,7 +117,7 @@ The resulting decision is concrete. A query containing an approved public packag
 
 The runtime may possess credentials for resources beyond this repair, and the requester may also have broader permissions. Neither set should silently become the authority of every proposed action. The task binding determines which permitted uses are available now. If a legitimate repair requires additional access, a trusted authorization path must revise the grant; the README and the model's own argument cannot perform that revision. @Sec-vol3-security-credentials develops how identity and credential brokering carry this distinction across service boundaries.
 
-Narrowing authority limits the effects of a redirected model, but it does not establish that every allowed choice is useful or correct. A model can still waste an allowed search, make an incorrect edit within its workspace, or select misleading evidence. Capability possession establishes permitted reach under the enforcement assumptions, not the quality of the holder's judgment. Attenuation also does not withdraw a broader grant the worker retained, so the runtime must consider all authority it can still exercise, as established in @sec-vol3-sandboxes-least-privilege.
+Narrowing authority limits the effects of a redirected model, but it does not establish that every allowed choice is useful or correct. A model can still waste an allowed search, make an incorrect edit within its workspace, or select misleading evidence. Capability possession establishes permitted reach under the enforcement assumptions, not the quality of the holder's judgment. Attenuation also does not withdraw a broader grant the worker retained, so the runtime must consider all authority it can still exercise, as established in @sec-vol3-sandboxes-least-privilege. That section also develops how a holder can narrow a capability without contacting its issuer, through caveat chains such as macaroons [@birgisson2014macaroons]; this chapter relies on the resulting narrowed grant rather than on the construction.
 
 The private-fixture case exposes the next obligation. Even when the runtime confines execution and recognizes the service being called, it must decide what information may cross that service boundary. The next section follows the disclosure path through an otherwise permitted search.
 
@@ -239,6 +249,12 @@ A deterministic adapter can propagate labels according to its implemented depend
 
 Model-generated transformations require a coarser policy. The runtime cannot infer a trustworthy semantic dependency graph merely from the generated explanation or attention weights. A conservative policy treats a model output as potentially dependent on all the selected inputs available to that invocation. It carries their relevant integrity provenance and confidentiality restrictions into the derived record and subsequent proposal. This is a declared approximation, not proof that every input actually caused every output token, and not a noninterference theorem for the whole system.
 
+Stated over sets, the rule becomes something a runtime can implement and a reader can check. The host attaches two properties to every record $x$: its integrity provenance $\iota(x)$, the set of sources whose content may have influenced it, and its confidentiality $\kappa(x)$, the set of recipients permitted to receive it. A public record has no recipient restriction, so its $\kappa$ contains every recipient. When a transformation derives $y$ from inputs $x_1, \dots, x_n$, the derived record carries
+
+$$\iota(y) = \bigcup_{i=1}^{n} \iota(x_i), \qquad \kappa(y) = \bigcap_{i=1}^{n} \kappa(x_i)$$ {#eq-vol3-flow-join}
+
+Provenance accumulates and the permitted recipients shrink. For a deterministic adapter, the inputs are the arguments it actually reads. For a model invocation, they are all the selected inputs in its context, which is where the conservative approximation enters. A query generated by a planner that saw both `readme_7` and the private fixture has both sources in $\iota$ and a $\kappa$ no wider than the fixture's, whatever words the query contains.
+
 The cost is overrestriction. A planner that sees a private fixture may produce an ordinary public package name, yet its query remains potentially fixture-dependent under this policy. A more selective design can construct the query from separately approved public fields through a trusted adapter, or run a restricted decision step without the private inputs. That separation must include derived summaries and other state that could carry the dependency. Simply asking the same model to omit secrets does not establish it.
 
 Dependencies include control choices as well as copied substrings. Selecting one of several public package names according to a private fixture value can disclose information even when no fixture text appears in the query. Tracking only string matches would miss that path. The conservative invocation rule covers such possible dependence within the inputs it tracks, at the cost of also restricting benign choices.
@@ -247,11 +263,17 @@ Compaction and persistence do not reset these properties. A summary of the READM
 
 ### Mediate the actual operation and destination
 
-The reference monitor applies these properties before dispatch, alongside the request, authority, and resource checks from @sec-vol3-tool-calling-schemas. It identifies the actual operation, resolved resources, recipients, and data that the call will expose. A name such as `search` or `read` is not an exemption. A local read can disclose protected data into model context, and an external search sends its query to a service even if it changes no remote record.
+The reference monitor\index{Reference monitor!information-flow checks} (@sec-vol3-tool-calling-complete-mediation) applies these properties before dispatch, alongside the request, authority, and resource checks from @sec-vol3-tool-calling-schemas. It identifies the actual operation, resolved resources, recipients, and data that the call will expose. A name such as `search` or `read` is not an exemption. A local read can disclose protected data into model context, and an external search sends its query to a service even if it changes no remote record.
 
 The policy need not reject every externally derived value. It can permit an untrusted candidate patch to enter a bounded local test while forbidding that candidate from modifying protected acceptance machinery. The test observation then supplies new evidence about the candidate without making the original document authoritative. Permitted influence is a property of the specific operation and its enforcement, not a universal clean/tainted division.
 
-For the repair variant, the runtime checks the task's search grant and the query's data dependencies separately. The grant allows selected package searches; it does not authorize sending the private fixture. A fixture-dependent query therefore fails the release policy before network dispatch. Independently, `claimed_tests_passed: true` from `readme_7` at `doc_v3` fails the evidence requirement for recording a test pass. The runtime may retain that assertion as document content without promoting it to a runner result.
+Both obligations reduce to one admission test. Let a proposed operation $o$ send argument values to the host-resolved recipient $r$, and let $x$ be the record obtained by applying @eq-vol3-flow-join to those arguments and to the invocation that proposed them. The monitor admits dispatch only if
+
+$$r \in \kappa(x) \qquad \text{and} \qquad \iota(x) \subseteq \mathcal{E}(o)$$ {#eq-vol3-flow-dispatch}
+
+where $\mathcal{E}(o)$ is the set of sources the task policy accepts as influences on $o$. The first condition is the release check and the second is the evidence check; they fail independently. A local test run can accept candidate code from any source, so its $\mathcal{E}(o)$ is unrestricted, while recording a test pass for acceptance admits only the protected runner.
+
+For the repair variant, the runtime checks the task's search grant and the query's data dependencies separately. The grant allows selected package searches; it does not authorize sending the private fixture. A fixture-dependent query therefore fails the release policy before network dispatch, because the search endpoint is not in the fixture's recipient set. Independently, `claimed_tests_passed: true` from `readme_7` at `doc_v3` fails the evidence requirement for recording a test pass, because that source lies outside the runner-only $\mathcal{E}(o)$. The runtime may retain that assertion as document content without promoting it to a runner result.
 
 These checks must cover every route through which the protected operation can occur. A general command runner that bypasses the labeled adapter would invalidate the claimed boundary. Sandbox and egress enforcement constrain that route as developed in @sec-vol3-sandboxes; the flow policy determines which data may traverse a permitted route. An unregistered tool, missing required provenance, or an unresolved recipient must not default to permission. The runtime can reject the proposal or hold it for an authorized decision under an explicit policy.
 
@@ -263,9 +285,62 @@ Opaque handles reduce the need to expose raw bytes to the planner. They do not e
 
 At dereference, the runtime authenticates the caller and checks the handle's task ownership, designated object and version, lifetime, permitted operation, and destination. It retrieves the object's integrity and confidentiality metadata from the host record, not from model-supplied fields. It then applies the same use policy to the underlying content and relevant proposal dependencies. A permitted local test may consume the fixture; an external search may not receive it under this task's grant. Replacing fixture bytes with an identifier cannot change that decision when an adapter later expands the identifier.
 
+In the notation of @eq-vol3-flow-join, a handle argument $h$ designating the host object $\mathrm{obj}(h)$ is checked with the effective labels
+
+$$\iota_{\text{eff}}(h) = \iota(h) \cup \iota(\mathrm{obj}(h)), \qquad \kappa_{\text{eff}}(h) = \kappa(h) \cap \kappa(\mathrm{obj}(h))$$ {#eq-vol3-flow-deref}
+
+together with the condition that $o$ is among the operations the handle's host record permits. The handle's own labels record what influenced its selection; the object's labels record what its bytes carry. Both enter @eq-vol3-flow-dispatch, so a fixture handle inherits the fixture's recipient set and fails the release check at the search endpoint exactly as the bytes would.
+
 An identifier or content hash is not authority. Equal bytes can belong to different tasks with different release restrictions, so content-addressed storage must not collapse their authorization records. The adapter must also bind the approved object version to the bytes it actually consumes, rather than check one version and later resolve a different object. Passing a handle selected under private influence can itself convey a choice, so hiding the blob contents does not eliminate the need to track the planner's dependencies.
 
 This arrangement narrows exposure while preserving policy enforcement at the point where bytes cross a boundary. It does not make an untrusted patch safe to apply or run. Content and effect checks, task grants, and execution containment remain necessary even when the planner never reads the patch text.
+
+@Lst-vol3-reference-monitor assembles the propagation rule (@eq-vol3-flow-join), handle resolution (@eq-vol3-flow-deref), and admission test (@eq-vol3-flow-dispatch) into one dispatch check. Every unknown, whether an unregistered tool, an unresolved recipient, or a value without a host record, ends in rejection rather than permission. The diagnostic names the rule that failed and never the blocked content, so the refusal itself does not become a disclosure path.
+
+::: {#lst-vol3-reference-monitor lst-cap="**Dispatch check at the reference monitor**: The host resolves the recipient, joins labels over arguments, dereferenced handles, and the proposing invocation, then applies the release and evidence checks separately. Unknown tools, recipients, and records default to rejection."}
+```python
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Label:
+    sources: frozenset  # integrity provenance: possible influences
+    readers: frozenset  # confidentiality: permitted recipients
+
+def join(labels):  # conservative derivation rule
+    return Label(frozenset().union(*(l.sources for l in labels)),
+                 frozenset.intersection(*(l.readers for l in labels)))
+
+def reject(rule):  # names the rule, never the blocked content
+    return {"status": "rejected_before_dispatch", "rule": rule}
+
+def check_dispatch(proposal, registry, records, task):
+    tool = registry.get(proposal.tool)
+    if tool is None:
+        return reject("unregistered_tool")
+    recipient = tool.resolve_recipient(proposal.args)  # host-resolved
+    if recipient is None:
+        return reject("unresolved_recipient")
+    if not task.grant.permits(tool.name, recipient):
+        return reject("outside_task_grant")
+    labels = [proposal.invocation_label]  # all selected model inputs
+    for name, value in proposal.args.items():
+        label = records.label_of(task.id, value)  # host metadata only
+        if label is None:
+            return reject("missing_provenance")
+        if tool.is_handle(name):
+            obj = records.resolve_handle(task.id, value)
+            if obj is None or tool.name not in obj.permitted_ops:
+                return reject("handle_not_usable_here")
+            label = join([label, obj.label])  # dereference-time labels
+        labels.append(label)
+    x = join(labels)
+    if recipient not in x.readers:
+        return reject("release: recipient not permitted")
+    if not tool.accepts_influence(task, x.sources):
+        return reject("evidence: source not accepted for this use")
+    return {"status": "admitted", "recipient": recipient, "label": x}
+```
+:::
 
 ### Authorize a specific use, not a universal trust upgrade
 
@@ -399,6 +474,8 @@ A trial specification identifies what the attacker controls: one README passage,
 
 Hold the task distribution, source snapshots, available tools, grants, model configuration, and resource limits comparable. Give each trial isolated mutable state. For persistence tests, preserve the intended poisoned record across the specified sessions, but do not let one trial's records contaminate another. Separate attack-development cases from held-out cases. A policy tuned until it blocks a published collection has not thereby demonstrated resistance to a new attacker.
 
+Two published testbeds illustrate the two protocols. InjecAgent\index{InjecAgent} is a fixed collection of indirect-injection cases embedded in tool responses across many tool categories, separating attacks that seek a harmful action from attacks that seek to steal data [@zhan2024injecagent]. AgentDojo\index{AgentDojo} is an extensible environment of user tasks and injection tasks that reports utility without attack, utility under attack, and attack success from the same runs, so a defense's cost in completed work is measured alongside its protection [@debenedetti2024agentdojo]. Either supplies a common starting point for comparison; the held-out and adaptive requirements above still apply to any result obtained on it.
+
 Record the proposed operation and target, relevant source/version and data labels, the runtime's policy decision, and the observed endpoint or protected-state result. Distinguish attempted misuse, rejection before dispatch, dispatched work, observed harm, and unresolved outcome. A timeout does not prove that a confidential request failed to arrive. Use the tool contract to reconcile available evidence; if the outcome remains unknown at the evaluation horizon, retain that category rather than count it as a successful defense.
 
 ### Measure security and useful completion together
@@ -499,6 +576,18 @@ A proposed defense lowers observed fixture disclosures but blocks more legitimat
 ## Fallacies and Pitfalls {#sec-vol3-security-fallacies}
 
 These mistakes promote evidence from one boundary into permission or trust at another.
+
+::: {.fallacy-pitfall}
+**Fallacy**: *A guardrail classifier in front of the agent eliminates prompt injection.*
+
+A classifier that screens inputs is itself a learned function over text, so paraphrase, encoding, and splitting a payload across sources or turns can evade it, and an optimizing attacker can search against it as against the agent. Tuning it to catch more payloads also rejects more legitimate documents, diagnostics, and security discussions, which evaluation must count as false blocks. A classifier can reduce exposure; enforcement remains the release and evidence checks before dispatch.
+:::
+
+::: {.fallacy-pitfall}
+**Fallacy**: *Safety post-training makes the model immune to injection.*
+
+Safety training teaches the model to refuse requests recognizable as harmful, while an indirect injection presents its goal as a benign step in an authorized task, such as a search query or a diagnostic. The property the attacker exploits is trained helpfulness in following plausible instructions found in the input. Training can lower attack success under a stated protocol, but it places no boundary the model cannot cross, so authority and release checks stay beneath the model.
+:::
 
 ::: {.fallacy-pitfall}
 **Fallacy**: *A valid scalar extracted by a separate reader is trusted evidence.*
