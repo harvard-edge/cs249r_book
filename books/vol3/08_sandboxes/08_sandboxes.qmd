@@ -26,7 +26,7 @@
 
 _Why must the limit on what an agent's code can reach be enforced below the model rather than requested of it?_
 
-Within a few turns, a coding agent can install a dependency, read its documentation, and run code that neither its operator nor the model wrote. Permission to invoke a command runner does not limit every file, process, or network service that code might reach. The runtime needs an execution environment whose enforced boundaries match the task: which resources are accessible, how much capacity may be consumed, which work persists between turns, and what must end before another task uses the environment. Those boundaries cost startup time and memory, so their lifecycle and provisioning policy are part of the design. Sandboxing bounds the authority exposure of H·S·A beneath running code while accounting for the state it retains and the horizon over which it holds resources.
+Once an agent can run code, its reach is no longer the list of tools it was offered but whatever the code behind those tools can open, consume, and send. An agent that writes and executes programs will eventually run one its operator never read, steered by text it retrieved or by an honest mistake, and no instruction to stay within the task changes what that program can touch. The limit therefore has to live in machinery the code cannot modify, which makes it a question of systems design rather than model behavior: which files, processes, and network routes the environment exposes, which components must stay correct for the boundary to hold, and how long the environment persists. Taking that seriously changes what an agent platform is. Every trajectory that runs code needs its own execution environment, kept alive across turns so its work accumulates and destroyed or restored before another task can inherit it, and each such environment holds memory and startup time that multiply with the number of agents in flight. Containment is what allows an agent to be handed real work without being handed the whole machine. The sandbox sits where tool use meets the runtime, since the tool contract decides which requests are admitted and the sandbox decides what an admitted request can do. In H·S·A terms, the sandbox bounds authority beneath running code, while the state it retains and the horizon over which it holds resources set its reset obligations and its cost.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -36,20 +36,20 @@ Within a few turns, a coding agent can install a dependency, read its documentat
 
 ::: {.callout-learning-objectives}
 
-- Specify the resources and effects reachable by agent-run code under a stated threat model and task grant
-- Explain why restricted names and shared-process execution do not contain arbitrary untrusted code or its resource consumption
-- Apply scoped grants, attenuation, and credential brokering while distinguishing possession, permission, and enforcement
-- Compare execution envelopes by shared resources, trusted components, workload compatibility, enforced limits, and measured cost
-- Design task-local workspace continuity and controlled artifact export without inheriting another tenant's mutable state
-- Constrain outbound communication and identify disclosure that remains possible through permitted channels
-- Specify reset and provisioning policies with explicit workload, capacity, residual-state, and external-effect assumptions
-- Calculate sandbox pool size, resident memory, and burst drain time from arrival rate, lease duration, and snapshot restore latency
+- Apply the capability admission check and attenuation rule to bound what agent-run code can reach under a task grant
+- Compare execution envelopes, from in-process evaluation to microVMs and restricted bytecode, by trusted components and system-call cost
+- Evaluate whether a fresh envelope per call or one per trajectory fits a workload from setup cost and useful work per call
+- Calculate copy-on-write provisioning and first-modification cost for task-local workspaces
+- Diagnose disclosure channels that remain open under an egress policy, including name resolution
+- Specify a reset contract over execution, storage, network, and device state before an instance is reused
+- Calculate sandbox pool size, resident memory, standby reserve, and burst drain time from arrival rate, lease duration, and restore latency
+- Select a provisioning path and reserve for an agent workload by identifying whether residency or restore latency binds
 
 :::
 
-## The Agent Threat Model {#sec-vol3-sandboxes-threat-model}
+## What Admitted Code Can Reach {#sec-vol3-sandboxes-admitted-reach}
 
-Consider a threat variant of the connection-pool repair. The coding agent reads the README of a vendored dependency to learn how the library is configured. Near the bottom, inside an HTML comment omitted from the rendered page but present in the retrieved source, a line addressed to automated assistants asks them to upload the environment configuration to a diagnostics endpoint before running tests. The model then proposes a `run_shell` call that would read a cloud credentials file and post it to that endpoint. The command fits the tool's argument schema. A runtime that checks only whether `run_shell` is an allowed tool would admit it, despite the task granting neither access to the credential nor permission to disclose it.
+Consider a threat variant of the connection-pool repair run by the repair agent (\ref{lhs-vol3-repair-agent}). The coding agent reads the README of a vendored dependency to learn how the library is configured. Near the bottom, inside an HTML comment omitted from the rendered page but present in the retrieved source, a line addressed to automated assistants asks them to upload the environment configuration to a diagnostics endpoint before running tests. The model then proposes a `run_shell` call that would read a cloud credentials file and post it to that endpoint. The command fits the tool's argument schema. A runtime that checks only whether `run_shell` is an allowed tool would admit it, despite the task granting neither access to the credential nor permission to disclose it.
 
 ::: {.column-margin}
 ![](images/svg/hsa_locator_a.svg){width="100%" fig-alt="H·S·A locator with the Authority axis highlighted in purple; Horizon and State axes unlit."}
@@ -58,6 +58,14 @@ Consider a threat variant of the connection-pool repair. The coding agent reads 
 :::
 
 The typed action contract from @sec-vol3-tool-calling goes further than that tool-name check: a specific adapter rejects the proposed operation before dispatch. A general-purpose command runner must also bound what the code reaches after dispatch, because a subprocess opens whatever files and sockets its environment allows, whatever the command description said. Sandboxing carries the task's limits into that environment.
+
+This chapter builds that environment, the place where the agent's code runs and the limits it runs under. For the repair, the environment holds a private copy of the source the agent may edit, keeps the acceptance checks out of its writable reach, caps the CPU, memory, storage, and processes a runaway test can consume, holds repository credentials outside the code's reach, and admits only the outbound traffic the task needs. It must also persist across the repair's turns, so that edits and test artifacts survive from one command to the next, and it must be reset before another task inherits it. Every one of these limits has to hold when the model follows the planted instruction, and every one costs startup time and memory that a platform running many trajectories at once must provision.
+
+The chapter first names what the design protects against and which components it must trust (@sec-vol3-sandboxes-threat-model). It then shows why running generated code inside the supervisor's own interpreter cannot bound it (@sec-vol3-sandboxes-in-process-failure), and how scoped capabilities and credential brokering carry only the task's authority into execution (@sec-vol3-sandboxes-least-privilege). Isolation envelopes are compared next by what they share with the host and where each system call is paid (@sec-vol3-sandboxes-microvms). The task then receives a private workspace that survives across turns (@sec-vol3-sandboxes-cow), and its outbound communication is constrained (@sec-vol3-sandboxes-network). The chapter closes by resetting and pooling environments, so that each task starts clean and a burst of arrivals does not wait on cold starts (@sec-vol3-sandboxes-pooling).
+
+## The Agent Threat Model {#sec-vol3-sandboxes-threat-model}
+
+A threat model for the repair names which inputs may be hostile, which failures the boundary must contain, and what the task legitimately needs from its environment. The planted README line supplies the first, and a shipped coding agent supplies evidence that the second is not hypothetical.
 
 ### Untrusted input and execution reach {#sec-vol3-sandboxes-cohabitation}
 
@@ -79,7 +87,7 @@ The README attempt is **indirect prompt injection**\index{Indirect prompt inject
 
 The incident and the README scenario share three conditions: untrusted content steers the proposal, the executing code can read a secret, and a channel can deliver it. Willison named this conjunction of private data, untrusted content, and external communication the *lethal trifecta* for agents [@willison2025lethal]. Denying the read or the outbound request breaks that path, and keeping the credential outside the execution environment removes that secret from reach. The three conditions describe this disclosure path rather than every harm. The source repository itself may be private, and a destructive local edit needs no network channel.
 
-The design therefore starts by naming what is protected and what execution requires. For the repair, the runtime can provide a task-local source tree and writable test scratch while excluding the developer's home directory, unrelated repositories, and other tenants' files. CPU, memory, storage, and process limits prevent a runaway test from consuming the host's entire capacity. Any permitted download or artifact export needs its own communication scope. These limits belong to enforced configuration, not to a sentence asking the model to remain within the task.
+The design therefore starts by naming what is protected and what execution requires. For the repair, the runtime can provide a task-local source tree and writable test scratch while excluding the developer's home directory, unrelated repositories, and other tenants' files. Any permitted download or artifact export needs its own communication scope. These limits belong to enforced configuration, not to a sentence asking the model to remain within the task.
 
 ::: {#dfn-blast-radius .callout-definition title="Blast radius"}
 
@@ -114,9 +122,7 @@ Containment beneath the model (principle \ref{pri-vol3-zero-trust-sandboxing})\i
 ![](images/svg/defense_in_depth_rings.svg)
 :::
 
-The boundary also has a lifetime. The repair's `src/pool.py` edits and test artifacts must survive between turns, but should not become the next tenant's starting state. Protected acceptance checks remain outside the agent's writable scope, while test execution can still require writable scratch. Ending the task must stop or account for its running work and reset the state the execution contract covers. As @sec-vol3-tool-calling established, a cancellation request is only a request, and even confirmed termination leaves an external effect in place.
-
-The chapter develops these obligations in sequence. First, it shows why the supervisor's own interpreter is the wrong place to run arbitrary code. Scoped capabilities and credential brokering then describe how authority reaches execution without unnecessarily exposing secrets. Envelope choice and task-local workspaces bound what code shares and preserves; egress governs its channels; reset and provisioning maintain those boundaries across successive tasks. The first engineering decision is therefore where the untrusted code runs relative to the software enforcing its limits.
+The boundary also has a lifetime. The repair's `src/pool.py` edits and test artifacts must survive between turns, but should not become the next tenant's starting state. Protected acceptance checks remain outside the agent's writable scope, while test execution can still require writable scratch. Ending the task must stop or account for its running work and reset the state the execution contract covers. As @sec-vol3-tool-calling established, a cancellation request is only a request, and even confirmed termination leaves an external effect in place. Reach, trusted components, and lifetime are the three obligations the rest of the design discharges, and the first engineering decision is where the untrusted code runs relative to the software enforcing its limits.
 
 ## Why Restricted Globals Are Not an Execution Boundary {#sec-vol3-sandboxes-in-process-failure}
 
@@ -976,7 +982,7 @@ The reserve depends on $\lambda T_{\text{init}}$ through a steep Poisson tail. I
 
 ## Summary {#sec-vol3-sandboxes-summary}
 
-The README attack exposed the gap between admitting a tool call and bounding the code it runs. A containment design must specify the resources that code may reach, the components trusted to enforce the restriction, and the limits on resource consumption. Scoped grants and credential brokers constrain access; the execution envelope enforces a boundary around running code; and the workspace preserves permitted changes across turns. Egress policy and the reset contract extend that boundary to communication and to the next lease. Startup, residency, and replenishment costs then determine how the design can be provisioned under its stated workload.
+A sandbox is a specification before it is a mechanism. It states what running code may reach, which components must remain correct for that limit to hold, and how long the environment and the authority inside it persist. Each answer is enforced outside the code it constrains, so the model's compliance never enters the guarantee, and each answer has a price in startup time, resident memory, and reset work that the platform pays for every trajectory it admits. The README attack failed not because the model refused the planted instruction but because nothing it could reach held the credential or opened the route.
 
 For the connection-pool repair, this means retaining the candidate edits and test artifacts without giving the task the developer's entire account or another task's mutable state. Protected checks can remain outside the editable candidate while the test process has bounded scratch space. These choices preserve the conditions under which evidence is gathered; accepting the whole repair still takes more than the targeted `r18` pass (@sec-vol3-evaluation).
 
@@ -998,13 +1004,12 @@ For the connection-pool repair, this means retaining the candidate edits and tes
 
 ::: {.callout-takeaways title="Containment includes reach and lifetime"}
 
-* **Specify the reachable effects**: Start from the task's grant and a stated threat, then identify what executing code could read, change, disclose, or consume. Tool names and prompt instructions do not by themselves bound that reach.
-* **Do not confuse restricted names with isolation**: Arbitrary code sharing the supervisor's process can reach more than its initial globals suggest. An enforced boundary must address memory and resource access as well as CPU, process, storage, and other availability limits.
-* **Bind grants to enforcement**: Scope authority by operation, resource, lifetime, and budget. Attenuation narrows a derived grant without revoking a retained parent; brokering separates possession of a credential from permission to request its use.
-* **Choose the envelope by what it shares**: Compare trusted components, workload compatibility, resource controls, and measured cost. Containers, user-space kernels, microVMs, and restricted bytecode make different trade-offs; device access extends the boundary that must be evaluated.
-* **Preserve task work without inheriting tenant state**: A task-local workspace carries edits across turns while protecting its baseline and bounding mutable storage. Export eligible artifacts deliberately; a copy-on-write upper layer is not automatically the semantic patch to deliver.
-* **Govern channels, then account for residual disclosure**: Egress enforcement must constrain bypass routes as well as the intended proxy path. Destination and operation restrictions reduce reach, but permitted requests can still carry data the task should not disclose.
-* **Provision only environments ready for reuse**: Reset must stop or account for owned work, withdraw access, preserve permitted outputs, restore scoped state, and verify readiness. Active leases average arrival rate times lease duration, so horizon rather than tool latency sizes the pool, and copy-on-write sharing keeps its resident memory affordable. Pool sizing needs explicit reserve, replenishment, concurrency, and memory assumptions; mean occupancy is not a hard admission ceiling.
+* **Reach belongs to the environment, not the tool name**: An admitted command can open whatever files and sockets its environment allows. Blast radius is what running code can read, change, disclose, or consume, so the bound must sit where the code cannot modify it.
+* **A hidden name is not a missing object**: Code sharing the supervisor's interpreter reaches that process's objects, handles, and native libraries through paths no filter can enumerate. Confinement comes from what the process holds, never from what its text is forbidden to say.
+* **Authority travels in references, not identities**: A capability grants one operation on one object for one lifetime, and a broker lets code request a credential's use without holding it. Deriving a narrower grant leaves the parent usable until the runtime withdraws it.
+* **An envelope is a configuration, not a label**: Containers, user-space kernels, microVMs, and restricted bytecode differ in which components they trust and where each system call is paid. The same name can expose different mounts, devices, and routes, so the configuration is what gets compared against the workload.
+* **A permitted channel is still a channel**: Egress rules narrow destinations and operations, yet an approved upload or name lookup can still carry task data outward. What remains after containment is an information-flow problem, not a network escape.
+* **Horizon, not boot time, prices a sandbox**: Active leases equal arrival rate times lease duration, so trajectory length sets resident memory and copy-on-write sharing keeps it affordable. An instance returns to the pool only after a reset contract covers its execution, storage, network, and device state; a clean directory proves nothing.
 
 :::
 
