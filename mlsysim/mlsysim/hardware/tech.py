@@ -31,6 +31,10 @@ class MemoryTier(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     name: str
     latency: Optional[Quantity] = None            # access latency
+    # Measured access latency in core clock cycles, when the source reports
+    # cycles (GPU microbenchmarks do). ``latency`` then holds the derived
+    # wall-clock value at the source's stated clock.
+    latency_cycles: Optional[float] = None
     energy_per_access: Optional[Quantity] = None  # pJ per access
     energy_per_byte: Optional[Quantity] = None    # pJ per byte
     bandwidth: Optional[Quantity] = None          # representative interface bandwidth
@@ -95,6 +99,27 @@ class InterconnectTier(BaseModel):
         return require_dimensionality(v, ureg.second, "latency")
 
 
+class ReticleField(BaseModel):
+    """Lithography exposure-field limit (technology-class): the largest die a
+    stepper/scanner can pattern in one exposure without stitching."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    name: str
+    width: Quantity
+    height: Quantity
+    metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("width", "height", mode="after")
+    @classmethod
+    def _validate_length(cls, v, info):
+        return require_dimensionality(v, ureg.meter, info.field_name)
+
+    @property
+    def area(self) -> Quantity:
+        """Derived exposure-field area (width x height)."""
+        return (self.width * self.height).to(ureg.millimeter ** 2)
+
+
 class OpEnergy(BaseModel):
     """Per-operation energy for an arithmetic op (technology/process-class)."""
 
@@ -154,6 +179,11 @@ Interconnect = load_collection(
     doc="Interconnect technology generations (link access-latency floor).",
 )
 
+Lithography = load_collection(
+    _DATA / "lithography.yaml", ReticleField, name="Lithography",
+    doc="Lithography technology limits (exposure-field / reticle size).",
+)
+
 
 class Tech(Registry):
     """Technology-class reference facts: latency / energy / generic bandwidth."""
@@ -164,6 +194,7 @@ class Tech(Registry):
     EffectiveCompute = EffectiveCompute
     Movement = Movement
     Interconnect = Interconnect
+    Lithography = Lithography
 
 
 def resolve_latency(instance_latency, tech_default):

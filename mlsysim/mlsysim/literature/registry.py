@@ -26,6 +26,9 @@ Fairness = _load("fairness", "Fairness", "Buolamwini & Gebru (2018) Gender Shade
 Surveys = _load("surveys", "Surveys", "Industry survey figures (CrowdFlower 2016 data-science time allocation).")
 Crypto = _load("crypto", "Crypto", "Security/crypto overhead anchors (TEE, FHE, HSM) for the security_privacy chapter.")
 ResponsibleAIOverhead = _load("rai_overhead", "ResponsibleAIOverhead", "Responsible-AI technique overhead ranges for the responsible_ai chapter.")
+TrainingRuns = _load("training_runs", "TrainingRuns", "Cited training-run field figures (GPU counts, durations, MFU, interruptions).")
+FleetOperations = _load("fleet_operations", "FleetOperations", "Measured fleet-operations results (job MTTF, utilization, cluster scale).")
+DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity", "Datacenter electricity consumption and projections (LBNL, IEA).")
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +176,9 @@ class Literature(Registry):
     Surveys = Surveys
     Crypto = Crypto
     ResponsibleAIOverhead = ResponsibleAIOverhead
+    TrainingRuns = TrainingRuns
+    FleetOperations = FleetOperations
+    DatacenterElectricity = DatacenterElectricity
     ComputeTrend = ComputeTrend
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
     KaplanScalingLaws = KaplanScalingLaws
