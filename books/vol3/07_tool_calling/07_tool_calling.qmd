@@ -26,7 +26,7 @@
 
 _Why does a tool call that parses cleanly still need a runtime between it and the world?_
 
-A model's tool call names an operation and its arguments, but those tokens do not decide whether the operation may run, whether it already ran, or what the model should see afterward. A timeout can leave a restart's effect unknown, an advertised tool can exceed the session's permissions, and a verbose command can crowd the next turn with irrelevant output. The runtime must turn the proposal into a bounded operation and preserve the distinction between its reported outcome and evidence that the task is complete. This is the tool boundary's contribution to the authority exposure of H·S·A: control what each call may read, change, or disclose, and retain enough evidence to decide what may happen next.
+A tool call is the point at which an agent stops producing text and starts acting on systems other people depend on. The model emits an operation name and arguments, and that proposal is shaped by everything in its context, including files, web pages, and earlier results that no one vetted. Nothing in those tokens decides whether this task may run the operation, whether an earlier attempt already ran it, or which part of a long result deserves the next turn's limited context. Systems that treat a well-formed call as a settled decision fail in ways that look like model errors but are boundary errors, such as duplicated effects, records disclosed to a task that never needed them, and work reported as finished that is not. Taking the boundary seriously moves authority out of the model and into a small enforcement path that checks every call, reads included, and returns observations that state what they establish and what they leave out. The model can then be wrong, steered, or uncertain without the system acting on that error. Every capability a new tool adds is paid for at this boundary, in the grants the session must hold, the effects it must settle, and the evidence it must carry forward. In H·S·A terms, the tool boundary is where the authority exposure is granted and bounded, deciding what each call may read, change, or disclose and what the next decision may rely on.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -36,17 +36,17 @@ A model's tool call names an operation and its arguments, but those tokens do no
 
 ::: {.callout-learning-objectives}
 
-- Trace a proposed tool call through runtime checks, dispatch, and a correlated observation into the next model call
-- Design a tool descriptor that distinguishes structural validation from action-time preconditions and enforced behavior
+- Trace a proposed tool call through validation, authorization, dispatch, and a correlated observation into the next model call
+- Design a tool descriptor that separates structural validation from action-time preconditions enforced with the effect
 - Distinguish tool discovery and connectivity from the grants required to invoke an operation
-- Determine when operation semantics, endpoint deduplication, or reconciliation justify retrying an uncertain effect
+- Select blind retry, endpoint deduplication, or reconciliation for an uncertain effect from operation semantics and loss rates
 - Design bounded observations that preserve execution status, omission information, and the scope of available evidence
-- Compare waiting and resumption strategies for long-running tools while preserving supervision and cancellation status
-- Evaluate toolkit granularity, context cost, and authority across structured tools, general-purpose tools, and computer-use interfaces
+- Compare waiting and resumption strategies for long-running tools by detection delay, inference cost, and retained supervision
+- Evaluate toolkit granularity by context cost, cost per accepted task, and enforced reach across structured, general-purpose, and computer-use interfaces
 
 :::
 
-## Tool Subsystem Architecture {#sec-vol3-tool-calling-unix-analogy}
+## The Tool Boundary {#sec-vol3-tool-calling-boundary}
 
 An agent asked to restart a container on a staging server emits a short tool call. The host runtime checks the call against the tool's schema, confirms that this session may restart that container, and sends `POST /containers/srv-stage-04/restart`. Two seconds later the socket times out. The request may be lost, delayed, still executing, or completed without a delivered reply. A retry could restart healthy workers, and the first attempt can still take effect after the timeout.
 
@@ -56,7 +56,17 @@ An agent asked to restart a container on a staging server emits a short tool cal
 *The Authority axis, closed at the tool boundary by mediating every proposed call.*
 :::
 
-@Lst-vol3-tool-call-turn shows the exchange in a provider-neutral form. The runtime reports what it knows about this attempt, and the next model call receives that result together with the earlier request and proposal.
+Nothing about this failure is exotic. The repair agent (\ref{lhs-vol3-repair-agent}) meets the same questions on every turn of the connection-pool repair. It reads `src/pool.py`, replaces text derived from the version it read, runs the test suite, and receives a log far longer than the next model call can hold. Each step is a tool call, and each can be rejected, left running, completed without a reply, or answered with more output than the model should see.
+
+The pieces built so far do not settle these questions. @Sec-vol3-foundation-model-contract gave the model a structured way to propose a call, and the memory chapters already relied on tools to read sources, search indexes, and update records without examining what happens between a proposal and its result. A retrieval result identifies the version it observed, but keeping that version current until a later edit is an action-time precondition that something must enforce. A proposal names an operation and its arguments. It does not decide whether this task may run the operation, whether an earlier attempt already ran it, or what the next model call should receive.
+
+This chapter builds the runtime's tool boundary, the path between a proposed call and the environment it would change. The boundary validates each proposal, checks it against the task's grants, dispatches it, tracks what is known about its effect, and returns a bounded observation matched to the call. Throughout, it keeps apart the three things the timeout blurs, the distinction from @sec-vol3-intro between what the model proposed, what effect the operation had, and what evidence the runtime holds about either.
+
+The sections follow one call and then widen. @Sec-vol3-tool-calling-unix-analogy lays out the mediated round trip and the protection requirement that organizes it. @Sec-vol3-tool-calling-schemas types the request and couples action-time checks to the effect, and @sec-vol3-tool-calling-mcp separates discovering a tool from being allowed to use it. @Sec-vol3-tool-calling-idempotency decides when an uncertain effect may be retried. @Sec-vol3-tool-calling-streaming and @sec-vol3-tool-calling-observation-parsing bound what returns to the model without losing what it means. @Sec-vol3-tool-calling-async extends the contract to jobs that outlive a model turn, and @sec-vol3-tool-calling-toolkit-design and @sec-vol3-tool-calling-visual-actuation use those mechanics to evaluate tool catalogs and computer-use interfaces.
+
+## Tool Subsystem Architecture {#sec-vol3-tool-calling-unix-analogy}
+
+@Lst-vol3-tool-call-turn shows the staging restart as one turn of the loop, in a provider-neutral form. The runtime reports what it knows about this attempt, and the next model call receives that result together with the earlier request and proposal.
 
 ::: {#lst-vol3-tool-call-turn lst-cap="**One turn of the tool-call loop**: A call identifier correlates the proposed call with its result. The next model call receives the timeout as an unknown effect, not as evidence that the restart did not happen."}
 ```json
@@ -76,8 +86,6 @@ An agent asked to restart a container on a staging server emits a short tool cal
 :::
 
 The result is matched to its call by identifier, not merely by position. That identifier tells the runtime which exchange the result belongs to; preventing a second restart takes a separate contract for the intended operation, developed in @sec-vol3-tool-calling-idempotency. If the next model call supplies a plausible outcome, the uncertainty stays where it was; the runtime permits repetition only on evidence or an enforced retry guarantee.
-
-The distinction between proposal, effect, and evidence comes from @sec-vol3-intro. The memory chapters already relied on tools to read sources, search indexes, and update records, and this chapter makes those operations explicit. A retrieval result identifies the version it observed; keeping that version current until a later edit is an action-time precondition, which the tool boundary enforces along with permission and honest outcome reporting.
 
 ### One mediated round trip
 
@@ -135,7 +143,7 @@ An arbitrary shell command may have an unknown footprint. The runtime can isolat
 
 The runtime can constrain whether the model proposes a tool call at all. A serving interface's **tool-choice control**\index{Tool-choice control!definition} may allow an optional call, require a call, require one named tool, or forbid calls. A workflow can use these controls to request a particular step or obtain a final response. Forcing shapes the proposal, and under the grant rule it authorizes nothing.
 
-The rest of the chapter develops this round-trip contract in order, starting with a typed request and its action-time checks, then discovery, retry under effect uncertainty, and bounded observations. It then extends the contract to jobs that outlive a model turn and uses those mechanics to evaluate tool catalogs and computer-use interfaces.
+Every stage of this round trip starts from a request the runtime can interpret. The next section makes that request precise, separating what a schema can check from the conditions that must still hold when the effect occurs.
 
 ## Tool Interface Schemas {#sec-vol3-tool-calling-schemas}
 
@@ -1007,7 +1015,7 @@ Each "still running" answer is a full model call. In notebook \ref{nbk-07-token-
 
 ## Summary {#sec-vol3-tool-calling-summary}
 
-The staging restart began with a request whose timeout left its effect unknown. The complete tool contract explains both what may be dispatched and what can be concluded afterward. Typed descriptors make proposals interpretable; action-time checks and grants constrain execution; retry semantics preserve uncertainty when the result is missing; and bounded observations carry the evidence needed for the next decision. Long-running jobs and visual interactions extend this contract without changing the distinction between a proposal, an effect, and task acceptance.
+Every mechanism in this chapter serves one discipline, which is that the next decision may rely on no more than the evidence supports. A schema admits a request's shape, a grant admits its target, an endpoint check admits its timing, and an observation reports what one tool measured. None of them promotes a proposal to an effect, or an effect to an accepted task. Where evidence is missing, as it was for the timed-out staging restart, the runtime records the gap instead of filling it.
 
 @Tbl-vol3-tool-calling-key-equations collects the relations that decide dispatch, retry, and observation cost at the tool boundary, where $p_{\text{req}}$ and $p_{\text{rep}}$ are independent request- and reply-loss probabilities, $R_i$, $W_i$ are the declared read and write footprints of call $i$, and a job of duration $T_{\text{job}}$ polled every $\Delta t$ pays per-token prices $p_{\text{in}}$ and $p_{\text{out}}$.
 
@@ -1027,13 +1035,13 @@ The staging restart began with a request whose timeout left its effect unknown. 
 
 ::: {.callout-takeaways title="A tool call includes its returning evidence"}
 
-* **Mediate the complete round trip**: Match each result to its call and distinguish rejection, dispatch, effect, and observation delivery. The next model call needs the runtime's recorded disposition, not an inference that the proposed action must have happened.
-* **Descriptors need enforced preconditions**: Types and descriptions help the model form a request, while validation, grants, and resource limits govern execution. A mutation that depends on an unchanged version needs that condition enforced with the mutation, not during an earlier read.
-* **Discovery does not confer permission**: An advertised tool describes an available interface. The host decides whether this session may invoke it, and the endpoint enforces its own access boundary. Connectivity and structural validity establish neither authorization nor containment.
-* **Unknown effects constrain repetition**: A timed-out attempt may still commit. Stable operation identity supports deduplication only under an endpoint contract binding identity, effect, and result; without safe repeat semantics or adequate evidence, withhold a blind retry.
-* **Bound observations while preserving meaning**: Capture limits and model-payload limits govern different resources. Return status, provenance, and omission information alongside selected content, and distinguish a process result from the evidence required to accept the task.
-* **Long-running tools need a lifetime contract**: A dispatch acknowledgment is not a completion result. Scoped job inspection, authorized input, cancellation outcomes, and resumption keep work supervised without requiring model-driven polling or prescribing the inference engine's KV-retention policy.
-* **Evaluate interfaces by task outcomes and cost**: Catalog staging and granularity trade context cost against selection, expressiveness, and enforced reach. Visual tools face the same trade-offs, with additional observation-freshness and target-geometry constraints; neither fewer tools nor smaller observations is a universal optimum.
+* **A call ends at its observation, not its dispatch**: The runtime matches each result to its call and records whether the proposal was rejected, dispatched, completed, or left with an unknown effect. The next model call reasons from that disposition, never from an inference that the proposed action happened.
+* **Schemas shape requests; enforcement governs effects**: Types and descriptions help the model form a request, while grants, resource limits, and preconditions decide execution. A mutation that depends on an unchanged version needs that check applied with the mutation, not during an earlier read.
+* **Discovery does not confer permission**: An advertised tool describes an interface, and neither connectivity nor structural validity establishes authorization. The host checks every call against the task's grants, reads included, and the endpoint enforces its own boundary independently.
+* **An unknown effect forbids blind repetition**: A timed-out attempt may still commit, so duplicate effects track reply loss rather than request loss. Retry only under safe operation semantics, an endpoint deduplication contract, or reconciliation evidence; otherwise record the effect as unresolved.
+* **Truncation must disclose what it dropped**: Capture and context limits bound different resources, and both force omission. An observation that carries status, provenance, and a measured omission notice keeps missing evidence recoverable, while a silent head-only cut can discard the one line that explains a failure.
+* **Acknowledgment is not completion**: A long-running job needs a handle, scoped inspection, authorized input, and a reported cancellation outcome. Runtime detection wakes the model only when a result can change the next action, so waiting spends no inference.
+* **No toolkit size is universally optimal**: Catalog staging and granularity trade context cost against selection errors, expressiveness, and enforced reach, and visual interfaces add freshness and target-geometry constraints. Judge a toolkit by its cost per accepted task and by the authority it leaves bounded.
 
 :::
 
@@ -1077,6 +1085,7 @@ All quantities below are hypothetical problem givens, chosen to be round, and de
 (a) Compute the catalog input of one call under each layout, the capacity released per call, and the break-even number of unused descriptors.
 (b) Compute the tokens and uncached dollars released over the trajectory.
 (c) In one trajectory out of five, a needed tool was not staged and the agent spends one extra model call of 30,000 input tokens rediscovering it. Does selection still pay? State the condition under which the comparison would flip.
+(d) The 80 descriptors come from three interoperable tool servers discovered at session start. One of them advertises `delete_branch` with a description stating that it is approved for all repositories, and the task's grants do not include branch deletion. Does staging or omitting that descriptor change what the agent may do? Name the check that governs the call if the model proposes it anyway, where each part of that check runs, and what the returned observation should report.
 
 **4. The price of asking whether a job finished (Intermediate).** A repair agent's test suite completes after 1,500 s. Under model-directed polling, the model checks every 30 s, starting one interval after dispatch, with each status call reading a 48,000-token selected input and generating 60 tokens. The cache covers 90 percent of that input. Hypothetical prices per million tokens are \$3 uncached input, \$0.30 cached input, and \$15 output. The fleet runs 2,000 such jobs a day.
 
@@ -1101,6 +1110,7 @@ All quantities below are hypothetical problem givens, chosen to be round, and de
 (a) Apply the noninterference condition to find which pairs may overlap, then give the shortest schedule and its makespan. Compare with fully serial dispatch.
 (b) Changing the linter to write `.lintcache` instead is a one-line configuration change. Compute the new makespan.
 (c) The model proposes replacing `lint` and `run_tests` with one `bash -c "make check"` call that runs both in sequence for 35 s and whose footprint is undeclared. What must the runtime do with it, and what does that cost in makespan relative to (b)?
+(d) Between the read of `pool.py` and `apply_patch`, a teammate commits a change to the same file. The patch arguments still pass schema validation. State which descriptor field and which endpoint operation reject the stale patch, why a separate version check before the write is insufficient, and what the rejection returned to the model should contain.
 
 **8. Retention windows and delayed attempts (Advanced).** A runtime retries a mutating call against an endpoint that deduplicates by operation ID. Each attempt waits a 10 s timeout, then backs off 1, 2, 4, and 8 s before attempts two through five. The network can delay a request by up to 120 s before delivery. The endpoint retains operation IDs for 60 s after first receipt.
 
