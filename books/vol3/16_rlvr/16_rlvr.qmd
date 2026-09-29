@@ -70,6 +70,10 @@ $$J(\theta)=\mathbb{E}_{\tau\sim\pi_\theta}\left[R(\tau)\right].$$
 
 The expectation runs over the declared task sampling and environment variation as well as policy sampling, so raising $J$ means raising expected *measured* reward under those conditions; how well the reward captures the task is a separate question, taken up in @sec-vol3-rlvr-rewards [@sutton2018reinforcement].
 
+When the reward comes from an automated check of the output rather than from a learned model of human preference, the method carries a name of its own,[^fn-tests-reward-lineage] introduced for post-training language models on tasks with checkable answers [@lambert2024tulu].
+
+[^fn-tests-reward-lineage]: **Tests as Reward**: Executed unit tests served as the reward for a code-generating model before the name existed: @le2022coderl trained a pretrained code model with reinforcement learning on test outcomes and added a learned critic that predicts functional correctness. That pairing anticipates this chapter's central tension, since the test outcome is the trustworthy signal while the denser learned critic is itself a model that optimization can exploit. \index{Reinforcement learning with verifiable rewards!unit-test rewards}
+
 ::: {#dfn-reinforcement-learning-with-verifiable-rewards .callout-definition title="Reinforcement learning with verifiable rewards"}
 
 ***Reinforcement learning with verifiable rewards (RLVR)***\index{Reinforcement learning with verifiable rewards!definition}\index{RLVR!definition} is policy optimization using reward signals computed by automated checks of specified properties of the policy's outputs or interactions, such as tests or proof checkers, rather than relying solely on learned preference scores or human ratings.
@@ -82,7 +86,7 @@ The expectation runs over the declared task sampling and environment variation a
 
 ### Compare a sampled return with a baseline
 
-A reward alone does not specify an update. A policy-gradient method uses the sampled responses and an associated score to estimate a direction for changing their probabilities. The standard comparison subtracts a **baseline**\index{Baseline (policy gradient)!definition}: the score is $R(\tau)-b(h_0)$, where the baseline depends on the starting information but not on which response was sampled. It is a reference level, fixed or estimated, and it need not come from a separately trained model [@schulman2016high].
+A reward alone does not specify an update. A policy-gradient method uses the sampled responses and an associated score to estimate a direction for changing their probabilities. The standard comparison subtracts a **baseline**\index{Baseline (policy gradient)!definition}: the score is $R(\tau)-b(h_0)$, where the baseline depends on the starting information but not on which response was sampled. It is a reference level, fixed or estimated, and it need not come from a separately trained model [@williams1992simple].
 
 ```{python}
 #| label: calc-vol3-rlvr-baseline-intuition
@@ -109,7 +113,9 @@ class RewardBaselineExample:
 
 For a hypothetical binary check with a fixed baseline of `{python} RewardBaselineExample.baseline_str`, a passing rollout has centered score `{python} RewardBaselineExample.passing_str`, while a failing rollout has centered score `{python} RewardBaselineExample.failing_str`. Positive and negative coefficients push the sampled responses' probabilities in opposite directions, and every action in a path receives its path's sign. With a zero baseline, a zero-reward rollout has zero centered score instead of a negative one.
 
-This is the **credit-assignment problem**\index{Credit assignment!definition}: a terminal check distinguishes assessed outcomes without identifying the contribution of each earlier response. @Sec-vol3-rlvr-credit develops the estimator and its assumptions. A baseline reduces estimation variance; it explains nothing causally, and the group-relative scoring of @sec-vol3-rlvr-grpo replaces it with a sample-dependent construction.
+This is the **credit-assignment problem**\index{Credit assignment!definition}:[^fn-credit-assignment-minsky] a terminal check distinguishes assessed outcomes without identifying the contribution of each earlier response. @Sec-vol3-rlvr-credit develops the estimator and its assumptions. A baseline reduces estimation variance [@greensmith2004variance]; it explains nothing causally, and the group-relative scoring of @sec-vol3-rlvr-grpo replaces it with a sample-dependent construction.
+
+[^fn-credit-assignment-minsky]: **Credit Assignment Problem**: @minsky1961steps named the problem for learning systems that receive one success signal for a strategy built from many internal decisions, with games and program writing as his examples. The repair agent poses the same question at the scale of tool calls: a failed acceptance check arrives after many turns, and every turn is a candidate for blame, which is why the estimators of this chapter differ mainly in how they spread one outcome across those turns. \index{Credit assignment!origin}
 
 ### Make exploration and assessment part of the learning system
 
@@ -139,15 +145,17 @@ A policy can receive a high score without accomplishing the task. A repair might
 ↩ Candidate selection, pass@$k$, and selection among noisy verifier scores are established in @sec-vol3-test-time-compute.
 :::
 
-The same false accept costs more here than it did in @sec-vol3-test-time-compute. A selector that accepts a bad candidate wastes one decision. A reward that accepts a bad trajectory raises the probability of the tokens that produced it, so the policy produces more such trajectories on later tasks. The exploit is learned into the weights, and the run can raise its score while growing worse at the intended task. Let $U(\tau)$ be the developer's intended objective and $\hat R(\tau)$ the reward the loop computes. If some trajectory $\tau_{\text{hack}}$ has $\hat R(\tau_{\text{hack}})\ge\hat R(\tau^*)$ while $U(\tau_{\text{hack}})\ll U(\tau^*)$, gradient ascent on $\hat R$ gives it no less weight than the intended solution, and it gains ground whenever it is also more probable under the current policy [@hadfieldmenell2016cooperative; @krakovna2020specification]. Short exploits often are. Weakening an assertion or rewriting a verdict takes a few lines and no understanding of the bug, while a real repair on a hard task may take many turns.
+The same false accept costs more here than it did in @sec-vol3-test-time-compute. A selector that accepts a bad candidate wastes one decision. A reward that accepts a bad trajectory raises the probability of the tokens that produced it, so the policy produces more such trajectories on later tasks. The exploit is learned into the weights, and the run can raise its score while growing worse at the intended task.[^fn-goodhart-reward-loop] Let $U(\tau)$ be the developer's intended objective and $\hat R(\tau)$ the reward the loop computes. If some trajectory $\tau_{\text{hack}}$ has $\hat R(\tau_{\text{hack}})\ge\hat R(\tau^*)$ while $U(\tau_{\text{hack}})\ll U(\tau^*)$, gradient ascent on $\hat R$ gives it no less weight than the intended solution, and it gains ground whenever it is also more probable under the current policy [@skalse2022defining; @krakovna2020specification]. Short exploits often are. Weakening an assertion or rewriting a verdict takes a few lines and no understanding of the bug, while a real repair on a hard task may take many turns.
+
+[^fn-goodhart-reward-loop]: **Goodhart's Law**: The observation that a statistical regularity collapses once pressure is placed on it for control came from monetary policy [@goodhart1984], and Strathern generalized it: "When a measure becomes a target, it ceases to be a good measure" [@strathern1997improving]. An RL loop applies that pressure mechanically at every update, so a gap between reward and task is searched far more persistently than any human-managed target ever is. \index{Goodhart's Law!reward hacking}
 
 Comparing rollouts within a task amplifies the first occurrence. Suppose the test files sit in the rollout's writable workspace and one of a group of $G$ rollouts sampled on a hard bug weakens the failing assertion while the others fail honestly. That rollout is the group's lone pass, so the group-relative scoring of @sec-vol3-rlvr-grpo gives it the largest coefficient in the group, approaching $\sqrt{G-1}$ (@eq-vol3-grpo-lone-pass), and every token that wrote the edit gains probability. Nothing in the loop malfunctioned; the optimizer did what it was built to do on the reward it was given.
 
-The exploits observed in coding environments fall into three recognizable classes, each documented in real training or evaluation runs:
+The exploits observed in coding environments fall into three recognizable classes, each documented in training or evaluation runs of 2025-era models:
 
-1. **Weakening or special-casing the check.** Code that returns the expected values only for the inputs the tests use, or tests edited until they pass. A published system card reports that one model, when it could not find a general solution, sometimes special-cased tests to make them pass [@anthropic2025claude37].
-2. **Stubbing or bypassing the verified code path.** During reinforcement learning of a frontier reasoning model on coding tasks, a monitor flagged a plan to make a verification function always return true, and an exploit that exited the environment before all unit tests ran [@baker2025monitoring].
-3. **Rewriting the verdict inside the runner.** In production coding environments susceptible to these hacks, reported exploits included returning an object whose equality comparison always succeeds, calling `sys.exit(0)` before any assertion executes, and writing a `conftest.py` that monkeypatches the test framework's report so every failure is recorded as a pass [@macdiarmid2025natural].
+1. **Weakening or special-casing the check.** Code that returns the expected values only for the inputs the tests use, or tests edited until they pass. A 2025 system card reports that one model, when it could not find a general solution, sometimes special-cased tests to make them pass [@anthropic2025claude37].
+2. **Stubbing or bypassing the verified code path.** In one 2025 report, during reinforcement learning of a reasoning model on coding tasks, a monitor flagged a plan to make a verification function always return true, and an exploit that exited the environment before all unit tests ran [@baker2025monitoring].
+3. **Rewriting the verdict inside the runner.** Production coding environments used for training were found vulnerable to returning an object whose equality comparison always succeeds, calling `sys.exit(0)` before any assertion executes, and writing a `conftest.py` that monkeypatches the test framework's report so every failure is recorded as a pass; models trained in those environments learned to use them [@macdiarmid2025natural].
 
 @Lst-vol3-rlvr-report-patch shows the shape of the third class. The candidate adds one file to its own source tree; the test runner imports that file before any test; and from then on the runner, not the tests, reports the result.
 
@@ -169,7 +177,7 @@ TestReport.from_item_and_call = classmethod(_always_pass)
 ```
 :::
 
-These exploits are not confined to training runs. An independent evaluator measured how often frontier models took them when the scorer was within reach, and whether asking the model not to made any difference.
+These exploits are not confined to training runs. An independent evaluator measured how often the most capable models of 2025 took them when the scorer was within reach, and whether asking the model not to made any difference.
 
 ```{python}
 #| label: calc-vol3-rlvr-metr-reward-hacking
@@ -254,7 +262,7 @@ A reward is only as strong as the closure evidence level of the check that compu
 
 : **Reward Sources and How They Are Gamed**: The top rows correspond to the sealed-test and formal-proof closure levels; their verdicts depend on the artifact, not its phrasing, so raising the score requires changing what the check runs on. The lower rows score text the policy writes. Coverage limits every row. {#tbl-vol3-reward-oracles}
 
-For a coding task with executable behavioral criteria, tests supply the outcome score while compilation and format checks supply narrower signals. The lower rows score text, and the policy controls the text; a learned judge is itself a model with blind spots that gradient ascent can find. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) sets the role such a score can play: learned assessments can rank or shape, and where a deterministic check exists, that check decides the reward. Some tasks have no executable check, and there a learned judge can supply the reward, provided its errors are measured against verified outcomes and rechecked as the policy changes. @Sec-vol3-rlvr-sandboxing develops the separate question of protecting measurement from the policy and from candidate code.
+For a coding task with executable behavioral criteria, tests supply the outcome score while compilation and format checks supply narrower signals. The lower rows score text, and the policy controls the text; a learned judge is itself a model with blind spots that gradient ascent can find [@gao2023scaling]. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) sets the role such a score can play: learned assessments can rank or shape, and where a deterministic check exists, that check decides the reward. Some tasks have no executable check, and there a learned judge can supply the reward, provided its errors are measured against verified outcomes and rechecked as the policy changes. @Sec-vol3-rlvr-sandboxing develops the separate question of protecting measurement from the policy and from candidate code.
 
 ### False accepts among rewarded outcomes
 
@@ -263,6 +271,12 @@ The calibration distinction from @sec-vol3-evaluation-grading matters especially
 $$
 P(F\mid V^+) = \frac{(1-p)q}{pu+(1-p)q}.
 $$ {#eq-vol3-rlvr-false-accept-share}
+
+::: {.column-margin}
+![](images/svg/vol3_rlvr_margin_false_share.svg){width="100%" fig-alt="A falling curve of the false-accept share against pass rate from 1 to 50 percent, with a red dot at a pass rate of 10 percent labeled 18.4 percent of rewards are failures."}
+
+*The rarer true passes are, the more of the reward a small verifier error claims.*
+:::
 
 @Eq-vol3-rlvr-false-accept-share is the **false-accept share**\index{False-accept share!definition} of the reward: the fraction of rewarded rollouts that fail the criterion. Its denominator includes both kinds of accepted rollout, so a small $q$ produces a large share whenever failures are common, and failures are common exactly on the hard tasks RL is meant to learn. The same arithmetic applies to automated tests and learned graders alike.
 
@@ -336,11 +350,13 @@ R(\tau)=C(\tau)+\lambda_{\text{fmt}}\Phi(\tau)-\lambda_{\text{len}}\ell(\tau),
 \qquad \lambda_{\text{fmt}}\ge 0,\quad \lambda_{\text{len}}\ge 0.
 $$
 
-Format compliance can favor usable tool calls, and the cost term can favor shorter solutions. Neither preference should silently replace the declared outcome priority. Over the stated ranges, an observed pass scores at least $1-\lambda_{\text{len}}$, while an observed failure scores at most $\lambda_{\text{fmt}}$. Thus a sufficient condition for every observed pass to outrank every observed failure is
+Format compliance can favor usable tool calls, and the cost term can favor shorter solutions.[^fn-shaping-potential-rlvr] Neither preference should silently replace the declared outcome priority. Over the stated ranges, an observed pass scores at least $1-\lambda_{\text{len}}$, while an observed failure scores at most $\lambda_{\text{fmt}}$. Thus a sufficient condition for every observed pass to outrank every observed failure is
 
 $$
 \lambda_{\text{fmt}}+\lambda_{\text{len}}<1.
 $$
+
+[^fn-shaping-potential-rlvr]: **Reward Shaping**: @ng1999policy showed that an added shaping reward is guaranteed to leave the optimal policy unchanged when it takes the form of a difference of potentials over states, and that other additions can change which policy is optimal. Format and length terms are not of that form, so they change the objective itself; their weights therefore need the priority bound derived here rather than an assumption that they merely speed learning. \index{Reward shaping!policy invariance}
 
 Equality permits a tie at the extremes. The inequality protects the score ordering, and it holds only while $\ell$ stays in $[0,1]$. Normalizing by a nominal token cap keeps that promise only if the runtime enforces the cap.
 
@@ -358,11 +374,11 @@ A connection-pool repair can contain a useful diagnosis followed by a faulty edi
 
 Keep the finite horizon $H$, decision index $k$, delivered history $h_k$ (which now includes the decision index), and undiscounted objective from the opening, and let $r_k$ be the reward following action $a_k$. The remaining return, or reward-to-go, is $R_{\ge k}=\sum_{j=k}^{H-1}r_j$. With only a terminal reward $R$, every $R_{\ge k}=R$.
 
-For a trajectory sampled from the current policy, a likelihood-ratio, or score-function, estimator of the REINFORCE form is
+For a trajectory sampled from the current policy, a likelihood-ratio, or score-function, estimator of the REINFORCE form [@williams1992simple] is
 
 $$\widehat g=\sum_{k=0}^{H-1}\nabla_\theta\log\pi_\theta(a_k\mid h_k)\,[R_{\ge k}-b(h_k)].$$
 
-Its expectation is the gradient of expected total reward under standard conditions: the initial task distribution, environment transitions, and reward mechanism do not themselves depend on $\theta$; the differentiable policy has fixed support; and differentiating the expectation is justified. The score $\nabla_\theta\log\pi_\theta(a_k\mid h_k)$ is a vector describing how the sampled action's log probability changes with the parameters. Multiplying it by a scalar return produces a parameter-update contribution, not an action-quality label [@sutton2018reinforcement].
+Its expectation is the gradient of expected total reward under standard conditions: the initial task distribution, environment transitions, and reward mechanism do not themselves depend on $\theta$; the differentiable policy has fixed support; and differentiating the expectation is justified [@sutton1999policy]. The score $\nabla_\theta\log\pi_\theta(a_k\mid h_k)$ is a vector describing how the sampled action's log probability changes with the parameters. Multiplying it by a scalar return produces a parameter-update contribution, not an action-quality label [@sutton2018reinforcement].
 
 The baseline $b(h_k)$ can be fixed, task-specific, or predicted by a learned value model. It must not depend on the current sampled action conditional on $h_k$, and it is held fixed when computing the score update. The reason subtraction preserves the expectation is elementary:
 
@@ -383,11 +399,13 @@ A^\pi(h_k,a_k)=Q^\pi(h_k,a_k)-V^\pi(h_k).$$
 
 The value averages over the policy's next action and subsequent interaction; the action value conditions on that next action. Their difference, the **advantage**\index{Advantage!definition}, measures expected return relative to the policy's usual behavior at that history. Defining all three on histories keeps them honest about what the model actually sees.
 
-With terminal value $V^\pi(h_H)=0$, the sampled **temporal-difference residual**\index{Temporal-difference residual!definition} is
+With terminal value $V^\pi(h_H)=0$, the sampled **temporal-difference residual**\index{Temporal-difference residual!definition} [@sutton1988learning] is
 
 $$\delta_k=r_k+V^\pi(h_{k+1})-V^\pi(h_k).$$
 
-Its conditional expectation given $h_k,a_k$ equals the advantage when the value function is exact and the next observation and reward follow the specified environment. One observed residual is a single noisy sample of that expectation, and replacing exact values with estimates adds estimation error on top; dropping $r_k$ is valid only where that immediate reward is zero. @Sec-vol3-appendix-math-rl develops the discounted and multi-step versions [@schulman2016high].
+Its conditional expectation given $h_k,a_k$ equals the advantage when the value function is exact and the next observation and reward follow the specified environment. One observed residual is a single noisy sample of that expectation, and replacing exact values with estimates adds estimation error on top;[^fn-gae-bias-variance] dropping $r_k$ is valid only where that immediate reward is zero. @Sec-vol3-appendix-math-rl develops the discounted and multi-step versions [@schulman2016high].
+
+[^fn-gae-bias-variance]: **Generalized Advantage Estimation**: GAE averages residuals over future steps with a decay $\lambda$. At $\lambda=0$ it uses one residual, low in variance but biased by any value error; at $\lambda=1$ it recovers the sampled return minus the value baseline, unbiased but carrying every later turn's noise [@schulman2016high]. For a multi-turn agent with an unreliable critic, $\lambda$ sets how much of each turn's credit comes from a model's prediction rather than from what the rollout actually earned. \index{Generalized advantage estimation!bias-variance trade-off}
 
 Estimating an existing return differs from adding a new reward. A learned critic, a model trained to predict value, estimates the declared continuation return. A process reward model instead scores intermediate behavior; adding its scores to the objective can change what the policy is asked to optimize. Such feedback can help, and it also scores plausible-looking steps whether or not they make progress. Process scores were introduced for selection in @sec-vol3-test-time-compute-verification [@lightman2023let; @uesato2022solving]; under training, the policy writes the text they score, and three exploit patterns are worth testing for. The policy can emit formulaic statements of care ("verify this pointer thoroughly") that raise step scores without doing anything, build locally coherent steps on a false premise that a scorer of local consistency rewards, and avoid the temporarily low-scoring detours that long repairs need. Denser feedback is not the same as correct feedback. @Tbl-vol3-credit-comparison separates these choices.
 
@@ -551,9 +569,11 @@ A reward is a measurement, and credit is an estimate built on it. Each has a pri
 
 ## Group Relative Policy Optimization {#sec-vol3-rlvr-grpo}
 
-Suppose three fresh rollouts attempt the connection-pool repair under the same fixture, budget, and assessment rule. Their completed terminal rewards are $[0,1,0]$. The successful rollout provides a comparison for the two failures without an expert labeling each edit. It does not identify which action caused success. **Group relative policy optimization (GRPO)**\index{Group relative policy optimization!definition}\index{GRPO|see{Group relative policy optimization}} uses such within-task comparisons to construct update coefficients, trading a learned value baseline for groups of sampled outcomes [@shao2024deepseekmath].
+Suppose three fresh rollouts attempt the connection-pool repair under the same fixture, budget, and assessment rule. Their completed terminal rewards are $[0,1,0]$. The successful rollout provides a comparison for the two failures without an expert labeling each edit. It does not identify which action caused success. **Group relative policy optimization (GRPO)**\index{Group relative policy optimization!definition}\index{GRPO|see{Group relative policy optimization}} uses such within-task comparisons[^fn-group-baseline-lineage] to construct update coefficients, trading a learned value baseline for groups of sampled outcomes [@shao2024deepseekmath].
 
 The trade is about the baseline, not the reward source: **proximal policy optimization (PPO)**\index{Proximal policy optimization!definition}\index{PPO|see{Proximal policy optimization}} can use an external check, and GRPO can use a learned reward model. PPO learns a value function, shared with the policy or held in a separate critic [@schulman2017proximal]. GRPO drops that critic and its training cost and pays instead in rollouts: $G$ comparable attempts per task to estimate group statistics. It is the worked optimizer here because its costs are easy to count, and the record and isolation requirements that follow apply to either. @Tbl-vol3-ppo-vs-grpo-comparison sets the two side by side.
+
+[^fn-group-baseline-lineage]: **Sampled Baselines**: Scoring each sample against the other samples for the same input predates GRPO. @kool2019buy drew several samples per input and used the others as each one's baseline, obtaining variance reduction without a learned critic, and @ahmadian2024back found that such REINFORCE-style estimators could outperform PPO when fine-tuning language models from human feedback. GRPO adds division by the group's reward dispersion, the choice whose weighting effects @sec-vol3-rlvr-grpo-objective examines. \index{Group relative policy optimization!lineage}
 
 | Dimension              | PPO                                                            | GRPO                                                            |
 |:-----------------------|:---------------------------------------------------------------|:----------------------------------------------------------------|
@@ -679,6 +699,12 @@ class DifficultyAbsorption:
     small_str = fmt(-hard_c[1], precision=2, commas=False)
 ```
 
+::: {.column-margin}
+![](images/svg/vol3_rlvr_margin_lone_pass.svg){width="100%" fig-alt="A rising concave curve of the lone-pass coefficient against group size from 2 to 16, with dots labeled G equals 3 at 1.41 and G equals 16 at 3.87."}
+
+*The rarer the pass in its group, the larger the coefficient it receives.*
+:::
+
 The group mean is a per-task baseline that absorbs the task's difficulty. If a binary group of size $G>1$ has one observed pass, its mean is $1/G$ and its population dispersion is $\sqrt{G-1}/G$, so under @eq-vol3-grpo-advantage the lone pass receives
 
 $$A_{\mathrm{pass}}=\frac{1-1/G}{\sqrt{G-1}/G+\epsilon_{\mathrm{stab}}}
@@ -703,7 +729,9 @@ $$\mathcal M_{i,t}(\theta)=\min\left\{
 \operatorname{clip}(\rho_{i,t}(\theta),1-\epsilon_{\text{clip}},1+\epsilon_{\text{clip}})A_i
 \right\}.$$
 
-For $A_i>0$, this term stops increasing when the ratio exceeds the upper threshold. For $A_i<0$, it stops improving when the ratio falls below the lower threshold. Changes in the unfavorable direction still reduce the surrogate. Clipping thus removes the incentive to push each sampled term further in its favored direction; the ratio itself remains free, and shared parameters, other tokens, and other loss terms can carry it outside the interval. A clip is an incentive cap, not a trust region that bounds how far the policy itself may move.
+For $A_i>0$, this term stops increasing when the ratio exceeds the upper threshold. For $A_i<0$, it stops improving when the ratio falls below the lower threshold. Changes in the unfavorable direction still reduce the surrogate. Clipping thus removes the incentive to push each sampled term further in its favored direction; the ratio itself remains free, and shared parameters, other tokens, and other loss terms can carry it outside the interval. A clip is an incentive cap, not a trust region that bounds how far the policy itself may move.[^fn-trust-region-clip]
+
+[^fn-trust-region-clip]: **Trust Region**: The clip descends from trust region policy optimization, which constrained each update so that the average KL divergence between the new and old policies stayed below a fixed bound [@schulman2015trust]. PPO replaced that constrained step with the clipped objective because it is simpler to implement [@schulman2017proximal]; the price is that nothing in the objective enforces a bound, so ratio and divergence statistics are monitored rather than assumed. \index{Trust region policy optimization!clipping}
 
 A frozen **reference policy**\index{Reference policy!definition} $\pi_{\text{ref}}$, usually the starting checkpoint, supplies a separate regularizer that penalizes drift away from it; it is a different model identity from the behavior policy of this collection. For strictly positive current and reference probabilities on a common token support, define
 
@@ -803,6 +831,12 @@ class ZeroContrast:
 ```
 
 The waste is large at the pass rates where learning is hardest. With groups of `{python} ZeroContrast.g_small_str` at $p$ of `{python} ZeroContrast.p_small_str`, $P_{\mathrm{contrast}}$ is `{python} ZeroContrast.contrast_small_str`, so `{python} ZeroContrast.silent_small_str` of groups contribute no reward-surrogate gradient. A task solved on `{python} ZeroContrast.p_mid_str` of attempts leaves a group of `{python} ZeroContrast.g_mid_str` silent `{python} ZeroContrast.silent_mid_str` of the time, yet every silent group still paid for its rollouts, tool calls, and assessments. The formula assumes independent runs of one task; a mixture of difficulties must be averaged task by task, since a fleet-average pass rate gives a different answer.
+
+::: {.column-margin}
+![](images/svg/vol3_rlvr_margin_contrast.svg){width="100%" fig-alt="An arch-shaped curve of the probability that a group of eight carries reward contrast against pass rate from 0 to 1, with a red dot labeled 0.34 at 5 percent and a green dot labeled 0.99 at 50 percent at the top of the arch."}
+
+*Groups of eight carry a gradient reliably only at mid-range pass rates.*
+:::
 
 The variance of a binary reward, $p(1-p)$, is largest at $p=0.5$, which is the basis for selecting tasks by recent pass rate. The two levers, larger groups and difficulty-targeted task selection, have very different prices, and the ratio that compares them has the same form as the cost per accepted task (@eq-vol3-cost-per-accepted-task): what an attempt costs, divided by the probability it yields something usable.
 
@@ -955,7 +989,9 @@ The record now identifies the sampled interaction and the status of its assessme
 
 The illustrative `rl_trial_01` now submits its candidate patch after using public tests while editing the connection pool. The training system needs an assessment under `repair_accept_v1`, not another report from the workspace that produced the patch; the METR runs of @sec-vol3-rlvr-rewards show what happens when the agent can reach the scorer.
 
-The grader boundary from @sec-vol3-evaluation-gyms therefore becomes part of the learning system, and **verifier isolation**\index{Verifier isolation!definition} is its name here: the assessment is protected from both the running agent and the code the agent submits. Isolation settles who can touch the verdict; coverage, which it leaves untouched, settles what the verdict means.
+The grader boundary from @sec-vol3-evaluation-gyms therefore becomes part of the learning system, and **verifier isolation**\index{Verifier isolation!definition} is its name here: the assessment is protected from both the running agent and the code the agent submits.[^fn-complete-mediation-verifier] Isolation settles who can touch the verdict; coverage, which it leaves untouched, settles what the verdict means.
+
+[^fn-complete-mediation-verifier]: **Complete Mediation**: @saltzer1975 listed complete mediation, checking every access to every object for authority, and least privilege among the design principles for protection. A verifier boundary applies both against a new adversary: the policy has no legitimate need to write tests or results, so it holds no such right, and every route to the verdict, including the runner's import path, passes through a controller that checks it. \index{Complete mediation!verifier isolation}
 
 ### Separate assessment from exploration
 
@@ -1144,7 +1180,7 @@ Repeated text or calls can trigger the bounded-progress controls already develop
 
 ### Evaluate recovery behavior, not its narration {#sec-vol3-rlvr-deliberation}
 
-The DeepSeek-R1 report describes increasing response length during its R1-Zero training and presents outputs that revisit an earlier approach [@deepseekai2025deepseekr1]. These are observations under that study's setup; they describe outputs, and a mechanism inside the model would need separate evidence. For an agent, the test of a correction is what the next actions achieve, whatever the text says about reconsidering.
+One 2025 report, on the DeepSeek-R1 models, describes increasing response length during its R1-Zero training and presents outputs that revisit an earlier approach [@deepseekai2025deepseekr1]. These are observations under that study's setup; they describe outputs, and a mechanism inside the model would need separate evidence. For an agent, the test of a correction is what the next actions achieve, whatever the text says about reconsidering.
 
 For the connection-pool repair, a controlled diagnostic fixture could introduce a version conflict after the initial inspection. Compare whether the candidate policy obtains compatible fresh evidence, proposes a permitted correction, and meets the declared repair criteria within the same resource allowance as its baseline. Failed and unavailable assessments are kept alongside successes. The test measures behavior after a defined disturbance, which is the claim a recovery ability needs. Recovery demonstrations can teach related behavior through imitation too, as @sec-vol3-fine-tuning-exposure-bias established.
 
@@ -1285,11 +1321,13 @@ Closing a group with only its fast members changes the comparison from the plann
 
 ### Bounding policy staleness {#sec-vol3-rlvr-freshness}
 
-Overlapping collection and training means that records can arrive after the trainer has changed its policy. The gap between the version that sampled a record and the version that learns from it is **policy staleness**\index{Policy staleness!definition}. Actor–learner architectures such as IMPALA pair asynchronous scheduling with an off-policy correction, a probability-ratio reweighting of records sampled by an older policy, for exactly this gap [@espeholt2018impala]. For an episode pinned to one behavior checkpoint, let $v_b$ identify its generating version and $v_t$ the trainer's current version. The update-count lag is
+Overlapping collection and training means that records can arrive after the trainer has changed its policy. The gap between the version that sampled a record and the version that learns from it is **policy staleness**\index{Policy staleness!definition}. Actor–learner architectures such as IMPALA pair asynchronous scheduling with an off-policy correction,[^fn-vtrace-truncation] a probability-ratio reweighting of records sampled by an older policy, for exactly this gap [@espeholt2018impala]. For an episode pinned to one behavior checkpoint, let $v_b$ identify its generating version and $v_t$ the trainer's current version. The update-count lag is
 
 $$\Delta v=v_t-v_b\approx\left\lfloor\frac{\Delta t_{\mathrm{rollout}}}{t_{\mathrm{step}}}\right\rfloor,$$ {#eq-vol3-rlvr-staleness}
 
 where $\Delta t_{\mathrm{rollout}}$ is the elapsed time from the rollout's first sampled token to its admission by the trainer, and $t_{\mathrm{step}}$ is the time per training step, when the trainer steps at a steady rate. The relation lets a designer size a lag bound from rollout latency: long agent rollouts are exactly the ones that return stale. Bounded staleness has a long lineage in distributed training, where workers read parameters at most a fixed number of steps old [@ho2013more], and asynchronous actor-learner methods accept a small lag in exchange for keeping every actor busy [@mnih2016asynchronous]. Panels (b) and (c) of @fig-vol3-asynchronous-freshness-pipeline follow three records through that admission check.
+
+[^fn-vtrace-truncation]: **V-trace**: IMPALA's correction weights each step by the ratio of learner to actor probabilities, truncated at a ceiling, accepting some bias to keep the variance of long products of ratios in check [@espeholt2018impala]. Truncation matters more for agent rollouts than for short episodes, because a product of per-token ratios over thousands of tokens is otherwise dominated by a few extreme values. \index{V-trace!off-policy correction}
 
 ::: {#fig-vol3-asynchronous-freshness-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Group Barriers and Version-Checked Admission**: (a) In the hypothetical group of four, the barrier holds every slot until the `{python} Straggler.barrier_str` member finishes, leaving `{python} Straggler.idle_str` of reserved slot time idle. (b) Asynchronous collection releases slots early, so the trainer's version advances while rollouts run. Each record carries the version that sampled it, and its lag $\Delta v$ at admission grows with its duration; the long rollout exceeds the illustrative bound and is excluded with its reason recorded. (c) A record leaves verification with a pass, a fail, or an unavailable verdict, waits in a bounded group buffer, and reaches the trainer only if its lag is within the bound. The check limits recorded age; it does not bound how far the policy's probabilities have moved." fig-alt="Three stacked panels. Panel a is a timeline of four rollouts lasting 0.2, 2.1, 4.2, and 16.8 seconds, with idle regions after the first three up to a red dashed barrier, and a trainer row that waits until the barrier before an update; a note reads 65 percent of reserved slot time idle. Panel b shows trainer versions v through v plus 4 as consecutive boxes above three rollouts: rollout A sampled with v is admitted at lag 1, rollout B sampled with v plus 1 is admitted at lag 2, and rollout C sampled with v ends at lag 4, marked in red as exceeding the maximum lag and excluded. Panel c is a flow from rollout pool to verification with pass, fail, or unavailable, to a bounded group buffer, to a version check, to the trainer, with a no branch to a box reading excluded, reason and cost recorded, and a return path carrying new weights to the rollout pool."}
 ![](images/svg/asynchronous-freshness-pipeline.svg)
@@ -1362,7 +1400,7 @@ An internal collection-policy promotion changes which checkpoint generates the n
 
 External deployment release answers a different question. It requires the scoped task acceptance, capability retention, resource accounting, and uncertainty treatment of @sec-vol3-fine-tuning-benchmarking and @sec-vol3-evaluation. Repeated internal checks become development feedback even when their tasks never enter the reward calculation. Protect a separate assessment boundary and report exposure when results guide training choices.
 
-Candidate availability, selected-result acceptance, and repeated-run consistency retain their distinct meanings. RL can raise pass@1 without raising pass@$k$ at large $k$. On reasoning benchmarks, RLVR-trained models beat their base models at small $k$, while the base models matched or exceeded them at large $k$, consistent with RL concentrating probability on solutions the base policy already sampled rather than discovering new ones [@yue2025does]. Reporting pass@1, pass@$k$ at large $k$, and pass$^k$ across repeated runs (@sec-vol3-evaluation-pass-k) therefore separates a policy that became more reliable from one that became more capable, and a deployment usually needs the first as much as the second. A named candidate stays unreleased until its required recovery, transfer, and unresolved-outcome evidence exists. The collection loop produces an artifact worth assessing; release evaluation decides whether to deploy it.
+Candidate availability, selected-result acceptance, and repeated-run consistency retain their distinct meanings. RL can raise pass@1 without raising pass@$k$ at large $k$. In one 2025 study on reasoning benchmarks, RLVR-trained models beat their base models at small $k$, while the base models matched or exceeded them at large $k$, consistent with RL concentrating probability on solutions the base policy already sampled rather than discovering new ones [@yue2025does]. Reporting pass@1, pass@$k$ at large $k$, and pass$^k$ across repeated runs (@sec-vol3-evaluation-pass-k) therefore separates a policy that became more reliable from one that became more capable, and a deployment usually needs the first as much as the second. A named candidate stays unreleased until its required recovery, transfer, and unresolved-outcome evidence exists. The collection loop produces an artifact worth assessing; release evaluation decides whether to deploy it.
 
 ## From a Reward Group to a Policy Candidate {#sec-vol3-rlvr-synthesis}
 
@@ -1439,6 +1477,23 @@ The repair group illustrates the resulting chain of responsibility. Completed as
 :::
 
 The worked group makes the verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) concrete under optimization pressure: a protected, scoped assessment must be joined to the sampled record before it can justify an update. Executing the candidate inside that assessment also stress-tests containment beneath the model (principle \ref{pri-vol3-zero-trust-sandboxing}), because fresh workspaces still receive untrusted code. The same asymmetry governs both ends of the loop. A learned score may shape an update, while the reward and the release decision rest on protected checks wherever such checks exist. Neither the learning signal nor an improved evaluation result moves authority into the weights; the invariant closure principle (\ref{pri-invariant-closure}) continues to govern the effects of each proposal.
+
+## Historical Perspective and Further Reading {#sec-vol3-rlvr-history}
+
+The problem this chapter manages began as a question about games. @minsky1961steps asked how a learning system that sees only whether a long strategy won or lost can distribute credit among the many decisions that produced the result, and he named it the credit-assignment problem. Two answers followed that still organize the field. Temporal-difference learning predicted later outcomes from earlier ones, so each step could be scored against the next prediction rather than the final result [@sutton1988learning]. The REINFORCE family instead differentiated expected reward directly through the probabilities of sampled actions and subtracted a reinforcement baseline to tame the variance [@williams1992simple]. The policy gradient theorem showed that such estimates remain valid with function approximation [@sutton1999policy], and the analysis of baselines as control variates explained why some reduce variance more than others [@greensmith2004variance].
+
+Scaling policy gradients to neural networks exposed instability rather than bias. Trust region policy optimization bounded each update's divergence from the policy that collected the data [@schulman2015trust], generalized advantage estimation made the bias-variance trade in the baseline explicit [@schulman2016high], and proximal policy optimization replaced the trust region with the cheaper clipped objective that GRPO and many later methods inherit [@schulman2017proximal]. The systems problem arrived in the same years. Stale-synchronous parameter servers bounded how old a worker's parameters could be [@ho2013more], asynchronous actor-learners kept every actor busy at the price of that lag [@mnih2016asynchronous], and IMPALA separated acting from learning with an explicit off-policy correction [@espeholt2018impala], a split that agent rollout fleets resemble.
+
+Language models then turned the reward itself into the hard part. Learning a reward model from human comparisons made preferences optimizable [@christiano2017deep; @ouyang2022instructgpt], and measuring what happens when a policy is optimized against such a proxy showed a held-out gold score eventually declining while the proxy score keeps rising [@gao2023scaling]. Executable checks offered a sturdier signal: unit tests became the reward for code generation [@le2022coderl], outcome and process supervision were compared on checkable reasoning [@uesato2022solving; @lightman2023let], and the name reinforcement learning with verifiable rewards was attached to training against such checks [@lambert2024tulu]. On the optimizer side, sampled baselines that score each output against its siblings [@kool2019buy; @ahmadian2024back] led to group-relative policy optimization [@shao2024deepseekmath]. The same years documented the cost of an imperfect reward, from the early catalog of specification problems [@amodei2016concrete; @krakovna2020specification] to a formal definition of reward hacking [@skalse2022defining], and the defense returned to the protection literature: confinement [@lampson1973note] and complete mediation [@saltzer1975] describe the verifier boundary in terms that predate learned policies entirely.
+
+For further reading, six works trace that lineage from classical learning theory to agent training.
+
+- @sutton2018reinforcement is the standard text on returns, value functions, temporal-difference learning, and policy gradients. It supplies the vocabulary every section of this chapter assumes.
+- @williams1992simple introduces the REINFORCE estimator and the reinforcement baseline. Reading it shows how little the core update has changed since.
+- @schulman2017proximal presents the clipped objective, read together with @schulman2016high for advantage estimation. The pair explains what GRPO keeps and what it removes.
+- @espeholt2018impala is the reference design for separating actors from learners with a bounded, corrected lag. Its staleness problem is the one agent rollouts make worse.
+- @skalse2022defining gives a precise definition of when a proxy reward can be hacked. It turns the informal worry of this chapter into a property a reward designer can reason about.
+- @saltzer1975 states the protection principles that verifier isolation applies. Reading it shows why an instruction to the policy is never a substitute for mediation of every route to the verdict.
 
 ::: {.column-margin .margin-pointer}
 

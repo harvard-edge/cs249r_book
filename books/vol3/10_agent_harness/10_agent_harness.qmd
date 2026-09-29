@@ -58,7 +58,7 @@ A trajectory can obey every tool contract and still spend its allowance without 
 
 The connection-pool repair (\ref{lhs-vol3-repair-agent}) has produced candidate `r18`, and a test job is still running against a fixed snapshot of that revision. An operator requests a pause for inspection. Meanwhile, an independent interactive task is waiting for service, and the repair trajectory is approaching its budget. The test job can finish correctly and the next model reply can be well formed, yet neither event answers whether the repair should continue now. That decision depends on the operator's request, current task state, shared capacity, and the allowance left after accounting for work already started.
 
-A deliberately minimal implementation calls the model, dispatches its proposed tools, appends their replies, and repeats until the model ends its turn. Without separately accessible control state and admission checks, it has nowhere to apply the pause while the test runs or to withhold another paid call. A loop or coroutine can implement a harness; supervision adds explicit state and rules that every continuation path respects. @Fig-vol3-controlplane-arch sets that loop beside the same loop running inside a harness.
+A deliberately minimal implementation calls the model, dispatches its proposed tools, appends their replies, and repeats until the model ends its turn, the interleaving of reasoning and actions that ReAct established for language models [@yao2023react]. Without separately accessible control state and admission checks, it has nowhere to apply the pause while the test runs or to withhold another paid call. A loop or coroutine can implement a harness; supervision adds explicit state and rules that every continuation path respects. @Fig-vol3-controlplane-arch sets that loop beside the same loop running inside a harness.
 
 ::: {#fig-vol3-controlplane-arch fig-env="figure" fig-pos="htb" fig-cap="**The Prototype Loop vs. the Agent Harness**: Panel (a) runs the model's proposed call directly and keeps all state in the message list, so an outside request has nowhere to land, nothing bounds cumulative spend, and calls that policy would gate run at once. Panel (b) wraps the same loop in a harness whose trajectory record, guarded transitions, control and approval paths, and reserved budgets decide what is admitted. The model only proposes, and the tool layer settles the outcomes of admitted calls." fig-alt="Two stacked panels. The top panel shows a five-line while loop that calls a model, breaks on end_turn, runs the tool call, and appends the result, with comments reading no gate, no deadline and state lives only here, beside three boxes: cannot be stopped from outside, no ceiling on turns, tokens, or dollars, and gated calls run at once. The bottom panel shows a model box, a harness box, and a tools and sandbox box, joined by paired arrows labeled proposal and context, and admitted call and observation. The harness box lists trajectory record, guarded state transitions, control actions and approval gates, and budgets and ceilings."}
 
@@ -157,7 +157,9 @@ The record now identifies what the trajectory proposes, what it has admitted, an
 
 The repair trajectory has submitted the tests for candidate `r18`. Its wait deadline passes before a result arrives, and the harness records that the outcome is unknown. A minute later, the test service reports success. Both facts are true. The first describes what was known at the deadline, and the second adds evidence. The failure would be to insert that result into an obsolete turn as though it had been available when the model made its next decision. This **observation crossing**\index{Observation crossing!definition} confuses the history of an operation with the evidence admitted to a particular continuation.
 
-A state machine makes that admission explicit. It also prevents a scheduler from treating a trajectory held for approval as merely idle and starting another model call. The runtime, not generated text, owns the transitions. @Tbl-vol3-lifecycle-states defines one supervisory machine with five live states, a finalizing state through which every exit passes, and three terminal outcomes.
+A state machine with guarded transitions[^fn-guarded-transition-statecharts] makes that admission explicit. It also prevents a scheduler from treating a trajectory held for approval as merely idle and starting another model call. The runtime, not generated text, owns the transitions. @Tbl-vol3-lifecycle-states defines one supervisory machine with five live states, a finalizing state through which every exit passes, and three terminal outcomes.
+
+[^fn-guarded-transition-statecharts]: **Guarded Transition**: Harel's statecharts [@harel1987] labeled each transition with the event that triggers it and a condition that must hold for it to fire, and added hierarchy and concurrency so that reactive controllers stayed readable as their state counts grew. The harness uses the flat core of that formalism: an event proposes an edge, and the guard, evaluated against the record at that moment, decides whether it fires. Keeping the guard on the edge, rather than in whichever handler happens to receive the event, is what lets one table govern every path into `CALLING_MODEL`. \index{Statecharts!guarded transitions}
 
 | State                             | Meaning                                                                                  | Legal next states                                          |
 |:----------------------------------|:-----------------------------------------------------------------------------------------|:-----------------------------------------------------------|
@@ -197,11 +199,15 @@ Approval adds one detour to the cycle. An approved action goes from `AWAITING_AP
 
 A legal edge is only the first check. Every admission of new work, a model call or a tool dispatch, must also pass what the rest of the chapter calls the *admission check*. It requires no pending control hold, a current task and context, applicable grants and any required exact-action approval, satisfied dependencies and preconditions, available service capacity and quota, time before the deadline, and a reservation for the operation's bounded liability that fits the remaining allowance without touching the finalization reserve (@sec-vol3-controlplane-accounting). A tool dispatch adds complete arguments. An unresolved earlier operation can block a dependent mutation even while the trajectory is `READY` for independent work. The check holds only at the moment it runs; a check passed earlier, when an approval arrived or a scheduler selected the call, does not carry forward to dispatch.
 
-The check and its local consequences form one serialized update of the record. Under the record lock the harness runs the check, reserves the liability, registers the invocation or operation attempt, records its observation eligibility, and changes state. Only after releasing the lock does it send the request. This *register-before-send rule* has two halves. Registering first means a fast reply always finds the record it belongs to. Sending outside the lock means a slow model or tool service never blocks control requests, other schedulers, or arriving results.
+The check and its local consequences form one serialized update of the record. Under the record lock[^fn-record-lock-monitor] the harness runs the check, reserves the liability, registers the invocation or operation attempt, records its observation eligibility, and changes state. Only after releasing the lock does it send the request. This *register-before-send rule* has two halves. Registering first means a fast reply always finds the record it belongs to. Sending outside the lock means a slow model or tool service never blocks control requests, other schedulers, or arriving results.
+
+[^fn-record-lock-monitor]: **Record Lock as a Monitor**: Hoare's monitors [@hoare1974monitors] bundled shared data with the only procedures allowed to touch it and ran those procedures one at a time, so every invariant on the data could be checked at procedure entry and exit. The trajectory record is a monitor in this sense: controllers, schedulers, and result handlers all reach it through short guarded procedures. The register-before-send rule adds one constraint for a record whose procedures front slow remote services: no procedure waits on a model or tool call while holding the lock. \index{Monitor!trajectory record}
 
 Control requests take the same lock, so every stop and every admission are ordered, and the *admission-order rule* states the consequence. A pause, cancellation, or other stop committed before an admission blocks it. An admission committed first makes the operation owned work, including a request whose transmission is still underway. A later stop can request that work's cancellation or wait for its settlement, but can never report it as unsent. Tool-side conditions still require the enforcement described in @sec-vol3-tool-calling.
 
-The `record_version` detects competing updates, and a change of `control_epoch` can make a previously eligible response obsolete. Neither replaces the logical operation ID or the transport attempt ID. A retry may create another attempt within one operation, whereas a control change can invalidate a response without undoing that operation.
+The `record_version` detects competing updates, the validation step of optimistic concurrency control [@kung1981optimistic], and a change of `control_epoch`[^fn-control-epoch-fencing] can make a previously eligible response obsolete. Neither replaces the logical operation ID or the transport attempt ID. A retry may create another attempt within one operation, whereas a control change can invalidate a response without undoing that operation.
+
+[^fn-control-epoch-fencing]: **Epochs Against Stale Messages**: Distributed lock services met the same hazard when a delayed request from a former lock holder arrived after the lock had passed to someone else. Chubby's answer was a sequencer carrying the lock's generation number, which the receiving server checks and rejects if stale [@burrows2006chubby]. The `control_epoch` plays that role for observations: a response stamped with an old epoch cannot advance the current continuation, however well formed it is. \index{Control epoch!fencing}
 
 @Lst-vol3-guarded-transition expresses these rules as one function. The legal edges are exactly those of @tbl-vol3-lifecycle-states, and an edge with no registered guard is refused rather than allowed by default. The caller passes the `record_version` it read when it made its decision, so a competing update fails the version check, and a repeated delivery of the same event fails either that check or the edge check, instead of admitting the action twice.
 
@@ -349,7 +355,9 @@ class BoundaryWait:
     t_wait_str = fmt_time(t_wait, unit=second, precision=1)
 ```
 
-Output and time limits perform different jobs. A service-enforced output allowance bounds the generated quantity under that service's accounting contract; elapsed time also depends on queueing, stalls, and generation rate. Even the most favorable case is long. At the reference output allowance of `{python} BoundaryWait.t_dec_ms_str` per generated token from @sec-vol3-foundation-model-cost, with no queueing or stall, a call admitted with a `{python} BoundaryWait.k_max_str`-token output allowance can hold the next turn boundary about `{python} BoundaryWait.t_wait_str` away. A pending cancel or pause that waited for the reply to end would wait at least that long, and the wait scales linearly with the output allowance: halving the allowance halves the worst-case delay, while streaming cancellation removes the dependence altogether. The harness therefore uses both, turn boundaries for admission and streaming cancellation for replies in flight.
+Output and time limits perform different jobs. A service-enforced output allowance bounds the generated quantity under that service's accounting contract; elapsed time also depends on queueing, stalls, and generation rate. Even the most favorable case is long.[^fn-boundary-wait-batching] At the reference output allowance of `{python} BoundaryWait.t_dec_ms_str` per generated token from @sec-vol3-foundation-model-cost, with no queueing or stall, a call admitted with a `{python} BoundaryWait.k_max_str`-token output allowance can hold the next turn boundary about `{python} BoundaryWait.t_wait_str` away. A pending cancel or pause that waited for the reply to end would wait at least that long, and the wait scales linearly with the output allowance: halving the allowance halves the worst-case delay, while streaming cancellation removes the dependence altogether. The harness therefore uses both, turn boundaries for admission and streaming cancellation for replies in flight.
+
+[^fn-boundary-wait-batching]: **Why Batching Does Not Shorten the Wait**: The reference rate charges each generated token one full read of the weights, the single-request case. A serving engine that batches many requests shares that read among them, which raises throughput but still advances each request by one token per ordinary decode step, so batching cannot bring the per-request wait below this estimate. Techniques that emit several tokens per step change the rate, not the wait's linear growth with the output allowance. \index{Turn boundary!decode latency}
 
 Stopping locally is not the same as stopping remotely. A host deadline determines when the supervisor stops waiting and initiates intervention; confirming that remote inference stopped takes evidence from the service. Under the settlement rule, missing usage remains an outstanding liability rather than an assumed refund.
 
@@ -384,7 +392,9 @@ Outside control makes continuation independent of the model's willingness to coo
 
 The test job for candidate `r18` can run for minutes. If the worker that dispatched it blocks until the result returns, that worker serves no other trajectory in the meantime, and nothing awake can act on the operator's pause or the interactive task that became ready. The repair needs no new model output while it waits. It does need a supervisor that can find the job, hold continuation, and retain its eventual evidence without depending on a worker blocked inside the test call.
 
-An asynchronous wait releases the worker to handle other work while the trajectory record identifies what remains pending. A blocking implementation can also remain controllable if an independent supervisor handles control requests and deadlines. The requirement is independent of any event-loop library. Waiting must leave the control record accessible, and a returning event must pass through that record's guards before it can advance the trajectory.
+An asynchronous wait[^fn-worker-release-seda] releases the worker to handle other work while the trajectory record identifies what remains pending. A blocking implementation can also remain controllable if an independent supervisor handles control requests and deadlines. The requirement is independent of any event-loop library. Waiting must leave the control record accessible, and a returning event must pass through that record's guards before it can advance the trajectory.
+
+[^fn-worker-release-seda]: **Event-Driven Waiting**: Internet servers faced the thread-per-request version of this problem when a request could wait far longer than it computed. SEDA [@welsh2001seda] split services into event-driven stages joined by explicit queues and applied admission control at each queue, so load was visible and bounded where work waited rather than hidden in blocked threads. A harness whose tool jobs run for minutes while a model call takes seconds has the same shape, and the trajectory record is its queue entry. \index{Staged event-driven architecture!agent waiting}
 
 ### From an event to an eligible observation
 
@@ -423,7 +433,9 @@ Suppose the `r18` result arrives while the operator's pause holds. The superviso
 
 Releasing a worker leaves the test process, workspace, captured output, network connection, and retained inference state in place. The record references these resources and their owners. Storage and tool charges may continue, reservations remain until their liabilities are settled, and the elapsed task deadline continues advancing. Status polling and cleanup also consume resources and need to fit the applicable limits.
 
-The workspace lease preserves candidate edits and test artifacts under the lifetime contract of @sec-vol3-sandboxes-lease. It persists across tool boundaries. The serving policy separately decides whether compatible KV state is kept, moved, or dropped, using the trade-offs in @sec-vol3-kvcache-swapping. The harness supplies the expected wait and resumption requirements; where a hosted service exposes no cache-placement controls, retention is the provider's decision.
+The workspace lease[^fn-workspace-lease-expiry] preserves candidate edits and test artifacts under the lifetime contract of @sec-vol3-sandboxes-lease. It persists across tool boundaries. The serving policy separately decides whether compatible KV state is kept, moved, or dropped, using the trade-offs in @sec-vol3-kvcache-swapping. The harness supplies the expected wait and resumption requirements; where a hosted service exposes no cache-placement controls, retention is the provider's decision.
+
+[^fn-workspace-lease-expiry]: **Lease Expiry**: Gray and Cheriton introduced leases as time-bounded grants for distributed file caches, so that a crashed or unreachable holder costs the system at most one lease term rather than blocking others indefinitely [@gray1989leases]. The same bound matters for a waiting trajectory. If the harness never returns to renew, lease expiry is what reclaims the workspace; if it does return after expiry, the resumed trajectory must treat its workspace as gone rather than assume the files it left are still there. \index{Lease!workspace expiry}
 
 A wait is thus a supervised interval with retained evidence, resources, and obligations. Its end makes some continuation eligible only when the record's guards permit it. Approval uses the same discipline for a different dependency. The operation has not yet been dispatched, and continuation awaits an authorized decision that may arrive late, be denied, or expire.
 
@@ -461,7 +473,9 @@ A policy that exists only as text in the model's context has no gate at all, and
 
 In harness terms, the freeze needed one rule of trusted policy at dispatch. While the freeze holds, every proposal whose operation mutates the production target is refused, or held in escrow for a human decision. A destructive proposal then becomes a refusal observation instead of an effect, and the model's compliance stops mattering to enforcement. The false rollback claim is a separate failure with the same remedy. It is model output about an effect, and the harness answers questions about effects from the operation ledger, not from the transcript.
 
-The gate should also stay narrow. A reviewer asked to approve dozens of routine calls an hour learns to approve without reading, and a gate that always approves supplies no closure. Grants, sandboxes, and automated policy handle the operations they can make safe, which reserves review for the operations they cannot. The narrower the gate, the more each approval reflects an actual reading of the held proposal.
+The gate should also stay narrow. A reviewer asked to approve dozens of routine calls an hour learns to approve without reading,[^fn-approval-fatigue-ironies] and a gate that always approves supplies no closure. Grants, sandboxes, and automated policy handle the operations they can make safe, which reserves review for the operations they cannot. The narrower the gate, the more each approval reflects an actual reading of the held proposal.
+
+[^fn-approval-fatigue-ironies]: **Ironies of Automation**: Bainbridge observed that automating most of a process leaves the human operator the residual job of monitoring it, and that people sustain attention poorly on a stream in which almost nothing goes wrong [@bainbridge1983ironies]. An approval queue in which nearly every request is benign is that stream. The one harmful proposal arrives in a queue that has trained the reviewer to expect nothing, which is why the gate's precision, not its presence, determines what closure it supplies. \index{Ironies of automation!approval gates}
 
 ### Hold an identifiable proposal
 
@@ -477,7 +491,9 @@ For the review submission, the held artifact is the exact `r18` patch and named 
 
 The trajectory enters `AWAITING_APPROVAL` without sending the held tool call. Waiting releases its worker and requires no model inference merely to ask whether a person has answered. It still retains the proposal and referenced artifacts, and may retain a workspace lease or other resources.
 
-Under stable flow, Little's law (@sec-vol3-kv-workload-dynamics) makes the mean number of trajectories held in `AWAITING_APPROVAL` equal to the rate of approval requests multiplied by the mean time to a decision, so review latency, not model speed, sets how many held trajectories and retained resources the system carries. The approval expiry bounds this wait for a decision; the trajectory's elapsed-time deadline continues independently. Which cost of the wait binds, retained resources or delayed effect, depends on the workload.
+Under stable flow, Little's law[^fn-littles-law-mean] (@sec-vol3-kv-workload-dynamics) makes the mean number of trajectories held in `AWAITING_APPROVAL` equal to the rate of approval requests multiplied by the mean time to a decision [@little1961], so review latency, not model speed, sets how many held trajectories and retained resources the system carries. The approval expiry bounds this wait for a decision; the trajectory's elapsed-time deadline continues independently. Which cost of the wait binds, retained resources or delayed effect, depends on the workload.
+
+[^fn-littles-law-mean]: **What Little's Law Does Not Say**: Little's proof needs no assumption about how requests arrive or how long decisions take, only that the long-run averages exist. The price of that generality is that it fixes the mean held count, not its peak. A burst of review requests after an incident, or a reviewer who works through a queue once a day, can hold far more than the mean for as long as the backlog lasts, so capacity for held workspaces is sized from the arrival pattern, not from $L = \lambda W$ alone. \index{Little's law!mean versus peak}
 
 ```{python}
 #| label: calc-vol3-harness-escrow-lighthouse
@@ -608,9 +624,11 @@ The admission unit here is a `READY` trajectory's **next model call**, not its e
 
 Equal numbers of calls need not mean equal service. One maintenance call can carry a much longer prompt than an interactive call. A scheduler must therefore state what its shares measure. A simple policy charges each admitted call its full input-token count plus its allowed output-token count. This deliberately conservative **scheduling charge**\index{Scheduling charge!definition} measures admitted token allowance rather than actual output, dollars, accelerator time, or task value. Cached input remains part of this charge. Another policy can use measured service, but then it needs an estimate at admission and a rule for reconciling that estimate afterward.
 
-**Weighted deficit round-robin**\index{Deficit round-robin!definition} offers one way to share the declared charge. Keep a queue and a credit counter for each service class, with a rotating queue of trajectories inside each class. Each round adds a quantum proportional to the class's weight. Admit calls from that class while their charges fit its remaining credit and the other gates permit; each admission deducts its charge. Then rotate to the next class. Unspent credit carries into later rounds so a larger admissible call can eventually fit. When a class has no eligible work, reset its credit. This adapts the credit-carryover mechanism of deficit round-robin [@shreedhar1995efficient] to model-call admission rather than packet transmission.
+**Weighted deficit round-robin**\index{Deficit round-robin!definition} offers one way to share the declared charge. Keep a queue and a credit counter for each service class, with a rotating queue of trajectories inside each class. Each round adds a quantum proportional to the class's weight. Admit calls from that class while their charges fit its remaining credit and the other gates permit; each admission deducts its charge. Then rotate to the next class. Unspent credit carries into later rounds so a larger admissible call can eventually fit. When a class has no eligible work, reset its credit. This adapts the credit-carryover mechanism[^fn-fair-queueing-lineage] of deficit round-robin [@shreedhar1995efficient] to model-call admission rather than packet transmission.
 
 Credit belongs to the class in this policy, so opening many trajectories leaves the class's share unchanged. Rotation within the class also matters, because restarting every scheduler pass at the same first record can starve records later in the list. Limit admitted request size, give every class intended to make progress a positive weight, and retain the rotation position between passes. If credit is capped, its cap must accommodate the largest request the policy allows. Otherwise a large call can wait forever despite repeated replenishment.
+
+[^fn-fair-queueing-lineage]: **From Fair Queueing to Deficit Round-Robin**: Fair queueing for packet networks [@demers1989analysis] emulated a bit-by-bit round-robin across flows, so a source that sent more could not take more than its share, but it had to order packets by computed finish times. Deficit round-robin reached comparable fairness with constant work per packet by giving each queue a quantum and carrying unspent credit forward [@shreedhar1995efficient]. Model-call charges span a wide range of sizes, which is why the carried credit, not the rotation, is the part that makes the policy fair here. \index{Fair queueing!model-call admission}
 
 Weights fix how the declared charge is shared, which is not the same as how calls are shared. A short calculation shows the gap.
 
@@ -676,6 +694,12 @@ class DrrShares:
 
 :::
 
+::: {.column-margin}
+![](images/svg/vol3_harness_drr_margin.svg){width="100%" fig-alt="Two horizontal stacked bars. The upper bar, token charge, is 75 percent blue for the interactive class and 25 percent gray for maintenance. The lower bar, calls admitted, is 98 percent blue with a thin gray sliver for maintenance."}
+
+*Weights split the token charge; request size then sets a far larger split in calls.*
+:::
+
 These rules divide service among classes in proportion to weight; response time still depends on capacity. A continuously overloaded workload needs admission limits on incoming tasks or an explicit rejection policy, because priority reallocates capacity rather than adding it.
 
 ### Quotas and capacity are separate gates
@@ -726,7 +750,9 @@ The model may receive the remaining allowance and help choose cheaper work. It c
 
 ### Reserve before dispatch, settle from evidence
 
-A budget becomes a ceiling only when admission charges work that has not yet been billed.
+A budget becomes a ceiling only when admission charges work that has not yet been billed.[^fn-reservation-escrow-method]
+
+[^fn-reservation-escrow-method]: **Escrow Reservation**: Database systems solved a version of this problem for shared quantities such as account balances and inventory counts. O'Neil's escrow method let a transaction set aside part of a quantity only after testing that the quantity's invariant would hold whichever concurrent transactions later committed or aborted [@oneil1986escrow]. Bounded-liability admission applies the same test to a trajectory's allowance, with the operation's maximum possible charge standing in for an exact decrement. \index{Escrow transactional method!budget reservation}
 
 ::: {#dfn-bounded-liability-admission .callout-definition title="Bounded-liability admission"}
 
@@ -852,9 +878,15 @@ class Admission:
 
 :::
 
+::: {.column-margin}
+![](images/svg/vol3_harness_admission_margin.svg){width="100%" fig-alt="Two horizontal bars on one dollar scale. The upper bar, labeled spend check, is long and reads 0.92 dollars. The lower bar, labeled after reservations, is short and red and reads 0.12 dollars. A dashed vertical line marks the next call at 0.21 dollars, inside the upper bar and beyond the end of the lower bar."}
+
+*The spend check sees room for the call; after reservations, it no longer fits.*
+:::
+
 Settlement replaces reserved liability with actual consumption established by an authenticated, correlated usage report. A partial report can transfer known consumption into the actual meter while retaining the remaining possible liability. Final evidence releases the unused portion. The settlement rule applies to charges as it does to effects; missing usage, stream cancellation, or a tool timeout establishes no refund.
 
-Cache discounts require the same discipline. Before dispatch, reserve at the applicable undiscounted rate unless the service contract guarantees which input will receive the discount. Afterward, use its actual usage categories. Cancellation can reduce a final charge, but admission cannot assume that reduction before the service establishes it. These conditions define the scope of the hard bound: complete mediation, bounded liabilities, and correct settlement for every included charge.
+Cache discounts require the same discipline. Before dispatch, reserve at the applicable undiscounted rate unless the service contract guarantees which input will receive the discount. Afterward, use its actual usage categories. Cancellation can reduce a final charge, but admission cannot assume that reduction before the service establishes it. These conditions define the scope of the hard bound: complete mediation [@saltzer1975], bounded liabilities, and correct settlement for every included charge.
 
 ### Metered accounting and prefix cache leverage {#sec-vol3-harness-metered-accounting}
 
@@ -957,7 +989,7 @@ Finalizing under an exhausted allowance leaves the evidence scope unchanged. If 
 
 ### Choosing a ceiling from task evidence
 
-An enforceable ceiling need not be a useful one. Select candidate budgets on a representative task distribution and evaluate the whole policy under each candidate, keeping model, tools, acceptance criteria, and other relevant conditions comparable. Record accepted tasks divided by all eligible tasks, including those that fail or exhaust the budget. Report actual cost, time, unresolved liabilities, and intervention burden alongside acceptance. This is cost per accepted task (@eq-vol3-cost-per-accepted-task) measured per policy, and it charges every failed or exhausted attempt to the tasks that were accepted; a cap looks cheap only when failed tasks drop out of the denominator.
+An enforceable ceiling need not be a useful one. Select candidate budgets on a representative task distribution and evaluate the whole policy under each candidate, keeping model, tools, acceptance criteria, and other relevant conditions comparable. Record accepted tasks divided by all eligible tasks, including those that fail or exhaust the budget. Report actual cost, time, unresolved liabilities, and intervention burden alongside acceptance. This is cost per accepted task (@eq-vol3-cost-per-accepted-task) measured per policy, and it charges every failed or exhausted attempt to the tasks that were accepted; a cap looks cheap only when failed tasks drop out of the denominator. Agent benchmarks that report accuracy without cost have rewarded needlessly complex and expensive designs, which is why the two should be optimized jointly rather than read one at a time [@kapoor2024agents].
 
 A generous-budget run can show when its accepted tasks finished and suggest candidate caps. Policies that warn, restrict, or finalize earlier change later decisions and results, so test the candidate policies themselves; the measured curve need not have a clear knee. The decision rule is to choose the cap with the lowest cost per accepted task among the policies whose unresolved liability and intervention burden the task can tolerate, and to treat differences smaller than the measurement's uncertainty as ties. @Sec-vol3-evaluation develops the trial design; economic accounting later extends the cost boundary.
 
@@ -1037,6 +1069,12 @@ An incomplete or canceled invocation may leave syntactically valid fragments. Sy
 Releasing the test job's reservation when its wait times out returns `{python} Admission.reserved_str`, `{python} Admission.reserved_share_str` of the allowance in notebook \ref{nbk-10-bounded-liability-admission}, to the pool. New calls can claim it before the job's final charge arrives, and the trajectory then overshoots its ceiling by up to that amount. The settlement rule prevents this. Withdraw stale observation eligibility, keep the operation's effect and charge obligations in the ledger, and route authenticated late evidence to the settlement owner rather than into an obsolete model turn.
 :::
 
+::: {.column-margin}
+![](images/svg/vol3_harness_compounding_margin.svg){width="100%" fig-alt="Line chart of the probability that an instruction has held on every turn, from 100 percent at turn 0 falling steadily to a red dot at 74 percent at 30 turns, on an axis from 0 to 100 percent."}
+
+*An instruction honored on almost every turn still fails across a whole trajectory.*
+:::
+
 ::: {.fallacy-pitfall}
 **Fallacy**: *An instruction in the prompt is a runtime control.*
 
@@ -1063,6 +1101,23 @@ The mechanisms work together at admission. A ready trajectory still needs curren
 :::
 
 Trajectory-level encapsulation (principle \ref{pri-vol3-trajectory-encapsulation}) makes the runtime-owned record the basis of supervision, holding references to the state it does not contain, and it places control and admission outside model cooperation. Both roles hold inside explicit resource and evidence boundaries, which is why every stop in this chapter left an owner for the effects already in flight.
+
+## Historical Perspective and Further Reading {#sec-vol3-agent-harness-history}
+
+The harness assembles ideas that operating systems, databases, and networks each developed when a shared resource met a client that could not be trusted to stop on its own. Monitors gave shared state a single serialized entry point [@hoare1974monitors], and state machines with guarded transitions made the legal behavior of a reactive controller explicit enough to check [@harel1987]. Protection research in the same period named the requirement that every access pass through a check the client cannot bypass [@saltzer1975]. The trajectory record, its lock, and its transition table apply those three ideas to one agent run.
+
+Concurrency and resource accounting followed. Optimistic concurrency control validated an update against the version it had read instead of holding locks across slow work [@kung1981optimistic], the pattern of the `record_version` check. Database escrow reserved part of a shared quantity only when an invariant would survive every concurrent outcome [@oneil1986escrow], the ancestor of bounded-liability admission, and leases bounded how long an absent holder could keep a resource [@gray1989leases]. Networks contributed fairness: fair queueing [@demers1989analysis] and deficit round-robin [@shreedhar1995efficient] divided a link among flows of unequal size, while queueing theory supplied the relation for sizing what waits [@little1961]. Event-driven servers showed how to keep long waits from pinning threads by making queues explicit and admitting work at each one [@welsh2001seda]. Human-factors research warned that people asked to monitor reliable automation monitor it poorly [@bainbridge1983ironies] and classified automation by how much it decides and acts without the human [@parasuraman2000model].
+
+Language-model agents met all of these problems at once. ReAct framed an agent as a loop that interleaves model reasoning with tool actions [@yao2023react], and repair agents built around purpose-designed agent-computer interfaces ran that loop against real software repositories [@yang2024sweagent], where cost, waiting, and interruption stopped being corner cases. An incident in which a production database was deleted during an instructed code freeze [@sharwood2025replit] showed what a control stated only in the prompt is worth, and evaluations that report accuracy without cost showed why a ceiling must be chosen from measured outcomes [@kapoor2024agents]. The harness of this chapter is the classical answer to each of these pressures, relocated to the trajectory.
+
+For further reading:
+
+- **Saltzer and Schroeder, "The Protection of Information in Computer Systems"** [@saltzer1975]: the design principles, complete mediation among them, that every admission check in this chapter applies.
+- **Hoare, "Monitors: An Operating System Structuring Concept"** [@hoare1974monitors]: the original case for serialized access to shared state, and the right lens for reasoning about the record lock.
+- **O'Neil, "The Escrow Transactional Method"** [@oneil1986escrow]: reservation against an invariant under concurrency, the idea behind bounded-liability admission.
+- **Shreedhar and Varghese, "Efficient Fair Queuing Using Deficit Round Robin"** [@shreedhar1995efficient]: a short, rigorous paper showing how carried credit makes fairness cheap when work items differ in size.
+- **Bainbridge, "Ironies of Automation"** [@bainbridge1983ironies]: a brief classic on why human oversight of reliable automation fails, worth reading before designing any approval gate.
+- **Yang et al., "SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering"** [@yang2024sweagent]: a concrete account of the commands and feedback a repair agent's loop runs through, useful for seeing where a harness's responsibilities begin.
 
 ::: {.callout-chapter-connection title="From a live record to a durable one"}
 

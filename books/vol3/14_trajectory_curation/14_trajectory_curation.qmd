@@ -293,7 +293,15 @@ class RandomSplitLeakage:
 
 Suppose a collection job generates several repairs for the same connection-pool defect. A random split of the resulting traces places one successful repair in training and another in the final test set. Different seeds, wording, and tool sequences do not make the underlying problem new, so the trained policy has already seen a solution to the task it will be assessed on. This is **split leakage**\index{Split leakage!definition}: information about an evaluation target reaching training through a related record [@kaufman2012leakage].
 
-Split leakage is the common case, not a corner case. With `{python} RandomSplitLeakage.k_str` attempts per task and a `{python} RandomSplitLeakage.f_train_str`/`{python} RandomSplitLeakage.f_test_str` random trace split, a task stays on one side only if all its attempts do, with probability $\phi^k+(1-\phi)^k$ for training fraction $\phi$ and $k$ attempts, so `{python} RandomSplitLeakage.straddle_str` of tasks straddle the partition. The split must follow task relationships, not run identifiers.
+Split leakage is the common case,[^fn-duplication-code] not a corner case. With `{python} RandomSplitLeakage.k_str` attempts per task and a `{python} RandomSplitLeakage.f_train_str`/`{python} RandomSplitLeakage.f_test_str` random trace split, a task stays on one side only if all its attempts do, with probability $\phi^k+(1-\phi)^k$ for training fraction $\phi$ and $k$ attempts, so `{python} RandomSplitLeakage.straddle_str` of tasks straddle the partition. The split must follow task relationships, not run identifiers.
+
+[^fn-duplication-code]: **Duplication in Code Corpora**: Code datasets are especially prone to leakage because forks, vendored libraries, and copied snippets reproduce one problem across nominally distinct repositories. Testing models of code on corpora that still contain duplicates inflated reported metrics by as much as a factor of two relative to deduplicated corpora [@allamanis2019adverse]. A trajectory corpus inherits every such copy and adds its own, the repeated attempts on one fixture, so grouping by task is the minimum defense rather than a refinement. \index{Split leakage!code duplication}
+
+::: {.column-margin}
+![](images/svg/vol3_trajectory_curation_margin_001.svg){width="100%" fig-alt="Line chart of the share of tasks that straddle a random 80/20 trace split against attempts per task from one to eight. The curve starts at zero for one attempt and rises steeply, reaching 83 percent at eight attempts, marked with a red dot."}
+
+*More attempts per task, more tasks on both sides of a random split.*
+:::
 
 The fixture contract fixes which interactions and outcomes a trial represents; split design fixes what later evaluation can claim about learning from them. Protected tasks are reserved before collection, model-assisted selection, or corpus tuning begins. Choosing demonstrations after inspecting final-test failures turns the assessment into development feedback even when no test trajectory appears in the training files.
 
@@ -331,13 +339,17 @@ Evaluation still presents task inputs and the feedback its protocol allows: a re
 
 A newly sourced fixture is checked against the reserved groups by task identity, source history, copied solutions, and derived variants, and unresolved relationships go to quarantine rather than to a fresh identifier. Redaction and schema renaming keep the parent's group. When an audit finds training material related to a final-test task, the affected corpus and model versions are identified and the evaluation claim reassessed; deleting the record from the next corpus leaves its influence in the checkpoint already trained.
 
-**Contamination**\index{Contamination!definition}, a task's earlier appearance in the base model's pretraining data, is the leakage route local splits cannot close. Public tasks carry it even when every local record is clean. Private tasks and source-history checks close particular routes, so the defensible claim names the population, the protected information, the screening performed, and the known exposure.
+**Contamination**\index{Contamination!definition}, a task's earlier appearance in the base model's pretraining data, is the leakage route local splits cannot close.[^fn-contamination-benchmark] Public tasks carry it even when every local record is clean. Private tasks and source-history checks close particular routes, so the defensible claim names the population, the protected information, the screening performed, and the known exposure.
+
+[^fn-contamination-benchmark]: **Benchmark Contamination**: The failure became a measurement problem once pretraining corpora grew large enough to contain the public test sets used to evaluate the resulting models, and its most severe form is a model trained on a benchmark's test split and then scored on it [@sainz2023nlp]. The model's owner often cannot enumerate what the pretraining corpus contained, so contamination is estimated with overlap or memorization probes rather than ruled out. For a curation pipeline the durable response is structural: keep private fixtures whose solutions never left the organization, and report which evaluation claims rest on them. \index{Contamination!benchmark}
 
 ### Screen similarity without equating it with independence {#sec-vol3-trajectory-dedup-minhash}
 
-Group assignment catches known task relationships; deduplication finds further candidates for review and controls redundancy within a partition. Similarity is evidence about a chosen representation, and it errs in both directions: two repairs can solve the same bug with little lexical overlap, and two traces can share a test command while answering different observations and teaching different decisions.
+Group assignment catches known task relationships; deduplication finds further candidates for review and controls redundancy within a partition. For language-model training corpora, near-duplicate removal also reduces verbatim memorization and train–test overlap [@lee2022]. Similarity is evidence about a chosen representation, and it errs in both directions: two repairs can solve the same bug with little lexical overlap, and two traces can share a test command while answering different observations and teaching different decisions.
 
-For a code task, a representation can combine text shingles, parsed patch structure, and selected tool-call features. A **shingle**\index{Shingle!definition} is a local feature, such as a short token sequence or a bounded subtree of parsed code. An abstract syntax tree (AST) exposes code structure, but stripping identifiers, literals, or statement order can erase the difference between a valid repair and an incorrect one, so the normalization policy is versioned and candidate matches are inspected in task and observation context. MinHash, which summarizes a feature set by its minimum hash values under random permutations, ignores repeated feature counts; a count-sensitive comparison needs a different estimator.
+For a code task, a representation can combine text shingles, parsed patch structure, and selected tool-call features. A **shingle**\index{Shingle!definition} is a local feature, such as a short token sequence or a bounded subtree of parsed code. An abstract syntax tree (AST) exposes code structure, but stripping identifiers, literals, or statement order can erase the difference between a valid repair and an incorrect one, so the normalization policy is versioned and candidate matches are inspected in task and observation context. MinHash,[^fn-minhash-resemblance] which summarizes a feature set by its minimum hash values under random permutations [@broder1997resemblance], ignores repeated feature counts; a count-sensitive comparison needs a different estimator.
+
+[^fn-minhash-resemblance]: **MinHash**: Minwise hashing was introduced to detect near-duplicate documents in a web search engine's crawl, where comparing every pair of pages was infeasible [@broder1997resemblance]. Its key property is that a fixed-size signature per document estimates set resemblance without ever materializing the pair. The same property is what lets a curation pipeline screen a trajectory corpus in time and memory linear in its size, deferring pairwise work to the candidates the index retrieves. \index{MinHash!origin}
 
 For nonempty finite feature sets $X_1$ and $X_2$, Jaccard similarity and the ideal MinHash collision probability are
 
@@ -346,11 +358,19 @@ $$J(X_1,X_2)=\frac{|X_1\cap X_2|}{|X_1\cup X_2|}, \qquad
 
 Here $\sigma$ is a uniformly random permutation of the common feature universe. The minima agree exactly when the first element of $X_1\cup X_2$ under that permutation belongs to $X_1\cap X_2$. With $n_\sigma$ independent such permutations, the fraction of matching signature components estimates $J$ without bias and has variance $J(1-J)/n_\sigma$. @li2022cminhash state this independent-permutation model. Practical hash families approximate the exact minwise property, and empty feature sets need an explicit handling rule.
 
-A locality-sensitive hashing (LSH) index can organize $n_\sigma=br$ signature components into $b$ bands of $r$ rows. Under independent ideal components and exact band matching, a pair agrees throughout one band with probability $J^r$. It becomes a candidate in at least one band with probability
+A locality-sensitive hashing (LSH)[^fn-lsh-origin] index can organize $n_\sigma=br$ signature components into $b$ bands of $r$ rows. Under independent ideal components and exact band matching, a pair agrees throughout one band with probability $J^r$. It becomes a candidate in at least one band with probability
 
 $$P_{\text{candidate}}=1-(1-J^r)^b.$$
 
 $P_{\text{candidate}}$ is a candidate-generation probability, an S-shaped curve rather than a hard cutoff. Fewer rows per band retrieve more matches and more review work, and a large bucket can hold quadratically many candidate pairs.
+
+[^fn-lsh-origin]: **Locality-Sensitive Hashing**: A family of hash functions for which similar items collide with higher probability than dissimilar ones, introduced to make approximate nearest-neighbor search sublinear in high-dimensional spaces [@indyk1998approximate]. Banding MinHash signatures is one such construction for Jaccard similarity. Its systems value is that the review budget, not the corpus size, sets the cost of screening: $b$ and $r$ are tuned until the candidate stream matches what reviewers can inspect. \index{Locality-sensitive hashing!origin}
+
+::: {.column-margin}
+![](images/svg/vol3_trajectory_curation_margin_002.svg){width="100%" fig-alt="S-shaped curve of candidate probability against Jaccard similarity from zero to one for 32 bands of 4 rows. The curve stays near zero below 0.2, rises steeply between 0.3 and 0.6, and reaches nearly one by 0.8. Dots mark 87 percent at 0.5 and nearly 100 percent at 0.8."}
+
+*Banding turns similarity into an S-curve, not a hard cutoff.*
+:::
 
 ```{python}
 #| label: lego-14-split-screening-budget
@@ -412,7 +432,9 @@ Retrieved pairs are inspected before groups merge or learning material is droppe
 
 ## Staged Verifier Cascades {#sec-vol3-flywheel-verification}
 
-A collection record can preserve the repair accurately and still be ineligible for imitation because its permission review is unresolved, and an expensive execution check run first spends minutes without touching that question. Curation therefore fixes the conditions for each learning use first and chooses an economical checking order second.
+A collection record can preserve the repair accurately and still be ineligible for imitation because its permission review is unresolved, and an expensive execution check run first spends minutes without touching that question. Curation therefore fixes the conditions for each learning use first and chooses an economical checking order second.[^fn-cascade-lineage]
+
+[^fn-cascade-lineage]: **Classifier Cascade**: An ordered sequence of tests that discards most candidates with cheap early checks was popularized by real-time object detection, where a cascade of increasingly complex classifiers rejected most image regions after a few feature evaluations and spent computation only on promising ones [@viola2001]. A curation cascade inherits the economics but not the error tolerance. A detector cascade accepts a few misses in exchange for speed, whereas an admission predicate loosened for speed changes which records the next policy learns from. \index{Verifier cascade!classifier lineage}
 
 ::: {#dfn-verifier-cascade .callout-definition title="Verifier cascade"}
 
@@ -518,7 +540,9 @@ Reordering the same predicates preserves the accepted set when their definitions
 
 $$\frac{c_a}{1-p_a} < \frac{c_b}{1-p_b},$$ {#eq-vol3-trajectory-curation-order-rule}
 
-so each predicate is ranked by its cost per rejection, and the cheapest rejection goes first.
+so each predicate is ranked by its cost per rejection, and the cheapest rejection goes first. This is the rank ordering[^fn-predicate-rank] that query optimizers apply to expensive selection predicates [@hellerstein1993predicate].
+
+[^fn-predicate-rank]: **Predicate Rank**: Relational query optimizers met this problem when selection predicates began to call costly user-defined functions, so that ordering selections by selectivity alone ran expensive predicates on rows a cheap one would have discarded. Sorting independent selections in ascending order of rank, selectivity minus one divided by per-row cost, is optimal, and it is the same exchange argument as @eq-vol3-trajectory-curation-order-rule [@hellerstein1993predicate]. In a curation cascade the expensive predicates are sandboxed test runs and model or human judgments, so rank decides where most of the verification budget is spent. \index{Predicate rank!query optimization}
 
 ```{python}
 #| label: lego-14-verification-cascade-economics-and-throughput
@@ -669,7 +693,7 @@ A learned score can prioritize review or choose among already eligible examples 
 
 Human or model judgment supplies a qualitative criterion when the task warrants one, under the rubric and calibration contract of @sec-vol3-evaluation-grading. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) sets its role: a learned assessment ranks candidates and supplies scoped evidence for its criterion, with its inputs protected from the behavior it judges. Deterministic checks are equally scoped. For either mechanism the record keeps the assessor, rubric, evidence, uncertainty, and abstentions, and no favorable score overrides another required failure.
 
-Repeated selection concentrates a grader's or ranker's weaknesses. Optimizing against a learned proxy improves the proxy faster than the quality it stands for [@gao2023scaling], and training on the selected records turns one round's preference into the next policy's habit. The countermeasures are an independent audit of accepted and rejected cases, held-out calibration kept apart from tuning, and reassessment whenever the policy or task population changes. A transformed trace gets checks for its new bytes and target roles, a lineage boundary that @sec-vol3-flywheel-provenance develops.
+Repeated selection concentrates a grader's or ranker's weaknesses. Optimizing against a learned proxy raises the proxy score faster than the quality it stands for, and past a point further optimization lowers that quality [@gao2023scaling]; training on the selected records turns one round's preference into the next policy's habit. The countermeasures are an independent audit of accepted and rejected cases, held-out calibration kept apart from tuning, and reassessment whenever the policy or task population changes. A transformed trace gets checks for its new bytes and target roles, a lineage boundary that @sec-vol3-flywheel-provenance develops.
 
 ::: {#chk-14-admission-cascades-limits .callout-checkpoint title="Defend an admission route"}
 
@@ -694,7 +718,9 @@ The cascade yields consumer-specific decisions rather than one undifferentiated 
 
 Consider a collection record containing a malformed edit proposal, the runtime's refusal to dispatch it, and a later corrected edit that satisfies the repair criteria. The cascade can admit the correction while retaining the mistake as context. The remaining choice is which recovery decisions to collect and how much corpus capacity to allocate to them.
 
-A corpus of direct successes teaches effective action on clean prefixes, and it covers few decisions made after an error or an incomplete observation. In deployment, the policy's own choices and the environment's responses decide which situations it reaches, so a correction demonstrated only after a clean prefix says little about behavior after a flawed one. That distribution mismatch is the reason to collect recovery decisions; @sec-vol3-fine-tuning-exposure-bias develops its learning consequences, and curation's job is to supply justified examples with their conditioning evidence intact.
+A corpus of direct successes teaches effective action on clean prefixes, and it covers few decisions made after an error or an incomplete observation. In deployment, the policy's own choices and the environment's responses decide which situations it reaches, so a correction demonstrated only after a clean prefix says little about behavior after a flawed one. That distribution mismatch[^fn-compounding-imitation] is the reason to collect recovery decisions; @sec-vol3-fine-tuning-exposure-bias develops its learning consequences, and curation's job is to supply justified examples with their conditioning evidence intact.
+
+[^fn-compounding-imitation]: **Compounding Imitation Error**: A policy trained only on the states an expert visits can turn a per-step error rate $\epsilon$ into as many as $T^2\epsilon$ mistakes over a $T$-step task, because each error leads to states the training data never covered. Collecting labels on the states the learner itself visits, the DAgger procedure, restores a bound that grows roughly linearly in $T$ [@ross2011reduction]. Recovery demonstrations are the curation-side counterpart: they place justified targets on the flawed prefixes that direct-success collection omits. \index{Imitation learning!compounding error}
 
 ::: {#dfn-recovery-demonstration .callout-definition title="Recovery demonstration"}
 
@@ -761,7 +787,9 @@ Had only the correction segment carried adequate evidence, its scoped admission 
 
 ### Collect faults without inventing their consequences
 
-Natural runs expose some recovery situations, and **fault injection**\index{Fault injection!recovery collection} fills a declared coverage gap on purpose. The collection protocol records the injection version, the affected request or observation, the available evidence, and the intended response criterion. The runtime's authority and recovery boundaries are unchanged: injection grants no permission to install packages, widen filesystem access, or bypass an approval.
+Natural runs expose some recovery situations, and **fault injection**\index{Fault injection!recovery collection}[^fn-fault-injection-chaos] fills a declared coverage gap on purpose. The collection protocol records the injection version, the affected request or observation, the available evidence, and the intended response criterion. The runtime's authority and recovery boundaries are unchanged: injection grants no permission to install packages, widen filesystem access, or bypass an approval.
+
+[^fn-fault-injection-chaos]: **Fault Injection**: Deliberately introducing failures to observe how a system responds is a long-standing reliability practice, formalized for large distributed services as chaos engineering: controlled experiments that inject server, network, and dependency faults into production to test a hypothesis about steady-state behavior [@basiri2016]. Curation borrows the discipline, not the venue. Faults are injected into versioned collection fixtures, where each injected condition is recorded and its consequences stay consistent, so the resulting records teach recovery from a represented fault rather than from an artifact of the harness. \index{Fault injection!chaos engineering}
 
 | Collection condition                               | Required causal distinction                                    | Candidate response to assess                                   |
 |:---------------------------------------------------|:---------------------------------------------------------------|:---------------------------------------------------------------|
@@ -779,6 +807,12 @@ A correction objective needs an authorized corrective path in the fixture; a saf
 ### Count records, stored tokens, and selected targets separately
 
 A recovery record carries far more diagnostic context than a direct success, so its share of records sets neither its share of stored tokens nor its share of selected targets. Accounting starts from a retained record pool and then defines each artifact's eligible subset and sampling policy; one retained record can feed several artifacts and still counts as one task observation.
+
+::: {.column-margin}
+![](images/svg/vol3_trajectory_curation_margin_003.svg){width="100%" fig-alt="Three horizontal bars showing the recovery class's share of the hypothetical pool under three denominators: 25 percent of records, 45 percent of stored tokens, and 39 percent of selected target tokens."}
+
+*One recovery class, three shares: records, stored tokens, targets.*
+:::
 
 For class $j$, let $n_j$ count records, $\bar\ell_j$ be mean stored tokens per record under the declared tokenizer, and $\bar w_j$ be mean selected target tokens per record for one specified imitation artifact. Then
 
@@ -878,7 +912,9 @@ A token budget names its unit and reports both. Holding selected targets fixed g
 
 Development tasks choose among mixtures and the protected set judges the final comparison, with ordinary tasks, covered fault conditions, and transfer conditions evaluated separately before any weighted combination. Reports carry task acceptance beside unsupported completion claims, unnecessary actions, appropriate stopping, and resource use, under the comparison discipline of @sec-vol3-evaluation-rigor.
 
-The chosen mixture enters the **corpus manifest**\index{Corpus manifest!definition}, the versioned record of a published learning artifact's eligible pools, selection versions, sampling weights, token denominators, coverage, and evaluation protocol. Retraining on the manifest's output changes which situations enter the next corpus, and that feedback is the self-improvement loop.
+The chosen mixture enters the **corpus manifest**\index{Corpus manifest!definition},[^fn-datasheet-manifest] the versioned record of a published learning artifact's eligible pools, selection versions, sampling weights, token denominators, coverage, and evaluation protocol. Retraining on the manifest's output changes which situations enter the next corpus, and that feedback is the self-improvement loop.
+
+[^fn-datasheet-manifest]: **Dataset Documentation**: The practice of shipping a dataset with a structured account of its motivation, composition, collection process, preprocessing, and recommended uses was proposed by analogy to the datasheets that accompany electronic components [@gebru2021]. A corpus manifest is the machine-checkable form of that account for trajectories: its fields are bound to versions and assessments, so a consumer can test a claim about the corpus instead of trusting its prose. \index{Corpus manifest!datasheet lineage}
 
 ## The Self-Improvement Loop {#sec-vol3-trajectory-curation-self-improvement}
 
@@ -888,7 +924,9 @@ Corpus selection changes the evidence the next policy learns from. Suppose a col
 
 A generate–select–train loop starts with a versioned policy sampling training fixtures under a declared collection budget. The cascade routes demonstrations, comparisons, and unresolved records to their uses, training produces a candidate policy, and evaluation decides whether it becomes the next collection policy; that promotion is not a production deployment. Attempted, rejected, and unresolved runs are recorded beside retained examples, so a change in selection cannot masquerade as a change in capability.
 
-Selecting sampled successes for imitation is **rejection-sampling fine-tuning**\index{Rejection-sampling fine-tuning!definition}. STaR is a bootstrapped-reasoning instance: it generates rationales, keeps those that reach correct answers, fine-tunes, and uses known answers to help generate rationales after unsuccessful attempts [@zelikman2022star]. The check selects an output under its criterion; target review still decides which intermediate steps deserve imitation.
+Selecting sampled successes for imitation is **rejection-sampling fine-tuning**\index{Rejection-sampling fine-tuning!definition}.[^fn-expert-iteration] STaR is a bootstrapped-reasoning instance: it generates rationales, keeps those that reach correct answers, fine-tunes, and uses known answers to help generate rationales after unsuccessful attempts [@zelikman2022star]. The check selects an output under its criterion; target review still decides which intermediate steps deserve imitation.
+
+[^fn-expert-iteration]: **Expert Iteration**: The generate–select–train loop predates language models. In expert iteration, a search procedure guided by the current network produces stronger decisions than the network alone, the network is trained to imitate them, and the improved network then guides the next round of search [@anthony2017thinking]. Rejection-sampling fine-tuning replaces the search with repeated sampling and the expert's judgment with a check, which is why the check's blind spots become the loop's habits. \index{Expert iteration!generate-select-train loop}
 
 Learning does not require mixed outcomes. An all-success collection supplies imitation targets, including efficient strategies, and an all-failure collection yields no whole-trajectory demonstrations under a success filter while still offering corrective segments, justified comparisons, or new fixtures. The case in which identical rewards remove a within-group contrast belongs to the group-relative objective of @sec-vol3-rlvr.
 
@@ -944,6 +982,12 @@ class InformativeTaskFraction:
 ```
 
 With `{python} InformativeTaskFraction.k_str` attempts, a fixture the policy solves `{python} InformativeTaskFraction.low_str` of the time yields a success with probability only `{python} InformativeTaskFraction.low_yield_str`, so harvesting one such fixture takes about `{python} InformativeTaskFraction.attempts_low_str` attempts on average. The same fixture forms a mixed group with probability `{python} InformativeTaskFraction.low_mixed_str`. At `{python} InformativeTaskFraction.mid_str` the mixed fraction is `{python} InformativeTaskFraction.mid_mixed_str`. At `{python} InformativeTaskFraction.high_str` nearly every fixture yields a success, but the mixed fraction falls back to `{python} InformativeTaskFraction.high_mixed_str`, because most groups contain no failure. @Eq-vol3-trajectory-curation-informative prices contrast, not usefulness. The all-success groups remain valid imitation material, and @sec-vol3-rlvr-grpo-zero-variance applies the $p^k$ and $(1-p)^k$ terms to groups whose rewards carry no contrast.
+
+::: {.column-margin}
+![](images/svg/vol3_trajectory_curation_margin_004.svg){width="100%" fig-alt="Two curves against per-attempt pass rate from zero to one for eight attempts. A blue success-yield curve rises quickly toward one. A purple informative-task curve is a symmetric plateau that falls to zero at both ends, with dots at 0.34 for pass rates of 5 and 95 percent."}
+
+*Easy fixtures always yield successes; only mid-difficulty fixtures yield contrast.*
+:::
 
 Collection difficulty is therefore a budget decision. Hard fixtures cost about `{python} InformativeTaskFraction.attempts_low_str` attempts per harvested success and expose missing behavior; easy fixtures cost almost nothing per success and preserve required behavior; rare task families can justify their low yield by coverage. The sampling and retention policy is recorded with the corpus so each choice stays visible.
 
@@ -1002,7 +1046,7 @@ Delivery repeats after a worker or connection fails, so each submission is bound
 
 ### Reserve for work that has not finished
 
-Rates show why a bound is needed. Let completed rollouts arrive at rate $\lambda$, and let $m$ equivalent verifier slots each take mean service time $\bar t_{\text{svc}}$ per record. Then $m/\bar t_{\text{svc}}$ is an idealized aggregate service capacity in records per second, and $\rho=\lambda \bar t_{\text{svc}}/m$ is its utilization. In a stable regime, Little's law (@sec-vol3-kv-workload-dynamics) gives the mean number of records in assessment as $\lambda$ times their mean residence time. Means describe the steady state, and the design question is the burst.
+Rates show why a bound is needed. Let completed rollouts arrive at rate $\lambda$, and let $m$ equivalent verifier slots each take mean service time $\bar t_{\text{svc}}$ per record. Then $m/\bar t_{\text{svc}}$ is an idealized aggregate service capacity in records per second, and $\rho=\lambda \bar t_{\text{svc}}/m$ is its utilization. In a stable regime, Little's law [@little1961], introduced in @sec-vol3-kv-workload-dynamics, gives the mean number of records in assessment as $\lambda$ times their mean residence time. Means describe the steady state, and the design question is the burst.
 
 The dangerous event is a change in service time rather than in arrivals. If a defective fixture makes every test run until its timeout $T_{\text{out}}$, capacity collapses to $m/T_{\text{out}}$ while rollouts keep arriving. Staging then grows by $\lambda-m/T_{\text{out}}$ records per second. Charged at the per-record ceiling $s_{\max}$, the reserved bytes of a staging store of size $M$ run out after
 
@@ -1087,7 +1131,9 @@ class VerifierBurstExhaustion:
 
 The running rollouts in that headroom term are why admission counts unfinished work. A queue's current length understates its next occupancy: rollouts admitted before a stall deliver their outputs after the dispatcher has stopped. Admission therefore enforces a record-count limit and a byte limit over outstanding reservations, sized from the per-record ceiling, because mean record size plans expected volume and says nothing about the worst case.
 
-A **collection credit**\index{Collection credit!definition} implements both limits. Each admitted run holds one credit and reserves space for its maximum permitted record while running, staged, or being assessed, and the credit returns only after a durable disposition or an acknowledged transfer to another capacity-controlled owner, so pending work is always charged somewhere. Oversized capture follows a declared policy, such as bounded output with explicit gaps and exclusion from uses that need the missing material, and never silent truncation of a required recovery record. @Fig-vol3-collection-pipeline places the credit on the four responsibilities of @tbl-vol3-pipeline-stages.
+A **collection credit**\index{Collection credit!definition}[^fn-credit-flow] implements both limits. Each admitted run holds one credit and reserves space for its maximum permitted record while running, staged, or being assessed, and the credit returns only after a durable disposition or an acknowledged transfer to another capacity-controlled owner, so pending work is always charged somewhere. Oversized capture follows a declared policy, such as bounded output with explicit gaps and exclusion from uses that need the missing material, and never silent truncation of a required recovery record. @Fig-vol3-collection-pipeline places the credit on the four responsibilities of @tbl-vol3-pipeline-stages.
+
+[^fn-credit-flow]: **Credit-Based Flow Control**: The mechanism comes from network switches, where a sender may forward a cell only while it holds a credit for a free buffer slot at the next hop, so buffers cannot overflow however bursty the traffic [@kung1994credit]. The receiver returns a credit only after it has drained the slot, which is exactly the rule that a collection credit returns only on durable disposition. The price is the same in both settings: throughput is capped by the credits outstanding divided by the time each takes to come back, so a slow assessment stage throttles generation instead of overrunning staging. \index{Credit-based flow control!collection credits}
 
 ::: {#fig-vol3-collection-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Collection Credits Across Four Responsibilities**: Each admitted run holds one credit through rollout, capture, staging, and assessment. The credit returns to the pool only when the record reaches a durable disposition or an acknowledged transfer to another bounded owner, such as the review queue. A watermark derived from in-flight work slows dispatch before the pool is exhausted, and a hard limit stops admission when that feedback arrives late." fig-alt="Four boxes left to right: collection admission containing a credit pool, a high watermark that slows dispatch, and a hard limit that stops admission; rollout and capture, which persists candidate bytes before releasing the sandbox; staging and assessment with five predicate chips R, U, P, O, T; and dataset publication producing a derived version with provenance. A bracket above spans admission to publication and reads one credit per run, held while running, staged, and assessed. Below assessment, arrows lead to a diagnostic or comparison pool and to an unresolved hold in a bounded review queue. Dashed lines from publication and both dispositions join a return path to admission labeled credit released only on durable disposition or acknowledged transfer."}
 ![](images/svg/vol3-collection-pipeline.svg)
@@ -1274,7 +1320,9 @@ The recovery example's raw record, `trace_r19_01`, belongs to collection run `co
 
 ### Bind the record to its evidence
 
-A **lineage envelope**\index{Lineage envelope!definition} records the origin, dependencies, transformations, and decisions of one record version. @Tbl-vol3-provenance-schema gives its conceptual fields, whose values can be references to protected, versioned artifacts rather than copies of private content.
+A **lineage envelope**\index{Lineage envelope!definition}[^fn-provenance-why] records the origin, dependencies, transformations, and decisions of one record version. @Tbl-vol3-provenance-schema gives its conceptual fields, whose values can be references to protected, versioned artifacts rather than copies of private content.
+
+[^fn-provenance-why]: **Why- and Where-Provenance**: Database research distinguished two questions about a derived datum: which source records justify its existence (why-provenance) and which source locations its values were copied from (where-provenance) [@buneman2001why]. A trajectory record needs both. Where-provenance traces each retained field to the run, event, and transformation that produced it, and why-provenance traces its admission to the assessments that justified it, so a withdrawn source or a revised criterion can be followed to every affected corpus member. \index{Provenance!why and where}
 
 | Record dimension         | Information to bind                                                                                                                          | Question it answers                                                  |
 |:-------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------|
@@ -1297,7 +1345,9 @@ A content digest identifies a specified byte representation under the hash's col
 
 An authenticated manifest binds the expected digests and metadata to a trusted issuer. A message authentication code (MAC) uses a shared secret key; HMAC is the hash-based construction defined in RFC 2104 [@krawczyk1997hmac]. The manifest records the algorithm, key version, and authorized issuing scope, with the key held outside the dataset. Any holder of the shared key can also mint a valid MAC, which is why a MAC is not an asymmetric signature, and key rotation must fit the manifest's authorized lifetime. Verification covers modifications within the authenticated representation and nothing outside it.
 
-Integrity is not truth. A faithfully authenticated trace can carry a fabricated model assertion, an incomplete grader verdict, or private information its consumer may not receive, and a Merkle root over captured components, a single hash computed over a tree of their hashes, proves nothing about components never captured. Reproduction claims follow the reconstruction and experiment distinctions of @sec-vol3-persistence-replay.
+Integrity is not truth. A faithfully authenticated trace can carry a fabricated model assertion, an incomplete grader verdict, or private information its consumer may not receive, and a Merkle root[^fn-merkle-tree] over captured components, a single hash computed over a tree of their hashes, proves nothing about components never captured. Reproduction claims follow the reconstruction and experiment distinctions of @sec-vol3-persistence-replay.
+
+[^fn-merkle-tree]: **Merkle Tree**: A tree in which each internal node holds the hash of its children, introduced to build digital signatures from a conventional one-way function [@merkle1988digital]. Its useful property is that proving one leaf belongs under a trusted root needs only the sibling hashes along one path, logarithmic in the number of leaves. A corpus manifest can therefore commit to millions of record digests under one root and still verify a single member cheaply, but the root commits only to the leaves that were hashed. \index{Merkle tree!corpus manifest}
 
 ### Transform a view without rewriting its history
 
@@ -1531,6 +1581,23 @@ Collection credits, lineage envelopes, and the corpus manifest make those decisi
 :::
 
 Verified trajectory post-training (principle \ref{pri-vol3-trajectory-post-training}) now has a concrete decision boundary: evidence supports a specified learning use, and the corpus manifest carries that decision through selection and transformation so the trainer can tell context from targets. The trained policy still faces evaluation and still runs under the runtime's authority and resource controls.
+
+## Historical Perspective and Further Reading {#sec-vol3-trajectory-curation-history}
+
+The questions this chapter asks of a trajectory corpus were first asked of ordinary datasets. Data mining named leakage as a family of failures in which information about the evaluation target reaches the learner through a related record [@kaufman2012leakage], and studies of models of code showed that duplicated source files inflate reported accuracy until test sets are deduplicated [@allamanis2019adverse]. The screening machinery came from web search, where minwise hashing estimated document resemblance from fixed-size signatures [@broder1997resemblance] and locality-sensitive hashing made similarity search sublinear [@indyk1998approximate]. Database research contributed the two ideas behind admission and lineage: optimizers that order expensive predicates by rank [@hellerstein1993predicate], and a precise account of which source data a derived value came from and why it exists [@buneman2001why].
+
+Learning from one's own behavior has a parallel lineage. Imitation learning showed that a policy trained only on expert states compounds its errors on the states it reaches by itself, and that labeling the learner's own states repairs the bound [@ross2011reduction]; recovery demonstrations are the curated form of that repair. Expert iteration made generate, select, and train into a loop in which search supplies better decisions for the network to imitate [@anthony2017thinking], and bootstrapped reasoning applied the same loop to language models by keeping sampled rationales that reach correct answers [@zelikman2022star]. Process supervision then moved the check from final outcomes to individual steps [@uesato2022solving; @lightman2023let].
+
+Each generation of self-training met the same limit: the selector is part of the system being trained. Production ML practice identified hidden feedback loops, in which a model's outputs shape its own future training data [@sculley2015hidden]; measurements of reward-model overoptimization showed the proxy score rising while the quality it stood for eventually fell [@gao2023scaling]; and recursive training on generated data was shown to narrow the learned distribution [@shumailov2024]. Agentic systems sharpen all three problems, because a trajectory carries tool effects, permissions, and a candidate that can reach its own grader. The responses in this chapter, from the verifier cascade and task-group splits to lineage envelopes and manifests modeled on dataset documentation [@gebru2021], are the classical answers applied to the trajectory as the unit of data.
+
+For further reading, start with these:
+
+- **End-to-end arguments** [@saltzer1984endtoend]: the clearest statement of why a function belongs where it can be implemented completely, which is the argument for repairing interfaces before training weights to compensate.
+- **Predicate migration** [@hellerstein1993predicate]: the database result behind ordering admission checks by cost per rejection, with the exchange argument worked out for expensive predicates.
+- **Imitation learning as no-regret online learning** [@ross2011reduction]: the analysis that explains why demonstrations on clean prefixes leave a policy unprepared for its own mistakes.
+- **Hidden technical debt in ML systems** [@sculley2015hidden]: a systems catalog of data dependencies and feedback loops that a self-improving corpus pipeline inherits.
+- **Datasheets for datasets** [@gebru2021]: the documentation discipline that a corpus manifest turns into versioned, checkable fields.
+- **Reward-model overoptimization** [@gao2023scaling]: a controlled measurement of what happens when selection pressure is applied to a learned proxy for quality.
 
 ::: {.callout-chapter-connection title="From corpus membership to learning targets"}
 

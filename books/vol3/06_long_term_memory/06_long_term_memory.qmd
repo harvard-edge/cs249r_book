@@ -283,9 +283,9 @@ In the connection-pool repair, locating `tests/test_pool.py`, finding references
 
 An exact path lookup asks for a named object within the authorized repository and version. A literal text search asks where a specified character sequence occurs under declared matching rules. Neither identifies what an occurrence means, since the test identifier might appear in a definition, a comment, or a stored failure log.
 
-An **inverted index**\index{Inverted index!definition} supports repeated lexical searches by mapping each indexed term to a postings list of documents containing it. A posting can record a document identifier, term frequency, and positions. The index's analyzer determines what counts as a term, including whether it preserves a whole identifier, splits `snake_case`, folds case, or applies stemming. A ranked match on an analyzed identifier can therefore differ from an exact match on the original string; an exact-match field or a check against the returned source establishes the narrower property.
+An **inverted index**\index{Inverted index!definition} supports repeated lexical searches by mapping each indexed term to a postings list of documents containing it [@zobel2006inverted]. A posting can record a document identifier, term frequency, and positions. The index's analyzer determines what counts as a term, including whether it preserves a whole identifier, splits `snake_case`, folds case, or applies stemming. A ranked match on an analyzed identifier can therefore differ from an exact match on the original string; an exact-match field or a check against the returned source establishes the narrower property.
 
-When several documents match, ranking determines which candidates enter the bounded result. **BM25**\index{BM25!definition} combines term rarity, diminishing returns from repeated occurrences, and document-length normalization [@robertson2009bm25]. One common form is
+When several documents match, ranking determines which candidates enter the bounded result. **BM25**\index{BM25!definition}[^fn-bm25-okapi] combines term rarity,[^fn-idf-term-rarity] diminishing returns from repeated occurrences, and document-length normalization [@robertson2009bm25]. One common form is
 
 $$
 \operatorname{score}(D,Q)=\sum_{q\in Q}\operatorname{IDF}(q)
@@ -295,6 +295,10 @@ $$
 $$
 
 Here $Q$ contains the query terms, $D$ is an indexed document, $f(q,D)$ is a term's frequency in that document, $|D|$ is its length in analyzer terms, and $\overline{|D|}$ is the collection's mean document length. The collection contains $N$ documents, of which $n(q)$ contain term $q$. These lengths are not the foundation model's token counts. The parameter $k_1>0$ controls frequency saturation, since at fixed length the frequency factor approaches $k_1+1$ as frequency grows, and $b\in[0,1]$ controls length normalization, with $b=0$ disabling it. Document boundaries, analyzer choices, and parameter settings therefore affect ranking even when the source text is unchanged.
+
+[^fn-bm25-okapi]: **BM25 (Best Match 25)**: The name records one weighting in the "Best Match" series of the Okapi retrieval system, built on the simple approximations to a two-Poisson model of term occurrence that @robertson1994simple derived. The formula survived decades of learned rankers because it needs no training data, only corpus statistics an index already keeps, which is why it remains the baseline a repository agent can deploy on the day its workspace is created. \index{BM25!Okapi origin}
+
+[^fn-idf-term-rarity]: **Inverse Document Frequency (IDF)**: @sparckjones1972statistical proposed weighting a term by how few documents contain it, on the argument that a term shared by most documents cannot tell them apart. In a repository that argument favors exactly the tokens an agent searches for, such as a unique test name or error string, and discounts keywords every file shares, which is why a rare identifier ranks sharply under BM25 while a vague symptom description does not. \index{Inverse document frequency!origin}
 
 ```{python}
 #| label: ltm-bm25-ranking-calc
@@ -373,7 +377,9 @@ Restricting an initial probe to `src/pool.py` and `tests/test_pool.py` can focus
 
 Filtering and ranking interact. A service that selects its top-ranked candidates globally and only then discards those outside the requested paths can return an empty set while eligible matches sit farther down the ranking. Restricting candidates before the final selection avoids this loss, and so does continuing the search after filtering. When work limits stop the search first, the absence rule makes the result partial.
 
-Which order to use is a cost decision a query planner makes, as a relational optimizer does for a selective predicate, from the fraction of the corpus the filter admits and the rarity of the query terms. A selective filter, such as two files in a large repository, favors restricting first and scoring only the survivors. A broad filter paired with a rare identifier favors scoring first, because the rare term's postings list is short, provided the service keeps searching until enough eligible results remain. The same choice returns with a sharper hazard once the index is a proximity graph (@sec-vol3-persistent-dense-retrieval).
+Which order to use is a cost decision a query planner makes, as a relational optimizer does for a selective predicate,[^fn-selectivity-optimizer] from the fraction of the corpus the filter admits and the rarity of the query terms. A selective filter, such as two files in a large repository, favors restricting first and scoring only the survivors. A broad filter paired with a rare identifier favors scoring first, because the rare term's postings list is short, provided the service keeps searching until enough eligible results remain. The same choice returns with a sharper hazard once the index is a proximity graph (@sec-vol3-persistent-dense-retrieval).
+
+[^fn-selectivity-optimizer]: **Cost-Based Access Path Selection**: The System R optimizer chose among index scans, sequential scans, and join orders by estimating each predicate's selectivity and the pages each plan would touch [@selinger1979access]. A retrieval gateway faces the same estimate with a scope filter as the predicate and a postings list or vector index as the access path, and a wrong estimate costs either a scan of the whole corpus or an empty result that looks like absence. \index{Query optimization!selectivity}
 
 ### When the vocabulary is unknown
 
@@ -387,7 +393,9 @@ A lexical search on the symptom's words can rank the return path of `src/pool.py
 
 ### Matching beyond shared words
 
-**Dense retrieval**\index{Dense retrieval!definition} encodes a query and each searchable record as vectors with a learned model and ranks records by vector similarity. In a bi-encoder design, records are encoded before a request arrives and only the query is encoded at request time [@karpukhin2020dense]. That moves record encoding out of the query path but not out of the system, because new or changed records need new vectors and a changed encoder can require rebuilding the index.
+**Dense retrieval**\index{Dense retrieval!definition} encodes a query and each searchable record as vectors with a learned model and ranks records by vector similarity.[^fn-vector-space-lineage] In a bi-encoder design, records are encoded before a request arrives and only the query is encoded at request time [@karpukhin2020dense]. That moves record encoding out of the query path but not out of the system, because new or changed records need new vectors and a changed encoder can require rebuilding the index.
+
+[^fn-vector-space-lineage]: **Vector Space Model**: Ranking documents by the angle between a query vector and each document vector predates learned encoders; @salton1975vector represented every document as a vector of term weights and scored it by cosine similarity. Dense retrieval keeps the geometry and replaces sparse, interpretable term weights with learned components, which is what lets it bridge vocabulary and also why no single component explains a match. \index{Vector space model!origin}
 
 The comparison rule belongs to the encoder and index configuration. Cosine similarity divides the dot product by the vectors' lengths and equals it for unit-length vectors, so normalization is part of the encoder's contract rather than a query-time choice. Neither score is a calibrated probability that a record answers the question.
 
@@ -482,9 +490,17 @@ The raw vectors occupy `{python} VectorScanLatencyFloor.footprint_str`. Counting
 
 The notebook applies to retrieval the bandwidth argument that @sec-vol3-foundation-model-cost makes for decoding. It also marks where the scan remains the right tool. When a filter leaves only thousands of eligible vectors, the scan reads megabytes rather than gigabytes with no index to maintain, and when an approximate index must be evaluated, the scan supplies its ground truth.
 
-**Approximate nearest-neighbor (ANN) search**\index{Approximate nearest-neighbor search!definition} avoids scoring every vector, at the risk of missing some of the highest-scoring vectors under the metric. Two designs illustrate the two ways to cut the bytes a query touches, visiting fewer vectors by following a graph or visiting compressed vectors within a few partitions.
+::: {.column-margin}
+![](images/svg/vol3_ltm_margin_scan_crossover.svg){width="100%" fig-alt="Log-log line chart of exact scan time against eligible vectors. A straight rising line passes a green dot at 10,000 vectors and 0.31 ms and a red dot at 10 million vectors and 307.2 ms. A dashed horizontal line marks a 10 ms budget and crosses the scan line near 326,000 vectors."}
 
-A **hierarchical navigable small-world (HNSW)**\index{HNSW!definition} index organizes the vectors as a layered proximity graph [@malkov2018efficient]. Every vector appears in layer 0, and each is also assigned a top layer $\ell=\lfloor -\ln U \cdot m_L\rfloor$, with $U$ drawn uniformly from $(0,1]$ and $m_L = 1/\ln M$ for a graph that links each vector to up to $M$ neighbors per layer, so each higher layer holds a geometrically smaller subset, much like the express lanes of a skip list. A query enters at the top layer and moves greedily to whichever neighbor lies closer to it, until no neighbor improves; it then drops one layer from that node and repeats. At layer 0 the greedy walk becomes a beam search that keeps the $ef_{\text{search}}$ closest candidates found so far and stops when no unexplored neighbor can improve them, returning the best $K$. The beam width $ef_{\text{search}}$ is the query-time recall knob, since a wider beam evaluates more distances and misses fewer true neighbors. @Fig-vol3-hnsw-routing traces one query through three layers.
+*Exact-scan time grows with eligible vectors; the search budget sets the crossover.*
+:::
+
+**Approximate nearest-neighbor (ANN) search**\index{Approximate nearest-neighbor search!definition}[^fn-ann-dimensionality] avoids scoring every vector, at the risk of missing some of the highest-scoring vectors under the metric. Two designs illustrate the two ways to cut the bytes a query touches, visiting fewer vectors by following a graph or visiting compressed vectors within a few partitions.
+
+[^fn-ann-dimensionality]: **Approximate Nearest Neighbors**: Exact nearest-neighbor structures that work well in two or three dimensions degrade toward a full scan as dimension grows, the curse of dimensionality. @indyk1998approximate relaxed the problem to returning a point within a factor of the true nearest distance and showed, through locality-sensitive hashing, that the relaxation admits sublinear query time. Every ANN index an agent uses makes the same bargain, so its misses are part of the contract, measured as recall, never a defect to be tuned away. \index{Approximate nearest-neighbor search!origin}
+
+A **hierarchical navigable small-world (HNSW)**\index{HNSW!definition} index organizes the vectors as a layered proximity graph [@malkov2018efficient]. Every vector appears in layer 0, and each is also assigned a top layer $\ell=\lfloor -\ln U \cdot m_L\rfloor$, with $U$ drawn uniformly from $(0,1]$ and $m_L = 1/\ln M$ for a graph that links each vector to up to $M$ neighbors per layer, so each higher layer holds a geometrically smaller subset, much like the express lanes of a skip list [@pugh1990skip]. A query enters at the top layer and moves greedily to whichever neighbor lies closer to it, until no neighbor improves; it then drops one layer from that node and repeats. At layer 0 the greedy walk becomes a beam search that keeps the $ef_{\text{search}}$ closest candidates found so far and stops when no unexplored neighbor can improve them, returning the best $K$. The beam width $ef_{\text{search}}$ is the query-time recall knob, since a wider beam evaluates more distances and misses fewer true neighbors. @Fig-vol3-hnsw-routing traces one query through three layers.
 
 Construction inserts each vector by running the same search and linking it to its nearest neighbors in each layer, so the graph costs memory beyond the vectors. Deletion is the awkward operation. Removing a node without repairing its neighbors' links can strand the vectors it connected, so systems usually mark deleted nodes and leave them in place, the cost @sec-vol3-persistent-invalidation takes up.
 
@@ -646,7 +662,7 @@ For an illustrative repair query, suppose both methods search the same authorize
 
 : **Fusion of hypothetical candidate rankings**: A benefits from appearing in both lists. A dash means absence from that truncated list and contributes zero. Equal scores are ordered by candidate ID, not by inferred relevance. {#tbl-vol3-rrf-scoring}
 
-Agreement raises A's priority for inspection, and it is weaker confirmation than it looks, because the two retrievers may share blind spots. A **cross-encoder reranker**\index{Cross-encoder reranker!definition} jointly scores the query and each candidate to refine this order at additional query-time cost. It reorders only what some candidate generator returned, and its score, like every rank, measures resemblance rather than applicability.
+Agreement raises A's priority for inspection, and it is weaker confirmation than it looks, because the two retrievers may share blind spots. A **cross-encoder reranker**\index{Cross-encoder reranker!definition} jointly scores the query and each candidate to refine this order at additional query-time cost [@nogueira2019passage]. It reorders only what some candidate generator returned, and its score, like every rank, measures resemblance rather than applicability.
 
 ```{python}
 #| label: lego-06-rerank-pool
@@ -709,7 +725,13 @@ An edge is only as strong as the way it was obtained. Parsing recovers declared 
 
 ### Bounding expansion and staged evidence
 
-Following every relation from a seed can collect far more material than the model should receive. Expansion needs limits on permitted edge types, direction, depth, visited nodes, and search work, and tracking visited identities keeps cycles from repeating expansion. The final payload budget still applies, since a few large nodes can exceed the available context. Within those limits the runtime can prioritize candidates by task relevance, relation type, or a graph score such as Personalized PageRank, which biases exploration toward the seeds (@sec-vol3-appendix-math-pagerank). A score threshold alone can select disconnected nodes, so a useful path may require keeping a low-ranked intermediate node and spending fewer tokens elsewhere.
+Following every relation from a seed can collect far more material than the model should receive. Expansion needs limits on permitted edge types, direction, depth, visited nodes, and search work, and tracking visited identities keeps cycles from repeating expansion. The final payload budget still applies, since a few large nodes can exceed the available context. Within those limits the runtime can prioritize candidates by task relevance, relation type, or a graph score such as Personalized PageRank [@page1999pagerank], which biases exploration toward the seeds (@sec-vol3-appendix-math-pagerank). A score threshold alone can select disconnected nodes, so a useful path may require keeping a low-ranked intermediate node and spending fewer tokens elsewhere.
+
+::: {.column-margin}
+![](images/svg/vol3_ltm_margin_depth_budget.svg){width="100%" fig-alt="Four vertical bars for traversal depths 0 through 3, each taller than the last. A dashed horizontal line marks a 6,144-token allowance. The depth 2 bar, labeled 2,440, sits below the line in green; the depth 3 bar, labeled 7,300, rises above it in red."}
+
+*One more level of depth turns a comfortable fit into an overflow.*
+:::
 
 The notebook below separates the number of reachable candidates from the number that can be staged, on a tree simple enough to count exactly.
 
@@ -783,7 +805,9 @@ Real graphs have overlapping neighborhoods, cycles, and uneven degrees, so a mea
 
 ### Community summaries as derived memory {#sec-vol3-graphrag-hierarchical}
 
-Some information needs concern a subsystem rather than one path, such as how connection management, request handling, and tests fit together. GraphRAG is one approach that builds an entity graph and precomputes summaries of related communities for broader questions [@edge2024graphrag]. Community detection supplies a grouping; whether a group matches a software responsibility, and whether its summary is correct, remain separate questions.
+Some information needs concern a subsystem rather than one path, such as how connection management, request handling, and tests fit together. GraphRAG is one approach that builds an entity graph and precomputes summaries of related communities for broader questions [@edge2024graphrag]. Community detection[^fn-community-detection] supplies a grouping; whether a group matches a software responsibility, and whether its summary is correct, remain separate questions.
+
+[^fn-community-detection]: **Community Detection**: GraphRAG partitions its entity graph with the Leiden algorithm, which refines modularity-based clustering so that every community it reports is internally connected [@traag2019leiden]. Modularity rewards groups with more internal edges than chance predicts, a property of link density; a community therefore reflects how often entities co-occur in the extracted text, and whether it matches a module boundary a maintainer would recognize must be checked against the source. \index{Community detection!GraphRAG}
 
 A summary can reduce repeated reading, but it is a new, lossy record. It needs links to its supporting material, the versions and scope it describes, and the access restrictions of its most restricted source. Detailed decisions open the supporting records; the overview only points to them.
 
@@ -859,7 +883,9 @@ Only after these checks does the runtime decide whether the candidate creates a 
 
 For the same user and scope, an explicit replacement performs **supersession**\index{Supersession!definition}: it creates a new preference version and marks the old version superseded, ending its eligibility for current decisions while keeping it as history. If the scope differs, both preferences may remain applicable to different cases. If the relation is unclear, the runtime records the unresolved conflict or asks for clarification instead of merging the statements into a broader rule. A correction differs from a changed preference, since fixing a miscopied 10:00 value repairs the stored form of an earlier statement, while accepting a later 11:00 statement records that the preference changed.
 
-Concurrent updates require support from the store. A proposed replacement carries the version it read, and the comparison and mutation occur in one conditional store operation, because a separate version check followed by an ordinary write leaves a race. On conflict, the writer rereads and applies an explicit conflict policy or asks for a decision; letting the model blend two conflicting preferences is not a concurrency policy.
+Concurrent updates require support from the store. A proposed replacement carries the version it read, and the comparison and mutation occur in one conditional store operation,[^fn-optimistic-concurrency] because a separate version check followed by an ordinary write leaves a race. On conflict, the writer rereads and applies an explicit conflict policy or asks for a decision; letting the model blend two conflicting preferences is not a concurrency policy.
+
+[^fn-optimistic-concurrency]: **Optimistic Concurrency Control**: A transaction reads without locks, then validates at commit that nothing it read has changed, and restarts if validation fails [@kung1981optimistic]. The scheme pays off when conflicts are rare, which suits memory writes: two sessions seldom revise the same preference at once, and a model call may take seconds, far too long to hold a lock across. \index{Optimistic concurrency control!memory writes}
 
 ### Recording and deriving memory {#sec-vol3-memory-dual-write-path}
 
@@ -875,13 +901,15 @@ A retained record changes status as its evidence and intended use change. The su
 
 **Expiration**\index{Memory expiration!definition} ends eligibility for a specified use after a deadline or condition. An expired temporary preference requires confirmation before it applies again. Lowering its retrieval score is insufficient, because the record still returns whenever other candidates rank lower. The payload can remain for an authorized historical purpose while current-use retrieval excludes it.
 
-Deletion addresses retention itself. If the user withdraws the scheduling preference and requests deletion, removing the primary record is only part of the work, because search entries, summaries, cached results, and staged prompt copies under the runtime's control may still contain it. The deletion procedure identifies those representations, ends their eligibility, and removes or regenerates them under the applicable policy. A **tombstone**\index{Tombstone!definition} is a durable exclusion marker that suppresses retrieval of a record, or of every record from a source generation, before physical cleanup finishes; it records ineligibility, not erasure.
+Deletion addresses retention itself. If the user withdraws the scheduling preference and requests deletion, removing the primary record is only part of the work, because search entries, summaries, cached results, and staged prompt copies under the runtime's control may still contain it. The deletion procedure identifies those representations, ends their eligibility, and removes or regenerates them under the applicable policy. A **tombstone**\index{Tombstone!definition}[^fn-tombstone-certificate] is a durable exclusion marker that suppresses retrieval of a record, or of every record from a source generation, before physical cleanup finishes; it records ineligibility, not erasure.
+
+[^fn-tombstone-certificate]: **Death Certificates**: Replicated databases met this problem first. If a replica simply drops a deleted item, an older copy arriving later from another replica looks like new data and resurrects it, so @demers1987epidemic kept a marked "death certificate" that is itself propagated and outranks older copies. A memory store's late indexing worker and restored backup play the part of the stale replica, which is why deletion here writes a marker before it removes anything. \index{Tombstone!death certificate}
 
 The deletion report names the boundary reached. Backups, independently retained external copies, and requests already sent to a remote model have different deletion capabilities, and deleting memory retracts neither a prompt already consumed nor a meeting already scheduled. Every copy under the runtime's control still stops influencing future requests.
 
 ### Consolidation without stronger claims {#sec-vol3-memory-consolidation}
 
-**Consolidation**\index{Memory consolidation!definition} combines related records into a smaller representation for later use. Several repair sessions might support a concise account of where waiter notification was investigated, which revisions were tested, and what remains unresolved. Grouping records by similarity locates candidates for consolidation; whether their failures share a cause needs evidence that proximity cannot supply.
+**Consolidation**\index{Memory consolidation!definition} combines related records into a smaller representation for later use. Several repair sessions might support a concise account of where waiter notification was investigated, which revisions were tested, and what remains unresolved. Agent architectures that periodically synthesize higher-level reflections from a stream of stored observations perform consolidation in this sense [@park2023generative], and each reflection is a generated lesson in the terms of @tbl-vol3-long-term-memory-write-policy. Grouping records by similarity locates candidates for consolidation; whether their failures share a cause needs evidence that proximity cannot supply.
 
 The generated summary preserves the scope of its supporting evidence, links to those records, and relevant counterexamples, rather than turning several successful cases into an unconditional procedure. Whether to retain the source records remains a separate decision, since a compact summary may omit details a later audit needs.
 
@@ -925,6 +953,12 @@ A persistent index also forces apart two operations that a staged prompt (@sec-v
 
 :::
 
+::: {.column-margin}
+![](images/svg/vol3_ltm_margin_write_path.svg){width="100%" fig-alt="Horizontal bar chart on a logarithmic time axis with three bars. A short green bar labeled exclusion at 0.4 microseconds; a long red bar labeled local re-index at 88 ms; a longer red bar labeled remote per-file re-index at 1.26 s."}
+
+*Excluding a stale entry costs microseconds; rebuilding it costs milliseconds to seconds.*
+:::
+
 ### Identify what changed
 
 An index entry records the **source generation**\index{Source generation!definition} from which it was derived: a version identity assigned under the source's update contract, stronger than a filesystem modification timestamp. For the repair, `r17` and `r18` name successive source states. Once the runtime establishes `r18` as the applicable version, a query about the current implementation rejects every entry from `r17`.
@@ -959,7 +993,9 @@ Exclusion has a cost, and it grows with time. An excluded entry still occupies m
 
 The contract must survive restarts and bypassed writers. After a restart, the gateway re-establishes authoritative generation information before treating persisted entries as current, because a newly empty in-memory tombstone set says nothing about an old index. Writers that bypass the coordinator surface only through watcher events that can arrive late or not at all, so the gateway falls back to source-side versioned reads and, when it cannot establish applicability in time, reports the gap in the result status.
 
-Replicated indexes add a **read-your-writes**\index{Read-your-writes consistency!definition} rule, under which a reader always observes its own earlier writes. A query issued after the agent's own write carries the minimum log sequence number it must observe (@sec-vol3-persistence-wal), and a replica whose applied watermark lags that number waits a bounded interval before the gateway falls back to the authoritative source or reports the scope partial.
+Replicated indexes add a **read-your-writes**\index{Read-your-writes consistency!definition}[^fn-session-guarantees] rule, under which a reader always observes its own earlier writes [@terry1994session]. A query issued after the agent's own write carries the minimum log sequence number it must observe (@sec-vol3-persistence-wal), and a replica whose applied watermark lags that number waits a bounded interval before the gateway falls back to the authoritative source or reports the scope partial.
+
+[^fn-session-guarantees]: **Session Guarantees**: The Bayou project defined four per-session promises over weakly consistent replicas: read your writes, monotonic reads, writes follow reads, and monotonic writes [@terry1994session]. An agent needs more than the first, because a trajectory that reads `r18` from one replica and `r17` from a lagging one on its next turn violates monotonic reads and sees its own history run backward. \index{Session guarantees!monotonic reads}
 
 ### Return current evidence or report the gap
 
@@ -1120,6 +1156,12 @@ Resource accounting follows the same trial boundary. It runs from query formulat
 
 Storage measurements need an equally explicit boundary. Report raw source bytes separately from index payloads, vectors, graph links, metadata, retained versions, and replicas, and name the ratio reported, either auxiliary bytes over source bytes or a total that adds the source to the numerator. Update latency likewise compares like operations, a full re-index against a full re-index rather than against an invalidation-table lookup. Notebook \ref{nbk-06-storage-amplification} applies both conventions to two stores.
 
+::: {.column-margin}
+![](images/svg/vol3_ltm_margin_storage_ratio.svg){width="100%" fig-alt="Two horizontal bars of auxiliary bytes relative to the raw source. Store A, lexical plus graph, reaches 0.36 times; Store B, lexical plus dense, reaches 8.52 times, with the larger vector portion in a darker shade."}
+
+*Dense vectors multiply a store's auxiliary bytes by an order of magnitude.*
+:::
+
 ```{python}
 #| label: lego-06-storage-amplification
 #| echo: false
@@ -1216,7 +1258,7 @@ The result is a set of trade-offs rather than one universal score. A larger stor
 
 ### Test the memory boundary under hostile input
 
-The same evaluation includes attempts to cross the memory contract. In a controlled environment, use synthetic sensitive records, unauthorized namespaces, and retrieved text carrying a prompt injection, and test whether the runtime blocks disallowed disclosure and writes and whether a malicious record survives in a later summary after its source is withdrawn.
+The same evaluation includes attempts to cross the memory contract. In a controlled environment, use synthetic sensitive records, unauthorized namespaces, and retrieved text carrying an indirect prompt injection [@greshake2023not], and test whether the runtime blocks disallowed disclosure and writes and whether a malicious record survives in a later summary after its source is withdrawn.
 
 Record both the model's proposal and the runtime's disposition, so that the evaluation distinguishes attempted misuse from an executed effect. The memory policy answers for the records it admits and returns, and tool authorization answers for what may act.
 
@@ -1290,6 +1332,23 @@ The repair agent needs more than a way to find text similar to its question. It 
 :::
 
 Authority stays with the source (principle \ref{pri-vol3-source-authority}), so retrieval is a contract rather than recall: locating a candidate does not settle how it may be used. The write lifecycle extends that obligation to information the agent creates for future sessions, as records are summarized, indexed, corrected, or withdrawn; those transformations must preserve the scope of the evidence rather than silently strengthen it.
+
+## Historical Perspective and Further Reading {#sec-vol3-long-term-memory-history}
+
+The problem this chapter treats, finding the right record among many and knowing what it is worth, was posed before digital computers could hold the records. @bush1945memex imagined the memex, a desk that would store a researcher's books and notes and let the user tie items together into associative trails, and he located the difficulty in selection rather than storage. Information retrieval turned selection into measurement. @salton1975vector represented documents as term-weight vectors ranked by similarity, @sparckjones1972statistical supplied the rarity weighting that makes a distinctive term count, and the probabilistic approximations of @robertson1994simple led to BM25. Inverted files made those rankings affordable over large collections [@zobel2006inverted], while the mismatch between a searcher's words and an author's words [@furnas1987vocabulary] waited for learned representations.
+
+A second lineage came from databases and distributed systems, which met the maintenance half of the problem long before retrieval did. Incremental view maintenance asked how a derived table stays consistent with its base relations [@blakeley1986efficiently; @gupta1995maintenance]. Optimistic concurrency control made a write conditional on what the writer had read [@kung1981optimistic], epidemic replication showed that a deletion must leave a marker or an older copy resurrects the item [@demers1987epidemic], and session guarantees named what a client may expect from lagging replicas [@terry1994session]. The log-structured merge tree made deferred cleanup of superseded entries a design pattern [@oneil1996log]. Each of these ideas reappears in the retrieval contract and write lifecycle, because a retrieval index is a materialized view that happens to be ranked.
+
+Learned retrieval joined the two lineages. Approximate nearest-neighbor search began as a relaxation that escapes the curse of dimensionality [@indyk1998approximate], and product quantization [@jegou2011product] and navigable proximity graphs [@malkov2018efficient] made it practical at the scale of billions of vectors [@johnson2019billion]. Memory networks gave a neural model an explicit store to read and write [@weston2015memory], open-domain question answering paired a retriever with a reader [@chen2017reading], and dense passage retrieval [@karpukhin2020dense] and retrieval-augmented generation [@lewis2020retrieval] made the retriever a learned component of generation. Agent systems then made the store something the model writes as well as reads, through interleaved search and reasoning [@yao2023react], model-managed context paging [@packer2023memgpt], stored verbal reflections [@shinn2023reflexion], and observation streams consolidated into reflections [@park2023generative]. What these systems inherit from the older lineages is the obligation this chapter develops: a record is worth only what its source, version, and scope support.
+
+Six works repay further study, in roughly historical order.
+
+- @bush1945memex frames personal information storage as a problem of selection and association, and shows how early the retrieval problem was stated in the terms agents now face.
+- @robertson2009bm25 is the authors' own account of the probabilistic relevance framework behind BM25 and the clearest explanation of why each of its parameters exists.
+- @zobel2006inverted surveys inverted-file construction, compression, and query evaluation, the engineering beneath every lexical index an agent queries.
+- @terry1994session defines four session guarantees in a few pages; read beside @sec-vol3-persistent-invalidation, it shows which of them a retrieval gateway must provide.
+- @jegou2011product and @malkov2018efficient describe the two designs behind most vector indexes, each precise about what its approximation gives up.
+- @park2023generative presents a complete agent memory architecture, with an observation stream, retrieval by recency, importance, and relevance, and periodic reflection, against which each record kind and lifecycle obligation of this chapter can be located.
 
 ::: {.callout-chapter-connection title="From memory policy to tool execution"}
 

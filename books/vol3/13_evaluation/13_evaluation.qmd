@@ -188,7 +188,9 @@ Some repository tests require in-process execution with the submitted code, and 
 
 ### Keep development feedback separate from evaluation evidence
 
-Leakage can enter before or during a trial. Training data may overlap a public benchmark, a retrieval index may expose a reference solution, and prior trial memory may carry a held-out answer into the next run. Repeatedly tuning prompts against held-out failures also turns that set from independent assessment into development data. Track the provenance and allowed use of task descriptions, solutions, tests, and derived traces, including retrieval sources and retained memories. Similarity tools flag overlap for investigation, but falling below their threshold does not prove two tasks independent; @sec-vol3-trajectory-curation develops the corresponding training-split discipline.
+Leakage can enter before or during a trial. Training data may overlap a public benchmark, a retrieval index may expose a reference solution, and prior trial memory may carry a held-out answer into the next run. Repeatedly tuning prompts against held-out failures also turns that set from independent assessment into development data,[^fn-goodhart-holdout] because analyses chosen after seeing earlier held-out results can overfit the held-out set itself [@dwork2015reusable]. Track the provenance and allowed use of task descriptions, solutions, tests, and derived traces, including retrieval sources and retained memories. Similarity tools flag overlap for investigation, but falling below their threshold does not prove two tasks independent; @sec-vol3-trajectory-curation develops the corresponding training-split discipline.
+
+[^fn-goodhart-holdout]: **Goodhart's Law**: The monetary economist Charles Goodhart observed in 1975 that any observed statistical regularity tends to collapse once pressure is placed on it for control purposes [@goodhart1984]. A held-out suite used to choose among prompts has become such a control target, so its score drifts from measuring the task population toward measuring fit to the suite. The simplest remedy is procedural: retire a suite into development use once it has steered decisions, and hold a fresh one for the release claim. \index{Goodhart's Law!held-out evaluation}
 
 Three benchmarks show how fixtures and criteria fit together. SWE-bench presents repository issues and evaluates generated patches against task-specific tests [@jimenez2024swebench]. Its evaluation procedure checks both tests expected to change from failing to passing and tests expected to remain passing [@jimenez2024swebench], which grounds “repair” in behavior on a specified repository state, limited by the coverage of those tests. GAIA poses questions with one short, unambiguous answer and grades the normalized final answer by exact match [@mialon2023gaia], so the checker is cheap and exact for that property but observes nothing about the actions taken to reach it. WebArena hosts self-contained web applications and grades many tasks by querying the resulting application state rather than the agent's transcript [@zhou2024webarena]. A state assertion checks only the records it queries, so an unrelated order deleted on the way to a correct result passes unless the acceptance contract also checks for unintended mutations, which is why the constraint-compliance dimension in @tbl-vol3-eval-contract-hierarchy needs its own evidence.
 
@@ -308,7 +310,7 @@ A fixed benchmark suite supports a narrower target, mean performance on those pa
 
 For one run on each independently sampled task, let $X$ of $N$ trials be accepted, so $\hat p=X/N$ estimates the population acceptance probability. A confidence interval expresses uncertainty from this sampling model only; grader error, missing outcomes, contamination, and a changed task distribution need their own accounting.
 
-The familiar Wald interval, $\hat p\pm z\sqrt{\hat p(1-\hat p)/N}$, breaks down at the extreme rates that safety and reliability claims involve. When every observed outcome agrees, as in a clean safety record, it collapses to zero width, and near the boundaries it can extend below zero. The **Wilson score interval**\index{Wilson score interval!definition} avoids both failures by using the hypothesized rate, not the observed one, in the variance:[^fn-wilson-score-inversion]
+The familiar Wald interval, $\hat p\pm z\sqrt{\hat p(1-\hat p)/N}$, breaks down at the extreme rates that safety and reliability claims involve. When every observed outcome agrees, as in a clean safety record, it collapses to zero width, and near the boundaries it can extend below zero.[^fn-wald-interval-coverage] The **Wilson score interval**\index{Wilson score interval!definition} [@wilson1927probable] avoids both failures by using the hypothesized rate, not the observed one, in the variance:[^fn-wilson-score-inversion]
 
 $$\tilde p=\frac{X+z^2/2}{N+z^2},\qquad
 [L,U]=\tilde p\pm\frac{z}{N+z^2}\sqrt{\frac{X(N-X)}{N}+\frac{z^2}{4}}.$$ {#eq-wilson-interval}
@@ -316,6 +318,8 @@ $$\tilde p=\frac{X+z^2/2}{N+z^2},\qquad
 Here $z$ is the standard normal quantile for the selected two-sided confidence level.
 
 [^fn-wilson-score-inversion]: **Wilson score inversion**\index{Wilson score interval!test inversion}: With $z=z_{1-\alpha/2}$, the score interval contains the values $p\in[0,1]$ satisfying $N(\hat p-p)^2\le z^2p(1-p)$. Solving this quadratic inequality gives the endpoints: the variance uses the hypothesized $p$, rather than fixing it at $\hat p$ as in the Wald construction [@guthrie2020nisthandbook, sec. 7.2.4.1].
+
+[^fn-wald-interval-coverage]: **Wald Interval Coverage**: A systematic study of binomial intervals found that the Wald interval's actual coverage oscillates erratically with both $N$ and $p$, stays poor at sample sizes that textbook rules of thumb call safe, and recommended the Wilson interval for small samples [@brown2001interval]. Agent evaluation lives in exactly that regime: suites of tens of tasks, and violation rates near zero, where a nominal 95 percent Wald interval can promise far more than it delivers. \index{Wald interval!coverage failure}
 
 For zero acceptances in 50 independent tasks, @eq-wilson-interval gives a lower limit of zero and an upper limit of $z^2/(50+z^2)$, which panel B of @fig-vol3-sample-size-confidence-intervals marks. Read with the outcomes reversed, the same arithmetic prices a clean record: zero observed violations in 50 tasks remains consistent with a violation rate up to that limit.
 
@@ -338,11 +342,13 @@ $$\hat\Delta=\hat p_{\mathrm{cand}}-\hat p_{\mathrm{base}}=\frac{c-b}{N}.$$
 
 The discordant pairs determine the net gain, while the concordant pairs still count in $N$ and in the uncertainty. The marginal counts alone cannot reveal whether the candidate gained tasks without losing any or traded many wins for many losses.
 
-**McNemar's test**\index{McNemar's test!definition} asks whether the paired marginal probabilities are equal. Under that null, and conditional on $n_{\mathrm{disc}}=b+c>0$ discordant pairs, candidate wins are $\operatorname{Binomial}(n_{\mathrm{disc}},1/2)$, and the exact two-sided test sums the symmetric tails:
+**McNemar's test**\index{McNemar's test!definition}[^fn-mcnemar-paired-test] [@mcnemar1947note] asks whether the paired marginal probabilities are equal. Under that null, and conditional on $n_{\mathrm{disc}}=b+c>0$ discordant pairs, candidate wins are $\operatorname{Binomial}(n_{\mathrm{disc}},1/2)$, and the exact two-sided test sums the symmetric tails:
 
 $$p_{\mathrm{exact}}=\min\!\left(1,\;2\sum_{j=0}^{\min(b,c)}\binom{n_{\mathrm{disc}}}{j}2^{-n_{\mathrm{disc}}}\right).$$
 
-A release decision usually asks a magnitude question instead of an equality question. **Noninferiority**\index{Noninferiority!definition} is the claim that the candidate loses no more than a declared tolerance $\delta_{\mathrm{tol}}$, and it needs an interval $[L_\Delta,U_\Delta]$ for $\Delta$ itself. The worksheet uses Newcombe's paired-score method 10 [@newcombe1998improved], which combines the candidate and baseline Wilson intervals of @eq-wilson-interval through a continuity-corrected estimate of their within-pair correlation, so that shared task outcomes narrow the interval even when both marginal counts stay fixed. The result is nominal and approximate, valid for one prespecified look under independent paired sampling. @Sec-vol3-appendix-math-newcombe states the interval in full, and the paired bootstrap of @sec-vol3-appendix-math-bootstrap serves statistics that lack such an analytic interval.
+[^fn-mcnemar-paired-test]: **McNemar's Test**: The test was introduced for psychological measurements in which the same subjects are classified twice, so the two proportions are correlated and cannot be compared as independent samples. Its central move is to discard concordant pairs from the test statistic, since a task both configurations pass, or both fail, says nothing about which is better. The interval for $\Delta$ still uses those pairs, because they set the precision of the estimate. \index{McNemar's test!concordant pairs}
+
+A release decision usually asks a magnitude question instead of an equality question. **Noninferiority**\index{Noninferiority!definition} is the claim that the candidate loses no more than a declared tolerance $\delta_{\mathrm{tol}}$, and it needs an interval $[L_\Delta,U_\Delta]$ for $\Delta$ itself. The worksheet uses Newcombe's paired-score method 10 [@newcombe1998improved], which combines the candidate and baseline Wilson intervals of @eq-wilson-interval through a continuity-corrected estimate of their within-pair correlation, so that shared task outcomes narrow the interval even when both marginal counts stay fixed. The result is nominal and approximate, valid for one prespecified look under independent paired sampling. @Sec-vol3-appendix-math-newcombe states the interval in full, and the paired bootstrap [@efron1979bootstrap] of @sec-vol3-appendix-math-bootstrap serves statistics that lack such an analytic interval.
 
 ```{python}
 #| label: calc-vol3-evaluation-paired-comparison
@@ -522,6 +528,12 @@ At $p=0.5$ and 95 percent confidence, `{python} SampleSizeScale.small_n_str` ind
 
 Pairing changes the count. Each task's candidate-minus-baseline outcome takes the value $-1$, $0$, or $+1$, so with discordant fraction $\psi$ the paired estimate has variance $(\psi-\Delta^2)/N$. The worked table has `{python} SampleSizeScale.discordant_str` discordant pairs, which puts the paired variance at about `{python} SampleSizeScale.paired_share_str` of the variance two independent arms would have at the same acceptance rates. The same precision therefore needs well under half as many tasks, and the worked interval spans about $\pm$`{python} SampleSizeScale.paired_half_pp_str` points. Estimation, detection, and noninferiority thus need different counts, and a paired plan also rests on an assumed discordance rate that the study must later report as observed.
 
+::: {.column-margin}
+![](images/svg/vol3_eval_margin_paired_variance.svg){width="100%" fig-alt="Two horizontal bars. A gray bar labeled independent arms is full length and labeled 100 percent. A purple bar labeled paired tasks is well under half as long, with its percentage printed inside and the word variance beside it."}
+
+*Pairing the worked comparison leaves about `{python} SampleSizeScale.paired_share_str` of the independent-arm variance.*
+:::
+
 The comparison so far uses one run per configuration per task. Permitting multiple attempts changes what success means and what it costs.
 
 ### Potential and repeated-run consistency {#sec-vol3-evaluation-pass-k}
@@ -543,6 +555,9 @@ class PassPowK:
     k = 8
     target = 0.90  # consistency the recurring work must hold
     chk_p, chk_k = 0.95, 5  # checkpoint exercise givens
+    # Point-in-time values reported in the tau-bench abstract (Yao et al. 2024,
+    # arXiv:2406.12045): best tested agent <50% task success, pass^8 <25% (retail).
+    taubench_success_bound, taubench_pow_bound, taubench_k = 0.50, 0.25, 8
 
     # 2. EXECUTE
     pow_hi, pow_lo, pow_better = p_hi**k, p_lo**k, p_better**k
@@ -571,11 +586,14 @@ class PassPowK:
     fail_cut_mult_str = fmt_multiple(fail_cut, precision=1)
     chk_p_str = fmt_percent(chk_p, precision=0, style="prose")
     chk_k_str = fmt_int(chk_k)
+    taubench_success_bound_str = fmt_percent(taubench_success_bound, precision=0, style="prose")
+    taubench_pow_bound_str = fmt_percent(taubench_pow_bound, precision=0, style="prose")
+    taubench_k_str = fmt_int(taubench_k)
 ```
 
 ::: {#thrm-vol3-evaluation-pass-at-k-pass-pow-k .callout-theorem title="Availability and consistency over repeated runs"}
 
-*For a fixed task $i$, initial-state distribution, complete generation policy, and binary pass criterion, let runs be independent and identically distributed given the task, each passing with probability $p_i$.* Averaged over the declared task distribution, the probability that at least one of $k$ runs passes and the probability that all $k$ pass, **pass$^k$** or **repeated-run consistency**\index{Repeated-run consistency!definition}, are estimated from $n_i\ge k$ fully graded runs with $c_i$ passes by the unbiased subset estimators [@chen2021evaluating]
+*For a fixed task $i$, initial-state distribution, complete generation policy, and binary pass criterion, let runs be independent and identically distributed given the task, each passing with probability $p_i$.* Averaged over the declared task distribution, the probability that at least one of $k$ runs passes and the probability that all $k$ pass, **pass$^k$** or **repeated-run consistency**\index{Repeated-run consistency!definition}, are estimated from $n_i\ge k$ fully graded runs with $c_i$ passes by the unbiased subset estimators [@chen2021evaluating; @yao2024taubench]
 
 $$\operatorname{pass@}k=\mathbb{E}_i\left[1-(1-p_i)^k\right],\qquad
 \widehat q_{i,k}=1-\frac{\binom{n_i-c_i}{k}}{\binom{n_i}{k}},$$ {#eq-pass-at-k}
@@ -591,7 +609,9 @@ $$\operatorname{pass}^{k}=\mathbb{E}_i\left[p_i^k\right],\qquad
 
 :::
 
-Each subset in @eq-pass-at-k contributes one when it contains a pass, and each in @eq-pass-pow-k when all its members pass, so their expectations are $1-(1-p_i)^k$ and $p_i^k$; @sec-vol3-appendix-math-pass-at-k derives both by indicator averaging and gives product forms that avoid factorial overflow. Average task-level estimates with the declared task weights, never by repeat count. The pass@$k$ metric measures candidate availability, while the deployed selector's returned results are measured separately (@sec-vol3-test-time-compute-pass-at-k); pass$^k$ can describe complete system runs, selector included. The consistency metric entered agent benchmarking with $\tau$-bench, which reports it for tool-using agents in customer-service domains [@yao2024taubench].
+Each subset in @eq-pass-at-k contributes one when it contains a pass, and each in @eq-pass-pow-k when all its members pass, so their expectations are $1-(1-p_i)^k$ and $p_i^k$; @sec-vol3-appendix-math-pass-at-k derives both by indicator averaging and gives product forms that avoid factorial overflow. Average task-level estimates with the declared task weights, never by repeat count. The pass@$k$ metric measures candidate availability, while the deployed selector's returned results are measured separately (@sec-vol3-test-time-compute-pass-at-k); pass$^k$ can describe complete system runs, selector included. The consistency metric entered agent benchmarking with $\tau$-bench, which reports it for tool-using agents in customer-service domains[^fn-taubench-consistency-gap] [@yao2024taubench].
+
+[^fn-taubench-consistency-gap]: **Consistency on a Live Benchmark**: At the benchmark's 2024 introduction, its authors reported that the strongest function-calling agent they tested completed fewer than `{python} PassPowK.taubench_success_bound_str` of tasks, and that its pass$^k$ at $k$ equal to `{python} PassPowK.taubench_k_str` fell below `{python} PassPowK.taubench_pow_bound_str` in the retail domain [@yao2024taubench]. The specific agents will age; the pattern will not, because consistency over repeated sessions always sits below single-run success once any task passes with probability below one. \index{Repeated-run consistency!benchmark evidence}
 
 ::: {#nbk-vol3-evaluation-pass-pow-k .callout-notebook title="Single-run success is not reliability"}
 
@@ -604,6 +624,12 @@ Each subset in @eq-pass-at-k contributes one when it contains a pass, and each i
 :::
 
 The distance between the two quantifiers, availability near one against consistency of `{python} PassPowK.pow_hi_str`, is the **verification gap**\index{Verification gap!definition}. A selector with a reliable checker converts availability into one accepted delivery at the cost priced in @sec-vol3-evaluation-matched-budgets; work that must pass every time it recurs gets only consistency.
+
+::: {.column-margin}
+![](images/svg/vol3_eval_margin_pass_k_diverge.svg){width="100%" fig-alt="Two lines from k equals 1 to k equals 8 that start at the same point near the top. The blue pass at k line rises to 100 percent; the purple pass hat k line falls steadily to a labeled dot about halfway down."}
+
+*At `{python} PassPowK.p_hi_pct_str` per run, availability nears certainty while `{python} PassPowK.k_str`-run consistency falls to `{python} PassPowK.pow_hi_str`.*
+:::
 
 A sequence of $k$ independently drawn *new tasks* has all-success probability $(\mathbb{E}_i[p_i])^k$, which Jensen's inequality places at or below $\mathbb{E}_i[p_i^k]$, so repeating one task overstates consistency across new tasks whenever difficulty varies. Shared outages, state carried between runs, or feedback-conditioned revisions break these independence formulas, and @tbl-vol3-statistical-metrics names the experiment behind each quantity.
 
@@ -635,7 +661,7 @@ Where a verdict in the pool stays pending or unknown, report that count and the 
 
 ### Comparing at matched budgets {#sec-vol3-evaluation-matched-budgets}
 
-Fix the task distribution, criteria, and resource envelope before comparing policies. An experiment that isolates a prompt change holds the rest of the configuration fixed; one that compares complete policies lets each spend the same envelope differently among generation, checking, and repair, so equal budgets need not mean equal sample counts. Report allowances and actual use, with time and tokens separate from monetary charges.
+Fix the task distribution, criteria, and resource envelope before comparing policies. An experiment that isolates a prompt change holds the rest of the configuration fixed; one that compares complete policies lets each spend the same envelope differently among generation, checking, and repair, so equal budgets need not mean equal sample counts. Report allowances and actual use, with time and tokens separate from monetary charges, since leaderboards that rank accuracy alone reward needlessly costly agent designs [@kapoor2024agents].
 
 For a fixed complete policy $\pi$, let $\mathrm{Acc}_\pi$ indicate accepted completion under the declared criteria, $C_\pi$ its total monetary charge, and $B$ a monetary ceiling. Its budgeted acceptance is
 
@@ -779,9 +805,13 @@ Across a gateway, queue, or sandbox boundary, record the relationship between di
 
 ### Read overlap and missing time before attributing latency
 
-A parent span encloses its children, so adding the parent's duration to every child double-counts time, and concurrent children overlap. Ordering comes from a completion dependency, never from a parent link alone. Durations on one monotonic clock compare directly, while timestamps from different hosts need a stated alignment model, or apparent overlap can reflect clock error. Instrumentation boundaries matter even without skew. Client-observed model latency includes transport and queueing, so time to first token is not an isolated measurement of prefill.
+A parent span encloses its children, so adding the parent's duration to every child double-counts time, and concurrent children overlap. Ordering comes from a completion dependency, never from a parent link alone. Durations on one monotonic clock compare directly, while timestamps from different hosts need a stated alignment model,[^fn-lamport-happened-before] or apparent overlap can reflect clock error. Instrumentation boundaries matter even without skew. Client-observed model latency includes transport and queueing, so time to first token is not an isolated measurement of prefill.
 
-A critical-path calculation uses the dependency graph and elapsed intervals at a declared boundary. Sequential required stages add, and branches that start together and must all finish contribute their longest duration. The following notebook makes those assumptions explicit.
+[^fn-lamport-happened-before]: **Happened-Before Order**: Without perfectly synchronized clocks, a distributed system can define only a partial order of events, built from each process's local sequence and from message sends and receipts; logical clocks extend that partial order consistently [@lamport1978time]. In a trajectory trace, parent and link relations recorded at dispatch carry that causal order, and cross-host timestamps without an alignment model do not. \index{Happened-before relation!trace ordering}
+
+A critical-path calculation[^fn-critical-path-float] uses the dependency graph and elapsed intervals at a declared boundary. Sequential required stages add, and branches that start together and must all finish contribute their longest duration. The following notebook makes those assumptions explicit.
+
+[^fn-critical-path-float]: **Critical Path Method**: Critical-path planning was formalized in 1959 for scheduling large engineering projects, computing for each activity the float by which it can slip without delaying completion [@kelley1959critical]. Float is the quantity the notebook below prices, since shortening a branch saves elapsed time only up to its slack over the next-longest parallel path. \index{Critical path!float}
 
 ```{python}
 #| label: calc-vol3-evaluation-observed-critical-path
@@ -904,6 +934,9 @@ class HeadSamplingMiss:
     rare_count = 5
     common_count = 50
     chk_theta, chk_count = 0.05, 20  # checkpoint exercise givens
+    # Dapper's first production sampling: one trace per 1024 candidates
+    # (Sigelman et al. 2010, Google Technical Report dapper-2010-1).
+    dapper_denominator = 1024
 
     # 2. EXECUTE: each occurrence retained independently with probability theta.
     miss_rare = (1 - theta) ** rare_count
@@ -919,13 +952,16 @@ class HeadSamplingMiss:
     common_count_str = fmt_int(common_count)
     chk_theta_str = fmt_percent(chk_theta, precision=0, style="prose")
     chk_count_str = fmt_int(chk_count)
+    dapper_denominator_str = fmt_int(dapper_denominator)
     miss_rare_str = fmt_percent(round(miss_rare, 2), precision=0, style="prose")
     miss_common_str = fmt_percent(round(miss_common, 3), precision=1, style="prose")
 ```
 
 Head sampling decides before the outcome is known, so each occurrence of a failure mode is retained independently with the sampling probability $\theta$, and a mode that occurs $n_f$ times leaves no detailed trace with probability $(1-\theta)^{n_f}$. At $\theta$ equal to `{python} HeadSamplingMiss.theta_str`, a failure mode seen `{python} HeadSamplingMiss.rare_count_str` times has about a `{python} HeadSamplingMiss.miss_rare_str` chance of leaving no detailed example; at `{python} HeadSamplingMiss.common_count_str` occurrences that chance falls to `{python} HeadSamplingMiss.miss_common_str`. Rare failure modes are exactly the ones a uniform sample is least likely to retain. **Tail sampling**\index{Tail sampling!definition} selects using evidence accumulated later, such as a failed acceptance check or an unusually costly run. It concentrates diagnostic storage on important cases, and the resulting collection is deliberately unrepresentative of ordinary traffic.
 
-The population failure rate therefore comes from the complete accounting record, never from the tail-selected traces. Estimates from sampled records keep inclusion probabilities and selection-policy versions, and a known random sample of ordinary accepted trials serves as controls, since a failure trace alone cannot show which behavior is unusual.
+The population failure rate therefore comes from the complete accounting record, never from the tail-selected traces. Estimates from sampled records keep inclusion probabilities and selection-policy versions,[^fn-dapper-uniform-sampling] and a known random sample of ordinary accepted trials serves as controls, since a failure trace alone cannot show which behavior is unusual.
+
+[^fn-dapper-uniform-sampling]: **Uniform Trace Sampling**: The first production version of one large-scale tracing system sampled uniformly, averaging one traced request per `{python} HeadSamplingMiss.dapper_denominator_str` candidates, which sufficed for high-traffic services because events of interest recurred often enough to be captured; lower-traffic workloads could miss important events at that rate [@sigelman2010dapper]. Its later adaptive scheme targeted a rate of sampled traces per unit time and recorded the sampling probability with each trace, the inclusion-probability bookkeeping that population estimates require. \index{Head sampling!Dapper}
 
 ### Make the verdict window explicit
 
@@ -1051,9 +1087,11 @@ Retention determines which observations survive, and privacy policy determines w
 
 ## Incident Postmortems {#sec-vol3-evaluation-postmortems}
 
-Suppose a trial of the connection-pool repair fails after receiving a silently truncated search result. The retained response ends in the middle of a source excerpt, and the next model response proposes replacing a file outside the permitted repair scope. The runtime rejects that proposal before dispatch. The trace locates the observation and the refusal, but whether a corrected observation would have produced an accepted repair is a separate question. An incident postmortem connects such evidence to a testable explanation and a scoped corrective change.
+Suppose a trial of the connection-pool repair fails after receiving a silently truncated search result. The retained response ends in the middle of a source excerpt, and the next model response proposes replacing a file outside the permitted repair scope. The runtime rejects that proposal before dispatch. The trace locates the observation and the refusal, but whether a corrected observation would have produced an accepted repair is a separate question. An incident postmortem[^fn-blameless-postmortem] connects such evidence to a testable explanation and a scoped corrective change.
 
 The initial findings stay separate. A delivered excerpt without required truncation metadata establishes an interface defect, a forbidden proposal establishes behavior by the model, and the admission record establishes whether the runtime blocked it. Several components can contribute to the same rejected task, and assigning one subsystem label too early hides the conditions a repair must address.
+
+[^fn-blameless-postmortem]: **Blameless Postmortem**: Site reliability practice asks a postmortem to identify the contributing causes of an incident without indicting any individual or team [@beyer2016sre, ch. 15]. Agent incidents extend that stance from people to components: a model, an observation adapter, and an admission gate can each contribute, and naming one culprit early hides the conditions the corrective change must address. \index{Postmortem!blameless}
 
 ### Reconstruct before experimenting {#sec-vol3-postmortem-replay}
 
@@ -1172,7 +1210,11 @@ A postmortem can produce an established interface defect, a tested correction, a
 
 The revised observation interface produced accepted repairs on the isolated fixture. That result supports testing the change on a broader task set; production authority is a separate grant. A release decision connects the change to its evidence and to the consequences of being wrong, which for an agent include operations and charges that remain outstanding after new traffic stops.
 
-Staging separates evidence available before live execution from evidence that requires it. Offline trials compare configurations on declared fixtures. **Shadow execution**\index{Shadow execution!definition} tests a candidate against authorized copies of current inputs without assigning it the live task. A **canary**\index{Canary release!definition} assigns a bounded portion of eligible live tasks to a candidate under an explicit release policy. Each stage answers its own question, and causal and statistical release evidence (principle \ref{pri-vol3-release-evidence}) supports a scoped decision at each step. @Fig-vol3-canary-deployment-pipeline lays out the stages and the hold that any of them can trigger.
+Staging separates evidence available before live execution from evidence that requires it. Offline trials compare configurations on declared fixtures. **Shadow execution**\index{Shadow execution!definition} tests a candidate against authorized copies of current inputs without assigning it the live task. A **canary**\index{Canary release!definition}[^fn-canary-release-origin] assigns a bounded portion of eligible live tasks to a candidate under an explicit release policy, the ramped online controlled experiment of web services applied to agent configurations [@kohavi2008]. Each stage answers its own question, and causal and statistical release evidence (principle \ref{pri-vol3-release-evidence}) supports a scoped decision at each step. @Fig-vol3-canary-deployment-pipeline lays out the stages and the hold that any of them can trigger.
+
+[^fn-canary-release-origin]: **Canary Release**: The name borrows from coal miners, who carried canaries underground as an early warning of toxic gas. The analogy holds in one respect and misleads in another: a canary detects a hazard by meeting it first, so a small allocation warns early but does not protect the tasks it exposes. \index{Canary release!etymology}
+
+[^fn-wald-sprt-origin]: **Sequential Probability Ratio Test**: Abraham Wald developed the test during the Second World War at Columbia University's Statistical Research Group, for sampling inspection of military supplies, and wartime restriction held back its open publication until 1945 [@wald1945sequential]. Its appeal then is its appeal for a canary now: because sampling stops as soon as the evidence is decisive, a sequential test typically reaches a decision with substantially fewer observations than a fixed-sample test with the same error targets. \index{Sequential probability ratio test!history}
 
 ::: {#fig-vol3-canary-deployment-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Staged Release and Its Hold Path**: Each stage applies its own criterion: the paired lower bound $L_\Delta$ against the declared margin offline, tool-call drift $D_{\mathrm{JS}}$ in shadow execution, and the sequential statistic $\Lambda_n$ with hard tripwires in the canary. A wider release requires every criterion of the gate $G$ in @eq-vol3-eval-release-gate. An unmet or inconclusive offline result, a drift review that finds a problem, or a canary alarm leads to the same hold. The hold stops new candidate admission; outstanding candidate operations keep their identities and owners, and recovery, not rollback, settles their effects." fig-alt="Four stage cards in a row joined by arrows labeled met. Stage 1, offline comparison: paired tasks with declared fixtures and matched criteria, a gate box reading L sub delta greater than minus delta sub tol, and a note that inconclusive counts as not met. Stage 2, shadow execution: authorized copy of live inputs with output withheld, a gate box reading D sub JS of P sub b and P sub c for tool-call drift, and a note that difference is not regression. Stage 3, canary: allocation rho of eligible live tasks with assignment sticky per trajectory, a gate box reading Lambda sub n versus ell and u, and a red hard tripwires badge for forbidden dispatch and exhausted limits. Stage 4, release decision: G equals 1 across paired margin, Theta, p99, and V sub c equals 0. Red arrows from stages 1, 2, and 3, labeled not met, review finds a problem, and alarm or tripwire, lead down to a hold band with two boxes: stop new candidate admission, and outstanding candidate work keeps its identities and owners while recovery settles effects and rollback does not undo them."}
 ![](images/svg/vol3-canary-deployment-pipeline.svg)
@@ -1218,7 +1260,7 @@ Outcome delay matters even when assignment is correct. Under the four-verdict ru
 
 ### Monitor a specified sequential alternative
 
-Repeatedly applying a fixed-sample test after each new canary outcome changes its error behavior. A sequential design instead declares in advance how accumulating evidence will be used. The **sequential probability ratio test** (SPRT)\index{Sequential probability ratio test!definition} is the compact example for two specified distributions, and it is a different procedure from the paired offline noninferiority test.
+Repeatedly applying a fixed-sample test after each new canary outcome inflates its false-positive rate well above the nominal level [@johari2017peeking]. A sequential design instead declares in advance how accumulating evidence will be used. The **sequential probability ratio test** (SPRT)\index{Sequential probability ratio test!definition}[^fn-wald-sprt-origin] [@wald1945sequential] is the compact example for two specified distributions, and it is a different procedure from the paired offline noninferiority test.
 
 Let independent task labels $x_i$ be Bernoulli with a stationary acceptance probability, and let the simple hypotheses be $p=p_0$ and $p=p_1$, with $0<p_1<p_0<1$ and the lower value a particular degradation. Both values are design inputs, not estimates. With $d_n=\sum_{i=1}^n x_i$, the log-likelihood ratio favoring the degraded hypothesis is
 
@@ -1238,11 +1280,17 @@ At $\Lambda_n\ge u$, the test selects the specified degraded hypothesis and the 
 
 A production stream can violate this model through changing task mix, shared outages, correlated tasks, or delayed labels. Processing results in completion order creates selection bias when duration depends on outcome, which a declared admission-order analysis avoids at the cost of waiting behind unresolved tasks. Testing several metrics or restarting after an unfavorable path needs error control beyond these two boundaries.
 
+::: {.column-margin}
+![](images/svg/vol3_eval_margin_sprt_corridor.svg){width="100%" fig-alt="A shaded corridor between a red upper line labeled u and hold with its value, and a green lower line labeled ell and select p sub 0 with its value. From a start at zero, a red dashed line rises to the upper boundary and a green dashed line falls to the lower one. The middle is labeled keep sampling; the horizontal axis reads labeled tasks n."}
+
+*Evidence drifts toward u under degradation and toward ℓ otherwise; between them, keep sampling.*
+:::
+
 The same simplified model gives a planning approximation for the expected stopping sample count. Under $p_1$, the expected increment is $m_1=p_1\ln(p_1/p_0)+(1-p_1)\ln((1-p_1)/(1-p_0))$. Neglecting boundary overshoot and substituting the target decision probabilities gives
 
 $$\mathbb{E}_1[N]\approx\frac{(1-\beta)u+\beta\ell}{m_1}.$$ {#eq-vol3-release-sprt-samples}
 
-The numerator in @eq-vol3-release-sprt-samples averages both terminal decisions, as in the stopping-sample approximation of @hory2004sequential [eq. 24]. @Sec-vol3-appendix-math-sprt derives the approximate decision boundaries and stopping-sample expression while distinguishing target errors from realized errors.
+The numerator in @eq-vol3-release-sprt-samples averages both terminal decisions, as in the classical average-sample-number approximation [@wald1945sequential; @hory2004sequential, eq. 24]. @Sec-vol3-appendix-math-sprt derives the approximate decision boundaries and stopping-sample expression while distinguishing target errors from realized errors.
 
 ```{python}
 #| label: lego-13-sizing-canary-traffic-and-circuit
@@ -1360,7 +1408,7 @@ Harms the monitor does not measure behave differently. They accrue for every adm
 
 **Context**: In late April 2025, OpenAI rolled out an update to the GPT-4o model behind ChatGPT, adjusting its default personality [@openai2025sycophancy].
 
-**Mechanism**: By OpenAI's account, the update focused too much on short-term user feedback and did not account for how users' interactions evolve over time. The model skewed toward responses that were overly supportive but disingenuous. OpenAI's follow-up analysis reports that an added reward signal from user thumbs-up and thumbs-down feedback weakened the primary reward that had held sycophancy in check, and that the offline evaluations and the A/B test of the update both looked good before launch [@openai2025expanding].
+**Mechanism**: By OpenAI's account, the update focused too much on short-term user feedback and did not account for how users' interactions evolve over time. The model skewed toward responses that were overly supportive but disingenuous. OpenAI's follow-up analysis reports that changes including an added reward signal from user thumbs-up and thumbs-down feedback weakened the influence of the primary reward that had held sycophancy in check, and that the offline evaluations and the A/B test of the update both looked good before launch [@openai2025expanding].
 
 **Impact**: The update reached ChatGPT users before the behavior was recognized, and OpenAI rolled it back, returning users to an earlier version with more balanced behavior.
 
@@ -1510,6 +1558,23 @@ The runtime can enforce admission, preserve a history, and recover partial effec
 :::
 
 Causal and statistical release evidence (principle \ref{pri-vol3-release-evidence}) requires the decision to name its task criteria, experimental scope, and uncertainty. Recorded traces and controlled comparisons connect a finding to inspectable evidence, and the resulting gate governs a specified next step.
+
+## Historical Perspective and Further Reading {#sec-vol3-evaluation-history}
+
+The statistics of this chapter are older than computing. Wilson's 1927 score interval answered the problem of bounding a proportion from a small sample [@wilson1927probable], and McNemar's 1947 test answered the problem of comparing two proportions measured on the same subjects [@mcnemar1947note]. Wartime sampling inspection posed a different problem, deciding as early as the evidence allows, and Wald's sequential probability ratio test answered it [@wald1945sequential]. Agreement between human raters became measurable with Cohen's kappa [@cohen1960], and the bootstrap made uncertainty available for statistics that lack a closed form [@efron1979bootstrap]. Much later, a systematic study showed that the textbook Wald interval behaves far worse than its reputation [@brown2001interval], which is why this chapter defaults to Wilson.
+
+Observability came from distributed systems. Lamport showed that events on separate machines admit only a partial order unless something records their causal links [@lamport1978time]. X-Trace propagated a task identifier across protocol layers and administrative domains so that one request's path could be reconstructed [@fonseca2007xtrace], and Dapper made that practical at production scale by sampling, recording spans, and keeping overhead low [@sigelman2010dapper]. Web services turned releases into experiments: online controlled experiments with ramped exposure became routine [@kohavi2008], continuous monitoring of those experiments was shown to inflate false positives without a sequential design [@johari2017peeking], and site reliability practice made the blameless postmortem a standard record [@beyer2016sre].
+
+Machine learning evaluation followed its own path to the same lessons. Reusing a held-out set to guide decisions was shown to overfit that set, with adaptive-analysis tools to limit the damage [@dwork2015reusable], while freshly collected test sets revealed accuracy drops that their authors traced to distribution shift rather than to adaptive overfitting [@recht2019imagenet]; both effects are why this chapter separates development feedback from held-out evidence and states the task population. Code generation introduced pass@$k$ with an unbiased estimator [@chen2021evaluating], model judges were measured for their biases [@zheng2023judging], and agent benchmarks moved into interactive environments graded on resulting state [@jimenez2024swebench; @zhou2024webarena], with repeated-run consistency [@yao2024taubench] and cost-controlled comparison [@kapoor2024agents] following once single-run accuracy proved insufficient for agents.
+
+**Further reading.**
+
+- **Wald, "Sequential Tests of Statistical Hypotheses"** [@wald1945sequential]: The original derivation of the sequential probability ratio test, its approximate boundaries, and its average sample number, the foundation of every staged-release monitor.
+- **Brown, Cai, and DasGupta, "Interval Estimation for a Binomial Proportion"** [@brown2001interval]: A careful demonstration of why the Wald interval fails and which alternatives to use, directly relevant to small agent suites and rare violations.
+- **Sigelman et al., "Dapper"** [@sigelman2010dapper]: The design of production tracing under an overhead budget, including the sampling decisions that shape what later diagnosis can see.
+- **Kohavi, Tang, and Xu, *Trustworthy Online Controlled Experiments*** [@kohavi2020trustworthy]: The practitioner's account of randomized comparison in live systems, from assignment units to the pitfalls that invalidate a result.
+- **Dwork et al., "The Reusable Holdout"** [@dwork2015reusable]: A short paper explaining why repeatedly consulting a held-out set erodes its validity, and what a disciplined reuse protocol looks like.
+- **Kapoor et al., "AI Agents That Matter"** [@kapoor2024agents]: An argument, grounded in agent benchmarks, for reporting cost alongside accuracy and for holdouts that resist overfitting.
 
 ::: {.callout-chapter-connection title="From evaluation evidence to curated trajectories"}
 

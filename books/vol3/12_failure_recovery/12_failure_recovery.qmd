@@ -58,11 +58,15 @@ The replacement worker has reconstructed the connection-pool repair's record and
 
 Now extend the repair with a separately authorized step: provision an isolated temporary integration-test environment and run checks against `ws_r18` there. The grant covers that environment only; production deployment, public routing, payments, and deletion of unrelated resources stay outside it. The environment service and the runtime's log commit separately, and although the service may run transactions inside its own boundary, no all-or-nothing boundary surrounds the whole workflow.
 
-If the worker loses the provisioning reply, it does not know whether the environment exists. Suppose instead that evidence establishes creation, but the integration checks cannot proceed. Restoring the local candidate snapshot leaves the remote environment allocated and its charge open. Releasing it takes a separate cleanup operation, plus evidence that the operation achieved its declared postcondition.
+If the worker loses the provisioning reply, it does not know whether the environment exists.[^fn-generals-lost-reply] Suppose instead that evidence establishes creation, but the integration checks cannot proceed. Restoring the local candidate snapshot leaves the remote environment allocated and its charge open. Releasing it takes a separate cleanup operation, plus evidence that the operation achieved its declared postcondition.
 
-A shared boundary cannot simply be imposed. Classical transaction processing makes a group of updates atomic and isolated by holding locks on the affected data until the outcome is decided. Two-phase commit extends that decision across several resource managers, each of which enters a prepare phase and holds its locks and recovery state until the coordinator's decision arrives [@gray1981transaction]. A trajectory defeats both requirements. The endpoints it calls expose no prepare phase and hold nothing on the runtime's behalf. Even a cooperating participant would have to hold its locks across model calls, test runs, and human approval, far longer than lock-based concurrency control was built for, and a prepared participant that loses its coordinator blocks every other client of the locked data.
+[^fn-generals-lost-reply]: **Lost acknowledgment**: Gray named this the generals paradox in his 1978 notes on database operating systems: over a channel that can lose messages, no finite exchange lets both parties know that the last message arrived [@gray1978notes]. Fischer, Lynch, and Paterson later proved that in a fully asynchronous system no deterministic protocol can guarantee agreement if even one process may crash, since a crashed process cannot be told apart from a slow one [@fischer1985impossibility]. A tool-call timeout inherits the same ambiguity, which is why the settlement rule below keeps the outcome unknown rather than guessing. \index{Two generals problem!lost reply}
 
-The application-level response that remains is **compensation**\index{Compensation!definition}, new execution that establishes declared postconditions after an earlier effect. Releasing the environment ends its allocation but leaves its creation history and charges in place, and the release can itself fail. Garcia-Molina and Salem introduced the **saga**\index{Saga!definition} for exactly this class of long-lived transaction. A saga gives up isolation across the whole sequence, commits each step separately, and pairs each step with a compensating step [@garciamolina1987sagas]. @Sec-vol3-appendix-systems-transactions reviews two-phase commit's blocking behavior and the original saga abstraction.
+A shared boundary cannot simply be imposed. Classical transaction processing makes a group of updates atomic and isolated by holding locks on the affected data until the outcome is decided. Two-phase commit extends that decision across several resource managers, each of which enters a prepare phase and holds its locks and recovery state until the coordinator's decision arrives [@gray1981transaction]. A trajectory defeats both requirements. The endpoints it calls expose no prepare phase and hold nothing on the runtime's behalf. Even a cooperating participant would have to hold its locks across model calls, test runs, and human approval, far longer than lock-based concurrency control was built for, and a prepared participant that loses its coordinator blocks every other client of the locked data. Designers of large-scale services reached the same position from the application side: once work spans independently owned entities, applications give up distributed transactions and negotiate outcomes through tentative operations, cancellation, and idempotent message processing [@helland2007life].
+
+The application-level response that remains is **compensation**\index{Compensation!definition},[^fn-compensation-log-gray] new execution that establishes declared postconditions after an earlier effect. Releasing the environment ends its allocation but leaves its creation history and charges in place, and the release can itself fail. Garcia-Molina and Salem introduced the **saga**\index{Saga!definition} for exactly this class of long-lived transaction. A saga gives up isolation across the whole sequence, commits each step separately, and pairs each step with a compensating step [@garciamolina1987sagas]. @Sec-vol3-appendix-systems-transactions reviews two-phase commit's blocking behavior and the original saga abstraction.
+
+[^fn-compensation-log-gray]: **Compensating transaction**: Gray's 1981 travel-agent example already had this shape. Each booking commits at another organization, so undoing the trip means running a compensating transaction, and Gray proposed that each nested step return the name and parameters of its compensator for the parent to log, with a message asking a human for help as the last resort [@gray1981transaction]. That log is written after the step returns. A trajectory saga registers the obligation before dispatch, because a lost reply would leave nothing to log. \index{Compensation!historical lineage}
 
 Compensation is one of three responses. Recovery may instead preserve useful completed work and repair a later proposal, or stop task work while transferring unresolved obligations to an authorized owner. Evidence and future costs decide among these options; money already spent is sunk. Two rules govern every one of these choices, and the rest of the chapter refers to them by name.
 
@@ -190,11 +194,13 @@ The separately authorized operation `provision_test_env_r18` has settled, bindin
 
 This case differs from the unresolved `test_r18` intent recovered in @sec-vol3-persistence-migration. A rejection before dispatch is established evidence that nothing ran; a missing result, under the settlement rule, is not.
 
-**Forward recovery**\index{Forward recovery!definition} changes the present state or proposed action to restore a permitted path toward the task. The dependability taxonomy distinguishes it from **backward recovery**\index{Backward recovery!definition}, which returns a system to an earlier saved state [@avizienis2004basic]. Restoring a workspace checkpoint is backward recovery for the state it covers, whereas compensation reaches declared earlier postconditions through new execution and restores only what @eq-vol3-semantic-equivalence names.
+**Forward recovery**\index{Forward recovery!definition} changes the present state or proposed action to restore a permitted path toward the task. Its counterpart, **backward recovery**\index{Backward recovery!definition}, returns a system to an earlier saved state; the dependability taxonomy names the two rollforward and rollback, the latter restoring a checkpoint [@avizienis2004basic].[^fn-recovery-terms-lineage] Restoring a workspace checkpoint is backward recovery for the state it covers, whereas compensation reaches declared earlier postconditions through new execution and restores only what @eq-vol3-semantic-equivalence names.
+
+[^fn-recovery-terms-lineage]: **Recovery vocabulary**: The same words carry different meanings across the two lineages this chapter joins. Garcia-Molina and Salem called running compensations a saga's backward recovery and running its missing steps from a save-point its forward recovery [@garciamolina1987sagas]. In the dependability taxonomy, compensation instead means masking an error with redundancy [@avizienis2004basic]. This chapter uses compensation in the saga sense, and forward and backward recovery in the state sense. \index{Backward recovery!terminology}
 
 ### Choose a recovery action from evidence
 
-“Try again” can name five different operations. A transport retry repeats the same logical operation under its repeat contract; resampling and feedback-based repair ask the model for a new or revised proposal; compensation establishes registered postconditions; escalation hands a decision or obligation to an authorized owner. @Tbl-vol3-recovery-comparison separates these choices by the evidence they require.
+“Try again” can name five different operations. A transport retry repeats the same logical operation under its repeat contract; resampling and feedback-based repair [@madaan2023selfrefine; @shinn2023reflexion] ask the model for a new or revised proposal; compensation establishes registered postconditions; escalation hands a decision or obligation to an authorized owner. @Tbl-vol3-recovery-comparison separates these choices by the evidence they require.
 
 | Choice                      | Appropriate basis                                                                                      | Obligation that remains                                                      |
 |:----------------------------|:-------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------|
@@ -210,7 +216,9 @@ A timeout raises an effect-status question before a model-repair question, and t
 
 The configuration rejection provides a narrower basis for repair because the runtime established that this proposal never reached the executor. It can supply the request, schema, field-level diagnostic, and task scope in a bounded repair context, and it validates the returned proposal before admitting any effect. If the repair instead changes source code, the changed candidate needs a new revision and its own test evidence, since a pass for `ws_r18` cannot certify it.
 
-Feedback changes the model's conditioning and leaves its authority unchanged. Independent resamples from an unchanged distribution succeed with the same probability on every attempt, but real repeated failures rarely are independent, because they often reveal a hard task, a shared misconception, or a changing environment. The repair success rate is therefore a measured property of a failure class and policy, estimated from recorded episodes.
+Feedback changes the model's conditioning and leaves its authority unchanged. Independent resamples from an unchanged distribution succeed with the same probability on every attempt, but real repeated failures rarely are independent, because they often reveal a hard task, a shared misconception, or a changing environment. The repair success rate is therefore a measured property of a failure class and policy, estimated from recorded episodes.[^fn-self-repair-evidence]
+
+[^fn-self-repair-evidence]: **Measured self-repair**: When code-generation repair was compared with plain resampling at matched sampling budgets, the gains were often modest, varied widely across problem subsets, and sometimes vanished; better feedback, from a stronger model or a human, raised them [@olausson2024selfrepair]. Without external feedback, self-correction on reasoning tasks can even lower accuracy [@huang2024cannot]. The diagnostic, not the retry, carries the value, so $p$ must be estimated per failure class and feedback source. \index{Repair episode!measured success}
 
 Retaining every failed response and diagnostic also changes the next input. Context assembly must fit useful evidence within one invocation's context capacity, while the cumulative token meter charges inputs and outputs across all repair calls; these are different limits. Compaction itself costs a model call and removes detail, and notebook \ref{nbk-12-loop-cost} prices repeated appended feedback under an explicit workload.
 
@@ -319,7 +327,9 @@ The isolated repair call receives `{python} RepairVsUnwind.rep_in_str` tokens in
 
 ### Bound the repair episode
 
-A runtime can bound repair without knowing whether the task is repairable. The unit it bounds is a **repair episode**\index{Repair episode!definition}, with an identity, the task and candidate versions it concerns, an attempt counter, and an explicit allowance. Each model call or corrective tool operation passes the admission check and reserves its liability. The counter increments at admission, not on success, so failed or interrupted work cannot escape the limit. Transport attempts and changed proposals link to their operations, so no retry layer gets a fresh allowance.
+A runtime can bound repair without knowing whether the task is repairable. The unit it bounds is a **repair episode**\index{Repair episode!definition},[^fn-recovery-blocks-randell] with an identity, the task and candidate versions it concerns, an attempt counter, and an explicit allowance. Each model call or corrective tool operation passes the admission check and reserves its liability. The counter increments at admission, not on success, so failed or interrupted work cannot escape the limit. Transport attempts and changed proposals link to their operations, so no retry layer gets a fresh allowance.
+
+[^fn-recovery-blocks-randell]: **Recovery blocks**: Randell's 1975 recovery block gave software the same structure: a primary routine, an acceptance test on its result, and a fixed list of alternates, each run from a restored recovery point until one passes or the list is exhausted [@randell1975system]. A repair episode keeps the acceptance test and the finite list, but its alternates are sampled rather than written in advance, so exhaustion signals an exhausted allowance, not proof that no alternate exists. \index{Recovery block!repair episode}
 
 The limit is a policy parameter, and exhausting it says nothing about whether a solution exists. The task's cumulative budget and earlier obligations carry across any revised plan or renamed operation; only an authorized policy change opens a new episode, and it keeps the old evidence and consumption.
 
@@ -361,7 +371,9 @@ The repair extension's temporary environment sits in the second row. Releasing `
 
 ### Plan a commitment region
 
-The third row of @tbl-vol3-action-invertibility needs a name, because the recovery policy plans around it.
+The third row of @tbl-vol3-action-invertibility needs a name, because the recovery policy plans around it.[^fn-pivot-subtransaction-origin]
+
+[^fn-pivot-subtransaction-origin]: **Pivot subtransaction**: The term comes from multidatabase transaction models, which classified each subtransaction as compensatable, retriable, or pivot (neither), allowed at most one pivot per global transaction, and required commits in the order compensatable, pivot, retriable [@mehrotra1992transaction]. The commitment region keeps that order: compensable preparation first, one pivot, then follow-up duties that can only be retried or handed off. \index{Pivot action!historical lineage}
 
 ::: {#dfn-pivot-action .callout-definition title="Pivot action"}
 
@@ -410,6 +422,12 @@ The repair agent meets few pivots inside its grant, since even submitting a patc
 The lighthouse's ordering claim is quantitative. The **expected irreversible loss**\index{Expected irreversible loss!definition} of a plan sums, over its actions $a$, the product of the probability that the action is wrong, the consequence if it commits, and the fraction $1-\rho_a$ of that consequence that compensation cannot recover:
 
 $$L_A = \sum_a P(\text{bad}\ a)\cdot \text{consequence}(a)\cdot(1-\rho_a).$$ {#eq-vol3-expected-irreversible-loss}
+
+::: {.column-margin}
+![](images/svg/vol3_failure_recovery_margin_pivot_loss.svg){width="100%" fig-alt="One horizontal stacked bar split into a short gray segment labeled Caught and a much longer red segment labeled Missed."}
+
+*After reordering, changes the canary misses dominate the remaining loss.*
+:::
 
 A check placed before the pivot moves a wrong change from $\rho_a = 0$ to the canary's compensable $\rho_a$; a check placed after it moves nothing.
 
@@ -520,7 +538,9 @@ Within the limits commitments set, permitted repair can still spend resources wi
 
 The repair can keep producing valid tool calls while making little useful progress. After the targeted check of `r18`, suppose later candidate revisions alternate between two versions of the same change and reproduce the same scoped test failure. Each call completes, yet nothing moves the connection-pool defect closer to resolution. A heartbeat answers whether a component responds, not whether the sequence is worth continuing.
 
-Classical liveness monitoring detects the absence of activity, such as a daemon that stops sending keepalives or a process deadlocked on a lock, and a supervisor restarts the component. A looping trajectory fails in the opposite way, through activity that does not advance the task. Its model and tool calls return and pass admission, every liveness probe stays green while it spends, and a cumulative allowance stops it only after the cycle has consumed most of that allowance. Detecting nonprogress requires evidence about the task rather than the process.
+Classical liveness monitoring[^fn-liveness-progress-evidence] detects the absence of activity, such as a daemon that stops sending keepalives or a process deadlocked on a lock, and a supervisor restarts the component. A looping trajectory fails in the opposite way, through activity that does not advance the task. Its model and tool calls return and pass admission, every liveness probe stays green while it spends, and a cumulative allowance stops it only after the cycle has consumed most of that allowance. Detecting nonprogress requires evidence about the task rather than the process.
+
+[^fn-liveness-progress-evidence]: **Liveness property**: In Alpern and Schneider's formalization, a liveness property says that something good eventually happens, and every finite execution can still be extended to satisfy it [@alpern1985defining]. No finite window of observations can therefore prove that a trajectory will never make progress. The runtime converts the question into a safety property, such as "no more than $N$ admitted attempts," which a finite history can violate and a gate can enforce. \index{Liveness!progress evidence}
 
 A **semantic watchdog**\index{Semantic watchdog!definition} is a runtime policy that uses task-relevant observations to flag possible nonprogress and choose a bounded intervention. Its signals are fallible evidence about the task; what the runtime enforces is the hold, which withholds further work even when the model proposes continuing.
 
@@ -568,6 +588,12 @@ Action comparison happens before dispatch, whereas outcome comparison uses evide
 For example, unchanged `ws_r18` while `test_r18` is running is not evidence of a repair loop. The monitor accounts for that declared wait and its deadline instead of demanding a source edit on every observation. @Sec-vol3-evaluation develops the calibration of grace periods and detector thresholds against missed loops, unnecessary interruptions, accepted tasks, and total costs.
 
 ### Price the work an intervention can avoid
+
+::: {.column-margin}
+![](images/svg/vol3_failure_recovery_margin_loop_cost.svg){width="100%" fig-alt="A convex curve of cumulative input tokens against turns, rising slowly then steeply. A green dot near the origin is labeled Early stop and a red dot at the top right is labeled Turn ceiling; the area under the curve past the green dot is shaded pale red."}
+
+*Re-sent input grows with the square of turns; late stops pay for it.*
+:::
 
 An unproductive loop's cost depends on how much input each call resends and how long the loop runs, which the following notebook prices under stated assumptions.
 
@@ -696,7 +722,9 @@ A progress monitor governs one trajectory. Repeated failures may instead reflect
 
 The repair's test service becomes slow while several trajectories are waiting on it. A watchdog can hold one trajectory that is not advancing, but others keep submitting tests to the same overloaded dependency, and client libraries add retries beneath their proposals. Recovery therefore needs a limit on aggregate dependency load as well as a limit on each task's work.
 
-A slowdown alone does not imply an increasing request rate. For a fixed population of sequential clients, longer response time actually reduces the rate of new requests. Amplification arises when retries add attempts, a timeout leaves remote work running while a replacement starts, retry layers repeat the same request, or simultaneous failures synchronize the next wave of arrivals. The runtime must identify which mechanism is producing load rather than treat every timeout as a reason for another attempt.
+A slowdown alone does not imply an increasing request rate. For a fixed population of sequential clients, longer response time actually reduces the rate of new requests. Amplification arises when retries add attempts, a timeout leaves remote work running while a replacement starts, retry layers repeat the same request, or simultaneous failures synchronize the next wave of arrivals.[^fn-metastable-retry-failure] The runtime must identify which mechanism is producing load rather than treat every timeout as a reason for another attempt.
+
+[^fn-metastable-retry-failure]: **Metastable failure**: Retry amplification can outlive its trigger. Bronson and colleagues describe systems in which a brief overload causes failures whose retries keep offered load above capacity after the original cause has gone, so the system stays degraded until load is shed or the retry policy changes [@bronson2021metastable]. A shared tool dependency serving many trajectories is exposed to the same feedback loop. \index{Metastable failure!retry amplification}
 
 Three controls address different parts of the problem. A circuit breaker withholds new calls based on recent dependency evidence, backoff and jitter delay and spread justified retries, and bounded execution and queues limit the resources retained while work waits. None establishes whether the earlier `test_r18` operation finished.
 
@@ -738,11 +766,13 @@ Assign one component responsibility for an operation's retry allowance, counting
 
 Before scheduling another attempt, the owner applies the settlement rule and the repeat contract of @sec-vol3-tool-calling-idempotency. It keeps the stable logical operation identity, distinguishes transport attempts, and treats an edited payload as a new operation rather than a retry. The retry then passes the admission check like any new work; sleeping refunds nothing.
 
-Identical delays preserve synchronization when requests fail together. **Capped exponential backoff with full jitter**\index{Full jitter!definition} chooses a capped exponential interval and draws a delay uniformly within it:
+Identical delays preserve synchronization when requests fail together. **Capped exponential backoff with full jitter**\index{Full jitter!definition}[^fn-exponential-backoff-ethernet] chooses a capped exponential interval and draws a delay uniformly within it:
 
 $$b_k = \min(b_{\max}, b_0 2^k), \qquad d_k \sim \operatorname{Uniform}(0,b_k).$$
 
 Here $k=0$ denotes the first retry. The name and the policy's comparison against other jitter schemes come from a widely used analysis of retry contention [@brooker2015backoff]. The cap limits each sampled delay, not the number of attempts. An applicable server instruction may require a later earliest retry time, which overrides the sampled delay.
+
+[^fn-exponential-backoff-ethernet]: **Binary exponential backoff**: The idea predates service retries. In the 1976 Ethernet design, a station whose transmission collided waited a random interval whose mean doubled after each successive collision [@metcalfe1976ethernet]. Randomization desynchronized contending senders and doubling adapted to unknown load, the same two jobs jitter and the exponential cap do for retries against a shared tool. \index{Exponential backoff!Ethernet origin}
 
 Independent jitter changes the arrival distribution but leaves the maximum burst unbounded, because samples can cluster and unrelated traffic can coincide. Rate admission and bounded capacity must still gate actual dispatch after the delay, where the admission check and the breaker generation are evaluated again. If the breaker is open, do not turn local rejection into a tight loop of new retries or model calls.
 
@@ -750,7 +780,9 @@ Independent jitter changes the arrival distribution but leaves the maximum burst
 
 **Bulkhead isolation**\index{Bulkhead isolation!definition} [@nygard2007releaseit] assigns explicit execution and queue limits to resource domains so one dependency cannot occupy capacity reserved for unrelated work. Blocking worker threads, asynchronous in-flight requests, retained payload bytes, and remote job reservations are different quantities, and an asynchronous wait can release a thread while retaining sockets, buffers, and unresolved operations.
 
-Little's law (@sec-vol3-kv-workload-dynamics) sizes the steady-state version of the problem. Calls to a stalled dependency that arrive at rate $\lambda_{\text{ext}}$ and each hold a worker until a timeout $T_{\text{out}}$ occupy on average $\lambda_{\text{ext}} T_{\text{out}}$ workers. An uncapped pool of $N_{\text{pool}}$ workers therefore holds $N_{\text{blocked}} = \min(N_{\text{pool}}, \lambda_{\text{ext}} T_{\text{out}})$ of them. Once that product reaches $N_{\text{pool}}$, even instant local work waits behind the external timeout.
+Little's law[^fn-little-law-occupancy] (@sec-vol3-kv-workload-dynamics) sizes the steady-state version of the problem. Calls to a stalled dependency that arrive at rate $\lambda_{\text{ext}}$ and each hold a worker until a timeout $T_{\text{out}}$ occupy on average $\lambda_{\text{ext}} T_{\text{out}}$ workers. An uncapped pool of $N_{\text{pool}}$ workers therefore holds $N_{\text{blocked}} = \min(N_{\text{pool}}, \lambda_{\text{ext}} T_{\text{out}})$ of them. Once that product reaches $N_{\text{pool}}$, even instant local work waits behind the external timeout.
+
+[^fn-little-law-occupancy]: **Little's law**: Little's 1961 proof that $L = \lambda W$ holds for a stationary queueing system requires no assumption about the arrival or service distributions [@little1961]. The worker-occupancy estimate therefore needs only the arrival rate and the timeout, not a model of how the stalled dependency fails. \index{Little's law!worker occupancy}
 
 Bound the waiting queue as well as execution. When both are full, reject additional requests before sending them and record that disposition for the task's recovery policy. A larger queue trades memory and waiting time for fewer immediate refusals during a burst, and queue expiry never authorizes dispatch after the task's deadline.
 
@@ -808,6 +840,12 @@ class ContainmentCapacity:
     spread_str = fmt_int(round(spread_ratio))
 ```
 
+::: {.column-margin}
+![](images/svg/vol3_failure_recovery_margin_jitter_rate.svg){width="100%" fig-alt="Two horizontal bars on a log scale. The upper bar, labeled Synchronized 64,000 per second, is long; the lower bar, labeled Jittered mean 64 per second, is short."}
+
+*Jitter lowers the mean retry rate a thousandfold but leaves the peak unbounded.*
+:::
+
 ::: {#nbk-12-sizing-bulkhead-capacity-and-jitter .callout-notebook title="What capacity and jitter actually bound"}
 
 **Problem**: Which worker-occupancy limits can bounded admission guarantee in the stated burst, and which retry-arrival quantities does jitter determine only in expectation?
@@ -844,7 +882,9 @@ An ordinary timeout, a rejected proposal, or ingestion of an untrusted document 
 
 ### Hold model-directed work without abandoning cleanup
 
-Compensation never required a benign model, because its registered handlers and the admission check are runtime responsibilities. Containment can therefore stop model-directed work and keep registered compensation running. Holding on suspicion applies the principle of fail-safe defaults [@saltzer1975]. When the evidence that would justify further model-directed work is in doubt, the default decision denies admission rather than permitting it.
+Compensation never required a benign model, because its registered handlers and the admission check are runtime responsibilities. Containment can therefore stop model-directed work and keep registered compensation running. Holding on suspicion applies the principle of fail-safe defaults [@saltzer1975].[^fn-failsafe-defaults-hold] When the evidence that would justify further model-directed work is in doubt, the default decision denies admission rather than permitting it.
+
+[^fn-failsafe-defaults-hold]: **Fail-safe defaults**: Saltzer and Schroeder argued for basing access decisions on permission rather than exclusion because the two designs fail differently: a mistake in a permission-based mechanism refuses a legitimate request, which someone notices and reports, while a mistake in an exclusion-based one grants access silently [@saltzer1975]. An incident hold inherits that asymmetry; a wrongly held trajectory costs time and surfaces in review, whereas a wrongly admitted action may be irreversible. \index{Fail-safe defaults!incident hold}
 
 The supervisor records a control hold at the guarded boundaries established in @sec-vol3-controlplane-statemachine and withdraws eligibility from active output and held proposals. A pause uses the existing guarded path through `READY` to `PAUSED` with no runnable gap, and a task that must end passes through `FINALIZING`.
 
@@ -1076,6 +1116,12 @@ A repeated state is evidence for a progress review, and a deliberate backtrack p
 A ceiling bounds total spending, and an append-only loop spends most of it before the ceiling trips. In notebook \ref{nbk-12-loop-cost}, running to the `{python} LoopCost.cap_str`-turn ceiling costs `{python} LoopCost.usd_cap_str`, about `{python} LoopCost.ratio_mult_str` the `{python} LoopCost.usd_det_str` of stopping at turn `{python} LoopCost.detect_str`, because input grows with the square of the turns. The ceiling is the backstop; a progress detector with a short detection latency is the control.
 :::
 
+::: {.column-margin}
+![](images/svg/vol3_failure_recovery_margin_retry_layers.svg){width="100%" fig-alt="A tree from one red square on the left branching into 3 violet dots, then 9 violet dots, then 27 small blue dots, with the counts 1, 3, 9, and 27 printed beneath the columns."}
+
+*Three independent retry layers turn one failing call into 27 attempts.*
+:::
+
 ::: {.fallacy-pitfall}
 **Pitfall**: *Letting every layer retry on its own allowance.*
 
@@ -1101,6 +1147,21 @@ Compensation establishes declared postconditions without erasing history. Forwar
 :::
 
 Intent before effect (principle \ref{pri-vol3-intent-before-effect}) becomes, for compensation, an ordering rule that registers corrective obligations before dispatch, checks the designated commitment, and preserves the duties that remain. Trajectory-level encapsulation (principle \ref{pri-vol3-trajectory-encapsulation}) adds enforced intervention when progress checks suggest nonprogress. Neither promises that every effect is reversible or every task recoverable.
+
+## Historical Perspective and Further Reading {#sec-vol3-failure-recovery-history}
+
+The settlement rule descends from transaction processing. Gray's notes on database operating systems described how a commit decision spans several nodes and why a lost message leaves one side uncertain [@gray1978notes], and his 1981 essay on the transaction concept named the limits that this chapter starts from: a travel booking commits at other organizations, lasts days rather than seconds, and can be undone only by compensating transactions logged by the parent [@gray1981transaction]. Garcia-Molina and Salem turned that observation into the saga, a long-lived transaction split into separately committed steps, each paired with a compensator [@garciamolina1987sagas]. Multidatabase transaction models then asked which steps could be compensated, which only retried, and which were pivots that could be neither, and fixed the order in which they may commit [@mehrotra1992transaction]. Two decades later, Helland argued from large-scale services that applications spanning independent entities must give up distributed transactions altogether and live with tentative operations, cancellation, and idempotent processing [@helland2007life].
+
+A second lineage supplied the vocabulary of recovery itself. Randell's recovery blocks gave software an acceptance test and a bounded list of alternates run from a restored state [@randell1975system], and the dependability taxonomy of Avizienis and colleagues later separated rollback, rollforward, and compensation as distinct error-handling techniques [@avizienis2004basic]. The formal distinction between safety and liveness [@alpern1985defining] and the impossibility of telling a crashed process from a slow one in an asynchronous system [@fischer1985impossibility] explain why a progress monitor produces evidence rather than proof and why a timeout settles nothing.
+
+Overload control arrived from networking and service operations. Ethernet's randomized exponential backoff desynchronized colliding senders [@metcalfe1976ethernet]; Nygard's circuit breakers and bulkheads packaged dependency containment for application code [@nygard2007releaseit]; analyses of jittered backoff and of retry amplification across service layers quantified why retries need one owner [@brooker2015backoff; @brooker2019timeouts]; and the study of metastable failures showed that retries can sustain an overload after its trigger has passed [@bronson2021metastable]. Agent systems inherited all three lineages at once and added a new source of repeated attempts: model-generated repair from feedback [@madaan2023selfrefine; @shinn2023reflexion], whose measured benefit depends on the quality of that feedback [@olausson2024selfrepair; @huang2024cannot].
+
+- @gray1981transaction is short and still the clearest statement of why the transaction concept breaks for long-lived, multi-organization work, and of compensation as the fallback.
+- @garciamolina1987sagas defines the saga and its backward and forward recovery; reading it alongside this chapter shows exactly what an unknown tool outcome adds to the original model.
+- @helland2007life explains, from practice, how systems that cannot use distributed transactions reach agreement through tentative operations and idempotence.
+- @avizienis2004basic gives the shared vocabulary of faults, errors, failures, and recovery techniques that most dependability work since has used.
+- @bronson2021metastable frames retry storms and similar self-sustaining overloads, the failure mode that circuit breakers and coordinated retries exist to prevent.
+- @olausson2024selfrepair measures when model self-repair beats resampling at equal cost, the empirical question behind this chapter's repair threshold.
 
 ::: {.callout-chapter-connection title="From recovery behavior to evaluation evidence"}
 

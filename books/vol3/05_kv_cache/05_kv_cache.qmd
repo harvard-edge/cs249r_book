@@ -56,7 +56,9 @@ The connection-pool repair (\ref{lhs-vol3-repair-agent}) has reached a candidate
 *State becomes a physical resource claim inside the serving system.*
 :::
 
-For causal attention, each new token attends to earlier tokens through their keys and values. Recomputing those vectors at every decode step would repeat the projections of the whole prefix, so the serving system keeps them. @Sec-vol3-foundation-model-autoregressive introduced this stored state; its capacity, sharing, and lifetime are the subject of this chapter.
+In the causal self-attention of the Transformer decoder, each new token attends to earlier tokens through their keys and values [@vaswani2017]. Recomputing those vectors at every decode step would repeat the projections of the whole prefix, so the serving system keeps them.[^fn-kv-memory-bound] @Sec-vol3-foundation-model-autoregressive introduced this stored state; its capacity, sharing, and lifetime are the subject of this chapter.
+
+[^fn-kv-memory-bound]: **Memory-Limited Inference**: Keeping keys and values turns a quadratic recomputation into a memory claim, and that claim soon sets the limit. An analytical study of large-model inference found that sharing one key-value head across all query heads let the same deployment serve contexts more than an order of magnitude longer, because the retained state, not the arithmetic, bounded context length and batch size [@pope2023efficiently]. The rest of this chapter manages that claim. \index{KV cache!memory bound}
 
 ::: {#dfn-kv-cache .callout-definition title="KV cache"}
 
@@ -74,7 +76,9 @@ $$m_{\text{token}} = 2 \cdot N_L \cdot H_{\text{KV}} \cdot d_{\text{head}} \cdot
 
 bytes per retained token. A sequence with KV state for $S$ tokens consequently has payload $M_{\text{KV}} = S \cdot m_{\text{token}}$. Here $S$ counts tokens whose keys and values have actually been computed; a newly sampled token joins $S$ once the model has processed it.
 
-The head count in @eq-mem-token is the number of stored key-value heads, which can be smaller than the number of query heads. **Grouped-query attention**\index{Grouped-query attention!definition} lets several query heads share one key-value head, dividing the stored head count by the group size relative to a comparable multi-head design [@ainslie2023gqa]. The reduction is fixed when the model is trained; an allocator cannot drop heads from an existing model without changing its computation.
+The head count in @eq-mem-token is the number of stored key-value heads, which can be smaller than the number of query heads. Multi-query attention took this to its limit, one key-value head shared by every query head[^fn-mqa-decode-bandwidth] [@shazeer2019fast]. **Grouped-query attention**\index{Grouped-query attention!definition} interpolates between the two: several query heads share one key-value head, dividing the stored head count by the group size relative to a comparable multi-head design [@ainslie2023gqa]. The reduction is fixed when the model is trained; an allocator cannot drop heads from an existing model without changing its computation.
+
+[^fn-mqa-decode-bandwidth]: **Multi-Query Attention**: The motivation was bandwidth before capacity. Incremental decoding reloads every stored key and value at each step, so its speed was bound by memory traffic, and sharing the key-value tensors across heads shrank both the traffic and the stored state at a small cost in quality [@shazeer2019fast]. Grouped-query attention later recovered most of that quality while keeping most of the saving, which is why the head count in @eq-mem-token is a training-time design choice. \index{Multi-query attention!memory bandwidth}
 
 The formula counts tensor payload for full attention over the retained sequence. Allocation granularity, alignment, block metadata, and precision-specific scales add to it, and architectures with local attention or compressed latent state need their own accounting.
 
@@ -151,7 +155,7 @@ class KvGeometry:
     fit_math = fmt_math(rf"\left\lfloor {kv_pool.to(GB).magnitude:.9f} / {kv_agent.to(GB).magnitude:.9f} \right\rfloor = {conc_agent}")
 ```
 
-The worked estimate uses the Llama 3 70B model geometry, with `{python} KvGeometry.params_str` parameters, and a DGX H100 node containing `{python} KvGeometry.n_acc_str` accelerators. Unlike the single-device, 8-bit illustration in @sec-vol3-foundation-model-cost, both weights and KV use 16-bit storage here, with the weights sharded across the node. The memory left after the weights and a runtime reserve is the **KV pool**\index{KV pool!definition}, and the number of sequences whose payload fits in it at once is the **resident-fit bound**\index{Resident-fit bound!definition}. Aggregate arithmetic assumes balanced shards without replicated copies; a deployment must also satisfy each device's limit. @Fig-vol3-context-window-anatomy traces one agent context of this length from its logical zones through that geometry to the number of such contexts the node can hold.
+The worked estimate uses a representative configuration: the Llama 3 70B model geometry, with `{python} KvGeometry.params_str` parameters, and a DGX H100 node containing `{python} KvGeometry.n_acc_str` accelerators. Both are point-in-time instances; a later model or node changes the inputs, not the arithmetic. Unlike the single-device, 8-bit illustration in @sec-vol3-foundation-model-cost, both weights and KV use 16-bit storage here, with the weights sharded across the node. The memory left after the weights and a runtime reserve is the **KV pool**\index{KV pool!definition}, and the number of sequences whose payload fits in it at once is the **resident-fit bound**\index{Resident-fit bound!definition}. Aggregate arithmetic assumes balanced shards without replicated copies; a deployment must also satisfy each device's limit. @Fig-vol3-context-window-anatomy traces one agent context of this length from its logical zones through that geometry to the number of such contexts the node can hold.
 
 ::: {#fig-vol3-context-window-anatomy fig-env="figure" fig-pos="htb" fig-cap="**From Agent Context to KV State**: A 32,768-token agent context (a), divided into system prompt, tool schemas, workspace, turn history, and the latest observation, becomes key and value tensors at every layer (b). The grouped-query model's per-token footprint then sets how many such contexts fit in the node's KV pool, before allocator overhead and headroom." fig-alt="Panel a divides a 32,768-token context into five labeled zones with token counts, grouped as a shared prefix, growing history, and active turn. Arrows lead to panel b, which lists model dimensions, derives 327,680 bytes per token and 10.7 GB per context, and states that resident fit equals the node's KV pool divided by the per-context footprint, so four times the context holds a quarter as many sequences."}
 ![](images/svg/prompt_context_window_anatomy.svg)
@@ -179,7 +183,9 @@ The memory available for KV payload is `{python} KvGeometry.pool_math`. Dividing
 
 The weights are paid once and shared by every request, while each independent sequence adds its own attention state. Shared prefixes reduce that per-sequence total only where the service retains and safely reuses compatible state.
 
-Architecture and precision change the payload before allocation begins. A model trained to retain fewer key-value heads or compressed latent vectors stores less state per token. Lower-precision KV storage shrinks the element payload at the cost of scale overhead and possible output changes, so it needs validation on the intended tasks. Either way, the remaining state still has a lifetime and an owner, and managing those is the rest of this chapter.
+Architecture and precision change the payload before allocation begins. A model trained to retain fewer key-value heads or compressed latent vectors[^fn-latent-kv-compression] stores less state per token. Lower-precision KV storage shrinks the element payload at the cost of scale overhead and possible output changes, so it needs validation on the intended tasks. Either way, the remaining state still has a lifetime and an owner, and managing those is the rest of this chapter.
+
+[^fn-latent-kv-compression]: **Latent KV Compression**: Multi-head latent attention stores a low-rank latent vector per token and reconstructs per-head keys and values from it during attention, trading extra projection arithmetic for a much smaller cache [@deepseek2024v2]. It changes $m_{\text{token}}$ in @eq-mem-token but none of the lifetime questions that follow: a latent cache is still allocated, shared, paused, and evicted as blocks. \index{Multi-head latent attention!KV footprint}
 
 For the repair agent, retaining state during the integration test is one such lifetime decision. The caller may prefer a faster resume, while the operator must weigh that benefit against competing requests. Before comparing those policies, the allocator must turn the payload estimate into actual storage. Reserving every sequence's largest possible future size can waste the pool well before its useful tensor contents reach capacity.
 
@@ -249,7 +255,7 @@ A second policy grows a contiguous allocation as tokens arrive. When adjacent ca
 
 ### Two kinds of unused capacity
 
-Unused slots inside a reservation are **internal fragmentation**\index{Internal fragmentation!KV definition}; free capacity split into extents too small for a contiguous request is **external fragmentation**\index{External fragmentation!KV definition}. @Tbl-vol3-kv-fragmentation-taxonomies separates them because each has a different remedy: releasing slack cures the first, and changing the allocation granularity cures the second.
+Unused slots inside a reservation are **internal fragmentation**\index{Internal fragmentation!KV definition}; free capacity split into extents too small for a contiguous request is **external fragmentation**\index{External fragmentation!KV definition}. The distinction comes from storage allocation for multiprogrammed computers[^fn-fragmentation-internal-external] [@randell1969fragmentation]. @Tbl-vol3-kv-fragmentation-taxonomies separates them because each has a different remedy: releasing slack cures the first, and changing the allocation granularity cures the second.
 
 | **Condition**          | **Where capacity is unavailable**                           | **Consequence**                                                               |
 |:-----------------------|:------------------------------------------------------------|:------------------------------------------------------------------------------|
@@ -257,6 +263,8 @@ Unused slots inside a reservation are **internal fragmentation**\index{Internal 
 | External fragmentation | In separate free extents of a variable-size allocation pool | A contiguous request can fail even when aggregate free capacity is sufficient |
 
 : **Unused KV capacity**: Reservation slack belongs to an allocation; external fragmentation concerns free space that cannot satisfy a particular contiguous request. {#tbl-vol3-kv-fragmentation-taxonomies tbl-colwidths="[22,40,38]"}
+
+[^fn-fragmentation-internal-external]: **Internal and External Fragmentation**: The analysis of storage allocation that named the two losses also measured their trade: rounding requests up to fewer standard sizes cost more storage in internal fragmentation than it recovered in external fragmentation [@randell1969fragmentation]. Paged KV allocation makes the same trade on purpose, accepting at most one partial block per sequence in exchange for a pool in which any free block fits any request. \index{Fragmentation!internal versus external}
 
 For a concrete external-fragmentation example, suppose an allocator has three free extents of exactly 256 token slots each, separated by live allocations. A request requiring 512 contiguous slots cannot fit in any extent, although the free extents together have sufficient capacity. The failure comes from the contiguity requirement, not from a shortage of memory.
 
@@ -406,6 +414,12 @@ class PagedWaste:
     gain_mult_str = fmt_multiple(round(gain))  # prose says "roughly"
 ```
 
+::: {.column-margin}
+![](images/svg/kv_paged_vs_static_margin.svg){width="100%" fig-alt="Two horizontal bars on one linear scale: a short gray bar labeled 48 for full-cap reservation and a long green bar labeled 780 for paged blocks, with the note sequences resident, same pool."}
+
+*Allocating blocks as tokens arrive admits about `{python} PagedWaste.gain_mult_str` the sequences of full-cap reservation.*
+:::
+
 The tail bounds become an expected waste once a length distribution is stated. Model final lengths as exponential with the hypothetical mean of `{python} StaticReservation.mean_final_tokens_str` tokens, capped at the `{python} StaticReservation.s_max_str`-token limit used for static reservation. Under that assumption, `{python} PhysicalBlockSizing.small_tokens_str`-token blocks leave `{python} PagedWaste.frag_small_str` of allocated KV memory unused and `{python} PhysicalBlockSizing.large_tokens_str`-token blocks leave `{python} PagedWaste.frag_large_str`. Dividing the pool that admitted `{python} StaticReservation.reservations_str` full-cap reservations by the expected paged allocation gives about `{python} PagedWaste.fit_paged_str` sequences, roughly `{python} PagedWaste.gain_mult_str` as many. That is the payoff of paging. Allocation tracks the tokens a sequence has actually produced rather than the cap it might reach. The count is a mean under the stated length model; the resident count fluctuates with the lengths actually present.
 
 ### Sharing a prefix without sharing its future writes
@@ -444,7 +458,7 @@ class ForkCopy:
 
 Deliberation that samples several candidates to buy evidence (principle \ref{pri-vol3-verification-asymmetry}) makes forks routine. Candidate repairs can begin from the same processed prefix and then generate different continuations. Their block tables may refer to the same immutable prefix blocks if the model computation is compatible and the service permits sharing. The saving is large at agent context lengths. A contiguous allocator that deep-copies an `{python} ForkCopy.prefix_str`-token prefix into four candidates writes `{python} ForkCopy.copied_str` of KV state for the Llama 3 70B geometry, while block-table duplication copies none of that payload. The runtime still constructs or shares metadata and records ownership; copying a block table and updating its references can require work proportional to its number of entries.
 
-The partial tail needs special treatment. Two candidates cannot independently append into the same shared writable slot. In the ten-token example, both candidates initially refer to `[3, 7, 9]`. Before candidate B writes position 10, the runtime allocates block 14, copies the two initialized entries from block 9, and redirects B's last table entry. The write then occurs at slot 2 of block 14. This **copy-on-write**\index{Copy-on-write!KV tail definition} operation leaves candidate A's state unchanged. @Tbl-vol3-kv-cow-trace follows the ownership change; its counts assume these two candidates are the only owners.
+The partial tail needs special treatment. Two candidates cannot independently append into the same shared writable slot. In the ten-token example, both candidates initially refer to `[3, 7, 9]`. Before candidate B writes position 10, the runtime allocates block 14, copies the two initialized entries from block 9, and redirects B's last table entry. The write then occurs at slot 2 of block 14. This **copy-on-write**\index{Copy-on-write!KV tail definition}[^fn-cow-tenex-pages] operation leaves candidate A's state unchanged. @Tbl-vol3-kv-cow-trace follows the ownership change; its counts assume these two candidates are the only owners.
 
 | **State**                     | **Candidate A table** | **Candidate B table** | **Physical ownership**                                   |
 |:------------------------------|:----------------------|:----------------------|:---------------------------------------------------------|
@@ -452,6 +466,8 @@ The partial tail needs special treatment. Two candidates cannot independently ap
 | After B's private-tail append | `[3, 7, 9]`           | `[3, 7, 14]`          | Blocks 3 and 7 retain two owners; 9 and 14 each have one |
 
 : **Partial-tail copy-on-write**: Full prefix blocks remain shared while the initialized portion of the tail is copied before a private append. The block IDs label allocations; they do not imply contiguous addresses. {#tbl-vol3-kv-cow-trace tbl-colwidths="[23,20,20,37]"}
+
+[^fn-cow-tenex-pages]: **Copy-on-Write**: The TENEX time-sharing system of the early 1970s gave each page a status bit that let processes share large parts of an address space and obtain private copies of only the pages they changed [@bobrow1972tenex]. Forked candidates reuse the idea at block granularity, which is why a fan-out of sampled repairs costs private blocks in proportion to what each candidate writes, not to the prefix they share. \index{Copy-on-write!TENEX origin}
 
 This is different from appending at a full-block boundary. After a twelve-token prefix in four-token blocks, position 12 starts a new logical block. The appending candidate acquires a fresh block; it does not copy an old tail. A private partial tail can likewise accept another entry without a copy. The necessary operation depends on both the fill level and ownership of the block being modified.
 
@@ -494,7 +510,9 @@ These conditions are also separate from whether an observation remains appropria
 
 ### Finding usable prefix state
 
-A **radix prefix cache**\index{Radix prefix cache!definition} indexes token sequences with a compressed prefix tree, whose edges may represent several tokens rather than one. Following matching edges from the root identifies a common prefix and the associated KV storage [@zheng2024sglang]. The service must then obtain usable ownership of that storage before eviction can reclaim it. Lookup cost grows with the length of the request prefix it examines. A hash index of blocks keyed by their contents and preceding prefix supports the same reuse contract.
+A **radix prefix cache**\index{Radix prefix cache!definition} indexes token sequences with a compressed prefix tree,[^fn-radix-patricia-trie] whose edges may represent several tokens rather than one. Following matching edges from the root identifies a common prefix and the associated KV storage [@zheng2024sglang]. The service must then obtain usable ownership of that storage before eviction can reclaim it. Lookup cost grows with the length of the request prefix it examines. A hash index of blocks keyed by their contents and preceding prefix supports the same reuse contract.
+
+[^fn-radix-patricia-trie]: **Compressed Prefix Tree**: The trie stored one symbol per edge, so a shared prefix was found by walking from the root [@fredkin1960]. PATRICIA collapsed chains of single-child nodes into one edge, so index size grows with the number of stored keys rather than their length [@morrison1968patricia]. The same compression matters for KV reuse, because agent prefixes run to thousands of tokens and a one-token-per-edge index would spend a node on each of them. \index{Radix tree!PATRICIA origin}
 
 The match must extend from the beginning of the input. A repeated passage after a changed earlier token is not, in general, reusable as an independent suffix: its attention state was computed under a different preceding context. This is the physical consequence of the stable-prefix layout in @sec-vol3-context-engineering-staging. Keeping volatile fields later preserves more opportunities for reuse, while rewriting an earlier region shortens the common prefix. Compaction that rewrites only a later region keeps the prefix before it.
 
@@ -506,11 +524,13 @@ A finished request releases its active claim on KV state while the cache may kee
 
 Reuse and reclamation must respect ownership. Before using a hit, the service acquires the references needed by the new request. Before recycling a block, it removes the cache's claim, confirms that no other owner needs the block, and waits for outstanding device operations that could access it to finish; a zero active-request count is only the first of these checks. Index updates and ownership changes must also prevent a lookup from acquiring a block while that block is being reclaimed.
 
-A useful radix-cache policy, **leaf-first eviction**\index{Leaf-first eviction!definition}, retains complete paths from the root and evicts unused leaves first. Removing a leaf preserves its shared ancestors for other requests; an ancestor becomes a candidate once no retained descendants require that path. Least-recently-used selection among eligible leaves is one concrete policy [@zheng2024sglang], a bet that recent use predicts future reuse. @Fig-vol3-radix-tree-cache shows the cascade: a dormant node with a cached child is not yet eligible, and evicting that child makes it a leaf that is.
+A useful radix-cache policy, **leaf-first eviction**\index{Leaf-first eviction!definition}, retains complete paths from the root and evicts unused leaves first. Removing a leaf preserves its shared ancestors for other requests; an ancestor becomes a candidate once no retained descendants require that path. Least-recently-used selection among eligible leaves is one concrete policy [@zheng2024sglang], a bet that recent use predicts future reuse.[^fn-lru-belady-optimal] @Fig-vol3-radix-tree-cache shows the cascade: a dormant node with a cached child is not yet eligible, and evicting that child makes it a leaf that is.
 
 ::: {#fig-vol3-radix-tree-cache fig-env="figure" fig-pos="htb" fig-cap="**Leaf-First Eviction in a Radix Prefix Cache**: Each node stands for a run of tokens and the KV blocks that hold them, so a request's cached state is the path from the root to its node. Nodes on a running request's path stay active. Only dormant leaves are eligible, which is why the dormant Other-task node in panel (a) survives until its Final-turn child is evicted in panel (b). A least-recently-used policy would choose among the eligible leaves; it never removes an ancestor before its retained descendants." fig-alt="Two copies of a three-level tree. Panel a has an active shared-prefix root, an active repair-history node with an active test-log-turn leaf and a dormant rejected-branch leaf, and a dormant other-task node with a dormant final-turn leaf; the two dormant leaves are shaded as eligible for eviction. Panel b shows the final-turn leaf faded as evicted and the other-task node now shaded as an eligible dormant leaf. A legend defines active, dormant, eligible, and evicted."}
 ![](images/svg/radix_prefix_tree_architecture.svg)
 :::
+
+[^fn-lru-belady-optimal]: **Replacement with Foresight**: The classic study of page replacement showed that the optimal policy evicts the page whose next use lies furthest in the future, a rule no online system can apply because it needs the future reference string [@belady1966study]. Recency-based policies approximate it. An agent harness sometimes holds part of that future, such as a tool launch that will idle a prefix for minutes, which is why a retention hint from the caller can beat recency alone. \index{Belady optimal replacement!prefix cache}
 
 This prefix-closed residency rule is a serving simplification. Freeing a prefix block leaves a retained suffix block's values intact, but the next full-attention step needs the complete preceding state, so an orphaned suffix is unusable until the missing prefix is restored or recomputed from its inputs.
 
@@ -600,7 +620,7 @@ The application must remain correct on a cache miss, because the selected contex
 
 Prefix reuse avoids processing an unchanged prefix, but a new observation still introduces work. When the repair agent submits selected integration-test output, the serving engine must process the uncached part of the serialized request before producing its response. Other requests may already be generating tokens on the same accelerators. If the engine runs the entire new prefill as one uninterrupted scheduling unit, those requests may have to wait for that unit to finish before their next decode step.
 
-Shortening the observation reduces that work. Once the request reaches the server, the remaining question is when the work runs, because the scheduler shares execution time among all admitted requests and need not run a long prefill as one unit [@agrawal2024sarathi].
+Shortening the observation reduces that work. Once the request reaches the server, the remaining question is when the work runs, because the scheduler shares execution time among all admitted requests and need not run a long prefill as one unit. Iteration-level scheduling, which re-forms the batch at every model iteration instead of once per request, made that sharing possible[^fn-iteration-level-scheduling] [@yu2022orca]; splitting prefills into chunks that ride alongside ongoing decodes then bounded how long any one iteration could stall them [@agrawal2023sarathi; @agrawal2024sarathi].
 
 ::: {#dfn-chunked-prefill .callout-definition title="Chunked prefill"}
 
@@ -611,6 +631,8 @@ Shortening the observation reduces that work. Once the request reaches the serve
 3. **Common pitfall**: Treating the per-iteration token budget as a time bound. Iteration time also depends on attended context length and batch composition, so the budget must be calibrated against measured gaps between output tokens.
 
 :::
+
+[^fn-iteration-level-scheduling]: **Iteration-Level Scheduling**: Request-level batching fixes a batch until its longest member finishes, so a short request waits for a long one and a new arrival waits for the whole batch. Scheduling at the granularity of one model iteration lets finished requests leave and new ones join between steps [@yu2022orca]. Chunked prefill depends on that granularity: without it, there is no boundary at which a chunk and a set of decodes can be combined. \index{Iteration-level scheduling!chunked prefill}
 
 ### Preserving the causal computation
 
@@ -697,7 +719,7 @@ Smaller chunks offer more frequent scheduling opportunities but delay prompt com
 
 ### Separating prefill and decode placement {#sec-vol3-kvcache-disaggregated}
 
-Chunking shares execution time on a worker. **Prefill-decode disaggregation**\index{Prefill-decode disaggregation!definition} instead assigns the two phases to different workers, so that their resources and parallelism can be chosen separately [@zhong2024distserve]. The two techniques compose: a separated prefill worker can still process prompts in chunks.
+Chunking shares execution time on a worker. **Prefill-decode disaggregation**\index{Prefill-decode disaggregation!definition} instead assigns the two phases to different workers, so that their resources and parallelism can be chosen separately [@patel2024; @zhong2024distserve]. The two techniques compose: a separated prefill worker can still process prompts in chunks.
 
 Separation introduces a handoff. The decode worker needs compatible attention state, sufficient destination memory, and an agreed representation before it can continue the request. Transferring that state consumes bandwidth and may require layout conversion; requests can also queue at either worker. Even a direct device-to-device transfer contends for links and memory bandwidth.
 
@@ -707,7 +729,7 @@ Chunking determines how an active request shares compute. Whether that request's
 
 ## Paused-State Policies {#sec-vol3-kvcache-swapping}
 
-Return to the earlier integration-test wait, before its log arrives. The serving policy stipulated at the start of this chapter retains the repair's compatible attention state on the accelerator. Once the request no longer needs active computation, the serving operator chooses a **paused-state policy**\index{Paused-state policy!definition}: keep the state, move it elsewhere, or drop it and reconstruct it when needed. The choice trades accelerator capacity against storage, transfer, and computation at resumption. Memory is a resource bound, and invariant closure places resource bounds in the runtime below the model (principle \ref{pri-invariant-closure}), so the serving system owns the pause decision.
+Return to the earlier integration-test wait, before its log arrives. The serving policy stipulated at the start of this chapter retains the repair's compatible attention state on the accelerator. Once the request no longer needs active computation, the serving operator chooses a **paused-state policy**\index{Paused-state policy!definition}: keep the state, move it elsewhere, or drop it and reconstruct it when needed. Serving research on tool-augmented generation analyzed these same three options, as preserve, swap, and discard, and chose among them per request by the accelerator memory each would waste [@abhyankar2024infercept]. The choice trades accelerator capacity against storage, transfer, and computation at resumption. Memory is a resource bound, and invariant closure places resource bounds in the runtime below the model (principle \ref{pri-invariant-closure}), so the serving system owns the pause decision.
 
 ### What can actually be reclaimed
 
@@ -731,7 +753,7 @@ The policies in @tbl-vol3-reclamation-policies differ in which resource carries 
 
 Keep state when the pool has spare capacity and a likely return needs low restoration delay; a long pause costs nothing if no competing work needs the blocks. Under pressure, move state to free accelerator capacity without repeating prefill. Drop it when a return is unlikely, host capacity is scarce, or reconstruction is cheaper than preserving and transferring the state. Every choice also respects the isolation rules that govern who may access a saved prefix.
 
-Storage beyond host memory is a further destination for long waits such as a human approval, worthwhile when the probability of reuse justifies its capacity, transfer, and retrieval costs. A serialized KV copy remains derived computation; the durable record of the task's inputs, actions, and evidence lives in the runtime's own records.
+Storage beyond host memory is a further destination for long waits such as a human approval, worthwhile when the probability of reuse justifies its capacity, transfer, and retrieval costs. Serving systems for multi-turn conversations keep a hierarchy of host memory and disk for this purpose, prefetching a session's state layer by layer so that retrieval overlaps computation [@gao2024cachedattention], and cluster-scale designs pool the host memory and solid-state storage of many nodes into one KV store [@qin2024mooncake]. A serialized KV copy remains derived computation; the durable record of the task's inputs, actions, and evidence lives in the runtime's own records.
 
 ### A bounded comparison during the test wait
 
@@ -830,6 +852,12 @@ Both estimates grow linearly with the retained length $S$, so their ratio does n
 
 $$\frac{T_{\text{reload}}}{T_{\text{recompute}}} = \frac{S \, m_{\text{token}} / \text{BW}_{\text{link}}}{2 P S / R_{\text{attain}}} = \frac{m_{\text{token}} \, R_{\text{attain}}}{2 P \, \text{BW}_{\text{link}}}$$ {#eq-kv-reload-ratio}
 
+::: {.column-margin}
+![](images/svg/kv_reload_vs_recompute_margin.svg){width="100%" fig-alt="Two bars on a log scale from 1 millisecond to 10 seconds: a blue bar of 21 ms for reload over host links and an orange bar of 1.3 s for recomputing the prefill, with a bracket between their ends labeled about 62 times."}
+
+*Reloading paused state beats rebuilding it by about `{python} PausedStateChoice.ratio_mult_str` at every context length.*
+:::
+
 Here $R_{\text{attain}}$ is the sustained prefill rate, the attainable fraction of peak assumed for the prefix-hit estimate. @Eq-kv-reload-ratio is the restricted comparison of @sec-vol3-appendix-inference-queueing applied to the reference node. Reload is about `{python} PausedStateChoice.ratio_mult_str` faster than reconstruction, and still about `{python} PausedStateChoice.ratio_quarter_mult_str` faster if the links sustain only a quarter of their rated bandwidth. On this node, reconstruction is the better way back only when host memory or the link, not accelerator time, is the scarce resource.
 
 Keeping the state occupies `{python} PausedStateChoice.state_str` $\times$ `{python} PausedStateChoice.wait_str` $\approx$ `{python} PausedStateChoice.held_str` during the wait, with the calculation using the unrounded payload. This memory-time product measures occupancy; it becomes lost service only when other work needed those blocks during the wait.
@@ -898,7 +926,7 @@ Some transfer can overlap other work, but dependencies determine which work. In 
 
 Keep, move, and reconstruct all preserve the full-attention computation. A different family of policies prunes entries, restricts attention to a window, or reduces KV precision. These change the computation itself and need their own task-quality validation, because low attention weight from earlier queries says little about relevance to a future one.
 
-**Attention sinks**\index{Attention sink!definition} show why the simplest approximation fails. Softmax weights at each query sum to one, so later queries deposit attention mass they cannot place elsewhere on the first few positions of the sequence. A sliding window that evicts those initial tokens removes that stabilizing mass and degrades generation once the sequence outgrows the window; retaining a handful of initial tokens beside the recent window restores stable generation over long streams [@xiao2024streamingllm]. Score-based policies go further and keep the entries that have accumulated the most attention [@zhang2023h2o] or that showed importance soon after they were written [@liu2023scissorhands]. Both families assume that past attention predicts future need.
+**Attention sinks**\index{Attention sink!definition} show why the simplest approximation fails. Softmax weights at each query sum to one, so later queries deposit attention mass they cannot place elsewhere on the first few positions of the sequence. A sliding window that evicts those initial tokens removes that stabilizing mass and degrades generation once the sequence outgrows the window; retaining a handful of initial tokens beside the recent window restores stable generation over long streams [@xiao2024streamingllm]. Score-based policies go further and keep the entries that have accumulated the most attention [@zhang2023h2o] or that drew high attention within a recent window of steps, on the hypothesis that a token important once stays important [@liu2023scissorhands]. Both families assume that past attention predicts future need.
 
 Agent trajectories break that assumption in three recurring ways. A constraint stated early, such as the repair's API restriction or a read-only credential, can draw little attention through many intervening tool turns and then decide the final edit. An identifier such as a commit hash, process ID, or transaction token can stay dormant for many turns until a command must quote it exactly. Tool-schema delimiters in the prefix govern the structure of every later call, yet any single step may attend to them weakly; losing them produces malformed calls rather than a slightly worse answer. An approximation must therefore be evaluated on such long-range dependencies, not on stored bytes alone. Preserving KV, for its part, preserves derived computation under its compatibility conditions and nothing more; task verification remains separate.
 
@@ -921,6 +949,12 @@ $$M_{\text{pool}} = M_{\text{HBM}} - M_{\text{weights}} - M_{\text{runtime}}$$ {
 and a planner withholds a further headroom fraction $\theta$ of it. With blocks of $p$ tokens, a block-aligned common prefix of $S_{\text{common}}$ tokens, and $B$ resident requests, the blocks demanded must fit the usable blocks:
 
 $$\left\lceil \frac{S_{\text{common}}}{p} \right\rceil + B \left\lceil \frac{S + K_{\max} - S_{\text{common}}}{p} \right\rceil \le \left\lfloor \frac{(1-\theta)\, M_{\text{pool}}}{p \, m_{\text{token}}} \right\rfloor$$ {#eq-kv-demand-shared}
+
+::: {.column-margin}
+![](images/svg/kv_sharing_gain_margin.svg){width="100%" fig-alt="A green curve rising from 1 times at zero shared fraction and steepening toward 10 times, with a blue dot at a shared fraction of 70.6 percent labeled 3.4 times."}
+
+*The sharing gain $1/(1-f)$ steepens as the shared fraction of each request grows.*
+:::
 
 The resident-fit bound is the largest $B$ that satisfies @eq-kv-demand-shared. Setting $S_{\text{common}} = 0$ recovers the unshared case. The common term is paid once, so sharing helps most when the common prefix is a large fraction of each prompt and the private region, including the output allowance, is small.
 
@@ -1068,6 +1102,12 @@ Rearranged as $\lambda = \bar{L}/\bar{W}$, the law turns a slot count into a rat
 
 :::
 
+::: {.column-margin}
+![](images/svg/kv_residency_tax_margin.svg){width="100%" fig-alt="A bracket labeled slot held 50 s spans one bar made of a short blue segment labeled generate 5 s and a long gray segment labeled tool wait 45 s, above the note rate divided by 10."}
+
+*A kept slot is paid for across the whole cycle, not only while it generates.*
+:::
+
 We call the factor $1 + W_{\text{wait}}/W_{\text{gen}}$ the **residency tax**\index{Residency tax!definition} of a tool wait. The released-slot rate is an upper constraint from memory alone. Prefill, restoration, transfer contention, and queueing all lower it, compute or transfer capacity can bind before memory does, and shared blocks that another request still uses stay allocated when one trajectory waits.
 
 A mean relation also leaves bursts unbounded. Several tools can return together, or one turn can spawn multiple candidates, creating demand that a time average conceals. Planning therefore tests the intended distribution of prompt lengths, output growth, branching, and waits against both physical availability and latency targets.
@@ -1194,7 +1234,9 @@ A block being copied while an active request still references it belongs in the 
 
 The storage view needs measurements of work and delay alongside it. Record offered requests and prompt/output token volumes, actual reused prompt tokens under the denominator defined earlier, eviction and restoration traffic, recomputed tokens, and the distribution of waits and resumes. Compare admission delay, time to first token, inter-token latency, and resume latency with explicit targets under the same workload. A high reuse fraction can coexist with long queues, while an eviction can be harmless if the removed prefix would never have been used again.
 
-Repeated eviction followed by reload or recomputation is evidence of churn. If that churn accompanies worsening tail latency or falling completed work at comparable offered load, it motivates a change in admission, retention, or scheduling; the diagnosis rests on that combination, since the occupied fraction at which churn begins differs across allocators and workloads. An application caller with only provider-exposed metrics should make claims within that visibility boundary; detailed physical-pool diagnosis belongs to the serving operator.
+Repeated eviction followed by reload or recomputation is evidence of churn.[^fn-thrashing-load-control] If that churn accompanies worsening tail latency or falling completed work at comparable offered load, it motivates a change in admission, retention, or scheduling; the diagnosis rests on that combination, since the occupied fraction at which churn begins differs across allocators and workloads. An application caller with only provider-exposed metrics should make claims within that visibility boundary; detailed physical-pool diagnosis belongs to the serving operator.
+
+[^fn-thrashing-load-control]: **Thrashing**: Multiprogrammed virtual-memory systems of the 1960s met the same failure as collapse: once the resident programs' working sets exceeded memory, each program's faults evicted pages another needed, and the processor spent its time moving pages rather than computing [@denning1968thrashing]. The remedy was load control, admitting fewer programs until their working sets fit. Its KV analog is admission control against the retained state of active trajectories, not a faster eviction policy. \index{Thrashing!KV churn}
 
 With the storage bound and this telemetry, a serving operator can identify which state must remain, which bytes can be reclaimed, and what work or delay reclamation introduces.
 
@@ -1258,6 +1300,23 @@ The repair's selected context becomes a physical allocation only through the ser
 :::
 
 Attention state derived from the token prefix (principle \ref{pri-vol3-prefix-coherence}) creates an opportunity to reuse work, not an obligation to keep every computed tensor resident. Block ownership and residence accounting price that opportunity. Authority still stays with the source (principle \ref{pri-vol3-source-authority}); a cheaper continuation does not make an old observation evidence about a changed artifact.
+
+## Historical Perspective and Further Reading {#sec-vol3-kv-cache-history}
+
+Nearly every mechanism in this chapter answers a memory problem that time-sharing computers met first. When programs outgrew the memory given to them, the Atlas one-level store introduced paging: a table mapped a program's contiguous addresses onto scattered physical frames, so a program could grow without a contiguous region [@kilburn1962onelevel]. Paging then exposed its own costs. @randell1969fragmentation separated the storage lost inside rounded-up allocations from the storage lost between them. @belady1966study showed that the best replacement policy needs knowledge of future references, so every practical policy approximates it. The working-set model explained why a machine collapses into thrashing when the programs it admits need more memory than it has, and why admitting fewer programs, not replacing pages faster, is the cure [@denning1968; @denning1968thrashing]. TENEX let processes share pages until one of them wrote [@bobrow1972tenex], and PATRICIA indexed long keys by their shared prefixes [@morrison1968patricia]. @denning1970 gathered these results into the virtual-memory discipline that operating-systems courses still teach.
+
+Model serving met the same problem when the Transformer made every generated token depend on stored keys and values for all earlier tokens [@vaswani2017]. The first answers changed the model. Multi-query and then grouped-query attention reduced the number of stored heads [@shazeer2019fast; @ainslie2023gqa], and an analytical study of large-model inference showed that retained state, not arithmetic, bounded context length and batch size [@pope2023efficiently]. The serving answers that followed track the operating-systems lineage closely. Iteration-level scheduling let requests join and leave a running batch [@yu2022orca]. PagedAttention brought block tables and copy-on-write to KV storage and measured how much memory contiguous reservation had wasted [@kwon2023vllm]. Radix-tree prefix caching with leaf-first eviction extended sharing across independent requests [@zheng2024sglang], chunked prefill bounded the stall that a long prompt imposes on ongoing decodes [@agrawal2023sarathi], and phase disaggregation placed prefill and decode on separate workers [@patel2024; @zhong2024distserve].
+
+Agent workloads added the problem at the center of this chapter: state that idles through a tool wait and then returns. Work on tool interceptions framed keep, move, and drop as a per-request trade of idle memory against recomputation and transfer [@abhyankar2024infercept], and multi-turn serving systems extended retention to host memory and storage [@gao2024cachedattention; @qin2024mooncake]. Approximation took a separate path, trading exact computation for smaller state through attention sinks and score-based eviction [@xiao2024streamingllm; @zhang2023h2o]. Whether any approximation preserves the long-range dependencies of agent trajectories remains an open problem.
+
+For further reading, six works trace the lineage from classical memory management to agent serving.
+
+- @denning1970 surveys paging, replacement, and locality in one place. Reading it first shows how many KV-cache questions are classical questions with a new unit of storage.
+- @denning1968 introduces the working set, the locality idea behind keeping each model call near its selected context, and the basis for reasoning about when admitted work exceeds memory.
+- @pope2023efficiently builds an analytical model of large-model inference. It teaches how head sharing and partitioning decide whether memory or arithmetic bounds a deployment.
+- @kwon2023vllm carries paging, block tables, and copy-on-write into KV storage and measures the waste they remove. It is a model of transferring a classical mechanism to a new workload with evidence.
+- @zheng2024sglang treats shared prompt structure as a serving resource, indexed by a radix tree and retained under an eviction policy.
+- @abhyankar2024infercept states the tool-wait problem as a serving problem and compares keeping, moving, and discarding paused state.
 
 ::: {.callout-chapter-connection title="From reusable computation to durable information"}
 

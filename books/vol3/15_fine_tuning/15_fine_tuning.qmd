@@ -77,7 +77,7 @@ Every response the model produces is a function of two inputs, the weights and t
 
 A memorized schema is a stale contract. A changed interface may require a new argument, and a revoked permission stays revoked however often training demonstrated the old action, so what training can usefully teach is the habit of consulting the supplied contract.
 
-The sorting rules out a tempting description of fine-tuning as compiling the prompt into the weights. Only the procedural part of a prompt, such as a debugging checklist or few-shot recovery examples, can move into the weights, saving those tokens on every turn (@sec-vol3-fine-tuning-distillation). The contractual part must stay, because removing it leaves the model guessing at the facts of the current task, and the check that enforces a permission moves into neither prompt nor weights.
+The sorting rules out a tempting description of fine-tuning as moving the whole prompt into the weights. Only the procedural part of a prompt, such as a debugging checklist or few-shot recovery examples, can move into the weights, saving those tokens on every turn (@sec-vol3-fine-tuning-distillation). The contractual part must stay, because removing it leaves the model guessing at the facts of the current task, and the check that enforces a permission moves into neither prompt nor weights.
 
 Fine-tuning does change which tools the model requests, how long it investigates, and which environment states it reaches, and those changes can improve or worsen task outcomes and resource use. All of them play out inside the horizon, state, and authority bounds the runtime sets. We call this the *proposal boundary*. Training changes what the policy proposes, and it never changes what the runtime permits. Every later section relies on it, including the release decision at the chapter's end.
 
@@ -173,7 +173,9 @@ Let $X=(x_1,\ldots,x_T)$ be one serialized example, with an initial context or b
 
 $$\mathcal{L}_{\mathrm{SFT}}(\theta)=-\frac{1}{N_{\mathrm{active}}}\sum_{t=2}^{T}m_t\log P_\theta(x_t\mid x_{<t}),\qquad N_{\mathrm{active}}=\sum_{t=2}^{T}m_t>0.$$ {#eq-vol3-sft-masked-objective}
 
-Each selected token is predicted from the preceding prefix. The training computation uses the recorded preceding tokens, including earlier selected responses, rather than sampling a fresh continuation at every position. This is **teacher forcing**\index{Teacher forcing!definition}. It can include recovery prefixes containing mistakes, provided those inputs and targets passed the curation contract.
+Each selected token is predicted from the preceding prefix. The training computation uses the recorded preceding tokens, including earlier selected responses, rather than sampling a fresh continuation at every position. This is **teacher forcing**\index{Teacher forcing!definition}[^fn-teacher-forcing-origin] [@williams1989learning]. It can include recovery prefixes containing mistakes, provided those inputs and targets passed the curation contract.
+
+[^fn-teacher-forcing-origin]: **Teacher Forcing**: Williams and Zipser named the technique in 1989 for recurrent networks, feeding the recorded target back as the next input instead of the network's own output. Because every prefix is recorded rather than generated, a causal model computes all of an example's next-token predictions in one parallel forward pass, which is why imitating a trajectory costs one pass per example rather than one sampled rollout per decision.
 
 In the repair example, `target_mask_v1` maps the reviewed response spans onto the tokens produced by `serialization_v1`, distinguishing selected targets from conditioning input as in @tbl-vol3-loss-masking-strata. A changed tokenizer, template, or transformed input can change those positions, so the mask must be regenerated and checked against the corresponding serialization rather than copied by stale offsets.
 
@@ -202,7 +204,9 @@ An example with no selected targets has no defined mean in @eq-vol3-sft-masked-o
 
 ### Align labels with the preceding prediction
 
-In a causal language model, logits produced after input position $t-1$ predict token $x_t$. A loader must therefore align those logits with label $x_t$ and mask $m_t$, not with the mask of the input token at $t-1$. @Tbl-vol3-mask-causal-shift makes the boundary cases explicit. Some training interfaces perform this shift internally; applying it again in the loader misaligns the targets. Inspect the actual labels and predictions on a short example before training a corpus.
+In a causal language model,[^fn-causal-mask-shift] logits produced after input position $t-1$ predict token $x_t$. A loader must therefore align those logits with label $x_t$ and mask $m_t$, not with the mask of the input token at $t-1$. @Tbl-vol3-mask-causal-shift makes the boundary cases explicit. Some training interfaces perform this shift internally; applying it again in the loader misaligns the targets. Inspect the actual labels and predictions on a short example before training a corpus.
+
+[^fn-causal-mask-shift]: **Causal Self-Attention**: The Transformer decoder masks each position's attention to later positions so that training on a whole sequence cannot read the tokens it is asked to predict [@vaswani2017]. The mask is what lets one forward pass produce every next-token prediction at once, and it is also why labels must be shifted by one position: the hidden state at $t-1$ is the only place the prediction of $x_t$ exists.
 
 | Logits computed from a prefix ending at…          | Next-token label                          | Target mask |
 |:--------------------------------------------------|:------------------------------------------|:------------|
@@ -229,6 +233,12 @@ Fitting the environment model anyway has two costs. The first is **loss dilution
 The mask removes both mechanisms. How often a given unmasked model fabricates results is a closed-loop measurement that the loss curve cannot reveal. Environment-text prediction is a legitimate objective for a different purpose, such as training a simulator of the tools, and a separate one from the policy imitation this chapter builds.
 
 ### Count selected targets without confusing them with compute
+
+::: {.column-margin}
+![](images/svg/vol3_sft_margin_targets.svg){width="100%" fig-alt="One horizontal stacked bar. A long green segment labeled observations 77.1% fills most of it, a gray segment labeled ctx follows, and a thin dark segment at the right end is labeled targets 4.9%."}
+
+*Observations fill 77.1 percent of the input; the loss sits on 4.9 percent.*
+:::
 
 The number of selected positions sets the denominator of this loss and therefore the coefficient each selected token receives. Long observations can fill most of an input while serving as context for a short corrective response, so the selected share of stored tokens measures how far an unmasked loss would dilute that coefficient. Notebook \ref{nbk-15-gradient-budget-and-compute-allocation} counts both under two target policies on the same input.
 
@@ -410,7 +420,7 @@ The coefficients in @tbl-vol3-loss-normalization-comparison must survive impleme
 
 :::
 
-The lookup from the section's opening must never read the repair's file contents or tool observations. Let $i$ and $j$ denote buffer positions, $Q_i$ and $K_j$ their query and key vectors, and $d$ the attention-head dimension. The pre-softmax attention scores $\mathrm{score}_{i,j}$ enforce both causality and example membership:
+The lookup from the section's opening must never read the repair's file contents or tool observations, the *cross-contamination*[^fn-packing-cross-contamination] that a packed layout must prevent [@krell2021efficient]. Let $i$ and $j$ denote buffer positions, $Q_i$ and $K_j$ their query and key vectors, and $d$ the attention-head dimension. The pre-softmax attention scores $\mathrm{score}_{i,j}$ enforce both causality and example membership:
 
 $$\mathrm{score}_{i,j}=\begin{cases}
 Q_iK_j^{\top}/\sqrt d & \text{if }\operatorname{example}(i)=\operatorname{example}(j)\text{ and }j\le i,\\
@@ -419,8 +429,16 @@ Q_iK_j^{\top}/\sqrt d & \text{if }\operatorname{example}(i)=\operatorname{exampl
 
 @Fig-vol3-block-diagonal-mask draws @eq-vol3-block-diagonal-attention for two packed examples beside the ordinary causal mask it replaces, a pattern called **block-diagonal attention**\index{Block-diagonal attention!definition}. Padding keys are excluded as well. Boundary offsets identify each example's interval, so a kernel can apply the mask from that metadata without allocating a dense matrix, and a variable-length attention kernel can also skip the masked cross-example blocks. That skipped work, rather than the mask itself, is where any compute saving comes from.
 
+[^fn-packing-cross-contamination]: **Cross-Contamination**: Krell and colleagues used the term for attention and label leakage between sequences packed into one buffer, and showed that masks, position resets, and per-sequence loss handling make a packed model mathematically equivalent to the unpacked one. The equivalence is the property to test: a packed loader that trains faster but lets examples read one another has changed the learning problem, and no loss curve will show it.
+
 ::: {#fig-vol3-block-diagonal-mask fig-env="figure" fig-pos="htb" fig-cap="**Block-Diagonal Attention for Packed Examples**: Two independent examples share one buffer. Under an ordinary causal mask (a), every query in the second example scores keys in the first, so the second example can use context it will not have when served. The block-diagonal mask (b) keeps causal scores only inside each example and sets every cross-example entry to $-\infty$ before the softmax, as in @eq-vol3-block-diagonal-attention. The boundary offsets define the blocks; whether a kernel also skips the masked blocks is an implementation property." fig-alt="Two eight-by-eight attention grids, queries down the side and keys across the top, each split into example 1 with five positions and example 2 with three. In panel a, the lower triangle within each example is shaded as a score, the upper triangle is marked minus infinity, and the block where example 2 queries meet example 1 keys is shaded red as a cross-example score. In panel b, the same lower triangles are shaded, and the whole cross-example block is marked minus infinity. A legend defines the score, minus infinity before softmax, and cross-example score."}
 ![](images/svg/ch13-block-diagonal-mask.svg)
+:::
+
+::: {.column-margin}
+![](images/svg/vol3_sft_margin_occupancy.svg){width="100%" fig-alt="Two horizontal bars. The upper bar, labeled packed 76.6%, is about four times longer than the lower bar, labeled padded 19.1%."}
+
+*One long trajectory holds padded occupancy to 19.1 percent; packing reaches 76.6 percent.*
 :::
 
 Loss construction needs the same boundaries. Shifting labels across the entire concatenated buffer can accidentally train the last position of one example to predict the first token of the next. Each example's initial context seed remains unselected, as in the preceding mask definition, and shifted prediction-target pairs must stay inside their example. Attention masks and target masks enforce different constraints; both must be correct.
@@ -510,7 +528,7 @@ Suppose a fresh bounded trial of the trained repair policy meets a version confl
 
 ::: {#dfn-15-exposure-bias .callout-definition title="Exposure bias"}
 
-***Exposure bias***\index{Exposure bias!definition} is the mismatch between training a sequential policy on reference prefixes and running it on prefixes produced by its own earlier outputs [@bengio2015scheduledsampling].
+***Exposure bias***\index{Exposure bias!definition} is the mismatch between training a sequential policy on reference prefixes and running it on prefixes produced by its own earlier outputs [@bengio2015scheduledsampling; @ranzato2016sequence].
 
 1. **Significance**: It turns a per-step error rate into a horizon-dependent cost. Measured on reference states, an error rate $\epsilon$ bounds excess task cost only by $H^2\epsilon$ (theorem \ref{thrm-15-imitation-regret}), a second factor of $H$ on top of the compounding of @sec-vol3-intro-horizon-arithmetic.
 2. **Distinction**: It is a property of the training distribution rather than of any single mistake. A policy can err on states the corpus covers and recover on states it never showed.
@@ -518,11 +536,19 @@ Suppose a fresh bounded trial of the trained repair policy meets a version confl
 
 :::
 
-Offline data can include recoveries, and a policy that departs from the demonstration can return to a familiar state or find another valid solution. Exposure bias is therefore a question of how well the corpus covers the states the trained policy itself visits, the version conflict among them.
+Offline data can include recoveries, and a policy that departs from the demonstration can return to a familiar state or find another valid solution. Exposure bias[^fn-exposure-bias-lineage] is therefore a question of how well the corpus covers the states the trained policy itself visits, the version conflict among them.
+
+[^fn-exposure-bias-lineage]: **Exposure Bias**: Ranzato and colleagues introduced the name in 2016 for text generators trained on reference words and run on their own [@ranzato2016sequence]. Control researchers had met the same effect earlier as the compounding error of behavioral cloning, which Ross and Bagnell bounded in 2010 [@ross2010efficient]. The two literatures describe one mechanism, and agents inherit the control version: a wrong action changes the environment, not just the phrasing.
 
 ### State the distribution behind an error rate
 
 An idealized finite-horizon model makes the coverage question precise. Its symbols follow the imitation-learning literature and are local to this derivation. The index $t$ now counts decision steps rather than token positions. The state $s$ is the full environment state of the decision process, which includes whatever history defines it and can hold environment variables the model never saw, unlike the context state $s_t$ in the masking definition (\ref{dfn-action-loss-masking}). Let $H$ be the number of decision steps, $\pi$ the learned policy (written bare because it is held fixed in the argument), and $\pi^*$ a deterministic reference policy, with the same initial-state distribution and environment dynamics. The *state distribution* $d_\pi^t$ is the distribution of states before step $t$ under $\pi$, and $d_\pi=H^{-1}\sum_{t=1}^H d_\pi^t$ averages it over the horizon.
+
+::: {.column-margin}
+![](images/svg/vol3_sft_margin_regret.svg){width="100%" fig-alt="Two curves over horizon from 0 to H equals 30. A red curve rises quadratically to a dot labeled H squared epsilon equals 18. A blue line stays near the axis and ends at a dot labeled u H epsilon equals 0.6. The gap between them is shaded."}
+
+*Same 2 percent error: 18 cost units on reference states, 0.6 on learner states.*
+:::
 
 Let $C(s,a)\in[0,1]$ be a normalized immediate task cost and $J(\pi)$ its expected sum over the horizon. Let $\ell(s,\pi)=\Pr_{a\sim\pi(\cdot\mid s)}[a\ne\pi^*(s)]$ measure disagreement with the reference. Disagreement is a conservative stand-in for failure, since several actions can be acceptable, and it is a probability of choosing a different action, a different quantity from the token cross-entropy the training job reports. Finally, the *cost-to-go* $Q_t^{\pi^*}(s,a)$ is the expected cost from step $t$ through $H$ after taking $a$ in $s$ and following the reference thereafter.
 
@@ -578,7 +604,7 @@ class DistributionBounds:
 
 *The horizon penalty of imitation depends on which states the error is measured on.* For a policy $\pi$ imitating a deterministic reference $\pi^*$ over $H$ steps with per-step cost in $[0,1]$, @ross2011reduction bound the excess task cost in two ways.
 
-**Reference-state error** (their Theorem 2.1). With disagreement measured on the reference policy's states, $\epsilon_E=\mathbb E_{s\sim d_{\pi^*}}[\ell(s,\pi)]$,
+**Reference-state error** (their Theorem 2.1, first proved by @ross2010efficient). With disagreement measured on the reference policy's states, $\epsilon_E=\mathbb E_{s\sim d_{\pi^*}}[\ell(s,\pi)]$,
 
 $$J(\pi)-J(\pi^*)\le \min\{H,\;H^2\epsilon_E\}.$$ {#eq-vol3-quadratic-derivation}
 
@@ -613,7 +639,9 @@ The quadratic term has a direct reading. Couple the environment randomness of th
 
 ### Label states the policy actually visits
 
-**Dataset Aggregation (DAgger)**\index{DAgger!definition} collects trajectories under successive learned policies, obtains reference actions at the states they visit, aggregates those labeled examples, and retrains [@ross2011reduction]. The result is **on-policy data**\index{On-policy data!definition}, examples drawn from the state distribution of the policy being trained. Executing a learner action and requesting its reference label are different operations, and early rounds mix them. In round $k$ the collector executes the reference action with probability $\lambda_k$ and the learner's action otherwise, decaying $\lambda_k$ toward zero so the collected states shift gradually toward the learner's own distribution. That shift is what moves the measured error onto learner states and makes the learner-state bound of theorem \ref{thrm-15-imitation-regret} the applicable one.
+**Dataset Aggregation (DAgger)**\index{DAgger!definition} collects trajectories under successive learned policies, obtains reference actions at the states they visit, aggregates those labeled examples, and retrains[^fn-dagger-simplest] [@ross2011reduction]. The result is **on-policy data**\index{On-policy data!definition}, examples drawn from the state distribution of the policy being trained. Executing a learner action and requesting its reference label are different operations, and early rounds mix them. In round $k$ the collector executes the reference action with probability $\lambda_k$ and the learner's action otherwise, decaying $\lambda_k$ toward zero so the collected states shift gradually toward the learner's own distribution. That shift is what moves the measured error onto learner states and makes the learner-state bound of theorem \ref{thrm-15-imitation-regret} the applicable one.
+
+[^fn-dagger-simplest]: **DAgger's Mixing Schedule**: Ross, Gordon, and Bagnell require only that the average reference-execution probability tend to zero over rounds, and report that the simplest schedule, executing the reference only in the first round, often performs best. The systems cost sits elsewhere: every visited state needs a reference label on demand, so the labeler is an online service in the collection loop rather than a one-time annotation pass.
 
 The version conflict is exactly such a state, and for the repair agent the practical question is whether an authorized labeler can supply a justified response there. The labeler, usually a stronger model or a larger test-time budget, produces a proposal like any other, and a wrong label trains recovery in the wrong direction. The pipeline therefore continues the trajectory from the corrected action in a sandbox and keeps the label only if the task's verifier accepts the outcome under the consumer-specific predicates of @sec-vol3-trajectory-curation. An accepted continuation shows that the label works, not that it is the only action that would. Labeling extends beyond detected errors, since a superficially successful step can also be poorly grounded, and it preserves the actual observations, the current tool contract, and any unavailable or disputed labels.
 
@@ -664,7 +692,7 @@ A stale-key response is an observable error pattern. Attributing it to fine-tuni
 
 ### Vary the contract coherently
 
-**Schema augmentation**\index{Schema augmentation!definition} creates related training examples with declared interface changes. A transformation updates everything needed to make the target valid under its new context, well beyond replacing a word in the target call. It creates a derived example whose lineage and use must be reviewed under @sec-vol3-flywheel-provenance.
+**Schema augmentation**\index{Schema augmentation!definition} creates related training examples with declared interface changes. A transformation updates everything needed to make the target valid under its new context, well beyond replacing a word in the target call. It creates a derived example whose lineage and use must be reviewed under @sec-vol3-flywheel-provenance. The complementary habit is conditioning on the delivered interface rather than recalling one: training with retrieved API documentation in the input has let a fine-tuned model follow documentation that changed after training [@patil2023gorilla].
 
 @Tbl-vol3-schema-perturbation-operators distinguishes useful transformations from their obligations. Each one breaks a shortcut the policy could otherwise learn, such as binding to one field order or one identifier.
 
@@ -704,12 +732,14 @@ $$\Delta_\theta(\tau;c)=\sum_{t\in\mathcal A(\tau)}
 
 The observations in $h_t$ condition subsequent predictions and carry no policy likelihood. Selection is specific to the comparison. The dispreferred response is scored to form a contrast and never becomes an imitation target, and an SFT mask reused unchanged would drop exactly the unselected decisions a preference often concerns.
 
-**Direct preference optimization (DPO)**\index{Direct preference optimization!definition} uses a logistic loss on the difference of policy/reference log ratios [@rafailov2023dpo]. With $\sigma(z)=1/(1+e^{-z})$, positive scale $\beta$, and dataset $\mathcal D$ of admitted comparisons, the corresponding selected-token objective is
+Earlier preference pipelines fit a separate reward model to human comparisons and then optimized the policy against it with reinforcement learning [@christiano2017deep; @ouyang2022instructgpt]. **Direct preference optimization (DPO)**\index{Direct preference optimization!definition} removes that separate stage and uses a logistic loss on the difference of policy/reference log ratios [@rafailov2023dpo]. With $\sigma(z)=1/(1+e^{-z})$, positive scale $\beta$, and dataset $\mathcal D$ of admitted comparisons, the corresponding selected-token objective is
 
 $$\mathcal L_{\mathrm{DPO}}=-\mathbb E_{(c,\tau_w,\tau_l)\sim\mathcal D}
 \log\sigma\!\left(\beta[\Delta_\theta(\tau_w;c)-\Delta_\theta(\tau_l;c)]\right).$$ {#eq-vol3-dpo-trajectory}
 
-The standard DPO derivation concerns complete responses to the same input under a preference model and a reference-regularized objective. Its reward reparameterization contains an input-dependent constant that cancels in the comparison, so the implied reward is identified only up to that constant. Scoring selected spans of a trajectory is a training surrogate built on that derivation and justified by the evaluation it passes.
+The standard DPO derivation concerns complete responses to the same input under the Bradley–Terry preference model[^fn-bradley-terry-dpo] [@bradley1952rank] and a reference-regularized objective. Its reward reparameterization contains an input-dependent constant that cancels in the comparison, so the implied reward is identified only up to that constant. Scoring selected spans of a trajectory is a training surrogate built on that derivation and justified by the evaluation it passes.
+
+[^fn-bradley-terry-dpo]: **Bradley–Terry Model**: Bradley and Terry's 1952 model of paired comparisons gives the probability that item $i$ is preferred to item $j$ as a logistic function of the difference of their latent scores. Only score differences are identified, which is why DPO's implied reward carries an input-dependent constant that cancels within a pair, and why a DPO score has no meaning outside the comparison that produced it.
 
 If all policy-generated positions of a complete interaction are scored, shared environment dynamics and initial conditions make environmental factors cancel in the policy/reference probability ratio *for that same recorded interaction*. Between the two alternatives the observations differ, so they still shape each score through its conditioning, and a change of context can reverse the preference.
 
@@ -811,7 +841,9 @@ Suppose the repair agent's system prompt carries a debugging checklist, with wor
 
 ### Context distillation
 
-**Context distillation**\index{Context distillation!definition} is the checklist case. It generates candidate demonstrations with the guidance present, reviews the resulting targets, and trains with a shorter input that omits the guidance. It is an intentional transformation of the learning problem rather than a reconstruction of the original model input, so both input versions and the transformation stay in the example's lineage (@sec-vol3-fine-tuning-serialization).
+**Context distillation**\index{Context distillation!definition}[^fn-context-distillation-origin] is the checklist case. It generates candidate demonstrations with the guidance present, reviews the resulting targets, and trains with a shorter input that omits the guidance. It is an intentional transformation of the learning problem rather than a reconstruction of the original model input, so both input versions and the transformation stay in the example's lineage (@sec-vol3-fine-tuning-serialization).
+
+[^fn-context-distillation-origin]: **Context Distillation**: Askell and colleagues introduced the term in 2021 for training a model without a long prompt to match the output distribution the same model produced with it, motivated by the context-window space and per-call compute the prompt consumed [@askell2021general]. The saving recurs on every call of every deployed trajectory, which is why the technique pays most for guidance that is long, stable, and resent each turn.
 
 Dropping the checklist is a different change from removing the refusal or schema observation that justifies the corrected edit. The latter can make the selected response unsupported by its new context. Distilling `trace_r19_01_redacted_v1` would create a new versioned record with its own target review, and its historical outcome would still belong to the original long-prompt execution.
 
@@ -821,7 +853,9 @@ Evaluate the student with the actual shorter prompt. Measure whether the intende
 
 ### Teacher distillation
 
-Knowledge distillation can use a teacher's output distribution as a training signal [@hinton2015distilling]. For a trajectory collector with access only to generated messages, the available signal is instead sampled responses and their conditioning evidence. A teacher might be another model, a configuration with a larger search budget, or the same model with additional guidance. Its candidate targets still pass the consumer-specific admission process from @sec-vol3-trajectory-curation; a fluent response or a favorable teacher judgment is not an independent correctness check. Fine-tuning smaller models on agent trajectories generated by a stronger model has improved their agent-task performance over prompting alone [@chen2023fireact; @zeng2023agenttuning]. A related source needs no separate teacher. The model samples several attempts per task, the verifiers keep the successes, and the model trains on its own admitted successes [@zelikman2022star]. That loop carries the selection and feedback risks developed in @sec-vol3-trajectory-curation-self-improvement.
+Knowledge distillation trains a smaller model to mimic a larger one [@bucilua2006model], and can use the teacher's full output distribution as the training signal[^fn-soft-target-distillation] [@hinton2015distilling]. For a trajectory collector with access only to generated messages, the available signal is instead sampled responses and their conditioning evidence. A teacher might be another model, a configuration with a larger search budget, or the same model with additional guidance. Its candidate targets still pass the consumer-specific admission process from @sec-vol3-trajectory-curation; a fluent response or a favorable teacher judgment is not an independent correctness check. Fine-tuning smaller models on agent trajectories generated by a stronger model has improved their agent-task performance over prompting alone [@chen2023fireact; @zeng2023agenttuning]. A related source needs no separate teacher. The model samples several attempts per task, the verifiers keep the successes, and the model trains on its own admitted successes [@zelikman2022star]. That loop carries the selection and feedback risks developed in @sec-vol3-trajectory-curation-self-improvement.
+
+[^fn-soft-target-distillation]: **Soft Targets**: Buciluǎ, Caruana, and Niculescu-Mizil compressed large ensembles in 2006 by labeling data with the ensemble's predictions and training a small network on those labels; Hinton, Vinyals, and Dean in 2015 named the method distillation and trained on the teacher's temperature-softened probabilities over every class. Soft targets require the teacher's logits. An agent collector that sees only a teacher's sampled messages has one sampled token per position instead of a distribution, so trajectory distillation is imitation of sampled responses and needs the same target admission as any other demonstration.
 
 A student can generalize differently from the teacher, and filtering changes the distribution it imitates, so no theorem caps its task performance at the teacher's. It also inherits systematic teacher errors wherever target review misses them.
 
@@ -829,7 +863,9 @@ Distillation fixes the source or conditioning of examples, independently of the 
 
 ## Parameter-Efficient Fine-Tuning {#sec-vol3-fine-tuning-peft}
 
-Full fine-tuning of the repair policy writes a new copy of every base weight, and the training run holds gradients and optimizer state for each of them. A second agent role trained the same way needs another full copy and another run of the same size. **Parameter-efficient fine-tuning**\index{Parameter-efficient fine-tuning!definition} instead freezes the base and trains a small added parameter set, an **adapter**\index{Adapter!definition}, that is released alongside it. For separately maintained agent roles, a compact adapter simplifies storage and versioning. It shares the process, base weights, and granted authority of whatever serves it, so it isolates nothing between roles.
+Full fine-tuning of the repair policy writes a new copy of every base weight, and the training run holds gradients and optimizer state for each of them. A second agent role trained the same way needs another full copy and another run of the same size. **Parameter-efficient fine-tuning**\index{Parameter-efficient fine-tuning!definition} instead freezes the base and trains a small added parameter set, an **adapter**\index{Adapter!definition}[^fn-adapter-lineage] [@houlsby2019parameter], that is released alongside it. For separately maintained agent roles, a compact adapter simplifies storage and versioning. It shares the process, base weights, and granted authority of whatever serves it, so it isolates nothing between roles.
+
+[^fn-adapter-lineage]: **Adapter Modules**: Houlsby and colleagues introduced adapters in 2019 as small bottleneck layers inserted inside each Transformer block, training only those layers per task. Inserted layers add serial computation to every forward pass at serving time. Low-rank adaptation instead expresses the update in the shape of an existing matrix, so the update can be merged into that matrix and served with no added layers.
 
 **Low-rank adaptation (LoRA)**\index{Low-rank adaptation!definition} expresses the change to a selected matrix through two trainable factors [@hu2021lora]. Let $W_0\in\mathbb{R}^{d_{\mathrm{out}}\times d_{\mathrm{in}}}$ be a frozen matrix acting on column-vector inputs, and define
 
@@ -837,11 +873,19 @@ $$W=W_0+\frac{\alpha}{r}BA,\qquad
 B\in\mathbb{R}^{d_{\mathrm{out}}\times r},\quad
 A\in\mathbb{R}^{r\times d_{\mathrm{in}}}.$$
 
-Here $r$ bounds the update's rank and $\alpha/r$ scales it. The factors contain $r(d_{\mathrm{in}}+d_{\mathrm{out}})$ trainable parameters. Sum that count over the actual selected matrices; attention projections need not all be square or have matching dimensions. Matrix choice and rank are capacity knobs, set by evaluation.
+Here $r$ bounds the update's rank and $\alpha/r$ scales it. The factors contain $r(d_{\mathrm{in}}+d_{\mathrm{out}})$ trainable parameters. Sum that count over the actual selected matrices; attention projections need not all be square or have matching dimensions. Matrix choice and rank are capacity knobs, set by evaluation.[^fn-lora-intrinsic-rank]
 
 With random $A$ and zero $B$, the update starts at zero, so training begins from the base model's exact forward mapping. The first gradient reaches $B$, while the gradient to $A$ starts at zero because it passes through $B$. Freezing $W_0$ removes its gradients and optimizer state, and the backward pass still flows through it to reach adapters in earlier layers. The input gradient includes both the base and adapter paths, as derived in @sec-vol3-appendix-math-lora.
 
+[^fn-lora-intrinsic-rank]: **Low Intrinsic Rank**: Hu and colleagues motivated LoRA with the hypothesis that the weight change needed to adapt a pretrained model has low intrinsic rank, and found small ranks competitive with full fine-tuning on the tasks they measured [@hu2021lora]. That finding is an empirical property of those tasks, not a law, so an agent corpus that teaches new tool-use procedure needs its own rank sweep under the chapter's evaluation contract.
+
 ### Inventory the parameter state before sizing the run
+
+::: {.column-margin}
+![](images/svg/vol3_sft_margin_adapter.svg){width="100%" fig-alt="Two horizontal bars. The upper bar, labeled full 128 GB, is about eight times longer than the lower bar, labeled adapter 16.1 GB."}
+
+*Training 0.10 percent of the parameters still keeps 12.6 percent of the state.*
+:::
 
 Count memory by its owner and representation, rather than choosing hardware from a model-size label. Notebook \ref{nbk-15-adapter-state-inventory} compares one full-parameter run with one LoRA run under an explicit storage convention. Activations and temporary workspace are left out because they depend on sequence length and implementation.
 
@@ -940,7 +984,7 @@ class AdapterStateInventory:
 
 **Problem**: A hypothetical model contains `{python} AdapterStateInventory.base_count_str` base parameters. The run attaches rank-`{python} AdapterStateInventory.rank_str` adapters to `{python} AdapterStateInventory.matrices_str` matrices in each of `{python} AdapterStateInventory.layers_str` layers. Each selected matrix has `{python} AdapterStateInventory.output_str` output coordinates and `{python} AdapterStateInventory.input_str` input coordinates. No other parameters are trained in the adapter case. What parameter-state memory does this save compared with training every base parameter?
 
-For each trainable parameter, assume a weight using `{python} AdapterStateInventory.weight_bytes_str`, a gradient using `{python} AdapterStateInventory.gradient_bytes_str`, a separate higher-precision master weight that the optimizer updates, using `{python} AdapterStateInventory.master_bytes_str`, and two optimizer moments (running averages of the gradient and its square) each using `{python} AdapterStateInventory.moment_bytes_str`. Frozen parameters retain only their weight copy. This is one declared implementation convention, not a requirement of every optimizer or framework. Count one unsharded resident copy of each array; display capacities in decimal MB and GB.
+For each trainable parameter, assume a weight using `{python} AdapterStateInventory.weight_bytes_str`, a gradient using `{python} AdapterStateInventory.gradient_bytes_str`, a separate higher-precision master weight that the optimizer updates, using `{python} AdapterStateInventory.master_bytes_str`, and two optimizer moments (running averages of the gradient and its square) each using `{python} AdapterStateInventory.moment_bytes_str`. Frozen parameters retain only their weight copy. This is the mixed-precision accounting of adaptive-moment optimization [@kingma2014adam; @micikevicius2017mixed], totaled at the same sixteen bytes per trainable parameter by @rajbhandari2020; it is one declared implementation convention, not a requirement of every optimizer or framework. Count one unsharded resident copy of each array; display capacities in decimal MB and GB.
 
 **Math**: Each adapted matrix adds $r(d_{\mathrm{in}}+d_{\mathrm{out}})$ parameters, so the adapters contain `{python} AdapterStateInventory.layers_str` $\times$ `{python} AdapterStateInventory.matrices_str` $\times$ `{python} AdapterStateInventory.rank_str` $\times$ (`{python} AdapterStateInventory.input_str` $+$ `{python} AdapterStateInventory.output_str`) $=$ `{python} AdapterStateInventory.parameter_str` parameters, `{python} AdapterStateInventory.parameter_fraction_str` of the base. The convention assigns `{python} AdapterStateInventory.per_parameter_str` of state to each trainable parameter and `{python} AdapterStateInventory.frozen_bytes_str` to each frozen one. @Tbl-vol3-sft-memory-breakdown inventories the resulting arrays.
 
@@ -1021,7 +1065,9 @@ A PRE that rises while familiar-interface success improves is the diagnostic sig
 
 **Resource use** asks how the changed behavior spends its allowance. Measure relevant quantities such as elapsed time, turns, tokens, and monetary charges separately. Cost per accepted task, $C_{\text{eff}}$ in @eq-vol3-cost-per-accepted-task, charges all initiated trials, failed ones included, within the declared accounting boundary. Because it divides attempt cost by acceptance probability, a candidate that raises acceptance can justify a longer, costlier attempt, and the comparison is made on $C_{\text{eff}}$ rather than on tokens per trial. Rejected proposals, failed attempts, checking, and required cleanup can all contribute. Unsettled charges remain visible; with no accepted task, report spend and the zero accepted count rather than a finite ratio. @Sec-vol3-evaluation-matched-budgets supplies the comparison rules.
 
-**Capability retention** evaluates other behaviors the released agent is still required to support. Choose that task set from its intended uses rather than treating an arbitrary general benchmark as the whole requirement. A measured decline triggers investigation of both the update and the serving configuration before it is attributed to forgetting, and each candidate remedy (corpus mixture, optimization, parameterization) is tested like any other change.
+**Capability retention** evaluates other behaviors the released agent is still required to support. Choose that task set from its intended uses rather than treating an arbitrary general benchmark as the whole requirement. A measured decline triggers investigation of both the update and the serving configuration before it is attributed to forgetting[^fn-catastrophic-forgetting-agents] [@mccloskey1989catastrophic], and each candidate remedy (corpus mixture, optimization, parameterization) is tested like any other change.
+
+[^fn-catastrophic-forgetting-agents]: **Catastrophic Forgetting**: McCloskey and Cohen showed in 1989 that a connectionist network trained sequentially on a new task can lose an earlier one almost entirely, because both share the same weights. A repair-trained policy shares its weights with every other behavior the agent still needs, so retention is measured on the release's required task set rather than assumed from a narrow training corpus.
 
 ### Controlled comparison and conditional release {#sec-vol3-fine-tuning-eval-protocol}
 
@@ -1126,6 +1172,23 @@ The objective, behavior source, and parameter artifact remain separate choices. 
 :::
 
 Verified trajectory post-training (principle \ref{pri-vol3-trajectory-post-training}) now has a concrete implementation obligation at the token level: preserve useful conditioning while aligning the objective with the selected predictions, rather than equating every recorded policy token with a target. At the record level, it connects the admitted lesson to a versioned update whose usefulness remains an evaluation question. The invariant closure principle (\ref{pri-invariant-closure}) stays outside that update, which is why the proposal boundary holds from the first training example to the release decision.
+
+## Historical Perspective and Further Reading {#sec-vol3-fine-tuning-history}
+
+The core mechanism of this chapter is older than language models. Williams and Zipser named teacher forcing in 1989, training recurrent networks by feeding the recorded target back as the next input [@williams1989learning]. At about the same time, ALVINN learned road following as a supervised mapping from camera images to a steering direction [@pomerleau1988alvinn], the template for what control researchers came to call behavioral cloning. Both generations met the same obstacle. A policy trained on recorded prefixes is run on its own, and its first error moves it into inputs the recording never showed. Ross and Bagnell turned that obstacle into a quadratic bound in 2010 [@ross2010efficient], and DAgger answered it the following year by labeling the states the learner itself visits [@ross2011reduction]. Sequence-generation research reached the same diagnosis independently, with scheduled sampling [@bengio2015scheduledsampling] and the name exposure bias [@ranzato2016sequence].
+
+Preference learning has a statistical root. Bradley and Terry's 1952 model of paired comparisons [@bradley1952rank] underlies the reward models that Christiano and colleagues fit to human comparisons of agent behavior [@christiano2017deep], and InstructGPT combined supervised demonstrations with such a reward model to align a language model [@ouyang2022instructgpt]. DPO then showed that the separate reward model and reinforcement learning stage could be folded into a classification loss on policy/reference log ratios [@rafailov2023dpo], the form this chapter extends from responses to selected trajectory spans.
+
+The cost of adaptation has its own lineage. Model compression [@bucilua2006model] and knowledge distillation [@hinton2015distilling] made a large model's behavior a training signal for a cheaper one, and context distillation applied the same idea to a prompt [@askell2021general]. Adapter modules [@houlsby2019parameter], low-rank adaptation [@hu2021lora], and quantized frozen bases [@dettmers2023qlora] shrank what each adaptation stores and trains, while the systems accounting of mixed-precision training [@micikevicius2017mixed] and ZeRO [@rajbhandari2020] made the per-parameter memory of that training explicit. Agent fine-tuning joined these threads once models emitted tool calls inside interleaved reasoning and action traces [@yao2023react; @schick2023toolformer], and trajectories generated by stronger models became training data for smaller ones [@chen2023fireact; @zeng2023agenttuning]. What changes for agents is the environment: a trajectory has two authors, which is why masking, serialization, and on-policy coverage become engineering obligations rather than details.
+
+For further reading:
+
+- Ross, Gordon, and Bagnell's DAgger paper [@ross2011reduction] states both regret bounds of theorem \ref{thrm-15-imitation-regret} and the reduction to online learning behind them; it is the shortest route to seeing why where error is measured matters more than how small it is.
+- Rafailov and colleagues' DPO paper [@rafailov2023dpo] derives the preference loss from a reference-regularized objective, and reading the derivation shows exactly which assumptions a trajectory-span surrogate relaxes.
+- Ouyang and colleagues' InstructGPT paper [@ouyang2022instructgpt] documents a complete demonstration-then-preference pipeline, including the human evaluations that compared the model after each stage.
+- Hu and colleagues' LoRA paper [@hu2021lora] motivates low-rank updates and reports experiments on which matrices to adapt and at what rank, the knobs this chapter says to set by evaluation.
+- Rajbhandari and colleagues' ZeRO paper [@rajbhandari2020] itemizes training memory by owner and precision, the same inventory discipline notebook \ref{nbk-15-adapter-state-inventory} applies to an adapter run.
+- Krell and colleagues' packing paper [@krell2021efficient] treats packing as an equivalence to prove rather than a throughput trick, the stance the chapter's packed-versus-separate logit test takes.
 
 ::: {.column-margin .margin-pointer}
 

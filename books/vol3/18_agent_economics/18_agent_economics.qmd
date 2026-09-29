@@ -56,7 +56,7 @@ The repair agent (\ref{lhs-vol3-repair-agent}) can spend less on each model call
 *Horizon, state, and authority each set the closure a task must pay for.*
 :::
 
-@Sec-vol3-intro introduced cost per accepted task as one of the book's two quantitative fundamentals: the expected cost of an attempt divided by the probability that the attempt is accepted. That ratio is the quantity this chapter develops. Its numerator must hold every charge an attempt incurs, its denominator must count only outcomes accepted under one declared contract, and each lever the runtime controls (reuse, retries, acceleration, routing, capacity, and delegation) is worth buying only if it lowers the ratio or buys a deadline the objective values.
+@Sec-vol3-intro introduced cost per accepted task as one of the book's two quantitative fundamentals: the expected cost of an attempt divided by the probability that the attempt is accepted. That ratio is the quantity this chapter develops. Its numerator must hold every charge an attempt incurs, its denominator must count only outcomes accepted under one declared contract, and each lever the runtime controls (reuse, retries, acceleration, routing, capacity, and delegation) is worth buying only if it lowers the ratio or buys a deadline the objective values. An agent evaluation that reports accuracy without cost cannot show this ratio, which is why cost-controlled evaluation reports the two jointly and compares designs on both [@kapoor2024agents].
 
 Acceptance is scoped to one declared contract, checker, and environment. Every comparison in this chapter is a matched comparison, holding those three and the available resource ceilings fixed while the policy changes; changing the contract while changing models confounds the result. The account also needs a population and a cutoff, which fix the initiated tasks it covers, the results accepted by the cutoff, and the operations, assessments, or charges still pending.
 
@@ -101,6 +101,12 @@ The numerator includes every initiated task, accepted or not. When none is accep
 For a fully classified cohort, write the acceptance fraction as $\alpha=N_{\text{acc}}/N$. Let $C_{\text{succ}}$ be the mean total task cost among accepted tasks and $C_{\text{fail}}$ the mean among nonaccepted tasks, including failed and canceled tasks. When both groups are nonempty, separating the numerator gives
 
 $$C_{\text{eff}}=C_{\text{succ}}+\frac{1-\alpha}{\alpha}C_{\text{fail}}.$$
+
+::: {.column-margin}
+![](images/svg/vol3_economics_rejected_per_accepted_margin.svg){width="100%" fig-alt="Curve of rejected tasks per accepted task falling steeply as acceptance rises. A red dot at low acceptance is labeled 3 and a green dot at high acceptance is labeled 0.33."}
+
+*Each accepted task carries the rejected ones, and that load explodes as acceptance falls.*
+:::
 
 The multiplier $(1-\alpha)/\alpha$ counts nonaccepted tasks per accepted task. It is a cohort identity, not an assumption that retries eventually solve every ticket, and it grows without bound as acceptance falls. Whether a token discount survives it depends on both groups' costs, which is why no single acceptance threshold decides the question; the next calculation prices one case.
 
@@ -226,11 +232,13 @@ An input token can appear in many calls without its attention state being recomp
 
 ### Economic valuation of prefix cache hits
 
-Separate the logical input from the work performed and the amount billed. A service may retain compatible KV state between calls even when the client supplies the full logical transcript again. Over a trajectory of $K$ calls, let $L_t$ be the logical input length on call $t$, $L_{\mathrm{hit},t}$ its eligible cached prefix, and $O_t$ its billed output length. For a declared tariff with per-token prices $p_{\mathrm{in}}$, $p_{\mathrm{cache}}$, and $p_{\mathrm{out}}$, the token charge is
+Separate the logical input from the work performed and the amount billed. A service may retain compatible KV state between calls even when the client supplies the full logical transcript again.[^fn-prefix-reuse-billing] Over a trajectory of $K$ calls, let $L_t$ be the logical input length on call $t$, $L_{\mathrm{hit},t}$ its eligible cached prefix, and $O_t$ its billed output length. For a declared tariff with per-token prices $p_{\mathrm{in}}$, $p_{\mathrm{cache}}$, and $p_{\mathrm{out}}$, the token charge is
 
 $$
 C_{\mathrm{session}}=\sum_{t=1}^{K}\left[p_{\mathrm{in}}(L_t-L_{\mathrm{hit},t})+p_{\mathrm{cache}}L_{\mathrm{hit},t}+p_{\mathrm{out}}O_t\right].
 $$ {#eq-vol3-agent-economics-session-bill}
+
+[^fn-prefix-reuse-billing]: **Prefix Reuse**: Serving systems made cross-request reuse practical by storing attention state in blocks that requests with a common prefix can share [@kwon2023], and by indexing retained state in a radix tree so a later call can find its longest cached prefix [@zheng2024sglang]. A cached-input price is the billing face of that mechanism, so it inherits the mechanism's condition: only an exactly matching prefix that is still resident is discounted.
 
 Real tariffs add categories to this model, such as cache-write charges, retention charges, and minimum eligible lengths. In an append-only transcript, each call's input is the previous call's input plus the tokens generated and observed on the previous turn. If the first prompt has $L_0$ tokens and each turn appends exactly $\Delta L$, total logical input is
 
@@ -444,7 +452,7 @@ class RetryBudget:
 
 :::
 
-Real tasks do not share one $p$. Hard tasks keep low acceptance across retries, so averaging per-task probabilities before applying $1-(1-p)^k$ overstates coverage and the aggregate ratio drifts from $c/p$; feedback, outages, and shared mutable environments also break the fixed-attempt model. Retry policy is therefore priced from measured per-task retry outcomes under the evaluation protocol of @sec-vol3-evaluation.
+Real tasks do not share one $p$. Hard tasks keep low acceptance across retries, so averaging per-task probabilities before applying $1-(1-p)^k$ overstates coverage and the aggregate ratio drifts from $c/p$. Measured repeated sampling shows the effect: on tasks with automatic checks, coverage, the fraction of tasks solved by any sample, keeps rising across orders of magnitude of samples, roughly log-linearly rather than saturating as a single shared $p$ would predict [@brown2024monkeys]. Feedback, outages, and shared mutable environments also break the fixed-attempt model. Retry policy is therefore priced from measured per-task retry outcomes under the evaluation protocol of @sec-vol3-evaluation.
 
 Each additional candidate is also another chance for a false acceptance (@sec-vol3-test-time-compute), and a passing check is evidence under its declared scope, not authorization to publish. Caching, compaction, and retry policy change what the runtime purchases; the next section asks which purchased work sets the completion time.
 
@@ -456,9 +464,11 @@ A faster model call does not produce an equally faster repair. Tests, environmen
 
 The tracing discipline in @sec-vol3-evaluation-tracing distinguishes an enclosing span from the work inside it. Adding a parent duration to its children's durations double-counts time. Adding concurrent children also overcounts elapsed time, while omitting queueing or uninstrumented gaps undercounts it. Preserve unexplained intervals as unexplained rather than assigning them to a convenient component.
 
-A span's parent identifies containment, which is not always a completion dependency. Construct the execution graph from the actual dispatch and join conditions. An edge means that the later interval cannot begin before its predecessor finishes. Use nonoverlapping intervals along each path, not inclusive parents alongside their children. For a dependency graph with durations $t(v)$ and source-to-sink paths $\Pi$, its longest path is
+A span's parent identifies containment, which is not always a completion dependency. Construct the execution graph from the actual dispatch and join conditions. An edge means that the later interval cannot begin before its predecessor finishes. Use nonoverlapping intervals along each path, not inclusive parents alongside their children. For a dependency graph with durations $t(v)$ and source-to-sink paths $\Pi$, its longest path, the **critical path**\index{Critical path!trajectory},[^fn-critical-path-method] is
 
 $$T_{\text{critical}} = \max_{\pi \in \Pi} \sum_{v \in \pi} t(v).$$ {#eq-vol3-critical-path}
+
+[^fn-critical-path-method]: **Critical Path**: The critical-path method was introduced for planning and scheduling large engineering projects, where the longest chain of dependent activities fixes the completion date and every activity off that chain has slack [@kelley1959critical]. Distributed-systems work later recovered the same dependency model from existing component logs of production requests, precisely so that critical-path and slack analysis could say which component's speedup would shorten end-to-end latency [@chow2014mystery]. An agent trace needs the same reconstruction before any acceleration is priced.
 
 For a graph containing only required service work, @eq-vol3-critical-path is a lower bound on completion time. It represents the observed elapsed interval exactly only when the graph also accounts for actual release times, resource waits, and other delays at the chosen boundary. The observation boundary must include whatever the decision values, since a streamed answer, an assessed candidate, and a fully finalized task are different endpoints.
 
@@ -536,7 +546,7 @@ class CriticalPath:
 
 : **One serial repair episode**: Categories partition elapsed time under the stated assumptions; the total is not an additional interval. {#tbl-vol3-trace-critical-path}
 
-**Math**: If model work occupies fraction $f$ of the original time $T$ and becomes $x$ times faster, with $x \geq 1$, then $T' = T[(1-f)+f/x]$. Here model work occupies `{python} CriticalPath.fraction_str`. A `{python} CriticalPath.model_speedup_mult_str` model acceleration gives a projected `{python} CriticalPath.changed_str` episode, saving `{python} CriticalPath.saving_str` and yielding a whole-episode speedup of `{python} CriticalPath.speedup_mult_str`. Even instantaneous model work would give only `{python} CriticalPath.limiting_speedup_mult_str` under these assumptions.
+**Math**: If model work occupies fraction $f$ of the original time $T$ and becomes $x$ times faster, with $x \geq 1$, then $T' = T[(1-f)+f/x]$, Amdahl's fixed-work bound [@amdahl1967]. Here model work occupies `{python} CriticalPath.fraction_str`. A `{python} CriticalPath.model_speedup_mult_str` model acceleration gives a projected `{python} CriticalPath.changed_str` episode, saving `{python} CriticalPath.saving_str` and yielding a whole-episode speedup of `{python} CriticalPath.speedup_mult_str`. Even instantaneous model work would give only `{python} CriticalPath.limiting_speedup_mult_str` under these assumptions.
 
 **Systems insight**: The ceiling $1/(1-f)$ decides whether model speed is worth buying, and it can be computed before any purchase. Halving the test interval at the same coverage would save `{python} CriticalPath.tests_half_saving_str`, several times the model speedup's `{python} CriticalPath.saving_str`, and it would also shorten the sandbox holding charge in $C_{\text{eff}}$. When the deadline gap exceeds what $1/(1-f)$ allows, the investment belongs on tests and sandbox lifecycle; in a branching trajectory the same test applies to the recomputed critical path of @eq-vol3-critical-path.
 
@@ -566,9 +576,11 @@ Early stopping changes the observation as well as its duration. A failed mandato
 
 @Sec-vol3-foundation-model introduced speculative decoding as a serving technique whose output and performance depend on its implementation and sampling assumptions. Here it is an economic option, worth buying only if it improves the task-level objective enough to justify its resource cost.
 
-A small draft model proposes $\gamma$ tokens per round, and the target model checks them in one pass, keeping the prefix it accepts and emitting one token of its own [@leviathan2023fast; @chen2023accelerating]. Let a draft token cost a fraction $\beta$ of one target decoding step, and let $\bar m$ be the mean number of draft tokens accepted per round. If verifying a round costs about one target step, each round emits $\bar m+1$ tokens in the time of $\gamma\beta+1$ target steps, so the decoding speedup for one stream is
+A small draft model[^fn-speculative-draft-lineage] proposes $\gamma$ tokens per round, and the target model checks them in one pass, keeping the prefix it accepts and emitting one token of its own [@leviathan2023fast; @chen2023accelerating]. Let a draft token cost a fraction $\beta$ of one target decoding step, and let $\bar m$ be the mean number of draft tokens accepted per round. If verifying a round costs about one target step, each round emits $\bar m+1$ tokens in the time of $\gamma\beta+1$ target steps, so the decoding speedup for one stream is
 
 $$S_{\text{spec}}=\frac{\bar m+1}{\gamma\beta+1}.$$ {#eq-vol3-spec-speedup}
+
+[^fn-speculative-draft-lineage]: **Draft-then-Verify Decoding**: The idea predates large language models. Blockwise parallel decoding predicted several future positions at once and backed off to the longest prefix a scoring model validated [@stern2018blockwise]. Speculative decoding moved the proposals into a separate small draft model and added an acceptance rule under which sampled outputs keep the target model's distribution, which is why its savings are purely a cost and latency question rather than a quality trade.
 
 Speculation shortens the call only when $\bar m>\gamma\beta$, that is, when accepted drafts repay the draft work; below that boundary it slows the stream it was meant to accelerate. The one-step verification assumption holds when single-stream decoding is limited by reading model state rather than by arithmetic (principle \ref{pri-vol3-memory-bandwidth-decoding}), and it weakens as batching makes the target's arithmetic busy.
 
@@ -648,7 +660,9 @@ Before routing calls across models, check the account and the clock.
 
 ## Model Cascades and Routing {#sec-vol3-agent-economics-cascades}
 
-Critical-path analysis identifies where faster execution matters; routing decides which configuration should attempt the work at all. A specialized model may complete a constrained transformation inexpensively, while another configuration may be worth its higher cost for diagnosis. A **model cascade**\index{Model cascade!definition} tries one configuration and conditionally escalates to another, an approach explored in FrugalGPT [@chen2023frugalgpt]. Its economic value depends on what the lower tiers resolve, what their failures cost, and which tasks remain for later tiers.
+Critical-path analysis identifies where faster execution matters; routing decides which configuration should attempt the work at all. A specialized model may complete a constrained transformation inexpensively, while another configuration may be worth its higher cost for diagnosis. A **model cascade**\index{Model cascade!definition}[^fn-cascade-viola-jones] tries one configuration and conditionally escalates to another, an approach explored for language model APIs in FrugalGPT [@chen2023frugalgpt]. Its economic value depends on what the lower tiers resolve, what their failures cost, and which tasks remain for later tiers.
+
+[^fn-cascade-viola-jones]: **Classifier Cascade**: The design pattern is older than language models. A real-time face detector chained increasingly expensive classifiers so that cheap early stages discarded most background regions and the costly stages ran only on the promising remainder [@viola2001]. Its speed came from the early exit rate, which is the same quantity that sets a model cascade's cost here.
 
 Every exit must satisfy the same declared acceptance contract. A schema check suffices for a purely syntactic transformation and cannot establish that a source patch preserves authentication behavior; the tier's price neither strengthens nor weakens the contract. Publication and effect authorization remain separate runtime decisions.
 
@@ -797,7 +811,9 @@ The harm term sits beside cost per accepted task rather than redefining it, and 
 
 Escalation passes the next tier bounded diagnostic evidence and the failed candidate's identity, treated as untrusted, rather than the whole failed transcript, and it keeps pending or unavailable assessments distinct from definite rejection. A passing assessment yields an accepted-candidate record; publication still checks current dependencies, authority, and any required operation-bound approval.
 
-A learned router can estimate the probability and cost of each eligible remaining policy from evaluation data. Its training records must reflect which configurations were actually tried; logs from a selective router do not reveal every untried configuration's counterfactual result. For a simple monetary objective, suppose policies $X$ and $Y$ offer acceptance probabilities $p_X,p_Y$ and expected additional costs $C_X,C_Y$ conditional on the current task information. If the same accepted outcome is valued at $V$, rejected outcomes have zero value, and other consequences are equal or already counted, prefer $Y$ when
+A learned router can estimate the probability and cost of each eligible remaining policy from evaluation data, for example by training on preference comparisons between a stronger and a weaker model [@ong2024routellm]. Its training records must reflect which configurations were actually tried; logs from a selective router do not reveal every untried configuration's counterfactual result.[^fn-counterfactual-router-logs]
+
+[^fn-counterfactual-router-logs]: **Counterfactual Logs**: Learning from the logs of a deployed selection policy is a causal-inference problem, worked out at scale for online ad placement, where the system only observes outcomes of the choices it made [@bottou2013counterfactual]. Estimating what another policy would have achieved requires that the logging policy explored with known probabilities, so a router that never sends an easy-looking task to the frontier tier leaves no evidence about what that route would have bought. For a simple monetary objective, suppose policies $X$ and $Y$ offer acceptance probabilities $p_X,p_Y$ and expected additional costs $C_X,C_Y$ conditional on the current task information. If the same accepted outcome is valued at $V$, rejected outcomes have zero value, and other consequences are equal or already counted, prefer $Y$ when
 
 $$
 V(p_Y-p_X)>C_Y-C_X.
@@ -813,7 +829,7 @@ A routing policy changes the work arriving at each model and tool service. Capac
 
 ### Residence, service, and quota
 
-For a stable population with finite long-run averages, Little's law (@sec-vol3-kv-workload-dynamics) relates the mean number of admitted trajectories present, $N_{\text{traj}}$, to their admission rate $\lambda_{\text{traj}}$ and mean time from admission to departure, $\mathbb{E}[T_{\text{traj}}]$:
+For a stable population with finite long-run averages, Little's law [@little1961] (@sec-vol3-kv-workload-dynamics) relates the mean number of admitted trajectories present, $N_{\text{traj}}$, to their admission rate $\lambda_{\text{traj}}$ and mean time from admission to departure, $\mathbb{E}[T_{\text{traj}}]$:
 
 $$N_{\text{traj}} = \lambda_{\text{traj}}\mathbb{E}[T_{\text{traj}}].$$ {#eq-vol3-trajectory-concurrency}
 
@@ -946,11 +962,21 @@ class QueuePrice:
 
 The repair agent's model calls share a serving pool with every other trajectory on the platform. The pool runs at `{python} QueuePrice.rho_low_str` utilization, and a proposal to push it to `{python} QueuePrice.rho_high_str` would lower its price per call. The extra throughput appears on the bill. The extra waiting does not, because it lands as elapsed time on every serial call of every trajectory while sandboxes and attention state stay held.
 
-The smallest model that prices this trade is one nonpreemptive, first-come-first-served server fed by a stationary renewal stream. Interarrival times are independent and identically distributed with mean $1/\lambda_{\text{call}}$; service times $T_s$ are independent and identically distributed; the two sequences are independent, with finite variances; and there is no batching, priority, abandonment, or feedback. Write $c_a^2$ and $c_s^2$ for the squared coefficients of variation (variance divided by squared mean) of the interarrival and service times, and $\rho=\lambda_{\text{call}}\mathbb{E}[T_s]<1$ for utilization.
+The smallest model that prices this trade is one nonpreemptive, first-come-first-served server fed by a stationary renewal stream. Interarrival times are independent and identically distributed with mean $1/\lambda_{\text{call}}$; service times $T_s$ are independent and identically distributed; the two sequences are independent, with finite variances; and there is no batching, priority, abandonment, or feedback. Write $c_a^2$ and $c_s^2$ for the squared coefficients of variation[^fn-scv-arrival-burstiness] (variance divided by squared mean) of the interarrival and service times, and $\rho=\lambda_{\text{call}}\mathbb{E}[T_s]<1$ for utilization.
 
-For this server, the **Kingman approximation**\index{Kingman approximation!definition} estimates the mean time waiting *before* service:
+For this server, the **Kingman approximation**\index{Kingman approximation!definition}[^fn-kingman-heavy-traffic] [@kingman1961single] estimates the mean time waiting *before* service:
 
 $$\mathbb{E}[W_q] \approx \frac{c_a^2+c_s^2}{2}\frac{\rho}{1-\rho}\mathbb{E}[T_s].$$ {#eq-vol3-kingman-gg1}
+
+[^fn-scv-arrival-burstiness]: **Squared Coefficient of Variation**: The scale-free measure of burstiness. Exponential interarrival or service times, as in a Poisson stream, have a squared coefficient of variation of exactly one, and perfectly regular ones have zero, so the notebook's values above one describe arrivals and service times burstier than Poisson, which is the usual state of agent traffic that arrives in cohorts and makes calls of very different lengths.
+
+[^fn-kingman-heavy-traffic]: **Heavy Traffic**: Kingman's 1961 note showed that as load approaches one, the steady-state waiting time of the single-server queue, suitably scaled, converges to an exponential distribution [@kingman1961single]. The consequence reaches past the mean: near saturation the whole waiting-time distribution, and with it every percentile, stretches by the same $\rho/(1-\rho)$ factor, so a latency target set as a percentile degrades as fast as the mean does.
+
+::: {.column-margin}
+![](images/svg/vol3_economics_queue_wait_margin.svg){width="100%" fig-alt="Curve of mean wait against utilization that stays low and then rises steeply. A blue dot at 70 percent utilization is labeled 7 seconds and a red dot at 90 percent is labeled 27 seconds."}
+
+*Near saturation, a little more utilization buys a lot more waiting.*
+:::
 
 The factor $\rho/(1-\rho)$ is why waiting grows so fast near full utilization; the expression is a heavy-traffic approximation to the mean, not an exact mean or a percentile. A derivation and error analysis are given by @boon2023heavy. Correlated agent bursts, batched inference, worker pools, and shared quotas need models or trace-driven simulations that represent them, and substituting a pooled service rate does not turn this equation into a multi-server one.
 
@@ -997,6 +1023,12 @@ class TailCompounding:
     p_tail_str = fmt(p_tail, precision=2)
     p_hit_str = fmt(p_hit, precision=2)
 ```
+
+::: {.column-margin}
+![](images/svg/vol3_economics_tail_compounding_margin.svg){width="100%" fig-alt="Rising curve of the probability of meeting at least one per-call tail delay against the number of serial calls, approaching a dashed line labeled certain. A red dot at 30 calls is labeled 0.26."}
+
+*A one-in-a-hundred delay per call becomes routine across a long trajectory.*
+:::
 
 Means also hide how tails compound along a trajectory. If each of $n$ serial calls independently exceeds its 99th-percentile latency with probability $p_{\text{tail}}$, the trajectory meets at least one such delay with probability $1-(1-p_{\text{tail}})^n$, the horizon compounding of @sec-vol3-intro-horizon-arithmetic applied to latency. A trajectory of `{python} TailCompounding.n_calls_str` serial calls, each with tail probability `{python} TailCompounding.p_tail_str`, meets at least one tail delay with probability `{python} TailCompounding.p_hit_str`. A fleet sized for good per-call latency therefore still delivers slow trajectories routinely. This is the serial counterpart of the fan-out straggler effect in @sec-vol3-multiagent-backpressure [@dean2013tail]. Correlated delays, such as a shared queue that stays long across consecutive calls, change the probability but not the lesson: provision and schedule against trajectory-level percentiles, not per-call means (principle \ref{pri-vol3-trajectory-goodput}).
 
@@ -1065,11 +1097,19 @@ class DedicatedBreakEven:
     crossing_nocache_str = fmt_percent(crossing_nocache, precision=1, style="prose")
 ```
 
-Once a workload's token bill is large and steady, a team can run its own deployment instead of paying per token, at a hypothetical `{python} DedicatedBreakEven.fixed_str` per hour plus `{python} DedicatedBreakEven.variable_str` per million output tokens. That deployment is **dedicated capacity**\index{Dedicated capacity!definition}, a commitment paid whether its resources are busy or idle, so the decision turns on how much of its capacity the workload keeps busy. The comparison is a matched one, with equivalent effective capability, acceptance criteria, privacy and authority constraints, and feasible latency at the workload mix; a similar model name or token rate does not establish that equivalence.
+Once a workload's token bill is large and steady, a team can run its own deployment instead of paying per token, at a hypothetical `{python} DedicatedBreakEven.fixed_str` per hour plus `{python} DedicatedBreakEven.variable_str` per million output tokens. That deployment is **dedicated capacity**\index{Dedicated capacity!definition}, a commitment paid whether its resources are busy or idle, so the decision turns on how much of its capacity the workload keeps busy.[^fn-cloud-utilization-argument] The comparison is a matched one, with equivalent effective capability, acceptance criteria, privacy and authority constraints, and feasible latency at the workload mix; a similar model name or token rate does not establish that equivalence.
 
 Fix the input/output and cache mix. Let $p_{\mathrm{API}}$ be the API charge per output token *including its associated input*, $p_{\mathrm{ded}}$ the deployment's variable charge per output token, and $C_{\mathrm{fixed}}$ its complete hourly fixed cost, including provisioned idle and reserve capacity, amortized operations, and other costs that differ between the alternatives. Common costs cancel only if they are genuinely unchanged; a differing tool, verification, networking, or support cost belongs in the comparison. Let $\mu_{\mathrm{out}}$ be a measured feasible output rate, in tokens per second, for this mix and latency target, and let $u$ be the fraction of that reference capacity the workload delivers, which is not accelerator busy time. An hour then delivers $3600\mu_{\mathrm{out}}u$ output tokens, which cost $3600\mu_{\mathrm{out}}u\,p_{\mathrm{API}}$ through an API with no fixed fee and $C_{\mathrm{fixed}}+3600\mu_{\mathrm{out}}u\,p_{\mathrm{ded}}$ on dedicated capacity. When $p_{\mathrm{API}}>p_{\mathrm{ded}}$, the two costs cross at the **break-even utilization**\index{Break-even utilization!definition}
 
 $$u^* = \frac{C_{\mathrm{fixed}}}{3600\mu_{\mathrm{out}}(p_{\mathrm{API}}-p_{\mathrm{ded}})}.$$ {#eq-vol3-breakeven-utilization}
+
+[^fn-cloud-utilization-argument]: **Pay-as-You-Go Economics**: The same comparison drove the economics of cloud computing. Renting capacity by the hour can cost less than owning it even at a higher hourly price, because owned capacity is paid for at its average utilization and the renter transfers the risk of over- and under-provisioning to the provider [@armbrust2010view]. A per-token API is that argument taken to its finest grain, which is why the crossing $u^*$, not the list price, decides the purchase.
+
+::: {.column-margin}
+![](images/svg/vol3_economics_breakeven_margin.svg){width="100%" fig-alt="Two cost-per-hour lines against delivered load. A red per-token API line starts at zero and rises steeply; a blue dedicated line starts at a fixed cost and rises gently. They cross at a dot above a dashed marker labeled u star."}
+
+*Owned capacity wins only above the load that repays its fixed cost.*
+:::
 
 If $u^*>1$, the dedicated alternative cannot reach the crossing within the stated capacity; if $p_{\mathrm{API}}\le p_{\mathrm{ded}}$ and $C_{\mathrm{fixed}}>0$, it never becomes cheaper. Deadlines and quotas are checked separately at the chosen load.
 
@@ -1120,7 +1160,7 @@ Each node $k$ keeps the same account in a runtime-owned ledger, with allocation 
 
 $$B_k=E_k+R_k+F_k,\qquad E_k,R_k,F_k\ge0.$$
 
-A **budget reservation**\index{Budget reservation!definition} removes funds from $F_k$ before another operation can claim them. A child's allocation remains reserved at its parent while the child spends within its own ledger. Parent and child records therefore represent the same backing at different levels, not additional money. Summing every node's reserved balance would double-count it. The parent's $E_k$ alone also omits charges still held in open child accounts. Fleet reporting attributes each charge once through its operation record, while the hierarchy accounts for which allocation backs it.
+A **budget reservation**\index{Budget reservation!definition}[^fn-escrow-budget-reservation] removes funds from $F_k$ before another operation can claim them. A child's allocation remains reserved at its parent while the child spends within its own ledger. Parent and child records therefore represent the same backing at different levels, not additional money. Summing every node's reserved balance would double-count it. The parent's $E_k$ alone also omits charges still held in open child accounts. Fleet reporting attributes each charge once through its operation record, while the hierarchy accounts for which allocation backs it.
 
 The updates in @tbl-vol3-ledger-transitions are atomic with respect to competing admissions and control changes. Their records must survive the failure domain declared in @sec-vol3-persistence-wal before billable work can leave the runtime. A replacement owner reconstructs reservations from that history rather than resetting a balance because the former worker disappeared. Permission grants remain separate from these consumed allocations. Delegating permission to read a repository does not subtract that permission from the parent; delegating spending capacity withholds funds the parent otherwise could use.
 
@@ -1133,6 +1173,8 @@ The updates in @tbl-vol3-ledger-transitions are atomic with respect to competing
 | Close a fully settled child            | No further admission; calls and descendants settled; $R_C=0$              | Parent removes $B_C$ from $R_P$, adds $E_C$ to $E_P$, and adds $F_C$ to $F_P$    |
 
 : **Conserved budget transitions**: Each update preserves the allocated total. Closure requires financial settlement, not merely a stopped local process. {#tbl-vol3-ledger-transitions}
+
+[^fn-escrow-budget-reservation]: **Escrow**: Databases solved the same concurrency problem for hot aggregate quantities such as account balances and inventory counts. The escrow transactional method lets long-lived transactions set aside part of an aggregate instead of locking it, so other transactions keep updating the remainder and commits of different updates can proceed asynchronously [@oneil1986escrow]. A budget reservation is escrow applied to spending authority, with the provider's final bill playing the role of the commit.
 
 Reservation identity binds the task, logical operation, transport attempt, price basis, and cost bound. Settlement uses authenticated usage evidence and a durable **settlement identity**\index{Settlement identity!definition}, the key under which one final charge is applied to the ledger. Repeated delivery of the same evidence applies the ledger update at most once; the runtime checks that a reused identity has the same payload. A conflicting amount is a reconciliation fault, not another charge to add or a duplicate to ignore. Partial usage can move known charges into $E_k$ while retaining a bound on all remaining liability; the full reservation is released only at finality. Deduplicating an effect at its endpoint and deduplicating a billing record are different contracts.
 
@@ -1271,7 +1313,9 @@ An **admission limit**\index{Admission limit!definition} instead checks newly ad
 
 $$\sum_{i:\,t-\tau<t_i\le t}\bar c_i\le B_\tau,$$
 
-where $t_i$ is the admission time and $\bar c_i$ the bounded charge of a billable operation. Every admission atomically checks this window as well as the cumulative ledger. The window covers all children in its scope, not a fresh full allowance for each child. Moving an allocation down the tree is not a second billable operation. Keeping $\bar c_i$ in the window until its admission ages out avoids treating early completion as permission for an unlimited burst. This bounds admitted commitments in that interval, not when providers execute them or post their bills; actual billing can bunch later.
+where $t_i$ is the admission time and $\bar c_i$ the bounded charge of a billable operation.[^fn-window-token-bucket] Every admission atomically checks this window as well as the cumulative ledger. The window covers all children in its scope, not a fresh full allowance for each child. Moving an allocation down the tree is not a second billable operation. Keeping $\bar c_i$ in the window until its admission ages out avoids treating early completion as permission for an unlimited burst. This bounds admitted commitments in that interval, not when providers execute them or post their bills; actual billing can bunch later.
+
+[^fn-window-token-bucket]: **Trailing Window versus Token Bucket**: A token bucket, the usual network and API rate limiter, admits a burst up to its depth at once and then a sustained rate, so its worst case over a short interval is the depth plus the rate times the interval. The trailing-window sum caps every window of length $\tau$ at $B_\tau$ directly, whatever shape the burst takes, at the cost of keeping each admission's record until it ages out.
 
 Rate controls must also leave capacity and funding for required finalization, or a stop can starve the status queries needed to settle its own reservations. Protected lanes or explicit finalization allowances inside the same total account solve that, and a successful probe or cleared alert never releases unrelated held funds.
 
@@ -1572,7 +1616,7 @@ class LighthouseEconomics:
 
 ::: {#lhs-18-cost-per-accepted-by-archetype .callout-lighthouse title="Cost per accepted task by archetype"}
 
-Each lighthouse runs one attempt under its own acceptance contract, and @tbl-vol3-lighthouse-economics prices it with the chapter's account. The repair agent's horizon is the step cap of the registry's reference coding harness, and its token bill is the cached append-only trajectory of notebook \ref{nbk-18-prefix-cache-dollars}. The research agent's token bill applies the `{python} LighthouseEconomics.fanout_mult_str` multiple of chat tokens reported for a multi-agent research system [@anthropic2025multiagent] to one single-chat answer at the same tariff. The remediation agent pays an on-call engineer to approve its production change, and each rejected support session hands off to a human agent at `{python} LighthouseEconomics.handoff_str`. All other inputs are scenario values.
+Each lighthouse runs one attempt under its own acceptance contract, and @tbl-vol3-lighthouse-economics prices it with the chapter's account. The repair agent's horizon is the step cap of the registry's reference coding harness, and its token bill is the cached append-only trajectory of notebook \ref{nbk-18-prefix-cache-dollars}. The research agent's token bill applies the `{python} LighthouseEconomics.fanout_mult_str` multiple of chat tokens that one 2025 engineering account reported for a production multi-agent research system [@anthropic2025multiagent], a point-in-time measurement rather than a constant, to one single-chat answer at the same tariff. The remediation agent pays an on-call engineer to approve its production change, and each rejected support session hands off to a human agent at `{python} LighthouseEconomics.handoff_str`. All other inputs are scenario values.
 
 | Quantity                                                                        |                                      Repair agent |                                      Research agent |                                      Remediation agent |                                      Support agent |
 |:--------------------------------------------------------------------------------|--------------------------------------------------:|----------------------------------------------------:|-------------------------------------------------------:|---------------------------------------------------:|
@@ -1698,6 +1742,23 @@ The chapter's decisions build on that account. Caching, compaction, and retry po
 :::
 
 Trajectory goodput and the accepted task (principle \ref{pri-vol3-trajectory-goodput}) acquire an explicit financial account, $C_{\text{eff}}$, and its reciprocal, goodput per dollar, and the same principle requires the account to include resource residence and waiting, not just active generation. Trajectory-level encapsulation (principle \ref{pri-vol3-trajectory-encapsulation}) preserves spending responsibility across children through reservations and settlement, while leaving reusable permissions distinct from consumable funds.
+
+## Historical Perspective and Further Reading {#sec-vol3-agent-economics-history}
+
+The time and capacity half of this chapter's account is operations research from the mid-twentieth century. Project planners needed to know which activities fixed a completion date, and the critical-path method answered with the longest chain of dependent work [@kelley1959critical]. Queueing theory supplied the capacity laws: Little proved that mean occupancy equals arrival rate times mean residence under very general conditions [@little1961], and Kingman showed in the same year that a single server's waiting time grows without bound, in proportion to $1/(1-\rho)$, as load approaches one [@kingman1961single], results later consolidated in textbook form [@kleinrock1975queueing]. When parallel computers promised large speedups, Amdahl's fixed-work argument bounded what accelerating one part of a job could buy [@amdahl1967]. Each generation hit the same problem the repair agent hits, a fast component inside a slow whole, and answered it by accounting for the whole.
+
+The spending half descends from transaction processing and utility computing. Databases that had to update hot account balances under heavy concurrency learned to escrow part of a quantity instead of locking it [@oneil1986escrow], within a broader discipline of atomic, durable, recoverable updates [@gray1992]. When computing capacity became rentable by the hour, the argument for renting over owning turned on average utilization and on who bears the risk of provisioning [@armbrust2010view], and warehouse-scale services learned that rare per-request delays dominate once a request touches many servers [@dean2013tail].
+
+Machine learning brought its own lineage of paying for computation only where it is needed. A boosted classifier cascade made real-time detection possible by discarding easy cases early [@viola2001], and the same shape returned for language model APIs as cascades and learned routers [@chen2023frugalgpt; @ong2024routellm]. Draft-then-verify decoding grew from blockwise parallel prediction [@stern2018blockwise] into speculative decoding [@leviathan2023fast; @chen2023accelerating]. Repeated sampling showed that more attempts keep buying coverage when a check can recognize success [@brown2024monkeys], and that result made the question this chapter answers unavoidable: evaluations of agents had to report what the accuracy cost [@kapoor2024agents].
+
+**Further reading.**
+
+- *The Single Server Queue in Heavy Traffic* [@kingman1961single]. Three pages that explain why waiting, not throughput, is the price of high utilization.
+- *The Escrow Transactional Method* [@oneil1986escrow]. The database ancestor of budget reservations, showing how concurrent work can share one bounded quantity without a global lock.
+- *A View of Cloud Computing* [@armbrust2010view]. The utilization and risk-transfer argument behind every rent-versus-own decision, including per-token APIs.
+- *Performance Modeling and Design of Computer Systems* [@harchol-balter2013]. The queueing models this chapter deliberately stops short of, including multiple servers, variability, and scheduling policy.
+- *The Tail at Scale* [@dean2013tail]. Why systems must be engineered against percentiles rather than means once work is composed of many calls.
+- *AI Agents That Matter* [@kapoor2024agents]. The case for reporting agent accuracy and cost together, which is the evaluation counterpart of cost per accepted task.
 
 ::: {.column-margin .margin-pointer}
 ↪ End-to-end integration, trajectory ownership, and specification boundaries are synthesized in @sec-vol3-conclusion.
