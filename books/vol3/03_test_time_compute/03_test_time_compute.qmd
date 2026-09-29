@@ -1410,6 +1410,23 @@ A score orders candidates by one criterion, and argmax selection concentrates th
 
 Test-time compute turns one bounded model call into a bounded policy for allocating work. Depth, breadth, and feedback offer different opportunities to improve a candidate, but selection determines which candidate survives, and checks provide evidence only within their scope. Revisable plans preserve useful work by tracking the observations on which it depends. Resource accounting and stopping rules bound the resulting search without converting an unfinished or high-scoring proposal into an accepted result. The engineering decision is whether the deployed policy improves the required outcome enough to justify its actual expenditure and delay.
 
+@Tbl-vol3-test-time-compute-key-equations collects the relations the chapter uses to price an allocation, judge a selector, bound a search, and decide when to stop.
+
+| **Equation**                                                                                                                                                                       | **What it bounds or decides**                                                                                 | **Where derived**                     |
+|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------|:--------------------------------------|
+| $T^{\text{depth}} \approx t_{\text{prefill}}(P) + K_{\text{ext}}\,t_{\text{step}}$, $\; T^{\text{breadth}} \approx t_{\text{prefill}}(P) + \max_{n} T_{\text{decode}}(K_n)$        | Critical path of extending one candidate versus sampling $N$ concurrently, given capacity for all $N$ streams | @eq-vol3-allocation-critical-path     |
+| $T^{\text{feedback}} \approx \sum_{r=1}^{R}\bigl(t_{\text{prefill}}(P_r) + T_{\text{decode}}(K_r) + t_{\text{check},r}\bigr)$, $\; P_r = P_1 + \sum_{j<r}(K_j + \lvert O_j\rvert)$ | Latency and input growth of observation-conditioned revision under an append-only context                     | @eq-vol3-allocation-critical-path     |
+| $\operatorname{pass@}k = 1-(1-p)^k$, $\; \widehat{\operatorname{pass@}k} = 1-\binom{n-c}{k}\big/\binom{n}{k}$                                                                      | Candidate availability for one task, and the ceiling on any selector that returns an unchanged pool member    | @sec-vol3-test-time-compute-pass-at-k |
+| $C_{\text{eff}} = \mathbb{E}[C_{\text{attempt}}]/p_{\text{acc}}$                                                                                                                   | Whether added deliberation raises $p_{\text{acc}}$ faster than it raises the attempt cost                     | @eq-vol3-cost-per-accepted-task       |
+| $\Pi_V = p(1-\epsilon_{\text{FR}}) \big/ \bigl[p(1-\epsilon_{\text{FR}}) + (1-p)\,\epsilon_{\text{FA}}\bigr]$                                                                      | Share of passing candidates that are valid; unchanged by pool size at fixed rates                             | @eq-vol3-verifier-precision           |
+| $\sum_{j=1}^{J}(P + j\,\ell) = JP + \tfrac{J(J+1)}{2}\,\ell$                                                                                                                       | Scorer input for step-level checks that rescore each growing prefix without reuse                             | @eq-vol3-prm-rescoring                |
+| $\mathbb{E}\bigl[\max_{i \le N} \epsilon_i\bigr] \approx \sigma\sqrt{2\ln N}$, $\; 1-(1-\eta)^N$                                                                                   | Score inflation that argmax selection concentrates in the winner, and the chance a pool holds a check exploit | @eq-vol3-argmax-noise                 |
+| $Q(s,a) + c_{\text{explore}}\,P(a \mid s)\,\sqrt{\textstyle\sum_{a'} N(s,a')}\,/\,\bigl(1 + N(s,a)\bigr)$                                                                          | Which extension of a partial candidate receives the next unit of tree search                                  | @eq-vol3-puct                         |
+| $b_{\text{eff}} = b\,(1 - p_{\text{prune}})$, $\; \sum_{d=1}^{D} b\,b_{\text{eff}}^{\,d-1}$                                                                                        | Whether pruning keeps a search tree finite, and the expected nodes it generates through depth $D$             | @eq-vol3-effective-branching          |
+| $(\hat P_m - \hat P_{m-1})/(C_m - C_{m-1}) < \epsilon_{\text{stop}}$                                                                                                               | Early stop within the hard ceilings and after satisficing, when the next unit of work is not worth its cost   | @eq-vol3-marginal-stopping            |
+
+: **Key equations**: Each relation holds under the assumptions stated where it is derived, such as independent candidates for a fixed task, fixed checker error rates, and an unchanged per-token rate across concurrent streams. {#tbl-vol3-test-time-compute-key-equations tbl-colwidths="[46,36,18]"}
+
 ::: {.callout-takeaways title="More work needs a bounded policy"}
 
 * **Allocation determines the shape of deliberation**: Depth adds sequential reasoning, breadth adds alternatives, and feedback conditions later attempts on observations. Their value depends on the task and selector; equal token allowances do not imply equal latency or equal quality.
@@ -1436,6 +1453,78 @@ Language models revived each idea at a new scale. Program-synthesis benchmarks m
 - **Process supervision** [@lightman2023let]. A controlled comparison of outcome and process supervision, with the step-labeling cost that decides whether process scoring is affordable.
 - **Reward-model overoptimization** [@gao2023scaling]. The measured shape of Goodhart's law under best-of-$N$ selection, and the evidence behind this chapter's warning about optimizing against a learned score.
 - **Compute-optimal test-time allocation** [@snell2024scaling]. A study of how the best split among revision, sampling, and search changes with problem difficulty, best read as a method for measuring allocation policies rather than as fixed numbers.
+
+## Exercises {#sec-vol3-test-time-compute-exercises}
+
+Unless a problem states otherwise, use the hypothetical givens in @tbl-vol3-test-time-compute-exercise-givens. They are problem inputs chosen for round arithmetic, not measurements of any model or service. Omit prefill, queueing, and transport time, and apply no prefix-cache discount unless a problem introduces one.
+
+| **Quantity**                                 | **Symbol**        | **Given**                 |
+|:---------------------------------------------|:------------------|:--------------------------|
+| Generation time per output token, per stream | $t_{\text{step}}$ | 20 ms                     |
+| Generator input price                        |                   | \$3 per million tokens    |
+| Generator output price                       |                   | \$15 per million tokens   |
+| Learned-scorer input price                   |                   | \$0.50 per million tokens |
+
+: **Givens for the exercises**: Hypothetical rates shared by the problems below. Concurrent streams keep the per-token rate up to the concurrency a problem states. {#tbl-vol3-test-time-compute-exercise-givens tbl-colwidths="[56,18,26]"}
+
+**1. Three allocations, one repository (Basic).** A repair request carries an $8{,}000$-token prompt and a ceiling of $6{,}000$ generated tokens. Depth spends the whole ceiling on one candidate. Breadth generates six $1{,}000$-token candidates, but the service admits only three concurrent streams. Feedback runs $R = 3$ rounds of $1{,}000$-token candidates; each round ends with a 6 s check that returns a 500-token report, and later requests append every earlier candidate and report.
+
+(a) Using @eq-vol3-allocation-critical-path, compute each allocation's critical path, input tokens, output tokens, and model-token bill.
+(b) The repository context grows to $64{,}000$ tokens. Recompute the three bills and the breadth premium $(N-1)P$ in tokens and dollars.
+(c) The task owner now requires a result within 60 s. Which allocation meets the deadline, and at what bill? A prefix cache would charge re-read prompt tokens at 10 percent of list price. What does breadth then cost, and what omitted term in this accounting would you measure before committing to it?
+
+**2. Sizing a pool against a target (Basic).** For a fixed repair task, independent candidates pass the acceptance check with probability $p = 0.20$, and the selector returns a passing member whenever one exists.
+
+(a) Find the smallest pool $N$ whose pass@$N$ reaches 90 percent, and the availability gained by its last candidate.
+(b) Compare candidates spent per accepted repair for the parallel pool and for sequential retry that stops at the first pass and gives up after $N$ attempts. What does the parallel pool buy for its premium?
+(c) The workload is actually mixed: half the tasks pass at $0.40$ per candidate and half never pass, so the average rate is still $0.20$. What pool success does your $N$ deliver, and what is the largest pool success any $N$ can deliver? What should the runtime do with the second half of the workload instead?
+(d) In a benchmark, 4 of 20 samples for one task pass. Compute the subset estimate of pass@5 and compare it with the plug-in value $1-(1-c/n)^5$.
+
+**3. How strict must the check be? (Basic).** A candidate pool has valid-candidate rate $p = 0.10$. The current check has $\epsilon_{\text{FR}} = 0.05$ and $\epsilon_{\text{FA}} = 0.01$ and costs \$0.10 per run.
+
+(a) Compute the probability of a pass $q$ and the precision $\Pi_V$ from @eq-vol3-verifier-precision.
+(b) Precision must reach 95 percent. Find the largest $\epsilon_{\text{FA}}$ that meets the target at this $p$, and alternatively the smallest $p$ that meets it with the current check.
+(c) The policy pre-generates 32 candidates and checks them in a fixed order until the first pass, abstaining if none passes. Compute the probability of any selection, the probability that the batch contains at least one false pass, and the probability of selecting a defective candidate. Explain why the second and third differ.
+(d) A stricter check has $\epsilon_{\text{FA}} = 0.005$ and $\epsilon_{\text{FR}} = 0.08$ and costs \$0.40 per run. A defective selection costs \$2,000 in incident loss. Compare the two checks on expected incident loss plus expected checking cost per attempt, and decide which to deploy.
+
+**4. What step scoring costs (Intermediate).** A learned process scorer reads a $3{,}000$-token task input and the growing prefix of a candidate built in $J = 20$ steps of 150 tokens each. The runtime scores 64 candidate trajectories per task at the scorer price in @tbl-vol3-test-time-compute-exercise-givens.
+
+(a) Using @eq-vol3-prm-rescoring, compute scorer input per trajectory and per task when every prefix is rescored from scratch, and when the interface supports incremental prefix reuse.
+(b) For this $P$ and $\ell$, beyond how many steps does the quadratic term exceed the $JP$ term?
+(c) Without prefix reuse, a team proposes scoring only every fourth step. Compute its scorer input and bill per task. A defective step is then caught on average 1.5 steps later, and every pruned trajectory generates those extra steps at the output price. Bound the added generation cost per task, and recommend a scoring stride with and without prefix reuse.
+
+**5. Keeping a tree finite (Intermediate).** Each retained node proposes $b = 4$ children of 200 generated tokens, a step check rejects each child independently with probability $p_{\text{prune}} = 0.60$, and the search runs $D = 5$ steps deep under a ceiling of $20{,}000$ generated tokens.
+
+(a) Compute $b_{\text{eff}}$ from @eq-vol3-effective-branching, the expected generated nodes and tokens with and without pruning, and whether each fits the ceiling.
+(b) What rejection rate would make the tree die out on its own, and why is a rejection rate that high rarely available?
+(c) The step check also rejects valid steps with probability $\epsilon_{\text{FR}}$. A correct solution needs five consecutive valid steps to survive. Compute its survival probability at $\epsilon_{\text{FR}} = 0.10$, and the largest $\epsilon_{\text{FR}}$ that keeps survival at or above 80 percent. What does this imply for tuning the check's threshold?
+
+**6. A waiting customer sets the policy (Intermediate).** The support agent (\ref{lhs-vol3-support-agent}) answers a policy question while the customer waits. Each request carries a $6{,}000$-token prompt of policy excerpts and conversation, each candidate reply is 150 output tokens, and a grounding check against the cited policy takes 1.5 s. A first reply passes with probability $0.70$; conditional on a failed first reply, a revision that reads the check's report passes with probability $0.50$. Concurrent candidates are checked concurrently, and the reply must arrive within 8 s.
+
+(a) Compute the duration of one generate-and-check round. How many feedback rounds fit the deadline, and what pass probability does feedback therefore deliver?
+(b) For concurrent breadth of $N = 1$ to $4$, compute pass probability, model-token bill per request, and bill per passing reply. Find the smallest $N$ that reaches 95 percent.
+(c) The service can hold 600 concurrent decode streams for all sessions. How many simultaneous sessions does your choice in (b) support, compared with a single candidate? Which resource binds this policy?
+(d) Contrast with the repair notebook (\ref{nbk-03-strategy-comparison}), where a second feedback round fit the deadline. Name the constraint that changed the answer, and state one design change that would make feedback viable for the support agent.
+
+**7. Scoping a revision (Intermediate).** A repair candidate records these generated artifacts, with their output tokens and direct prerequisites: diagnosis $D$ (300; source excerpt, failure observation), pool patch $P_1$ (600; source excerpt, $D$), metrics patch $P_2$ (200; $D$), check selection $C$ (150; $P_1$, test inventory), API notes $N$ (250; API declaration), release note $R$ (200; $P_1$, $P_2$, $N$), and migration script $M$ (400; $N$).
+
+(a) A waiter-and-return test contradicts $D$. List $\text{Desc}(D)$, and compute the output tokens of scoped regeneration (the diagnosis and its descendants) against full regeneration.
+(b) Instead, the API declaration changes while the diagnosis stands. Which artifacts need review, and what share of the output does scoped regeneration avoid?
+(c) The pool patch in fact calls the pool's public constructor, so $P_1$ depends on the API declaration, but that edge was never recorded. After the declaration changes, which stale artifacts survive the traversal, and what could the runtime then wrongly reuse? Propose how the runtime should record edges so that this failure cannot occur silently, and state what that costs.
+
+**8. A judge under selection pressure (Advanced).** The research agent (\ref{lhs-vol3-research-agent}) drafts $N$ candidate summaries of what it has read, and a learned judge scores each as $\hat U_i = U_i + \epsilon_i$. True quality is $U_i \sim \mathcal{N}(\mu, \sigma_U^2)$ with $\sigma_U = 1.0$, scoring error is $\epsilon_i \sim \mathcal{N}(0, \sigma^2)$ with $\sigma = 0.5$, all independent. The exact expected maximum of $N$ standard normal draws is 1.03, 1.77, and 2.34 for $N$ = 4, 16, and 64. Each candidate costs \$0.12.
+
+(a) Using the exact values in place of @eq-vol3-argmax-noise, bound the winner's expected scoring error at each $N$.
+(b) Show that when selection is on $\hat U$, the winner's expected quality gain over $\mu$ is $(\sigma_U^2/s)\,m_N$ and its expected error is $(\sigma^2/s)\,m_N$, where $s = \sqrt{\sigma_U^2 + \sigma^2}$ and $m_N$ is the expected standard-normal maximum. Evaluate both at the three pool sizes, and compare quality gained per dollar in moving from 4 to 16 and from 16 to 64 candidates.
+(c) A fraction $\eta = 0.002$ of summaries cite a retrieved page whose planted text the judge rewards but which does not support the claim. Compute the probability that a pool of 4, 16, and 64 contains at least one such summary, and explain why selection then tends to return it.
+(d) Redesign the selection policy. Choose a pool size and a check the planted page cannot influence, and state what evidence the returned summary must carry. How does the binding constraint here differ from the repair agent's?
+
+**9. Stopping before an irreversible change (Advanced).** The remediation agent (\ref{lhs-vol3-remediation-agent}) generates candidate configuration changes in rounds, each costing \$0.20 in generation and a staging check. Calibrated on held-out incidents, the estimated probability of a staging-accepted candidate after $m$ rounds is $\hat P_m$ = 0.40, 0.58, 0.68, 0.74, 0.77, 0.79 for $m$ = 1 to 6, with $\hat P_0 = 0$, and the hard ceiling is six rounds.
+
+(a) Compute the marginal ratio of @eq-vol3-marginal-stopping for each round. With $\epsilon_{\text{stop}} = 0.25$ per dollar, how many rounds does the policy admit, and what are the resulting acceptance probability and expected generation cost if search stops at the first accepted candidate?
+(b) An accepted automated change saves \$30 of on-call time compared with escalation. Derive $\epsilon_{\text{stop}}$ from that value, and state how many rounds the policy now admits and which rule ends the search.
+(c) A colleague proposes that when the ceiling is reached without an accepted candidate, the agent applies its highest-scoring candidate. That candidate is defective with probability 0.5, a defective change costs \$40,000, and escalating to a human costs \$150. Compute the expected loss per task of each fallback, and identify the stopping-precedence rule the proposal violates.
+(d) Write the redesigned policy as the ordered checks the runtime applies before admitting another round, including what it returns in each case. Why does a staging-accepted candidate still not authorize the production change?
 
 ::: {.callout-chapter-connection title="From deliberation to working state"}
 Deliberation leaves candidate versions, failed hypotheses, observations, and dependency records. The next model call cannot treat all of them as equally current or useful. It needs a working context that retains the evidence supporting the selected candidate, distinguishes superseded material, and carries unresolved questions forward. @Sec-vol3-context-engineering develops this logical state-selection problem. Only after deciding what belongs in the working context does the physical question arise of how to store and reuse its model state, developed in @sec-vol3-kv-cache.
