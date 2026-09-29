@@ -26,6 +26,8 @@ from mlsysim.physics.robotics import (
     calc_cbf_safety_margin,
     calc_action_chunk_streaming_amortization,
     calc_watchdog_lease_bound,
+    calc_phase_lag_total,
+    calc_canfd_frame_bits,
     calc_canfd_bus_utilization,
     calc_ethercat_cycle_time,
     calc_contact_force,
@@ -288,24 +290,77 @@ def test_watchdog_lease_bound():
     assert res["t_lease_max"] == res["t_total_delay_max"]
 
 
+def test_canfd_frame_bits_8_bytes():
+    # ISO 11898-1:2015 FD base format, 8 data bytes, CRC-17.
+    f = calc_canfd_frame_bits(8)
+    assert f["data_field_bytes"] == 8
+    assert f["crc_bits"] == 17 and f["fixed_stuff_bits"] == 6
+    # Stuffed run SOF..data = 17 + 5 + 64 = 86 bits -> floor(85/4) = 21 stuff bits;
+    # 4 of them fall in the 17 nominal-rate arbitration bits.
+    assert f["stuff_bits_nominal"] == 4 and f["stuff_bits_data"] == 17
+    # Nominal: 17 + 13 (CRC delim, ACK, ACK delim, EOF 7, IFS 3) + 4 = 34
+    assert f["bits_nominal"] == 34
+    # Data: ESI 1 + DLC 4 + 64 + stuff count 4 + CRC 17 + fixed stuff 6 + 17 = 113
+    assert f["bits_data"] == 113
+
+
+def test_canfd_frame_bits_crc21_padding_and_extended():
+    f = calc_canfd_frame_bits(64)
+    assert f["crc_bits"] == 21 and f["fixed_stuff_bits"] == 7
+    assert f["bits_data"] == 5 + 512 + 4 + 21 + 7 + ((17 + 5 + 512 - 1) // 4 - 4)
+    # 9 bytes pad up to the 12-byte data field; 17 < 20 keeps CRC-17.
+    assert calc_canfd_frame_bits(9)["data_field_bytes"] == 12
+    assert calc_canfd_frame_bits(17)["crc_bits"] == 21
+    # Extended identifier: 36 nominal arbitration bits.
+    ext = calc_canfd_frame_bits(8, extended_id=True, worst_case_stuffing=False)
+    assert ext["bits_nominal"] == 36 + 13
+    with pytest.raises(ValueError):
+        calc_canfd_frame_bits(65)
+
+
 def test_canfd_bus_utilization():
-    # Chapter 4 CAN-FD 8 axes, 64-byte payload
+    # 9 axes, command + feedback frames, 8 bytes each, 1/5 Mbps, worst-case stuffing.
     res = calc_canfd_bus_utilization(
-        num_axes=8,
-        payload_bytes=64,
+        num_axes=9,
+        payload_bytes=8,
         baud_arbitration=Q_("1.0 Mbps"),
         baud_data=Q_("5.0 Mbps"),
         cycle_time=Q_("1.0 ms"),
-        interframe_spacing=Q_("6.0 us"),
-        overhead_bits_arb=32,
     )
-    # t_tx = 32 us + 102.4 us + 6.0 us = 140.4 us
-    assert res["t_tx"].to("us").magnitude == pytest.approx(140.4, rel=1e-2)
-    # t_total = 8 * 140.4 = 1123.2 us
-    assert res["t_total_tx"].to("us").magnitude == pytest.approx(1123.2, rel=1e-2)
-    # utilization = 1.1232 (>1.0 -> unschedulable)
-    assert res["utilization"] == pytest.approx(1.1232, rel=1e-2)
+    # t_frame = 34 bits / 1 Mbps + 113 bits / 5 Mbps = 34 + 22.6 = 56.6 us
+    assert res["t_tx"].to("us").magnitude == pytest.approx(56.6, rel=1e-9)
+    assert res["n_frames"] == 18
+    # 18 * 56.6 = 1018.8 us > 1 ms
+    assert res["t_total_tx"].to("us").magnitude == pytest.approx(1018.8, rel=1e-9)
+    assert res["utilization"] == pytest.approx(1.0188, rel=1e-9)
     assert res["is_schedulable"] is False
+    # One bus per limb: the 7-joint arm bus fits the serialization check.
+    arm = calc_canfd_bus_utilization(num_axes=7)
+    assert arm["t_total_tx"].to("us").magnitude == pytest.approx(792.4, rel=1e-9)
+    assert arm["is_schedulable"] is True
+    # Without stuffing the frame is shorter (lower bound, not a WCRT input).
+    lo = calc_canfd_bus_utilization(num_axes=9, worst_case_stuffing=False)
+    assert lo["t_tx"] < res["t_tx"]
+
+
+def test_phase_lag_total():
+    # 20 Hz crossover, 1 ms tick, 0.25 ms compute, 1 ms bus, 5 deg allowance.
+    r = calc_phase_lag_total(
+        Q_("20 Hz"), Q_("1 ms"), compute_delay=Q_("0.25 ms"), transport_delay=Q_("1 ms"),
+        phase_allowance=Q_("5 degree"),
+    )
+    # ZOH: 360 * 20 * 0.0005 = 3.6 deg; bus: 7.2 deg; compute: 1.8 deg; total 12.6 deg
+    assert r["phase_zoh"].to("degree").magnitude == pytest.approx(3.6, rel=1e-9)
+    assert r["phase_transport"].to("degree").magnitude == pytest.approx(7.2, rel=1e-9)
+    assert r["phase_total"].to("degree").magnitude == pytest.approx(12.6, rel=1e-9)
+    assert r["tau_total"].to("ms").magnitude == pytest.approx(1.75, rel=1e-9)
+    # allowed delay = 5 / (360 * 20) s = 0.6944 ms; f_max = 5 / (360 * 1.75e-3) = 7.937 Hz
+    assert r["tau_allowed"].to("ms").magnitude == pytest.approx(0.694444, rel=1e-5)
+    assert r["f_crossover_max"].to("Hz").magnitude == pytest.approx(7.936508, rel=1e-5)
+    assert r["within_allowance"] is False
+    # Sample-and-hold alone fits the allowance.
+    z = calc_phase_lag_total(Q_("20 Hz"), Q_("1 ms"), phase_allowance=Q_("5 degree"))
+    assert z["within_allowance"] is True
 
 
 def test_ethercat_cycle_time():

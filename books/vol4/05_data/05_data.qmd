@@ -742,7 +742,48 @@ Human takeovers and automated disengagements introduce a selection trap into fle
 
 Appending a rescued episode directly to a behavioral cloning dataset can make unsafe policy commands look like expert demonstrations. Before takeover, the learned policy may issue commands that increase heading error or contact force; after takeover, the expert issues corrective commands from states the learner visited. Those drift states are valuable for corrective aggregation when an expert can label a safe action there. If an engineering pipeline naively trains on the entire recorded trajectory without curation, it falls into the **causal confusion trap**: the neural network correlates the visual cues of approaching boundary hazards (such as tilting towards a wall or skidding on ice) with the failing policy's high-risk commands, accelerating policy divergence rather than correcting it.
 
-Separating these labels requires locating the **divergence point** where the autonomous policy departed the nominal path (extending @sec-nervous-multi-rate-bridge), rather than treating takeover as the first error. In a streaming telemetry pipeline, edge loggers maintain a circular rolling ring buffer in locked memory or fast non-volatile storage spanning a fixed lookback window ($\Delta t_{\text{lookback}} = 1.0\text{--}2.0\text{ s}$). Because memory allocation during emergency events introduces non-deterministic latency, this buffer operates as a zero-allocation, pre-allocated ring buffer populated at the hardware servo tick ($1\text{ kHz}$). When a human safety supervisor hits an override button or an MCU safety enforcer trips a barrier, the pipeline latches the intervention timestamp $t_{\text{takeover}}$ and freezes the preceding ring buffer. An out-of-loop supervisory takeover (@sec-intervention-human-authority budgets its latency) takes longer than the teleoperation loop's continuous correction (@sec-data-teleop-costs); at an illustrative $100\text{ Hz}$ that delay spans many control cycles, all logged under the learner's authority.
+```{python}
+#| label: calc-data-lookback-window
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRE-TRIGGER LOOKBACK WINDOW (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-intervention-recovery (divergence search and the
+# │          intervention record)
+# │ Goal:    Size the ring buffer's lookback from the sourced takeover time.
+# │ Show:    The lookback window.
+# │ How:     AISLE.pre_trigger_window: the design out-of-loop takeover (90th
+# │          percentile condition-mean take-over time plus console transport)
+# │          rounded up to whole seconds; @sec-intervention-trustworthy-logs
+# │          uses the same window.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import second
+from mlsysim.fmt import fmt_latency, check
+
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class DataLookbackWindow:
+    """Lookback window that reaches back past the design takeover."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_takeover = AISLE.t_takeover_out_of_loop  # category: derived (sourced p90 take-over time + transport)
+    t_lookback = AISLE.pre_trigger_window  # category: derived
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    headroom = (t_lookback - t_takeover).to(second)
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(t_lookback >= t_takeover, "The lookback must reach back past the design takeover.")
+    check(abs(t_lookback.to(second).magnitude - 5.0) < 1e-9, f"lookback window: {t_lookback}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_lookback_str = fmt_latency(t_lookback, unit=second, precision=0)
+```
+
+Separating these labels requires locating the **divergence point** where the autonomous policy departed the nominal path (extending @sec-nervous-multi-rate-bridge), rather than treating takeover as the first error. In a streaming telemetry pipeline, edge loggers maintain a circular rolling ring buffer in locked memory or fast non-volatile storage spanning a fixed lookback window, $\Delta t_{\text{lookback}} =$ `{python} DataLookbackWindow.t_lookback_str`: the design out-of-loop takeover time of @sec-intervention-human-authority, rounded up to whole seconds, because the operator's response alone spans that interval after the divergence has begun. Because memory allocation during emergency events introduces non-deterministic latency, this buffer operates as a zero-allocation, pre-allocated ring buffer populated at the hardware servo tick ($1\text{ kHz}$). When a human safety supervisor hits an override button or an MCU safety enforcer trips a barrier, the pipeline latches the intervention timestamp $t_{\text{takeover}}$ and freezes the preceding ring buffer. An out-of-loop supervisory takeover (@sec-intervention-human-authority budgets its latency) takes longer than the teleoperation loop's continuous correction (@sec-data-teleop-costs); at an illustrative $100\text{ Hz}$ that delay spans many control cycles, all logged under the learner's authority.
 
 Detecting $t_{\text{div}}$ in offline ingestion pipelines requires searching backwards in time from the physical override timestamp across this synchronized pre-trigger telemetry buffer:
 $$\begin{aligned}
@@ -779,7 +820,7 @@ Training successive policy generations on drift-window learner commands mislabel
 2. **Generation 2:** If the drift-window commands are presented as expert labels, the policy learns to repeat them at similar off-nominal states. On this rig, that could increase excursions toward the torque limit before a correction.
 3. **Generation 3:** Operators may then intervene earlier. Intervention rate can rise while validation loss on the mislabeled archive falls, making the offline metric look better as physical performance worsens.
 
-To detect such a cascade, the permission path emits an **intervention record**\index{Intervention record!definition} for each takeover or barrier trip,[^fn-std-iso-records] the training-side view of the forensic authority record that @sec-intervention-authority-log builds. The intervention record needs more than a binary flag on video: a pre-trigger buffer long enough for the declared lookback (two seconds in this example), synchronized observations and action taps, a monotonic override timestamp and authority ID, and the subsequent recovery sequence. Without the pre-trigger evidence, the pipeline cannot locate $t_{\text{div}}$ reliably or separate unsafe learner commands from states eligible for expert relabeling.
+To detect such a cascade, the permission path emits an **intervention record**\index{Intervention record!definition} for each takeover or barrier trip,[^fn-std-iso-records] the training-side view of the forensic authority record that @sec-intervention-authority-log builds. The intervention record needs more than a binary flag on video: a pre-trigger buffer long enough for the declared lookback (`{python} DataLookbackWindow.t_lookback_str` in this example), synchronized observations and action taps, a monotonic override timestamp and authority ID, and the subsequent recovery sequence. Without the pre-trigger evidence, the pipeline cannot locate $t_{\text{div}}$ reliably or separate unsafe learner commands from states eligible for expert relabeling.
 
 [^fn-std-iso-records]: **Fault-Event Logging**\index{Deterministic fault logging!non-volatile ring buffers}: This collection design preserves pre-trigger state, action authority, fault codes, and actuator-current samples across an override, with integrity checks on the stored record. Such telemetry helps distinguish policy drift from hardware or environment faults.
 

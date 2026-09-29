@@ -79,26 +79,30 @@ The **digital twin delusion**\index{Digital twin delusion!simulation limits} tre
 # │ Goal: Derive the two oracle bounds (powered deceleration onset after the last valid renewal,
 # │       stopping distance at the aisle speed) and the envelope points that
 # │       F1-F4 and A1-A4 are injected at, all from the machine's registry entry.
-# │ Show: 82 ms onset bound; 997.4 mm budget and 102.6 mm spare at 1.3 m/s;
-# │       78.9 ms of travel in that spare, 174.7 ms at the 1.2 m/s takeover
-# │       speed; the 1.39 m/s dry and 1.09 m/s inspected-floor ceilings; the
+# │ Show: 82 ms onset bound; 969.0 mm budget and 131.0 mm spare at 1.3 m/s;
+# │       100.8 ms of travel in that spare, 184.1 ms at the 1.2 m/s takeover
+# │       speed; the 1.44 m/s dry and 1.23 m/s inspected-floor ceilings; the
 # │       17.3 V control-rail sag; the permission rail's 2.0 s hold-up against
-# │       1497.35 ms from flag to brakes set (F4b); F1's stop oracle from the
-# │       last valid renewal (780.4 mm at 1.3 m/s); the F1 record's oracle at
-# │       the restricted 1.0 m/s point (759.3 mm from the last valid renewal);
+# │       1313.43 ms from flag to brakes set (F4b); F1's stop oracle from the
+# │       last valid renewal (751.9 mm at 1.3 m/s); the F1 record's oracle at
+# │       the restricted 1.0 m/s point (629.6 mm from the last valid renewal);
 # │       the Class 3 tank contrast (volume, not distance); F2's refusal
 # │       threshold, the 51.6 ms budgeted dispatch age plus the 0.2 ms clock-conversion
-# │       bound (51.8 ms upper age).
-# │ How: calc_safe_stopping_distance and calc_max_permitted_velocity with the
-# │      C² suffix (a_eff = a_brake / 1.5) and the three fixed overheads;
+# │       bound (51.8 ms upper age); the unbudgeted queue length that exhausts
+# │       the spare (100.8 ms, about three-quarters of the pre-brake subtotal).
+# │ How: the jerk-limited S-curve stop (calc_scurve_stop_distance / _time,
+# │      calc_scurve_max_permitted_velocity) with the jerk bound taken as the
+# │      reference C2 polynomial's peak jerk at the drive limit, as in
+# │      @sec-planning-c2-stopping-suffix, and the three fixed overheads;
 # │      calc_voltage_droop for the rail; tank arithmetic by conservation of volume.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import ureg, kilogram, microsecond, millisecond, second, meter, millimeter
 from mlsysim.physics.robotics import (
-    calc_safe_stopping_distance,
-    calc_max_permitted_velocity,
     calc_c2_stop_suffix,
+    calc_scurve_stop_distance,
+    calc_scurve_stop_time,
+    calc_scurve_max_permitted_velocity,
 )
 from mlsysim.physics import calc_voltage_droop
 from mlsysim.fmt import (
@@ -111,6 +115,7 @@ from mlsysim.fmt import (
     fmt_current,
     fmt_temperature,
     fmt_mass,
+    fmt_percent,
     check,
 )
 
@@ -160,59 +165,54 @@ class RackEndVerification:
         1.0 * meter / second
     )  # restricted-mode aisle speed on inspected floors, below the inspected-floor ceiling; scenario assumption; category: chosen
     late_onset = 30 * millisecond  # example late powered deceleration onset (STL margin); scenario assumption; category: illustrative
-    queue_delay = 100 * millisecond  # unbudgeted ISP-to-backbone queue (fallacy); scenario assumption; category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     overhead = (delta_loc + delta_margin + eps_track).to(millimeter)
-    a_eff = (a_brake / 1.5).to(meter / second**2)
+    # Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
+    j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"].to(meter / second**3)
     onset_bound = (t_lease + t_tick + t_bus + t_act).to(millisecond)
     upper_age = (t_age + eps_sync).to(millisecond)  # F2: dispatch-only upper-age threshold; admission/execution age continues
     lease_probe_at = (t_lease + lease_probe).to(millisecond)
     chunk_period = (1 / chunk_rate).to(millisecond)
-    budget = calc_safe_stopping_distance(v_aisle, tau_delay, a_eff, loc_margin=delta_loc, physical_margin=delta_margin + eps_track).to(millimeter)
-    c2 = calc_c2_stop_suffix(v_aisle, a_brake)
-    c2_distance = c2["distance"].to(millimeter)
+    c2_distance = calc_scurve_stop_distance(v_aisle, a_brake, j_brake).to(millimeter)
+    budget = (v_aisle * tau_delay + c2_distance + overhead).to(millimeter)
     spare = (d_clear - budget).to(millimeter)
     t_spare = (spare / v_aisle).to(millisecond)
     per_ms = (v_aisle * (1 * millisecond)).to(millimeter)
-    budget_takeover = calc_safe_stopping_distance(v_takeover, tau_delay, a_eff, loc_margin=delta_loc, physical_margin=delta_margin + eps_track).to(
-        millimeter
-    )
+    budget_takeover = (v_takeover * tau_delay + calc_scurve_stop_distance(v_takeover, a_brake, j_brake) + overhead).to(millimeter)
     spare_takeover = (d_clear - budget_takeover).to(millimeter)
     t_spare_takeover = (spare_takeover / v_takeover).to(millisecond)
-    ceiling_dry = calc_max_permitted_velocity(d_clear, tau_delay, a_eff, loc_margin=delta_loc, physical_margin=delta_margin + eps_track).to(
-        meter / second
-    )
+    ceiling_dry = calc_scurve_max_permitted_velocity(
+        d_clear, tau_delay, a_brake, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
+    ).to(meter / second)
     mu_min = float((a_brake / g).to("dimensionless").magnitude)
+    # The floor caps the deceleration; the jerk bound belongs to the load and is unchanged.
     a_insp = min(a_brake, (mu_insp * g).to(meter / second**2))
-    budget_insp = calc_safe_stopping_distance(v_aisle, tau_delay, a_insp / 1.5, loc_margin=delta_loc, physical_margin=delta_margin + eps_track).to(
-        millimeter
-    )
-    ceiling_insp = calc_max_permitted_velocity(d_clear, tau_delay, a_insp / 1.5, loc_margin=delta_loc, physical_margin=delta_margin + eps_track).to(
-        meter / second
-    )
+    budget_insp = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_insp, j_brake) + overhead).to(millimeter)
+    ceiling_insp = calc_scurve_max_permitted_velocity(
+        d_clear, tau_delay, a_insp, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
+    ).to(meter / second)
     rail_sag = calc_voltage_droop(i_rail, rail_r).to(ureg.volt)
     rail_min = (rail_low - rail_sag).to(ureg.volt)
     # F4: from the undervoltage or feed-loss flag, stop onset, the longest resident
     # stop inside the envelope (inspected floor at its ceiling), and brakes set
     flag_onset = (t_tick + t_bus + t_act).to(millisecond)
-    stop_insp_ceiling = calc_c2_stop_suffix(ceiling_insp, a_insp)["duration"].to(millisecond)
+    stop_insp_ceiling = calc_scurve_stop_time(ceiling_insp, a_insp, j_brake).to(millisecond)
     flag_to_set = (flag_onset + stop_insp_ceiling + brake_engage_max).to(millisecond)
     holdup_margin = (rail_holdup - flag_to_set).to(millisecond)
     # F1 record at the restricted point, scored from the last valid renewal
     f1_preonset = (v_restricted * onset_bound).to(millimeter)
-    f1_c2 = calc_c2_stop_suffix(v_restricted, a_insp)["distance"].to(millimeter)
+    f1_c2 = calc_scurve_stop_distance(v_restricted, a_insp, j_brake).to(millimeter)
     f1_stop_bound = (f1_preonset + f1_c2 + eps_track).to(millimeter)
     # F1 at the aisle speed, scored from the same event (last valid renewal)
     f1_aisle_stop_bound = (v_aisle * onset_bound + c2_distance + eps_track).to(millimeter)
-    budget_restricted = calc_safe_stopping_distance(
-        v_restricted, tau_delay, a_insp / 1.5, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
-    ).to(millimeter)
+    budget_restricted = (v_restricted * tau_delay + f1_c2 + overhead).to(millimeter)
     late_extra = (v_aisle * late_onset).to(millimeter)
     stop_late = (budget + late_extra).to(millimeter)
     rho_late = (budget - stop_late).to(millimeter)
-    queue_extra = (v_aisle * queue_delay).to(millimeter)
-    queue_breach = (queue_extra - spare).to(millimeter)
+    # Fallacy: an unbudgeted queue spends the spare at v per unit time, so the
+    # queue length that exhausts it is the spare's travel time t_spare.
+    queue_exhaust_ratio = (t_spare / tau_delay).to("dimensionless").magnitude
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(onset_bound.magnitude - 82.0) < 1e-9, "Canon: powered deceleration onset 82 ms after the last valid renewal.")
@@ -220,41 +220,43 @@ class RackEndVerification:
     check(abs(t_age.to(millisecond).magnitude - 51.6) < 5e-3, "Canon: t_age 51.6 ms.")
     check(abs(eps_sync.to(millisecond).magnitude - 0.2) < 1e-9, "Clock-conversion bound must match the perception contract's 0.2 ms.")
     check(abs(upper_age.magnitude - 51.8) < 5e-3, "Canon (D22): F2 dispatch-age check refuses above a 51.8 ms upper age.")
-    check(abs(budget.magnitude - 997.43) < 5e-3, "Canon: budget at 1.3 m/s is 997.43 mm.")
-    check(abs(spare.magnitude - 102.57) < 5e-3, "Canon: spare at 1.3 m/s is 102.57 mm.")
-    check(abs(c2_distance.magnitude - 633.75) < 5e-3, "Canon: C2 stop at 1.3 m/s is 633.75 mm.")
-    check(abs(t_spare.magnitude - 78.9) < 5e-2, "Canon: T_latest 78.9 ms.")
-    check(abs(ceiling_dry.magnitude - 1.3898) < 5e-5, "Canon: dry-floor ceiling 1.3898 m/s.")
-    check(abs(ceiling_insp.magnitude - 1.0947) < 5e-5, "Canon: inspected-floor ceiling 1.0947 m/s.")
+    check(abs(j_brake.magnitude - 64.0 / 9.0) < 1e-9, "Canon: the jerk bound is the reference polynomial's 7.11 m/s^3 peak.")
+    check(abs(budget.magnitude - 968.9925) < 5e-3, "Canon: budget at 1.3 m/s is 968.99 mm.")
+    check(abs(spare.magnitude - 131.0075) < 5e-3, "Canon: spare at 1.3 m/s is 131.01 mm.")
+    check(abs(c2_distance.magnitude - 605.3125) < 5e-3, "Canon: S-curve stop at 1.3 m/s is 605.31 mm.")
+    check(abs(t_spare.magnitude - 100.775) < 5e-3, "Canon: T_latest 100.8 ms.")
+    check(abs(ceiling_dry.magnitude - 1.4367) < 5e-5, "Canon: dry-floor ceiling 1.4367 m/s.")
+    check(abs(ceiling_insp.magnitude - 1.2309) < 5e-5, "Canon: inspected-floor ceiling 1.2309 m/s.")
     check(abs(mu_min - 0.204) < 5e-4, "Canon: friction needed for a_brake is 0.204.")
     check(abs(rail_min.magnitude - 17.3) < 5e-3, "Canon: control rail sags to 17.3 V.")
     check(rail_min < rail_dropout, "The sagged rail must fall below the regulator dropout for F4.")
     check(v_aisle < ceiling_dry and ceiling_insp < v_aisle, "Aisle speed sits between the two ceilings.")
     check(budget_insp > d_clear, "At the aisle speed the inspected-floor budget must exceed the clear distance.")
     check(mu_insp < mu_min < mu_dry, "Dry floor supports a_brake; the inspected floor does not.")
-    check(queue_extra > spare, "The unbudgeted queue must exhaust the spare.")
+    check(t_spare < tau_delay, "A queue shorter than the budgeted pre-brake subtotal exhausts the spare.")
+    check(abs(queue_exhaust_ratio - 0.754) < 5e-4, "The exhausting queue is about three-quarters of the pre-brake subtotal.")
     check(abs(overhead.magnitude - 190.0) < 1e-6, "Canon: fixed overhead 190 mm.")
     check(rho_late.magnitude < 0, "A late onset must drive the distance margin negative.")
-    check(abs(v_takeover.to(meter / second).magnitude - 1.2) < 1e-9, "Canon: in-loop takeover speed 1.2 m/s.")
+    check(abs(v_takeover.to(meter / second).magnitude - 0.8) < 1e-9, "Canon: in-loop takeover speed 0.8 m/s.")
     check(t_spare_takeover >= t_takeover, "At the slowed speed the spare must cover the in-loop takeover.")
     check(t_spare < t_takeover, "At the aisle speed the spare cannot cover the in-loop takeover.")
-    check(abs(spare_takeover.magnitude - 209.7) < 5e-2, "Canon: spare at the 1.2 m/s takeover speed is 209.7 mm.")
-    check(abs(t_spare_takeover.magnitude - 174.7) < 5e-2, "Canon: T_latest 174.7 ms at 1.2 m/s.")
+    check(abs(spare_takeover.magnitude - 530.62) < 5e-2, "Canon: spare at the 0.8 m/s takeover speed is 530.6 mm.")
+    check(abs(t_spare_takeover.magnitude - 663.3) < 5e-2, "Canon: T_latest 663.3 ms at 0.8 m/s.")
     check(abs(flag_onset.magnitude - 22.0) < 1e-9, "Canon: stop onset within 22 ms of the flag.")
     check(abs(rail_holdup.to(second).magnitude - 2.0) < 1e-9, "Canon: permission-rail hold-up 2.0 s.")
-    check(abs(flag_to_set.magnitude - 1497.35) < 5e-3, "Canon: flag to brakes set 1497.35 ms.")
-    check(abs(holdup_margin.magnitude - 502.65) < 5e-3, "Canon: hold-up margin 502.65 ms.")
+    check(abs(flag_to_set.magnitude - 1313.43) < 5e-3, "Canon: flag to brakes set 1313.43 ms.")
+    check(abs(holdup_margin.magnitude - 686.57) < 5e-3, "Canon: hold-up margin 686.57 ms.")
     check(v_restricted < ceiling_insp, "The restricted point must sit below the inspected-floor ceiling.")
     check(abs(f1_preonset.magnitude - 82.0) < 1e-6, "Canon: 82 mm of pre-onset travel at 1.0 m/s.")
-    check(abs(f1_c2.magnitude - 637.3) < 5e-2, "Canon: C2 stop at 1.0 m/s on the inspected floor is 637.3 mm.")
-    check(abs(f1_stop_bound.magnitude - 759.3) < 5e-2, "Canon: F1 stop oracle 759.3 mm from the last valid renewal.")
+    check(abs(f1_c2.magnitude - 507.6) < 5e-2, "Canon: S-curve stop at 1.0 m/s on the inspected floor is 507.6 mm.")
+    check(abs(f1_stop_bound.magnitude - 629.6) < 5e-2, "Canon: F1 stop oracle 629.6 mm from the last valid renewal.")
     check(
-        abs(f1_aisle_stop_bound.magnitude - 780.35) < 5e-3 and f1_aisle_stop_bound < budget,
-        "F1 stop oracle at 1.3 m/s is 780.35 mm from the last valid renewal.",
+        abs(f1_aisle_stop_bound.magnitude - 751.9125) < 5e-3 and f1_aisle_stop_bound < budget,
+        "F1 stop oracle at 1.3 m/s is 751.91 mm from the last valid renewal.",
     )
     check(
-        abs(budget_restricted.magnitude - 960.9) < 5e-2 and budget_restricted < d_clear,
-        "Canon: budget at 1.0 m/s on the inspected floor is 960.9 mm.",
+        abs(budget_restricted.magnitude - 831.2) < 5e-2 and budget_restricted < d_clear,
+        "Canon: budget at 1.0 m/s on the inspected floor is 831.2 mm.",
     )
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
@@ -309,9 +311,7 @@ class RackEndVerification:
     late_onset_str = fmt_latency(late_onset, unit=millisecond, precision=0)
     late_extra_str = fmt_length(late_extra, unit=millimeter, precision=None)
     stop_late_str = fmt_length(stop_late, unit=millimeter, precision=1)
-    queue_delay_str = fmt_latency(queue_delay, unit=millisecond, precision=0)
-    queue_extra_str = fmt_length(queue_extra, unit=millimeter, precision=0)
-    queue_breach_str = fmt_length(queue_breach, unit=millimeter, precision=1)
+    queue_exhaust_pct_str = fmt_percent(queue_exhaust_ratio, precision=1, style="prose")
 ```
 
 The calculations above reproduce the selected partial design budget; they are conditional oracle inputs, not measured timing closure. Its time origin is the exposure midpoint of the qualified observation, whose capture stamp defines the evidence age. The capture-to-admission path still needs a bound for dispatch-to-admission delay. A claim timed from physical target appearance additionally needs the independently witnessed appearance-to-usable-capture interval; that interval is absent from the subtotal. A trial must record successful admission times, continuing evidence age, and physical response onset; the nominal proposal cadence alone does not establish renewal before expiry. The lease begins at successful admission. The renewal campaign must qualify the maximum interval between successful admissions required by @sec-nervous-cadences, including load and rejected proposals, rather than measuring only proposer dispatch. If the missing interval is not covered by a justified allocation, the baseline distance cannot serve as a qualified release bound.
@@ -1019,7 +1019,7 @@ A machine can pass every isolated fault test and still fail when a shared rail, 
 
 A sensor, proposer, and permission path can each meet its local execution deadline while an unmonitored queue holds the observation between them. The watchdogs measure time spent inside their own tasks; the stopping claim depends on elapsed time across the complete path.
 
-For an illustrative violation, add an unbudgeted `{python} RackEndVerification.queue_delay_str` queue to the running machine's `{python} RackEndVerification.tau_delay_str` pre-deceleration budget. At `{python} RackEndVerification.v_aisle_str`, the additional travel is `{python} RackEndVerification.queue_extra_str`, exceeding the `{python} RackEndVerification.spare_str` reserve by `{python} RackEndVerification.queue_breach_str`. No friction change is needed for this arithmetic to breach the clear-distance budget. The experiment must distinguish target appearance, capture, dispatch, admission, lease expiry, and powered response onset so that an interval is neither omitted nor counted twice.
+For an illustrative violation, add an unbudgeted queue to the running machine's `{python} RackEndVerification.tau_delay_str` pre-deceleration budget. At `{python} RackEndVerification.v_aisle_str`, every millisecond of queueing adds `{python} RackEndVerification.per_ms_str` of travel, so a queue of `{python} RackEndVerification.t_spare_str` spends the whole `{python} RackEndVerification.spare_str` reserve, and any longer queue breaches the clear-distance budget. That queue is only `{python} RackEndVerification.queue_exhaust_pct_str` of the budgeted pre-deceleration interval, and every local watchdog still passes while it grows. The reserve has not yet paid for dispatch-to-admission travel, so even a shorter queue spends distance the release argument needs. No friction change is needed for this arithmetic to breach the clear-distance budget. The experiment must distinguish target appearance, capture, dispatch, admission, lease expiry, and powered response onset so that an interval is neither omitted nor counted twice.
 
 **Local watchdogs verify component execution, not end-to-end physical propagation.**
 

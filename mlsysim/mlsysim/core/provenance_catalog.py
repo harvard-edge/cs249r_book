@@ -542,6 +542,78 @@ ISO_13855_APPROACH_SPEED = _ds(
     ),
 )
 
+# --- Human takeover response times (2026-09-28, M4) ---
+CARD_MORAN_NEWELL_MHP = _lit(
+    "prov:card-moran-newell-1983-mhp",
+    "Card, S. K., Moran, T. P., and Newell, A., The Psychology of Human-Computer "
+    "Interaction, Lawrence Erlbaum Associates (1983); CRC Press reprint 2018, "
+    "DOI 10.1201/9780203736166. Model Human Processor cycle times.",
+    url="https://doi.org/10.1201/9780203736166",
+    verified="2026-09-28",
+    notes=(
+        "Processor cycle times, nominal [range]: perceptual 100 [50-200] ms, cognitive "
+        "70 [25-170] ms, motor 70 [30-100] ms; a simple reaction takes one cycle of each, "
+        "240 ms nominal and 470 ms with every processor at its slow bound. Values checked "
+        "against Jastrzembski and Charness (2007), PMC4591021, which quotes the 1983 "
+        "parameters. The ranges bracket the model, not a percentile of a measured "
+        "population. Applies to an attending person responding to an expected stimulus."
+    ),
+)
+
+GREEN_2000_PERCEPTION_BRAKE = _lit(
+    "prov:green-2000-perception-brake",
+    "Green, M., '\"How long does it take to stop?\" Methodological analysis of driver "
+    "perception-brake times', Transportation Human Factors 2(3):195-216 (2000), "
+    "DOI 10.1207/STHF0203_1",
+    url="https://doi.org/10.1207/STHF0203_1",
+    verified="2026-09-28",
+    notes=(
+        "Abstract (Crossref and TRID record): a driver fully aware of the time and place "
+        "of the brake signal detects it and moves the foot to the brake in about "
+        "0.70-0.75 s; an unexpected but common signal (lead-car brake lights) takes about "
+        "1.25 s; a surprise event about 1.5 s. Expectation changes the time by about a "
+        "factor of two. The registry uses 0.75 s, the upper end of the expected range. "
+        "These are typical values synthesized from many data sets, not percentiles."
+    ),
+)
+
+ZHANG_2019_TAKEOVER_META = _lit(
+    "prov:zhang-2019-takeover-meta-analysis",
+    "Zhang, B., de Winter, J., Varotto, S., Happee, R., and Martens, M., 'Determinants "
+    "of take-over time from automated driving: A meta-analysis of 129 studies', "
+    "Transportation Research Part F 64:285-307 (2019), DOI 10.1016/j.trf.2019.04.020; "
+    "supplementary data DOI 10.4121/uuid:75c28abe-6559-4273-85f4-927e969c1c59 (CC0)",
+    url="https://doi.org/10.1016/j.trf.2019.04.020",
+    verified="2026-09-28",
+    notes=(
+        "Paper, section 3.1: mean take-over time (TOT) across 520 conditions of 129 "
+        "studies ranged 0.69-19.79 s; the average mean TOT was 2.72 s (SD 1.45), and the "
+        "distribution of mean TOTs is right-skewed. Section 3.3: mean and SD of TOT "
+        "correlate at r = 0.82 (n = 397). Percentiles computed here from the 520 MTOT "
+        "values in the supplementary mastersheet.xlsx (observed-value, inverted-CDF "
+        "percentiles): p50 2.37 s, p90 4.33 s, p99 7.0 s; the same file reproduces "
+        "2.72 s mean and 1.45 s SD. These are percentiles of condition means, not of "
+        "individual responses: the individual tail within a condition is longer (the "
+        "file's SD rises about 0.39 s per second of mean). Take-over is measured from "
+        "the take-over request to the driver's first input."
+    ),
+)
+
+SCHIMPE_2022_TELEOP_G2G = _lit(
+    "prov:schimpe-2022-teleop-glass-to-glass",
+    "Schimpe, A., Feiler, J., Hoffmann, S., Majstorovic, D., and Diermeyer, F., 'Open "
+    "Source Software for Teleoperated Driving', 2022 International Conference on "
+    "Connected Vehicle and Expo (ICCVE), pp. 1-6, DOI 10.1109/ICCVE52871.2022.9742859",
+    url="https://arxiv.org/abs/2109.11252",
+    verified="2026-09-28",
+    notes=(
+        "Measured glass-to-glass latency of a 40 Hz, 520p video feed sent over a wired "
+        "connection and shown on a 144 Hz monitor: about 104 ms. The same stack on a "
+        "Jetson TX2 RC car at 15 Hz measured 241 ms. The wired figure is a best case; a "
+        "site's wireless console link needs its own measurement."
+    ),
+)
+
 AUTONOMOUS_VEHICLE_ROBOTAXI = _est(
     "prov:autonomous-vehicle-robotaxi",
     "Representative Level 4 robotaxi class profile (not a single vehicle)",

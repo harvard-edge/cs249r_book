@@ -950,76 +950,281 @@ def calc_watchdog_lease_bound(
     }
 
 
-def calc_canfd_bus_utilization(
-    num_axes: int,
-    payload_bytes: int = 64,
-    baud_arbitration=None,
-    baud_data=None,
-    cycle_time=None,
-    interframe_spacing=None,
-    overhead_bits_arb: int = 32,
-    overhead_bits_data: int = 0,
+def calc_phase_lag_total(
+    crossover_frequency,
+    sample_period,
+    compute_delay=None,
+    transport_delay=None,
+    phase_allowance=None,
 ):
     """
-    Calculate serialization latency and bus utilization for cyclic CAN-FD transmission.
+    Total loop delay and the phase it removes at crossover (sample-and-hold,
+    compute, and transport terms together).
 
-    CAN-FD employs a dual-bitrate scheme: an arbitration phase at baud_arbitration
-    (standard 1 Mbps) and a high-speed data phase at baud_data (e.g. 5 Mbps).
+    A zero-order hold behaves in the baseband like a pure delay of half a
+    sample period. A controller that outputs its command some time after it
+    samples adds that compute delay, and a command that reaches the actuator
+    one bus cycle later adds the transport delay. A pure delay tau removes
+    phase omega * tau at every frequency, so near crossover:
 
-    Equation:
-        t_arb = overhead_bits_arb / baud_arbitration
-        t_data = (payload_bytes * 8 + overhead_bits_data) / baud_data
-        t_tx = t_arb + t_data + interframe_spacing
-        t_total_tx = num_axes * t_tx
-        rho = t_total_tx / cycle_time
+        tau_total   = T_s / 2 + tau_comp + tau_bus
+        dphi_total  = 2 * pi * f_c * tau_total              (radians)
+
+    Given a phase allowance dphi_allow, the largest total delay the loop can
+    absorb, and the highest crossover a given total delay supports, are
+
+        tau_allow   = dphi_allow / (2 * pi * f_c)
+        f_c,max     = dphi_allow / (2 * pi * tau_total)
+
+    Source: Franklin, G. F., Powell, J. D. and Workman, M. L., Digital Control
+    of Dynamic Systems, 3rd ed., Addison-Wesley, 1998 (zero-order hold as a
+    T/2 delay; phase of a pure delay). The half-sample approximation holds
+    only well below the sampling frequency; it is a budget, not a stability
+    proof.
 
     Parameters
     ----------
-    num_axes : int
-        Number of cyclic node/axis messages scheduled per loop (>= 1).
-    payload_bytes : int, optional
-        Data field payload size in bytes (default 64 bytes for CAN-FD).
-    baud_arbitration : Quantity, optional
-        Nominal arbitration phase bitrate (default 1.0 Mbps).
-    baud_data : Quantity, optional
-        Data phase bitrate (default 5.0 Mbps).
-    cycle_time : Quantity, optional
-        Total control cycle period (default 1.0 ms).
-    interframe_spacing : Quantity, optional
-        Inter-frame spacing and bus idle interval (default 6.0 us).
-    overhead_bits_arb : int, optional
-        Arbitration, header, and CRC delimiter bit count (default 32 bits).
-    overhead_bits_data : int, optional
-        Data phase stuff bits and CRC bit overhead (default 0).
+    crossover_frequency : Quantity
+        Loop crossover frequency f_c (Hz).
+    sample_period : Quantity
+        Controller sample period T_s.
+    compute_delay : Quantity, optional
+        Sample-to-output compute delay tau_comp (default 0).
+    transport_delay : Quantity, optional
+        Command transport delay to the actuator tau_bus (default 0).
+    phase_allowance : Quantity, optional
+        Phase erosion the design allows at crossover (angle). When given, the
+        allowed delay, the delay margin, and the highest supported crossover
+        are also returned.
 
     Returns
     -------
     dict
-        t_tx, t_total_tx, utilization, is_schedulable.
+        tau_zoh, tau_total (ms); phase_zoh, phase_compute, phase_transport,
+        phase_total (degrees); and, with phase_allowance, tau_allowed,
+        tau_margin (negative when the budget fails), f_crossover_max,
+        within_allowance.
+    """
+    validate_positive(crossover_frequency, "crossover_frequency")
+    validate_positive(sample_period, "sample_period")
+
+    f_c = crossover_frequency.to(ureg.hertz)
+    t_s = sample_period.to(ureg.millisecond)
+    t_comp = (0.0 * ureg.millisecond) if compute_delay is None else compute_delay.to(ureg.millisecond)
+    t_bus = (0.0 * ureg.millisecond) if transport_delay is None else transport_delay.to(ureg.millisecond)
+    validate_nonnegative(t_comp, "compute_delay")
+    validate_nonnegative(t_bus, "transport_delay")
+
+    omega = 2.0 * math.pi * f_c.magnitude  # rad/s
+
+    def _deg(tau):
+        return (omega * tau.to(ureg.second).magnitude * ureg.radian).to(ureg.degree)
+
+    tau_zoh = (t_s / 2.0).to(ureg.millisecond)
+    tau_total = (tau_zoh + t_comp + t_bus).to(ureg.millisecond)
+
+    result = {
+        "tau_zoh": tau_zoh,
+        "tau_total": tau_total,
+        "phase_zoh": _deg(tau_zoh),
+        "phase_compute": _deg(t_comp),
+        "phase_transport": _deg(t_bus),
+        "phase_total": _deg(tau_total),
+    }
+
+    if phase_allowance is not None:
+        validate_positive(phase_allowance, "phase_allowance")
+        allow_rad = phase_allowance.to(ureg.radian).magnitude
+        tau_allowed = (allow_rad / omega * ureg.second).to(ureg.millisecond)
+        f_max = (allow_rad / (2.0 * math.pi * tau_total.to(ureg.second).magnitude)) * ureg.hertz
+        result.update(
+            {
+                "tau_allowed": tau_allowed,
+                "tau_margin": (tau_allowed - tau_total).to(ureg.millisecond),
+                "f_crossover_max": f_max,
+                "within_allowance": bool(tau_total <= tau_allowed),
+            }
+        )
+
+    return result
+
+
+# Data-field sizes a CAN FD DLC can encode (ISO 11898-1:2015). A payload that
+# is not one of these is padded up to the next size on the wire.
+CANFD_DATA_FIELD_SIZES = (0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64)
+
+
+def calc_canfd_frame_bits(
+    payload_bytes: int = 8,
+    extended_id: bool = False,
+    worst_case_stuffing: bool = True,
+):
+    """
+    Bit count of one CAN FD data frame, split by the bit rate each bit uses.
+
+    Frame layout (ISO 11898-1:2015 FD base format; extended format adds the
+    SRR bit and the 18-bit identifier extension):
+
+        nominal rate, before the switch:  SOF 1, ID 11, RRS 1, IDE 1, FDF 1,
+                                          res 1, BRS 1          (17 bits; 36 extended)
+        data rate, after BRS:             ESI 1, DLC 4, data 8n,
+                                          stuff count 4, CRC 17 (n <= 16) or 21,
+                                          fixed stuff bits 6 (CRC-17) or 7 (CRC-21)
+        nominal rate, after the switch:   CRC delimiter 1, ACK slot 1,
+                                          ACK delimiter 1, EOF 7, intermission 3
+                                                                (13 bits)
+
+    Dynamic stuff bits (one after five equal bits) apply from SOF through the
+    end of the data field. The worst case over a stuffed run of L bits is
+    floor((L - 1) / 4); the nominal-rate share is floor((L_nom - 1) / 4) and
+    the rest fall in the data phase. The CRC field uses the fixed stuff bits
+    above instead. BRS and the CRC delimiter straddle the rate switch; both
+    are counted whole at the nominal rate, which slightly overstates the time.
+
+    Source: ISO 11898-1:2015, Road vehicles -- Controller area network (CAN)
+    -- Part 1: Data link layer and physical signalling (FD frame format, stuff
+    count, fixed stuff bits); Robert Bosch GmbH, CAN with Flexible Data-Rate,
+    Specification Version 1.0, 2012 (dual bit rate, CRC-17/21, fixed CRC stuff
+    bits).
+
+    Parameters
+    ----------
+    payload_bytes : int
+        Application bytes to carry (0 to 64). Padded up to the next data-field
+        size a DLC can encode.
+    extended_id : bool
+        29-bit identifier (extended format) instead of 11-bit.
+    worst_case_stuffing : bool
+        Include the worst-case dynamic stuff bits (the bound a response-time
+        analysis needs). False gives the unstuffed length.
+
+    Returns
+    -------
+    dict
+        data_field_bytes, crc_bits, fixed_stuff_bits, stuff_bits_nominal,
+        stuff_bits_data, bits_nominal, bits_data (all int).
+    """
+    validate_at_least(payload_bytes, 0, "payload_bytes")
+    if payload_bytes > 64:
+        raise ValueError(f"CAN FD carries at most 64 data bytes per frame, got {payload_bytes}.")
+
+    data_field = next(s for s in CANFD_DATA_FIELD_SIZES if s >= payload_bytes)
+    crc_bits = 17 if data_field <= 16 else 21
+    fixed_stuff = 6 if crc_bits == 17 else 7
+
+    arb_bits = 36 if extended_id else 17
+    ctrl_data_bits = 1 + 4 + 8 * data_field  # ESI, DLC, data field
+    trailer_nominal = 1 + 1 + 1 + 7 + 3  # CRC delimiter, ACK, ACK delimiter, EOF, intermission
+
+    if worst_case_stuffing:
+        stuffed_run = arb_bits + ctrl_data_bits
+        stuff_total = (stuffed_run - 1) // 4
+        stuff_nominal = (arb_bits - 1) // 4
+        stuff_data = stuff_total - stuff_nominal
+    else:
+        stuff_nominal = 0
+        stuff_data = 0
+
+    bits_nominal = arb_bits + trailer_nominal + stuff_nominal
+    bits_data = ctrl_data_bits + 4 + crc_bits + fixed_stuff + stuff_data
+
+    return {
+        "data_field_bytes": data_field,
+        "crc_bits": crc_bits,
+        "fixed_stuff_bits": fixed_stuff,
+        "stuff_bits_nominal": stuff_nominal,
+        "stuff_bits_data": stuff_data,
+        "bits_nominal": bits_nominal,
+        "bits_data": bits_data,
+    }
+
+
+def calc_canfd_bus_utilization(
+    num_axes: int,
+    payload_bytes: int = 8,
+    baud_arbitration=None,
+    baud_data=None,
+    cycle_time=None,
+    frames_per_axis: int = 2,
+    extended_id: bool = False,
+    worst_case_stuffing: bool = True,
+):
+    """
+    Serialization time and bus occupancy of a cyclic CAN FD axis exchange.
+
+    Each axis exchanges ``frames_per_axis`` frames per cycle (default 2: one
+    command frame from the controller and one feedback frame from the drive;
+    CAN carries them separately, unlike a summation-frame bus such as
+    EtherCAT). Frame bits come from ``calc_canfd_frame_bits``:
+
+        t_frame   = bits_nominal / R_nom + bits_data / R_data
+        n_frames  = num_axes * frames_per_axis
+        t_total   = n_frames * t_frame
+        rho       = t_total / cycle_time
+
+    rho <= 1 is only a necessary condition: non-preemptive blocking, competing
+    frames, and error retransmissions still need a response-time analysis.
+
+    Source: frame format per ISO 11898-1:2015 and Bosch CAN FD Specification
+    1.0 (2012), via ``calc_canfd_frame_bits``.
+
+    Parameters
+    ----------
+    num_axes : int
+        Axes served on this bus (>= 1). Model one bus per call; parallel buses
+        (for example one per limb) are separate calls.
+    payload_bytes : int, optional
+        Application bytes per frame (default 8: a position-mode setpoint or
+        feedback record). Padded to a valid CAN FD data-field size.
+    baud_arbitration : Quantity, optional
+        Nominal (arbitration-phase) bit rate (default 1.0 Mbps).
+    baud_data : Quantity, optional
+        Data-phase bit rate (default 5.0 Mbps).
+    cycle_time : Quantity, optional
+        Cycle the exchange must fit (default 1.0 ms).
+    frames_per_axis : int, optional
+        Frames per axis per cycle (default 2, command plus feedback).
+    extended_id : bool, optional
+        29-bit identifiers (default False).
+    worst_case_stuffing : bool, optional
+        Charge worst-case dynamic stuff bits (default True).
+
+    Returns
+    -------
+    dict
+        t_tx (per frame), t_total_tx, n_frames, utilization, is_schedulable,
+        plus the per-frame bit breakdown of ``calc_canfd_frame_bits``.
     """
     validate_at_least(num_axes, 1, "num_axes")
-    validate_at_least(payload_bytes, 0, "payload_bytes")
+    validate_at_least(frames_per_axis, 1, "frames_per_axis")
 
     baud_arb = (1.0 * (ureg.megabit / ureg.second)) if baud_arbitration is None else baud_arbitration
     baud_dat = (5.0 * (ureg.megabit / ureg.second)) if baud_data is None else baud_data
     t_cycle = (1.0 * ureg.millisecond) if cycle_time is None else cycle_time
-    t_ifs = (6.0 * ureg.microsecond) if interframe_spacing is None else interframe_spacing
 
-    bits_arb = overhead_bits_arb * ureg.bit
-    bits_data = (payload_bytes * 8 + overhead_bits_data) * ureg.bit
+    frame = calc_canfd_frame_bits(
+        payload_bytes=payload_bytes,
+        extended_id=extended_id,
+        worst_case_stuffing=worst_case_stuffing,
+    )
 
-    t_arb = (bits_arb / baud_arb).to(ureg.microsecond)
-    t_data = (bits_data / baud_dat).to(ureg.microsecond)
-    t_tx = t_arb + t_data + t_ifs.to(ureg.microsecond)
-    t_total_tx = num_axes * t_tx
+    t_nom = ((frame["bits_nominal"] * ureg.bit) / baud_arb).to(ureg.microsecond)
+    t_dat = ((frame["bits_data"] * ureg.bit) / baud_dat).to(ureg.microsecond)
+    t_tx = (t_nom + t_dat).to(ureg.microsecond)
+    n_frames = num_axes * frames_per_axis
+    t_total_tx = (n_frames * t_tx).to(ureg.microsecond)
 
     rho = (t_total_tx / t_cycle).to(ureg.dimensionless).magnitude
 
     return {
-        "t_tx": t_tx.to(ureg.microsecond),
-        "t_total_tx": t_total_tx.to(ureg.microsecond),
+        "t_tx": t_tx,
+        "t_nominal": t_nom,
+        "t_data": t_dat,
+        "t_total_tx": t_total_tx,
+        "n_frames": n_frames,
         "utilization": float(rho),
         "is_schedulable": bool(rho <= 1.0),
+        **frame,
     }
 
 

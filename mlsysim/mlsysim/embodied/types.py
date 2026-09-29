@@ -1,5 +1,6 @@
 """Embodied AI, cyber-physical machines, and robotics platform types."""
 
+import math
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -342,8 +343,25 @@ class EmbodiedSiteScenario(BaseModel):
     f_contact_criterion: Quantity
     # coworker handover and remote takeover (shared by more than one chapter)
     v_handover: Quantity
-    t_takeover_in_loop: Quantity
-    t_takeover_out_of_loop: Quantity
+    # Remote-takeover response terms (2026-09-28, M4). Human terms are sourced;
+    # the totals t_takeover_in_loop / t_takeover_out_of_loop are properties.
+    t_human_perceptual: Quantity          # Model Human Processor, nominal
+    t_human_perceptual_slow: Quantity     # Model Human Processor, slow bound
+    t_human_cognitive: Quantity
+    t_human_cognitive_slow: Quantity
+    t_human_motor: Quantity
+    t_human_motor_slow: Quantity
+    t_brake_response_expected: Quantity   # driver perception-brake time, expected signal
+    t_brake_response_unexpected: Quantity # unexpected but common signal
+    t_brake_response_surprise: Quantity   # surprise event
+    t_takeover_driving_p50: Quantity      # percentiles of condition-mean take-over time
+    t_takeover_driving_mean: Quantity
+    t_takeover_driving_p90: Quantity
+    t_takeover_driving_p99: Quantity
+    t_video_glass_to_glass: Quantity      # remote console video latency
+    t_handshake_request: Quantity         # four-phase protocol budgets (commit is one tick)
+    t_handshake_acknowledge: Quantity
+    t_handshake_confirm: Quantity
     v_takeover_in_loop: Quantity
     v_takeover_out_of_loop: Quantity
     # coincident current transient on the shared control rail (inference burst
@@ -364,7 +382,12 @@ class EmbodiedSiteScenario(BaseModel):
         "t_brake_onset", "t_lease", "t_bus", "t_transport", "t_dma", "t_isp", "t_backbone",
         "t_ipc", "heartbeat_timeout", "mcu_self_watchdog", "enforcer_unloaded",
         "enforcer_wcet", "enforcer_deadline", "t_contact_response",
-        "t_takeover_in_loop", "t_takeover_out_of_loop",
+        "t_human_perceptual", "t_human_perceptual_slow", "t_human_cognitive",
+        "t_human_cognitive_slow", "t_human_motor", "t_human_motor_slow",
+        "t_brake_response_expected", "t_brake_response_unexpected", "t_brake_response_surprise",
+        "t_takeover_driving_p50", "t_takeover_driving_mean", "t_takeover_driving_p90",
+        "t_takeover_driving_p99", "t_video_glass_to_glass", "t_handshake_request",
+        "t_handshake_acknowledge", "t_handshake_confirm",
         mode="after",
     )
     @classmethod
@@ -434,6 +457,58 @@ class EmbodiedSiteScenario(BaseModel):
         """Total pre-brake delay: brake onset, lease, one tick, one bus cycle, and observation age."""
         return (self.t_brake_onset + self.t_lease + self.t_tick + self.t_bus
                 + self.perception_age).to(ureg.millisecond)
+
+    @property
+    def t_handshake(self):
+        """Four-phase takeover exchange: request, acknowledge, commit on one tick, confirm."""
+        return (self.t_handshake_request + self.t_handshake_acknowledge + self.t_tick
+                + self.t_handshake_confirm).to(ureg.millisecond)
+
+    @property
+    def t_takeover_transport(self):
+        """Transport a remote takeover adds to the human response.
+
+        The scene reaches the operator through the console video
+        (glass-to-glass latency), and the operator's request returns through
+        the four-phase exchange.
+        """
+        return (self.t_video_glass_to_glass + self.t_handshake).to(ureg.millisecond)
+
+    @property
+    def t_human_simple_reaction(self):
+        """Model Human Processor simple reaction time: one perceptual, cognitive, and motor cycle."""
+        return (self.t_human_perceptual + self.t_human_cognitive
+                + self.t_human_motor).to(ureg.millisecond)
+
+    @property
+    def t_human_simple_reaction_slow(self):
+        """Simple reaction time with every processor at the slow end of its range."""
+        return (self.t_human_perceptual_slow + self.t_human_cognitive_slow
+                + self.t_human_motor_slow).to(ureg.millisecond)
+
+    @property
+    def t_takeover_in_loop(self):
+        """Design in-loop takeover: slow-bound simple reaction plus takeover transport.
+
+        Holds only for an attending operator with hands on the controls who
+        responds to the stimulus the task leads them to expect; an unexpected
+        hazard takes the longer perception-brake times.
+        """
+        return (self.t_human_simple_reaction_slow + self.t_takeover_transport).to(ureg.millisecond)
+
+    @property
+    def t_takeover_out_of_loop(self):
+        """Design out-of-loop takeover: 90th-percentile condition-mean take-over time plus transport."""
+        return (self.t_takeover_driving_p90 + self.t_takeover_transport).to(ureg.second)
+
+    @property
+    def pre_trigger_window(self):
+        """Pre-trigger logging window: the out-of-loop design takeover, rounded up to whole seconds.
+
+        The buffer must reach back past the divergence that preceded the
+        takeover, so it spans at least the design takeover interval.
+        """
+        return math.ceil(self.t_takeover_out_of_loop.to(ureg.second).magnitude) * ureg.second
 
     @property
     def fixed_overhead(self):

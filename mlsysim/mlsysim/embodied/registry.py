@@ -310,10 +310,71 @@ class SiteScenarios(Registry):
         k_contact_human=15_000.0 * (ureg.newton / ureg.meter),
         f_contact_criterion=50.0 * ureg.newton,                # chosen
         v_handover=0.10 * (ureg.meter / ureg.second),          # chosen coworker handover TCP speed
-        t_takeover_in_loop=150.0 * ureg.millisecond,           # illustrative in-loop takeover
-        t_takeover_out_of_loop=2.0 * ureg.second,              # illustrative out-of-loop takeover
-        v_takeover_in_loop=1.2 * (ureg.meter / ureg.second),   # chosen slow-down before an in-loop request
-        v_takeover_out_of_loop=0.3 * (ureg.meter / ureg.second),  # chosen crawl before an out-of-loop request
+        # Remote takeover (2026-09-28, M4; replaces an illustrative 150 ms in-loop
+        # and 2.0 s out-of-loop takeover). The design totals are properties:
+        # t_takeover_in_loop = slow-bound simple reaction + video + handshake;
+        # t_takeover_out_of_loop = p90 condition-mean take-over time + video + handshake.
+        t_human_perceptual=sourced_qty(
+            100.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor perceptual cycle, nominal",
+        ),
+        t_human_perceptual_slow=sourced_qty(
+            200.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor perceptual cycle, slow bound",
+        ),
+        t_human_cognitive=sourced_qty(
+            70.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor cognitive cycle, nominal",
+        ),
+        t_human_cognitive_slow=sourced_qty(
+            170.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor cognitive cycle, slow bound",
+        ),
+        t_human_motor=sourced_qty(
+            70.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor motor cycle, nominal",
+        ),
+        t_human_motor_slow=sourced_qty(
+            100.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor motor cycle, slow bound",
+        ),
+        t_brake_response_expected=sourced_qty(
+            0.75 * ureg.second, pc.GREEN_2000_PERCEPTION_BRAKE,
+            name="Perception-brake time, expected signal (upper end of 0.70-0.75 s)",
+        ),
+        t_brake_response_unexpected=sourced_qty(
+            1.25 * ureg.second, pc.GREEN_2000_PERCEPTION_BRAKE,
+            name="Perception-brake time, unexpected but common signal",
+        ),
+        t_brake_response_surprise=sourced_qty(
+            1.5 * ureg.second, pc.GREEN_2000_PERCEPTION_BRAKE,
+            name="Perception-brake time, surprise event",
+        ),
+        t_takeover_driving_p50=sourced_qty(
+            2.37 * ureg.second, pc.ZHANG_2019_TAKEOVER_META,
+            name="Take-over time, median of 520 condition means",
+        ),
+        t_takeover_driving_mean=sourced_qty(
+            2.72 * ureg.second, pc.ZHANG_2019_TAKEOVER_META,
+            name="Take-over time, average of 520 condition means",
+        ),
+        t_takeover_driving_p90=sourced_qty(
+            4.33 * ureg.second, pc.ZHANG_2019_TAKEOVER_META,
+            name="Take-over time, 90th percentile of 520 condition means",
+        ),
+        t_takeover_driving_p99=sourced_qty(
+            7.0 * ureg.second, pc.ZHANG_2019_TAKEOVER_META,
+            name="Take-over time, 99th percentile of 520 condition means",
+        ),
+        t_video_glass_to_glass=sourced_qty(
+            104.0 * ureg.millisecond, pc.SCHIMPE_2022_TELEOP_G2G,
+            name="Teleoperation video glass-to-glass latency, wired best case",
+        ),                                                     # site wireless link: needs a measured value
+        t_handshake_request=10.0 * ureg.millisecond,           # chosen protocol budget
+        t_handshake_acknowledge=5.0 * ureg.millisecond,        # chosen protocol budget
+        t_handshake_confirm=15.0 * ureg.millisecond,           # chosen protocol budget
+        v_takeover_in_loop=0.8 * (ureg.meter / ureg.second),   # chosen slow-down, under the sourced in-loop ceiling (was 1.2)
+        v_takeover_out_of_loop=0.15 * (ureg.meter / ureg.second),  # chosen crawl, under the sourced out-of-loop ceiling (was 0.3)
         i_rail_transient=70.0 * ureg.ampere,                   # illustrative coincident inference + drive transient
         metadata=Metadata(provenance=pc.WAREHOUSE_AISLE_SCENARIO),
     )

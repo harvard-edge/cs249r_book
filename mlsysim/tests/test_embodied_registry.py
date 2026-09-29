@@ -282,8 +282,8 @@ def test_running_machine_budget_rows_at_drive_limit(row, want):
     ("body_only", lambda: calc_max_permitted_velocity(
         _AISLE.d_clear, _AISLE.t_brake_onset, _AISLE.a_brake,
         _AISLE.delta_loc, _AISLE.delta_margin).to(_MPS).magnitude, 1.9098, 5e-5),
-    ("in_loop_takeover", lambda: _ceiling(_AISLE.t_takeover_in_loop), 1.2249, 5e-5),
-    ("out_of_loop_takeover", lambda: _ceiling(_AISLE.t_takeover_out_of_loop), 0.3986, 5e-5),
+    ("in_loop_takeover", lambda: _scurve_ceiling(_AISLE.t_takeover_in_loop), 0.8362, 5e-5),
+    ("out_of_loop_takeover", lambda: _scurve_ceiling(_AISLE.t_takeover_out_of_loop), 0.1911, 5e-5),
     ("inspected_floor", lambda: _ceiling(decel=_AISLE.mu_inspected_floor * _G), 1.0947, 5e-5),
     ("walking_person", _walking_person_ceiling, 0.4620, 5e-5),
     ("mu_min", lambda: (_AISLE.a_brake / _G).to("dimensionless").magnitude, 0.204, 5e-4),
@@ -295,8 +295,8 @@ def test_running_machine_ceiling_guard(name, got, want, tol):
 def test_running_machine_chosen_speeds_sit_under_their_ceilings():
     """Each chosen speed is below the derived ceiling it was chosen against."""
     assert _AISLE.v_aisle.to(_MPS).magnitude < _ceiling()
-    assert _AISLE.v_takeover_in_loop.to(_MPS).magnitude < _ceiling(_AISLE.t_takeover_in_loop)
-    assert _AISLE.v_takeover_out_of_loop.to(_MPS).magnitude < _ceiling(_AISLE.t_takeover_out_of_loop)
+    assert _AISLE.v_takeover_in_loop.to(_MPS).magnitude < _scurve_ceiling(_AISLE.t_takeover_in_loop)
+    assert _AISLE.v_takeover_out_of_loop.to(_MPS).magnitude < _scurve_ceiling(_AISLE.t_takeover_out_of_loop)
     hand_ceiling = (_AISLE.f_contact_criterion
                     / (_AISLE.k_contact_human * _RM.arm_effective_contact_mass) ** 0.5)
     assert _AISLE.v_handover < hand_ceiling
@@ -400,3 +400,64 @@ def test_intent_latency_agrees_with_published_measurement():
 def test_intent_rate_rejects_unachievable_rate():
     with pytest.raises(ValueError, match="shorter than the computed intent latency"):
         _RM.model_validate({**_RM.__dict__, "intent_rate": 5.0 * ureg.Hz})
+
+
+# ---------------------------------------------------------------------------
+# Remote-takeover response terms (added 2026-09-28, M4): sourced human times,
+# design totals, S-curve ceilings, and the shared pre-trigger window.
+# ---------------------------------------------------------------------------
+
+def _scurve_ceiling(extra_delay=0 * ureg.millisecond):
+    """Speed at which the finished budget with the jerk-limited stop fills d_clear."""
+    from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_max_permitted_velocity
+    j = calc_c2_stop_suffix(_RM.base.max_velocity, _AISLE.a_brake)["peak_jerk"]
+    return calc_scurve_max_permitted_velocity(
+        _AISLE.d_clear, _AISLE.tau_delay + extra_delay, _AISLE.a_brake, j,
+        _AISLE.delta_loc + _AISLE.eps_track, _AISLE.delta_margin,
+    ).to(_MPS).magnitude
+
+
+def test_takeover_human_terms_carry_provenance():
+    for field, prov in [
+        ("t_human_perceptual", "prov:card-moran-newell-1983-mhp"),
+        ("t_human_cognitive_slow", "prov:card-moran-newell-1983-mhp"),
+        ("t_brake_response_surprise", "prov:green-2000-perception-brake"),
+        ("t_takeover_driving_p90", "prov:zhang-2019-takeover-meta-analysis"),
+        ("t_video_glass_to_glass", "prov:schimpe-2022-teleop-glass-to-glass"),
+    ]:
+        assert getattr(_AISLE, field).provenance.id == prov
+
+
+@pytest.mark.parametrize("getter, want, unit", [
+    (lambda: _AISLE.t_human_simple_reaction, 240.0, "ms"),
+    (lambda: _AISLE.t_human_simple_reaction_slow, 470.0, "ms"),
+    (lambda: _AISLE.t_handshake, 31.0, "ms"),
+    (lambda: _AISLE.t_takeover_transport, 135.0, "ms"),
+    (lambda: _AISLE.t_takeover_in_loop, 605.0, "ms"),
+    (lambda: _AISLE.t_takeover_out_of_loop, 4.465, "s"),
+    (lambda: _AISLE.pre_trigger_window, 5.0, "s"),
+], ids=["mhp_nominal", "mhp_slow", "handshake", "transport", "in_loop", "out_of_loop", "pre_trigger"])
+def test_takeover_design_totals(getter, want, unit):
+    assert getter().to(unit).magnitude == pytest.approx(want, abs=1e-9)
+
+
+def test_takeover_response_ordering():
+    """Expectation and engagement order the sourced human times."""
+    assert _AISLE.t_human_simple_reaction < _AISLE.t_human_simple_reaction_slow
+    assert _AISLE.t_human_simple_reaction_slow < _AISLE.t_brake_response_expected
+    assert (_AISLE.t_brake_response_expected < _AISLE.t_brake_response_unexpected
+            < _AISLE.t_brake_response_surprise)
+    assert (_AISLE.t_takeover_driving_p50 < _AISLE.t_takeover_driving_mean
+            < _AISLE.t_takeover_driving_p90 < _AISLE.t_takeover_driving_p99)
+    assert _AISLE.pre_trigger_window >= _AISLE.t_takeover_out_of_loop
+
+
+def test_takeover_redesign_rejects_the_former_speeds():
+    """With sourced delays, the former 1.2 m/s and 0.3 m/s request speeds exceed their ceilings."""
+    assert _scurve_ceiling(_AISLE.t_takeover_in_loop) < 1.2
+    assert _scurve_ceiling(_AISLE.t_takeover_out_of_loop) < 0.3
+    # Ceilings fall monotonically with the response percentile.
+    ceilings = [_scurve_ceiling(_AISLE.t_takeover_transport + t) for t in (
+        _AISLE.t_takeover_driving_p50, _AISLE.t_takeover_driving_mean,
+        _AISLE.t_takeover_driving_p90, _AISLE.t_takeover_driving_p99)]
+    assert ceilings == sorted(ceilings, reverse=True)

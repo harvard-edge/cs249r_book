@@ -210,39 +210,33 @@ def test_vol4_ch04_amr_watchdog_lease():
 
 
 def test_vol4_ch04_fieldbus_schedulability():
-    num_axes = 8
+    # Mirrors calc-nervous-fieldbus-schedulability: 9 axes (7 arm + 2 wheels),
+    # 8-byte command and feedback frames on CAN FD vs one EtherCAT frame.
     cycle_time = 1.0 * millisecond
-
-    canfd_64 = calc_canfd_bus_utilization(
-        num_axes=num_axes,
-        payload_bytes=64,
+    kw = dict(
+        payload_bytes=8,
         baud_arbitration=1.0 * (megabit / second),
         baud_data=5.0 * (megabit / second),
         cycle_time=cycle_time,
-        interframe_spacing=6.0 * microsecond,
     )
-    canfd_32 = calc_canfd_bus_utilization(
-        num_axes=num_axes,
-        payload_bytes=32,
-        baud_arbitration=1.0 * (megabit / second),
-        baud_data=5.0 * (megabit / second),
-        cycle_time=cycle_time,
-        interframe_spacing=6.0 * microsecond,
-    )
+    one_bus = calc_canfd_bus_utilization(num_axes=9, **kw)
+    arm_bus = calc_canfd_bus_utilization(num_axes=7, **kw)
+    base_bus = calc_canfd_bus_utilization(num_axes=2, **kw)
     ethercat = calc_ethercat_cycle_time(
-        num_axes=num_axes,
-        bytes_per_axis=32,
+        num_axes=9,
+        bytes_per_axis=16,
         baud_rate=100.0 * (megabit / second),
         header_bytes=64,
         hop_delay=0.6 * microsecond,
         cycle_time=cycle_time,
     )
 
-    check(abs(canfd_64["t_tx"].to(microsecond).magnitude - 140.4) < 0.5, f"Unexpected CAN-FD 64B frame time: {canfd_64['t_tx']}")
-    check(abs(canfd_64["t_total_tx"].to(microsecond).magnitude - 1123.2) < 2.0, f"Unexpected CAN-FD 64B total: {canfd_64['t_total_tx']}")
-    check(canfd_64["utilization"] > 1.0, "CAN-FD 64B must overrun 1.0 ms cycle time")
-    check(abs(ethercat["t_cycle_total"].to(microsecond).magnitude - 30.4) < 0.2, f"Unexpected EtherCAT total: {ethercat['t_cycle_total']}")
-    check(abs(ethercat["t_margin"].to(microsecond).magnitude - 969.6) < 0.5, f"Unexpected EtherCAT margin: {ethercat['t_margin']}")
+    check(abs(one_bus["t_tx"].to(microsecond).magnitude - 56.6) < 1e-6, f"Unexpected CAN FD frame time: {one_bus['t_tx']}")
+    check(abs(one_bus["t_total_tx"].to(microsecond).magnitude - 1018.8) < 1e-6, f"Unexpected single-bus total: {one_bus['t_total_tx']}")
+    check(one_bus["utilization"] > 1.0, "One CAN FD bus for 9 axes must overrun the 1.0 ms cycle")
+    check(abs(arm_bus["t_total_tx"].to(microsecond).magnitude - 792.4) < 1e-6, f"Unexpected arm-bus total: {arm_bus['t_total_tx']}")
+    check(arm_bus["utilization"] < 1.0 and base_bus["utilization"] < 1.0, "Per-limb buses pass serialization")
+    check(abs(ethercat["t_cycle_total"].to(microsecond).magnitude - 22.04) < 1e-6, f"Unexpected EtherCAT total: {ethercat['t_cycle_total']}")
     check(ethercat["utilization"] < 0.05, "EtherCAT utilization must be under 5%")
 
 

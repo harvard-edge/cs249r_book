@@ -63,8 +63,10 @@ A human takeover changes who directs the machine, but it does not suspend motion
 # │ Context: @sec-intervention-shared-authority, first paragraph.
 # │
 # │ Goal:    Show that an out-of-loop pause outruns the rack-end clear distance.
-# │ Show:    Aisle speed, out-of-loop takeover delay, travel, clear distance.
-# │ How:     WarehouseAisle scenario fields; travel = v * T_takeover.
+# │ Show:    Aisle speed, design out-of-loop takeover delay, travel, clear distance.
+# │ How:     WarehouseAisle scenario fields; the design takeover is the 90th
+# │          percentile condition-mean take-over time plus transport
+# │          (AISLE.t_takeover_out_of_loop); travel = v * T_takeover.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millisecond
@@ -78,25 +80,26 @@ class InterventionSharedAuthorityScene:
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     v = AISLE.v_aisle  # category: chosen
-    t_pause = AISLE.t_takeover_out_of_loop  # category: illustrative
+    t_pause = AISLE.t_takeover_out_of_loop  # category: derived (sourced p90 take-over time + transport)
     d_clear = AISLE.d_clear  # category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     travel = (v * t_pause).to(meter)
+    travel_ratio = (travel / d_clear).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(travel.magnitude - 2.6) < 1e-9, f"travel during the pause: {travel}")
-    check(travel > 2 * d_clear, "The pause must carry the machine more than twice the clear distance.")
+    check(abs(travel.magnitude - 5.8045) < 5e-4, f"travel during the pause: {travel}")
+    check(travel > 5 * d_clear, "The pause must carry the machine more than five times the clear distance.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
-    t_pause_str = fmt_latency(t_pause, unit=second, precision=0)
+    t_pause_str = fmt_latency(t_pause, unit=second, precision=1)
     travel_str = fmt_length(travel, unit=meter, precision=1)
     d_clear_str = fmt_length(d_clear, unit=meter, precision=2)
     chunk_lease_str = fmt_latency(AISLE.t_lease, unit=millisecond, precision=0)
 ```
 
-A human supervisor is often drawn as one arrow into the plant. When a pallet blocks an aisle, the warehouse mobile manipulator needs a remote assistant to take over, yet at its chosen `{python} InterventionSharedAuthorityScene.v_str` aisle speed a `{python} InterventionSharedAuthorityScene.t_pause_str` pause (illustrative; see the Reader Guide) before braking would carry it `{python} InterventionSharedAuthorityScene.travel_str`, more than twice its `{python} InterventionSharedAuthorityScene.d_clear_str` rack-end clear distance. An operator request reaches a machine that is already moving under an admitted command; it cannot erase momentum or make an actuator respond instantaneously. The arbiter, the permission path's source-selection step, must decide who may propose the next command, and the enforcer, its admission check, must admit or reject it; both run deterministically on the safety microcontroller (MCU). The plant must still have enough clearance to execute the chosen stop. An abrupt setpoint switch requests an instantaneous torque step that the motor drives, gearboxes, and payload must absorb. A delayed switch can exhaust stopping room even when both the learned policy and the human controller are individually well behaved.
+A human supervisor is often drawn as one arrow into the plant. When a pallet blocks an aisle, the warehouse mobile manipulator needs a remote assistant to take over, yet at its chosen `{python} InterventionSharedAuthorityScene.v_str` aisle speed a `{python} InterventionSharedAuthorityScene.t_pause_str` pause before braking, the sourced out-of-loop takeover time of @sec-intervention-reaction-drift, would carry it `{python} InterventionSharedAuthorityScene.travel_str`, more than five times its `{python} InterventionSharedAuthorityScene.d_clear_str` rack-end clear distance. An operator request reaches a machine that is already moving under an admitted command; it cannot erase momentum or make an actuator respond instantaneously. The arbiter, the permission path's source-selection step, must decide who may propose the next command, and the enforcer, its admission check, must admit or reject it; both run deterministically on the safety microcontroller (MCU). The plant must still have enough clearance to execute the chosen stop. An abrupt setpoint switch requests an instantaneous torque step that the motor drives, gearboxes, and payload must absorb. A delayed switch can exhaust stopping room even when both the learned policy and the human controller are individually well behaved.
 
 Human review cannot pause a moving plant as it pauses a software queue. Moving mass ($m \mathbf{v}$) and stored kinetic energy ($E_k = \frac{1}{2} m \|\mathbf{v}\|^2$) remain across the causal boundary (@sec-boundary-causal-boundary); the state continues evolving under $\dot{\mathbf{x}} = f(\mathbf{x}, \mathbf{u})$ while the operator reconstructs the scene. Passive monitoring also weakens the situational awareness needed for an unexpected takeover, an instance of Bainbridge's *ironies of automation* [@bainbridge1983ironies]. The machine must therefore preserve its own stopping envelope throughout human re-engagement. Faster communication cannot remove the time needed to recognize a hazard, decide, and move the controls.
 
@@ -196,9 +199,9 @@ For example, the remote assistant who supervises the mobile manipulator may hold
 
 ### Physiological reaction floors and kinematic drift {#sec-intervention-reaction-drift}
 
-The remote assistant must notice the blocked aisle, decide how to recover, move the controls, and deliver a checked request. For a sequential illustrative budget, total supervisory takeover latency $T_{\Sigma}$ is:
+The remote assistant must notice the blocked aisle, decide how to recover, move the controls, and deliver a checked request. Summed in sequence, the total supervisory takeover latency $T_{\Sigma}$ is:
 $$T_{\Sigma} = T_{\text{sensory}} + T_{\text{cognitive}} + T_{\text{motor}} + T_{\text{comm}}$$ {#eq-intervention-reaction-floor}
-The components depend on operator engagement and the console; they are not universal physiological bounds. The calculation below compares a continuously engaged operator with an out-of-loop assistant. Its communication term includes transport and the protocol exchange, so that exchange must not be charged again.
+The first three terms belong to the person and depend on engagement and expectation; the last belongs to the console and the link. Human response times are distributions with long right tails, so a stopping budget needs a value that nearly every request meets, not the typical one. The calculation below compares a continuously engaged operator with an out-of-loop assistant. Its communication term includes transport and the protocol exchange, so that exchange must not be charged again.
 
 Waiting consumes distance before the selected stop begins. The finished stopping budget from @sec-enforcement-stopping-envelopes supplies the machine delay, resident stop, and fixed allowances. Adding the human waiting interval exposes whether remote rescue can fit at the current speed; it does not authorize waiting when the local stop is already required.
 
@@ -214,18 +217,27 @@ Waiting consumes distance before the selected stop begins. The finished stopping
 # │          follow @eq-intervention-reaction-floor, and the notebook
 # │          "Takeover budget and clearance margin".
 # │
-# │ Goal:    Price an operator's takeover delay on the warehouse mobile
+# │ Goal:    Price an operator's sourced takeover delay on the warehouse mobile
 # │          manipulator at its aisle speed.
-# │ Show:    Spare margin at 1.3 m/s; travel during an in-loop and an
-# │          out-of-loop takeover; the stop with each delay added; the speed
-# │          ceilings; the out-of-loop decomposition that sums to 2.0 s.
-# │ How:     Finished stopping budget from the WarehouseAisle scenario (C2
-# │          stop, all overheads); T_Sigma adds to tau_delay; ceilings by
-# │          calc_max_permitted_velocity with a_eff = a_brake / 1.5.
+# │ Show:    Spare margin at 1.3 m/s; the in-loop decomposition (Model Human
+# │          Processor at the slow end of each cycle, video glass-to-glass
+# │          latency, four-phase exchange); the out-of-loop design value
+# │          (90th-percentile condition-mean take-over time plus the same
+# │          transport); travel during each; the stop with each delay added;
+# │          the speed ceilings.
+# │ How:     Finished stopping budget from the WarehouseAisle scenario
+# │          (jerk-limited resident stop, all overheads); the jerk bound is the
+# │          peak jerk of the reference C2 polynomial at the drive limit
+# │          (@sec-planning-c2-stopping-suffix); T_Sigma adds to tau_delay;
+# │          ceilings by calc_scurve_max_permitted_velocity.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_max_permitted_velocity
+from mlsysim.physics.robotics import (
+    calc_c2_stop_suffix,
+    calc_scurve_stop_distance,
+    calc_scurve_max_permitted_velocity,
+)
 from mlsysim.fmt import (
     fmt_velocity,
     fmt_length,
@@ -247,54 +259,70 @@ class InterventionTakeoverBudget:
     d_clear = AISLE.d_clear  # category: illustrative
     tau_delay = AISLE.tau_delay  # category: derived
     a_brake = AISLE.a_brake  # category: illustrative
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
     near_overhead = AISLE.delta_loc + AISLE.eps_track  # category: illustrative
     margin = AISLE.delta_margin  # category: chosen
     overhead = AISLE.fixed_overhead  # category: illustrative / chosen
-    t_in = AISLE.t_takeover_in_loop  # category: illustrative
-    t_ool = AISLE.t_takeover_out_of_loop  # category: illustrative
-    # Scenario assumptions (this chapter only): the out-of-loop decomposition
-    t_sensory = 300 * millisecond  # category: illustrative
-    t_cognitive = 1200 * millisecond  # category: illustrative
-    t_motor = 300 * millisecond  # category: illustrative
-    t_comm = 200 * millisecond  # category: illustrative
+    t_sensory = AISLE.t_human_perceptual_slow  # category: sourced (Card, Moran, Newell 1983)
+    t_cognitive = AISLE.t_human_cognitive_slow  # category: sourced
+    t_motor = AISLE.t_human_motor_slow  # category: sourced
+    t_video = AISLE.t_video_glass_to_glass  # category: sourced (wired best case)
+    t_handshake = AISLE.t_handshake  # category: chosen (four-phase budgets)
+    t_expected = AISLE.t_brake_response_expected  # category: sourced (Green 2000)
+    t_surprise = AISLE.t_brake_response_surprise  # category: sourced (Green 2000)
+    t_tot_mean = AISLE.t_takeover_driving_mean  # category: sourced (Zhang et al. 2019)
+    t_tot_p90 = AISLE.t_takeover_driving_p90  # category: sourced (computed from its data)
+    t_in = AISLE.t_takeover_in_loop  # category: derived
+    t_ool = AISLE.t_takeover_out_of_loop  # category: derived
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    a_eff = a_brake / 1.5
     reaction = (v * tau_delay).to(millimeter)
-    stop_c2 = calc_c2_stop_suffix(v, a_brake)["distance"].to(millimeter)
-    budget = (reaction + stop_c2 + overhead).to(millimeter)
+    stop = calc_scurve_stop_distance(v, a_brake, j_brake).to(millimeter)
+    budget = (reaction + stop + overhead).to(millimeter)
     spare = (d_clear - budget).to(millimeter)
+    t_comm = (t_video + t_handshake).to(millisecond)
     t_sum = (t_sensory + t_cognitive + t_motor + t_comm).to(millisecond)
     travel_in = (v * t_in).to(millimeter)
     travel_ool = (v * t_ool).to(millimeter)
     d_stop_in = (budget + travel_in).to(millimeter)
     d_stop_ool = (budget + travel_ool).to(millimeter)
     stop_ratio = (d_stop_ool / d_stop_in).to("").magnitude
-    ceil_in = calc_max_permitted_velocity(d_clear, tau_delay + t_in, a_eff, near_overhead, margin).to(meter / second)
-    ceil_ool = calc_max_permitted_velocity(d_clear, tau_delay + t_ool, a_eff, near_overhead, margin).to(meter / second)
+
+    def _ceiling(t, *, _d=d_clear, _tau=tau_delay, _a=a_brake, _j=j_brake, _n=near_overhead, _m=margin):
+        return calc_scurve_max_permitted_velocity(_d, _tau + t, _a, _j, _n, _m).to(meter / second)
+
+    ceil_in = _ceiling(t_in)
+    ceil_ool = _ceiling(t_ool)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(spare.magnitude - 102.57) < 5e-3, f"spare margin at the aisle speed: {spare}")
-    check(abs(t_sum.magnitude - t_ool.to(millisecond).magnitude) < 1e-9, "The four stages must sum to the out-of-loop takeover.")
-    check(travel_in > spare, "Even the in-loop takeover must overrun the spare margin at the aisle speed.")
-    check(travel_ool > 2 * d_clear, "The out-of-loop travel must exceed twice the clear distance.")
-    check(abs(d_stop_in.magnitude - 1192.43) < 5e-3, f"stop with in-loop takeover: {d_stop_in}")
-    check(abs(d_stop_ool.magnitude - 3597.43) < 5e-3, f"stop with out-of-loop takeover: {d_stop_ool}")
-    check(abs(ceil_in.magnitude - 1.2249) < 5e-5, f"in-loop takeover ceiling: {ceil_in}")
-    check(abs(ceil_ool.magnitude - 0.3986) < 5e-5, f"out-of-loop takeover ceiling: {ceil_ool}")
-    check(abs(stop_ratio - 3.0) < 0.05, f"out-of-loop to in-loop stop ratio: {stop_ratio}")
+    check(abs(spare.magnitude - 131.01) < 5e-3, f"spare margin at the aisle speed: {spare}")
+    check(abs(t_sum.magnitude - t_in.to(millisecond).magnitude) < 1e-9, "The four stages must sum to the in-loop takeover.")
+    check(abs((t_tot_p90 + t_comm - t_ool).to(millisecond).magnitude) < 1e-9, "The out-of-loop takeover is the p90 time plus transport.")
+    check(travel_in > 5 * spare, "The in-loop takeover must overrun the spare margin several times at the aisle speed.")
+    check(travel_ool > 5 * d_clear, "The out-of-loop travel must exceed five times the clear distance.")
+    check(abs(d_stop_in.magnitude - 1755.49) < 5e-3, f"stop with in-loop takeover: {d_stop_in}")
+    check(abs(d_stop_ool.magnitude - 6773.49) < 5e-3, f"stop with out-of-loop takeover: {d_stop_ool}")
+    check(abs(ceil_in.magnitude - 0.8362) < 5e-5, f"in-loop takeover ceiling: {ceil_in}")
+    check(abs(ceil_ool.magnitude - 0.1911) < 5e-5, f"out-of-loop takeover ceiling: {ceil_ool}")
+    check(abs(stop_ratio - 3.86) < 0.01, f"out-of-loop to in-loop stop ratio: {stop_ratio}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
     d_clear_str = fmt_length(d_clear, unit=meter, precision=2)
     spare_str = fmt_length(spare, unit=millimeter, precision=1)
     t_in_str = fmt_latency(t_in, unit=millisecond, precision=0)
-    t_ool_str = fmt_latency(t_ool, unit=second, precision=0)
+    t_ool_str = fmt_latency(t_ool, unit=second, precision=1)
     t_sensory_str = fmt_latency(t_sensory, unit=millisecond, precision=0)
-    t_cognitive_str = fmt_latency(t_cognitive, unit=millisecond, precision=0, commas=True)
+    t_cognitive_str = fmt_latency(t_cognitive, unit=millisecond, precision=0)
     t_motor_str = fmt_latency(t_motor, unit=millisecond, precision=0)
+    t_video_str = fmt_latency(t_video, unit=millisecond, precision=0)
+    t_handshake_str = fmt_latency(t_handshake, unit=millisecond, precision=0)
     t_comm_str = fmt_latency(t_comm, unit=millisecond, precision=0)
-    travel_in_str = fmt_length(travel_in, unit=millimeter, precision=0)
+    t_expected_str = fmt_latency(t_expected, unit=second, precision=2)
+    t_surprise_str = fmt_latency(t_surprise, unit=second, precision=1)
+    t_tot_mean_str = fmt_latency(t_tot_mean, unit=second, precision=2)
+    t_tot_p90_str = fmt_latency(t_tot_p90, unit=second, precision=2)
+    travel_in_str = fmt_length(travel_in, unit=millimeter, precision=1)
     travel_ool_str = fmt_length(travel_ool, unit=meter, precision=2)
     d_stop_in_str = fmt_length(d_stop_in, unit=meter, precision=2)
     d_stop_ool_str = fmt_length(d_stop_ool, unit=meter, precision=2)
@@ -303,36 +331,36 @@ class InterventionTakeoverBudget:
     ceil_ool_str = fmt_velocity(ceil_ool, unit=meter / second, precision=2)
 
     reaction_value_str = fmt_magnitude(reaction, unit=millimeter, precision=2)
-    stop_c2_value_str = fmt_magnitude(stop_c2, unit=millimeter, precision=2)
+    stop_value_str = fmt_magnitude(stop, unit=millimeter, precision=2)
     overhead_value_str = fmt_magnitude(overhead, unit=millimeter, precision=0)
-    travel_in_value_str = fmt_magnitude(travel_in, unit=millimeter, precision=0)
-    travel_ool_value_str = fmt_magnitude(travel_ool, unit=millimeter, precision=0)
+    travel_in_value_str = fmt_magnitude(travel_in, unit=millimeter, precision=1)
+    travel_ool_value_str = fmt_magnitude(travel_ool, unit=millimeter, precision=1)
     d_stop_in_value_str = fmt_magnitude(d_stop_in, unit=millimeter, precision=2)
     d_stop_ool_value_str = fmt_magnitude(d_stop_ool, unit=millimeter, precision=2)
 
     haptic_display_math = fmt_display_math(
-        rf"d_{{\text{{stop}},1}} = v\,\tau_{{\text{{delay}}}} + v\,T_{{\Sigma,1}} + \frac{{v^2}}{{2a_{{\text{{eff}}}}}} + \delta = "
-        rf"{reaction_value_str} + {travel_in_value_str} + {stop_c2_value_str} + {overhead_value_str} = {d_stop_in_value_str}\text{{ mm}}"
+        rf"d_{{\text{{stop}},1}} = v\,\tau_{{\text{{delay}}}} + v\,T_{{\Sigma,1}} + d_{{\text{{suffix}}}}(v) + \delta = "
+        rf"{reaction_value_str} + {travel_in_value_str} + {stop_value_str} + {overhead_value_str} = {d_stop_in_value_str}\text{{ mm}}"
     )
     ool_display_math = fmt_display_math(
-        rf"d_{{\text{{stop}},2}} = v\,\tau_{{\text{{delay}}}} + v\,T_{{\Sigma,2}} + \frac{{v^2}}{{2a_{{\text{{eff}}}}}} + \delta = "
-        rf"{reaction_value_str} + {travel_ool_value_str} + {stop_c2_value_str} + {overhead_value_str} = {d_stop_ool_value_str}\text{{ mm}}"
+        rf"d_{{\text{{stop}},2}} = v\,\tau_{{\text{{delay}}}} + v\,T_{{\Sigma,2}} + d_{{\text{{suffix}}}}(v) + \delta = "
+        rf"{reaction_value_str} + {travel_ool_value_str} + {stop_value_str} + {overhead_value_str} = {d_stop_ool_value_str}\text{{ mm}}"
     )
 ```
 
 The finished stopping budget of @sec-enforcement-stopping-envelopes (@tbl-enforcement-stopping-budget) shows what @eq-intervention-reaction-floor costs on the mobile manipulator. At the `{python} InterventionTakeoverBudget.v_str` aisle speed it leaves `{python} InterventionTakeoverBudget.spare_str` of the `{python} InterventionTakeoverBudget.d_clear_str` rack-end clear distance. A takeover delay adds to the machine's own pre-brake delay $\tau_{\text{delay}}$, and every millisecond of it becomes travel at the aisle speed:
 
-1. **Mode 1: Continuous In-Loop Teleoperation**: An alert, dedicated operator in an active teleoperation loop (streaming kinematic setpoints via a synchronized leader arm or real-time console with continuous visual monitoring) responds within an illustrative $T_{\Sigma,1} =$ `{python} InterventionTakeoverBudget.t_in_str`, bus transit included. The machine travels `{python} InterventionTakeoverBudget.travel_in_str` during that delay, already more than the spare margin, so at the aisle speed even with this takeover the machine's stop would end past the rack-end clear distance. Solving the budget for speed with $T_{\Sigma,1}$ added to $\tau_{\text{delay}}$ bounds the machine to `{python} InterventionTakeoverBudget.ceil_in_str`.
-2. **Mode 2: Passive Out-of-the-Loop Supervisory Takeover**: When an assistant monitors the telemetry of several machines passively, sensory recognition consumes $T_{\text{sensory}} =$ `{python} InterventionTakeoverBudget.t_sensory_str`, cognitive situational assessment requires $T_{\text{cognitive}} =$ `{python} InterventionTakeoverBudget.t_cognitive_str`, motor switch actuation takes $T_{\text{motor}} =$ `{python} InterventionTakeoverBudget.t_motor_str`, and network transport and handshake protocol overhead adds $T_{\text{comm}} =$ `{python} InterventionTakeoverBudget.t_comm_str`. By @eq-intervention-reaction-floor, the takeover delay expands to $T_{\Sigma,2} =$ `{python} InterventionTakeoverBudget.t_ool_str`, during which the machine covers `{python} InterventionTakeoverBudget.travel_ool_str`, more than twice the clear distance, before any brake command. The same solution bounds the machine to `{python} InterventionTakeoverBudget.ceil_ool_str`.
+1. **Mode 1: Continuous In-Loop Teleoperation**: An attending operator with hands on the controls of a synchronized leader arm or a real-time console, responding to the stimulus the task has led them to expect, makes a simple reaction. The Model Human Processor of Card, Moran, and Newell prices that reaction as one perceptual, one cognitive, and one motor cycle [@jastrzembski2007model]; at the slow end of each cycle's range, $T_{\text{sensory}} =$ `{python} InterventionTakeoverBudget.t_sensory_str`, $T_{\text{cognitive}} =$ `{python} InterventionTakeoverBudget.t_cognitive_str`, and $T_{\text{motor}} =$ `{python} InterventionTakeoverBudget.t_motor_str`. The console adds $T_{\text{comm}} =$ `{python} InterventionTakeoverBudget.t_comm_str`: the scene reaches the operator after a video glass-to-glass latency of `{python} InterventionTakeoverBudget.t_video_str`, measured for a wired teleoperation link [@schimpe2022opensource], and the request returns through the `{python} InterventionTakeoverBudget.t_handshake_str` protocol exchange of @tbl-14-handshake-protocol. By @eq-intervention-reaction-floor, $T_{\Sigma,1} =$ `{python} InterventionTakeoverBudget.t_in_str`. The machine travels `{python} InterventionTakeoverBudget.travel_in_str` during that delay, several times the spare margin. Solving the budget for speed with $T_{\Sigma,1}$ added to $\tau_{\text{delay}}$ bounds the machine to `{python} InterventionTakeoverBudget.ceil_in_str`. The value holds only for the expected stimulus. A driver who is waiting for a brake signal needs up to `{python} InterventionTakeoverBudget.t_expected_str` to detect it and reach the pedal, and a surprise raises that to about `{python} InterventionTakeoverBudget.t_surprise_str` [@green2000stop]. @Sec-intervention-speed-ceilings prices those cases.
+2. **Mode 2: Passive Out-of-the-Loop Supervisory Takeover**: An assistant who monitors the telemetry of several machines passively does not make a simple reaction, and its stages cannot be priced separately. Driver take-over studies measure the whole interval, from the take-over request to the first control input. Across 520 experimental conditions in 129 studies, the mean take-over time averaged `{python} InterventionTakeoverBudget.t_tot_mean_str`, and the distribution of those condition means is skewed to the right [@zhang2019takeover]. A stopping budget must hold for nearly every request, so the design value is the 90th percentile of the condition means, `{python} InterventionTakeoverBudget.t_tot_p90_str`, computed from the study's published data. With the same `{python} InterventionTakeoverBudget.t_comm_str` console term, the takeover delay is $T_{\Sigma,2} =$ `{python} InterventionTakeoverBudget.t_ool_str`, during which the machine covers `{python} InterventionTakeoverBudget.travel_ool_str`, more than five times the clear distance, before any brake command. The same solution bounds the machine to `{python} InterventionTakeoverBudget.ceil_ool_str`.
 
-In Mode 2 at the aisle speed, the machine would reach a static obstacle at the rack end at full speed, because contact occurs before braking ever begins. Stronger braking can raise a finite stopping-speed ceiling, but cannot recover distance already spent waiting. As braking distance tends toward zero, reaction travel still sets a limiting ceiling, and @sec-intervention-clearance-deadlines turns these two ceilings into the speeds at which the machine may request each kind of takeover.
+In Mode 2 at the aisle speed, the machine would reach a static obstacle at the rack end at full speed, because contact occurs before braking ever begins. Stronger braking can raise a finite stopping-speed ceiling, but cannot recover distance already spent waiting. As braking distance tends toward zero, reaction travel still sets a limiting ceiling. A percentile of condition means also understates the tail an individual operator can produce, because each condition's own spread grows with its mean; the site must measure its operators, console, and task load before any of these values admits a speed. @Sec-intervention-clearance-deadlines turns the two design values into the speeds at which the machine may request each kind of takeover.
 
 ::: {#nbk-intervention-operator-takeover-budget-spatial-clearance-margin .callout-notebook title="Takeover budget and clearance margin"}
 **Concept**: The stopping distance during a human intervention adds every source of delay and distance before the machine comes to rest. On the mobile manipulator there are four terms:
 
 1. **Machine blind travel**: The distance covered during the machine's own pre-brake delay ($v\,\tau_{\text{delay}}$), from @tbl-enforcement-stopping-budget.
 2. **Takeover travel**: The distance covered while the operator perceives the obstacle, decides, acts, and the command crosses the network ($v\,T_{\Sigma}$).
-3. **Resident stop**: The $C^2$ stop suffix of @sec-planning-behavior-seam, $v^2/(2a_{\text{eff}})$ with $a_{\text{eff}} = a_{\text{brake}}/1.5$.
+3. **Resident stop**: The jerk-limited stop suffix $d_{\text{suffix}}(v)$ of @eq-plan-c2-stopping-suffix, which above $v = a_{\text{brake}}^2/j_{\max}$ equals $v^2/(2a_{\text{brake}}) + v\,a_{\text{brake}}/(2j_{\max})$.
 4. **Fixed overheads**: $\delta = \delta_{\text{loc}} + \delta_{\text{margin}} + \epsilon_{\text{track}}$.
 
 **Worked Comparison**: At the aisle speed $v =$ `{python} InterventionTakeoverBudget.v_str` against a rack-end clear distance of `{python} InterventionTakeoverBudget.d_clear_str`:
@@ -342,12 +370,12 @@ In Mode 2 at the aisle speed, the machine would reach a static obstacle at the r
 - **Passive Out-of-the-Loop Takeover** ($T_{\Sigma,2} =$ `{python} InterventionTakeoverBudget.t_ool_str`):
   `{python} InterventionTakeoverBudget.ool_display_math`
 
-**Systems Insight**: Passive monitoring inflates the takeover delay from `{python} InterventionTakeoverBudget.t_in_str` to `{python} InterventionTakeoverBudget.t_ool_str` and grows the stop from `{python} InterventionTakeoverBudget.d_stop_in_str` to `{python} InterventionTakeoverBudget.d_stop_ool_str`, `{python} InterventionTakeoverBudget.stop_mult_str` longer. Neither fits the `{python} InterventionTakeoverBudget.d_clear_str` clear distance at the aisle speed, which is why the machine slows before it asks for either one. For the kinematic derivation of these stopping distances, see @sec-appendix-systems-stopping.
+**Systems Insight**: Passive monitoring inflates the takeover delay from `{python} InterventionTakeoverBudget.t_in_str` to `{python} InterventionTakeoverBudget.t_ool_str` and grows the stop from `{python} InterventionTakeoverBudget.d_stop_in_str` to `{python} InterventionTakeoverBudget.d_stop_ool_str`, `{python} InterventionTakeoverBudget.stop_mult_str` longer. Neither fits the `{python} InterventionTakeoverBudget.d_clear_str` clear distance at the aisle speed, which is why the machine slows or stops before it asks for either one. For the kinematic derivation of these stopping distances, see @sec-appendix-systems-stopping.
 :::
 
 ### Speed ceilings and the clearance collision horizon {#sec-intervention-speed-ceilings}
 
-The warehouse comparison can include different operator interfaces without changing machines. Each interface is useful only at speeds where its selected response delay leaves room for the same resident stop.
+The warehouse comparison can include different operator states without changing machines. Each state is useful only at speeds where its response time leaves room for the same resident stop, and the sourced response times differ by more than an order of magnitude.
 
 ```{python}
 #| label: calc-intervention-takeover-ladder
@@ -355,19 +383,24 @@ The warehouse comparison can include different operator interfaces without chang
 #| warning: false
 #| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ TAKEOVER-MODE LADDER ON THE MOBILE MANIPULATOR
+# │ SPEED CEILING AGAINST THE SOURCED HUMAN RESPONSE
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @tbl-14-teleop-stability and the paragraph that introduces it.
 # │
-# │ Goal:    Price each intervention mode's delay as a speed ceiling.
-# │ Show:    Per mode, the selected delay, the added travel at the aisle
-# │          speed, and the speed at which the finished budget still fits.
-# │ How:     Each delay adds to tau_delay (WarehouseAisle scenario); ceilings
-# │          by calc_max_permitted_velocity with a_eff = a_brake / 1.5.
+# │ Goal:    Price each sourced human response time as a speed ceiling.
+# │ Show:    Per row, the human response, the total with the console term
+# │          (video glass-to-glass plus the four-phase exchange), the added
+# │          travel at the aisle speed, and the speed at which the finished
+# │          budget still fits. Rows: Model Human Processor simple reaction
+# │          (nominal and slow bound); perception-brake times for an expected,
+# │          an unexpected, and a surprise signal; percentiles of condition-mean
+# │          take-over time.
+# │ How:     Each total adds to tau_delay (WarehouseAisle scenario); ceilings
+# │          by calc_scurve_max_permitted_velocity with the stipulated jerk bound.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import calc_max_permitted_velocity
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_max_permitted_velocity
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -375,76 +408,115 @@ AISLE = Embodied.Scenario.WarehouseAisle
 
 def _ceiling(t):
     """Largest speed whose finished budget, with t added to tau_delay, fits d_clear."""
-    return calc_max_permitted_velocity(
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]
+    return calc_scurve_max_permitted_velocity(
         AISLE.d_clear,
         AISLE.tau_delay + t,
-        AISLE.a_brake / 1.5,
+        AISLE.a_brake,
+        j_brake,
         AISLE.delta_loc + AISLE.eps_track,
         AISLE.delta_margin,
     ).to(meter / second)
 
 class InterventionTakeoverLadder:
-    """Speed ceiling for each intervention mode's selected delay."""
+    """Speed ceiling for each sourced human response time."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     v = AISLE.v_aisle  # category: chosen
-    t_bilateral = AISLE.t_takeover_in_loop  # category: illustrative
-    t_ool = AISLE.t_takeover_out_of_loop  # category: illustrative
-    # Scenario assumptions (this chapter only)
-    t_guidance = 450 * millisecond  # category: illustrative
-    t_waypoint = 1150 * millisecond  # category: illustrative
-    t_protective = 250 * millisecond  # category: illustrative (human plus device)
+    t_comm = AISLE.t_takeover_transport  # category: sourced video + chosen exchange
+    human = {
+        "mhp": AISLE.t_human_simple_reaction,  # category: sourced (Card, Moran, Newell 1983)
+        "mhp_slow": AISLE.t_human_simple_reaction_slow,  # category: sourced
+        "expected": AISLE.t_brake_response_expected,  # category: sourced (Green 2000)
+        "unexpected": AISLE.t_brake_response_unexpected,  # category: sourced
+        "surprise": AISLE.t_brake_response_surprise,  # category: sourced
+        "p50": AISLE.t_takeover_driving_p50,  # category: sourced (Zhang et al. 2019 data)
+        "mean": AISLE.t_takeover_driving_mean,  # category: sourced
+        "p90": AISLE.t_takeover_driving_p90,  # category: sourced
+        "p99": AISLE.t_takeover_driving_p99,  # category: sourced
+    }
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    ceil_bilateral = _ceiling(t_bilateral)
-    ceil_guidance = _ceiling(t_guidance)
-    ceil_waypoint = _ceiling(t_waypoint)
-    ceil_ool = _ceiling(t_ool)
-    ceil_protective = _ceiling(t_protective)
-    travel_bilateral = (v * t_bilateral).to(millimeter)
-    travel_guidance = (v * t_guidance).to(millimeter)
-    travel_waypoint = (v * t_waypoint).to(millimeter)
-    travel_ool = (v * t_ool).to(millimeter)
-    travel_protective = (v * t_protective).to(millimeter)
+    # Plain loops: class-body comprehensions cannot see class-level names.
+    total, travel, ceiling = {}, {}, {}
+    for _k, _t in human.items():
+        total[_k] = (_t + t_comm).to(millisecond)
+        travel[_k] = (v * total[_k]).to(millimeter)
+        ceiling[_k] = _ceiling(total[_k])
+    order = list(human)
+    ceiling_list = list(ceiling.values())  # insertion order follows human
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(ceil_bilateral.magnitude - 1.2249) < 5e-5, f"bilateral ceiling: {ceil_bilateral}")
-    check(abs(ceil_ool.magnitude - 0.3986) < 5e-5, f"out-of-loop ceiling: {ceil_ool}")
-    check(abs(ceil_guidance.magnitude - 0.9632) < 5e-5, f"guidance ceiling: {ceil_guidance}")
-    check(abs(ceil_waypoint.magnitude - 0.6028) < 5e-5, f"waypoint ceiling: {ceil_waypoint}")
-    check(abs(ceil_protective.magnitude - 1.1281) < 5e-5, f"protective-input ceiling: {ceil_protective}")
-    check(max(ceil_bilateral, ceil_protective) < v, "No intervention mode fits at the aisle speed.")
+    check(abs((total["mhp_slow"] - AISLE.t_takeover_in_loop).to(millisecond).magnitude) < 1e-9, "Design in-loop row is the registry total.")
+    check(abs((total["p90"] - AISLE.t_takeover_out_of_loop).to(millisecond).magnitude) < 1e-9, "Design out-of-loop row is the registry total.")
+    check(abs(ceiling["mhp"].magnitude - 1.0094) < 5e-5, f"nominal in-loop ceiling: {ceiling['mhp']}")
+    check(abs(ceiling["mhp_slow"].magnitude - 0.8362) < 5e-5, f"design in-loop ceiling: {ceiling['mhp_slow']}")
+    check(abs(ceiling["surprise"].magnitude - 0.4504) < 5e-5, f"surprise ceiling: {ceiling['surprise']}")
+    check(abs(ceiling["p90"].magnitude - 0.1911) < 5e-5, f"design out-of-loop ceiling: {ceiling['p90']}")
+    check(all(hi > lo for hi, lo in zip(ceiling_list, ceiling_list[1:])), "Ceilings must fall as the response grows.")
+    check(max(ceiling.values()) < v, "No operator state fits at the aisle speed.")
+    # Expectation costs more speed than the console term does.
+    console_cost = (_ceiling(human["mhp_slow"]) - ceiling["mhp_slow"]).magnitude
+    check((ceiling["expected"] - ceiling["surprise"]).magnitude > console_cost, "Expectation must outweigh the console term.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
-    t_bilateral_str = fmt_latency(t_bilateral, unit=millisecond, precision=0, commas=True)
-    t_guidance_str = fmt_latency(t_guidance, unit=millisecond, precision=0, commas=True)
-    t_waypoint_str = fmt_latency(t_waypoint, unit=millisecond, precision=0, commas=True)
-    t_ool_str = fmt_latency(t_ool, unit=millisecond, precision=0, commas=True)
-    t_protective_str = fmt_latency(t_protective, unit=millisecond, precision=0, commas=True)
-    travel_bilateral_str = fmt_length(travel_bilateral, unit=millimeter, precision=0)
-    travel_guidance_str = fmt_length(travel_guidance, unit=millimeter, precision=0)
-    travel_waypoint_str = fmt_length(travel_waypoint, unit=millimeter, precision=0)
-    travel_ool_str = fmt_length(travel_ool, unit=millimeter, precision=0)
-    travel_protective_str = fmt_length(travel_protective, unit=millimeter, precision=0)
-    ceil_bilateral_str = fmt_velocity(ceil_bilateral, unit=meter / second, precision=2)
-    ceil_guidance_str = fmt_velocity(ceil_guidance, unit=meter / second, precision=2)
-    ceil_waypoint_str = fmt_velocity(ceil_waypoint, unit=meter / second, precision=2)
-    ceil_ool_str = fmt_velocity(ceil_ool, unit=meter / second, precision=2)
-    ceil_protective_str = fmt_velocity(ceil_protective, unit=meter / second, precision=2)
+    t_comm_str = fmt_latency(t_comm, unit=millisecond, precision=0)
+    mhp_human_str = fmt_latency(human["mhp"], unit=millisecond, precision=0, commas=True)
+    mhp_total_str = fmt_latency(total["mhp"], unit=millisecond, precision=0, commas=True)
+    mhp_travel_str = fmt_length(travel["mhp"], unit=meter, precision=2)
+    mhp_ceiling_str = fmt_velocity(ceiling["mhp"], unit=meter / second, precision=2)
+    mhp_slow_human_str = fmt_latency(human["mhp_slow"], unit=millisecond, precision=0, commas=True)
+    mhp_slow_total_str = fmt_latency(total["mhp_slow"], unit=millisecond, precision=0, commas=True)
+    mhp_slow_travel_str = fmt_length(travel["mhp_slow"], unit=meter, precision=2)
+    mhp_slow_ceiling_str = fmt_velocity(ceiling["mhp_slow"], unit=meter / second, precision=2)
+    expected_human_str = fmt_latency(human["expected"], unit=millisecond, precision=0, commas=True)
+    expected_total_str = fmt_latency(total["expected"], unit=millisecond, precision=0, commas=True)
+    expected_travel_str = fmt_length(travel["expected"], unit=meter, precision=2)
+    expected_ceiling_str = fmt_velocity(ceiling["expected"], unit=meter / second, precision=2)
+    unexpected_human_str = fmt_latency(human["unexpected"], unit=millisecond, precision=0, commas=True)
+    unexpected_total_str = fmt_latency(total["unexpected"], unit=millisecond, precision=0, commas=True)
+    unexpected_travel_str = fmt_length(travel["unexpected"], unit=meter, precision=2)
+    unexpected_ceiling_str = fmt_velocity(ceiling["unexpected"], unit=meter / second, precision=2)
+    surprise_human_str = fmt_latency(human["surprise"], unit=millisecond, precision=0, commas=True)
+    surprise_total_str = fmt_latency(total["surprise"], unit=millisecond, precision=0, commas=True)
+    surprise_travel_str = fmt_length(travel["surprise"], unit=meter, precision=2)
+    surprise_ceiling_str = fmt_velocity(ceiling["surprise"], unit=meter / second, precision=2)
+    p50_human_str = fmt_latency(human["p50"], unit=millisecond, precision=0, commas=True)
+    p50_total_str = fmt_latency(total["p50"], unit=millisecond, precision=0, commas=True)
+    p50_travel_str = fmt_length(travel["p50"], unit=meter, precision=2)
+    p50_ceiling_str = fmt_velocity(ceiling["p50"], unit=meter / second, precision=2)
+    mean_human_str = fmt_latency(human["mean"], unit=millisecond, precision=0, commas=True)
+    mean_total_str = fmt_latency(total["mean"], unit=millisecond, precision=0, commas=True)
+    mean_travel_str = fmt_length(travel["mean"], unit=meter, precision=2)
+    mean_ceiling_str = fmt_velocity(ceiling["mean"], unit=meter / second, precision=2)
+    p90_human_str = fmt_latency(human["p90"], unit=millisecond, precision=0, commas=True)
+    p90_total_str = fmt_latency(total["p90"], unit=millisecond, precision=0, commas=True)
+    p90_travel_str = fmt_length(travel["p90"], unit=meter, precision=2)
+    p90_ceiling_str = fmt_velocity(ceiling["p90"], unit=meter / second, precision=2)
+    p99_human_str = fmt_latency(human["p99"], unit=millisecond, precision=0, commas=True)
+    p99_total_str = fmt_latency(total["p99"], unit=millisecond, precision=0, commas=True)
+    p99_travel_str = fmt_length(travel["p99"], unit=meter, precision=2)
+    p99_ceiling_str = fmt_velocity(ceiling["p99"], unit=meter / second, precision=2)
 ```
 
-@Tbl-14-teleop-stability extends the two takeover modes to the other ways a site might let a person intervene, each with an illustrative delay. Each row adds its delay to $\tau_{\text{delay}}$ and solves the finished stopping budget for the largest speed at which the machine still stops inside the rack-end clear distance. Before charging the missing admission delay, the ceiling falls from `{python} InterventionTakeoverLadder.ceil_bilateral_str` for continuous in-loop teleoperation to `{python} InterventionTakeoverLadder.ceil_ool_str` for an out-of-loop takeover, and no mode fits at the `{python} InterventionTakeoverLadder.v_str` aisle speed. The last column names the local protection that must hold the machine safe while that delay runs.
+@Tbl-14-teleop-stability prices each sourced response time. Every row adds the `{python} InterventionTakeoverLadder.t_comm_str` console term to the human response, adds the total to $\tau_{\text{delay}}$, and solves the finished stopping budget for the largest speed at which the machine still stops inside the rack-end clear distance. Before charging the missing admission delay, the ceiling falls from `{python} InterventionTakeoverLadder.mhp_ceiling_str` for an attending operator who meets the expected stimulus at the nominal pace to `{python} InterventionTakeoverLadder.p99_ceiling_str` for the slowest percentile of takeover conditions, and no row fits at the `{python} InterventionTakeoverLadder.v_str` aisle speed. Two facts dominate the table. Expectation matters more than the console, because moving from an expected to a surprising stimulus costs more speed than the whole console term does. The tail matters more than the average, because a speed chosen for the mean take-over time is overrun by every condition slower than the mean.
 
-| Intervention mode                |                                                              Selected total delay |                                 Added travel at aisle speed |                                             Speed ceiling | Local protection                   |
-|:---------------------------------|----------------------------------------------------------------------------------:|------------------------------------------------------------:|----------------------------------------------------------:|:-----------------------------------|
-| Continuous in-loop teleoperation |                             `{python} InterventionTakeoverLadder.t_bilateral_str` |  `{python} InterventionTakeoverLadder.travel_bilateral_str` |  `{python} InterventionTakeoverLadder.ceil_bilateral_str` | Qualified rate and envelope checks |
-| Continuous velocity guidance     |                              `{python} InterventionTakeoverLadder.t_guidance_str` |   `{python} InterventionTakeoverLadder.travel_guidance_str` |   `{python} InterventionTakeoverLadder.ceil_guidance_str` | Onboard velocity/clearance gate    |
-| Supervisory waypoint dispatch    |                              `{python} InterventionTakeoverLadder.t_waypoint_str` |   `{python} InterventionTakeoverLadder.travel_waypoint_str` |   `{python} InterventionTakeoverLadder.ceil_waypoint_str` | Local obstacle veto and fallback   |
-| Out-of-loop takeover             |                                   `{python} InterventionTakeoverLadder.t_ool_str` |        `{python} InterventionTakeoverLadder.travel_ool_str` |        `{python} InterventionTakeoverLadder.ceil_ool_str` | Independent stop while waiting     |
-| Physical protective input        | `{python} InterventionTakeoverLadder.t_protective_str` human-plus-device response | `{python} InterventionTakeoverLadder.travel_protective_str` | `{python} InterventionTakeoverLadder.ceil_protective_str` | Risk-assessed protective stop      |
+| Operator state and response                         |                                             Human response |                                          With console term |                                 Added travel at aisle speed |                                                Speed ceiling |
+|:----------------------------------------------------|-----------------------------------------------------------:|-----------------------------------------------------------:|------------------------------------------------------------:|-------------------------------------------------------------:|
+| In-loop, expected stimulus, nominal pace            |        `{python} InterventionTakeoverLadder.mhp_human_str` |        `{python} InterventionTakeoverLadder.mhp_total_str` |        `{python} InterventionTakeoverLadder.mhp_travel_str` |        `{python} InterventionTakeoverLadder.mhp_ceiling_str` |
+| **In-loop, expected stimulus, slow bound (design)** |   `{python} InterventionTakeoverLadder.mhp_slow_human_str` |   `{python} InterventionTakeoverLadder.mhp_slow_total_str` |   `{python} InterventionTakeoverLadder.mhp_slow_travel_str` |   `{python} InterventionTakeoverLadder.mhp_slow_ceiling_str` |
+| Expected brake signal                               |   `{python} InterventionTakeoverLadder.expected_human_str` |   `{python} InterventionTakeoverLadder.expected_total_str` |   `{python} InterventionTakeoverLadder.expected_travel_str` |   `{python} InterventionTakeoverLadder.expected_ceiling_str` |
+| Unexpected but common signal                        | `{python} InterventionTakeoverLadder.unexpected_human_str` | `{python} InterventionTakeoverLadder.unexpected_total_str` | `{python} InterventionTakeoverLadder.unexpected_travel_str` | `{python} InterventionTakeoverLadder.unexpected_ceiling_str` |
+| Surprise event                                      |   `{python} InterventionTakeoverLadder.surprise_human_str` |   `{python} InterventionTakeoverLadder.surprise_total_str` |   `{python} InterventionTakeoverLadder.surprise_travel_str` |   `{python} InterventionTakeoverLadder.surprise_ceiling_str` |
+| Out-of-loop takeover, median condition              |        `{python} InterventionTakeoverLadder.p50_human_str` |        `{python} InterventionTakeoverLadder.p50_total_str` |        `{python} InterventionTakeoverLadder.p50_travel_str` |        `{python} InterventionTakeoverLadder.p50_ceiling_str` |
+| Out-of-loop takeover, average condition             |       `{python} InterventionTakeoverLadder.mean_human_str` |       `{python} InterventionTakeoverLadder.mean_total_str` |       `{python} InterventionTakeoverLadder.mean_travel_str` |       `{python} InterventionTakeoverLadder.mean_ceiling_str` |
+| **Out-of-loop takeover, 90th percentile (design)**  |        `{python} InterventionTakeoverLadder.p90_human_str` |        `{python} InterventionTakeoverLadder.p90_total_str` |        `{python} InterventionTakeoverLadder.p90_travel_str` |        `{python} InterventionTakeoverLadder.p90_ceiling_str` |
+| Out-of-loop takeover, 99th percentile               |        `{python} InterventionTakeoverLadder.p99_human_str` |        `{python} InterventionTakeoverLadder.p99_total_str` |        `{python} InterventionTakeoverLadder.p99_travel_str` |        `{python} InterventionTakeoverLadder.p99_ceiling_str` |
 
-: **Illustrative takeover delay and speed ceiling**: Values exclude the unqualified dispatch-to-admission interval and are optimistic speed ceilings. Each row adds its selected delay to the machine's pre-brake delay $\tau_{\text{delay}}$ and solves the finished stopping budget of @tbl-enforcement-stopping-budget for the largest speed that still stops inside the rack-end clear distance. {#tbl-14-teleop-stability tbl-colwidths="[25,17,16,18,24]"}
+: **Takeover speed ceiling against the sourced human response**: The first two rows are Model Human Processor simple reactions, one perceptual, cognitive, and motor cycle at nominal and slow-bound cycle times [@jastrzembski2007model]. The next three are driver perception-brake times for an expected, an unexpected, and a surprise signal [@green2000stop]. The last four are percentiles of the mean take-over time across 520 experimental conditions, computed from the published data of @zhang2019takeover; they describe conditions, not individual operators, whose tail is longer. Each total adds the console term (video glass-to-glass latency [@schimpe2022opensource] plus the four-phase exchange) and excludes the unqualified dispatch-to-admission interval, so every ceiling is optimistic. Bold rows are the design values. {#tbl-14-teleop-stability tbl-colwidths="[32,16,17,17,18]"}
+
+The table also locates the other interfaces a site might offer. Continuous velocity guidance or supervisory waypoint dispatch places the operator somewhere between an expected-stimulus reaction and an out-of-loop takeover, and only a measured response distribution for that interface, console, and task says where. A hardwired protective input removes the console term but not the human response, so its operator still needs the local stop to hold the machine safe while that response runs.
 
 ```{=latex}
 \Needspace{0.62\textheight}
@@ -463,21 +535,30 @@ An autonomous policy's handover request cannot remain pending indefinitely. If a
 # │ HANDOVER DEADLINE AND TAKEOVER SPEEDS ON THE MOBILE MANIPULATOR
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-intervention-authority-transitions, the T_latest paragraph and
-# │          the takeover-speed paragraph that follows it.
+# │          the takeover-speed paragraphs that follow it.
 # │
-# │ Goal:    Spend the finished budget's spare margin as a handover deadline.
-# │ Show:    T_latest at the aisle speed, its tick-rounded dispatch, the
-# │          handshake that fits inside it, and the in-loop and out-of-loop
-# │          takeover ceilings with the chosen slow-down and crawl speeds;
-# │          T_latest again at the 1.2 m/s slow-down, where the in-loop
-# │          takeover runs against it, and the time left after that takeover.
-# │ How:     Ch14's T_latest formula with a_eff = a_brake / 1.5 (resident C2
-# │          stop) and all three overheads, from the WarehouseAisle scenario;
-# │          ceilings by calc_max_permitted_velocity with T_Sigma in tau_delay.
+# │ Goal:    Spend the finished budget's spare margin as a handover deadline and
+# │          derive the speeds at which each takeover may be requested.
+# │ Show:    T_latest at the aisle speed (the unallocated timing allowance of
+# │          the finished budget), its tick-rounded dispatch, the handshake that
+# │          fits inside it, and the sourced in-loop and out-of-loop takeover
+# │          ceilings; T_latest at a 1.2 m/s slow-down, which the sourced
+# │          in-loop response overruns; the redesigned slow-down and crawl,
+# │          T_latest at each and the time left after the takeover; the crawl
+# │          against the 99th-percentile response.
+# │ How:     @eq-intervention-latest-fallback with the jerk-limited resident
+# │          stop (calc_scurve_stop_distance, jerk bound = peak jerk of the
+# │          reference C2 polynomial at the drive limit) and all three
+# │          overheads, from the WarehouseAisle scenario; ceilings by
+# │          calc_scurve_max_permitted_velocity with T_Sigma in tau_delay.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import calc_max_permitted_velocity
+from mlsysim.physics.robotics import (
+    calc_c2_stop_suffix,
+    calc_scurve_stop_distance,
+    calc_scurve_max_permitted_velocity,
+)
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -491,52 +572,71 @@ class InterventionTimeoutBudget:
     d_clear = AISLE.d_clear  # category: illustrative
     tau_delay = AISLE.tau_delay  # category: derived
     a_brake = AISLE.a_brake  # category: illustrative
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
     near_overhead = AISLE.delta_loc + AISLE.eps_track  # category: illustrative
     margin = AISLE.delta_margin  # category: chosen
     tick = AISLE.t_tick  # category: chosen
-    t_in = AISLE.t_takeover_in_loop  # category: illustrative
-    t_ool = AISLE.t_takeover_out_of_loop  # category: illustrative
-    v_in = AISLE.v_takeover_in_loop  # category: chosen
-    v_ool = AISLE.v_takeover_out_of_loop  # category: chosen
+    t_in = AISLE.t_takeover_in_loop  # category: derived (sourced human + transport)
+    t_ool = AISLE.t_takeover_out_of_loop  # category: derived (sourced human + transport)
+    t_ool_p99 = AISLE.t_takeover_driving_p99 + AISLE.t_takeover_transport  # category: derived
+    v_in = AISLE.v_takeover_in_loop  # category: chosen (under the sourced in-loop ceiling)
+    v_ool = AISLE.v_takeover_out_of_loop  # category: chosen (under the sourced out-of-loop ceiling)
+    t_request = AISLE.t_handshake_request  # category: chosen
+    t_acknowledge = AISLE.t_handshake_acknowledge  # category: chosen
+    t_confirm = AISLE.t_handshake_confirm  # category: chosen
+    t_handshake = AISLE.t_handshake  # category: derived (four-phase sum)
     # Scenario assumptions (this chapter only)
-    # Four-phase budgets of tbl-14-handshake-protocol: request, acknowledge,
-    # commit (one tick), confirm.
-    t_request = 10 * millisecond  # category: illustrative
-    t_acknowledge = 5 * millisecond  # category: illustrative
-    t_confirm = 15 * millisecond  # category: illustrative
+    v_fast_slowdown = 1.2 * meter / second  # category: illustrative (a slow-down that fits only a much faster human response)
     config = 500 * millisecond  # category: chosen (configured protocol ceiling)
     manual_lease = 100 * millisecond  # category: chosen (loss-of-engagement lease)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    a_eff = a_brake / 1.5
-    t_handshake = (t_request + t_acknowledge + tick + t_confirm).to(millisecond)
-    t_latest = ((d_clear - near_overhead - margin - v**2 / (2 * a_eff)) / v - tau_delay).to(millisecond)
+    def _t_latest(speed, *, _d=d_clear, _n=near_overhead, _m=margin, _tau=tau_delay, _a=a_brake, _j=j_brake):
+        stop = calc_scurve_stop_distance(speed, _a, _j)
+        return ((_d - _n - _m - stop) / speed - _tau).to(millisecond)
+
+    def _ceiling(t, *, _d=d_clear, _tau=tau_delay, _a=a_brake, _j=j_brake, _n=near_overhead, _m=margin):
+        return calc_scurve_max_permitted_velocity(_d, _tau + t, _a, _j, _n, _m).to(meter / second)
+
+    t_latest = _t_latest(v)
     spare = (v * t_latest).to(millimeter)
-    # The same deadline at the slow-down before an in-loop takeover.
-    t_latest_in = ((d_clear - near_overhead - margin - v_in**2 / (2 * a_eff)) / v_in - tau_delay).to(millisecond)
+    # A slow-down sized for a much faster human response.
+    t_latest_fast = _t_latest(v_fast_slowdown)
+    short_fast = (t_in - t_latest_fast).to(millisecond)
+    # The redesigned in-loop slow-down.
+    t_latest_in = _t_latest(v_in)
     spare_in = (v_in * t_latest_in).to(millimeter)
     left_in = (t_latest_in - t_in).to(millisecond)
+    # The redesigned out-of-loop crawl, at the design and the 99th-percentile response.
+    t_latest_ool = _t_latest(v_ool)
+    left_ool = (t_latest_ool - t_ool).to(millisecond)
+    short_ool_p99 = (t_ool_p99 - t_latest_ool).to(millisecond)
     timeout = min(config.to(millisecond), t_latest)
     timeout_ticks = int(timeout.magnitude // tick.to(millisecond).magnitude)
     admitted = (timeout_ticks * tick).to(millisecond)
-    ceil_in = calc_max_permitted_velocity(d_clear, tau_delay + t_in, a_eff, near_overhead, margin).to(meter / second)
-    ceil_ool = calc_max_permitted_velocity(d_clear, tau_delay + t_ool, a_eff, near_overhead, margin).to(meter / second)
+    ceil_in = _ceiling(t_in)
+    ceil_ool = _ceiling(t_ool)
+    ceil_ool_p99 = _ceiling(t_ool_p99)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(t_latest.magnitude - 78.9) < 5e-3, f"T_latest at the aisle speed: {t_latest}")
-    check(abs(spare.magnitude - 102.57) < 5e-3, f"spare margin at the aisle speed: {spare}")
-    check(abs(t_latest_in.magnitude - 174.73) < 5e-3, f"T_latest at the in-loop slow-down: {t_latest_in}")
-    check(abs(spare_in.magnitude - 209.68) < 5e-3, f"spare margin at the in-loop slow-down: {spare_in}")
-    check(abs(left_in.magnitude - 24.73) < 5e-3, f"T_latest left after the in-loop takeover: {left_in}")
-    check(admitted.magnitude == 78, f"tick-rounded fallback dispatch: {admitted}")
+    check(abs(t_latest.magnitude - 100.775) < 5e-3, f"T_latest at the aisle speed: {t_latest}")
+    check(abs(spare.magnitude - 131.01) < 5e-3, f"spare margin at the aisle speed: {spare}")
+    check(abs(t_latest_fast.magnitude - 184.11) < 5e-3, f"T_latest at 1.2 m/s: {t_latest_fast}")
+    check(t_in > t_latest_fast, "The sourced in-loop response must overrun the allowance at 1.2 m/s.")
+    check(abs(t_latest_in.magnitude - 663.275) < 5e-3, f"T_latest at the in-loop slow-down: {t_latest_in}")
+    check(abs(spare_in.magnitude - 530.62) < 5e-3, f"spare margin at the in-loop slow-down: {spare_in}")
+    check(abs(left_in.magnitude - 58.275) < 5e-3, f"T_latest left after the in-loop takeover: {left_in}")
+    check(left_ool.magnitude > 0, "The crawl must cover the design out-of-loop takeover.")
+    check(short_ool_p99.magnitude > 0, "The crawl must not cover the 99th-percentile takeover.")
+    check(admitted.magnitude == 100, f"tick-rounded fallback dispatch: {admitted}")
     check(t_latest < config, "The clearance deadline must bind before the configured ceiling.")
-    check(abs(t_handshake.magnitude - 31.0) < 1e-9, f"four-phase handshake: {t_handshake}")
+    check(abs(t_handshake.to(millisecond).magnitude - 31.0) < 1e-9, f"four-phase handshake: {t_handshake}")
     check(t_handshake < t_latest, "The four-phase handshake must fit inside T_latest.")
     check(t_in > t_latest, "An in-loop takeover must not fit at the aisle speed.")
-    check(abs(ceil_in.magnitude - 1.2249) < 5e-5, f"in-loop takeover ceiling: {ceil_in}")
-    check(abs(ceil_ool.magnitude - 0.3986) < 5e-5, f"out-of-loop takeover ceiling: {ceil_ool}")
-    check(v_in < ceil_in < v, "The slow-down speed sits under the in-loop ceiling, below the aisle speed.")
-    check(v_ool < ceil_ool, "The crawl sits under the out-of-loop ceiling.")
+    check(abs(ceil_in.magnitude - 0.8362) < 5e-5, f"in-loop takeover ceiling: {ceil_in}")
+    check(abs(ceil_ool.magnitude - 0.1911) < 5e-5, f"out-of-loop takeover ceiling: {ceil_ool}")
+    check(v_in < ceil_in < v_fast_slowdown < v, "The slow-down sits under the sourced in-loop ceiling; 1.2 m/s does not.")
+    check(ceil_ool_p99 < v_ool < ceil_ool, "The crawl sits under the design ceiling and above the 99th-percentile ceiling.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
@@ -546,33 +646,45 @@ class InterventionTimeoutBudget:
     tick_str = fmt_latency(tick, unit=millisecond, precision=0)
     config_str = fmt_latency(config, unit=millisecond, precision=0)
     manual_lease_str = fmt_latency(manual_lease, unit=millisecond, precision=0)
+    t_request_str = fmt_latency(t_request, unit=millisecond, precision=0)
+    t_acknowledge_str = fmt_latency(t_acknowledge, unit=millisecond, precision=0)
+    t_confirm_str = fmt_latency(t_confirm, unit=millisecond, precision=0)
     t_handshake_str = fmt_latency(t_handshake, unit=millisecond, precision=0)
     t_in_str = fmt_latency(t_in, unit=millisecond, precision=0)
-    t_ool_str = fmt_latency(t_ool, unit=second, precision=0)
+    t_ool_str = fmt_latency(t_ool, unit=second, precision=1)
+    t_ool_p99_str = fmt_latency(t_ool_p99, unit=second, precision=1)
     ceil_in_str = fmt_velocity(ceil_in, unit=meter / second, precision=2)
     ceil_ool_str = fmt_velocity(ceil_ool, unit=meter / second, precision=2)
+    ceil_ool_p99_str = fmt_velocity(ceil_ool_p99, unit=meter / second, precision=2)
+    v_fast_str = fmt_velocity(v_fast_slowdown, unit=meter / second, precision=1)
+    t_latest_fast_str = fmt_latency(t_latest_fast, unit=millisecond, precision=1)
+    short_fast_str = fmt_latency(short_fast, unit=millisecond, precision=1)
     v_in_str = fmt_velocity(v_in, unit=meter / second, precision=1)
-    v_ool_str = fmt_velocity(v_ool, unit=meter / second, precision=1)
+    v_ool_str = fmt_velocity(v_ool, unit=meter / second, precision=2)
     t_latest_in_str = fmt_latency(t_latest_in, unit=millisecond, precision=1)
     spare_in_str = fmt_length(spare_in, unit=millimeter, precision=1)
     left_in_str = fmt_latency(left_in, unit=millisecond, precision=1)
+    t_latest_ool_str = fmt_latency(t_latest_ool, unit=second, precision=2)
+    left_ool_str = fmt_latency(left_ool, unit=second, precision=2)
 ```
 
 A stopping budget needs a single reference event. In the numerical comparisons here, $D_{\text{clear}}$ is clearance at the observation capture event used by the inherited stopping ledger. The complete $\tau_{\text{delay}}$ spans capture to physical response onset and includes the still-unqualified $\Delta_{\text{da}}$. The extra $T_{\text{wait}}$ is a separate allowance inserted into that ledger; any overlap with its reserved processing, lease, or transport intervals must be removed. Thus the displayed remainders price additional delay, not a fresh countdown starting whenever the operator request arrives.
 
 The same algebra can serve a live check with a different, explicit origin. At the current permission tick, use remaining clearance reduced for motion since capture, account conservatively for estimation error once through the stated allowances, and use current speed. Let $\tau_{\text{delay}}$ contain only the future delay after the proposed additional wait until stopping response begins. Elapsed capture, dispatch, and admission intervals are already represented by the reduced clearance. For a pending timeout that itself decides when to dispatch STOP, the future delay is dispatch-to-response onset plus any still-unpaid processing; do not append a fresh full lease after that timeout. Active lease and evidence expiry run concurrently and can force earlier dispatch. The arbiter takes the earliest protocol, lease, evidence, or clearance deadline. A newly accepted proposal updates only its own contract.
 
-Before inverting for time, state the prerequisite physical inequality in distance. If the machine continues cruising at speed $v$ for a waiting duration $T_{\text{wait}}$ while awaiting the operator's response, its total projected stopping distance—comprising travel during the wait, onboard sensory and actuator delay $\tau_{\text{delay}}$, quadratic kinetic dissipation under effective braking deceleration $a_{\text{eff}}$, and fixed localization, margin, and tracking allowances—must not exceed $D_{\text{clear}}$ measured at the same reference event:
-$$d_{\text{stop}}(T_{\text{wait}}) = v(T_{\text{wait}} + \tau_{\text{delay}}) + \frac{v^2}{2a_{\text{eff}}} + \delta_{\text{loc}} + \delta_{\text{margin}} + \epsilon_{\text{track}} \le D_{\text{clear}}.$$ {#eq-intervention-stopping-inequality}
+Before inverting for time, state the prerequisite physical inequality in distance. If the machine continues cruising at speed $v$ for a waiting duration $T_{\text{wait}}$ while awaiting the operator's response, its total projected stopping distance—comprising travel during the wait, onboard sensory and actuator delay $\tau_{\text{delay}}$, the travel $d_{\text{suffix}}(v)$ of the jerk-limited resident stop (@eq-plan-c2-stopping-suffix), and fixed localization, margin, and tracking allowances—must not exceed $D_{\text{clear}}$ measured at the same reference event:
+$$d_{\text{stop}}(T_{\text{wait}}) = v(T_{\text{wait}} + \tau_{\text{delay}}) + d_{\text{suffix}}(v) + \delta_{\text{loc}} + \delta_{\text{margin}} + \epsilon_{\text{track}} \le D_{\text{clear}}.$$ {#eq-intervention-stopping-inequality}
 Setting equality in @eq-intervention-stopping-inequality ($d_{\text{stop}}(T_{\text{wait}}) = D_{\text{clear}}$) and solving for the maximum permissible waiting time yields the latest fallback deadline $T_{\text{latest}}$:
-$$T_{\text{latest}} = \frac{D_{\text{clear}}-\delta_{\text{loc}}-\delta_{\text{margin}}-\epsilon_{\text{track}}-v^2/(2a_{\text{eff}})}{v}-\tau_{\text{delay}},\qquad T_{\text{timeout}}=\max\!\left(0,\min(T_{\text{config}},T_{\text{latest}})\right).$$ {#eq-intervention-latest-fallback}
+$$T_{\text{latest}} = \frac{D_{\text{clear}}-\delta_{\text{loc}}-\delta_{\text{margin}}-\epsilon_{\text{track}}-d_{\text{suffix}}(v)}{v}-\tau_{\text{delay}},\qquad T_{\text{timeout}}=\max\!\left(0,\min(T_{\text{config}},T_{\text{latest}})\right).$$ {#eq-intervention-latest-fallback}
 For a live check, the safety microcontroller dispatches fallback **no later than** the last permission tick before the resulting deadline. A nonpositive $T_{\text{latest}}$ calls for immediate fallback and may mean stopping is already infeasible. The configured protocol ceiling cannot extend that physical deadline or the expiry of active permission.
 
-On the mobile manipulator at `{python} InterventionTimeoutBudget.v_str`, the capture-origin partial ledger leaves `{python} InterventionTimeoutBudget.spare_str`, equivalent to `{python} InterventionTimeoutBudget.t_latest_str` of additional delay before charging $\Delta_{\text{da}}$. Its `{python} InterventionTimeoutBudget.admitted_str` tick-rounded value illustrates rounding down a budget; it is not an absolute fallback time measured from a later request. The actual arbiter reconstructs the remaining allowance at the request event. The `{python} InterventionTimeoutBudget.config_str` configured ceiling is therefore only an outer protocol limit.
+On the mobile manipulator at `{python} InterventionTimeoutBudget.v_str`, the capture-origin partial ledger leaves `{python} InterventionTimeoutBudget.spare_str`, equivalent to `{python} InterventionTimeoutBudget.t_latest_str` of additional delay before charging $\Delta_{\text{da}}$; this is the unallocated timing allowance of the finished budget in @sec-enforcement-composite-budget. Its `{python} InterventionTimeoutBudget.admitted_str` tick-rounded value illustrates rounding down a budget; it is not an absolute fallback time measured from a later request. The actual arbiter reconstructs the remaining allowance at the request event. The `{python} InterventionTimeoutBudget.config_str` configured ceiling is therefore only an outer protocol limit.
 
-The `{python} InterventionTimeoutBudget.t_handshake_str` protocol exchange used below fits the partial additional-delay allowance, but may proceed only if its nonoverlapping intervals and physical blend fit the complete live budget. The illustrative `{python} InterventionTimeoutBudget.t_in_str` in-loop response exceeds the aisle-speed allowance. The worked design therefore considers `{python} InterventionTimeoutBudget.v_in_str`, below the partial `{python} InterventionTimeoutBudget.ceil_in_str` ceiling. The capture-origin ledger then leaves `{python} InterventionTimeoutBudget.spare_in_str`, or `{python} InterventionTimeoutBudget.t_latest_in_str` of additional delay; reserving the response consumes all but `{python} InterventionTimeoutBudget.left_in_str`. That is a conservative design allocation, not a claim that every request at that speed receives the same live timeout.
+The `{python} InterventionTimeoutBudget.t_handshake_str` protocol exchange used below fits the partial additional-delay allowance, but may proceed only if its nonoverlapping intervals and physical blend fit the complete live budget. The sourced `{python} InterventionTimeoutBudget.t_in_str` in-loop response does not. It exceeds the aisle-speed allowance several times over, so an in-loop request needs a slower machine, and the human response time, not the machine, sets how much slower. A slow-down to `{python} InterventionTimeoutBudget.v_fast_str` would suit an operator who responds in a small fraction of a second; there the ledger leaves `{python} InterventionTimeoutBudget.t_latest_fast_str`, and the sourced response overruns it by `{python} InterventionTimeoutBudget.short_fast_str`. Such a design passes every check that uses an optimistic human and fails the first operator who needs the time the literature measures.
 
-An out-of-loop response of `{python} InterventionTimeoutBudget.t_ool_str` motivates the `{python} InterventionTimeoutBudget.v_ool_str` crawl candidate, below the partial `{python} InterventionTimeoutBudget.ceil_ool_str` ceiling. Both candidate modes still require qualified admission delay, current clearance, and a feasible stopping continuation. The hidden pallet leaves no room for an anticipatory slow-down, so the machine answers it with its own local stop and requests the out-of-loop takeover from standstill. A planned slow-down or crawl can prepare an anticipated request; neither permits waiting at aisle speed for a newly discovered obstacle.
+The redesign starts from the response and solves for the speed. The sourced response caps the request speed at `{python} InterventionTimeoutBudget.ceil_in_str`, so the design slows to `{python} InterventionTimeoutBudget.v_in_str` before requesting an in-loop takeover. The capture-origin ledger then leaves `{python} InterventionTimeoutBudget.spare_in_str`, or `{python} InterventionTimeoutBudget.t_latest_in_str` of additional delay; reserving the response consumes all but `{python} InterventionTimeoutBudget.left_in_str`. That is a conservative design allocation, not a claim that every request at that speed receives the same live timeout, and it holds only while the operator meets the expected stimulus. An unexpected hazard moves the operator to the slower rows of @tbl-14-teleop-stability, whose ceilings the slow-down exceeds.
+
+The out-of-loop takeover forces a larger change. Its `{python} InterventionTimeoutBudget.t_ool_str` design response caps the request speed at `{python} InterventionTimeoutBudget.ceil_ool_str`, so the crawl before an out-of-loop request is `{python} InterventionTimeoutBudget.v_ool_str`, where the ledger leaves `{python} InterventionTimeoutBudget.t_latest_ool_str` and the design response leaves `{python} InterventionTimeoutBudget.left_ool_str` of it unspent. The crawl still fails the 99th-percentile condition, whose `{python} InterventionTimeoutBudget.t_ool_p99_str` response admits only `{python} InterventionTimeoutBudget.ceil_ool_p99_str`, and an individual operator's tail is longer than any condition mean. A crawl slow enough for every operator is no longer motion worth keeping. The robust design therefore stops the machine automatically before handing over. The local stop runs first, and the out-of-loop takeover begins from standstill, where waiting costs time but no clearance. Both moving candidates still require qualified admission delay, current clearance, and a feasible stopping continuation. The hidden pallet leaves no room for an anticipatory slow-down at all, so the machine answers it with its own local stop and requests the takeover from standstill. A planned slow-down or crawl can prepare an anticipated request; neither permits waiting at aisle speed for a newly discovered obstacle.
 
 ### Monotonic safety leases and three-position enabling hardware {#sec-intervention-enabling-hardware}
 
@@ -590,7 +702,7 @@ In physical teleoperation, network leases can be coupled with three-position ind
 
 These dual-channel contacts request the stop selected by the machine's safety circuit, independently of the Linux MPU and application scheduler. Where that response includes Safe Torque Off (STO, IEC 61800-5-2), STO disables torque generation; the configured braking or holding mechanism must still establish the required plant response. The enabling circuit must also prevent a return through Position 2 after an over-squeeze from automatically restoring motion.
 
-[^fn-std-iso13849-takeover]: **Three-Position Enabling Devices**\index{Three-position enabling devices}: The cited ABB operating manual documents a three-position enabling grip and a $250\text{ mm/s}$ manual-mode limit for that robot. Releasing or over-squeezing the grip is a request into the configured safety circuit, and the machine's risk assessment under ISO 13849-1 sets the required performance level and the stop the circuit selects.
+[^fn-std-iso13849-takeover]: **Three-Position Enabling Devices**\index{Three-position enabling devices}: ISO 10218-1 limits the tool speed of an industrial robot in manual reduced-speed mode to $250\text{ mm/s}$ [@iso10218part1]; the pendant in @fig-14-teach-pendant pairs that mode with a three-position enabling grip. Releasing or over-squeezing the grip is a request into the configured safety circuit, and the machine's risk assessment under ISO 13849-1 sets the required performance level and the stop the circuit selects.
 
 ::: {#fig-14-teach-pendant fig-env="figure" fig-pos="t" fig-cap="**Industrial teach pendant with three-position enabling grip**: Front view of an ABB teach pendant showing the touch display, manual jogging joystick, emergency-stop mushroom button, and industrial fieldbus cable. On the rear handle (out of view), an ergonomic three-position deadman switch requires continuous hold at the center tactile detent; relaxing the grip (Position 1) or panic-clenching (Position 3) mechanically trips the dual-channel safety loop to halt motion. Photograph by [Auledas](https://commons.wikimedia.org/wiki/File:Teach_Pendant_ABB.JPG), [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), via Wikimedia Commons; local copy is re-encoded." fig-alt="Front of an ABB industrial robot teach pendant with a display, keys, red emergency-stop actuator, and attached cable; rear enabling grip and safety wiring are not visible."}
 ![](images/jpg/fig14_real_teach_pendant.jpg){width="85%"}
@@ -655,25 +767,25 @@ Shifting authority between these discrete states requires a deterministic **four
 ::: {.column-margin}
 ![](images/svg/margin_four_phase_handshake_strip.svg){width="100%" fig-alt="Sequence strip showing four-phase handshake timing over a 31-millisecond total budget."}
 
-*The illustrative protocol notification budget totals 31 ms. Profile completion and release of manual proposal rights occur on their own timeline.*
+*The protocol notification budget totals `{python} InterventionTimeoutBudget.t_handshake_str`. Profile completion and release of manual proposal rights occur on their own timeline.*
 :::
 
 Each phase in @tbl-14-handshake-protocol carries a budgeted bound, a guard and owner, and its failure handling. The transaction rejects spoofed override injections and routes interrupted handovers to the separately validated fallback path.
 
-| Phase / takeover stage    | Budgeted bound | Guard and owner                                                                                 | Failure handling                                                              |
-|:--------------------------|---------------:|:------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------|
-| 1. Request (Notice)       |          10 ms | Authenticated role, checked nonce, and fresh clock-converted timestamp; no owner change         | Reject invalid packet; keep current qualified mode                            |
-| 2. Acknowledge (Declutch) |           5 ms | Check state, manual target, and full stop reserve; isolate write path                           | Reject request; invoke fallback if current mode cannot continue               |
-| 3. Commit (Transition)    |      1 ms tick | Revoke policy token, latch both checked endpoints, assign **enforcer** sole actuator write path | No partial commit within the requested channel mask; fallback on failed guard |
-| 4. Confirm (notification) |          15 ms | Announce committed `BLEND`; later announce `MAN` after profile and lease check                  | Lost notice alarms operator but does not undo commit                          |
+| Phase / takeover stage    |                                         Budgeted bound | Guard and owner                                                                                 | Failure handling                                                              |
+|:--------------------------|-------------------------------------------------------:|:------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------|
+| 1. Request (Notice)       |     `{python} InterventionTimeoutBudget.t_request_str` | Authenticated role, checked nonce, and fresh clock-converted timestamp; no owner change         | Reject invalid packet; keep current qualified mode                            |
+| 2. Acknowledge (Declutch) | `{python} InterventionTimeoutBudget.t_acknowledge_str` | Check state, manual target, and full stop reserve; isolate write path                           | Reject request; invoke fallback if current mode cannot continue               |
+| 3. Commit (Transition)    |     `{python} InterventionTimeoutBudget.tick_str` tick | Revoke policy token, latch both checked endpoints, assign **enforcer** sole actuator write path | No partial commit within the requested channel mask; fallback on failed guard |
+| 4. Confirm (notification) |     `{python} InterventionTimeoutBudget.t_confirm_str` | Announce committed `BLEND`; later announce `MAN` after profile and lease check                  | Lost notice alarms operator but does not undo commit                          |
 
-: **Four-phase takeover timing**: The phase budgets sum to $10+5+1+15=31\text{ ms}$. This sum budgets the exchange through commit notification, not physical blending or release of manual proposal rights. The blend begins at commit and may continue after notification. {#tbl-14-handshake-protocol tbl-colwidths="[15,16,40,29]"}
+: **Four-phase takeover timing**: The phase budgets sum to `{python} InterventionTimeoutBudget.t_handshake_str`. This sum budgets the exchange through commit notification, not physical blending or release of manual proposal rights. The blend begins at commit and may continue after notification. {#tbl-14-handshake-protocol tbl-colwidths="[15,16,40,29]"}
 
 ### Arbiter execution and monotonic safety lease heartbeats {#sec-intervention-arbiter-heartbeats}
 
 Once authority resides in $\text{Human-Manual}$, the machine must verify continuous human engagement through hardware-timed **monotonic safety leases**\index{Monotonic safety lease!heartbeats}\index{Manual lease}. A teleoperation console might sense physical grip, eye gaze, or active joystick deflection; the systems designer chooses among these modalities based on measured sensor coverage and false-loss rates. In our implementation, the manual lease $T_{\text{lease,man}}$ of @sec-intervention-human-authority is set to `{python} InterventionTimeoutBudget.manual_lease_str`. Authority is maintained strictly through authenticated, high-frequency keep-alive heartbeats transmitted from the teleoperation console to the safety microcontroller.
 
-Each heartbeat packet carries a strictly increasing 64-bit sequence counter $k$, a monotonic hardware timestamp $t_k$, the authenticated operator credential, and a keyed cryptographic authentication tag (HMAC-SHA256). For the age expression below, $t_k$ denotes the sender timestamp converted into the local clock domain. The receiver carries the measured conversion-error interval and evaluates freshness using its oldest plausible timestamp; an unqualified clock mapping cannot establish packet freshness. The nominal local-clock age is:
+Each heartbeat packet carries a strictly increasing 64-bit sequence counter $k$, a monotonic hardware timestamp $t_k$, the authenticated operator credential, and a keyed message authentication tag (AES-128 CMAC, priced in @sec-intervention-authenticating-intervention). For the age expression below, $t_k$ denotes the sender timestamp converted into the local clock domain. The receiver carries the measured conversion-error interval and evaluates freshness using its oldest plausible timestamp; an unqualified clock mapping cannot establish packet freshness. The nominal local-clock age is:
 $$\Delta t_{\text{heartbeat}} = t_{\text{local}} - t_k.$$
 A heartbeat may renew authority only while its conservative age remains within the configured freshness window. The active lease still expires on the local clock at its accepted deadline; late or stale traffic cannot move that deadline. The autonomous chunk likewise follows its admitted local expiry. A packet that fails authentication is rejected and cannot renew the lease; it does not itself revoke still-valid authority. The existing timeout continues to run. At expiry, the microcontroller revokes the operator's supervisory token, drops into `FALLBACK` (the state-dependent validated response), and autonomously executes the validated holding or stopping profile. After a lease lapse, the state machine strictly blocks any return to $\text{Autonomous}$ or $\text{Human-Manual}$ until explicit system reset conditions are met: the machine must come to a complete mechanical standstill, clear all diagnostic fault registers, and complete a fresh, authenticated four-phase re-admission handshake from rest.
 
@@ -741,27 +853,30 @@ Smoothing an acceleration command from cruising speed to emergency braking delay
 # │
 # │ Goal:    Size the enforcer's blend window on the mobile manipulator and
 # │          price the stopping reserve a blend uses.
-# │ Show:    Base at the in-loop takeover speed: a stop blended from cruise to
-# │          a_brake under the resident stop's peak command jerk; window, blend
-# │          and total distance, penalty against a step and against the
-# │          resident stop. Reserve use: the largest growth, over the blend's
-# │          ticks, of travel plus the resident stop from the blended state, at
-# │          the in-loop speed and at the out-of-loop crawl, where the base
-# │          window of @tbl-14-authority-timing-contract is sized. Arm: a
-# │          joint-torque change under a torque-rate ceiling.
+# │ Show:    Base at the in-loop request speed: a stop blended from cruise to
+# │          a_brake under the resident stop's jerk bound; window, blend and
+# │          total distance, penalty against a step and against the resident
+# │          jerk-limited stop. Reserve use: the largest growth, over the
+# │          blend's ticks, of travel plus the resident stop from the blended
+# │          speed. Arm: a joint-torque change under a torque-rate ceiling.
 # │ How:     Fixed-endpoint smoothstep, peak slope 1.875
-# │          (@sec-appendix-control-splines); resident stop by
-# │          calc_c2_stop_suffix, whose acceleration -6 v u (1 - u) / T gives a
-# │          peak jerk 6 v / T^2 at its endpoints; arm window by
+# │          (@sec-appendix-control-splines); jerk bound = peak jerk of the
+# │          reference C2 polynomial at the drive limit, the same stipulated
+# │          bound the resident S-curve stop uses (@sec-planning-c2-stopping-suffix);
+# │          resident stop by calc_scurve_stop_distance; arm window by
 # │          calc_quintic_blend_duration; windows rounded up to whole
 # │          permission ticks (RM.permission_rate via AISLE.t_tick).
 # │          InterventionAssistantSession compares the reserve use with the
-# │          remainder left after each takeover.
+# │          remainder left after the in-loop takeover.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond, newton
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_quintic_blend_duration
+from mlsysim.physics.robotics import (
+    calc_c2_stop_suffix,
+    calc_scurve_stop_distance,
+    calc_quintic_blend_duration,
+)
 from mlsysim.fmt import (
     fmt_velocity,
     fmt_acceleration,
@@ -776,9 +891,13 @@ from mlsysim.fmt import (
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
-def blend_reserve_use(v_start, a, window, tick):
-    """Largest growth, over a smoothstep blend's ticks, of travel plus the resident stop."""
-    k_stop = (calc_c2_stop_suffix(v_start, a)["distance"] / v_start**2).to(second**2 / meter)
+def blend_reserve_use(v_start, a, j, window, tick):
+    """Largest growth, over a smoothstep blend's ticks, of travel plus the resident stop.
+
+    The resident stop from each blended speed is charged from zero acceleration,
+    which overstates it while the blend is already decelerating (conservative).
+    """
+    d_start = calc_scurve_stop_distance(v_start, a, j)
     n = math.ceil((window / tick).to("").magnitude - 1e-9)
     worst = 0.0
     for i in range(n + 1):
@@ -786,9 +905,10 @@ def blend_reserve_use(v_start, a, window, tick):
         # Integrals of alpha = 10 u^3 - 15 u^4 + 6 u^5 from 0 to u, once and twice.
         a1 = u**6 - 3 * u**5 + 2.5 * u**4
         a2 = u**7 / 7 - u**6 / 2 + u**5 / 2
-        v = v_start - a * window * a1
+        v = (v_start - a * window * a1).to(meter / second)
         x = v_start * window * u - a * window**2 * a2
-        worst = max(worst, (x + k_stop * (v**2 - v_start**2)).to(millimeter).magnitude)
+        grow = x + calc_scurve_stop_distance(v, a, j) - d_start
+        worst = max(worst, grow.to(millimeter).magnitude)
     return worst * millimeter
 
 class InterventionBlendBudget:
@@ -796,8 +916,8 @@ class InterventionBlendBudget:
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     v0 = AISLE.v_takeover_in_loop  # category: chosen (speed at which the in-loop takeover commits)
-    v_crawl = AISLE.v_takeover_out_of_loop  # category: chosen (crawl for an out-of-loop takeover)
-    a_target = AISLE.a_brake  # category: illustrative (canon a_brake per §3.2; the base's blended step)
+    a_target = AISLE.a_brake  # category: illustrative (canon a_brake; the base's blended step)
+    j_allowable = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
     tick = AISLE.t_tick  # category: chosen (from RM.permission_rate)
     arm_torque_max = RM.arm.max_torque  # category: datasheet
     # Scenario assumptions (this chapter only): an arm-joint command change
@@ -805,55 +925,39 @@ class InterventionBlendBudget:
     arm_rate = 750.0 * newton * meter / second  # category: chosen (torque-command rate ceiling)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    stop_c2 = calc_c2_stop_suffix(v0, a_target)
-    t_c2 = stop_c2["duration"].to(second)
-    d_c2 = stop_c2["distance"].to(meter)
-    # Resident stop's peak command jerk, at its endpoints (@sec-planning-behavior-seam).
-    j_allowable = (6 * v0 / t_c2**2).to(meter / second**3)
+    d_res = calc_scurve_stop_distance(v0, a_target, j_allowable).to(meter)
+    t_ramp = (a_target / j_allowable).to(millisecond)  # the resident stop's own jerk ramp
     # Peak smoothstep slope 1.875 for fixed endpoints (@sec-appendix-control-splines).
     T = (1.875 * a_target / j_allowable).to(second)
-    # The enforcer blends in whole permission ticks, so each window rounds up.
+    # The enforcer blends in whole permission ticks, so the window rounds up.
     T_ticks = math.ceil((T / tick).to("").magnitude - 1e-9)
     T_budget = (T_ticks * tick).to(millisecond)
     step_jerk = (a_target / tick).to(meter / second**3)
     # Integral alpha ds = 1/2; integral (1-s) alpha ds = 1/7.
-    v1 = v0 - a_target * T / 2
+    v1 = (v0 - a_target * T / 2).to(meter / second)
     d_blend = (v0 * T - a_target * T**2 / 7).to(meter)
     d_after = (v1**2 / (2 * a_target)).to(meter)
     d_total = d_blend + d_after
     d_ideal = (v0**2 / (2 * a_target)).to(meter)
     d_penalty = d_total - d_ideal
-    d_over_c2 = d_total - d_c2
-    # Reserve a blend uses: at the in-loop speed, and at the crawl.
-    excess_in = blend_reserve_use(v0, a_target, T, tick)
-    stop_crawl = calc_c2_stop_suffix(v_crawl, a_target)
-    j_crawl = (6 * v_crawl / stop_crawl["duration"].to(second) ** 2).to(meter / second**3)
-    T_crawl = (1.875 * a_target / j_crawl).to(second)
-    T_crawl_ticks = math.ceil((T_crawl / tick).to("").magnitude - 1e-9)
-    T_crawl_budget = (T_crawl_ticks * tick).to(millisecond)
-    excess_crawl = blend_reserve_use(v_crawl, a_target, T_crawl, tick)
+    d_over_res = d_total - d_res
+    excess_in = blend_reserve_use(v0, a_target, j_allowable, T, tick)
     arm_blend = calc_quintic_blend_duration(arm_delta, arm_rate).to(millisecond)
     arm_ticks = math.ceil((arm_blend / tick).to("").magnitude - 1e-9)
     arm_budget = (arm_ticks * tick).to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(j_allowable.magnitude - 8.8889) < 5e-5, f"resident-stop peak jerk at the takeover speed: {j_allowable}")
-    check(
-        abs(j_allowable.magnitude - (8 * a_target**2 / (3 * v0)).to(meter / second**3).magnitude) < 1e-9,
-        "6 v / T^2 with T = 1.5 v / a must equal 8 a^2 / (3 v).",
-    )
-    check(abs(T.to(millisecond).magnitude - 421.875) < 1e-6, f"base blend window: {T}")
-    check(T_budget.magnitude == 422, f"base blend in whole ticks: {T_budget}")
-    check(abs(d_blend.to(millimeter).magnitude - 455.40) < 5e-3, f"distance during the blend: {d_blend}")
-    check(abs(d_total.to(millimeter).magnitude - 606.77) < 5e-3, f"blended stop: {d_total}")
-    check(abs(d_penalty.to(millimeter).magnitude - 246.77) < 5e-3, f"penalty against a step: {d_penalty}")
-    check(abs(d_over_c2.to(millimeter).magnitude - 66.77) < 5e-3, f"blended stop beyond the resident stop: {d_over_c2}")
-    check(d_over_c2.magnitude > 0, "A stop through the blend must be longer than the resident stop.")
-    check(abs(excess_in.magnitude - 197.56) < 5e-3, f"reserve a blend uses at the takeover speed: {excess_in}")
-    check(abs(j_crawl.magnitude - 35.5556) < 5e-5, f"resident-stop peak jerk at the crawl: {j_crawl}")
-    check(abs(T_crawl.to(millisecond).magnitude - 105.46875) < 1e-6, f"base blend window at the crawl: {T_crawl}")
-    check(T_crawl_budget.magnitude == 106, f"crawl blend in whole ticks: {T_crawl_budget}")
-    check(abs(excess_crawl.magnitude - 12.35) < 5e-3, f"reserve a blend uses at the crawl: {excess_crawl}")
+    check(abs(j_allowable.to(meter / second**3).magnitude - 64 / 9) < 1e-9, f"stipulated jerk bound: {j_allowable}")
+    check(abs(T.to(millisecond).magnitude - 527.34375) < 1e-6, f"base blend window: {T}")
+    check(T_budget.magnitude == 528, f"base blend in whole ticks: {T_budget}")
+    check(T > t_ramp, "The smoothstep must take longer than the resident stop's linear jerk ramp.")
+    check(v1.magnitude > 0, "The base must still be moving when the blend ends.")
+    check(abs(d_blend.to(millimeter).magnitude - 342.42) < 5e-3, f"distance during the blend: {d_blend}")
+    check(abs(d_total.to(millimeter).magnitude - 361.01) < 5e-3, f"blended stop: {d_total}")
+    check(abs(d_penalty.to(millimeter).magnitude - 201.01) < 5e-3, f"penalty against a step: {d_penalty}")
+    check(abs(d_over_res.to(millimeter).magnitude - 88.51) < 5e-3, f"blended stop beyond the resident stop: {d_over_res}")
+    check(d_over_res.magnitude > 0, "A stop through the blend must be longer than the resident stop.")
+    check(excess_in.magnitude > d_over_res.to(millimeter).magnitude, "Reserve use must cover at least the final excess.")
     check(abs(arm_blend.magnitude - 37.5) < 1e-9, f"arm blend window: {arm_blend}")
     check(arm_budget.magnitude == 38, f"arm blend in whole ticks: {arm_budget}")
     check(arm_delta < arm_torque_max, "The arm command change must sit inside the joint torque rating.")
@@ -862,6 +966,7 @@ class InterventionBlendBudget:
     v0_str = fmt_velocity(v0, unit=meter / second, precision=1)
     delta_a_str = fmt_acceleration(a_target, unit=meter / second**2, precision=0)
     j_allowable_str = fmt_jerk(j_allowable, unit=meter / second**3, precision=2)
+    t_ramp_str = fmt_latency(t_ramp, unit=millisecond, precision=2)
     T_str = fmt_latency(T, unit=millisecond, precision=2)
     T_budget_str = fmt_latency(T_budget, unit=millisecond, precision=0)
     tick_str = fmt_latency(tick, unit=millisecond, precision=0)
@@ -872,14 +977,9 @@ class InterventionBlendBudget:
     d_total_str = fmt_length(d_total, unit=millimeter, precision=1)
     d_ideal_str = fmt_length(d_ideal, unit=millimeter, precision=0)
     d_penalty_str = fmt_length(d_penalty, unit=millimeter, precision=1)
-    d_c2_str = fmt_length(d_c2, unit=millimeter, precision=0)
-    d_over_c2_str = fmt_length(d_over_c2, unit=millimeter, precision=1)
+    d_res_str = fmt_length(d_res, unit=millimeter, precision=1)
+    d_over_res_str = fmt_length(d_over_res, unit=millimeter, precision=1)
     excess_in_str = fmt_length(excess_in, unit=millimeter, precision=1)
-    v_crawl_str = fmt_velocity(v_crawl, unit=meter / second, precision=1)
-    j_crawl_str = fmt_jerk(j_crawl, unit=meter / second**3, precision=2)
-    T_crawl_str = fmt_latency(T_crawl, unit=millisecond, precision=2)
-    T_crawl_budget_str = fmt_latency(T_crawl_budget, unit=millisecond, precision=0)
-    excess_crawl_str = fmt_length(excess_crawl, unit=millimeter, precision=1)
     arm_delta_str = fmt_torque(arm_delta, unit=newton * meter, precision=0)
     arm_rate_str = fmt_torque_rate(arm_rate, precision=0)
     arm_blend_str = fmt_latency(arm_blend, unit=millisecond, precision=1)
@@ -894,13 +994,13 @@ For a torque command, replace the acceleration difference and jerk ceiling with 
 
 [^fn-math-heptic-transitions]: **Nonzero Boundary Derivatives**\index{Quintic smoothstep!nonzero boundary derivatives}: The $1.875/\tau_{\text{blend}}$ peak derivative factor assumes stationary endpoint derivatives. A general quintic can match the command value, first derivative, and second derivative at both endpoints, including nonzero values (@sec-planning-continuous-trajectories). Its interior rate extrema must then be checked; the fixed-endpoint smoothstep factor does not automatically apply.
 
-Increasing $\tau_{\text{blend}}$ reduces the profile's peak commanded jerk, but delays the full human target and can lengthen the stopping trajectory. Consider the remote assistant's takeover of the mobile manipulator's base, committed while the machine cruises at the $v =$ `{python} InterventionBlendBudget.v0_str` it slowed to before requesting it (@sec-intervention-authority-transitions), and suppose the assistant commands a stop at the scenario's braking deceleration, a fixed step of $|\Delta a| =$ `{python} InterventionBlendBudget.delta_a_str` from the latched cruise command. The enforcer holds the blend to $j_{\text{allowable}} =$ `{python} InterventionBlendBudget.j_allowable_str`, the peak jerk $6v/T_{\text{stop}}^2$ of the resident stop from the same speed (@sec-planning-behavior-seam), so the candidate uses the same peak command-jerk ceiling as the resident stop. Measured load response still requires qualification. The smoothstep bound then sets a minimum blending window of `{python} InterventionBlendBudget.T_str`. The smoothstep weight averages one half over the window, so the base would leave the blend at `{python} InterventionBlendBudget.v1_str` after traveling `{python} InterventionBlendBudget.d_blend_str`, and braking from there at the full target would take another `{python} InterventionBlendBudget.d_after_str`, for `{python} InterventionBlendBudget.d_total_str` to zero speed in this partial model. It holds full deceleration until rest, then switches acceleration to zero instantaneously. The value is therefore a lower-bound comparison for the ramp followed by ideal braking, not a complete smooth stopping trajectory; a feasible terminal transition needs its own distance and boundary-state check.
+Increasing $\tau_{\text{blend}}$ reduces the profile's peak commanded jerk, but delays the full human target and can lengthen the stopping trajectory. Consider the remote assistant's takeover of the mobile manipulator's base, committed while the machine cruises at the $v =$ `{python} InterventionBlendBudget.v0_str` it slowed to before requesting it (@sec-intervention-authority-transitions), and suppose the assistant commands a stop at the scenario's braking deceleration, a fixed step of $|\Delta a| =$ `{python} InterventionBlendBudget.delta_a_str` from the latched cruise command. The enforcer holds the blend to $j_{\text{allowable}} =$ `{python} InterventionBlendBudget.j_allowable_str`, the jerk bound $j_{\max}$ of the resident jerk-limited stop (@sec-planning-c2-stopping-suffix). That bound is a stipulated property of the loaded base, not of its speed, so the blend window does not depend on the speed at which the takeover commits. Measured load response still requires qualification. The smoothstep bound then sets a minimum blending window of `{python} InterventionBlendBudget.T_str`, longer than the `{python} InterventionBlendBudget.t_ramp_str` the resident stop spends ramping its deceleration at the same jerk bound, because the smoothstep reaches its peak slope only at mid-window. The smoothstep weight averages one half over the window, so the base would leave the blend at `{python} InterventionBlendBudget.v1_str` after traveling `{python} InterventionBlendBudget.d_blend_str`, and braking from there at the full target would take another `{python} InterventionBlendBudget.d_after_str`, for `{python} InterventionBlendBudget.d_total_str` to zero speed in this partial model. It holds full deceleration until rest, then switches acceleration to zero instantaneously. The value is therefore a lower-bound comparison for the ramp followed by ideal braking, not a complete smooth stopping trajectory; a feasible terminal transition needs its own distance and boundary-state check.
 
 ::: {.column-margin .margin-pointer}
 ↩ Acceleration-bounded bumpless transfer profiles build upon the physical stopping constraints enforced in @sec-enforcement-stopping-envelopes.
 :::
 
-An instantaneous step takeover would stop in `{python} InterventionBlendBudget.d_ideal_str`, so even this partial ramp-and-brake model adds `{python} InterventionBlendBudget.d_penalty_str` of travel.[^fn-math-trajectory-blend] The partial model is also `{python} InterventionBlendBudget.d_over_c2_str` longer than the `{python} InterventionBlendBudget.d_c2_str` resident stop from the same speed. A blend therefore spends stopping reserve beyond the stop the budget holds. While an idealized step stop is mathematically shorter, executing an unblended emergency stop risks wheel lockup, dynamic rollover, or load shedding (such as throwing a loaded tote off the manipulator rack), which can increase the actual physical stopping distance beyond the ideal theoretical rigid-body stop. Command smoothing preserves physical stability, but only when clearance is explicitly reserved to absorb the spatial penalty. The enforcer admits each blended tick only while the resident stop from the resulting state still fits, and where no blend fits, the base receives the resident stop itself, the suffix the fallback ladder's stop rung executes (@sec-enforcement-fallback-ladder). Bypassing the blend window by applying the acceleration step within a single `{python} InterventionBlendBudget.tick_str` permission tick would instead request a command jerk of about `{python} InterventionBlendBudget.step_jerk_str` over that tick. The idealized step is only a comparison baseline.
+An instantaneous step takeover would stop in `{python} InterventionBlendBudget.d_ideal_str`, so even this partial ramp-and-brake model adds `{python} InterventionBlendBudget.d_penalty_str` of travel.[^fn-math-trajectory-blend] The partial model is also `{python} InterventionBlendBudget.d_over_res_str` longer than the `{python} InterventionBlendBudget.d_res_str` resident stop from the same speed. The comparison could not have come out the other way. Under the same deceleration and jerk bounds, the jerk-limited stop is the shortest stop available (@sec-planning-c2-stopping-suffix), so any smoothed transition into braking under those bounds spends stopping reserve beyond the stop the budget holds. For a braking command the resident stop is already the bumpless transfer. While an idealized step stop is mathematically shorter, executing an unblended emergency stop risks wheel lockup, dynamic rollover, or load shedding (such as throwing a loaded tote off the manipulator rack), which can increase the actual physical stopping distance beyond the ideal theoretical rigid-body stop. Command smoothing preserves physical stability, but only when clearance is explicitly reserved to absorb the spatial penalty. The enforcer admits each blended tick only while the resident stop from the resulting state still fits, and where no blend fits, the base receives the resident stop itself, the suffix the fallback ladder's stop rung executes (@sec-enforcement-fallback-ladder). Bypassing the blend window by applying the acceleration step within a single `{python} InterventionBlendBudget.tick_str` permission tick would instead request a command jerk of about `{python} InterventionBlendBudget.step_jerk_str` over that tick. The idealized step is only a comparison baseline.
 
 [^fn-math-trajectory-blend]: **Bumpless Transfer Braking Penalty**\index{Bumpless transfer braking penalty}: The penalty belongs to the smoothstep profile, its fixed endpoints, and the stated acceleration step; another profile or endpoint pair gives a different penalty.
 
@@ -908,12 +1008,12 @@ An instantaneous step takeover would stop in `{python} InterventionBlendBudget.d
 
 Admitting the remote assistant requires bounding four timing parameters against the machine's limits: the operator reaction budget\index{Operator reaction budget} (the takeover latency $T_{\Sigma}$ of @eq-intervention-reaction-floor for the takeover mode in use), the **handshake protocol latency**\index{Handshake protocol latency} $T_{\text{handshake}}$, the manual lease $T_{\text{lease,man}}$, and the minimum blending window\index{Blending window} $\tau_{\text{blend}}$. @Tbl-14-authority-timing-contract states them for the machine's two command channels, the base and the arm, which one remote-assistant session commands together.
 
-| Machine channel           | Command change and chosen rate ceiling                                                                                                                                                                                | Smoothstep window $\tau_{\text{blend}}\ge1.875\lvert\Delta u\rvert/r$, whole ticks | Human / protocol time                                                                                 | Fallback contract                                                                                                                                          |
-|:--------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------:|:------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Base acceleration command | Crawl at `{python} InterventionBlendBudget.v_crawl_str` to braking at `{python} InterventionBlendBudget.delta_a_str`; $r=$ `{python} InterventionBlendBudget.j_crawl_str`, the resident stop's peak jerk at the crawl |                              `{python} InterventionBlendBudget.T_crawl_budget_str` | `{python} InterventionTimeoutBudget.t_ool_str` / `{python} InterventionTimeoutBudget.t_handshake_str` | `{python} InterventionTimeoutBudget.manual_lease_str` manual lease; `{python} InterventionTimeoutBudget.config_str` pending ceiling shortened by clearance |
-| Arm joint torque command  | `{python} InterventionBlendBudget.arm_delta_str`; torque rate $r=$ `{python} InterventionBlendBudget.arm_rate_str`                                                                                                    |                                  `{python} InterventionBlendBudget.arm_budget_str` | `{python} InterventionTimeoutBudget.t_in_str` / `{python} InterventionTimeoutBudget.t_handshake_str`  | The same manual lease; its loss invokes the arm's validated stop                                                                                           |
+| Machine channel           | Command change and chosen rate ceiling                                                                                                          | Smoothstep window $\tau_{\text{blend}}\ge1.875\lvert\Delta u\rvert/r$, whole ticks | Human / protocol time                                                                                | Fallback contract                                                                                                                                          |
+|:--------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------:|:-----------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Base acceleration command | Zero to `{python} InterventionBlendBudget.delta_a_str`; $r=$ `{python} InterventionBlendBudget.j_allowable_str`, the resident stop's jerk bound |                                    `{python} InterventionBlendBudget.T_budget_str` | `{python} InterventionTimeoutBudget.t_in_str` / `{python} InterventionTimeoutBudget.t_handshake_str` | `{python} InterventionTimeoutBudget.manual_lease_str` manual lease; `{python} InterventionTimeoutBudget.config_str` pending ceiling shortened by clearance |
+| Arm joint torque command  | `{python} InterventionBlendBudget.arm_delta_str`; torque rate $r=$ `{python} InterventionBlendBudget.arm_rate_str`                              |                                  `{python} InterventionBlendBudget.arm_budget_str` | `{python} InterventionTimeoutBudget.t_in_str` / `{python} InterventionTimeoutBudget.t_handshake_str` | The same manual lease; its loss invokes the arm's validated stop                                                                                           |
 
-: **Blending windows on the mobile manipulator**: One remote-assistant session commands both channels, and each window is rounded up to whole `{python} InterventionBlendBudget.tick_str` permission ticks. The rate ceiling $r$ bounds the derivative of each *command*. The base row is sized at the out-of-loop crawl, where the ideal-profile estimate fits the partial stopping reserve; at the in-loop takeover speed the proposed braking blend does not fit, and the base receives the resident stop. Every lease and pending deadline must fit the state-dependent stopping reserve. {#tbl-14-authority-timing-contract tbl-colwidths="[18,26,15,18,23]"}
+: **Blending windows on the mobile manipulator**: One remote-assistant session commands both channels, and each window is rounded up to whole `{python} InterventionBlendBudget.tick_str` permission ticks. The rate ceiling $r$ bounds the derivative of each *command*. The base window is the same at every speed, because the jerk bound belongs to the loaded base. At the in-loop request speed a braking blend does not fit the clearance that remains, so the base receives the resident stop; the window governs base command changes that do not stop the machine, such as the first manual command after an automatic stop. Every lease and pending deadline must fit the state-dependent stopping reserve. {#tbl-14-authority-timing-contract tbl-colwidths="[18,26,15,18,23]"}
 
 ```{python}
 #| label: calc-intervention-assistant-session
@@ -927,22 +1027,22 @@ Admitting the remote assistant requires bounding four timing parameters against 
 # │          follow @tbl-14-authority-timing-contract, and the A3 fault case.
 # │
 # │ Goal:    Bound an in-loop takeover and its manual lease at the slowed speed.
-# │ Show:    Spare margin at 1.2 m/s, travel during the in-loop takeover, the
-# │          remainder in mm and ms, and the travel the manual lease adds
-# │          once the assistant holds MAN; T_latest at 1.2 m/s and at the
-# │          aisle speed for the A3 rule.
+# │ Show:    Spare margin at the in-loop request speed, travel during the
+# │          sourced in-loop takeover, the remainder in mm and ms, and the
+# │          travel the manual lease adds once the assistant holds MAN; the
+# │          remainder after an out-of-loop takeover at the crawl; T_latest at
+# │          the slowed speed and at the aisle speed for the A3 rule.
 # │          Ties to InterventionBlendBudget: the reserve a base blend uses
-# │          exceeds the in-loop remainder, and fits the remainder left after
-# │          an out-of-loop takeover at the crawl.
-# │ How:     Finished stopping budget from the WarehouseAisle scenario (C2
-# │          stop, all overheads). In MAN the manual lease takes the chunk
-# │          lease's place in tau_delay, so it adds v * (lease - chunk lease).
-# │          Handshake, manual lease, and T_latest come from
-# │          InterventionTimeoutBudget.
+# │          exceeds the in-loop remainder.
+# │ How:     Finished stopping budget from the WarehouseAisle scenario
+# │          (jerk-limited resident stop, all overheads). In MAN the manual
+# │          lease takes the chunk lease's place in tau_delay, so it adds
+# │          v * (lease - chunk lease). Handshake, manual lease, and T_latest
+# │          come from InterventionTimeoutBudget.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import calc_c2_stop_suffix
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -957,51 +1057,55 @@ class InterventionAssistantSession:
     d_clear = AISLE.d_clear  # category: illustrative
     tau_delay = AISLE.tau_delay  # category: derived
     a_brake = AISLE.a_brake  # category: illustrative
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
     overhead = AISLE.fixed_overhead  # category: illustrative / chosen
-    t_react = AISLE.t_takeover_in_loop  # category: illustrative
+    t_react = AISLE.t_takeover_in_loop  # category: derived (sourced human + transport)
     v_crawl = AISLE.v_takeover_out_of_loop  # category: chosen
-    t_ool = AISLE.t_takeover_out_of_loop  # category: illustrative
+    t_ool = AISLE.t_takeover_out_of_loop  # category: derived (sourced human + transport)
     chunk_lease = AISLE.t_lease  # category: chosen
     # Chapter values set once in InterventionTimeoutBudget
-    t_handshake = InterventionTimeoutBudget.t_handshake  # category: illustrative
+    t_handshake = InterventionTimeoutBudget.t_handshake  # category: derived
     manual_lease = InterventionTimeoutBudget.manual_lease  # category: chosen
     t_latest = InterventionTimeoutBudget.t_latest  # category: derived
     t_latest_in = InterventionTimeoutBudget.t_latest_in  # category: derived
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    budget_in = (v_in * tau_delay + calc_c2_stop_suffix(v_in, a_brake)["distance"] + overhead).to(millimeter)
-    spare_in = (d_clear - budget_in).to(millimeter)
+    def _budget(speed, *, _tau=tau_delay, _a=a_brake, _j=j_brake, _o=overhead):
+        return (speed * _tau + calc_scurve_stop_distance(speed, _a, _j) + _o).to(millimeter)
+
+    spare_in = (d_clear - _budget(v_in)).to(millimeter)
     travel_react = (v_in * t_react).to(millimeter)
     remainder = (spare_in - travel_react).to(millimeter)
     remainder_time = (remainder / v_in).to(millisecond)
-    budget_crawl = (v_crawl * tau_delay + calc_c2_stop_suffix(v_crawl, a_brake)["distance"] + overhead).to(millimeter)
-    remainder_crawl = (d_clear - budget_crawl - v_crawl * t_ool).to(millimeter)
+    remainder_crawl = (d_clear - _budget(v_crawl) - v_crawl * t_ool).to(millimeter)
     lease_excess = (manual_lease - chunk_lease).to(millisecond)
     lease_travel = (v_in * lease_excess).to(millimeter)
-    budget_aisle = v_aisle * tau_delay + calc_c2_stop_suffix(v_aisle, a_brake)["distance"] + overhead
-    t_latest_check = ((d_clear - budget_aisle) / v_aisle).to(millisecond)
+    t_latest_check = ((d_clear - _budget(v_aisle)) / v_aisle).to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(spare_in.magnitude - 209.68) < 5e-3, f"spare margin at 1.2 m/s: {spare_in}")
-    check(abs(travel_react.magnitude - 180.0) < 1e-9, f"in-loop takeover travel: {travel_react}")
-    check(abs(remainder.magnitude - 29.68) < 5e-3, f"remainder after takeover: {remainder}")
-    check(abs(remainder_time.magnitude - 24.73) < 5e-3, f"remainder as time: {remainder_time}")
-    check(abs(lease_travel.magnitude - 48.0) < 1e-9, f"travel the manual lease adds in MAN: {lease_travel}")
-    check(lease_travel < spare_in, "In MAN the manual lease must fit the spare at 1.2 m/s.")
+    check(abs(spare_in.magnitude - 530.62) < 5e-3, f"spare margin at the in-loop request speed: {spare_in}")
+    check(abs(travel_react.magnitude - 484.0) < 1e-9, f"in-loop takeover travel: {travel_react}")
+    check(abs(remainder.magnitude - 46.62) < 5e-3, f"remainder after takeover: {remainder}")
+    check(abs(remainder_time.magnitude - 58.275) < 5e-3, f"remainder as time: {remainder_time}")
+    check(abs(lease_travel.magnitude - 32.0) < 1e-9, f"travel the manual lease adds in MAN: {lease_travel}")
+    check(lease_travel < remainder, "In MAN the manual lease must fit the remainder at the in-loop request speed.")
     check(t_handshake < t_react, "The handshake is a share of the in-loop takeover delay.")
     check(abs(t_latest_check.magnitude - t_latest.magnitude) < 1e-9, "T_latest agrees with the timeout cell.")
-    check(abs(t_latest.magnitude - 78.9) < 5e-3, f"T_latest at the aisle speed: {t_latest}")
-    check(abs((t_latest_in - t_react - remainder_time).to(millisecond).magnitude) < 1e-9, "The remainder is T_latest at 1.2 m/s less the takeover.")
-    check(abs(remainder_crawl.magnitude - 236.17) < 5e-3, f"remainder after an out-of-loop takeover at the crawl: {remainder_crawl}")
-    # No base blend fits the in-loop remainder; the crawl blend fits its remainder.
+    check(abs(t_latest.magnitude - 100.775) < 5e-3, f"T_latest at the aisle speed: {t_latest}")
+    check(
+        abs((t_latest_in - t_react - remainder_time).to(millisecond).magnitude) < 1e-9,
+        "The remainder is T_latest at the slowed speed less the takeover.",
+    )
+    check(remainder_crawl.magnitude > 0, f"remainder after an out-of-loop takeover at the crawl: {remainder_crawl}")
+    # No base braking blend fits the in-loop remainder.
     check(InterventionBlendBudget.v0 == v_in, "Both cells describe the same takeover speed.")
-    check(InterventionBlendBudget.v_crawl == v_crawl, "Both cells describe the same crawl.")
-    check(InterventionBlendBudget.excess_in > remainder, "A base blend at 1.2 m/s must overrun the remainder.")
-    check(InterventionBlendBudget.excess_crawl < remainder_crawl, "The crawl blend must fit its remainder.")
+    check(InterventionBlendBudget.excess_in > remainder, "A base blend at the in-loop request speed must overrun the remainder.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_in_str = fmt_velocity(v_in, unit=meter / second, precision=1)
+    v_crawl_str = fmt_velocity(v_crawl, unit=meter / second, precision=2)
     t_react_str = fmt_latency(t_react, unit=millisecond, precision=0)
+    t_ool_str = fmt_latency(t_ool, unit=second, precision=1)
     t_handshake_str = fmt_latency(t_handshake, unit=millisecond, precision=0)
     manual_lease_str = fmt_latency(manual_lease, unit=millisecond, precision=0)
     spare_in_str = fmt_length(spare_in, unit=millimeter, precision=1)
@@ -1016,9 +1120,9 @@ class InterventionAssistantSession:
     v_aisle_str = fmt_velocity(v_aisle, unit=meter / second, precision=1)
 ```
 
-Consider an illustrative remote-assistant in-loop takeover, requested after the mobile manipulator has slowed to `{python} InterventionAssistantSession.v_in_str` with the assistant's `manual_drive` entry. The comparison first uses the partial timing budget; qualification must subtract the still-unmeasured admission cost. The operator reaction budget $T_{\Sigma}$ sets the maximum duration the permission path permits between issuing a takeover demand and detecting the assistant's first command; here it is the `{python} InterventionAssistantSession.t_react_str` in-loop takeover of @sec-intervention-human-authority, which already includes transport. The handshake latency $T_{\text{handshake}}$ defines the round-trip deadline for mutual authentication and state acknowledgment over the bus, budgeted at `{python} InterventionAssistantSession.t_handshake_str` per the four-phase protocol in @tbl-14-handshake-protocol; it is part of $T_{\Sigma}$, not an addition to it. The manual lease $T_{\text{lease,man}}$ of @sec-intervention-authority-transitions sets the longest silence tolerated from the assistant before the permission path declares a link failure and reverts to the fallback trajectory, here `{python} InterventionAssistantSession.manual_lease_str`. Finally, the blending window $\tau_{\text{blend}}$ governs the rate of authority transfer to prevent mechanical shock, and @tbl-14-authority-timing-contract gives it for each channel. The base's window depends on its speed, because the resident stop's peak jerk, which caps the blend under the smoothstep rate bound, rises as speed falls; the table therefore sizes it at the `{python} InterventionBlendBudget.v_crawl_str` crawl.
+Consider an illustrative remote-assistant in-loop takeover, requested after the mobile manipulator has slowed to `{python} InterventionAssistantSession.v_in_str` with the assistant's `manual_drive` entry. The comparison first uses the partial timing budget; qualification must subtract the still-unmeasured admission cost. The operator reaction budget $T_{\Sigma}$ sets the maximum duration the permission path permits between issuing a takeover demand and detecting the assistant's first command; here it is the `{python} InterventionAssistantSession.t_react_str` in-loop takeover of @sec-intervention-human-authority, which already includes transport. The handshake latency $T_{\text{handshake}}$ defines the round-trip deadline for mutual authentication and state acknowledgment over the bus, budgeted at `{python} InterventionAssistantSession.t_handshake_str` per the four-phase protocol in @tbl-14-handshake-protocol; it is part of $T_{\Sigma}$, not an addition to it. The manual lease $T_{\text{lease,man}}$ of @sec-intervention-authority-transitions sets the longest silence tolerated from the assistant before the permission path declares a link failure and reverts to the fallback trajectory, here `{python} InterventionAssistantSession.manual_lease_str`. Finally, the blending window $\tau_{\text{blend}}$ governs the rate of authority transfer to prevent mechanical shock, and @tbl-14-authority-timing-contract gives it for each channel. The base's window is the same at every speed, because the jerk bound that caps it belongs to the loaded base rather than to the stop from a particular speed.
 
-In the conservative capture-origin allocation, before charging $\Delta_{\text{da}}$, reserving the in-loop takeover leaves `{python} InterventionAssistantSession.remainder_str` of the rack-end clear distance at `{python} InterventionAssistantSession.v_in_str`, the `{python} InterventionAssistantSession.remainder_time_str` by which it beats $T_{\text{latest}}$ (@sec-intervention-authority-transitions). That remainder bounds the transfer itself. Any further delay before a stop could begin while authority is changing hands must fit inside the remainder, and the enforcer checks the resident stop against it at every tick of the transfer. The proposed base braking blend does not pass that check at this speed. Blending the step to braking from `{python} InterventionAssistantSession.v_in_str` grows the travel plus the resident stop from the blended state by up to `{python} InterventionBlendBudget.excess_in_str`, far past the remainder, so in this session the base receives the resident stop and only the arm blends. After a `{python} InterventionTimeoutBudget.t_ool_str` out-of-loop takeover at the crawl, `{python} InterventionAssistantSession.remainder_crawl_str` remains, and the ideal-profile calculation estimates `{python} InterventionBlendBudget.excess_crawl_str` of reserve use at the sampled ticks. These figures screen the candidates; qualification must check the rounded executable profile and the state-matched fallback, including delay travel, over the full transition. Once the assistant holds `MAN`, the enforcer uses current remaining clearance and measured speed; commit does not restore the distance spent waiting or blending. The manual lease replaces the `{python} InterventionAssistantSession.chunk_lease_str` chunk lease in $\tau_{\text{delay}}$. At the same speed it adds `{python} InterventionAssistantSession.lease_travel_str` of travel. That increment fits the original `{python} InterventionAssistantSession.spare_in_str` spare but exceeds the `{python} InterventionAssistantSession.remainder_str` remaining after the in-loop wait, another reason the base must complete its stop before accepting continued manual motion. At the crawl, the capture-origin design ledger must reserve the missing $v\Delta_{\text{da}}$ travel, the rounded blend, and the active manual lease. A live check uses current clearance and only the unelapsed portions of those intervals. The large difference between the two candidate remainders identifies the crawl as the configuration worth qualifying; it is not a completed positive admission result.
+In the conservative capture-origin allocation, before charging $\Delta_{\text{da}}$, reserving the in-loop takeover leaves `{python} InterventionAssistantSession.remainder_str` of the rack-end clear distance at `{python} InterventionAssistantSession.v_in_str`, the `{python} InterventionAssistantSession.remainder_time_str` by which it beats $T_{\text{latest}}$ (@sec-intervention-authority-transitions). That remainder bounds the transfer itself. Any further delay before a stop could begin while authority is changing hands must fit inside the remainder, and the enforcer checks the resident stop against it at every tick of the transfer. The proposed base braking blend does not pass that check at this speed. Blending the step to braking from `{python} InterventionAssistantSession.v_in_str` grows the travel plus the resident stop from the blended state by up to `{python} InterventionBlendBudget.excess_in_str`, far past the remainder, so in this session the base receives the resident stop and only the arm blends. After a `{python} InterventionAssistantSession.t_ool_str` out-of-loop takeover at the `{python} InterventionAssistantSession.v_crawl_str` crawl, `{python} InterventionAssistantSession.remainder_crawl_str` remains, and the base's stop from the crawl is its resident stop, with no braking blend to reserve. These figures screen the candidates; qualification must check the rounded executable profile and the state-matched fallback, including delay travel, over the full transition. Once the assistant holds `MAN`, the enforcer uses current remaining clearance and measured speed; commit does not restore the distance spent waiting or blending. The manual lease replaces the `{python} InterventionAssistantSession.chunk_lease_str` chunk lease in $\tau_{\text{delay}}$. At the same speed it adds `{python} InterventionAssistantSession.lease_travel_str` of travel. That increment fits the original `{python} InterventionAssistantSession.spare_in_str` spare and also the `{python} InterventionAssistantSession.remainder_str` remaining after the in-loop wait, but it consumes most of that remainder before $\Delta_{\text{da}}$ is charged, another reason the base should complete its stop before accepting continued manual motion. At the crawl, the capture-origin design ledger must reserve the missing $v\Delta_{\text{da}}$ travel and the active manual lease. A live check uses current clearance and only the unelapsed portions of those intervals. The large difference between the two candidate remainders identifies the crawl as the configuration worth qualifying; it is not a completed positive admission result.
 
 ### Initial condition matching and integrator pre-biasing {#sec-intervention-integrator-prebiasing}
 
@@ -1063,74 +1167,90 @@ The remote assistant's `veto_path` packet and a forged wheel drive-torque packet
 # │ AUTHENTICATION DEADLINE ON THE MOBILE MANIPULATOR
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-intervention-authenticating-intervention, the verification
-# │          deadline, the two verifier timings, and the freshness window.
+# │          deadline, the two primitives, and the freshness window.
 # │
-# │ Goal:    Price signature verification against the finished budget's spare.
-# │ Show:    T_auth,max = T_latest at the aisle speed; travel and overrun for a
-# │          slow verifier; travel and leftover spare for a fast one; the
-# │          displacement a replay at the edge of the freshness window carries.
-# │ How:     Verification adds to tau_delay, so each millisecond is travel at
-# │          the aisle speed against the spare of InterventionTimeoutBudget.
+# │ Goal:    Price message authentication and signature verification against
+# │          the finished budget's spare.
+# │ Show:    T_auth,max = T_latest at the aisle speed; the time and travel of
+# │          an AES-128 CMAC over one frame and of one Ed25519 verification on
+# │          the safety microcontroller; the displacement a replay at the edge
+# │          of the freshness window carries.
+# │ How:     Published Cortex-M4 cycle counts divided by the permission MCU's
+# │          clock (RM.permission_mcu); verification adds to tau_delay, so each
+# │          millisecond is travel at the aisle speed against the spare of
+# │          InterventionTimeoutBudget.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
+from mlsysim.core.units import meter, second, millimeter, millisecond, microsecond
+from mlsysim.fmt import fmt, fmt_int, fmt_frequency, fmt_length, fmt_latency, fmt_velocity, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
 class InterventionAuthBudget:
-    """Signature verification as one more pre-brake delay on the machine."""
+    """Takeover authentication as one more pre-brake delay on the machine."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     v = AISLE.v_aisle  # category: chosen
     spare = InterventionTimeoutBudget.spare  # category: derived
     t_auth_max = InterventionTimeoutBudget.t_latest  # category: derived
-    # Scenario assumptions (this chapter only): verifier timings
-    t_auth_a = 180 * millisecond  # category: illustrative (a slow verifier)
-    t_auth_b = 15 * millisecond  # category: illustrative (a fast verifier)
+    mcu_clock = RM.permission_mcu.compute.clock_rate  # category: illustrative (reference class)
+    # Published cycle counts on an ARM Cortex-M4 (this chapter only); the
+    # reference core is assumed to retire them in the same number of cycles.
+    ed25519_verify_cycles = 720_000  # category: sourced (Owens et al. 2024, optimized assembly)
+    aes_block_cycles = 661.7  # category: sourced (Schwabe and Stoffelen, AES-128 single block)
+    # Scenario assumptions (this chapter only)
+    mac_blocks = 3  # category: illustrative (48-byte frame: counter, timestamp, role, channel mask, command)
     tau_fresh = 100 * millisecond  # category: illustrative (freshness window)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    travel_a = (v * t_auth_a).to(millimeter)
-    overrun_a = (travel_a - spare).to(millimeter)
-    travel_b = (v * t_auth_b).to(millimeter)
-    left_b = (spare - travel_b).to(millimeter)
+    t_sig = (ed25519_verify_cycles / mcu_clock).to(millisecond)
+    t_mac = (mac_blocks * aes_block_cycles / mcu_clock).to(microsecond)
+    travel_sig = (v * t_sig).to(millimeter)
+    left_sig = (spare - travel_sig).to(millimeter)
+    travel_mac = (v * t_mac).to(millimeter)
     dx_fresh = (v * tau_fresh).to(millimeter)
+    left_fresh = (spare - dx_fresh).to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(t_auth_max.magnitude - 78.9) < 5e-3, f"verification deadline: {t_auth_max}")
-    check(t_auth_a > t_auth_max, "The slow verifier must miss the deadline.")
-    check(t_auth_b < t_auth_max, "The fast verifier must fit the deadline.")
-    check(abs(overrun_a.magnitude - 131.43) < 5e-3, f"slow-verifier overrun: {overrun_a}")
-    check(abs(left_b.magnitude - 83.07) < 5e-3, f"spare left by the fast verifier: {left_b}")
-    check(dx_fresh > spare, "A replay at the freshness edge must exceed the spare.")
+    check(abs(t_auth_max.magnitude - 100.775) < 5e-3, f"verification deadline: {t_auth_max}")
+    check(abs(t_sig.magnitude - 1.8) < 1e-9, f"one Ed25519 verification: {t_sig}")
+    check(abs(t_mac.magnitude - 4.96275) < 1e-6, f"one AES-128 CMAC frame: {t_mac}")
+    check(t_sig < t_auth_max, "One signature verification must fit the deadline.")
+    check(t_sig > 300 * t_mac, "A signature must cost hundreds of MACs.")
+    check(abs(left_sig.magnitude - 128.67) < 5e-3, f"spare left after one signature: {left_sig}")
+    check(dx_fresh < spare and left_fresh.magnitude < 2.0, "A replay at the freshness edge must consume nearly the whole spare.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
     spare_str = fmt_length(spare, unit=millimeter, precision=1)
     t_auth_max_str = fmt_latency(t_auth_max, unit=millisecond, precision=1)
-    t_auth_a_str = fmt_latency(t_auth_a, unit=millisecond, precision=0)
-    t_auth_b_str = fmt_latency(t_auth_b, unit=millisecond, precision=0)
+    mcu_clock_str = fmt_frequency(mcu_clock, unit="MHz", precision=0)
+    ed25519_cycles_str = fmt_int(ed25519_verify_cycles)
+    aes_block_cycles_str = fmt(aes_block_cycles, precision=1)
+    mac_blocks_str = fmt_int(mac_blocks)
+    t_sig_str = fmt_latency(t_sig, unit=millisecond, precision=1)
+    t_mac_str = fmt_latency(t_mac, unit=microsecond, precision=1)
+    travel_sig_str = fmt_length(travel_sig, unit=millimeter, precision=2)
+    left_sig_str = fmt_length(left_sig, unit=millimeter, precision=1)
     tau_fresh_str = fmt_latency(tau_fresh, unit=millisecond, precision=0)
-    travel_a_str = fmt_length(travel_a, unit=millimeter, precision=0)
-    overrun_a_str = fmt_length(overrun_a, unit=millimeter, precision=1)
-    travel_b_str = fmt_length(travel_b, unit=millimeter, precision=1)
-    left_b_str = fmt_length(left_b, unit=millimeter, precision=1)
     dx_fresh_str = fmt_length(dx_fresh, unit=millimeter, precision=0)
+    left_fresh_str = fmt_length(left_fresh, unit=millimeter, precision=1)
 ```
 
 Authentication consumes part of the remote-request deadline. If the machine waited for verification before starting its stop, that waiting would add travel to the finished budget. The following comparison prices that rejected design against $T_{\text{latest}}$ of @eq-intervention-latest-fallback. The local fallback timer must continue independently while verification runs.
 
-At the `{python} InterventionAuthBudget.v_str` aisle speed, the partial spare permits at most `{python} InterventionAuthBudget.t_auth_max_str` of additional waiting before charging $\Delta_{\text{da}}$ and other admission work not already included. Each interval is charged once. The illustrative slow verifier takes `{python} InterventionAuthBudget.t_auth_a_str`; waiting for it would add `{python} InterventionAuthBudget.travel_a_str` of travel and put the stop `{python} InterventionAuthBudget.overrun_a_str` beyond the available clearance. The illustrative fast verifier takes `{python} InterventionAuthBudget.t_auth_b_str`, spending `{python} InterventionAuthBudget.travel_b_str` and leaving `{python} InterventionAuthBudget.left_b_str`. Even that result only prices verification; other uncharged work and the physical transition must fit too.
+What that waiting costs depends on the primitive. A message authentication code uses a key that console and machine share. AES-128 CMAC [@dworkin2005cmac] over a `{python} InterventionAuthBudget.mac_blocks_str`-block frame carrying the sequence counter, timestamp, role, channel mask, and command costs about `{python} InterventionAuthBudget.mac_blocks_str` block encryptions, each `{python} InterventionAuthBudget.aes_block_cycles_str` cycles on an ARM Cortex-M4 [@schwabe2016aes], or `{python} InterventionAuthBudget.t_mac_str` at the safety microcontroller's `{python} InterventionAuthBudget.mcu_clock_str` clock if its core retires the same cycles. A public-key signature costs far more. Verifying one Ed25519 signature takes `{python} InterventionAuthBudget.ed25519_cycles_str` cycles on the same core class [@owens2024ed25519], or `{python} InterventionAuthBudget.t_sig_str`. The signature buys something the code cannot. Because both ends hold the shared key, a MAC cannot show which of them produced a packet, whereas a signature binds a takeover to the operator's private key, the property an incident investigation needs. The design therefore signs the session-establishing `manual_drive` request and authenticates every heartbeat and command after it with the MAC.
 
-A designer may use symmetric message authentication or an isolated cryptographic engine to reduce admission cost. The transferable requirement is a qualified delivery bound and an allocation that preserves the permission tick under load (@sec-placement). A verifier that spans several ticks must not block the arbiter or the local fallback. If verification misses its deadline, remote assistance becomes unavailable while the independent protection path acts.
+At the `{python} InterventionAuthBudget.v_str` aisle speed, the partial spare permits at most `{python} InterventionAuthBudget.t_auth_max_str` of additional waiting before charging $\Delta_{\text{da}}$ and other admission work not already included. Each interval is charged once. Waiting for one signature adds `{python} InterventionAuthBudget.travel_sig_str` of travel and leaves `{python} InterventionAuthBudget.left_sig_str`; a MAC adds a negligible fraction of a millimeter. Per packet, verification is cheap against the deadline. The hazard lies in how many packets reach the verifier, which the verifier-flooding pitfall of @sec-intervention-fallacies-pitfalls prices. Other uncharged work and the physical transition must fit too.
+
+An isolated cryptographic engine can reduce admission cost further. The transferable requirement is a qualified delivery bound and an allocation that preserves the permission tick under load (@sec-placement). A verifier that spans several ticks must not block the arbiter or the local fallback. If verification misses its deadline, remote assistance becomes unavailable while the independent protection path acts.
 
 ::: {.column-margin}
 **CAN bus priority:** A transmitting CAN frame is non-preemptive. A higher-priority identifier wins only at the next arbitration opportunity; controller buffer policy and worst-case current-frame serialization must be included in the measured delivery bound. An independent protective input avoids this shared queue where the safety case requires it.
 :::
 
-Freshness requirements arise from the same kinematics. If an authentication window permits a timestamp drift or message age threshold of $\tau_{\text{fresh}} =$ `{python} InterventionAuthBudget.tau_fresh_str`, an authenticated packet replayed from the boundary of that window commands an action based on a base position displaced by $\Delta x = v\,\tau_{\text{fresh}} =$ `{python} InterventionAuthBudget.dx_fresh_str` at the aisle speed, more than the whole `{python} InterventionAuthBudget.spare_str` spare.
+Freshness requirements arise from the same kinematics. If an authentication window permits a timestamp drift or message age threshold of $\tau_{\text{fresh}} =$ `{python} InterventionAuthBudget.tau_fresh_str`, an authenticated packet replayed from the boundary of that window commands an action based on a base position displaced by $\Delta x = v\,\tau_{\text{fresh}} =$ `{python} InterventionAuthBudget.dx_fresh_str` at the aisle speed, which leaves only `{python} InterventionAuthBudget.left_fresh_str` of the `{python} InterventionAuthBudget.spare_str` spare. The freshness window is a distance budget, not a clock tolerance.
 
 To prevent replay attacks and stale packet injection without expanding the verification budget, the safety microcontroller couples symmetric authentication with **monotonic sequence tracking**:
 
@@ -1223,7 +1343,47 @@ The architecture therefore employs a hierarchical **memory-tiered circular loggi
 1. **Low-Bandwidth, Hard Real-Time Tier**: The selected evidence layout is written to an SRAM ring buffer on the safety microcontroller. Its serialized size must include every retained state and command vector, channel mask, timestamp, and integrity field; a compact metadata-only record cannot stand in for that full tuple. Record size times logging cadence sets the required write rate, and qualification must establish capacity, write time, overflow indication, and loss handling.
 2. **High-Bandwidth, Best-Effort Tier**: High-resolution camera frames, raw point clouds, and VLA attention weights are buffered in a multi-gigabyte DRAM circular buffer on the Linux host processor.
 
-Upon receiving an intervention trigger (such as an operator takeover, an emergency stop trip, or an enforcer barrier violation), the logger freezes a configured **pre-trigger window** ($T_{\text{pre}} \ge 3.0\text{ s}$) and transitions to recording a dedicated post-trigger segment. This selected window exceeds the illustrative out-of-loop reaction interval; deployment must size it against the qualified operator and logging delays. Missing frames or overwritten samples remain declared gaps in the pre-intervention evidence. If the buffer only recorded data from the instant of human physical contact, the telemetry would capture the recovery while completely discarding the anomalous proposals and perception states that made the rescue necessary. Capturing the pre-trigger interval preserves the learner-visited failure states required for DAgger relabeling and root-cause model evaluation.
+```{python}
+#| label: calc-intervention-pre-trigger-window
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRE-TRIGGER LOGGING WINDOW
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-intervention-trustworthy-logs, the pre-trigger paragraph.
+# │
+# │ Goal:    Size the frozen pre-trigger window from the sourced takeover time.
+# │ Show:    The design out-of-loop takeover and the window it sets.
+# │ How:     AISLE.pre_trigger_window, the design takeover rounded up to whole
+# │          seconds (the same window @sec-data-intervention-recovery uses).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import second
+from mlsysim.fmt import fmt_latency, check
+
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class InterventionPreTriggerWindow:
+    """Pre-trigger window that reaches back past the design takeover."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_ool = AISLE.t_takeover_out_of_loop  # category: derived (sourced p90 take-over time + transport)
+    t_pre = AISLE.pre_trigger_window  # category: derived
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    headroom = (t_pre - t_ool).to(second)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(t_pre >= t_ool, "The window must reach back past the design takeover.")
+    check(abs(t_pre.to(second).magnitude - 5.0) < 1e-9, f"pre-trigger window: {t_pre}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_ool_str = fmt_latency(t_ool, unit=second, precision=1)
+    t_pre_str = fmt_latency(t_pre, unit=second, precision=0)
+```
+
+Upon receiving an intervention trigger (such as an operator takeover, an emergency stop trip, or an enforcer barrier violation), the logger freezes a configured **pre-trigger window** ($T_{\text{pre}} =$ `{python} InterventionPreTriggerWindow.t_pre_str`) and transitions to recording a dedicated post-trigger segment. The window is the `{python} InterventionPreTriggerWindow.t_ool_str` design out-of-loop takeover of @sec-intervention-reaction-drift rounded up to whole seconds, because the operator's response alone spans that interval after the divergence has begun; a site that measures a longer takeover tail must lengthen it. Missing frames or overwritten samples remain declared gaps in the pre-intervention evidence. If the buffer only recorded data from the instant of human physical contact, the telemetry would capture the recovery while completely discarding the anomalous proposals and perception states that made the rescue necessary. Capturing the pre-trigger interval preserves the learner-visited failure states required for DAgger relabeling and root-cause model evaluation.
 
 Append-only hash chains support detection of later log modification when their anchors and keys remain protected. Within the Nervous System, logging routines batch evidence tuples into fixed blocks corresponding to $100\text{ ms}$ of physical execution. Each block is hashed using SHA-256, and its digest is concatenated with the hash of the preceding block to form an append-only cryptographic chain:
 $$H_k = \text{SHA-256}\left( H_{k-1} \,\|\, \text{Block}_k \right).$$
@@ -1259,14 +1419,14 @@ The authority rules make the event record testable. The same timestamps also ide
 ### Causal masking and recovery eligibility {#sec-intervention-recovery-eligibility}
 
 When logging intervention episodes for downstream policy retraining, the recording system must enforce **causal intervention masking**\index{Causal intervention masking}. In imitation learning and dataset aggregation architectures, the optimization objective over recorded telemetry trajectories is formulated as:
-$$\mathcal{L}_{\text{imitation}}(\theta) = \mathbb{E}_{(\mathbf{x}, \mathbf{u}^*, \mathcal{M}) \sim \mathcal{D}_{\text{telemetry}}} \left[ \sum_{t=0}^{H} \mathcal{M}(t) \cdot \ell\left(\pi_\theta(\mathbf{x}_t), \mathbf{u}^*(t)\right) \right]$$ {#eq-intervention-causal-masking-loss}
-where $\ell(\pi_\theta(\mathbf{x}_t), \mathbf{u}^*(t))$ is the policy prediction loss (such as MSE across action chunks or score-matching denoising loss for diffusion policies), and $\mathcal{M}(t) \in \{0, 1\}$ is a binary causal mask. The safety microcontroller's timestamped authority transitions identify controller ownership; measured stabilization and review of task validity determine whether human-owned samples are eligible imitation targets.
+$$\mathcal{L}_{\text{imitation}}(\theta) = \mathbb{E}_{(\mathbf{x}, \mathbf{u}^*, \mathcal{M}) \sim \mathcal{D}_{\text{train}}} \left[ \sum_{t=0}^{H} \mathcal{M}(t) \cdot \ell\left(\pi_\theta(\mathbf{x}_t), \mathbf{u}^*(t)\right) \right]$$ {#eq-intervention-causal-masking-loss}
+where $\ell(\pi_\theta(\mathbf{x}_t), \mathbf{u}^*(t))$ is the policy prediction loss (such as MSE across action chunks or score-matching denoising loss for diffusion policies), $\mathcal{M}(t) \in \{0, 1\}$ is a binary causal mask, and $\mathbf{u}^*(t)$ is the training target. The training set $\mathcal{D}_{\text{train}}$ is built from the log, not copied from it. Each logged state keeps its place, but its target and mask are assigned by the interval it falls in, so the logged command need not be the target. The safety microcontroller's timestamped authority transitions identify controller ownership; measured stabilization, review of task validity, and the availability of an expert label determine which samples receive $\mathcal{M}(t) = 1$ and with which target.
 
 A supervisory intervention event does not represent a monolithic demonstration. Instead, it spans four mathematically distinct temporal intervals along the physical timeline:
 
 1. **Compounding policy drift ($t_{\text{diverge}} \le t < t_{\text{commit}}$)**: The autonomous policy $\pi_\theta$ drifts away from the expert distribution, potentially accumulating compounding error (@sec-data-policy-coverage) while the operator perceives, orients, and decides (the pre-commit interval of @eq-intervention-reaction-floor).
-   - *Masking policy*: $\mathcal{M}(t) = 0$ for behavioral cloning. The autonomous proposals $\hat{\mathbf{u}}(t)$ executed during this drift must never be treated as imitation targets; doing so teaches the policy to reproduce its own failure trajectories.
-   - *DAgger & relabeling utility*: Crucially, the *learner-visited states* $\mathbf{x}(t)$ must not be discarded. In dataset aggregation algorithms such as DAgger [@ross2011reduction] and its human-gated variants (@sec-data-intervention-recovery), these off-distribution states are precisely the high-leverage samples needed to mitigate covariate shift. An expert policy or human annotator retroactively relabels these states with corrective actions $\mathbf{u}^*(t) = \pi^*(\mathbf{x}_t)$, teaching the neural network how to recover back to nominal execution.
+   - *Masking policy*: The autonomous proposals $\hat{\mathbf{u}}(t)$ executed during this drift are never targets; training on them teaches the policy to reproduce its own failure trajectories. Without an expert label, $\mathcal{M}(t) = 0$.
+   - *DAgger & relabeling utility*: Crucially, the *learner-visited states* $\mathbf{x}(t)$ must not be discarded. In dataset aggregation algorithms such as DAgger [@ross2011reduction] and its human-gated variants (@sec-data-intervention-recovery), these off-distribution states are precisely the high-leverage samples needed to mitigate covariate shift. When an expert policy or human annotator supplies a corrective action for such a state, the sample enters training with $\mathcal{M}(t) = 1$ and the new target $\mathbf{u}^*(t) = \pi^*(\mathbf{x}_t)$, teaching the network how to recover back to nominal execution. The state stays; only its label changes. When no expert can supply that label, which is common for continuous control, the state keeps $\mathcal{M}(t) = 0$ and remains in the record for failure analysis and later relabeling.
 2. **Atomic handover and enforcer blend ($t_{\text{commit}} \le t < t_{\text{commit}} + \tau_{\text{blend}}$)**: The safety microcontroller latches endpoints and executes the $C^2$ smoothstep trajectory.
    - *Masking policy*: $\mathcal{M}(t) = 0$ unconditionally. Dispatched setpoints $\mathbf{u}(t)$ are synthetic interpolation splines generated by the enforcer's deterministic quintic profile. They reflect neither neural policy intent nor human cognitive demonstration. Training on this interval teaches the policy to output ungrounded, open-loop kinematic ramps.
 3. **Operator re-orientation and hunting ($t_{\text{commit}} + \tau_{\text{blend}} \le t < t_{\text{stabilize}}$)**: Upon receiving the live manual lease ($T_{\text{lease,man}}$), the operator experiences neuromuscular latency, visual parallax, and control re-orientation, producing high-jerk, oscillatory corrections as they acquire situational awareness.
@@ -1276,7 +1436,7 @@ A supervisory intervention event does not represent a monolithic demonstration. 
 4. **Stabilized expert recovery ($t \ge t_{\text{stabilize}}$)**: The operator provides task-directed recovery guidance after the measured stabilization criteria hold. Smooth motion alone does not establish correct recovery; the episode must also satisfy the task's validity criteria before its actions become expert targets.
    - *Masking policy*: Set $\mathcal{M}(t) = 1$, with imitation target $\mathbf{u}^*(t) = \mathbf{u}_{\text{human}}(t)$, only for stabilized segments that also pass the task-validity review; keep other segments excluded from direct imitation. Accepted recovery trajectories expand the training distribution without treating smooth but unsuccessful intervention as expert behavior.
 
-Feeding unsegmented logs into behavioral cloning or diffusion policies mixes synthetic enforcer ramps and operator panic into the training distribution. The mask $\mathcal{M}(t)$ uses the safety microcontroller's authenticated PTP timestamps to distinguish controller ownership, subject to the recorded clock and sampling limits. It preserves learner-visited states for corrective relabeling while restricting direct imitation to reviewed recovery segments.
+Feeding unsegmented logs into behavioral cloning or diffusion policies mixes synthetic enforcer ramps and operator panic into the training distribution. The mask $\mathcal{M}(t)$ and target $\mathbf{u}^*(t)$ use the safety microcontroller's authenticated PTP timestamps to distinguish controller ownership, subject to the recorded clock and sampling limits. They preserve learner-visited states for corrective relabeling while restricting imitation targets to expert relabels and reviewed recovery segments.
 
 When assembling the safety case for operational certification, @sec-release evaluates the authority record as the evidence for claim C6, the claim that authority transfers as these four rules specify. A safety assessment examines the stated authority constraints, implementation evidence, fault coverage, and tested operating envelope. The certification package pairs the static authority manifest with the plant measurements that @sec-intervention-bumpless-transfer requires of every transfer and with execution traces from the fault-injection campaign that show any gaps in the audit trail. The plant measurements are needed because a handover that is correct at the bus can still slide the base or shift the tote rack. The measured preemption latency in those traces is a percentile of the tested distribution rather than a bound (@sec-nervous-deterministic-fieldbuses).
 
@@ -1301,13 +1461,13 @@ Changing an authority register does not complete a safe handover\index{Handover!
 # │ Goal:    Show that one configured window fits at the crawl and overruns at
 # │          the aisle speed.
 # │ Show:    Travel during the window and the overrun at 1.3 m/s; the spare
-# │          and T_latest at the 0.3 m/s crawl.
-# │ How:     Finished stopping budget (C2 stop, all overheads) at each speed,
-# │          the window added to tau_delay.
+# │          and T_latest at the out-of-loop crawl.
+# │ How:     Finished stopping budget (jerk-limited resident stop, all
+# │          overheads) at each speed, the window added to tau_delay.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import calc_c2_stop_suffix
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -1322,27 +1482,28 @@ class InterventionFixedWindowPitfall:
     d_clear = AISLE.d_clear  # category: illustrative
     tau_delay = AISLE.tau_delay  # category: derived
     a_brake = AISLE.a_brake  # category: illustrative
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
     overhead = AISLE.fixed_overhead  # category: illustrative / chosen
     window = InterventionTimeoutBudget.config  # category: chosen
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    def _budget(speed, tau, a, ovh):
-        return (speed * tau + calc_c2_stop_suffix(speed, a)["distance"] + ovh).to(millimeter)
+    def _budget(speed, tau, a, j, ovh):
+        return (speed * tau + calc_scurve_stop_distance(speed, a, j) + ovh).to(millimeter)
 
-    budget = _budget(v, tau_delay, a_brake, overhead)
+    budget = _budget(v, tau_delay, a_brake, j_brake, overhead)
     travel = (v * window).to(millimeter)
     overrun = (budget + travel - d_clear).to(millimeter)
-    spare_crawl = (d_clear - _budget(v_crawl, tau_delay, a_brake, overhead)).to(millimeter)
+    spare_crawl = (d_clear - _budget(v_crawl, tau_delay, a_brake, j_brake, overhead)).to(millimeter)
     t_latest_crawl = (spare_crawl / v_crawl).to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(budget.magnitude - 997.43) < 5e-3, f"finished budget at the aisle speed: {budget}")
+    check(abs(budget.magnitude - 968.99) < 5e-3, f"finished budget at the aisle speed: {budget}")
     check(overrun.magnitude > 0, "The window must overrun the clear distance at the aisle speed.")
     check(t_latest_crawl > window, "The same window must fit at the crawl.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
-    v_crawl_str = fmt_velocity(v_crawl, unit=meter / second, precision=1)
+    v_crawl_str = fmt_velocity(v_crawl, unit=meter / second, precision=2)
     window_str = fmt_latency(window, unit=millisecond, precision=0)
     travel_str = fmt_length(travel, unit=meter, precision=2)
     d_clear_str = fmt_length(d_clear, unit=meter, precision=2)
@@ -1389,48 +1550,57 @@ Manual takeover also requires a bounded grant of proposal authority. Packet loss
 # │
 # │ Goal:    Show that authentication alone leaves an availability hazard:
 # │          forged packets that the verifier must reject still spend its time.
-# │ Show:    The fast verifier's time per packet; the fewest forged packets
-# │          queued ahead of a genuine veto that push its admission past
-# │          T_latest at the aisle speed; the admission time they cause.
-# │ How:     Serial verification on the permission processor, each packet
-# │          taking t_auth,B of InterventionAuthBudget; the genuine veto
-# │          finishes after (n + 1) verifications.
+# │ Show:    The signature verification time per packet; the fewest forged
+# │          signed takeover requests queued ahead of a genuine veto that push
+# │          its admission past T_latest at the aisle speed; the admission time
+# │          they cause and the arrival rate they need; the same count for
+# │          MAC-only frames.
+# │ How:     Serial verification on the permission processor, each signed
+# │          packet taking t_sig of InterventionAuthBudget; the genuine veto
+# │          finishes after (n + 1) verifications; the forgeries must arrive
+# │          within that interval.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
-from mlsysim.core.units import millisecond
-from mlsysim.fmt import fmt_latency, fmt_count, check
+from mlsysim.core.units import millisecond, second, hertz
+from mlsysim.fmt import fmt_int, fmt_latency, fmt_count, check
 
 class InterventionVerifierFloodPitfall:
     """Forged takeover packets that delay a genuine veto past T_latest."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    t_verify = InterventionAuthBudget.t_auth_b  # category: derived
+    t_verify = InterventionAuthBudget.t_sig  # category: derived (sourced cycles / MCU clock)
+    t_mac = InterventionAuthBudget.t_mac  # category: derived
     t_latest = InterventionTimeoutBudget.t_latest  # category: derived
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     # Fewest forged packets n with (n + 1) * t_verify > t_latest.
     n_forged = math.floor((t_latest / t_verify).to("").magnitude)
     t_admit = ((n_forged + 1) * t_verify).to(millisecond)
+    # Whole packets per second the forger must sustain, rounded up.
+    arrival_rate = math.ceil((n_forged / t_admit).to(1 / second).magnitude)
+    n_forged_mac = math.floor((t_latest / t_mac).to("").magnitude)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(n_forged == 5, f"forged packets that push the veto past T_latest: {n_forged}")
-    check(abs(t_admit.magnitude - 90.0) < 1e-9, f"genuine veto admission time: {t_admit}")
+    check(n_forged == 55, f"forged packets that push the veto past T_latest: {n_forged}")
     check(t_admit > t_latest, "The queued forgeries must push the veto past T_latest.")
     check(n_forged * t_verify <= t_latest, "One fewer forgery must still let the veto fit.")
+    check(n_forged_mac > 100 * n_forged, "A MAC-only flood needs far more frames than a signature flood.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    t_verify_str = fmt_latency(t_verify, unit=millisecond, precision=0)
-    t_latest_str = fmt_latency(t_latest, unit=millisecond, precision=1)
-    t_admit_str = fmt_latency(t_admit, unit=millisecond, precision=0)
+    t_verify_str = fmt_latency(t_verify, unit=millisecond, precision=1)
+    t_latest_str = fmt_latency(t_latest, unit=millisecond, precision=2)
+    t_admit_str = fmt_latency(t_admit, unit=millisecond, precision=2)
     n_forged_str = fmt_count(n_forged)
+    arrival_rate_str = fmt_int(arrival_rate)
+    n_forged_mac_str = fmt_count(n_forged_mac)
 ```
 
 ::: {.fallacy-pitfall}
 
 **Pitfall**: *Relying on cryptographic authentication without rate limiting the traffic that reaches the verifier.*
 
-Consider an admission queue that checks each remote takeover packet with the illustrative fast verifier of @sec-intervention-authenticating-intervention, at `{python} InterventionVerifierFloodPitfall.t_verify_str` per signature\index{Authentication!signature verification}. Verification rejects a forged packet only after spending that time on it. If a faulty or compromised node on the link\index{Network!availability} sends `manual_drive` packets that fail verification faster than the verifier retires them, as few as `{python} InterventionVerifierFloodPitfall.n_forged_str` of them queued ahead of the remote assistant's genuine `veto_path` delay its admission to `{python} InterventionVerifierFloodPitfall.t_admit_str`, past the `{python} InterventionVerifierFloodPitfall.t_latest_str` fallback deadline $T_{\text{latest}}$ at the aisle speed. The independently wired protective input and local lease timer do not wait in that queue. Their qualified responses must remain available even when network requests cannot be admitted. Authentication preserves command integrity while leaving an availability hazard. Mailbox filtering and per-source rate limiting\index{Network!rate limiting} must bound the traffic before it reaches the verifier, and qualification must test both command rejection and enforcement timing under the admitted load.
+Consider an admission queue that checks each signed remote takeover request of @sec-intervention-authenticating-intervention, at `{python} InterventionVerifierFloodPitfall.t_verify_str` per Ed25519 signature\index{Authentication!signature verification}. Verification rejects a forged request only after spending that time on it. If a faulty or compromised node on the link\index{Network!availability} sends signed `manual_drive` requests that fail verification faster than the verifier retires them, as few as `{python} InterventionVerifierFloodPitfall.n_forged_str` of them queued ahead of the remote assistant's genuine `veto_path` delay its admission to `{python} InterventionVerifierFloodPitfall.t_admit_str`, past the `{python} InterventionVerifierFloodPitfall.t_latest_str` fallback deadline $T_{\text{latest}}$ at the aisle speed. The forger needs to deliver only about `{python} InterventionVerifierFloodPitfall.arrival_rate_str` requests per second, a rate any wireless link carries. A MAC-only stream moves the bottleneck without removing it. A MAC flood would need `{python} InterventionVerifierFloodPitfall.n_forged_mac_str` forged frames inside the same deadline, so the link's frame rate rather than the verifier limits it. The independently wired protective input and local lease timer do not wait in that queue. Their qualified responses must remain available even when network requests cannot be admitted. Authentication preserves command integrity while leaving an availability hazard. Mailbox filtering and per-source rate limiting\index{Network!rate limiting} must bound the traffic before it reaches the verifier, and qualification must test both command rejection and enforcement timing under the admitted load.
 
 **Authentication preserves integrity while introducing a denial-of-service hazard: a receiver cannot prioritize authenticated packets over malicious packets without spending CPU cycles to verify them first.**
 
@@ -1446,7 +1616,7 @@ A learning pipeline treats every remote-assistant takeover of the mobile manipul
 
 **Unsegmented takeover logs teach neural policies to imitate near-failure oscillations and human panic.**
 
-**Architect's countermeasure:** Use hardware PTP commit timestamps to enforce causal intervention masking (@eq-intervention-causal-masking-loss). Segregate pre-commit data (Interval 1) for failure-mode analysis and DAgger-style corrective relabeling, zero out the enforcer's transition phase (Interval 2, $\mathcal{M}(t)=0$), exclude the transitional re-orientation phase from imitation while retaining its raw forensic data (Interval 3, $\mathcal{M}(t)=0$), and train imitation policies only on post-stabilization manual guidance that also passes task-validity review (Interval 4, $\mathcal{M}(t)=1$).
+**Architect's countermeasure:** Use hardware PTP commit timestamps to enforce causal intervention masking (@eq-intervention-causal-masking-loss). Segregate pre-commit data (Interval 1) for failure-mode analysis, never using the policy's own commands as targets and admitting a state only with an expert relabel as its new target, zero out the enforcer's transition phase (Interval 2, $\mathcal{M}(t)=0$), exclude the transitional re-orientation phase from imitation while retaining its raw forensic data (Interval 3, $\mathcal{M}(t)=0$), and train imitation policies only on post-stabilization manual guidance that also passes task-validity review (Interval 4, $\mathcal{M}(t)=1$).
 
 :::
 
@@ -1467,12 +1637,17 @@ A learning pipeline treats every remote-assistant takeover of the mobile manipul
 # │ Show:    Spare margin and T_latest at the aisle speed; T_latest at the
 # │          slow-down; the chosen slow-down and crawl speeds; the
 # │          out-of-loop ceiling.
-# │ How:     Finished stopping budget (C2 stop, all overheads) from the
-# │          WarehouseAisle scenario; ceilings by calc_max_permitted_velocity.
+# │ How:     Finished stopping budget (jerk-limited resident stop, all
+# │          overheads) from the WarehouseAisle scenario; ceilings by
+# │          calc_scurve_max_permitted_velocity.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_max_permitted_velocity
+from mlsysim.physics.robotics import (
+    calc_c2_stop_suffix,
+    calc_scurve_stop_distance,
+    calc_scurve_max_permitted_velocity,
+)
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -1486,47 +1661,61 @@ class InterventionSummaryWaiting:
     d_clear = AISLE.d_clear  # category: illustrative
     tau_delay = AISLE.tau_delay  # category: derived
     a_brake = AISLE.a_brake  # category: illustrative
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
     overhead = AISLE.fixed_overhead  # category: illustrative / chosen
-    t_ool = AISLE.t_takeover_out_of_loop  # category: illustrative
+    t_in = AISLE.t_takeover_in_loop  # category: derived (sourced human + transport)
+    t_ool = AISLE.t_takeover_out_of_loop  # category: derived (sourced human + transport)
     v_in = AISLE.v_takeover_in_loop  # category: chosen
     v_ool = AISLE.v_takeover_out_of_loop  # category: chosen
     t_latest_in = InterventionTimeoutBudget.t_latest_in  # category: derived
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    budget = (v * tau_delay + calc_c2_stop_suffix(v, a_brake)["distance"] + overhead).to(millimeter)
+    budget = (v * tau_delay + calc_scurve_stop_distance(v, a_brake, j_brake) + overhead).to(millimeter)
     spare = (d_clear - budget).to(millimeter)
     t_latest = (spare / v).to(millisecond)
-    ceil_ool = calc_max_permitted_velocity(
+    ceil_in = calc_scurve_max_permitted_velocity(
+        d_clear,
+        tau_delay + t_in,
+        a_brake,
+        j_brake,
+        AISLE.delta_loc + AISLE.eps_track,
+        AISLE.delta_margin,
+    ).to(meter / second)
+    ceil_ool = calc_scurve_max_permitted_velocity(
         d_clear,
         tau_delay + t_ool,
-        a_brake / 1.5,
+        a_brake,
+        j_brake,
         AISLE.delta_loc + AISLE.eps_track,
         AISLE.delta_margin,
     ).to(meter / second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(spare.magnitude - 102.57) < 5e-3, f"spare margin at the aisle speed: {spare}")
-    check(abs(t_latest.magnitude - 78.9) < 5e-3, f"T_latest at the aisle speed: {t_latest}")
-    check(abs(ceil_ool.magnitude - 0.3986) < 5e-5, f"out-of-loop takeover ceiling: {ceil_ool}")
-    check(v_ool < ceil_ool, "The chosen crawl must sit under the out-of-loop ceiling.")
-    check(abs(t_latest_in.magnitude - 174.73) < 5e-3, f"T_latest at the in-loop slow-down: {t_latest_in}")
+    check(abs(spare.magnitude - 131.01) < 5e-3, f"spare margin at the aisle speed: {spare}")
+    check(abs(t_latest.magnitude - 100.775) < 5e-3, f"T_latest at the aisle speed: {t_latest}")
+    check(abs(ceil_in.magnitude - 0.8362) < 5e-5, f"in-loop takeover ceiling: {ceil_in}")
+    check(abs(ceil_ool.magnitude - 0.1911) < 5e-5, f"out-of-loop takeover ceiling: {ceil_ool}")
+    check(v_in < ceil_in and v_ool < ceil_ool, "The chosen request speeds must sit under their ceilings.")
+    check(abs(t_latest_in.magnitude - 663.275) < 5e-3, f"T_latest at the in-loop slow-down: {t_latest_in}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
     spare_str = fmt_length(spare, unit=millimeter, precision=1)
     t_latest_str = fmt_latency(t_latest, unit=millisecond, precision=1)
     v_in_str = fmt_velocity(v_in, unit=meter / second, precision=1)
-    v_ool_str = fmt_velocity(v_ool, unit=meter / second, precision=1)
-    t_ool_str = fmt_latency(t_ool, unit=second, precision=0)
+    v_ool_str = fmt_velocity(v_ool, unit=meter / second, precision=2)
+    t_in_str = fmt_latency(t_in, unit=millisecond, precision=0)
+    t_ool_str = fmt_latency(t_ool, unit=second, precision=1)
+    ceil_in_str = fmt_velocity(ceil_in, unit=meter / second, precision=2)
     ceil_ool_str = fmt_velocity(ceil_ool, unit=meter / second, precision=2)
     t_latest_in_str = fmt_latency(t_latest_in, unit=millisecond, precision=1)
 ```
 
-Human authority over an embodied physical AI system rests on a channel-specific contract that preserves a feasible local response throughout waiting, commit, blending, and manual operation. When communication stalls or software faults occur, role-specific **monotonic safety leases** bound authority and invoke the validated fallback without awaiting high-level software. The autonomous chunk lease and the `{python} InterventionTimeoutBudget.manual_lease_str` manual lease each have to fit the stopping budget for the active mode. Supervisory intervention arbitrates the transition between proposers while the independent enforcer checks admitted commands and executes the selected stop when a lease lapses. Network commands reach the enforcer only after capability and authentication checks, whose computational cost makes rate limiting ahead of the verifier essential, while trusted protective wiring bypasses the network entirely. On the mobile manipulator at its `{python} InterventionSummaryWaiting.v_str` aisle speed, the finished stopping budget leaves `{python} InterventionSummaryWaiting.spare_str`, which corresponds to `{python} InterventionSummaryWaiting.t_latest_str` before subtracting the unqualified $\Delta_{\text{da}}$. Only the remainder can be spent waiting before the machine dispatches its own stop. The worked design therefore tests a `{python} InterventionSummaryWaiting.v_in_str` in-loop request and a `{python} InterventionSummaryWaiting.v_ool_str` out-of-loop crawl; a newly discovered rack-end pallet requires the local stop first. Neither candidate speed is qualified until the missing delay and remaining physical premises close.
+Human authority over an embodied physical AI system rests on a channel-specific contract that preserves a feasible local response throughout waiting, commit, blending, and manual operation. When communication stalls or software faults occur, role-specific **monotonic safety leases** bound authority and invoke the validated fallback without awaiting high-level software. The autonomous chunk lease and the `{python} InterventionTimeoutBudget.manual_lease_str` manual lease each have to fit the stopping budget for the active mode. Supervisory intervention arbitrates the transition between proposers while the independent enforcer checks admitted commands and executes the selected stop when a lease lapses. Network commands reach the enforcer only after capability and authentication checks, whose computational cost makes rate limiting ahead of the verifier essential, while trusted protective wiring bypasses the network entirely. On the mobile manipulator at its `{python} InterventionSummaryWaiting.v_str` aisle speed, the finished stopping budget leaves `{python} InterventionSummaryWaiting.spare_str`, which corresponds to `{python} InterventionSummaryWaiting.t_latest_str` before subtracting the unqualified $\Delta_{\text{da}}$. Only the remainder can be spent waiting before the machine dispatches its own stop. Sourced human response times, `{python} InterventionSummaryWaiting.t_in_str` for an attending in-loop operator and `{python} InterventionSummaryWaiting.t_ool_str` at the 90th percentile of out-of-loop takeover conditions, cap the request speeds at `{python} InterventionSummaryWaiting.ceil_in_str` and `{python} InterventionSummaryWaiting.ceil_ool_str`. The worked design therefore requests an in-loop takeover only after slowing to `{python} InterventionSummaryWaiting.v_in_str` and an out-of-loop takeover from a `{python} InterventionSummaryWaiting.v_ool_str` crawl or, more robustly, from standstill after an automatic stop; a newly discovered rack-end pallet requires the local stop first. Neither candidate speed is qualified until the missing delay and remaining physical premises close.
 
 Transferring control from an active policy takes time, because replacing an admitted policy setpoint with a different human target in one $1\text{ ms}$ cycle requests a torque step. The $C^2$ bumpless authority transfer ramp\index{C2 bumpless transfer ramp@$C^2$ bumpless authority transfer ramp} instead varies an authority parameter $\alpha(t)$ smoothly from zero to one between latched command endpoints. An optional force-reflecting console needs a separate passivity and physical-limit argument for its delayed feedback loop. Its sampled implementation must respect command-rate limits and the stopping reserve of @sec-enforcement-stopping-envelopes.
 
-In the illustrative design, the candidate base blend starts from the `{python} InterventionBlendBudget.v_crawl_str` crawl, over `{python} InterventionBlendBudget.T_crawl_budget_str`. At the `{python} InterventionBlendBudget.v0_str` in-loop takeover speed the proposed braking blend does not fit the clearance that remains, so the base receives the resident stop while the arm blends over `{python} InterventionBlendBudget.arm_budget_str`. Execution remains conditional on qualification of the complete delay, rounded profile, and state-matched stopping reserve. The enforcer must monitor that reserve and the plant response at every blended tick.
+In the illustrative design, a base command blend lasts `{python} InterventionBlendBudget.T_budget_str` at any speed, because its jerk bound belongs to the load. At the `{python} InterventionBlendBudget.v0_str` in-loop takeover speed a braking blend does not fit the clearance that remains, and no smoothed braking transition under the same bounds could beat the resident stop, so the base receives the resident stop while the arm blends over `{python} InterventionBlendBudget.arm_budget_str`. Execution remains conditional on qualification of the complete delay, rounded profile, and state-matched stopping reserve. The enforcer must monitor that reserve and the plant response at every blended tick.
 
 The **Intervention Event record** makes each intervention forensically reviewable. As the thirteenth contract in the machine stack's lineage, it binds the static authority manifest (pairing actuator channels to authorized actors, tiers, and deadlines) with dynamic per-tick evidence tuples $\langle t_{\text{MCU}}, S_{\text{auth}}, \mathbf{x}_{\text{state}}, \mathbf{u}_{\text{prop}}, \mathbf{u}_{\text{enf}}, \mathbf{u}_{\text{act}}, \text{ID}_{\text{operator}}, \tau_{\text{lease\_rem}}\rangle$ that log who held authority and what was proposed, admitted, and delivered, consuming fallback rungs from the enforcement record (@sec-enforcement-telemetry) and operator-path latencies from the placement record (@sec-placement-hardware-allocation). A logged commit marks the recorded boundary where autonomous policy authority was revoked, subject to the logger's clock and sampling limits, and hash chaining with protected keys can reveal later modification. Command and authority records support reconstruction only when paired with independent sensor, current, and contact evidence and their timing uncertainty.
 
@@ -1534,7 +1723,7 @@ For model training, the pre-commit interval is a **policy-owned** segment even w
 
 ::: {.callout-takeaways title="Supervisory intervention and authority bounds"}
 * **State-dependent fallback and monotonic leases:** Bind each proposer to its mode-specific lease and stopping reserve. Expiry invokes the validated local response for the current state, with the sensing, drive energy, braking, and holding premises that response requires. The manual lease here is `{python} InterventionTimeoutBudget.manual_lease_str`.
-* **Clearance governs waiting:** The partial budget gives `{python} InterventionSummaryWaiting.t_latest_str` at aisle speed and `{python} InterventionSummaryWaiting.t_latest_in_str` at the `{python} InterventionSummaryWaiting.v_in_str` candidate slow-down. Subtract the missing $\Delta_{\text{da}}$ in that capture-origin ledger. Live checks pair current clearance with only future delay and obey earlier active expiry. A `{python} InterventionSummaryWaiting.t_ool_str` out-of-loop takeover needs a speed below `{python} InterventionSummaryWaiting.ceil_ool_str`. Dispatch fallback by the earlier of the configuration ceiling and the state-dependent stopping deadline.
+* **Clearance governs waiting:** The partial budget gives `{python} InterventionSummaryWaiting.t_latest_str` at aisle speed and `{python} InterventionSummaryWaiting.t_latest_in_str` at the `{python} InterventionSummaryWaiting.v_in_str` candidate slow-down. Subtract the missing $\Delta_{\text{da}}$ in that capture-origin ledger. Live checks pair current clearance with only future delay and obey earlier active expiry. Price the human at a sourced percentile, not a hopeful point value. A `{python} InterventionSummaryWaiting.t_in_str` in-loop response needs a speed below `{python} InterventionSummaryWaiting.ceil_in_str`, and a `{python} InterventionSummaryWaiting.t_ool_str` out-of-loop takeover a speed below `{python} InterventionSummaryWaiting.ceil_ool_str`, which makes stopping before handover the robust design. Dispatch fallback by the earlier of the configuration ceiling and the state-dependent stopping deadline.
 * **One actuator writer:** Source arbitration and exclusive enforcer output ownership prevent conflicting actuator writes; bus arbitration alone does not establish authority. The four-phase takeover protocol (Request, Acknowledge, Commit, Confirm) shifts authority deterministically. Commit revokes the policy's token on the committed channels and latches its last admitted command. The enforcer owns `BLEND` and checks human proposals against the same physical limits before releasing the supervisory token.
 * **Smooth commands and haptic passivity:** A fixed-endpoint $C^2$ acceleration profile bounds commanded jerk during transfer, and its extra stopping distance must be reserved. An optional bilateral console also needs qualified interaction-energy control under its stated delay, loss, and actuator assumptions.
 * **Distinct stop paths:** Trusted protective wiring invokes a risk-assessed plant response. Invalid network packets are rejected; lost valid renewal invokes the lease fallback.

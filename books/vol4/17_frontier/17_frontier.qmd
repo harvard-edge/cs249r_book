@@ -105,10 +105,13 @@ The first law asks what the cell cannot undo, so the evaluation begins by catalo
 # │ PACKAGING CELL: A CANDIDATE TRANSPORT MODE
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-frontier-packaging-cell-study.
-# │ Goal:    Test nominal and restricted speeds against a fixed stop line.
-# │ Show:    Delay, stopping distances, reserve, and translational energy.
+# │ Goal:    Test nominal speed against a fixed stop line, solve the speed
+# │          ceiling the stop budget admits, and check a restricted speed below it.
+# │ Show:    Delay, stopping distances, the ceiling, reserve, and translational energy.
 # │ How:     One-off hypothetical scenario inputs; MLSysIM constant-deceleration
-# │          stopping and kinetic-energy models. These are not measurements.
+# │          stopping (calc_safe_stopping_distance), its positive root
+# │          (calc_max_permitted_velocity), and kinetic-energy models. These are
+# │          not measurements.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
@@ -137,6 +140,8 @@ class PackagingCell:
     brake_nom = v_nom**2 / (2 * deceleration)
     stop_nom = calc_safe_stopping_distance(v_nom, delay, deceleration)
     deficit = stop_nom - clearance
+    # Speed ceiling: positive root of v tau + v^2/(2a) = clearance - reserve
+    v_ceiling = calc_max_permitted_velocity(clearance, delay, deceleration, physical_margin=reserve).to(ureg.meter / ureg.second)
     blind_clamp = v_clamp * delay
     brake_clamp = v_clamp**2 / (2 * deceleration)
     stop_clamp = calc_safe_stopping_distance(v_clamp, delay, deceleration)
@@ -152,6 +157,12 @@ class PackagingCell:
     check(abs(stop_nom.to(ureg.mm).magnitude - 171) < 1e-9, "Nominal stop must be 171 mm.")
     check(abs(stop_clamp.to(ureg.mm).magnitude - 40.3333333333) < 1e-6, "Restricted stop must be 40.3 mm.")
     check(stop_clamp < stop_budget and remaining > reserve, "Restricted stop must preserve the allocated reserve.")
+    check(abs(v_ceiling.magnitude - 0.5471) < 5e-4, "Carriage speed ceiling must be 0.55 m/s.")
+    check(
+        abs(calc_safe_stopping_distance(v_ceiling, delay, deceleration).to(ureg.mm).magnitude - stop_budget.to(ureg.mm).magnitude) < 1e-6,
+        "At the ceiling the stop must fill the stop budget exactly.",
+    )
+    check(v_clamp < v_ceiling < v_nom, "The restricted speed is chosen below the ceiling, which sits below nominal.")
     check(abs(energy_nom.to(joule).magnitude - 13.5) < 1e-9, "Nominal translational energy must be 13.5 J.")
     check(abs(energy_clamp.to(joule).magnitude - 1.5) < 1e-9, "Restricted translational energy must be 1.5 J.")
 
@@ -159,6 +170,7 @@ class PackagingCell:
     mass_str = fmt_qty(mass, unit=ureg.kg, precision=0)
     v_nom_str = fmt_velocity(v_nom, precision=2)
     v_clamp_str = fmt_velocity(v_clamp, precision=2)
+    v_ceiling_str = fmt_velocity(v_ceiling, precision=2)
     clearance_str = fmt_length(clearance, unit=ureg.mm, precision=0)
     reserve_str = fmt_length(reserve, unit=ureg.mm, precision=0)
     deceleration_str = fmt_acceleration(deceleration, precision=0)
@@ -192,7 +204,9 @@ The delay budget must cover the entire interval from that closure to effective b
 $$d_{\text{stop}} = v\tau_{\text{delay}} + \frac{v^2}{2a_{\text{brake}}}.$$
 At nominal speed, delay travel alone is `{python} PackagingCell.blind_nom_str`, already greater than the clearance. Braking adds `{python} PackagingCell.brake_nom_str`, giving a total of `{python} PackagingCell.stop_nom_str` and a deficit of `{python} PackagingCell.deficit_str`. Under these assumptions the carriage reaches the gate before braking even begins.
 
-A candidate transport mode follows from the same model. Reserving `{python} PackagingCell.reserve_str` for uncertainty and residual clearance leaves a stopping budget of `{python} PackagingCell.stop_budget_str`. At a selected speed ceiling of `{python} PackagingCell.v_clamp_str`, delay travel falls to `{python} PackagingCell.blind_clamp_str` and braking distance to `{python} PackagingCell.brake_clamp_str`. Their sum, `{python} PackagingCell.stop_clamp_str`, leaves `{python} PackagingCell.remaining_str` before the stop line, exceeding the allocated reserve. Translational kinetic energy, $E_k = mv^2/2$, falls from `{python} PackagingCell.energy_nom_str` to `{python} PackagingCell.energy_clamp_str`, a reduction of `{python} PackagingCell.energy_reduction_str`. The slower mode is therefore worth qualifying. The calculation does not establish that the delay and deceleration bounds hold, or that the chosen reserve covers clearance error and speed overshoot; those remain measurements and acceptance decisions for the assembled cell.
+A candidate transport mode follows from the same model. Reserving `{python} PackagingCell.reserve_str` for uncertainty and residual clearance leaves a stopping budget of `{python} PackagingCell.stop_budget_str`. Setting $d_{\text{stop}}$ equal to that budget, $d_{\text{budget}}$, and solving for the positive root gives the speed ceiling
+$$v_{\max} = -a_{\text{brake}}\tau_{\text{delay}} + \sqrt{(a_{\text{brake}}\tau_{\text{delay}})^2 + 2a_{\text{brake}}\,d_{\text{budget}}},$$
+which is `{python} PackagingCell.v_ceiling_str` for these inputs. The candidate mode admits `{python} PackagingCell.v_clamp_str`, below that ceiling. At that speed, delay travel falls to `{python} PackagingCell.blind_clamp_str` and braking distance to `{python} PackagingCell.brake_clamp_str`. Their sum, `{python} PackagingCell.stop_clamp_str`, leaves `{python} PackagingCell.remaining_str` before the stop line, exceeding the allocated reserve. Translational kinetic energy, $E_k = mv^2/2$, falls from `{python} PackagingCell.energy_nom_str` to `{python} PackagingCell.energy_clamp_str`, a reduction of `{python} PackagingCell.energy_reduction_str`. The slower mode is therefore worth qualifying. The calculation does not establish that the delay and deceleration bounds hold, or that the chosen reserve covers clearance error and speed overshoot; those remain measurements and acceptance decisions for the assembled cell.
 
 ::: {.column-margin .margin-pointer}
 ↩ Closed-loop rollouts, distribution shift, and endogenous data generation are developed in @sec-data and @sec-evaluation.
@@ -242,8 +256,10 @@ A pallet jack with a weeping hydraulic line crosses one aisle of the site where 
 # │          margin buys. The walking-person ceiling is Ch12's
 # │          (@sec-enforcement-stopping-envelopes) and is cited, not recomputed.
 # │ How:     credible deceleration a = min(a_brake, mu g); the finished budget
-# │          (C2 stop, all three overheads) at the aisle speed; its ceiling as
-# │          the positive root with a_eff = a / 1.5; zero-failure sample size.
+# │          (jerk-limited S-curve stop, all three overheads) at the aisle speed,
+# │          jerk bound = the reference C2 polynomial's peak jerk at the drive
+# │          limit (@sec-planning-c2-stopping-suffix); its ceiling from
+# │          calc_scurve_max_permitted_velocity; zero-failure sample size.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
@@ -272,17 +288,20 @@ class OilFilm:
     a_dry = min(a_brake, mu_dry * g)
     a_insp = min(a_brake, mu_insp * g)
     a_oil = min(a_brake, mu_oil * g)
+    # Jerk bound: the reference C2 polynomial's peak jerk at the drive limit; the
+    # floor caps the deceleration, while the jerk bound belongs to the load.
+    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, a_brake)["peak_jerk"].to(ureg.meter / ureg.second**3)
 
-    # finished budget at the aisle speed: v tau + 0.75 v^2/a (C2 stop) + overhead
-    budget_aisle = (v_aisle * tau_delay + calc_c2_stop_suffix(v_aisle, a_dry)["distance"] + overhead).to(ureg.meter)
+    # finished budget at the aisle speed: v tau + S-curve stop + overhead
+    budget_aisle = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_dry, j_brake) + overhead).to(ureg.meter)
     spare_aisle = (d_clear - budget_aisle).to(ureg.millimeter)
     t_latest = (spare_aisle / v_aisle).to(ms)
-    stop_oil = (v_aisle * tau_delay + calc_c2_stop_suffix(v_aisle, a_oil)["distance"] + overhead).to(ureg.meter)
+    stop_oil = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_oil, j_brake) + overhead).to(ureg.meter)
 
-    # ceilings: positive root of the finished budget with a_eff = a / 1.5
+    # ceilings: the largest speed whose finished budget fits the clear distance
     margin_loc = AISLE.delta_loc + AISLE.eps_track
-    ceiling_dry = calc_max_permitted_velocity(d_clear, tau_delay, a_dry / 1.5, margin_loc, AISLE.delta_margin)
-    ceiling_insp = calc_max_permitted_velocity(d_clear, tau_delay, a_insp / 1.5, margin_loc, AISLE.delta_margin)
+    ceiling_dry = calc_scurve_max_permitted_velocity(d_clear, tau_delay, a_dry, j_brake, margin_loc, AISLE.delta_margin)
+    ceiling_insp = calc_scurve_max_permitted_velocity(d_clear, tau_delay, a_insp, j_brake, margin_loc, AISLE.delta_margin)
 
     n_closure = calc_zero_failure_sample_size(1.0 - p_miss_target, confidence=confidence)
     p_miss_contrast = 1.0 - calc_clopper_pearson_zero_failure_bound(n_contrast, confidence=confidence)
@@ -292,20 +311,21 @@ class OilFilm:
     check(a_dry == a_brake and mu_dry > mu_min, "On dry concrete the brakes, not friction, must bind.")
     check(mu_oil < mu_min and mu_insp < mu_min, "On the film and on an inspected floor friction must bind.")
     check(abs(a_insp.to(ureg.meter / ureg.second**2).magnitude - 1.1768) < 5e-4, f"Inspected-floor deceleration should be 1.18 m/s², got {a_insp}.")
-    check(abs(budget_aisle.to(ureg.millimeter).magnitude - 997.43) < 5e-3, f"Budget at 1.3 m/s should be 997.43 mm, got {budget_aisle}.")
-    check(abs(spare_aisle.to(ureg.millimeter).magnitude - 102.57) < 5e-3, f"Spare at 1.3 m/s should be 102.57 mm, got {spare_aisle}.")
-    check(abs(t_latest.to(ms).magnitude - 78.9) < 5e-2, f"T_latest should be 78.9 ms, got {t_latest}.")
-    check(abs(ceiling_dry.to(ureg.meter / ureg.second).magnitude - 1.3898) < 5e-5, f"Dry-floor ceiling should be 1.3898 m/s, got {ceiling_dry}.")
+    check(abs(j_brake.magnitude - 64.0 / 9.0) < 1e-9, f"Jerk bound should be the reference polynomial's 7.11 m/s^3 peak, got {j_brake}.")
+    check(abs(budget_aisle.to(ureg.millimeter).magnitude - 968.9925) < 5e-3, f"Budget at 1.3 m/s should be 968.99 mm, got {budget_aisle}.")
+    check(abs(spare_aisle.to(ureg.millimeter).magnitude - 131.0075) < 5e-3, f"Spare at 1.3 m/s should be 131.01 mm, got {spare_aisle}.")
+    check(abs(t_latest.to(ms).magnitude - 100.775) < 5e-3, f"T_latest should be 100.8 ms, got {t_latest}.")
+    check(abs(ceiling_dry.to(ureg.meter / ureg.second).magnitude - 1.4367) < 5e-5, f"Dry-floor ceiling should be 1.4367 m/s, got {ceiling_dry}.")
     check(
-        abs(ceiling_insp.to(ureg.meter / ureg.second).magnitude - 1.0947) < 5e-5, f"Inspected-floor ceiling should be 1.0947 m/s, got {ceiling_insp}."
+        abs(ceiling_insp.to(ureg.meter / ureg.second).magnitude - 1.2309) < 5e-5, f"Inspected-floor ceiling should be 1.2309 m/s, got {ceiling_insp}."
     )
     check(
         v_restricted < ceiling_insp < v_aisle < ceiling_dry,
         "Restricted mode must sit under the inspected ceiling, and the aisle speed under the dry ceiling.",
     )
-    check(abs(stop_oil.to(ureg.meter).magnitude - 2.95) < 5e-3, f"Finished budget on the film should be 2.95 m, got {stop_oil}.")
+    check(abs(stop_oil.to(ureg.meter).magnitude - 2.13) < 5e-3, f"Finished budget on the film should be 2.13 m, got {stop_oil}.")
     check(abs(a_oil.to(ureg.meter / ureg.second**2).magnitude - 0.49) < 5e-3, f"Film deceleration should be 0.49 m/s², got {a_oil}.")
-    check(stop_oil > 2 * d_clear, f"On the film the stop from the aisle speed must exceed twice the clear distance, got {stop_oil}.")
+    check(stop_oil > d_clear, f"On the film the incomplete budget from the aisle speed must already exceed the clear distance, got {stop_oil}.")
     check(n_closure == 2995, f"Zero-failure closure test should need 2,995 trials, got {n_closure}.")
     check(abs(p_miss_contrast - 0.002991) < 5e-7, f"1,000 zero-miss trials should bound the miss rate at 0.002991, got {p_miss_contrast}.")
 
