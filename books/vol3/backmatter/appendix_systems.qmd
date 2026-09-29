@@ -1,0 +1,90 @@
+# Distributed State Foundations {#sec-vol3-appendix-systems}
+
+An agent runtime relies on distributed systems guarantees when it records intent, calls a tool, or hands work to another worker. This appendix provides histories, boundary comparisons, and failure examples for interpreting those guarantees without assuming that a local transaction governs an entire task. The chapters retain the agent-specific admission, persistence, and compensation protocols.
+
+## How to Use This Appendix {.unnumbered}
+
+Use the observed ambiguity to select the relevant background:
+
+- When timestamps appear to disagree about which operation happened first, @sec-vol3-appendix-systems-order distinguishes causal order from an enforced operation order.
+- When a design claims that an update is atomic or durable, @sec-vol3-appendix-systems-boundaries identifies the state and failures the claim must cover.
+- When recovery invokes transactions, sagas, or a write-ahead log, @sec-vol3-appendix-systems-transactions separates their guarantees.
+- When a reply is lost, @sec-vol3-appendix-systems-retries distinguishes repeated execution, repeated effects, and result recovery.
+- When a replacement worker takes ownership, @sec-vol3-appendix-systems-fencing explains how the resource excludes a stale holder.
+
+These distinctions help interpret, but do not replace, the endpoint's actual contract.
+
+## Histories and Operation Order {#sec-vol3-appendix-systems-order}
+
+Two workers read the same configuration version and independently prepare replacements. Sorting their log entries by wall-clock timestamp does not decide which replacement may publish. The clocks may differ, and even perfectly ordered observations would not prevent both workers from acting on the old version.
+
+A causal history records dependencies rather than inferring them from timestamps. Lamport's happened-before relation\index{Happened-before relation!definition} includes a process's local event order, message transmission before its receipt, and the transitive consequences of those relationships. Events unrelated by this relation are concurrent. A logical clock preserves the implication from causal precedence to increasing clock values, but the converse does not hold; unequal logical timestamps need not establish a causal relationship [@lamport1978time].
+
+An endpoint can impose a stronger contract on its operations. Under linearizability\index{Linearizability!definition}, each completed operation appears to take effect at one point between invocation and response, consistently with the object's sequential specification. If one operation returns before another starts, that order must be respected. Overlapping operations can take either order if their results fit that specification. The original correctness condition [@herlihy1990linearizability] concerns observable histories, not synchronized clocks.
+
+For the configuration example, suppose the endpoint provides a linearizable conditional update that compares an expected version and replaces the value and version together. Both workers supply the same old version. Once one update succeeds and advances the version, the other cannot also succeed against that old version. This argument assumes versions do not cycle back to the same identifier. It also assumes every conflicting writer uses the enforcing boundary. A separate read followed by an unconditional write does not implement this operation.
+
+The comparison protects only what it covers. If publication also depends on a changing permission record elsewhere, checking the configuration version alone leaves that permission unchecked at publication. Operation order therefore needs an explicit state boundary, not merely an ordering label.
+
+## Guarantee Boundaries {#sec-vol3-appendix-systems-boundaries}
+
+A service can commit a database update while a notification sent to another service remains undelivered. Calling the update a transaction does not place the notification inside it. The guarantee comparison in @tbl-vol3-appendix-systems-guarantees separates claims that often appear together but answer different failure questions.
+
+| Property                | What the contract specifies                                   | What does not follow                                   |
+|:------------------------|:--------------------------------------------------------------|:-------------------------------------------------------|
+| Atomicity               | Which changes commit or abort together                        | Unrelated remote effects participate                   |
+| Isolation               | Which concurrent observations and interleavings are permitted | Every isolation level gives serial execution semantics |
+| Durability              | Which acknowledged changes survive which failures             | Every copy or failure domain survives                  |
+| Application consistency | Which state constraints each committed transition preserves   | The store understands whether a task result is correct |
+
+: **Distinct Transaction Guarantees**: Each property requires a declared boundary; none supplies the other properties by its name alone. {#tbl-vol3-appendix-systems-guarantees tbl-colwidths="[19,40,41]"}
+
+Atomicity\index{Atomicity!appendix refresher} concerns the commit unit. Durability\index{Durability!appendix refresher} concerns persistence after commitment [@gray1981transaction]. A process can recover from a crash using an intact local disk, yet lose that same history if the disk disappears permanently. Replication changes the survivable failure set only when the acknowledgment policy requires the relevant replicas to preserve the update. The word “durable” must therefore identify both the acknowledgment and the assumed failures.
+
+Isolation\index{Transaction isolation!definition} concerns interference during concurrent execution. Serializable execution has the effect of some serial ordering of the participating transactions; it does not necessarily preserve their real-time order. A transaction operating at weaker isolation may observe a different class of histories. Even serializability cannot repair an incorrect transaction that violates the intended application rule when run alone. The engineer must establish both a correct state transition and the concurrency contract under which it runs.
+
+For a workflow spanning independent endpoints, the boundary test is to identify which operations participate in one commit decision. Anything outside that set needs its own completion and recovery contract. Classical coordination mechanisms preserve this distinction.
+
+## Classical Transaction Background {#sec-vol3-appendix-systems-transactions}
+
+A database crash can leave modified pages on disk while other modifications remain only in memory. A distributed workflow adds another difficulty: one participant may have committed while another has not received a decision. Transaction recovery addresses these cases only where the storage and participants implement the required protocol.
+
+### Transactions and two-phase commit
+
+Two-phase commit\index{Two-phase commit!definition} coordinates an atomic commit decision among participating resource managers. During preparation, each participant establishes that it can commit and preserves the required recovery state. A participant that votes to commit cannot then abort unilaterally merely because it stops hearing from the coordinator. The final decision determines whether the participants commit or abort [@gray1981transaction]. Preparation is consequently a recovery obligation, not a readiness hint.
+
+The protocol requires cooperating participants. Writing “prepare” into a runtime log does not enlist an unrelated service or make its effect reversible. Moreover, a prepared participant can have to wait when it cannot learn the decision. A design must account for this blocking and for the resources retained while waiting; an atomic decision is not a promise of bounded completion time.
+
+### Sagas
+
+A saga\index{Saga!appendix refresher} divides a long operation into separately committed transactions with compensating transactions for partial execution [@garciamolina1987sagas]. Intermediate effects can become visible because the whole sequence does not retain one transaction's isolation. A reservation followed by cancellation illustrates the distinction: cancellation is a new state transition, not deletion of the earlier history.
+
+The application must specify what compensation restores and what remains. Charges already incurred or observations by another client may survive it. The original saga abstraction relies on the system's ability to execute the required compensations; a remote workflow must separately handle compensators that fail or remain uncertain. @Sec-vol3-sagas-architecture develops the agent-specific obligation records and evidence needed for that case.
+
+### Write-ahead logging
+
+Write-ahead logging\index{Write-ahead logging!appendix refresher} imposes an ordering between recovery information and persistent changes. Before a database writes a modified page to persistent storage, the log information needed to recover that change must be durable. Before it acknowledges a durable commit, the required transaction log prefix must survive the promised failures. This ordering permits recovery even when the data pages themselves have not all been flushed.
+
+ARIES organizes recovery into analysis, redo, and undo [@mohan1992aries]. Analysis reconstructs recovery state; redo repeats relevant logged history; undo removes effects of transactions designated for rollback while logging the undo work. Prepared transactions awaiting a commit decision must retain their unresolved status. Its page-oriented redo and support for logical undo are more general than restoring an old byte image for every operation. Transaction log chains help locate earlier records, but a particular record layout is an algorithm choice, not the definition of write-ahead logging.
+
+A runtime's durable intent borrows the ordering requirement, not the database's control over remote state. Recovering a request record does not establish that the endpoint executed it. @Sec-vol3-persistence-wal develops this distinction for trajectory dispatch; interpreting an uncertain reply additionally requires the endpoint's repeat contract.
+
+## Repetition and Result Recovery {#sec-vol3-appendix-systems-retries}
+
+A client times out after requesting a state change. The server may never have received the request, may still be executing it, or may have completed it and lost the reply. A timeout alone does not distinguish those histories. Remote procedure call protocols therefore separate retransmission handling from the caller's knowledge of execution [@birrell1984rpc].
+
+Idempotence\index{Idempotence!appendix refresher} means that repeating an operation has the same effect on the specified state as applying it once, under the stated conditions. It does not require identical replies. An expected-version update can reject a repeat after an earlier success, protecting the state while leaving the caller uncertain which attempt succeeded. Conversely, a repeated “set” can overwrite an intervening writer even when setting the same value twice is idempotent in isolation.
+
+Deduplication\index{Deduplication!appendix refresher} needs a stable logical operation identity and an enforcing record at the effect boundary. A restricted implementation can atomically commit a local mutation together with the operation's identity and result. Repeated delivery of that identity then recovers the recorded result instead of repeating the mutation. If the record and effect commit independently, a crash between them recreates the ambiguity. Reusing an identity with different arguments must also be rejected or otherwise resolved by the declared contract.
+
+Result retention bounds the guarantee. Once the endpoint discards the record, an old request must not silently become a new operation unless the contract permits that behavior. “Exactly once” is meaningful only with a stated effect boundary, identity scope, retention rule, and failure model; it does not imply eventual completion through indefinite outages. @Sec-vol3-tool-calling-idempotency applies these distinctions to tool outcomes without treating a timeout as permission to repeat an effect.
+
+## Leases and Fencing {#sec-vol3-appendix-systems-fencing}
+
+A worker pauses long enough to lose its lease. A replacement acquires ownership, but the old worker later resumes and sends a buffered write. The ownership service's new grant does not itself stop that request at the resource.
+
+A lease\index{Lease!appendix refresher} grants ownership for a bounded interval under a declared timing contract. A fencing token\index{Fencing token!appendix refresher} enables enforcement at the resource. One design attaches an authenticated ownership generation to requests and records the current generation at the resource. After the replacement's generation is installed there, the resource rejects requests from older generations. The Chubby sequencer mechanism [@burrows2006chubby] exemplifies resource-side validation of a lock generation.
+
+We can test the handoff by delaying the old worker's write until after installation of the new fence. Rejection demonstrates the intended exclusion for that trace. If the write arrives before installation, comparing generations alone cannot detect expiration of the old lease. That requires a lease-validity contract or a handoff protocol that establishes the fence before relying on exclusion.
+
+The current holder can issue several distinct operations under the same generation; fencing does not deduplicate them. Nor does a larger integer establish authority unless the resource authenticates its grant. These distinctions keep ownership, repeat handling, and effect settlement separate. An implementation must enforce each guarantee where the corresponding state can change.

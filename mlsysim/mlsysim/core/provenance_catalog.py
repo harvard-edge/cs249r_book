@@ -913,6 +913,63 @@ STREAMING_VOICE_AGENT_PROFILE = Provenance(
     ),
 )
 
+RESEARCH_AGENT_WORKLOAD = Provenance(
+    id="prov:research-agent-workload",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref=(
+        "Illustrative orchestrator-worker research agent workload; token "
+        "multiples from Hadfield et al. (2025), How We Built Our Multi-Agent "
+        "Research System, Anthropic Engineering Blog"
+    ),
+    url="https://www.anthropic.com/engineering/built-multi-agent-research-system",
+    verified="2026-09-29",
+    notes=(
+        "Sourced: agent_token_multiple = 4 and fanout_token_multiple = 15 "
+        "quote the report's 'agents typically use about 4x more tokens than "
+        "chat interactions, and multi-agent systems use about 15x more tokens "
+        "than chats', measured on the builders' own data. Teaching "
+        "assumptions with no published source: the 20-turn horizon, 100 "
+        "untrusted documents read per task, the 16,000-input and 800-output "
+        "token chat answer, the USD 0.10 search/fetch and USD 0.05 rubric "
+        "charges per attempt, the 0.60 acceptance probability, and the USL "
+        "coefficients sigma = 0.10 and kappa = 0.002."
+    ),
+)
+
+REMEDIATION_AGENT_WORKLOAD = Provenance(
+    id="prov:remediation-agent-workload",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="Illustrative on-call remediation agent workload (approved production configuration change)",
+    verified="2026-09-29",
+    notes=(
+        "Every value is an MLSysIM teaching assumption with no published "
+        "source: 10-turn horizon, 10 untrusted items (alerts, log excerpts) "
+        "per task, USD 0.15 model, USD 0.10 tool, and USD 0.20 health-check "
+        "charges per attempt, 0.70 acceptance probability, 2 approval requests "
+        "per hour, 6 min diagnosis, 15 min mean approval decision, 9 min "
+        "apply-and-verify, 10 min reviewer effort at USD 120 per hour, 0.04 "
+        "probability a proposed fleet change is wrong, USD 12,000 impact of a "
+        "committed wrong change, 0.80 canary catch rate, and 0.90 of a caught "
+        "change's impact recovered by canary revert."
+    ),
+)
+
+SUPPORT_AGENT_WORKLOAD = Provenance(
+    id="prov:support-agent-workload",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="Illustrative customer-support agent workload (short interactive sessions)",
+    verified="2026-09-29",
+    notes=(
+        "Every value is an MLSysIM teaching assumption with no published "
+        "source: 6-turn session, 6 untrusted items (messages, attachments) per "
+        "session, 8,192-token session context with a 6,144-token shared "
+        "prefix, 150-token replies, 2 s generation residence and 20 s customer "
+        "reply time per turn, USD 0.03 model, USD 0.01 record-lookup, and "
+        "USD 0.01 grounding-check charges per session, 0.85 acceptance "
+        "probability, and a USD 4 human handoff per rejected session."
+    ),
+)
+
 MLOPS_DRIFT_THRESHOLDS = _conv(
     "prov:mlops-drift-threshold-conventions",
     "Common PSI and two-sample Kolmogorov-Smirnov drift-threshold conventions",
