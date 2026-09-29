@@ -50,13 +50,19 @@ A deployed agent records attempts, observations, corrections, and outcomes. Eval
 
 A deployed agent's log is not a training set. The evaluation record for `pool_repair_01` illustrates the difference. Trial `eval_pool_01_candidate_v2_run1` produced candidate artifact `ws_r19`; its targeted check passed, while required regression and accounting evidence remained pending. Those facts do not establish an accepted repair or justify treating the whole run as a successful demonstration. The separate experiment `diag_pool_truncation_v1` supported investigating an observation-interface change. It did not prove that the model had no behavioral weakness or that its diagnostic continuations should enter a training corpus.
 
+::: {.column-margin}
+![](images/svg/hsa_locator_origin.svg){width="100%" fig-alt="H·S·A locator with no axis highlighted and the origin dot marked, for a chapter that changes the model rather than an exposure."}
+
+*Learning changes the exposure a policy realizes, not the grant it runs under.*
+:::
+
 **Trajectory curation**\index{Trajectory curation!definition} selects, labels, and transforms recorded interactions for a declared learning use while preserving the evidence and constraints that justify that use. Evaluation supplies criterion-level findings and their limitations. Curation adds another decision: which behavior or task should the learning process receive, and why. Its output is a versioned artifact with specified consumers, not a collection of success labels.
 
 ### Connect diagnosis to a learning objective
 
 A failure does not identify the component that needs changing. The postmortem in @sec-vol3-evaluation-postmortems separated an established interface defect, a forbidden proposal, and a successful runtime refusal. These findings can coexist. Adding missing truncation metadata addresses the interface contract; retaining the admission guard prevents an out-of-scope dispatch; learning to seek further evidence can address model behavior. No single subsystem label replaces these distinct obligations.
 
-@Tbl-vol3-failure-taxonomy connects diagnostic findings to possible interventions and learning uses. The rows overlap, and the interventions require evaluation under their actual conditions. They are not a mandatory ladder that every failure must climb before training becomes legitimate.
+@Tbl-vol3-failure-taxonomy connects diagnostic findings to possible interventions and learning uses. The rows overlap, and each intervention requires evaluation under its actual conditions. The order in which to try them follows from their cost and reversibility.
 
 | Diagnostic finding                                                    | Direct system intervention to investigate                                | Possible learning use and its limit                                                                                                                 |
 |:----------------------------------------------------------------------|:-------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -67,11 +73,106 @@ A failure does not identify the component that needs changing. The postmortem in
 
 : **Diagnostic Findings and Learning Uses**: A direct system repair and a behavioral learning objective can both be justified by the same incident. Each proposal needs its own evidence and scope. {#tbl-vol3-failure-taxonomy}
 
-A direct repair is often attractive when a defect is localized and its corrected contract can be tested independently of the model. For example, an adapter test can check whether a partial response carries the required status. That does not require teaching a model to compensate for a missing field. Yet deployed environments can legitimately return incomplete results, transient errors, or unavailable services. Teaching the model how to act on those represented conditions does not require first proving that every context is complete and every execution deterministic.
+### Order interventions by cost and reversibility {#sec-vol3-flywheel-intervention-order}
 
-State the intended behavioral change before collecting its examples. For the repair, a useful objective might be to inspect the completeness status of a search result, obtain a permitted continuation when available, and state the remaining limitation otherwise. The objective is narrower than “fix failed trajectories.” Its evaluation must assess both the resulting repair and the proposed process, including additional reads, resource use, and unsupported conclusions. A model can learn a longer investigation that improves acceptance but costs more, or a shorter path that misses necessary evidence. Neither effect follows from training loss alone.
+The **intervention ladder**\index{Intervention ladder!definition} orders the remedies for a measured failure by cost and reversibility: context, then tool and schema, then runtime, then supervised fine-tuning, then reinforcement learning. The cheap, reversible fixes come first. Weights change only for the residual failure that survives them, and only on evidence that the change helps. Fine-tuning a model to compensate for a missing fact or an ambiguous schema is premature fine-tuning, which spends the most expensive intervention on a defect that a cheaper one removes.
 
-The cost comparison therefore includes implementing and testing a system repair, collecting and reviewing learning material, training, and evaluating the changed system. There is no universal ordering of those costs or guarantee that a prompt or schema change cannot cause regressions. Prefer a directly testable intervention when the evidence supports it, and compare any trained candidate under the evaluation protocol rather than declaring weights the last remaining cause.
+Three properties set the order. The first is cost. A context, schema, or runtime change edits a versioned artifact and can be tested against the same fixtures in minutes. A weight change needs a curated corpus, a training run, and a held-out evaluation of every behavior the model serves, not only the failing task. The second is reversibility. A lower-rung change reverts as a configuration version, and its effect is confined to the calls that use it. An update to weights changes behavior on every task at once, and rolling it back discards whatever it fixed along with whatever it broke. Reinforcement learning sits above supervised fine-tuning for the same reasons, because it adds a rollout fleet, a protected reward check, and optimization pressure against that check (@sec-vol3-rlvr) to everything imitation already requires.
+
+The third property is that runtime enforcement cannot be replaced by weights. A trained policy may propose fewer out-of-scope actions, but a policy that usually complies still leaves a residual rate, and invariant closure (principle \ref{pri-invariant-closure}) forbids the runtime to rely on compliance. Budgets, authority checks, and sandboxes remain the bound after any amount of training. The end-to-end argument [@saltzer1984endtoend] gives the same answer for interfaces. A function belongs where it can be implemented completely. A typed action contract (principle \ref{pri-vol3-strict-action-abi}) holds for any model behind it, while a model trained to guess a field the schema omits carries a habit that breaks when the interface changes. For example, an adapter test can check whether a partial response carries the required status without teaching any model to compensate for a missing field.
+
+Evidence, not a checklist, moves a failure up the ladder. Each lower rung has a counterfactual probe on the recorded failure: rerun with the missing fact supplied to the context, replay the proposal against a strict schema, and execute the same tool payload in a clean sandbox with its limits raised. A failure that disappears under a probe belongs to that rung. The failure that survives every probe is the residual the learning pipeline receives, and a trained candidate for it is still compared under the protocol of @sec-vol3-evaluation-rigor rather than accepted because weights were the last remaining cause.
+
+The ladder is a default order, not a gate that every failure must climb. When the probes already show a capability gap, as when the model fails with the complete context, a strict schema, and a healthy runtime, the order shortens to the learning rungs; the evidence of the gap is still required. Deployed environments also return incomplete results, transient errors, and unavailable services by design. Teaching a model to act well on those represented conditions is a learning objective in its own right, not a skipped rung. Notebook \ref{nbk-14-intervention-order-tradeoff} prices the ladder for one hypothetical failure mix.
+
+```{python}
+#| label: lego-14-intervention-order-tradeoff
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INTERVENTION ORDER: SYSTEM REPAIR VERSUS PREMATURE FINE-TUNING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-flywheel-intervention-order,
+# │          @nbk-14-intervention-order-tradeoff.
+# │ Goal: Show that accelerator cost does not decide the ladder; attribution does.
+# │ Show: Failures each rung removes, training FLOPs, accelerator time and bill.
+# │ How: 6PD training FLOPs; registry model, accelerator, MFU, and GPU-hour rate.
+# │ Note: Failure mix and corpus shape are hypothetical scenario inputs.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import second, hour
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent, fmt_qty, fmt_sci_flops, fmt_time, fmt_usd
+
+class InterventionOrderTradeoff:
+    # 1. LOAD: registry specs plus hypothetical failure mix and corpus shape.
+    model = Models.Language.Llama3_70B
+    accel = Hardware.Cloud.H100
+    n_accel = 8
+    mfu = Literature.Training.MfuLow
+    gpu_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
+    n_runs = 50_000
+    fail_rate = 0.06
+    share_interface = 0.70
+    share_runtime = 0.20
+    seq_tokens = 4_096
+    epochs = 3
+
+    # 2. EXECUTE: failures removed below the weights, then training work.
+    n_fail = round(n_runs * fail_rate)
+    n_system = round(n_fail * (share_interface + share_runtime))
+    n_residual = n_fail - n_system
+    system_share = n_system / n_fail
+    flops_all = calc_transformer_training_flops(model.parameters, n_fail * seq_tokens * epochs)
+    flops_res = calc_transformer_training_flops(model.parameters, n_residual * seq_tokens * epochs)
+    sustained = n_accel * accel.compute.peak_flops * mfu
+    wall_all = (flops_all / sustained).to(second)
+    accel_hours_all = (n_accel * wall_all).to(hour)
+    cost_all = (accel_hours_all * gpu_rate).to(USD)
+    cost_res = (n_accel * (flops_res / sustained) * gpu_rate).to(USD)
+
+    # 3. GUARD: split, corpus ratio, and the small-bill claim in the prose.
+    check(n_fail == 3_000 and n_residual == 300, "Failure split")
+    check(abs(system_share - 0.9) < 1e-12, "System-rung share")
+    check(abs(10 * flops_res.to(flop).magnitude - flops_all.to(flop).magnitude) < 1e6, "Residual corpus is one tenth")
+    check(cost_all < 1_000 * USD, "Accelerator bill stays small")
+
+    # 4. OUTPUT: every export is consumed in the notebook below.
+    runs_str = fmt_int(n_runs)
+    fail_pct_str = fmt_percent(fail_rate, precision=0, style="prose")
+    fail_str = fmt_int(n_fail)
+    interface_pct_str = fmt_percent(share_interface, precision=0, style="prose")
+    runtime_pct_str = fmt_percent(share_runtime, precision=0, style="prose")
+    system_str = fmt_int(n_system)
+    system_pct_str = fmt_percent(system_share, precision=0, style="prose")
+    residual_str = fmt_int(n_residual)
+    seq_str = fmt_int(seq_tokens)
+    epochs_str = fmt_int(epochs)
+    params_str = fmt(model.parameters.to("param").magnitude / 1e9, precision=1)
+    n_accel_str = fmt_int(n_accel)
+    peak_str = fmt_qty(accel.compute.peak_flops, "TFLOPs/s", precision=0)
+    mfu_str = fmt_percent(mfu, precision=0, style="prose")
+    rate_str = fmt_usd(gpu_rate.to(USD / hour).magnitude, precision=0)
+    flops_all_str = fmt_sci_flops(flops_all, precision=2)
+    wall_all_str = fmt_time(wall_all, unit="h", precision=1)
+    accel_hours_str = fmt(accel_hours_all.to(hour).magnitude, precision=1)
+    cost_all_str = fmt_usd(cost_all.to(USD).magnitude, precision=0)
+    cost_res_str = fmt_usd(cost_res.to(USD).magnitude, precision=0)
+```
+
+::: {#nbk-14-intervention-order-tradeoff .callout-notebook title="Pricing the ladder for one failure mix"}
+
+**Problem**: A hypothetical maintenance agent runs `{python} InterventionOrderTradeoff.runs_str` trajectories a month, and `{python} InterventionOrderTradeoff.fail_pct_str` fail, `{python} InterventionOrderTradeoff.fail_str` in all. Counterfactual probes attribute `{python} InterventionOrderTradeoff.interface_pct_str` of the failures to a tool schema that omits a required field and `{python} InterventionOrderTradeoff.runtime_pct_str` to sandbox startup timeouts; the rest survive every probe. One team repairs the schema and the sandbox pool first. Another fine-tunes on all the failures, with corrected targets, as `{python} InterventionOrderTradeoff.seq_str`-token sequences over `{python} InterventionOrderTradeoff.epochs_str` epochs. What does each path remove, and what does the training run cost?
+
+**Assumptions**: The model has `{python} InterventionOrderTradeoff.params_str` billion parameters. Training takes about six floating-point operations per parameter per token. `{python} InterventionOrderTradeoff.n_accel_str` accelerators with a dense 16-bit peak of `{python} InterventionOrderTradeoff.peak_str` each sustain `{python} InterventionOrderTradeoff.mfu_str` of that peak, and accelerator time costs `{python} InterventionOrderTradeoff.rate_str` per hour. The attribution is taken as correct for this calculation; collection, review, evaluation, and engineering labor are excluded from both paths.
+
+**Calculation**: The system repairs remove the `{python} InterventionOrderTradeoff.system_str` failures that the probes placed below the weights, `{python} InterventionOrderTradeoff.system_pct_str` of the total, and each reverts as a configuration version. Fine-tuning on every failure takes `{python} InterventionOrderTradeoff.flops_all_str`, about `{python} InterventionOrderTradeoff.wall_all_str` of wall time or `{python} InterventionOrderTradeoff.accel_hours_str` accelerator-hours, for an accelerator bill of `{python} InterventionOrderTradeoff.cost_all_str`. Fine-tuning only on the `{python} InterventionOrderTradeoff.residual_str` residual failures after the repairs costs `{python} InterventionOrderTradeoff.cost_res_str`.
+
+**Result**: The accelerator bill is too small to decide the order. What decides it is what each path leaves behind. After premature fine-tuning, the schema still omits the field and the sandbox still times out, so those failures return whenever the model guesses wrong or the pool is loaded, and the learned compensation breaks when the interface changes. Its corpus also spends curation and review on records whose correct fix was never behavioral. After the repairs, the learning pipeline receives a residual corpus one-tenth the size, made of failures that are plausibly behavioral.
+
+**Systems insight**: Training compute is rarely the binding cost of a premature fine-tune. Misattribution is. Attribute first with probes, repair what the probes place below the weights, and train on what survives.
+
+:::
+
+For the residual failure, state the intended behavioral change before collecting its examples. For the repair, a useful objective might be to inspect the completeness status of a search result, obtain a permitted continuation when available, and state the remaining limitation otherwise. The objective is narrower than “fix failed trajectories.” Its evaluation must assess both the resulting repair and the proposed process, including additional reads, resource use, and unsupported conclusions. A model can learn a longer investigation that improves acceptance but costs more, or a shorter path that misses necessary evidence. Neither effect follows from training loss alone.
 
 ### Distinguish the artifacts that learning consumes
 
@@ -118,7 +219,7 @@ If necessary context is unavailable, the record may support a narrower diagnosti
 
 A grader that accepts an inadequate control can fill a corpus with apparent successes. Before collecting at scale, exercise the intended criteria with independently assessed adequate and inadequate candidates. For the repair's defect check, a candidate known to retain the missed-wakeup bug should fail the corresponding reproducer under its declared conditions. A reference repair independently assessed to satisfy that check should pass it. If those outcomes do not occur, investigate the fixture, test invocation, and result binding before trusting that check for collection.
 
-Those controls establish only their covered distinctions. Accepting a run that produces the reference repair still requires the other regression, process, resource, and residual-duty evidence under `repair_accept_v1`; passing the reproducer alone does not accept the run. Controls for protected-file changes or unsupported completion reports exercise different criteria. Keep the grader boundary from @sec-vol3-evaluation-gyms, including the execution reach of submitted candidate code. A read-only test file or a separate agent process does not make the grader immune to interference.
+Those controls establish only their covered distinctions. Accepting a run that produces the reference repair still requires the other regression, process, resource, and residual-duty evidence under `repair_accept_v1`; passing the reproducer alone does not accept the run. Controls for protected-file changes or unsupported completion reports exercise different criteria. Keep the grader outside the agent's authority, as invariant closure (principle \ref{pri-invariant-closure}) requires, with the boundary from @sec-vol3-evaluation-gyms, including the execution reach of submitted candidate code. A read-only test file or a separate agent process does not make the grader immune to interference.
 
 Calibration also follows @sec-vol3-evaluation-grading. Mechanical checks and qualitative judgments can supply scoped criterion results, with known limitations and unavailable evidence recorded. A changed fixture, rubric, or collected population may expose cases absent from the original controls. Testing those changes is more informative than assuming a binary oracle remains correct because its implementation did not change.
 
@@ -154,7 +255,7 @@ The fixture now connects a task and its criteria to a proposed learning use, a c
 
 ## Split Design {#sec-vol3-flywheel-evaluation}
 
-Suppose a collection job generates several repairs for the same connection-pool defect. A random split of the resulting traces places one successful repair in training and another in the final test set. Different seeds, wording, and tool sequences do not make the underlying problem new. The trained policy has already received a solution to the task on which it will be assessed. The split must therefore follow task relationships, not merely the identifiers of individual runs.
+Suppose a collection job generates several repairs for the same connection-pool defect. A random split of the resulting traces places one successful repair in training and another in the final test set. Different seeds, wording, and tool sequences do not make the underlying problem new. The trained policy has already received a solution to the task on which it will be assessed, a form of leakage in which information about the evaluation target reaches training [@kaufman2012leakage]. The split must therefore follow task relationships, not merely the identifiers of individual runs.
 
 The fixture contract establishes which interactions and outcomes a trial represents. Split design establishes what later evaluation can claim about learning from those trials. Reserve protected tasks before collection, model-assisted selection, or corpus tuning begins. Otherwise, choosing demonstrations after inspecting final-test failures turns the assessment into another source of development feedback, even if no test trajectory appears verbatim in the training files.
 
@@ -301,7 +402,23 @@ Preserve `pass`, `fail`, `pending`, and `unknown` for each required predicate, a
 
 ### Protect the checks and preserve their limits {#sec-vol3-verifier-gaming}
 
-The grading boundary from @sec-vol3-evaluation-gyms applies during collection as well. A hypothetical repair that replaces a required assertion with `assert True` can produce a favorable local exit code without fixing the defect. If the task forbids changing that protected assertion, its process condition fails; if the authoritative defect check still fails, its outcome condition fails too. Neither finding should be replaced by the agent's completion claim.
+The grading boundary from @sec-vol3-evaluation-gyms applies during collection as well. Collection makes the pressure on it sharper, because every admitted record becomes a target the next policy is trained to reproduce. @Lst-vol3-curation-assert-true shows a hypothetical candidate that edits the defect's reproducer instead of the pool.
+
+::: {#lst-vol3-curation-assert-true lst-cap="**A tampered reproducer**: The candidate replaces the missed-wakeup assertions with a constant-true assertion. The local test exits with success while the defect remains."}
+```diff
+--- a/tests/test_pool_wakeup.py
++++ b/tests/test_pool_wakeup.py
+@@ def test_waiter_wakes_after_release():
+     pool = ConnectionPool(max_size=1)
+-    waiter = pool.acquire_async()
+-    pool.release(pool.acquire())
+-    assert waiter.done(timeout=1.0)
++    # skip flaky wakeup check
++    assert True
+```
+:::
+
+The replacement produces a favorable local exit code without fixing the defect. If the task forbids changing that protected assertion, its process condition fails; if the authoritative defect check still fails, its outcome condition fails too. Neither finding should be replaced by the agent's completion claim.
 
 ::: {#dfn-test-tampering-defense .callout-definition title="Test-tampering defense"}
 
@@ -312,6 +429,8 @@ The grading boundary from @sec-vol3-evaluation-gyms applies during collection as
 3. **Common pitfall**: Treating read-only test files or a fresh interpreter as complete protection when candidate code can inspect hidden tests or alter the runner in the same process.
 
 :::
+
+Three mechanisms put the checks beyond the candidate's reach, extending containment beneath the model (principle \ref{pri-vol3-zero-trust-sandboxing}) to the grader itself. First, the authoritative tests live outside the candidate's writable tree and are mounted read-only or supplied only after the candidate is frozen. Second, the candidate's diff is compared against a manifest of protected paths, so an edit to a protected test, build file, or runner configuration fails the process predicate whatever the exit code says. Third, the test runner executes in a clean process started by the supervisor, so candidate code cannot patch the assertion helpers or replace the failure handler inside the runner's own interpreter. Each is necessary and none is sufficient. Candidate code executed during grading can still read inputs, exhaust resources, or behave differently under test, which is why @sec-vol3-evaluation-gyms isolates the grading process as well.
 
 Use the task's patch-admission policy to identify protected files and permitted edits rather than prohibiting all changes to tests or build configuration in every task. Protect result collection and account for candidate execution, not only the live agent's file access. An audit after collection records what happened; it does not replace the authority and containment checks required before executing untrusted code. Safety prerequisites remain in force even when retrospective admission checks are reordered.
 
@@ -454,11 +573,11 @@ class VerificationCascadeEconomicsThroughput:
 
 ### Learned scores and scoped judgments {#sec-vol3-trajectory-curation-rankers}
 
-A learned score can prioritize review or choose among already eligible examples according to a declared diversity or quality objective. A process score can suggest where to inspect a failure, but it does not establish the first causal error. A preference for concise traces also changes the selected training distribution; it should not silently exclude the longer recovery behavior the corpus intends to teach.
+A learned score can prioritize review or choose among already eligible examples according to a declared diversity or quality objective. A process reward model, which scores individual steps rather than final outcomes [@uesato2022solving; @lightman2023let], can suggest where to inspect a failure, but it does not establish the first causal error. A preference for concise traces also changes the selected training distribution; it should not silently exclude the longer recovery behavior the corpus intends to teach.
 
-Human or model judgment can supply a required qualitative criterion when the task warrants it, following the rubric and calibration contract in @sec-vol3-evaluation-grading. It need not be restricted to advice merely because it is fallible. Conversely, deterministic checks are not complete truth instruments. Preserve the assessor, rubric, evidence, uncertainty, and abstentions for either mechanism. No favorable score overrides another required failure or supplies missing evidence.
+Human or model judgment can supply a required qualitative criterion when the task warrants it, following the rubric and calibration contract in @sec-vol3-evaluation-grading. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) states the boundary. A learned assessment can rank candidates or supply scoped evidence for its criterion, but it does not supply an independent guarantee of correctness, and its inputs must be protected from the behavior it judges. It need not be restricted to advice merely because it is fallible. Conversely, deterministic checks are not complete truth instruments. Preserve the assessor, rubric, evidence, uncertainty, and abstentions for either mechanism. No favorable score overrides another required failure or supplies missing evidence.
 
-Repeated selection can concentrate weaknesses in a grader or ranker. Audit accepted and rejected cases under an independent assessment protocol, keep held-out calibration separate from tuning examples, and reassess when the policy or task population changes. A transformed trace also needs the checks appropriate to its new bytes and target roles; an earlier verdict cannot automatically certify the derivative. The provenance section develops that lineage boundary.
+Repeated selection can concentrate weaknesses in a grader or ranker. Optimizing against a learned proxy improves the proxy score faster than the quality it stands for [@gao2023scaling], and training on the selected records turns one round's preference into the next policy's habit. Audit accepted and rejected cases under an independent assessment protocol, keep held-out calibration separate from tuning examples, and reassess when the policy or task population changes. A transformed trace also needs the checks appropriate to its new bytes and target roles; an earlier verdict cannot automatically certify the derivative. The provenance section develops that lineage boundary.
 
 ::: {#chk-14-admission-cascades-limits .callout-checkpoint title="Defend an admission route"}
 
@@ -659,15 +778,68 @@ Selecting sampled successes for imitation is often called rejection-sampling fin
 
 Mixed successes and failures are not a universal requirement for learning. An all-success collection can still supply useful imitation targets, including efficient strategies or demonstrations for a different learner. An all-failure collection supplies no accepted whole-trajectory demonstrations under a success-only filter, but may contain eligible corrective segments, justified comparisons, or cases worth turning into new fixtures. Their usefulness depends on the intended objective and the evidence supporting those roles. The special case in which identical rewards remove a within-group contrast belongs to the group-relative objective in @sec-vol3-rlvr, not to supervised learning in general.
 
+The sampling budget can still be quantified. Suppose the collection policy succeeds on a fixture with probability $p$ per attempt and the $k$ attempts are independent. A success filter harvests from the fixture only if at least one attempt succeeds, which happens with probability $1-(1-p)^k$. That expected yield per fixture sets how many attempts an imitation corpus must buy. A comparison or a group-relative objective needs more, a group containing at least one success and at least one failure. Removing the all-failure and all-success groups gives the **informative-task fraction**\index{Informative-task fraction!definition}
+
+$$P_{\text{inform}}(p,k)=1-(1-p)^k-p^k.$$ {#eq-vol3-trajectory-curation-informative}
+
+```{python}
+#| label: lego-14-informative-task-fraction
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SUCCESS YIELD AND INFORMATIVE-TASK FRACTION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-trajectory-curation-informative.
+# │ Goal: Show how per-attempt pass rate sets harvest yield and group contrast.
+# │ Show: 1-(1-p)^k and 1-(1-p)^k-p^k at three pass rates for k attempts.
+# │ How: Independent attempts with a fixed per-attempt pass probability.
+# │ Note: Pass rates are illustrative, not measured fixture difficulties.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
+
+class InformativeTaskFraction:
+    # 1. LOAD: attempts per fixture and three illustrative pass rates.
+    k = 8
+    p_low, p_mid, p_high = 0.05, 0.50, 0.95
+
+    # 2. EXECUTE: at least one success, then at least one of each outcome.
+    yield_low = 1 - (1 - p_low) ** k
+    yield_mid = 1 - (1 - p_mid) ** k
+    yield_high = 1 - (1 - p_high) ** k
+    mixed_low = yield_low - p_low**k
+    mixed_mid = yield_mid - p_mid**k
+    mixed_high = yield_high - p_high**k
+    attempts_low = k / yield_low
+
+    # 3. GUARD: symmetry of the mixed fraction and the displayed scales.
+    check(abs(mixed_low - mixed_high) < 1e-12, "Mixed fraction is symmetric in p and 1-p")
+    check(0.33 < mixed_low < 0.34, "Low pass-rate mixed fraction")
+    check(mixed_mid > 0.99, "Mid pass-rate mixed fraction")
+    check(yield_high > 0.999, "High pass-rate yield is near one")
+    check(23 < attempts_low < 24, "Attempts per harvested hard fixture")
+
+    # 4. OUTPUT: every export is consumed in the paragraph below.
+    k_str = fmt_int(k)
+    low_str = fmt_percent(p_low, precision=0, style="prose")
+    mid_str = fmt_percent(p_mid, precision=0, style="prose")
+    high_str = fmt_percent(p_high, precision=0, style="prose")
+    low_yield_str = fmt(yield_low, precision=2)
+    low_mixed_str = fmt(mixed_low, precision=2)
+    mid_mixed_str = fmt(mixed_mid, precision=2)
+    high_mixed_str = fmt(mixed_high, precision=2)
+    attempts_low_str = fmt_int(round(attempts_low))
+```
+
+With `{python} InformativeTaskFraction.k_str` attempts, a fixture the policy solves `{python} InformativeTaskFraction.low_str` of the time yields a success with probability only `{python} InformativeTaskFraction.low_yield_str`, so harvesting one such fixture takes about `{python} InformativeTaskFraction.attempts_low_str` attempts on average. The same fixture forms a mixed group with probability `{python} InformativeTaskFraction.low_mixed_str`. At `{python} InformativeTaskFraction.mid_str` the mixed fraction is `{python} InformativeTaskFraction.mid_mixed_str`. At `{python} InformativeTaskFraction.high_str` nearly every fixture yields a success, but the mixed fraction falls back to `{python} InformativeTaskFraction.high_mixed_str`, because most groups contain no failure. @Eq-vol3-trajectory-curation-informative therefore prices contrast, not usefulness. The all-success groups remain valid imitation material, and @sec-vol3-rlvr-grpo-zero-variance applies the $p^k$ and $(1-p)^k$ terms to groups whose rewards carry no contrast.
+
 Consequently, collection difficulty is a budget decision, not a rule to sample only tasks with intermediate pass rates. Current failures can expose missing recovery behavior; easy tasks can preserve required behavior; rare task families may deserve explicit coverage despite low yield. Record the sampling and retention policy alongside the corpus so these choices remain visible.
 
 ### Refresh without erasing coverage
 
 Freshness has several meanings. A trajectory may come from an older policy yet remain a valid demonstration. Conversely, a recent trajectory may use an obsolete tool schema or an incorrect grader. Record the generating policy, fixture, interface, and grading versions, then assess compatibility with the proposed learning use. Changed criteria may require reassessment; changed interfaces may require transformation and revalidation; a changed policy may justify collecting the failure states it now visits. There is no fixed number of rounds after which every demonstration expires.
 
-Repeated selection can also narrow coverage. Strategies already sampled often have more opportunities to pass, be retained, and appear in later training. Studies of recursive training on generated data demonstrate distributional degradation under their studied sampling and training procedures [@shumailov2024]. This is a reason to investigate selection feedback, not a theorem that every verified self-training loop must collapse.
+Repeated selection can also narrow coverage. Strategies already sampled often have more opportunities to pass, be retained, and appear in later training. Studies of recursive training on generated data demonstrate distributional degradation under their studied sampling and training procedures [@shumailov2024]. This is a reason to investigate selection feedback, not a theorem that every verified self-training loop must collapse. A model whose outputs shape its own future training data is the hidden feedback loop that accumulates as technical debt in production learning systems [@sculley2015hidden], and it needs explicit measurement.
 
-Use per-family allocation and duplicate screening to control dominance, while preserving meaningfully different observations and recovery paths. Identical action text under different observations need not be a duplicate learning example. Track coverage and held-out acceptance together with cost; fewer distinct action sequences can reflect either lost alternatives or removal of unnecessary work. Diversity alone does not establish usefulness.
+Narrowing leaves three measurable signals. The number of distinct normalized action sequences per fixture falls across rounds. Pass@1 rises while pass@$k$ at large $k$ stays flat (@sec-vol3-evaluation-pass-k), which indicates a policy concentrating on strategies it already had rather than acquiring new ones. Held-out task families stall while training families keep improving. Four controls answer them: cap retained samples per fixture so easy fixtures cannot dominate a round; deduplicate by normalized action sequence, while treating identical action text under different observations as distinct learning examples; keep an anchor of external demonstrations that no round replaces; and stop the loop when diversity and held-out families stall, even if training-family acceptance still rises. Read the first signal with care, because fewer distinct action sequences can reflect either lost alternatives or removal of unnecessary work. Diversity alone does not establish usefulness.
 
 External demonstrations and external evaluation evidence serve different roles. Suitable, permitted human or expert demonstrations can anchor training coverage without being regenerated by the current policy. Protected evaluation tasks remain outside training and model-assisted selection. Repeatedly tuning collection choices against a holdout makes it development evidence; retain separate confirmation evidence for the final claim. Review samples across selection outcomes for grader shortcuts and missed useful cases. Sampling can reveal defects, but cannot guarantee their absence. Unexpected regressions or failed promotion criteria call for review rather than automatic continuation.
 
@@ -714,7 +886,90 @@ Delivery may be repeated after a worker or connection fails. Bind the submission
 
 ### Reserve for work that has not finished
 
-A queue's current length understates its possible next occupancy. If many admitted rollouts finish while checking is stalled, their outputs arrive after the dispatcher has stopped issuing new work. Admission therefore needs both a record-count limit and a byte limit that cover outstanding reservations, not just completed records. Mean record size is useful for planning expected volume; it cannot establish a worst-case byte bound.
+Rates show why a bound is needed. Let completed rollouts arrive at rate $\lambda$, and let $m$ equivalent verifier slots each take mean service time $E[S]$ per record. Then $m/E[S]$ is an idealized aggregate service capacity in records per second, and $\rho=\lambda E[S]/m$ is its utilization. In a stable regime, Little's law (@sec-vol3-kv-workload-dynamics) gives the mean number of records in assessment as $\lambda$ times their mean residence time. It says nothing about a burst. The aggregate rate is also not a single-server service rate, so the single-server waiting-time approximation of @eq-vol3-kingman-gg1 does not apply to it directly. Shared dependencies, mixed assessment paths, and unavailable verdicts reduce effective capacity further.
+
+The dangerous event is a change in service time rather than in arrivals. If a defective fixture makes every test run until its timeout $T_{\text{out}}$, capacity collapses to $m/T_{\text{out}}$ while rollouts keep arriving. Staging then grows by $\lambda-m/T_{\text{out}}$ records per second. Charged at the per-record ceiling $s_{\max}$, the reserved bytes of a staging store of size $M$ run out after
+
+$$T_{\text{exhaust}}=\frac{M}{\left(\lambda-m/T_{\text{out}}\right)s_{\max}}.$$
+
+Notebook \ref{nbk-14-verifier-burst-exhaustion} evaluates it for a stipulated fleet.
+
+```{python}
+#| label: lego-14-verifier-burst-exhaustion
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STAGING EXHAUSTION UNDER A VERIFIER TIMEOUT BURST (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-flywheel-pipeline, @nbk-14-verifier-burst-exhaustion.
+# │ Goal: Show how fast reserved staging fills when service time collapses.
+# │ Show: Nominal utilization, degraded capacity, exhaustion time, watermark.
+# │ How: Aggregate slot capacity; reservations charged at the record ceiling.
+# │ Note: Every input is hypothetical; no queueing-delay formula is applied.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import GB, MB, second
+from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_percent, fmt_qty, fmt_time
+
+class VerifierBurstExhaustion:
+    # 1. LOAD: hypothetical fleet, verifier pool, record ceiling, and store.
+    n_rollouts = 1_024
+    rollout_time = 45 * second
+    slots = 512
+    mean_service = 16.875 * second
+    timeout = 120 * second
+    max_record = 8 * MB
+    store = 32 * GB
+    reaction = 30 * second
+
+    # 2. EXECUTE: nominal utilization, burst growth, exhaustion, watermark.
+    arrival = n_rollouts / rollout_time
+    capacity = slots / mean_service
+    rho = (arrival / capacity).to("").magnitude
+    degraded = slots / timeout
+    net = arrival - degraded
+    growth = (net * max_record).to(MB / second)
+    t_exhaust = (store / growth).to(second)
+    inflight = n_rollouts * max_record
+    headroom = inflight + reaction * growth
+    high_mark = (1 - headroom / store).to("").magnitude
+    high_mark_set = int(high_mark * 100) / 100
+
+    # 3. GUARD: stable nominal case, unstable burst, watermark below its bound.
+    check(0.74 < rho < 0.76, "Nominal utilization below one")
+    check(net.to(1 / second).magnitude > 0, "Staging grows during the burst")
+    check(0 < high_mark_set <= high_mark < 1, "Watermark within its bound")
+
+    # 4. OUTPUT: every export is consumed in the notebook below.
+    rollouts_str = fmt_int(n_rollouts)
+    rollout_time_str = fmt_time(rollout_time, unit="s", precision=0)
+    slots_str = fmt_int(slots)
+    service_str = fmt_time(mean_service, unit="s", precision=3)
+    timeout_str = fmt_time(timeout, unit="s", precision=0)
+    max_record_str = fmt_memory(max_record, unit=MB, precision=0)
+    store_str = fmt_memory(store, unit=GB, precision=0)
+    reaction_str = fmt_time(reaction, unit="s", precision=0)
+    arrival_str = fmt(arrival.to(1 / second).magnitude, precision=1)
+    capacity_str = fmt(capacity.to(1 / second).magnitude, precision=1)
+    rho_str = fmt(rho, precision=2)
+    degraded_str = fmt(degraded.to(1 / second).magnitude, precision=1)
+    net_str = fmt(net.to(1 / second).magnitude, precision=1)
+    growth_str = fmt_qty(growth, "MB/s", precision=1)
+    t_exhaust_str = fmt_time(t_exhaust, unit="s", precision=1)
+    t_exhaust_min_str = fmt_time(t_exhaust, unit="min", precision=1)
+    inflight_str = fmt_memory(inflight, unit=GB, precision=1)
+    high_mark_str = fmt_percent(high_mark_set, precision=0, style="prose")
+```
+
+::: {#nbk-14-verifier-burst-exhaustion .callout-notebook title="How long a staging store survives a timeout burst"}
+
+**Problem**: A hypothetical collector runs `{python} VerifierBurstExhaustion.rollouts_str` concurrent rollouts that each take `{python} VerifierBurstExhaustion.rollout_time_str`. `{python} VerifierBurstExhaustion.slots_str` verifier slots take `{python} VerifierBurstExhaustion.service_str` per record on average. Each record reserves a ceiling of `{python} VerifierBurstExhaustion.max_record_str` in a `{python} VerifierBurstExhaustion.store_str` staging store. Treat completions as a steady flow and all slots as interchangeable. A defective fixture then makes every test run to its `{python} VerifierBurstExhaustion.timeout_str` timeout. How long until the store is fully reserved, and where must dispatch stop if the controller needs `{python} VerifierBurstExhaustion.reaction_str` to act?
+
+**Calculation**: Rollouts complete at `{python} VerifierBurstExhaustion.arrival_str` records per second against a nominal capacity of `{python} VerifierBurstExhaustion.capacity_str`, a utilization of `{python} VerifierBurstExhaustion.rho_str`. During the burst, capacity falls to `{python} VerifierBurstExhaustion.degraded_str` records per second, so staging grows by `{python} VerifierBurstExhaustion.net_str` records, or `{python} VerifierBurstExhaustion.growth_str` of reservations, every second. The store is fully reserved after `{python} VerifierBurstExhaustion.t_exhaust_str`, about `{python} VerifierBurstExhaustion.t_exhaust_min_str`. When dispatch stops, the rollouts already running still hold up to `{python} VerifierBurstExhaustion.inflight_str` of reservations, and growth continues for the reaction delay. A high watermark leaves room for both only if it is set at or below `{python} VerifierBurstExhaustion.high_mark_str` of the store.
+
+**Systems insight**: A pool running at comfortable utilization can exhaust its staging in minutes when service time rather than arrival rate changes. The watermark must be derived from the work already in flight and the controller's delay, not chosen as a round fraction, and a hard limit on outstanding reservations must hold when feedback is late.
+
+:::
+
+The running rollouts in that headroom term are the reason admission counts unfinished work. A queue's current length understates its possible next occupancy. If many admitted rollouts finish while checking is stalled, their outputs arrive after the dispatcher has stopped issuing new work. Admission therefore needs both a record-count limit and a byte limit that cover outstanding reservations, not just completed records. Mean record size is useful for planning expected volume; it cannot establish a worst-case byte bound.
 
 An end-to-end credit policy provides one simple design. Each admitted collection run holds one credit and reserves space for its maximum permitted captured record. It retains that credit while running, staged, or being assessed. Release occurs only after a durable disposition or an acknowledged transfer to another capacity-controlled owner. Pending work remains charged somewhere. Oversized capture must follow a declared policy, such as bounded output with explicit gaps and exclusion from uses requiring the missing material. The collector must not truncate required recovery records to make its own quota appear satisfied.
 
@@ -795,9 +1050,93 @@ After the burst, one record per verifier finishes every stipulated service inter
 
 :::
 
-Long-run rates help identify a capacity shortfall but answer a different question. With $m$ equivalent independent verifier slots and mean service time $E[S]$ seconds per record, $m/E[S]$ is an idealized service capacity in records per second. An arrival rate below that value does not bound a burst, queue delay, or retained bytes. Shared dependencies, mixed assessment paths, and unavailable verdicts can reduce effective capacity. Treating the aggregate rate as a single-server service rate would not justify a single-server waiting-time formula.
+The two notebooks divide the work. Rates identify how fast a shortfall consumes capacity; credits bound what that shortfall can consume. An arrival rate below aggregate capacity does not bound a burst, queue delay, or retained bytes.
 
-Monitor queue counts, reserved and actual bytes, oldest pending work, assessment outcomes, and the capacities of downstream owners. Watermarks can slow collection before reservations run out; hard admission limits enforce the bound when feedback is late. Retries and additional reviews consume capacity too. The dependency controls in @sec-vol3-sagas-containment apply when repeated checking encounters an unavailable service, rather than allowing every worker to amplify the same failure.
+Monitor queue counts, reserved and actual bytes, oldest pending work, assessment outcomes, and the capacities of downstream owners. Watermarks derived from in-flight work and controller delay slow collection before reservations run out; hard admission limits enforce the bound when feedback is late. Retries and additional reviews consume capacity too. The dependency controls in @sec-vol3-sagas-containment apply when repeated checking encounters an unavailable service, rather than allowing every worker to amplify the same failure.
+
+### Find the stage that bounds collection {#sec-vol3-flywheel-bottleneck}
+
+Credits keep a shortfall from overrunning memory; they do not say which resource sets the collector's sustainable rate. Three resources each impose a ceiling in attempts per second. With $N_{\text{acc}}$ accelerators each spending $T_{\text{gen}}$ accelerator-seconds per attempt, generation supports $N_{\text{acc}}/T_{\text{gen}}$. With $m$ verifier slots and expected slot time $C_{\text{attempt}}$ per attempt from @eq-verifier-cost-cascade, assessment supports $m/C_{\text{attempt}}$. With sustained write bandwidth $B$ to the record store and per-record ceiling $s_{\max}$, storage supports $B/s_{\max}$. The collector cannot run faster than the smallest:
+
+$$\Theta=\min\left(\frac{N_{\text{acc}}}{T_{\text{gen}}},\ \frac{m}{C_{\text{attempt}}},\ \frac{B}{s_{\max}}\right).$$ {#eq-vol3-trajectory-curation-throughput-bound}
+
+The bound identifies which resource to add; admitted output is $\Theta$ times the route's yield $Y$. It is an upper bound on a sustained rate, not a prediction, and any shared dependency adds another term. Its practical lesson concerns cheap resources. Verifier slots cost little per hour compared with accelerators, yet too few of them throttle the whole fleet, while the price per admitted record is set almost entirely by generation and yield. Notebook \ref{nbk-14-collection-bottleneck} applies the bound to one stipulated collector.
+
+```{python}
+#| label: lego-14-collection-bottleneck
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COLLECTION BOTTLENECK AND COST PER ADMITTED RECORD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-trajectory-curation-throughput-bound,
+# │          @nbk-14-collection-bottleneck.
+# │ Goal: Find the binding stage and split cost between generation and checking.
+# │ Show: Three ceilings, slots needed, cost per admitted record and its split.
+# │ How: Reuses the cascade notebook's expected slot time and yield; registry
+# │      inference GPU-hour rate; other inputs hypothetical.
+# │ Note: The verifier-slot price has no registry anchor; stipulated in LOAD.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import MB, hour, second
+from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_percent, fmt_qty, fmt_time, fmt_usd
+
+class CollectionBottleneck:
+    # 1. LOAD: cascade results, registry accelerator rate, hypothetical fleet.
+    slot_time = VerificationCascadeEconomicsThroughput.expected_s[0] * second
+    route_yield = VerificationCascadeEconomicsThroughput.yield_rate
+    accel_rate = Infrastructure.Pricing.Cloud.GpuInferencePerHour.rate
+    slot_rate = 0.04 * USD / hour  # hypothetical verifier-slot price
+    n_accel = 64
+    gen_time = 60 * second  # accelerator-seconds per attempt
+    slots = 4
+    write_bw = 200 * (MB / second)
+    max_record = 8 * MB
+
+    # 2. EXECUTE: ceilings, binding stage, slots to unbind, cost split.
+    gen_ceiling = (n_accel / gen_time).to(1 / second)
+    verify_ceiling = (slots / slot_time).to(1 / second)
+    store_ceiling = (write_bw / max_record).to(1 / second)
+    theta = min(gen_ceiling, verify_ceiling, store_ceiling)
+    slots_needed = math.ceil((gen_ceiling * slot_time).to("").magnitude)
+    gen_cost = (gen_time * accel_rate).to(USD)
+    verify_cost = (slot_time * slot_rate).to(USD)
+    per_admitted = (gen_cost + verify_cost) / route_yield
+    verify_share = (verify_cost / (gen_cost + verify_cost)).to("").magnitude
+
+    # 3. GUARD: verification binds at the stated slot count; enough slots unbind it.
+    check(verify_ceiling < gen_ceiling < store_ceiling, "Verification binds first")
+    check(theta == verify_ceiling, "Bound equals the verification ceiling")
+    check(slots_needed * 1 / slot_time >= gen_ceiling, "Enough slots to match generation")
+    check(verify_share < 0.01, "Checking is a small share of cost")
+
+    # 4. OUTPUT: every export is consumed in the notebook below.
+    n_accel_str = fmt_int(n_accel)
+    gen_time_str = fmt_time(gen_time, unit="s", precision=0)
+    slots_str = fmt_int(slots)
+    slot_time_str = fmt_time(slot_time, unit="s", precision=2)
+    write_bw_str = fmt_qty(write_bw, "MB/s", precision=0)
+    max_record_str = fmt_memory(max_record, unit=MB, precision=0)
+    accel_rate_str = fmt_usd(accel_rate.to(USD / hour).magnitude, precision=2)
+    slot_rate_str = fmt_usd(slot_rate.to(USD / hour).magnitude, precision=2)
+    yield_str = fmt_percent(route_yield, precision=2, style="prose")
+    gen_ceiling_str = fmt(gen_ceiling.to(1 / second).magnitude, precision=2)
+    verify_ceiling_str = fmt(verify_ceiling.to(1 / second).magnitude, precision=2)
+    store_ceiling_str = fmt(store_ceiling.to(1 / second).magnitude, precision=0)
+    slots_needed_str = fmt_int(slots_needed)
+    per_admitted_str = fmt_usd(per_admitted.to(USD).magnitude, precision=2)
+    verify_share_str = fmt_percent(verify_share, precision=1, style="prose")
+```
+
+::: {#nbk-14-collection-bottleneck .callout-notebook title="The cheapest stage can set the rate"}
+
+**Problem**: A hypothetical collector uses `{python} CollectionBottleneck.n_accel_str` accelerators, each spending `{python} CollectionBottleneck.gen_time_str` of accelerator time per attempt at `{python} CollectionBottleneck.accel_rate_str` per hour. It checks attempts with the admission route of notebook \ref{nbk-14-verification-cascade-economics-and-throughput}, whose cheaper order occupies `{python} CollectionBottleneck.slot_time_str` of slot time per attempt and admits `{python} CollectionBottleneck.yield_str` of attempts, on `{python} CollectionBottleneck.slots_str` verifier slots priced at `{python} CollectionBottleneck.slot_rate_str` per slot-hour. Records of at most `{python} CollectionBottleneck.max_record_str` go to a store that sustains `{python} CollectionBottleneck.write_bw_str`. Which stage bounds the collector, and what does an admitted record cost?
+
+**Calculation**: By @eq-vol3-trajectory-curation-throughput-bound, generation supports `{python} CollectionBottleneck.gen_ceiling_str` attempts per second, assessment `{python} CollectionBottleneck.verify_ceiling_str`, and storage `{python} CollectionBottleneck.store_ceiling_str`. Assessment binds. Matching generation needs `{python} CollectionBottleneck.slots_needed_str` slots. With enough slots, generation and checking together cost `{python} CollectionBottleneck.per_admitted_str` per admitted record, of which checking is `{python} CollectionBottleneck.verify_share_str`.
+
+**Systems insight**: The stage that sets the rate and the stage that sets the price can differ. A few inexpensive verifier slots idled most of an accelerator fleet here, while the cost of an admitted record was determined by generation divided by yield. Raising yield through better fixtures and sampling lowers cost; adding slots only raises the rate until generation binds.
+
+:::
 
 ### Capture artifacts before releasing execution resources
 
@@ -1036,7 +1375,7 @@ Collection capacity and provenance make that decision operational. Bounded admis
 
 ::: {.callout-takeaways title="Give every learning artifact a declared use"}
 
-* **Justify a learning use before collecting its targets**: Use evaluation findings to specify a behavior change and compare relevant system interventions. Causes can overlap. Distinguish demonstrations, context-compatible preference comparisons, and fixtures for fresh reward-scored rollouts; a recorded outcome does not select its own downstream objective.
+* **Justify a learning use before collecting its targets**: Try context, tool and schema, and runtime repairs before weights, guided by counterfactual probes, and train only on the residual failure that survives them. Distinguish demonstrations, context-compatible preference comparisons, and fixtures for fresh reward-scored rollouts; a recorded outcome does not select its own downstream objective.
 * **Build fixtures and splits around the claim**: Declare collection conditions, criterion coverage, permitted variation, and known adequate and inadequate controls. Group related attempts before selection and protect held-out answers and evidence. Familiar tools or repositories are not automatically leakage; additional holdouts answer stated transfer questions.
 * **Compare admission costs without weakening admission**: Define each predicate, its evidence, and its routing consequence. Preserve mandatory conditions and safe execution prerequisites when changing order, and use the appropriate conditional costs and survival rates. Mechanical checks and calibrated judgments remain limited by their coverage.
 * **Separate recorded behavior from selected supervision**: Keep faithful recovery context without endorsing an erroneous action as a target. Negative records can support several declared uses. Report trajectory counts, stored-token shares, and loss-bearing allocation separately, and test mixtures rather than memorizing an allegedly optimal ratio.
