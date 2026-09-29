@@ -34,13 +34,13 @@ format:
 
 _Why can a policy improve its training score while becoming less reliable on the machine?_
 
-A policy learns from the experience its training process supplies. Demonstrations can omit recovery from a displaced fixture; simulation can reward a fast approach that a real contact surface cannot tolerate. Better performance on either source does not establish what happens when the machine encounters the missing condition. Training also determines how long the policy takes to propose an action and what physical exposure is needed to improve it. The engineer must choose a source of experience, an action representation, and an operating region that the available evidence can support. The resulting checkpoint carries those assumptions into evaluation, while an independent permission path continues to bound execution. Across the causal boundary, the consequences of an admitted action cannot be undone by another gradient update.
+A learned policy acquires its behavior from the experience its training supplies, and its weights keep no record of which experience that was. Demonstrations can omit the recovery from a displaced fixture, a simulator can reward a fast approach that a real contact surface cannot tolerate, and a model pretrained on other robots can behave plausibly in conditions no one has tested on this machine. In each case the training score rises while the dependency stays hidden, so ranking candidates by score can favor the one that exploited its data or its solver. Training also fixes how long the policy takes to propose an action, and every improvement gathered on the machine itself is paid for in heat and component life. An engineer who does not understand these mechanisms cannot choose a source of experience that supports the behavior the task needs, cannot state the conditions in which a checkpoint may be trusted, and discovers each hidden dependency only when the machine meets it. Because an admitted action crosses the causal boundary and its consequences cannot be undone by another gradient update, the limits of a policy's evidence must be established before it is allowed to propose motion.
 
 {{< pagebreak >}}
 
 ::: {.callout-learning-objectives}
 
-- Compare training regimes by the experience they supply and the physical dependencies they leave in the policy
+- Compare training regimes, from behavioral cloning to post-training a pretrained generalist, by the experience they supply and the physical dependencies they leave in the policy
 - Diagnose the separate risks of averaging valid action choices and drifting beyond demonstrated states
 - Calculate whether an action decoder fits its proposal deadline and identify the required execution safeguards
 - Evaluate simulator mismatch and distinguish parameter variation from missing mechanisms or unavailable observations
@@ -121,7 +121,11 @@ class LatchContactDeadline:
     t_left_fast_str = fmt_latency(t_left_fast, unit=millisecond, precision=1)
 ```
 
-Two learned controllers can succeed at the same task under nominal conditions and still fail on the same machine for entirely different physical reasons. The cage-door latch task of @sec-data has two such controllers. Both use the machine's chunk-policy architecture, Action Chunking with Transformers (ACT) [@zhao2023learning], which decodes each chunk in one pass. The first latch policy, `latch-bc-01`, was cloned from the latch campaign's teleoperated door-opening demonstrations via supervised regression. The second, `latch-sim-02`, is a distilled student: reinforcement learning inside a massively parallel physics simulator trained a teacher that observed privileged simulator state, and `latch-sim-02`, initialized from `latch-bc-01`, learned to reproduce the teacher's actions from the onboard sensors alone (@sec-training-privileged-distillation).
+A policy is the learned function that maps the machine's observations to proposed actions, and policy training is the process that sets its weights from experience. A classical robot controller is derived from a model of the plant and tuned by an engineer, so its assumptions are written down where a reviewer can read them. A learned policy instead acquires its behavior from whatever experience its training supplies: demonstrations recorded by operators, logs of earlier runs, rollouts in a physics simulator, trials on the machine itself, or the weights of a generalist model pretrained on other robots' data. These sources are what made learned manipulation practical, and each is also a path by which assumptions enter the controller without being written down, because the trained weights do not record which experience shaped them.
+
+The central question of policy training on a physical machine is therefore which behavior the chosen experience actually supports, and at what cost, rather than which regime reaches the highest score. Three constraints shape every answer. A policy that proposes too slowly fails its deadline however good its actions are. Experience gathered on the machine consumes time, heat, and component life. Experience gathered in simulation is only as faithful as the solver's contact and timing models. This chapter compares the training regimes against those constraints on the warehouse machine's cage-door latch task, then traces the failure each regime leaves behind, and ends with the policy manifest, the record that confines a checkpoint's declared operating domain to what its evidence supports. Two latch policies show why the comparison cannot stop at the training score.
+
+The cage-door latch task of @sec-data has two learned controllers that both succeed under nominal conditions and still fail on the same machine for entirely different physical reasons. Both use the machine's chunk-policy architecture, Action Chunking with Transformers (ACT) [@zhao2023learning], which decodes each chunk in one pass. The first latch policy, `latch-bc-01`, was cloned from the latch campaign's teleoperated door-opening demonstrations via supervised regression. The second, `latch-sim-02`, is a distilled student: reinforcement learning inside a massively parallel physics simulator trained a teacher that observed privileged simulator state, and `latch-sim-02`, initialized from `latch-bc-01`, learned to reproduce the teacher's actions from the onboard sensors alone (@sec-training-privileged-distillation).
 
 The inherited constraint is the same for both candidates: the demonstrations support the nominal plate at the guarded approach, but leave other conditions uncharacterized. Cloning must turn those examples into coherent action proposals; learning through interaction can supply new experience, but its value depends on how faithfully that interaction represents the machine. Choosing a training regime therefore also chooses which assumptions must be tested before the resulting checkpoint enters evaluation.
 
@@ -130,9 +134,7 @@ In this illustrative comparison, at the nominal strike plate and the guarded app
 1. **Missing recovery experience**: When the door has sagged and its strike plate sits off nominal, `latch-bc-01` has no demonstrated correction for that condition. Supervised training minimizes prediction error on the observations the campaign recorded; it does not test recovery from a displaced plate. The policy still produces an action at the unfamiliar observation. That action changes the next observation, allowing errors to compound at each `{python} LatchContactDeadline.t_step_str` setpoint tick until the gripper binds on the edge of the plate. The missing experience, rather than the size of the network, is the immediate engineering problem.
 2. **Misleading simulated contact**: In contrast, `latch-sim-02` fails on the nominal strike plate itself. Its simulator represents contact with a soft penalty spring ($F = k_{\text{pen}} \delta + c \dot{\delta}$), where penetration and its rate determine the simulated force. The spring permits more compression than the real plate. In this example, the training reward therefore charges no damage penalty for an approach at `{python} LatchContactDeadline.v_fast_str`, and the optimizer favors the shorter episode. The teacher has learned a fast plunge whose apparent acceptability depends on the simulated contact response, and distillation has passed that plunge to the student.
 
-A contact-force budget exposes why the fast approach cannot be accepted from its simulated score. Under constant approach velocity $v$, penetration depth into the strike plate grows linearly over time as $\Delta x = v t$. Assuming linear contact stiffness ($F = k \Delta x$), normal contact force rises as $F(t) = k v t$. Setting $F(t) = F_{\text{lim}}$ establishes the **contact yield deadline**:
-$$t_{\text{yield}} = \frac{F_{\text{lim}}}{k v},$$
-which estimates the time to the force limit under the constant-speed, linear-stiffness assumptions. A stopping analysis must additionally account for the changing velocity and actuator response. On physical hardware, the steel strike plate exhibits high contact stiffness ($k \gg k_{\text{pen}}$). Using the plate's stiffness alone treats the arm, wrist, and finger pads as rigid, which is the stiffest case and therefore the shortest deadline; @sec-training-contact-exploit adds the robot's own compliance. Approaching at the unbraked speed of `{python} LatchContactDeadline.v_fast_str`, contact force crosses the latch's `{python} LatchContactDeadline.f_lim_str` threshold in just `{python} LatchContactDeadline.t_yield_fast_str` after impact. This deadline barely exceeds the contact loop's `{python} LatchContactDeadline.t_contact_loop_str` sensing and bus response latency, leaving only `{python} LatchContactDeadline.t_left_fast_str` to shed the mechanism's kinetic energy $E_k = \frac{1}{2} m_{\text{eff}} v^2$. The timing comparison therefore leaves almost no established margin for deceleration. The force calculation in @sec-training-contact-exploit shows why the unbraked plunge exceeds the illustrative latch limit; accepting it would require stopping evidence that this training result does not supply.
+A contact-force budget exposes why the fast approach cannot be accepted from its simulated score. The steel strike plate on the machine is far stiffer than the simulated spring ($k \gg k_{\text{pen}}$). If the drive keeps pressing at the unbraked speed of `{python} LatchContactDeadline.v_fast_str`, contact force crosses the latch's `{python} LatchContactDeadline.f_lim_str` limit only `{python} LatchContactDeadline.t_yield_fast_str` after touch. That barely exceeds the `{python} LatchContactDeadline.t_contact_loop_str` the contact loop needs to sense and respond, and leaves `{python} LatchContactDeadline.t_left_fast_str` to shed the mechanism's kinetic energy, which is no established margin for deceleration. @Sec-training-contact-exploit derives this contact deadline and the peak force of the plunge; accepting the plunge would require stopping evidence that this training result does not supply.
 
 Both failures reveal dependencies that the training score does not test: demonstrated recovery states for the cloned policy and realistic contact response for the simulated policy. Choosing a regime requires matching the experience it supplies to the behavior the task needs. The resulting checkpoint remains a proposal generator across the proposal-permission boundary (@sec-boundary-machine-model); useful performance requires proposals that fit the machine's actuator dynamics and contact deadlines as well as its task objective.
 
@@ -144,7 +146,7 @@ Both failures reveal dependencies that the training score does not test: demonst
 
 ## Policy Synthesis Regimes {#sec-training-synthesis-regimes}
 
-The latch task could draw on five sources of experience: the teleoperated door openings of @sec-data, a log of imperfect or scripted door runs, a simulator of the cage door, the arm itself, and a generalist checkpoint pretrained on other robots' data. Each buys a different capability at a different physical price, and @tbl-06-regimes sets them side by side with the failure each is known for and the check that intercepts it.
+The latch task could draw on five sources of experience: the teleoperated door openings of @sec-data, a log of imperfect or scripted door runs, a simulator of the cage door, the arm itself, and a generalist checkpoint pretrained on other robots' data. Each buys a different capability at a different physical price, and @tbl-06-regimes sets them side by side with the failure each is known for and the check that intercepts it. Cloning, offline reinforcement learning, and post-training learn from recorded experience, and this section develops them. Learning by trial, on the machine and in simulation, occupies the sections that follow, and fine-tuning on the real machine closes the comparison.
 
 | Policy Synthesis Regime            | Core Purchased Capability                                                                                        | Data & Compute Budget                                                   | Sample Efficiency & Scale                                              | Hardware Safety & Wear Risk                                                                          | Dominant Failure Mode & Interceptor                                                                                                                           |
 |:-----------------------------------|:-----------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------|:-----------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -303,11 +305,7 @@ where $\mathbf{A}_t^* = [\mathbf{a}_t^*, \dots, \mathbf{a}_{t+H-1}^*]^\top$ repr
 $$\ell_\delta(r) = \begin{cases} \frac{1}{2} r^2 & \text{for } |r| \le \delta, \\ \delta \left(|r| - \frac{1}{2} \delta\right) & \text{otherwise.} \end{cases}$$
 (ACT [@zhao2023learning], the architecture of both latch policies, uses an $L_1$ reconstruction penalty in place of $\ell_\delta$ and adds a conditional variational autoencoder (CVAE) term $\beta D_{\text{KL}}(q(\mathbf{z} \mid \mathbf{A}_t^*, \mathbf{o}_t) \parallel p(\mathbf{z}))$, which lets a latent variable absorb differences in style across demonstrations.)
 
-Teleoperated setpoints can contain outliers caused by tremor, tracking errors, or dropouts. Squared loss gives a large residual disproportionate influence over the fit, whereas a robust loss limits that influence. Neither objective directly constrains the velocity, acceleration, or jerk of the resulting trajectory.
-
-Huber loss transitions from quadratic $L_2$ regression for small errors ($|r| \le \delta$) to robust linear $L_1$ regression for large errors ($|r| > \delta$). Its gradient is strictly bounded:
-$$\nabla_r \ell_\delta(r) = \begin{cases} r & \text{for } |r| \le \delta, \\ \delta \operatorname{sgn}(r) & \text{otherwise.} \end{cases}$$
-For residuals exceeding the threshold $\delta$, the gradient saturates at a constant magnitude $\delta$, limiting each outlier's influence on the fit. The threshold acts on prediction residuals, however, rather than directly on velocity, acceleration, or jerk. Huber loss alone therefore establishes neither smooth motion nor actuator feasibility; those properties need explicit constraints and checks on the proposed chunk.
+Teleoperated setpoints can contain outliers caused by tremor, tracking errors, or dropouts. Squared loss gives a large residual disproportionate influence over the fit. Huber loss is quadratic for small residuals ($|r| \le \delta$) and linear beyond them, so its gradient saturates at magnitude $\delta$ and no single outlier can dominate the fit. The threshold acts on prediction residuals, however, rather than on the velocity, acceleration, or jerk of the resulting trajectory. Huber loss alone therefore establishes neither smooth motion nor actuator feasibility; those properties need explicit constraints and checks on the proposed chunk.
 
 Predicting $H$ future actions at once creates opportunities for more coherent execution, provided training and runtime checks preserve them:
 
@@ -319,7 +317,7 @@ Crucially, receding-horizon temporal ensembling introduces an acute physical fai
 
 [^fn-ctrl-commitment-horizon]: **Mode Commitment Horizons in Temporal Ensembling**\index{Action chunking!mode commitment}\index{Temporal ensembling!mode averaging failure}: One remedy is to stop blending across the seam. Real-time chunking generates the next chunk while the current one executes, freezes the actions already committed to execution, and inpaints the rest of the new chunk to agree with them, so the new chunk continues the executing mode instead of averaging against it [@black2025realtime]; @sec-brain-action-chunking places the committed prefix on the machine's renewal schedule. The method applies to diffusion and flow decoders, whose sampling can be conditioned on the frozen prefix. This commitment never overrides a state limit, evidence expiry, or lease expiry; the qualified fallback takes precedence when continued execution is invalid.
 
-Chunking changes how often the policy replans, but does not supply recovery states absent from the demonstrations. Executing $H_a$ actions between queries reduces the number of query boundaries to $T_{\text{eff}} = T/H_a$ while leaving disturbances within each execution window to the lower-level feedback system. This count alone does not convert the imitation-learning cost bound $\mathcal{O}(T^2 \epsilon)$ into a task-survival curve. ACT [@zhao2023learning] and receding-horizon diffusion [@chi2024diffusionpolicy] change temporal execution; DAgger [@ross2011reduction] changes the training distribution by obtaining labels on learner-visited states. These are separate ways to improve behavior, and their closed-loop benefits must be measured on the task. @Fig-06-compounding-error places the section's three ideas in one state space: the tube of demonstrated states, a learner that drifts out of it, and the learner-visited state where DAgger obtains an expert label before the drift reaches a region from which no admissible action returns. Neither the sketch nor the imitation-learning cost bound establishes a task-survival probability or ranks learning algorithms.
+Chunking changes how often the policy replans, but does not supply recovery states absent from the demonstrations. Executing $H_a$ actions between queries reduces the number of query boundaries to $T_{\text{eff}} = T/H_a$ while leaving disturbances within each execution window to the lower-level feedback system. This count alone does not convert the imitation-learning cost bound $\mathcal{O}(T^2 \epsilon)$ into a task-survival curve. ACT [@zhao2023learning] and receding-horizon diffusion [@chi2024diffusionpolicy] change temporal execution; DAgger [@ross2011reduction] changes the training distribution by obtaining labels on learner-visited states. These are separate ways to improve behavior, and their closed-loop benefits must be measured on the task. @Fig-06-compounding-error returns to the drift of @sec-training-recovery-experience-6a31 and places its three ideas in one state space, the tube of demonstrated states, a learner that drifts out of it, and the learner-visited state where DAgger obtains an expert label before the drift reaches a region from which no admissible action returns. Neither the sketch nor the imitation-learning cost bound establishes a task-survival probability or ranks learning algorithms.
 
 ::: {#fig-06-compounding-error fig-env="figure" fig-pos="htb" fig-cap="**Drift out of the demonstrated states**: Behavioral cloning trains only inside the shaded tube the expert visited. Once the learner leaves it, each action is taken from an unfamiliar state and the error compounds. DAgger labels a learner-visited state outside the tube, which supplies recovery experience while a return is still possible. Past the red boundary, actuator and friction limits leave no action that restores the task, so no label can help. The sketch is schematic; its axes carry no units." fig-alt="Schematic state-space plot with task progress on the horizontal axis and deviation from the demonstrated path on the vertical axis. A shaded band surrounds a solid expert path. A dashed learner path leaves the band and continues upward into a red region at the top. At one point just outside the band, a marker labeled DAgger label has an arrow pointing back toward the band."}
 
@@ -421,7 +419,7 @@ The same multimodal choice now has a computational cost. @Fig-06-diffusion-denoi
 
 Diffusion policies [@chi2024diffusionpolicy] learn to remove noise from demonstrated action chunks conditioned on the observation history. At inference, each denoising evaluation consumes the preceding candidate, so the evaluations occur sequentially. Flow matching [@lipman2022flow; @black2024pi0] instead learns a vector field that transports a noisy candidate toward the demonstrated distribution. Its solver also incurs a sequence of model evaluations. Neither construction guarantees collision-free or actuator-feasible output. The diffusion and flow-matching objectives are developed in @sec-appendix-ml-diffusion; for the latch decision, their relevant consequence is how many evaluations yield adequate action quality within the available time.
 
-Autoregressive vision-language-action policies [@kim2024openvla] incur a related dependency by generating successive action tokens. Their cost depends on the tokenization, model, and implementation, rather than on the decoder family name alone. Compressing a chunk into fewer tokens shortens that sequence, and @sec-brain-action-chunking prices one such tokenizer, FAST [@pertsch2025fast]. Tokenization also changes what training can do. A vision-language backbone can be adapted on discrete action tokens while a separate continuous action expert is trained beside it, with the expert's gradient stopped before it reaches the backbone, so the newly initialized expert does not disturb the pretrained weights; this **knowledge insulation** trained faster and generalized better than letting the expert's gradient flow into the backbone [@driess2025knowledge]. The run-time decoder is then the one-pass or few-step action expert, and it is that expert's latency the proposal deadline must absorb. We therefore compare complete proposal latency, including perception, with the actual proposal deadline before selecting the execution arrangement.
+Autoregressive vision-language-action policies [@kim2024openvla] incur a related dependency by generating successive action tokens. Their cost depends on the tokenization, model, and implementation, rather than on the decoder family name alone. Compressing a chunk into fewer tokens shortens that sequence, and @sec-brain-action-chunking prices one such tokenizer, FAST [@pertsch2025fast]. Some post-training recipes remove the token sequence from the run-time path altogether by training a separate action expert (@sec-training-pretrain-post-train). We therefore compare complete proposal latency, including perception, with the actual proposal deadline before selecting the execution arrangement.
 
 The number and dependency of decoder evaluations constrain proposal latency; the implementation and loaded hardware determine its measured value. The total wall-clock duration of a single policy inference cycle $t_{\text{infer}}$ is the sum of perceptual feature extraction and iterative generative trajectory sampling:
 $$t_{\text{infer}} = t_{\text{enc}}(\mathbf{O}_t) + \sum_{k=1}^{N_{\text{eval}}} t_{\text{eval}}\left(\mathbf{A}^k, k\right) \le t_{\text{deadline}},$$
@@ -550,7 +548,7 @@ The illustrative budget distinguishes sampler choice from execution authority:
 # │ Show: setpoint ticks, renewal boundaries, ACT and diffusion inference
 # │       bars with their slack, the diffusion overrun under a jitter-sized
 # │       stretch, and the lease interval.
-# │ How: timing_strip() draws one row per event stream; every duration from
+# │ How: viz.decoder_budget_strip() draws one lane per stream; every duration from
 # │      DecoderBudget, LatchContactDeadline, and AISLE.t_lease.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import viz
@@ -571,70 +569,13 @@ check(
     "values hand-drawn in fig06_bespoke_diffusion_denoising_process.svg panel (c)",
 )
 
-def timing_strip(ax, rows, t_end, bar_h=0.5):
-    """Draw a timing strip. rows = [(label, [(t0, t1, color, text, hatch)...], ticks)]."""
-    n = len(rows)
-    for i, (label, segs, ticks) in enumerate(rows):
-        y = n - 1 - i
-        ax.text(-0.02 * t_end, y, label, ha="right", va="center", fontsize=9.5)
-        for t in ticks:
-            ax.plot([t, t], [y - 0.28, y + 0.28], color=COLORS["primary"], lw=1.4)
-        for t0, t1, color, text, hatch in segs:
-            ax.barh(
-                y,
-                t1 - t0,
-                left=t0,
-                height=bar_h,
-                color="white" if hatch else color,
-                edgecolor=color,
-                hatch=None if hatch == "open" else hatch,
-                lw=1.0,
-            )
-            if text:
-                ax.text(0.5 * (t0 + t1), y, text, ha="center", va="center", fontsize=9, color="white" if not hatch else color)
-    ax.set_ylim(-0.7, n - 0.3)
-    ax.set_xlim(0, t_end)
-    ax.set_yticks([])
-    for s in ("top", "right", "left"):
-        ax.spines[s].set_visible(False)
+# The strip is drawn by the shared timing-strip family (mlsysim.viz), which
+# reads every duration from DecoderBudget and the lease.
+strip = viz.decoder_budget_strip(_B, AISLE.t_lease)
+check(any(s.label == f"ends {_ms(_B.ddim_stretch_over):.0f} ms past renewal" for s in strip.spans), "strip overrun label")
+fig, ax, _ = viz.plot_timing_strip(strip)
+import matplotlib.pyplot as plt
 
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 4.2))
-PROP, LEASE = "#B87333", "#1A4D3E"
-t_end = 2 * _t_renew
-renewals = [0.0, _t_renew, 2 * _t_renew]
-for t in renewals:
-    ax.axvline(t, color=COLORS["grid"], lw=1.0, ls="--", zorder=0)
-rows = [
-    (f"setpoint every {_t_step:.0f} ms", [], [k * _t_step for k in range(int(t_end / _t_step) + 1)]),
-    (f"renewal every {_t_renew:.0f} ms", [], renewals),
-    (
-        "ACT decoder",
-        [(r, r + _t_act, PROP, f"{_t_act:.0f} ms", None) for r in renewals[:2]]
-        + [(r + _t_act, r + _t_renew, PROP, f"{_t_renew - _t_act:.0f} ms", "open") for r in renewals[:2]],
-        [],
-    ),
-    ("diffusion head", [(r, r + _t_ddim, PROP, f"{_t_ddim:.0f} ms", None) for r in renewals[:2]], []),
-    (
-        f"diffusion, {_t_jit:.0f} ms stretch",
-        [
-            (0.0, _t_ddim, PROP, f"{_t_ddim:.0f} ms", None),
-            (_t_ddim, _t_renew, PROP, "", "////"),
-            (_t_renew, _t_ddim + _t_jit, COLORS["RedLine"], "", None),
-        ],
-        [],
-    ),
-    ("lease from admission", [(0.0, _t_lease, LEASE, f"{_t_lease:.0f} ms lease", None)], []),
-]
-timing_strip(ax, rows, t_end)
-n = len(rows)
-ax.text(_t_ddim + 1, n - 4 + 0.30, f"{_t_renew - _t_ddim:.0f} ms slack", fontsize=9, color=PROP, ha="right", va="bottom")
-ax.text(
-    _t_ddim + _t_jit + 1.5, n - 5, f"stretch ends {_ms(_B.ddim_stretch_over):.0f} ms past renewal", color=COLORS["RedLine"], fontsize=9, va="center"
-)
-ax.text(_t_lease + 1.5, n - 6, "expires unless renewed", color=LEASE, fontsize=9, va="center")
-ax.set_xlabel("Time (ms)")
-ax.set_xticks([k * _t_step for k in range(int(t_end / _t_step) + 1)])
-ax.grid(False)
 fig.tight_layout()
 plt.show()
 plt.close()
@@ -657,7 +598,7 @@ To reduce value overestimation without querying the physical environment, **Cons
 $$\min_Q \alpha \cdot \mathbb{E}_{\mathbf{s} \sim \mathcal{D}} \left[ \ln \int_{\mathcal{A}} \exp(Q(\mathbf{s}, \mathbf{a}))\,d\mathbf{a} - \mathbb{E}_{\mathbf{a} \sim \mathcal{D}}\left[ Q(\mathbf{s}, \mathbf{a}) \right] \right] + \frac{1}{2} \mathbb{E}_{(\mathbf{s}, \mathbf{a}, r, \mathbf{s}') \sim \mathcal{D}} \left[ \left( Q(\mathbf{s}, \mathbf{a}) - \mathcal{B}^* \hat{Q}(\mathbf{s}, \mathbf{a}) \right)^2 \right],$$
 where $\mathcal{B}^* \hat{Q}(\mathbf{s}, \mathbf{a}) = r(\mathbf{s}, \mathbf{a}) + \gamma \max_{\mathbf{a}'} \hat{Q}(\mathbf{s}', \mathbf{a}')$ is the empirical Bellman target operator and $\alpha > 0$ balances value conservatism against Bellman error minimization.[^fn-math-cql-bound]
 
-The objective discourages optimistic values for poorly supported actions. In the expression, $Q$ estimates future reward from an action, and the Bellman target combines the immediate reward with the estimated reward that follows. The conservative penalty changes those estimates; it does not impose a hard boundary on executable actions:
+The conservative penalty reshapes value estimates term by term; it does not impose a hard boundary on executable actions:
 
 1. The logarithmic integral term $\ln \int_{\mathcal{A}} \exp(Q(\mathbf{s}, \mathbf{a}))\,d\mathbf{a}$ acts as a soft-maximum that actively pushes *down* on Q-values across the entire action space, aggressively depressing values in unvisited action regions where function approximation variance would otherwise create spurious positive spikes.
 2. The dataset expectation $\mathbb{E}_{\mathbf{a} \sim \mathcal{D}}[Q(\mathbf{s}, \mathbf{a})]$ pushes *up* on Q-values exclusively for state-action pairs executed during the logging campaign.
@@ -730,7 +671,9 @@ Pretraining buys competence that the latch campaign could not. A base that has s
 
 Three dependencies follow, and each needs a place in the manifest. The base checkpoint is an input whose own training data usually cannot be cited by digest, because its mixture, filtering, and training run were fixed by whoever produced it. The manifest therefore records the base by the digest of its weights and states its pretraining provenance as a known unknown, in the `base_checkpoint` field of @tbl-06-training-schema. The base's action space rarely matches the machine. A checkpoint that emits normalized end-effector deltas at its own rate must be re-headed or re-mapped onto setpoints every `{python} LatchRewardProblem.t_step_str`, and that mapping is where the normalization fallacy of @sec-data-embodiment-contracts re-enters. Post-training can also erase what pretraining supplied. Updates that fit the latch demonstrations can degrade behaviors the base performed well and the latch campaign never exercised. That is the same forgetting obligation `latch-res-03` carries (@sec-training-real-machine-tuning), now over a far larger and less documented set of behaviors.
 
-Post-training need not stop at imitation. A pretrained policy can be improved with reinforcement learning on its own experience, in simulation or on the machine, and @sec-training-rl-post-training compares those methods by what each one freezes. The decoder question also carries over. A study of post-training recipes found that action chunking with a plain $L_1$ regression head matched iterative decoders on its benchmark while decoding far faster [@kim2025openvlaoft], so the deadline arithmetic of @sec-training-decoder-costs governs the post-trained head just as it governs the latch's own.
+Post-training need not stop at imitation. A pretrained policy can be improved with reinforcement learning on its own experience, in simulation or on the machine, and @sec-training-rl-post-training compares those methods by what each one freezes.
+
+The decoder question also carries over, because post-training often changes the head that runs at deployment. A vision-language backbone can be adapted on discrete action tokens while a separate continuous action expert is trained beside it, with the expert's gradient stopped before it reaches the backbone, so the newly initialized expert does not disturb the pretrained weights; this **knowledge insulation** trained faster and generalized better than letting the expert's gradient flow into the backbone [@driess2025knowledge]. The run-time decoder is then the one-pass or few-step action expert, not the token sequence. A study of post-training recipes likewise found that action chunking with a plain $L_1$ regression head matched iterative decoders on its benchmark while decoding far faster [@kim2025openvlaoft]. Either way, the deadline arithmetic of @sec-training-decoder-costs governs the post-trained head just as it governs the latch's own.
 
 Cloning, chunking, offline value learning, and post-training a pretrained base can all propose actions beyond the logged experience. Their training data do not supply evidence for those proposals merely because an optimizer assigns them a low loss or high value. When the archive lacks the recovery maneuvers the task requires, additional experience and validation are needed; closed-loop trial is one way to obtain them.
 
@@ -871,16 +814,6 @@ This substitution fundamentally alters the contract between training and reality
 
 The latch policy learned that a fast plunge was acceptable because its simulated plate yielded more than the physical plate. Removing the simulator at deployment does not remove that learned behavior. A simulator therefore belongs in the training system's engineering specification: its equations, contact approximations, and timing assumptions determine the experience supplied to the optimizer. The engineer needs measurable error tolerances for those assumptions before using simulated success as evidence about the machine.
 
-::: {#dfn-training-sim-real-reality-gap-vector .callout-definition title="Sim-to-real reality gap vector"}
-
-***Sim-to-real reality gap vector***\index{Sim-to-real reality gap vector!definition}\index{Reality gap!definition} $\boldsymbol{\Delta}_{\text{sim2real}} = [\Delta_{\text{dyn}}, \Delta_{\text{sens}}, \Delta_{\text{vis}}, \Delta_{\text{lat}}]$ is the coupled, multi-channel decomposition of physical discrepancies between simulated and hardware environments spanning contact mechanics ($\Delta_{\text{dyn}}$), sensor transduction and noise ($\Delta_{\text{sens}}$), visual appearance ($\Delta_{\text{vis}}$), and asynchronous transport latency and jitter ($\Delta_{\text{lat}}$).
-
-1.  **Significance**: Treating the "reality gap" as a scalar difficulty metric or pure visual domain mismatch causes engineers to overlook dynamical and temporal divergences. Discrepancies in actuator back-EMF, gearbox compliance, or bus jitter deplete feedback stability margins before the policy completes its first physical control step.
-2.  **Distinction**: An inaccurate parameter value (such as a 10 percent error in link mass) preserves the causal differential equations of motion, whereas an omitted mechanism (such as zero-delay communication or unmodeled Coulomb stick-slip) entirely severs physical feedback paths, leading policies to exploit non-physical simulator artifacts.
-3.  **Common pitfall**: Relying on domain randomization alone to bridge a large gap. Randomization covers only the mechanisms the simulator models; for a memoryless policy, a wide range also yields a conservative compromise that can miss precision tasks on real hardware.
-
-:::
-
 Like any hardware subsystem, the simulator requires a formal interface contract, stated in quantities that can be measured and budgeted. This contract specifies observation dimensions, action bounds, simulation time step $\Delta t$, transport latency between command issuance and physical actuation, actuator torque and current limits, sensor noise distributions, reset distributions, and termination conditions. If the simulator specifies an observation loop executing at $100\text{ Hz}$ with an assumed zero-delay sensor channel and Gaussian noise with variance $\sigma^2 = 1.0 \times 10^{-4}\text{ (rad/s)}^2$, the policy learns feedback gains tuned to those precise signal statistics, and an unmodeled $15\text{ ms}$ bus transport delay on the physical machine invalidates them. Dactyl's twin (@fig-06-sim2real-dactyl) could not match its physical hand exactly, so its simulator was calibrated against the real hand and then randomized around the calibrated values, and the policy met the unmatched remainder as variation it had already trained against [@andrychowicz2020learning].
 
 ::: {#fig-06-sim2real-dactyl fig-env="figure" fig-pos="t" fig-cap="**Sim-to-real transfer setup**: OpenAI's Dactyl apparatus, a 24-DoF Shadow Hand inside a motion-capture cage beside the MuJoCo digital twin it was trained in [@andrychowicz2020learning]. Transfer is bought with domain randomization over friction, damping, actuator gains, masses, dimensions, and lighting, together with modeled backlash and action delay. A recurrent policy with memory could identify and adapt to the variation it met, so transfer did not depend on making the simulator exact. Attribution: @andrychowicz2020learning." fig-alt="Two side-by-side panels. On the left, headed real-world environment, a photograph of an aluminum frame cage with many cameras mounted on it and a robot hand at its center. On the right, headed simulation environment, a rendering on an orange background of a robot hand holding a lettered cube beside a purple cylindrical housing."}
@@ -903,9 +836,7 @@ When a simulator uses an inaccurate rotor inertia, assigning $J_{\text{rotor}} =
 
 [^fn-inc-dactyl-friction]: **OpenAI Dactyl domain randomization**\index{OpenAI Dactyl!system identification}: On the physical hand, @andrychowicz2020learning found that policies trained without the physics randomizations, or without the added models of effects the simulator omits, such as backlash and action delay, achieved far fewer consecutive rotations than the policy trained with all of them.
 
-Contact is the decisive mechanism for this task. A solver must relate separation, compression, friction, and relative motion to forces that the policy can observe. The rigid-contact complementarity model and its numerical approximations are developed in @sec-appendix-control-contact. For choosing the latch training regime, the immediate test is whether those approximations preserve the force and timing quantities that determine the allowed approach.
-
-A rigid-contact formulation enforces non-penetration through contact constraints; penalty formulations allow compression to generate a restoring force. Practical solvers approximate both formulations, and numerical settings affect the result. The latch simulator uses a softened penalty spring, so its training result must be checked against the plate's force response.
+Whether the latch simulator is worth these risks depends on two properties, the experience it can supply per hour and the fidelity of its contact response to the plate. Throughput comes first, because it is the reason teams accept a simulator at all.
 
 ### Massively parallel simulation and on-policy learning {#sec-training-parallel-simulation}
 
@@ -983,6 +914,10 @@ Rudin and colleagues trained a quadruped walking policy this way with `{python} 
 Apply that throughput to the latch. The from-scratch scenario of @sec-training-learning-by-trial is `{python} ParallelSimBudget.latch_steps_str` policy steps, which the reported rate would deliver in `{python} ParallelSimBudget.t_latch_sim_str`, against `{python} TrialWallClock.t_auto_days_str` on the automated-reset fixture. That comparison is why simulation carries most robot reinforcement learning, and it is also a comparison to distrust. The throughput was measured on legged locomotion over terrain meshes, and the same authors report a factor-of-two change in simulation time between the first minutes of training and the end, as their robots spread apart and stopped colliding, because detecting and resolving contact dominates the cost. A latch scene with a door, a cam, and a spring-loaded plate is the kind that runs slowest, and rendering camera observations slows it further. Throughput benchmarks also report speed without fidelity. The 2024 launch benchmark of one GPU simulator was disputed because it stepped a scene with one action followed by long runs of steps without any action, at the fastest solver settings, with robot self-collisions disabled [@genesis2024benchmarkissue]. A step per second is not a unit of evidence. What the latch needs is simulated experience whose contact response has passed paired probes, and more rollouts only make an optimizer explore the modeled dynamics more thoroughly. They do not repair a missing mechanism, as the latch's own simulator shows next.
 
 ### The sim-to-real contact exploit {#sec-training-contact-exploit}
+
+Contact is the decisive mechanism for this task. A solver must relate separation, compression, friction, and relative motion to forces that the policy can observe. The rigid-contact complementarity model and its numerical approximations are developed in @sec-appendix-control-contact. For choosing the latch training regime, the immediate test is whether those approximations preserve the force and timing quantities that determine the allowed approach.
+
+A rigid-contact formulation enforces non-penetration through contact constraints; penalty formulations allow compression to generate a restoring force. Practical solvers approximate both formulations, and numerical settings affect the result. The latch simulator uses a softened penalty spring, so its training result must be checked against the plate's force response.
 
 Reinforcement learning optimizes against the physics the solver presents, not the physics of the plant\index{Sim-to-real contact exploit}. The latch's penalty contact computes a restoring force from penetration and penetration rate, $F = k_{\text{pen}} \delta + c \dot{\delta}$. Softening that contact changes the relation between approach speed, compression, and peak force. The following illustrative calculation isolates this dependency with an undamped spring-energy model; it does not claim that every penalty solver dissipates momentum instantly or creates additional traction.
 
@@ -1069,7 +1004,9 @@ On the machine, the plate is `{python} LatchContactExploit.plate_over_sim_mult_s
 $$k_{\text{eff}} = \left(\frac{1}{k_{\text{plate}}} + \frac{1}{k_{\text{robot}}}\right)^{-1}.$$
 A rigid robot bounds the peak from above. With $k_{\text{robot}} \to \infty$ the same plunge peaks at `{python} LatchContactExploit.f_rigid_str`, `{python} LatchContactExploit.rigid_over_lim_mult_str` the latch limit. The latch limit is reached when $k_{\text{eff}}$ reaches $(F_{\text{lim}}/v)^2/m =$ `{python} LatchContactExploit.k_eff_star_str`, which requires a robot-side stiffness of `{python} LatchContactExploit.k_robot_star_str`. A robot stiffer than that value breaks the latch at the fast approach, and a softer one does not. The chapter has no measured $k_{\text{robot}}$ for this arm, gripper, and pad set, and it will not invent one. A quasi-static push test at the tool center point would supply it, and until it does the sign of the real outcome is unknown, which is exactly why the simulated result cannot be accepted. The same energy model gives `{python} LatchContactExploit.f_guarded_rigid_str` for a rigid robot coasting in at the guarded speed, under the limit even in the stiffest case.
 
-The energy model describes a mass that coasts into the plate after drive force stops. The constant-speed model of @sec-training-policy-synthesis describes the other case, a drive that keeps commanding motion into the plate, which is the worst case the permission path must stop. Whether the permission path can prevent that peak is a question of time. Contact force follows $F = k\,\Delta x$ (@sec-body-actuator-limits), and because the plate compresses at the approach speed, $\Delta x = vt$ and the force rises as $F = kvt$ from the moment of touch. With the plate alone as the stiffness, the conservative choice for a deadline, the latch limit arrives `{python} LatchContactDeadline.t_yield_fast_str` after touch at the fast approach, barely more than the `{python} LatchContactDeadline.t_contact_loop_str` the contact loop needs to respond, while at the guarded approach of `{python} LatchContactDeadline.v_guarded_str` it arrives after `{python} LatchContactDeadline.t_yield_guarded_str`. A response that begins with only `{python} LatchContactDeadline.t_left_fast_str` remaining under the constant-speed estimate has no established stopping margin in this example. Prevention must therefore act before contact. An independently enforced stopping envelope, such as $v_{\text{max}}(z) \le \sqrt{2 a_{\text{brake}} z}$, can preserve the ability to stop before contact. Here $z$ is usable clearance to a stopping boundary before the plate after reserving response travel, and $a_{\text{brake}}$ is the validated deceleration. The bound tends to zero at that boundary; it does not authorize a nonzero touch speed. Entering the guarded contact mode instead requires separate validation of approach speed, contact-force rise, response delay, and available deceleration. A force tripwire limits subsequent loading only within those validated assumptions. The contact deadline, not the training reward, is what confines the latch policy's declared ODD to the guarded approach (@sec-training-policy-manifest). @Fig-06-latch-contact-force draws both approaches on one time axis, so the margin left after the contact loop responds can be read directly.
+The energy model describes a mass that coasts into the plate after drive force stops. The other case, a drive that keeps commanding motion into the plate, is the worst case the permission path must stop, and whether it can is a question of time. Contact force follows $F = k\,\Delta x$ (@sec-body-actuator-limits), and because the plate compresses at the approach speed, $\Delta x = vt$ and the force rises as $F(t) = kvt$ from the moment of touch. Setting $F(t) = F_{\text{lim}}$ establishes the **contact yield deadline**
+$$t_{\text{yield}} = \frac{F_{\text{lim}}}{k v},$$
+the time to the force limit under these constant-speed, linear-stiffness assumptions; a stopping analysis must also account for the changing velocity and the actuator response. Using the plate's stiffness alone treats the arm, wrist, and finger pads as rigid, which is the stiffest case and therefore the shortest, conservative deadline. With that choice the latch limit arrives `{python} LatchContactDeadline.t_yield_fast_str` after touch at the fast approach, barely more than the `{python} LatchContactDeadline.t_contact_loop_str` the contact loop needs to respond, while at the guarded approach of `{python} LatchContactDeadline.v_guarded_str` it arrives after `{python} LatchContactDeadline.t_yield_guarded_str`. A response that begins with only `{python} LatchContactDeadline.t_left_fast_str` remaining under the constant-speed estimate has no established stopping margin in this example. Prevention must therefore act before contact. An independently enforced stopping envelope, such as $v_{\text{max}}(z) \le \sqrt{2 a_{\text{brake}} z}$, can preserve the ability to stop before contact. Here $z$ is usable clearance to a stopping boundary before the plate after reserving response travel, and $a_{\text{brake}}$ is the validated deceleration. The bound tends to zero at that boundary; it does not authorize a nonzero touch speed. Entering the guarded contact mode instead requires separate validation of approach speed, contact-force rise, response delay, and available deceleration. A force tripwire limits subsequent loading only within those validated assumptions. The contact deadline, not the training reward, is what confines the latch policy's declared ODD to the guarded approach (@sec-training-policy-manifest). @Fig-06-latch-contact-force draws both approaches on one time axis, so the margin left after the contact loop responds can be read directly.
 
 ::: {#fig-06-latch-contact-force fig-env="figure" fig-pos="htb" fig-cap="**Contact force against the contact-loop response**: Under constant drive into the plate, force rises as $F = kvt$ from touch. At the fast approach of `{python} LatchContactDeadline.v_fast_str` it crosses the `{python} LatchRewardProblem.f_trip_str` tripwire almost at once and reaches the `{python} LatchContactDeadline.f_lim_str` latch limit only `{python} LatchContactDeadline.t_left_fast_str` after the `{python} LatchContactDeadline.t_contact_loop_str` contact loop can respond. At the guarded approach of `{python} LatchContactDeadline.v_guarded_str`, the limit arrives at `{python} LatchContactDeadline.t_yield_guarded_str`, leaving several loop responses of margin. Plate stiffness alone is used, the stiffest and therefore shortest case." fig-alt="Line plot of contact force in newtons against time since touch in milliseconds. Two straight lines rise from the origin, a steep dashed line for the fast approach and a shallower solid line for the guarded approach. A gray dotted horizontal line marks the tripwire and a red horizontal line marks the latch limit, with a red band above it. A vertical line marks the contact-loop response time. Brackets show the short time left on the fast line and the longer time left on the guarded line."}
 
@@ -1110,7 +1047,7 @@ t_ms = np.linspace(0.0, 10.0, 400)
 f_top = 1.3 * _f_lim
 ax.axhspan(_f_lim, f_top, color=COLORS["RedL"], lw=0, zorder=0)
 ax.axhline(_f_lim, color=COLORS["RedLine"], lw=1.6, zorder=2)
-ax.text(3.6, _f_lim + 3, f"latch limit {_f_lim:.0f} N", color=COLORS["RedLine"], ha="left", va="bottom", fontsize=9.5)
+ax.text(4.2, _f_lim + 3, f"latch limit {_f_lim:.0f} N", color=COLORS["RedLine"], ha="left", va="bottom", fontsize=9.5)
 ax.axhline(_f_trip, color=COLORS["secondary"], lw=1.2, ls=":", zorder=2)
 ax.text(9.9, _f_trip + 2, f"tripwire {_f_trip:.0f} N", color=COLORS["secondary"], ha="right", va="bottom", fontsize=9.5)
 ax.axvline(_t_loop, color="#1A4D3E", lw=1.4, zorder=2)
@@ -1118,7 +1055,16 @@ ax.text(_t_loop + 0.1, 0.52 * _f_lim, f"contact loop\nresponds at\n{_t_loop:.0f}
 
 ax.plot(t_ms, _k * _v_f * t_ms * 1e-3, color=COLORS["primary"], lw=2.2, ls="--", zorder=3)
 ax.plot(t_ms, _k * _v_g * t_ms * 1e-3, color=COLORS["GreenLine"], lw=2.2, zorder=3)
-ax.text(3.15, 1.12 * _f_lim, f"fast {_v_f:.2f} m/s", color=COLORS["primary"], ha="left", va="bottom", fontsize=9.5)
+ax.text(
+    1.35,
+    0.62 * _f_lim,
+    f"fast {_v_f:.2f} m/s",
+    color=COLORS["primary"],
+    ha="right",
+    va="center",
+    fontsize=9.5,
+    bbox=dict(boxstyle="square,pad=0.1", fc="white", ec="none"),
+)
 ax.text(6.5, 0.62 * _f_lim, f"guarded {_v_g:.2f} m/s", color=COLORS["GreenLine"], ha="left", va="center", fontsize=9.5)
 ax.plot([_t_f, _t_g], [_f_lim, _f_lim], "o", color=COLORS["RedLine"], ms=5, zorder=4)
 
@@ -1167,6 +1113,16 @@ Because the structural assumptions of the simulator are frozen into the neural n
 ## Physical Constituents of the Sim-to-Real Gap {#sec-training-sim-to-real-gap}
 
 The latch simulator departs from the real cage door in two unrelated ways, a penalty spring far softer than the strike plate and a command path with no transport lag, and a single distance between simulated and real trajectories would blend them into a number that names neither. Errors in different physical channels carry different units, propagate through different paths in the closed loop, and produce different failures, so the mismatch is a vector of coupled components spanning dynamics, sensing, appearance, and timing\index{Sim-to-real gap!physical vector decomposition}. Sizing it is an accounting of physical errors against the task's tolerances, from paired command-response traces recorded under identical excitations, and each channel demands its own interceptor. @Tbl-06-reality-gap lists the interceptors for dynamics, which it splits into actuator and contact rows, and for sensing and timing; appearance is sized in the prose below and in panel (d) of @fig-06-sim2real-gap.
+
+::: {#dfn-training-sim-real-reality-gap-vector .callout-definition title="Sim-to-real reality gap vector"}
+
+***Sim-to-real reality gap vector***\index{Sim-to-real reality gap vector!definition}\index{Reality gap!definition} $\boldsymbol{\Delta}_{\text{sim2real}} = [\Delta_{\text{dyn}}, \Delta_{\text{sens}}, \Delta_{\text{vis}}, \Delta_{\text{lat}}]$ is the coupled, multi-channel decomposition of physical discrepancies between simulated and hardware environments spanning contact mechanics ($\Delta_{\text{dyn}}$), sensor transduction and noise ($\Delta_{\text{sens}}$), visual appearance ($\Delta_{\text{vis}}$), and asynchronous transport latency and jitter ($\Delta_{\text{lat}}$).
+
+1.  **Significance**: Treating the "reality gap" as a scalar difficulty metric or pure visual domain mismatch causes engineers to overlook dynamical and temporal divergences. Discrepancies in actuator back-EMF, gearbox compliance, or bus jitter deplete feedback stability margins before the policy completes its first physical control step.
+2.  **Distinction**: An inaccurate parameter value (such as a 10 percent error in link mass) preserves the causal differential equations of motion, whereas an omitted mechanism (such as zero-delay communication or unmodeled Coulomb stick-slip) entirely severs physical feedback paths, leading policies to exploit non-physical simulator artifacts.
+3.  **Common pitfall**: Relying on domain randomization alone to bridge a large gap. Randomization covers only the mechanisms the simulator models; for a memoryless policy, a wide range also yields a conservative compromise that can miss precision tasks on real hardware.
+
+:::
 
 Dynamics mismatch measures differences between commanded actuator effort and the resulting physical motion or contact force across the operational envelope. A simulator that models a rigid link with zero backlash and instantaneous contact stiffness predicts a faster force rise than a drivetrain whose gearbox compliance and drive delay add phase lag, and a policy that keyed contact onset to the simulated rise keeps pushing on the machine, the opposite-sign contact mismatch of @sec-training-simulator-component.
 
@@ -1291,9 +1247,7 @@ Even under careful domain randomization, contact calibration, and privileged sta
 
 ## Real-Robot Fine-Tuning and Residual Control {#sec-training-real-machine-tuning}
 
-The real cage door carries its strike plate at a small structural mounting offset from where the simulator placed it, a departure the simulator does not model. A local, measurable mismatch of this kind is what fine-tuning on physical hardware can absorb. Gradient updates computed from physical rollouts adapt the policy to the true compliance, contact dynamics, and bus delays of the machine, but they measure none of those mechanisms, so the simulator's other two departures, the soft contact spring and the missing transport lag, stay in the omission log until paired probes close them. The adaptation also has a physical price. In a simulator, sampling states near the boundary of stability costs only compute cycles, while on hardware every sample expends component life and risks driving the machine into an unrecoverable contact state.
-
-The cost of updating policy parameters on physical hardware\index{Fine-tuning!on physical hardware} compounds, because the gradient steps that solve localized contact errors also consume finite mechanical fatigue life, heat the motor windings, and risk catastrophic forgetting of pre-verified nominal transit stability.
+The real cage door carries its strike plate at a small structural mounting offset from where the simulator placed it, a departure the simulator does not model. A local, measurable mismatch of this kind is what fine-tuning on physical hardware can absorb. Gradient updates computed from physical rollouts adapt the policy to the true compliance, contact dynamics, and bus delays of the machine, but they measure none of those mechanisms, so the simulator's other two departures, the soft contact spring and the missing transport lag, stay in the omission log until paired probes close them. The adaptation also has a physical price\index{Fine-tuning!on physical hardware}. In a simulator, sampling states near the boundary of stability costs only compute cycles. On hardware, the gradient steps that correct a local contact error consume fatigue life and heat the motor windings, each sample risks driving the machine into an unrecoverable contact state, and the update can erase nominal behavior that was already verified.
 
 ```{python}
 #| label: calc-training-latch-residual-exposure
@@ -1528,7 +1482,7 @@ An ML engineer proposes replacing `latch-bc-01`'s one-pass ACT decoder with a `{
 
 ## Summary {#sec-training-summary}
 
-Every training regime buys a capability and leaves a dependency in the weights. Behavioral cloning depends on the states its demonstrators visited and can average incompatible action choices; simulation depends on its contact model, timing, and omitted mechanisms; fine-tuning depends on recent experience and requires evidence for the updated checkpoint; post-training a pretrained generalist borrows competence but no supported cell. A training score alone does not expose those dependencies. Tracing each one to a possible failure identifies what evaluation must test and what independent execution limits must cover. The policy manifest records that reasoning and confines the declared operating domain accordingly. Principle \ref{pri-vol4-endogenous-drift} requires attention to the states a policy's own corrections reach, while simulation adds a second kind of absence: mechanisms its solver never represented.
+Every training regime buys a capability and leaves a dependency in the weights. Behavioral cloning depends on the states its demonstrators visited and can average incompatible action choices; offline value learning cannot reach states its log never visited; post-training a pretrained generalist borrows competence but no supported cell; learning by trial on the machine spends calendar time, heat, and component life; simulation depends on its contact model, timing, and omitted mechanisms; fine-tuning depends on recent experience and requires evidence for the updated checkpoint. Whatever the regime, its decoder must also meet the machine's proposal deadline, and a more expressive action distribution earns no extra time at the actuator. A training score alone does not expose those dependencies. Tracing each one to a possible failure identifies what evaluation must test and what independent execution limits must cover. Principle \ref{pri-vol4-endogenous-drift} requires attention to the states a policy's own corrections reach, while simulation adds a second kind of absence, the mechanisms its solver never represented. The policy manifest records that reasoning and confines the declared operating domain accordingly. For the latch, it sends `latch-bc-01` to evaluation at the nominal plate and the guarded approach, and keeps the simulation-refined checkpoints out of service until paired probes close their omissions, because an action admitted on the strength of a training score crosses the causal boundary with only that score behind it.
 
 ::: {.callout-takeaways title="Policy synthesis and sim-to-real transfer"}
 * **Every regime leaves a dependency no training score shows:** Offline loss and simulated return reward compliance with the data and the solver. Candidate rankings can therefore invert on hardware, and a deployment condition that violates a dependency produces a predictable failure signature that names the detector the permission path needs.

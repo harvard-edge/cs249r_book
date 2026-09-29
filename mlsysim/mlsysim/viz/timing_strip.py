@@ -28,6 +28,7 @@ __all__ = [
     "chunk_renewal_strip",
     "takeover_strip",
     "perception_age_strip",
+    "decoder_budget_strip",
 ]
 
 # Volume IV diagram semantic roles, mirrored from books/vol4/tex/theme-colors.tex
@@ -591,4 +592,54 @@ def perception_age_strip(scenario, speed):
         distance_notes=dnotes,
         figsize=(7.0, 3.5),
         xlabel="Time from the exposure midpoint (ms)",
+    )
+
+
+def decoder_budget_strip(budget, t_lease, n_renewals=2):
+    """Decoder renewal budget (Ch6 instance): ACT vs. diffusion on the renewal schedule.
+
+    Reads budget.t_step (setpoint step), budget.t_renew (renewal period),
+    budget.t_act and budget.t_ddim (decoder inference), budget.t_jitter (the
+    renewal-jitter stretch), and budget.ddim_stretch_over (how far the
+    stretched diffusion run ends past the renewal); t_lease is the lease from
+    admission. Slack is drawn as an outlined bound, the stretched overrun in
+    the consequence role, the lease in the structural role. No distance row.
+
+    Lanes, top to bottom: setpoints, ACT decoder, diffusion head, diffusion
+    under the jitter stretch, lease from admission.
+    """
+    step, renew = _ms(budget.t_step), _ms(budget.t_renew)
+    t_act, t_ddim, t_jit = _ms(budget.t_act), _ms(budget.t_ddim), _ms(budget.t_jitter)
+    over = _ms(budget.ddim_stretch_over)
+    lease = _ms(t_lease)
+    t_end = n_renewals * renew
+    spans = []
+    t = 0.0
+    while t <= t_end + 1e-9:
+        spans.append(Span("", t - 0.35, t + 0.35, "structural", 0, solid=True))
+        t += step
+    for k in range(n_renewals):
+        r = k * renew
+        spans.append(Span(f"{t_act:.0f} ms", r, r + t_act, "proposal", 1, solid=True, label_pos="in"))
+        spans.append(Span(f"{renew - t_act:.0f} ms slack", r + t_act, r + renew, "proposal", 1,
+                          outline_only=True, label_pos="in"))
+        spans.append(Span(f"{t_ddim:.0f} ms, {renew - t_ddim:.0f} ms slack" if k == 0 else f"{t_ddim:.0f} ms",
+                          r, r + t_ddim, "proposal", 2, solid=True, label_pos="in"))
+    spans.append(Span(f"{t_ddim:.0f} ms", 0.0, t_ddim, "proposal", 3, solid=True, label_pos="in"))
+    spans.append(Span("", t_ddim, renew, "proposal", 3, hatch="////"))
+    spans.append(Span(f"ends {over:.0f} ms past renewal", renew, t_ddim + t_jit, "consequence", 3,
+                      solid=True, label_pos="right"))
+    spans.append(Span(f"lease {lease:.0f} ms, expires unless renewed", 0.0, lease, "structural", 4,
+                      solid=True, label_pos="in"))
+    events = [Event(k * renew, "renewal", "neutral", 0, "dashed",
+                    ha="left" if k == 0 else ("right" if k == n_renewals else "center"))
+              for k in range(n_renewals + 1)]
+    brackets = [Bracket(0, step, f"setpoint {step:.0f} ms", "structural", "time", 0),
+                Bracket(0, renew, f"renewal {renew:.0f} ms", "proposal", "time", 1)]
+    return TimingStrip(
+        spans=spans,
+        lanes=["setpoints", "ACT decoder", "diffusion head", f"diffusion, {t_jit:.0f} ms stretch",
+               "lease from admission"],
+        events=events, brackets=brackets, xlim=(-3, t_end + 3), figsize=(9, 3.9),
+        xlabel="Time from admission (ms)",
     )
