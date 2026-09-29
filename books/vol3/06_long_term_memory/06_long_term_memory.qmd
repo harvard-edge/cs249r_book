@@ -50,7 +50,13 @@ An agent's tasks can span days: a repository it must come back to, a user whose 
 
 The connection-pool repair may resume after the current session ends. The next session needs the candidate source at `r18`, the earlier failure at `r17`, the subsequent result of `test_waiter_notified_on_return`, and the broader checks that remain unresolved. These records do different jobs. The source identifies what the repository contains; the test result reports what happened under particular conditions; the progress note tells the next session where to continue. Keeping only the final message can lose the supporting evidence. Keeping every message without its scope can turn the earlier failure into an apparent failure of the new candidate.
 
-The previous chapters separated the information selected for a call from the attention computation retained by the serving system. Context selection does not require forgetting everything outside the request, and KV state need not disappear at a session boundary. KV may remain available or be serialized, but its reuse still concerns compatible computation. This chapter concerns information that should influence a later decision: what to retain, how to retrieve it, and how to change it when its source or intended use changes. Storage medium alone does not distinguish these responsibilities.
+::: {.column-margin}
+![](images/svg/hsa_locator_s.svg){width="100%" fig-alt="H·S·A locator with the State axis highlighted."}
+
+*Durable State, closed by checking each retrieved record against its source.*
+:::
+
+The previous chapters separated the information selected for a call from the attention computation retained by the serving system. Context selection does not require forgetting everything outside the request, and KV state need not disappear at a session boundary. KV may remain available or be serialized, but its reuse still concerns compatible computation. This chapter concerns information that should influence a later decision: what to retain, how to retrieve it, and how to change it when its source or intended use changes. Storage medium alone does not distinguish these responsibilities. In the terms of @sec-vol3-intro-hsa, such records are durable State ($S_3$), which outlives the session or remains authoritative beyond the working copy.
 
 ### Persistent records have different roles
 
@@ -134,7 +140,7 @@ A content hash can help check whether the returned bytes match a recorded versio
 
 ### Staging bounded evidence {#sec-vol3-persistent-quarantine}
 
-The retrieval response is not automatically the next prompt. The runtime selects evidence for the pending decision, preserves the source and version labels needed to interpret it, and measures the final serialized request. This applies Context Engineering's working-set decision at the read boundary. Candidate generation may examine more records than the model ultimately sees.
+The retrieval response is not automatically the next prompt. The runtime selects evidence for the pending decision, preserves the source and version labels needed to interpret it, and measures the final serialized request. This applies Context Engineering's working-set decision at the read boundary. Candidate generation may examine more records than the model ultimately sees. Staging is where invariant closure (principle \ref{pri-invariant-closure}) reaches the read path, because the runtime, not the retrieved text or its score, decides what enters the call.
 
 Returned text remains data, including text from a local repository. Serialization should distinguish the payload from runtime instructions and escape syntax according to the chosen format. Provenance labels and delimiters help interpretation; neither guarantees that the model will ignore an instruction embedded in the payload. Access controls and policy-appropriate redaction constrain what may be exposed, while authorization of later actions remains a separate boundary. The security treatment develops those controls rather than assuming a wrapper makes retrieved material harmless.
 
@@ -203,6 +209,8 @@ The largest complete-record count is `{python} RetrievalPayloadLedger.records_st
 
 Actual token counts must be measured after serialization with the intended model interface; independently tokenized fragments need not add up exactly. If a relevant record does not fit, the runtime can choose a smaller coherent excerpt, defer it to a later read, or return a handle with an explicit omitted-content status. An excerpt retains enough scope to show what was selected and what remains unavailable. A handle is a route to a future read, not evidence already present in this call.
 
+Every staged token also has a serving cost beyond the budget it occupies. Retrieved text enters prefill and holds KV state for as long as the serving system retains that prefix, so staging fifty records instead of five raises both costs roughly in proportion to the added tokens. @Sec-vol3-kvcache-geometry derives the bytes each token occupies; retrieval depth is one of the levers that sets how many tokens that is.
+
 ::: {#chk-06-retrieval-contract .callout-checkpoint title="Interpreting a bounded result"}
 
 - [ ] A query for current source returns an r17 excerpt after the workspace reaches r18. What historical use remains valid, and what must happen before using it to plan an r18 edit?
@@ -215,7 +223,7 @@ Actual token counts must be measured after serialization with the intended model
 
 Two retrieval policies can begin the connection-pool repair. One runtime pre-stages the relevant source, test, and earlier failure before asking the model for a next step. Another gives the model bounded text search, file reading, and symbol-navigation tools. The model finds the notification logic, reads the corresponding test, and follows references when the first result leaves an open question. Both use the same retrieval contract; they differ in when the information need is refined and who proposes the next query.
 
-Pre-staging applies the retrieval-augmented generation pattern of supplying external material with a model request [@lewis2020retrieval]. **Agentic retrieval**\index{Agentic retrieval!definition} lets the model propose searches during the execution loop, interleaving retrieved observations with further reasoning [@yao2023react]. These are combinable choices, not separate kinds of storage. A runtime can pre-stage results from several queries or a structural traversal, and a model-directed probe can use a direct read or an index.
+Pre-staging applies the retrieval-augmented generation pattern of supplying external material with a model request [@lewis2020retrieval]. **Agentic retrieval**\index{Agentic retrieval!definition} lets the model propose searches during the execution loop, interleaving retrieved observations with further reasoning [@yao2023react]. Agents built for repository-level issue resolution [@jimenez2024swebench] give the model search and file-navigation commands shaped for its use rather than a single pre-staged top-$k$ result [@yang2024sweagent]. These are combinable choices, not separate kinds of storage. A runtime can pre-stage results from several queries or a structural traversal, and a model-directed probe can use a direct read or an index.
 
 Pre-staging is useful when the next decision's evidence requirements are already known. Supplying `src/pool.py` and `tests/test_pool.py` can avoid a model round spent merely locating those files. It can also stage irrelevant material or miss a dependency that only becomes apparent after inspection. Iterative search lets a result change the next query: a test name reveals a helper, or a source reference identifies another file. That opportunity does not guarantee better queries. The model can pursue an unhelpful lead, repeatedly search the same region, or stop before obtaining the needed evidence.
 
@@ -334,6 +342,8 @@ All three methods operate within the earlier retrieval contract. Searching the a
 
 Filtering and ranking also interact. If a service first selects its highest-ranked candidates globally and only then discards candidates outside the requested paths, it can return an empty set even though eligible matches exist farther down the ranking. Restricting candidates before selecting the final ranked set avoids this particular loss; continued search after filtering is another option. Access checks remain mandatory regardless of the ranking strategy. If work limits prevent further search, the service must report the corresponding coverage or partial result, rather than letting the agent interpret an empty list as proof of absence.
 
+Which order to use is a cost decision a query planner can make from two estimates, the fraction of the corpus the filter admits and the rarity of the query terms. A selective filter, such as a scope of two files in a large repository, favors restricting first, so the service intersects the eligible document set with the postings lists and scores only the survivors. A broad filter paired with a rare identifier favors scoring first, because the rare term's postings list is short and few candidates need a filter check, provided the service keeps searching until enough eligible results remain. This is the choice a relational optimizer makes for a selective predicate, and it returns with a sharper hazard once the index is a proximity graph (@sec-vol3-persistent-dense-retrieval).
+
 ### When the vocabulary is unknown
 
 Exact and structural lookup are strongest when the agent already has useful names or locations. Earlier in the investigation, it may know only the symptom: “a connection is returned, but another caller keeps waiting.” The implementation might express the relevant operation through `notify_all`, without using the same phrasing. This is the vocabulary mismatch problem [@furnas1987vocabulary]. Its effect depends on the analyzer and the surrounding text: identifier splitting, synonym expansion, or query reformulation may recover useful lexical matches. Once the test identifier is known, a literal lookup can be more direct than another conceptual search.
@@ -350,7 +360,7 @@ A dense retriever encodes a query and each searchable record as vectors. In a bi
 
 The comparison rule belongs to the encoder and index configuration. Dot product is one common rule. Cosine similarity divides the dot product by the vectors' lengths; it equals the dot product when both vectors have unit length. A system should not normalize representations merely because another retriever does so. Neither score is, by itself, a calibrated probability that a record answers the question.
 
-For the repair task, a dense retriever might connect the waiting symptom to the return-and-notify implementation. That is a candidate worth inspecting, not proof of a defect. It might also prefer a passage about a different kind of waiting. Conversely, an exact identifier can be distinctive to lexical retrieval without being well represented by an embedding model. The useful question is which method finds the evidence this workload needs, within the retrieval contract's limits.
+For the repair task, a dense retriever might connect the waiting symptom to the return-and-notify implementation. That is a candidate worth inspecting, not proof of a defect. The same property that bridges vocabulary also blurs distinctions code depends on. In a constructed illustration, suppose `src/pool.py` contains `self._available.notify()` in the return path, `self._available.notify_all()` in shutdown, and `self._available.wait(timeout)` in acquisition. The three lines share a condition variable, a module, and the vocabulary of waiting, so an encoder can place them at nearly the same similarity to a query about waking a waiter. They differ in exactly the property the repair turns on, whether the call wakes one waiter, wakes every waiter, or blocks. A literal search for `notify(` separates them at once, and BM25 gives a rare identifier a high inverse document frequency. Conversely, an exact identifier can be distinctive to lexical retrieval without being well represented by an embedding model. The useful question is which method finds the evidence this workload needs, within the retrieval contract's limits.
 
 ### Choosing the search work
 
@@ -361,35 +371,62 @@ The scan's basic resource requirements are visible without choosing a particular
 ```{python}
 #| label: lego-06-memory-bandwidth-and-latency-floor
 #| echo: false
-# What: Establish the data volume and arithmetic of an illustrative exact scan.
-# How: Count vector components; do not assume a hardware latency or throughput.
-from mlsysim.core.units import BYTES_FP16, GB, GFLOP, byte, flop
-from mlsysim.fmt import check, fmt_flops, fmt_int, fmt_memory
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EXACT VECTOR SCAN: INTENSITY AND BANDWIDTH FLOOR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-06-memory-bandwidth-and-latency-floor
+# │ Goal: Show that an exact dot-product scan is bandwidth-bound on a host.
+# │ Show: 1 FLOP/byte at FP16 vs a 20 FLOP/byte host ridge; 307.2 ms floor.
+# │ How: Hypothetical corpus; host bandwidth and peak rate from the registry.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import BYTES_FP16, GB, GFLOP, byte, flop, millisecond, second
+from mlsysim.fmt import check, fmt_arithmetic_intensity, fmt_bandwidth, fmt_flop_rate, fmt_flops, fmt_int, fmt_memory, fmt_time
 
 class VectorScanLatencyFloor:
-    # LOAD: Hypothetical corpus; representation width is a shared constant.
+    # ┌── 1. LOAD (Hypothetical corpus; host from the registry) ─────────────
+    host = Hardware.Cloud.ReferenceCPU
     n_vectors = 10_000_000
     d_dim = 768
     bytes_per_val = BYTES_FP16
+    n_probes = 20  # stipulated searches in one trajectory
 
-    # EXECUTE: Raw vector bytes and multiply-add work, excluding other stages.
+    # ┌── 2. EXECUTE (Bytes, FLOPs, intensity, and the two time floors) ────
+    bw = host.memory.bandwidth
+    peak = host.compute.peak_flops
     footprint = n_vectors * d_dim * bytes_per_val
     flops_total = 2 * n_vectors * d_dim * flop
+    intensity = (flops_total / footprint).to(flop / byte)
+    ridge = (peak / bw).to(flop / byte)
+    t_mem = (footprint / bw).to(millisecond)
+    t_arith = (flops_total / peak).to(millisecond)
+    t_probes = (n_probes * t_mem).to(second)
 
-    # GUARD: Preserve the intended teaching magnitudes and dimensional units.
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(footprint.to(GB).magnitude - 15.36) < 1e-9, "vector bytes")
     check(abs(flops_total.to(GFLOP).magnitude - 15.36) < 1e-9, "scan FLOPs")
+    check(abs(intensity.magnitude - 1.0) < 1e-12, "one FLOP per byte at FP16")
+    check(ridge > 10 * intensity, "scan sits far below the host ridge")
+    check(t_mem > 10 * t_arith, "bandwidth term dominates")
 
-    # OUTPUT: All computed prose quantities use the shared formatter.
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     n_vectors_str = fmt_int(n_vectors)
     d_dim_str = fmt_int(d_dim)
     width_str = fmt_memory(bytes_per_val, unit=byte, precision=0)
     footprint_str = fmt_memory(footprint, unit=GB, precision=2)
     work_str = fmt_flops(flops_total, unit=GFLOP, precision=2)
+    intensity_str = fmt_arithmetic_intensity(intensity, precision=0)
+    ridge_str = fmt_arithmetic_intensity(ridge, precision=0)
+    bw_str = fmt_bandwidth(bw, unit=GB / second, precision=0)
+    peak_str = fmt_flop_rate(peak, precision=0)
+    t_mem_str = fmt_time(t_mem, unit=millisecond, precision=1)
+    t_arith_str = fmt_time(t_arith, unit=millisecond, precision=2)
+    n_probes_str = fmt_int(n_probes)
+    t_probes_str = fmt_time(t_probes, unit=second, precision=1)
 ```
 
-::: {#nbk-06-memory-bandwidth-and-latency-floor .callout-notebook title="The work of an exact vector scan"}
-**Problem.** Consider a hypothetical searchable set of `{python} VectorScanLatencyFloor.n_vectors_str` vectors, each with `{python} VectorScanLatencyFloor.d_dim_str` components stored in FP16 at `{python} VectorScanLatencyFloor.width_str` per component. How much data and arithmetic does one exact dot-product scan require?
+::: {#nbk-06-memory-bandwidth-and-latency-floor .callout-notebook title="Why an exact vector scan is bandwidth-bound"}
+**Problem.** Consider a hypothetical searchable set of `{python} VectorScanLatencyFloor.n_vectors_str` vectors, each with `{python} VectorScanLatencyFloor.d_dim_str` components stored in FP16 at `{python} VectorScanLatencyFloor.width_str` per component, held in the memory of the reference host processor from the book's hardware registry. Which resource limits one exact dot-product scan, and what floor does it set?
 
 **Math.** Multiply the vector count by the dimension and component width:
 
@@ -397,14 +434,92 @@ $$
 Ndb = 10^7 \times 768 \times 2\ \text{bytes}.
 $$
 
-The raw vectors occupy `{python} VectorScanLatencyFloor.footprint_str`. Counting two FLOPs per multiply-add gives $2Nd = 2 \times 10^7 \times 768$ FLOPs, or `{python} VectorScanLatencyFloor.work_str` per scan. These are vector-storage and scoring estimates, not the total index footprint or complete request cost.
+The raw vectors occupy `{python} VectorScanLatencyFloor.footprint_str`. Counting two FLOPs per multiply-add gives $2Nd$, or `{python} VectorScanLatencyFloor.work_str` per scan. Arithmetic intensity is therefore $2Nd/(Ndb) = 2/b$, which is `{python} VectorScanLatencyFloor.intensity_str` at FP16 whatever the corpus size or dimension. The reference host delivers `{python} VectorScanLatencyFloor.peak_str` and `{python} VectorScanLatencyFloor.bw_str`, a ridge point of `{python} VectorScanLatencyFloor.ridge_str`. The scan sits far below the ridge, so bandwidth sets its floor. Streaming the vectors takes at least `{python} VectorScanLatencyFloor.t_mem_str`, while the arithmetic alone would take `{python} VectorScanLatencyFloor.t_arith_str`. A trajectory that issues `{python} VectorScanLatencyFloor.n_probes_str` such searches spends at least `{python} VectorScanLatencyFloor.t_probes_str` moving vectors.
 
-**Systems insight.** Search-set size controls both costs linearly. A narrower eligible set reduces the scan work; a larger one may make an approximate index attractive. The byte count alone cannot determine latency. That also depends on where the vectors reside, the available bandwidth and arithmetic throughput, batching, and other work sharing the machine.
+**Systems insight.** An exact scan cannot be made fast by adding arithmetic, because its intensity is fixed by the component width, not by the machine. An accelerator raises bandwidth but has an even higher ridge, so the scan stays bandwidth-bound there too. The levers are fewer bytes per query (a narrower eligible set, compressed vectors) or fewer vectors touched (an approximate index). The floor excludes query encoding, top-$k$ selection, and fetching the records, so it bounds the scan from below rather than predicting a request's latency.
 :::
 
-Approximate nearest-neighbor (ANN) search avoids scoring every vector, at the risk of missing some of the highest-scoring vectors under the metric. For example, a hierarchical navigable small-world (HNSW) index follows links among vectors and spends a configurable amount of work exploring candidates [@malkov2018efficient]. More exploration generally offers a different work–recall trade-off; it is not a universal latency or recall guarantee. Graph links consume storage beyond the vectors themselves. Other approaches partition the search space or compress vector representations, trading search coverage or score fidelity against work and storage.
+The notebook applies the bandwidth argument that @sec-vol3-foundation-model-cost makes for decoding, and whose ridge-point derivation appears in @sec-vol3-appendix-inference-roofline, to a retrieval workload. The same argument explains why the scan is still the right tool in two cases. When a filter leaves only thousands of eligible vectors, the scan reads a few megabytes and returns exact results with no index to maintain. When an approximate index must be evaluated, the scan supplies the ground truth it is measured against.
+
+Approximate nearest-neighbor (ANN) search avoids scoring every vector, at the risk of missing some of the highest-scoring vectors under the metric. Two designs illustrate the two ways to cut the bytes a query touches. One visits fewer vectors by following a graph; the other visits compressed vectors within a few partitions.
+
+A hierarchical navigable small-world (HNSW) index organizes the vectors as a layered proximity graph [@malkov2018efficient]. Every vector appears in layer 0, and each is also assigned a top layer $\ell=\lfloor -\ln U \cdot m_L\rfloor$, with $U$ drawn uniformly from $(0,1]$ and $m_L = 1/\ln M$ for a graph that links each vector to up to $M$ neighbors per layer, so each higher layer holds a geometrically smaller subset, much like the express lanes of a skip list. A query enters at the top layer and moves greedily to whichever neighbor lies closer to it, until no neighbor improves; it then drops one layer from that node and repeats. At layer 0 the greedy walk becomes a beam search that keeps the $ef_{\text{search}}$ closest candidates found so far and stops when no unexplored neighbor can improve them, returning the best $K$. The beam width $ef_{\text{search}}$ is the query-time recall knob, since a wider beam evaluates more distances and misses fewer true neighbors. Construction inserts each vector by running the same search and linking it to its nearest neighbors in each layer, so the graph costs memory beyond the vectors. Deletion is the awkward operation. Removing a node without repairing its neighbors' links can strand the vectors it connected, so systems usually mark deleted nodes and leave them in place, the cost @sec-vol3-persistent-invalidation takes up.
+
+An inverted file with product quantization (IVF-PQ) instead shrinks what each visited vector costs [@jegou2011product]. A coarse $k$-means step partitions the vectors into $C$ cells, each with an inverted list of its members, and a query compares itself with the $C$ centroids and scans only the $n_{\text{probe}}$ nearest cells. Product quantization then compresses every stored vector. It splits the $d$ dimensions into $m$ subvectors, trains a codebook of 256 centroids for each subspace, and stores each subvector as the one-byte index $c_j$ of its nearest centroid. The query stays in full precision. The runtime precomputes a table $\text{LUT}[j,c]$ of squared distances from the query's $j$-th subvector to centroid $c$ of subspace $j$, after which the approximate distance between the query $\mathbf{q}$ and a stored vector $\mathbf{x}$ with codes $c_1, \dots, c_m$ is
+
+$$
+\tilde{d}(\mathbf{q}, \mathbf{x}) = \sum_{j=1}^{m} \text{LUT}[j, c_j].
+$$ {#eq-vol3-pq-adc}
+
+@Eq-vol3-pq-adc replaces a streamed $d$-component dot product with $m$ one-byte reads and table lookups, and the table itself is small enough to stay in cache. Two knobs govern quality. The probe count $n_{\text{probe}}$ trades recall against the number of cells scanned, and $m$ trades distance fidelity against bytes per code. Systems commonly recover fidelity by re-scoring a short candidate list against full-precision vectors stored elsewhere, and the same structure scales to billions of vectors on accelerators [@johnson2019billion]. Inserting a vector is cheap (assign a cell, encode, append). The centroids and codebooks, however, were trained on the vectors that existed at build time; a drifting corpus or a changed encoder erodes their fit until they are retrained.
+
+```{python}
+#| label: lego-06-ann-footprint
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ANN INDEX FOOTPRINT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-vol3-ann-tradeoffs and the cost line before it.
+# │ Goal: Size HNSW links and PQ codes for the exact-scan notebook's corpus.
+# │ Show: 2.56 GB of links beside 15.36 GB of vectors; 0.64 GB of codes (24x).
+# │ How: Stipulated M=32 links of 8 bytes; m=64 one-byte PQ subcodes.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import BYTES_FP32, GB, KB, byte
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_multiple
+
+class AnnFootprint:
+    # ┌── 1. LOAD (Corpus from the exact-scan notebook; stipulated index shape) ─
+    n = VectorScanLatencyFloor.n_vectors
+    d = VectorScanLatencyFloor.d_dim
+    raw = VectorScanLatencyFloor.footprint
+    links_per_node = 32
+    link_bytes = 8 * byte
+    pq_subvectors = 64
+    pq_centroids = 256
+    code_bytes_per_sub = 1 * byte
+    lut_entry = BYTES_FP32
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
+    graph = n * links_per_node * link_bytes
+    codes = n * pq_subvectors * code_bytes_per_sub
+    ratio = (raw / codes).to("").magnitude
+    lut = (pq_subvectors * pq_centroids * lut_entry).to(KB)
+    sub_dim = d // pq_subvectors
+
+    # ┌── 3. GUARD ────────────────────────────────────────────────────────
+    check(d % pq_subvectors == 0, "subvectors tile the dimension")
+    check(abs(graph.to(GB).magnitude - 2.56) < 1e-9, "graph links")
+    check(abs(codes.to(GB).magnitude - 0.64) < 1e-9, "PQ codes")
+    check(ratio == 24, "FP16 vectors to PQ codes")
+    check(abs(lut.magnitude - 65.536) < 1e-9, "lookup table size (64 x 256 x 4 bytes)")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────────────────────
+    links_str = fmt_int(links_per_node)
+    graph_str = fmt_memory(graph, unit=GB, precision=2)
+    total_hnsw_str = fmt_memory(raw + graph, unit=GB, precision=2)
+    code_str = fmt_int(pq_subvectors)
+    sub_dim_str = fmt_int(sub_dim)
+    codes_str = fmt_memory(codes, unit=GB, precision=2)
+    ratio_mult_str = fmt_multiple(ratio, precision=0)
+    lut_str = fmt_memory(lut, unit=KB, precision=1)
+```
+
+The costs are easy to size for the notebook's corpus. With `{python} AnnFootprint.links_str` eight-byte links per node, HNSW adds `{python} AnnFootprint.graph_str` of links to `{python} VectorScanLatencyFloor.footprint_str` of vectors, all of which must stay in memory because the search hops unpredictably among nodes. Product quantization with `{python} AnnFootprint.code_str` subvectors of `{python} AnnFootprint.sub_dim_str` dimensions stores `{python} AnnFootprint.codes_str` of codes, `{python} AnnFootprint.ratio_mult_str` smaller than the FP16 vectors, and its per-query table occupies `{python} AnnFootprint.lut_str`. @Tbl-vol3-ann-tradeoffs sets the three designs side by side.
+
+| **Property**                  | **Exact scan**                                  | **IVF-PQ**                                                               | **HNSW**                                                                |
+|:------------------------------|:------------------------------------------------|:-------------------------------------------------------------------------|:------------------------------------------------------------------------|
+| **Work per query**            | Every eligible vector                           | $C$ centroids plus the codes in $n_{\text{probe}}$ cells                 | Distances along a greedy path and a beam of width $ef_{\text{search}}$  |
+| **Resident bytes (notebook)** | `{python} VectorScanLatencyFloor.footprint_str` | `{python} AnnFootprint.codes_str` of codes, plus centroids and codebooks | `{python} AnnFootprint.total_hnsw_str` of vectors and links             |
+| **Distance fidelity**         | Exact under the metric                          | Approximate; re-scoring a short list recovers it                         | Exact for each visited vector; misses come from unvisited ones          |
+| **Recall knob**               | None needed                                     | $n_{\text{probe}}$, $m$                                                  | $ef_{\text{search}}$, $M$                                               |
+| **Insert and delete**         | Append; delete by exclusion                     | Cheap append; centroids and codebooks age as the corpus drifts           | Insert runs a search and relinks neighbors; delete leaves a marked node |
+| **Memory access**             | Sequential streaming, bandwidth-bound           | Short sequential scans of small codes                                    | Dependent random reads, one per hop                                     |
+
+: **Exact and approximate vector search**: Each design trades the bytes a query touches against recall and update cost. Footprints use the exact-scan notebook's hypothetical corpus and the stipulated index shapes above; measured latency and recall depend on the data, queries, and settings. {#tbl-vol3-ann-tradeoffs tbl-colwidths="[20,22,29,29]"}
 
 These choices must be evaluated on the eligible records and query types the agent actually uses. Recall against an exact vector scan measures agreement with that metric's nearest neighbors, not whether the neighbors contain adequate evidence. An ANN operation can complete under its declared search semantics without finding every exact neighbor. If the operation instead stops at a deadline or cannot access part of the requested scope, the retrieval result must expose that limitation through the contract's status and coverage fields. Neither outcome establishes that a missing fact is absent from the source of record.
+
+Scope filters interact with a graph index in a way they do not with postings lists. Restricting a lexical search first is safe, because intersecting a postings list with an eligibility bitset removes documents without changing how the rest are found. Restricting an HNSW search first means the beam may step only onto eligible nodes, and a permission or path mask can cut the graph into pieces. When the eligible nodes near the query are reachable only through ineligible ones, the greedy walk stalls in a region with no eligible path onward and returns too few results, even though eligible neighbors exist. Filtering after the search instead reproduces the emptiness failure of lexical post-filtering. Systems respond by partitioning the index along common scope boundaries, such as one graph per tenant or repository, by keeping additional entry points so the walk can restart inside the eligible region, or, when the filter is selective, by running an exact scan over the eligible vectors, which the notebook shows is cheap when they are few.
 
 ### Combining candidate rankings
 
@@ -478,6 +593,41 @@ For an illustrative repair query, suppose both methods search the same authorize
 
 Agreement raises A's priority for inspection; it does not supply independent confirmation that A explains the failure. The two retrievers may share the same blind spots. A reranker that jointly scores the query and each candidate can refine this order at additional query-time cost, but it cannot recover a record omitted by every candidate generator. Nor does a higher reranking score establish source accuracy, applicability, or permission to act.
 
+```{python}
+#| label: lego-06-rerank-pool
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CROSS-ENCODER RERANKING WORK (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: reranking-cost paragraph in the rank-fusion subsection.
+# │ Goal: Show that reranking work scales with pool size times pair length.
+# │ Show: 50 candidates of 300 tokens with a 100-token query = 20,000 tokens.
+# │ How: Stipulated token counts; no model or hardware latency claim.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_int
+
+class RerankPool:
+    # ┌── 1. LOAD (Stipulated counts) ─────────────────────────────────────
+    pool = 50
+    passage_tokens = 300
+    query_tokens = 100
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
+    pair_tokens = passage_tokens + query_tokens
+    total = pool * pair_tokens
+
+    # ┌── 3. GUARD ────────────────────────────────────────────────────────
+    check(total == 20_000, "tokens processed per reranked query")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────────────────────
+    pool_str = fmt_int(pool)
+    passage_str = fmt_int(passage_tokens)
+    query_str = fmt_int(query_tokens)
+    total_str = fmt_int(total)
+```
+
+The reranker's cost is why it runs on a short list. A bi-encoder scores a candidate with one dot product against a vector computed before the query arrived. A cross-encoder reads the query and candidate together through a transformer, so nothing can be precomputed, its work grows with the pool size, and attention within each pair grows quadratically with the pair's length. Reranking a hypothetical pool of `{python} RerankPool.pool_str` candidates of `{python} RerankPool.passage_str` tokens each against a `{python} RerankPool.query_str`-token query processes `{python} RerankPool.total_str` tokens for one query, as much prefill as a substantial model call, spent only on ordering. The runtime controls that cost by shrinking the pool, reranking only when the next decision warrants the precision, or running the reranker off the interactive path.
+
 Finally, the ordered candidates still have to become usable evidence. The runtime applies the retrieval contract's bound scope, permissions, and source-version requirements, and selects excerpts within the serialized payload budget. It preserves provenance and reports truncation rather than treating a short returned list as exhaustive. The agent must then assess what those excerpts support. Finding the `r18` implementation and a passing reproducer supports a narrower claim than showing that every caller behaves correctly. The next question is how to retrieve the related records needed for such a broader claim, using further queries or maintained relationships when those methods are useful.
 
 ## Multi-Hop Retrieval {#sec-vol3-persistent-graphrag}
@@ -498,9 +648,13 @@ A retrieval response should therefore preserve the relationships that made the r
 
 A simple structural index may contain symbol definitions and references. A code property graph combines richer representations of syntax, control flow, and dependencies [@yamaguchi2014modeling]. These structures can support queries such as locating callers or following reads of a shared field. They complement lexical and dense search: an exact symbol lookup, a ranked passage, or a known source location can all supply a starting node, called a seed.
 
-The usefulness of an edge depends on how it was obtained. Parsing can recover declared structure; resolving cross-file calls may need types, build configuration, or additional analysis. Dynamic dispatch and generated code can leave targets uncertain. An observed execution trace supplies different evidence and covers only the execution recorded. The graph should retain these distinctions rather than turn every inferred relation into an observed event.
+The graph's data model is what makes "follow the right links" precise. A code property graph is a directed multigraph $G=(V,E,\Sigma_V,\Sigma_E,\mu_V,\mu_E)$. Its vertices $V$ are program entities typed by $\Sigma_V$ (file, module, class, function, variable), and each edge in $E$ carries a type from an alphabet $\Sigma_E$. The attribute maps $\mu_V$ and $\mu_E$ attach properties such as source spans, source generations, and call-site locations. Five edge families carry most repository questions. Containment and declaration edges (`CONTAINS`, `DECLARES`) come from the syntax tree; invocation edges (`CALLS`) link call sites to targets; data-dependence edges (`READS`, `MODIFIES`, `REACHES`) follow values between definitions and uses; type edges (`INHERITS`, `IMPLEMENTS`) resolve hierarchies; and module edges (`IMPORTS`) link files. The original formulation merges the syntax tree, the control-flow graph, and the program-dependence graph into this one structure. In the repair, a traversal permitted only `CALLS` and `MODIFIES` edges can go from `test_waiter_notified_on_return` to the pool's return method and on to the waiter set that method changes, without collecting every file that merely imports the pool.
+
+The usefulness of an edge depends on how it was obtained. Parsing can recover declared structure; resolving cross-file calls may need types, build configuration, or additional analysis. Dynamic dispatch and generated code can leave targets uncertain. An observed execution trace supplies different evidence and covers only the execution recorded. The graph should retain these distinctions rather than turn every inferred relation into an observed event. The edge attributes $\mu_E$ carry that distinction by recording whether each edge came from parsing, from resolution under a stated build configuration, or from a recorded trace.
 
 Maintaining those links costs work when sources change. A local edit may affect callers or summaries outside the changed file, while an unrelated edit need not invalidate every edge. A retrieval policy needs the applicable source versions and a way to exclude or label relationships whose support is no longer current. Recomputing a small local syntax tree does not automatically restore all global dependencies. The later invalidation section develops the update contract; here, maintenance cost is part of deciding whether an index earns its place over repeated direct probes.
+
+Two tiers of extraction keep that cost tractable. A syntactic parser re-parses an edited file locally, in time proportional to the file, and recovers declarations, spans, and imports but not resolved cross-file calls. Compiler-grade extraction resolves types and call targets across the whole build, which requires rerunning whole-program analysis and is slow on a large repository. A tiered design keeps the compiler-grade graph as a base and overlays a local delta from the fast parser, serving the view $G_{\text{view}}=(G_{\text{global}}\setminus T)\cup \Delta G_{\text{local}}$, where $T$ holds the base graph's vertices and edges from the edited files. The overlay's edges carry parse-level evidence until the background pass replaces them, and $\mu_E$ says so.
 
 ### Bounding expansion and staged evidence
 
@@ -576,7 +730,7 @@ Some information needs concern a subsystem rather than one path. A question abou
 
 A summary can reduce repeated reading, but it is a new, lossy record. It needs links to its supporting material, the versions and scope it describes, and permissions appropriate to the information it contains. A summary spanning several sources cannot inherit access merely from the least restricted source. Detailed decisions may require opening the supporting records rather than relying on the overview.
 
-For example, a repair summary may record that the `r18` candidate passed `test_waiter_notified_on_return` under a stated configuration while broader compatibility remains unverified. It must not silently become “the connection pool is correct.” A later change to the relevant implementation or test can remove its support for a current-state claim without making the historical test result false. Creating summaries also creates a maintenance obligation: identify affected derivatives when support changes, and revise, withdraw, or retain them explicitly as history under the record's policy.
+For example, a repair summary may record that the `r18` candidate passed `test_waiter_notified_on_return` under a stated configuration while broader compatibility remains unverified. It must not silently become “the connection pool is correct.” A later change to the relevant implementation or test can remove its support for a current-state claim without making the historical test result false. Creating summaries also creates a maintenance obligation: identify affected derivatives when support changes, and revise, withdraw, or retain them explicitly as history under the record's policy. Recording which communities and sources each summary covers makes the first step mechanical, since a change marks every dependent summary, and every summary built from those, dirty; a dirty summary may still be served as a labeled historical view until it is regenerated.
 
 ::: {#chk-06-hybrid-retrieval .callout-checkpoint title="Choosing and bounding related evidence"}
 
@@ -618,7 +772,7 @@ A structured progress record from context engineering can be retained across ses
 
 ### Admission before deduplication {#sec-vol3-memory-admission-gate}
 
-The model may propose a memory write; the runtime decides whether and how to apply it. Admission checks the destination and writer's permission, the allowed retention scope, the record type, and whether the attached evidence supports the proposed wording. Schema validation can require evidence fields but cannot establish faithful interpretation; that decision needs an explicit evidence standard and, where necessary, review. Sensitive information requires a retention policy, not just a pattern filter: a filter can miss secrets or information that is private without resembling a credential. Unsupported interpretations can remain explicitly marked hypotheses if the application permits them; they must not silently enter the preference or observation classes.
+The model may propose a memory write; the runtime decides whether and how to apply it. The division holds even in designs where the model pages records into and out of its own context through memory calls [@packer2023memgpt], because paging decides what the model sees while admission decides what may be kept. Admission checks the destination and writer's permission, the allowed retention scope, the record type, and whether the attached evidence supports the proposed wording. Schema validation can require evidence fields but cannot establish faithful interpretation; that decision needs an explicit evidence standard and, where necessary, review. Sensitive information requires a retention policy, not just a pattern filter: a filter can miss secrets or information that is private without resembling a credential. Unsupported interpretations can remain explicitly marked hypotheses if the application permits them; they must not silently enter the preference or observation classes.
 
 Only after these checks does the runtime decide whether the candidate creates a record, revises an existing one, or duplicates information already retained. The change from 10:00 to 11:00 illustrates why embedding novelty cannot make this decision. The two statements are nearly identical yet express different constraints. Discarding the latter as a near duplicate would preserve the wrong current preference. Conversely, an entirely novel generated claim can be false. Similarity helps find related records for comparison; it establishes neither write authority nor the semantics of an update.
 
@@ -628,7 +782,7 @@ Concurrent updates require support from the store. A proposed replacement can ca
 
 ### Recording and deriving memory {#sec-vol3-memory-dual-write-path}
 
-Retaining an observation and deriving a reusable lesson need not happen in the same operation. The runtime can first record the permitted observation with its task, source version, and result status, then schedule summarization and indexing separately. This separation makes it possible to preserve evidence without invoking a reflection model on every turn. It does not require every observation to enter a semantic index.
+Retaining an observation and deriving a reusable lesson need not happen in the same operation. The runtime can first record the permitted observation with its task, source version, and result status, then schedule summarization and indexing separately. This separation makes it possible to preserve evidence without invoking a reflection model on every turn. Reflection is worth scheduling, because storing a verbal reflection on a failed attempt and supplying it to the next attempt has improved later attempts [@shinn2023reflexion]. The derived reflection is still a generated lesson in the sense of @tbl-vol3-long-term-memory-write-policy, admitted with its supporting observations rather than as a new fact. It does not require every observation to enter a semantic index.
 
 The acknowledgment must state what completed. “Queued for retention,” “stored under the durability contract,” and “available to search” are different outcomes. An in-memory buffer is not a durable log merely because entries are appended to it. If the task requires persistence before continuation, the runtime must wait for the corresponding storage acknowledgment or report failure. Background derivation still consumes compute, storage, and queue capacity and can compete with interactive work. Its resource limits and failures need accounting even when the foreground task does not wait for it.
 
@@ -671,7 +825,14 @@ The write path determines what a record claims and when its use or retention mus
 
 ## Storage Invalidation {#sec-vol3-persistent-invalidation}
 
-The connection-pool repair has reached `r18`, and `test_waiter_notified_on_return` has passed on that candidate. A later search can nevertheless return an excerpt of `src/pool.py` indexed at `r17`. If the result is presented as current source, the model may propose an edit that has already been applied. The problem is not that the historical excerpt became false: the retrieval layer returned evidence for a different version than the decision required.
+The connection-pool repair has reached `r18`, and `test_waiter_notified_on_return` has passed on that candidate. A later search can nevertheless return an excerpt of `src/pool.py` indexed at `r17`. A constructed trace shows how that single stale read unravels a trajectory.
+
+1. At turn 12 the agent edits the return path of `src/pool.py`, and the edit tool reports the file at `r18`.
+2. At turn 13 a search for the notification logic returns the `r17` excerpt, still containing the line the edit replaced, with no version label.
+3. At turn 14 the model concludes that its edit did not persist and reissues it. The edit tool rejects the request because the text to be replaced no longer exists.
+4. At turn 15 the model holds a reported success, an excerpt contradicting it, and a failed re-edit. It hypothesizes a corrupted file and begins broader edits, each consuming budget and moving the workspace further from a reviewed state.
+
+Each step is a reasonable inference from the evidence staged; the defect is the unlabeled stale read at turn 13. The problem is not that the historical excerpt became false: the retrieval layer returned evidence for a different version than the decision required.
 
 @Sec-vol3-context-engineering-context-rot established this distinction for staged observations. Persistent indexes add another place where an old representation can survive after its source changes. Invalidation prevents an affected indexed copy from being admitted as current evidence; rebuilding supplies a replacement representation. Separating these operations permits background maintenance, but excluding old evidence does not guarantee that new evidence is available.
 
@@ -680,6 +841,8 @@ The connection-pool repair has reached `r18`, and `test_waiter_notified_on_retur
 An index entry should identify the source generation from which it was derived. A generation is a version identity assigned under the source's update contract, not merely a filesystem modification timestamp. For the repair, `r17` and `r18` name successive source states. A query asking about the current implementation must not silently accept an entry from `r17` after the runtime has established `r18` as the applicable version.
 
 The dependency may be larger than one file. A source excerpt depends on the file version, while a caller relationship can depend on several source files and the analysis configuration. A generated repair summary also depends on the observations and checks it summarizes. A relevant source change requires reconsidering these derived records; it does not make every unrelated index entry stale. Where dependencies are incomplete, the runtime must widen the affected set or report uncertainty rather than infer validity from missing links.
+
+Every retrieval index is a materialized view of its sources, and databases have long maintained views incrementally. Classical view maintenance computes the change to a view algebraically from the change to its base relations, without recomputing the view [@blakeley1986efficiently; @gupta1995maintenance]. Retrieval indexes resist that approach. Inserting a few lines near the top of a file shifts every later chunk boundary under fixed-size chunking, and an encoder's output for a changed chunk cannot be derived from the old vector and the edit. The affected entries must be excluded and recomputed. That is why the protocol below separates exclusion, which is cheap and immediate, from rebuilding, which is neither.
 
 Source identity and index configuration answer different questions. Matching a source generation does not establish that a vector was produced under the document/query encoder and preprocessing contract required by the current search configuration. Both identities belong with the derived record. Neither establishes that a retrieved claim is true or that an action based on it is permitted.
 
@@ -699,9 +862,21 @@ The timeline follows a source update while an older indexing job is still runnin
 
 The publication check and installation must form one conditional operation with respect to relevant source updates. Checking first and installing later would allow another change between the two. This is the reason to coordinate writers and publishers, not a requirement that every index use the same storage algorithm.
 
-A tombstone can mark a record or generation as excluded while rebuilding proceeds. It is a retrieval-side exclusion record, not merely a sentence appended to a prompt. Permanently applying source-generation validation at admission is a simple teaching contract: an old candidate does not become acceptable just because a temporary dirty marker was cleared. Deletion also needs a versioned absence or equivalent exclusion state so a late worker cannot recreate an active record from a deleted source. Physical reclamation and the handling of retained history follow the store's retention policy.
+A tombstone can mark a record or generation as excluded while rebuilding proceeds. It is a retrieval-side exclusion record, not merely a sentence appended to a prompt. Permanently applying source-generation validation at admission is a simple teaching contract: an old candidate does not become acceptable just because a temporary dirty marker was cleared. Deletion also needs a versioned absence or equivalent exclusion state so a late worker cannot recreate an active record from a deleted source.
+
+Source generations give the exclusion rule a compact form. Each derived entry $c$ carries the generation interval over which its source supported it, $[g_{\text{birth}}(c), g_{\text{death}}(c))$, where $g_{\text{death}}$ stays open until a relevant source change closes it. A query that requires generation $g_q$ admits the entry only if
+
+$$
+\text{IsValid}(c, g_q) = \big(g_{\text{birth}}(c) \le g_q < g_{\text{death}}(c)\big).
+$$ {#eq-vol3-index-validity}
+
+A current-state query sets $g_q$ to the applicable source generation, and a historical query sets it to the revision being explained, so @eq-vol3-index-validity serves both without letting one masquerade as the other.
+
+Exclusion is not free, and its cost grows with time. An excluded entry still occupies memory, and in an HNSW graph it still sits in its neighbors' link lists. Searches keep visiting it and then discard it, so for a fixed beam width the eligible candidates found fall as the dead fraction grows, and recall on current records declines. Tombstones therefore need reclamation. A background job watches the dead fraction $\rho_{\text{dead}} = |V_{\text{tomb}}|/|V|$ and, when it passes a tuned threshold, builds a compacted copy that omits entries no reader or retention policy still needs, relinks their former neighbors, re-establishes entry points, and swaps the copy in atomically. The pattern is the compaction of a log-structured merge tree [@oneil1996log]. The threshold trades the memory and recall lost to dead entries against the cost of rebuilding, and entries retained as history move to an explicitly historical store rather than surviving in the current index.
 
 The contract must survive the deployment's actual failure conditions. After restart, the gateway must recover or reestablish authoritative generation information before treating persisted index entries as current. A newly empty in-memory tombstone set is not evidence that an old index is valid. If other writers bypass the coordinator, watcher events can prompt reconciliation but may be delayed or missed. The gateway then needs source-side versioned reads or another validated detection path; when it cannot establish applicability within the request's limits, that limitation belongs in the result status. A distributed replica's receipt of an invalidation event likewise does not prove that replacement content has already been indexed.
+
+Replicas need a read-your-writes rule, and the standard one is small. Each committed source change receives a sequence number from the log that records it (@sec-vol3-persistence-wal). A query issued after the agent's own write carries the minimum sequence number $s_{\min}$ it must observe, one more field in the bounded request of @tbl-vol3-query-tuple. A replica compares that number with its watermark, the highest log entry it has applied. If the watermark has caught up, the replica answers directly. Otherwise it waits up to a bounded interval for the missing entries and, if they do not arrive, the gateway serves the request from the authoritative source or reports the affected scope as partial. The agent never reads a replica that predates its own write, and no query waits without bound on a lagging one.
 
 ### Return current evidence or report the gap
 
@@ -717,11 +892,82 @@ After excluding a stale candidate, the retrieval layer still owes the caller an 
 
 For a known path such as `src/pool.py`, a direct read can supply the relevant `r18` region while embeddings are rebuilt. A broader request for every caller may need an updated structural index or several bounded reads; fetching the edited file alone does not establish complete caller coverage. If those operations exceed the deadline or authorized scope, the result envelope reports partial or unavailable evidence with the reason and any continuation option. Raising the candidate limit may find more eligible records, but cannot retrieve a new record that has not entered the index.
 
-Synchronous re-indexing moves maintenance work onto the write path and can make the new representation available before a dependent query. Background re-indexing lets the write finish earlier but requires the gateway to handle the interval before replacement records are ready. Both designs pay for source checks, indexing work, coordination, and result handling; neither provides a zero-cost or universally complete current view. The appropriate choice depends on how frequently the source changes and whether bounded direct reads can satisfy the next decision.
+Synchronous re-indexing moves maintenance work onto the write path and can make the new representation available before a dependent query. Background re-indexing lets the write finish earlier but requires the gateway to handle the interval before replacement records are ready. Both designs pay for source checks, indexing work, coordination, and result handling; neither provides a zero-cost or universally complete current view. The appropriate choice depends on how frequently the source changes and whether bounded direct reads can satisfy the next decision. The costs differ by orders of magnitude, as notebook \ref{nbk-06-index-maintenance-cost} shows, which is what makes the choice a design decision rather than a detail.
+
+```{python}
+#| label: lego-06-index-maintenance-cost
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WHO PAYS FOR INDEX MAINTENANCE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-06-index-maintenance-cost
+# │ Goal: Compare synchronous re-indexing on the write path with exclusion.
+# │ Show: 88 ms local, 210 ms remote batched, 1.26 s remote per file; exclusion
+# │       costs 0.4 us per write and 1.5 us per query.
+# │ How: Stipulated per-stage costs; no hardware or embedding-model claim.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.core.units import microsecond, millisecond, nanosecond, second
+from mlsysim.fmt import check, fmt_int, fmt_time
+
+class IndexMaintenanceCost:
+    # ┌── 1. LOAD (Stipulated edit and per-stage costs) ───────────────────
+    files = 8
+    chunks_per_file = 2
+    t_parse = 3.5 * millisecond  # per file
+    t_lex = 2.0 * millisecond  # per chunk
+    t_embed_batch = 28.0 * millisecond  # one local batch
+    batch = 16
+    t_rpc = 150 * millisecond  # one remote embedding request
+    t_excl_write = 50 * nanosecond  # per exclusion-table entry
+    candidates = 50
+    t_excl_check = 30 * nanosecond  # per candidate lookup
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
+    chunks = files * chunks_per_file
+    batches = math.ceil(chunks / batch)
+    t_local = (files * t_parse + chunks * t_lex + batches * t_embed_batch).to(millisecond)
+    t_remote = (files * t_parse + chunks * t_lex + batches * t_rpc).to(millisecond)
+    t_serial = (files * t_parse + chunks * t_lex + files * t_rpc).to(second)
+    t_write = (files * t_excl_write).to(microsecond)
+    t_read = (candidates * t_excl_check).to(microsecond)
+
+    # ┌── 3. GUARD ────────────────────────────────────────────────────────
+    check(chunks == 16 and batches == 1, "one embedding batch")
+    check(abs(t_local.magnitude - 88) < 1e-9, "local synchronous path")
+    check(abs(t_remote.magnitude - 210) < 1e-9, "remote batched path")
+    check(abs(t_serial.magnitude - 1.26) < 1e-9, "remote per-file path")
+    check(t_local.to(microsecond) > 1e4 * t_write, "exclusion is orders of magnitude cheaper")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────────────────────
+    files_str = fmt_int(files)
+    chunks_str = fmt_int(chunks)
+    candidates_str = fmt_int(candidates)
+    t_local_str = fmt_time(t_local, unit=millisecond, precision=0)
+    t_remote_str = fmt_time(t_remote, unit=millisecond, precision=0)
+    t_serial_str = fmt_time(t_serial, unit=second, precision=2)
+    t_write_str = fmt_time(t_write, unit=microsecond, precision=1)
+    t_read_str = fmt_time(t_read, unit=microsecond, precision=1)
+    t_parse_str = fmt_time(t_parse, unit=millisecond, precision=1)
+    t_lex_str = fmt_time(t_lex, unit=millisecond, precision=0)
+    t_embed_batch_str = fmt_time(t_embed_batch, unit=millisecond, precision=0)
+    batch_str = fmt_int(batch)
+    t_rpc_str = fmt_time(t_rpc, unit=millisecond, precision=0)
+    t_excl_write_str = fmt_time(t_excl_write, unit=nanosecond, precision=0)
+    t_excl_check_str = fmt_time(t_excl_check, unit=nanosecond, precision=0)
+```
+
+::: {#nbk-06-index-maintenance-cost .callout-notebook title="Who pays for keeping the index current"}
+**Problem.** The repair's next edit changes `{python} IndexMaintenanceCost.files_str` files and `{python} IndexMaintenanceCost.chunks_str` indexed chunks. Using stipulated per-stage costs (`{python} IndexMaintenanceCost.t_parse_str` to parse a file, `{python} IndexMaintenanceCost.t_lex_str` to update one chunk's postings, `{python} IndexMaintenanceCost.t_embed_batch_str` for one local embedding batch of up to `{python} IndexMaintenanceCost.batch_str` chunks, `{python} IndexMaintenanceCost.t_rpc_str` for one remote embedding request, `{python} IndexMaintenanceCost.t_excl_write_str` to write an exclusion entry, and `{python} IndexMaintenanceCost.t_excl_check_str` to check one), how much does each design add, and to which path?
+
+**Math.** Synchronous re-indexing blocks the write for parsing, postings updates, and embedding. With a local embedding service it adds `{python} IndexMaintenanceCost.t_local_str`. With one batched remote request it adds `{python} IndexMaintenanceCost.t_remote_str`, and with one remote request per file, `{python} IndexMaintenanceCost.t_serial_str`. Exclusion instead writes `{python} IndexMaintenanceCost.files_str` table entries, `{python} IndexMaintenanceCost.t_write_str` on the write path, and a later query checks `{python} IndexMaintenanceCost.candidates_str` candidates for `{python} IndexMaintenanceCost.t_read_str` on the read path.
+
+**Systems insight.** Exclusion moves almost all of the cost off the write path, but it buys zero stale admissions, not fresh evidence. The rebuild still costs what the synchronous path cost; it runs later, in the background, and the interval before it finishes must be served by a direct read or an explicit incomplete result (@tbl-vol3-invalidation-tradeoffs). How often the source changes and how soon a dependent query follows decide whether that interval matters.
+:::
 
 The returned evidence describes a version observed under the retrieval contract. A concurrent write can still occur after admission and before the model's proposed action executes. Protecting an action that requires an unchanged version belongs at the tool boundary, using an appropriate execution-time precondition rather than trusting an earlier search check. The index policy must preserve the observed version so that later boundary has the information it needs.
 
-Invalidation therefore maintains applicability without erasing history or disguising missing evidence. Coordinated generation checks exclude known obsolete current-state candidates; conditional publication prevents late workers from restoring them; and the result contract exposes whether an adequate replacement was obtained. Evaluation must test all of these outcomes, including correction, deletion, delayed indexing, and incomplete reads, rather than count stale-candidate rejection alone as successful memory use.
+Invalidation therefore maintains applicability without erasing history or disguising missing evidence. Coordinated generation checks exclude known obsolete current-state candidates; conditional publication prevents late workers from restoring them; and the result contract exposes whether an adequate replacement was obtained. These mechanisms close a storage property, not the task. Whether the `r18` repair works is still established at the end-to-end boundary, by checks run against the environment itself [@saltzer1984endtoend]; what the index owes that boundary is an honest record of which source version each piece of evidence describes. Evaluation must test all of these outcomes, including correction, deletion, delayed indexing, and incomplete reads, rather than count stale-candidate rejection alone as successful memory use.
 
 ## Evaluating Memory Policies {#sec-vol3-persistent-governance-eval}
 
@@ -781,9 +1027,95 @@ Task acceptance remains the final outcome measure. Count accepted tasks over all
 
 Resource accounting must follow the same trial boundary. Include query formulation, search, source reads, reranking, serialization, model input and output, memory writes, consolidation, and index maintenance. Background work still consumes resources even when it does not delay the foreground request. Report unfinished maintenance obligations at the measurement horizon, and state how shared initial indexing costs are charged or amortized. Total resource expenditure divided by accepted tasks is meaningful only when acceptance occurs; with no accepted tasks, report the expenditure and zero acceptances rather than a zero cost per success.
 
-Storage measurements need an equally explicit boundary. Report raw source bytes separately from index payloads, vectors, graph links, metadata, retained versions, and replicas. If a storage-amplification ratio uses auxiliary bytes divided by raw source bytes, it excludes the source from its numerator. A total-storage ratio includes it. Stating the numerator prevents two implementations from appearing comparable while one omits its vectors or historical copies. Update latency should likewise cover the promised operation, not compare a complete re-indexing pass with a single invalidation-table lookup.
+Storage measurements need an equally explicit boundary. Report raw source bytes separately from index payloads, vectors, graph links, metadata, retained versions, and replicas. If a storage-amplification ratio uses auxiliary bytes divided by raw source bytes, it excludes the source from its numerator. A total-storage ratio includes it. Stating the numerator prevents two implementations from appearing comparable while one omits its vectors or historical copies. Update latency should likewise cover the promised operation, not compare a complete re-indexing pass with a single invalidation-table lookup. Notebook \ref{nbk-06-storage-amplification} applies both conventions to two stores.
 
-The result is a set of trade-offs rather than one universal score. A larger store can preserve useful cases and also accumulate misleading records; a stricter admission policy can reject false lessons and miss useful experience. Increasing a staging cutoff can recover missing evidence or add irrelevant material, with no universal optimal number of chunks. Vary the read and write policies under comparable budgets, then inspect whether changes in accepted outcomes are explained by evidence coverage, applicability, lifecycle failures, or cost.
+```{python}
+#| label: lego-06-storage-amplification
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STORAGE AMPLIFICATION AND RE-INDEX TIME (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-06-storage-amplification
+# │ Goal: Show why lexical+graph and lexical+dense stores differ by an order
+# │       of magnitude in auxiliary bytes and re-index time.
+# │ Show: auxiliary ratio 0.36x vs 8.52x; re-index 34.1 ms vs 612 ms.
+# │ How: Stipulated corpus, index shapes, and throughputs; HNSW shape reused
+# │      from the ANN footprint cell.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import BYTES_FP32, MB, byte, millisecond, second
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_multiple, fmt_time
+
+class StorageAmplification:
+    # ┌── 1. LOAD (Stipulated corpus, index shapes, throughputs) ──────────
+    files = 50_000
+    tokens_per_file = 200
+    bytes_per_file = 800 * byte
+    postings_per_token = 0.8 * byte
+    edges_per_file = 4
+    edge_bytes = 32 * byte
+    passage_tokens = 100
+    d = 768
+    vec_width = BYTES_FP32
+    links = AnnFootprint.links_per_node
+    link_bytes = AnnFootprint.link_bytes
+    edited = 15
+    lex_rate = 1_250  # files per second
+    parse_rate = 680  # files per second
+    embed_rate = 50  # chunks per second
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
+    tokens = files * tokens_per_file
+    raw = files * bytes_per_file
+    postings = tokens * postings_per_token
+    graph = files * edges_per_file * edge_bytes
+    chunks = tokens // passage_tokens
+    vectors = chunks * d * vec_width
+    hnsw = chunks * links * link_bytes
+    aux_a = postings + graph
+    aux_b = postings + vectors + hnsw
+    ratio_aux_a = (aux_a / raw).to("").magnitude
+    ratio_aux_b = (aux_b / raw).to("").magnitude
+    edited_chunks = edited * tokens_per_file // passage_tokens
+    t_a = ((edited / lex_rate + edited / parse_rate) * second).to(millisecond)
+    t_b = ((edited / lex_rate + edited_chunks / embed_rate) * second).to(millisecond)
+
+    # ┌── 3. GUARD ────────────────────────────────────────────────────────
+    check(chunks == 100_000 and edited_chunks == 30, "chunk counts")
+    check(abs(ratio_aux_a - 0.36) < 1e-9 and abs(ratio_aux_b - 8.52) < 1e-9, "ratios")
+    check(t_b > 10 * t_a, "dense re-index dominated by embedding")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────────────────────
+    files_str = fmt_int(files)
+    tokens_per_file_str = fmt_int(tokens_per_file)
+    raw_str = fmt_memory(raw, unit=MB, precision=0)
+    edges_str = fmt_int(edges_per_file)
+    passage_str = fmt_int(passage_tokens)
+    d_str = fmt_int(d)
+    aux_a_str = fmt_memory(aux_a, unit=MB, precision=1)
+    aux_b_str = fmt_memory(aux_b, unit=MB, precision=1)
+    vectors_str = fmt_memory(vectors, unit=MB, precision=1)
+    ratio_aux_a_mult_str = fmt_multiple(ratio_aux_a, precision=2)
+    ratio_aux_b_mult_str = fmt_multiple(ratio_aux_b, precision=2)
+    ratio_tot_a_mult_str = fmt_multiple(1 + ratio_aux_a, precision=2)
+    ratio_tot_b_mult_str = fmt_multiple(1 + ratio_aux_b, precision=2)
+    edited_str = fmt_int(edited)
+    edited_chunks_str = fmt_int(edited_chunks)
+    embed_rate_str = fmt_int(embed_rate)
+    t_a_str = fmt_time(t_a, unit=millisecond, precision=1)
+    t_b_str = fmt_time(t_b, unit=millisecond, precision=0)
+```
+
+::: {#nbk-06-storage-amplification .callout-notebook title="Why two memory stores differ by an order of magnitude"}
+**Problem.** A hypothetical repository holds `{python} StorageAmplification.files_str` files of `{python} StorageAmplification.tokens_per_file_str` tokens each, `{python} StorageAmplification.raw_str` of source. Store A adds a BM25 index and a structural graph with `{python} StorageAmplification.edges_str` edges per file. Store B adds the same BM25 index plus `{python} StorageAmplification.passage_str`-token chunks embedded as `{python} StorageAmplification.d_str`-dimensional FP32 vectors under an HNSW graph shaped like the one in @tbl-vol3-ann-tradeoffs. How do their auxiliary bytes and re-index times compare?
+
+**Math.** Store A's auxiliary structures occupy `{python} StorageAmplification.aux_a_str`, an auxiliary ratio of `{python} StorageAmplification.ratio_aux_a_mult_str` over the raw source (total ratio `{python} StorageAmplification.ratio_tot_a_mult_str`). Store B's occupy `{python} StorageAmplification.aux_b_str`, of which the vectors alone are `{python} StorageAmplification.vectors_str`, an auxiliary ratio of `{python} StorageAmplification.ratio_aux_b_mult_str` (total `{python} StorageAmplification.ratio_tot_b_mult_str`). After an edit to `{python} StorageAmplification.edited_str` files, at stipulated throughputs for postings updates and parsing, Store A re-indexes in `{python} StorageAmplification.t_a_str`. Store B must re-embed `{python} StorageAmplification.edited_chunks_str` chunks; at `{python} StorageAmplification.embed_rate_str` chunks per second it needs `{python} StorageAmplification.t_b_str`.
+
+**Systems insight.** Dense vectors dominate both the bytes and the maintenance time, because each chunk becomes hundreds of floating-point components produced by a model pass. Stating which ratio is reported, auxiliary or total, keeps the comparison honest, and neither number says which store answers the workload's questions better. That still requires the task outcomes above.
+:::
+
+Staging depth deserves its own measurement because task success need not rise with it. Recall@$k$ can only grow as $k$ grows, yet each additional staged record that is similar but inapplicable competes for the model's attention with the evidence that matters, and relevant material placed in the middle of a long staged block can be used less reliably [@liu2024lost]. The result is a distractor dilemma. Too few records omit needed evidence, too many dilute it, and where the useful range lies depends on the model, the task, and the ranking quality. This is the working-set argument of @sec-vol3-context-engineering-physics (principle \ref{pri-vol3-attention-working-set}) applied to the read path. The engineering response is to separate candidate generation, which can afford high recall, from staging, which should admit a small reranked set, and to measure task outcomes across several staging depths instead of assuming a best one.
+
+The result is a set of trade-offs rather than one universal score. A larger store can preserve useful cases and also accumulate misleading records; a stricter admission policy can reject false lessons and miss useful experience. Vary the read and write policies under comparable budgets, then inspect whether changes in accepted outcomes are explained by evidence coverage, applicability, lifecycle failures, or cost.
 
 ### Test the memory boundary under hostile input
 
@@ -811,7 +1143,7 @@ Persistent memory fails when the system assigns a stored representation more aut
 ::: {.fallacy-pitfall}
 **Fallacy**: *Persistent information is a lower level of the KV cache.*
 
-KV tensors can be retained across calls or serialized to durable storage, but they remain derived computation for compatible model inputs. A source record, a preference, and a scoped test observation have different meanings and update obligations. Moving either object to another storage medium does not erase that distinction. A later decision needs the applicable information staged into context, whether or not compatible attention state is available to accelerate processing it.
+KV tensors can be retained across calls or serialized to durable storage, but they remain derived computation for compatible model inputs (principle \ref{pri-vol3-prefix-coherence}). A source record, a preference, and a scoped test observation have different meanings and update obligations. Moving either object to another storage medium does not erase that distinction. A later decision needs the applicable information staged into context, whether or not compatible attention state is available to accelerate processing it.
 :::
 
 ::: {.fallacy-pitfall}
