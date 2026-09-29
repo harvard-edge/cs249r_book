@@ -961,14 +961,16 @@ These per-component FIT figures describe the silicon's intrinsic soft-error budg
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-fault-tolerance-reliability-reliability-worked-example-cluster-
 # │          mtbf-calculation-9255. Drives the Steps 1-3 display equations and the
-# │          closing narrative (every 3.7 h, 6.5/day, ~45/week).
+# │          closing narrative (every 3.9 h, 6.2/day, ~43/week).
 # │
 # │ Goal: Reproduce the worked MTBF cascade from canonical MTTF/fleet constants so
 # │       every quoted rate is traceable and cannot drift.
 # │ Scope: chapter-anchor — checkpoint analysis reuses the worked cluster MTBF.
 # │ Show: lambda per subsystem, total, system rate, cluster MTBF, failure cadence.
-# │ How:  lambda = 1/MTTF; power/network shared across the node's GPUs; system = N*total.
-# │       Narrative cadence follows the displayed rate (0.2708) for self-consistency.
+# │ How:  lambda = 1/MTTF; network shared across the node's GPUs; power enters only
+# │       through series (non-redundant) PSUs, 0 for the DGX H100's 4+2 supply;
+# │       system = N*total. Narrative cadence follows the displayed rate (0.2583)
+# │       for self-consistency.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Scenarios
@@ -982,16 +984,20 @@ class FailureCascadeExample:
     psu_mttf = float(Systems.Reliability.Psu.mttf_hours)
     nic_mttf = float(Systems.Reliability.Nic.mttf_hours)
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    series_psus = Systems.Nodes.DGX_H100.series_psus  # 0: 4+2 redundant supplies
+    psus_per_node = Systems.Nodes.DGX_H100.psus_per_node
+    psu_redundancy = Systems.Nodes.DGX_H100.psu_redundancy
+    psus_required = psus_per_node - psu_redundancy
     ref_gpus = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
     l_gpu = 1 / gpu_mttf
     l_pcie = 1 / pcie_mttf
-    l_power = (1 / gpus_per_node) / psu_mttf
+    l_power = (series_psus / gpus_per_node) / psu_mttf  # 0 for the DGX H100's 4+2 supply
     l_net = (1 / gpus_per_node) / nic_mttf
     l_total = l_gpu + l_pcie + l_power + l_net
     l_system = fleet_gpus * l_total
-    l_system_disp = round(l_system, 4)  # rate as displayed (0.2708)
+    l_system_disp = round(l_system, 4)  # rate as displayed (0.2583)
     mtbf_h = 1 / l_system_disp  # narrative follows the displayed rate
     per_day = 24 * l_system_disp
     per_week = 24 * 7 * l_system_disp
@@ -999,6 +1005,7 @@ class FailureCascadeExample:
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(0 < l_gpu < 1, "per-GPU failure rate must be a small positive value")
+    check(l_power == 0, "DGX H100 PSUs are 4+2 redundant: no single-PSU term in the series sum")
     check(2.0 < mtbf_h < 5.0, "10k-GPU cluster MTBF should be a few hours")
     check(per_week > per_day > 1, "weekly failures must exceed daily, both above one")
     check(9 < fleet_gpus / ref_gpus < 11, "prose says 'roughly ten times' the reference cluster")
@@ -1011,6 +1018,9 @@ class FailureCascadeExample:
     psu_mttf_hours_str = fmt_time(psu_mttf, "hour", precision=0, commas=True, style="word")
     nic_mttf_hours_str = fmt_time(nic_mttf, "hour", precision=0, commas=True, style="word")
     gpus_per_node_str = fmt(gpus_per_node, precision=0)
+    psus_per_node_str = fmt(psus_per_node, precision=0)
+    psus_required_str = fmt(psus_required, precision=0)
+    psu_redundancy_str = fmt(psu_redundancy, precision=0)
     _gpu_d = fmt(gpu_mttf, precision=0).replace(",", "{,}")
     _pcie_d = fmt(pcie_mttf, precision=0).replace(",", "{,}")
     _psu_d = fmt(psu_mttf, precision=0).replace(",", "{,}")
@@ -1024,13 +1034,13 @@ class FailureCascadeExample:
         rf" \lambda_{{\text{{PCIe}}}} = \frac{{1}}{{{_pcie_d}}} = {l_pcie*1e5:.1f} \times 10^{{-5}} \text{{ failures/hour}} "
     )
     lambda_power_eq_math = fmt_display_math(
-        rf" \lambda_{{\text{{power/GPU}}}} = \frac{{1}}{{{_npn}}} \times \frac{{1}}{{{_psu_d}}} = {l_power*1e5:.3f} \times 10^{{-5}} \text{{ failures/hour}} "
+        rf" \lambda_{{\text{{power/GPU}}}} = \frac{{n_{{\text{{psu,series}}}}}}{{{_npn}}} \times \frac{{1}}{{{_psu_d}}} = \frac{{{series_psus}}}{{{_npn}}} \times \frac{{1}}{{{_psu_d}}} = 0 \text{{ failures/hour}} "
     )
     lambda_net_eq_math = fmt_display_math(
         rf" \lambda_{{\text{{network/GPU}}}} = \frac{{1}}{{{_npn}}} \times \frac{{1}}{{{_nic_d}}} = {l_net*1e5:.3f} \times 10^{{-5}} \text{{ failures/hour}} "
     )
     lambda_total_eq_math = fmt_display_math(
-        rf" \lambda_{{\text{{total/GPU}}}} = ({l_gpu*1e5:.1f} + {l_pcie*1e5:.1f} + {l_power*1e5:.3f} + {l_net*1e5:.3f}) \times 10^{{-5}} = {l_total*1e5:.3f} \times 10^{{-5}} \text{{ failures/hour}} "
+        rf" \lambda_{{\text{{total/GPU}}}} = ({l_gpu*1e5:.1f} + {l_pcie*1e5:.1f} + {l_net*1e5:.3f}) \times 10^{{-5}} = {l_total*1e5:.3f} \times 10^{{-5}} \text{{ failures/hour}} "
     )
     lambda_system_eq_math = fmt_display_math(
         rf" \lambda_{{\text{{system}}}} = {_fleet_d} \times {l_total*1e5:.3f} \times 10^{{-5}} = {l_system:.4f} \text{{ failures/hour}} "
@@ -1047,14 +1057,14 @@ Consider a training cluster designed for large language model development, rough
 - `{python} FailureCascadeExample.fleet_gpus_str` NVIDIA H100\index{H100!cluster reliability}\index{NVIDIA!H100} GPUs
 - Individual GPU MTBF: `{python} FailureCascadeExample.gpu_mttf_hours_str`
 - Each GPU connected to host via PCIe (MTBF: `{python} FailureCascadeExample.pcie_mttf_hours_str`)
-- Each node contains `{python} FailureCascadeExample.gpus_per_node_str` GPUs with shared power supply (MTBF: `{python} FailureCascadeExample.psu_mttf_hours_str`)
+- Each node contains `{python} FailureCascadeExample.gpus_per_node_str` GPUs fed by `{python} FailureCascadeExample.psus_per_node_str` power supply units (MTBF: `{python} FailureCascadeExample.psu_mttf_hours_str` each) in `{python} FailureCascadeExample.psus_required_str`+`{python} FailureCascadeExample.psu_redundancy_str` redundancy, so the node keeps full performance with any `{python} FailureCascadeExample.psu_redundancy_str` of them failed
 - Network infrastructure per node (network interface card (NIC), cables): MTBF `{python} FailureCascadeExample.nic_mttf_hours_str`
 
 Together, these components define the failure domain used in the rate calculations in this worked example.
 
 #### Failure rate calculation per GPU subsystem {.unnumbered}
 
-Each GPU operates within a failure domain that includes the GPU itself, its PCIe connection, and proportional shares of the power supply and network infrastructure.
+Each GPU operates within a failure domain that includes the GPU itself, its PCIe connection, and a proportional share of the node's network infrastructure. Power enters the sum only through supplies whose single failure stops the node, counted as $n_{\text{psu,series}}$ in the power equation. With the node's supplies in redundant sets, no single unit qualifies, and a failed one is normally replaced long before further failures exhaust the redundancy, so the power term below is zero. That zero covers independent supply faults only. A fault upstream of the chassis, such as the loss of the circuits feeding it, still takes down the whole node, and it belongs to the correlated failures treated later in this chapter.
 
 `{python} FailureCascadeExample.lambda_gpu_eq_math`
 
@@ -1076,7 +1086,7 @@ Each GPU operates within a failure domain that includes the GPU itself, its PCIe
 
 This result means the cluster experiences a failure approximately every `{python} FailureCascadeExample.mtbf_hours_str` on average. The expected failure cadence is `{python} FailureCascadeExample.failures_per_day_str`; a training run lasting one week will experience approximately `{python} FailureCascadeExample.weekly_failures_str`. Any training system operating at this scale must treat failure as a continuous condition, not an exceptional event. @Sec-appdx-reliability-foundations-mtbf-cascade works this same cascade through step by step, composing per-component rates into a fleet-wide system MTBF, so a reader can rerun the calculation for a different node design or cluster size.
 
-The cluster MTBF scaling\index{Cluster!MTBF scaling} in @tbl-cluster-mtbf-scaling isolates the GPU-only baseline across cluster sizes. The full-system calculation is lower once PCIe, power, and network failure domains are included.
+The cluster MTBF scaling\index{Cluster!MTBF scaling} in @tbl-cluster-mtbf-scaling isolates the GPU-only baseline across cluster sizes. The full-system calculation is lower once PCIe and network failure domains are included.
 
 ```{python}
 #| echo: false
@@ -2313,7 +2323,7 @@ Byzantine-resilient distributed training algorithms exist but impose significant
 
 #### Correlated failures {#sec-fault-tolerance-reliability-reliability-correlated-failures-95e8}
 
-The reliability calculations in @sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef assume independent failures. Real systems depart sharply from this assumption by exhibiting correlated failures, where common physical or operational dependencies take down multiple components simultaneously. At the node level, a single power supply failure\index{Correlated failure!power supply} takes down every GPU in the chassis. At the cluster level, a top-of-rack network switch failure\index{Correlated failure!network switch} isolates all attached nodes, while a cooling system failure\index{Correlated failure!cooling system} triggers cascading thermal shutdowns across an entire row of racks. Beyond physical infrastructure, shared software dependencies create broad blast radiuses: a software bug\index{Correlated failure!software bug} in an updated CUDA driver crashes every process executing on the platform, and operator error\index{Correlated failure!operator error} during cluster reconfiguration can render an entire fleet unreachable.
+The reliability calculations in @sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef assume independent failures. Real systems depart sharply from this assumption by exhibiting correlated failures, where common physical or operational dependencies take down multiple components simultaneously. At the node level, a power fault that exhausts the chassis's redundant supplies\index{Correlated failure!power supply}, such as the loss of the circuits feeding it, takes down every GPU in the chassis. At the cluster level, a top-of-rack network switch failure\index{Correlated failure!network switch} isolates all attached nodes, while a cooling system failure\index{Correlated failure!cooling system} triggers cascading thermal shutdowns across an entire row of racks. Beyond physical infrastructure, shared software dependencies create broad blast radiuses: a software bug\index{Correlated failure!software bug} in an updated CUDA driver crashes every process executing on the platform, and operator error\index{Correlated failure!operator error} during cluster reconfiguration can render an entire fleet unreachable.
 
 Correlated failures violate the independence assumption underlying @eq-system-reliability-n-components. A model that counts only independent device failures omits shared hazards and their potentially larger blast radius; incident frequency and the number of affected devices must be modeled separately. Correlated failures can also defeat redundancy strategies. Three replicas of a model provide no protection against a shared power failure if all three run on the same power domain.
 
@@ -3195,7 +3205,7 @@ plt.close()
 
 :::
 
-The worked cascade's 10,000-GPU cluster, roughly ten times the Archetype A reference cluster, supplies both inputs, replacing the round figures in @fig-checkpoint-tradeoff with computed values. That cascade (@sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255) put full-system MTBF, including PCIe, power, and network failures, at `{python} FailureCascadeExample.mtbf_hours_2dp_str`, and the checkpoint payload calculated earlier in this section writes in `{python} FaultToleranceCheckpointRecap.ckpt_write_s_str` (a `{python} FaultToleranceCheckpointRecap.gpt3_ckpt_tb_str` checkpoint at `{python} FaultToleranceCheckpointRecap.aggregate_read_gb_per_s_str`). Substituting these into the Young-Daly formula gives the canonical interval for this cluster.
+The worked cascade's 10,000-GPU cluster, roughly ten times the Archetype A reference cluster, supplies both inputs, replacing the round figures in @fig-checkpoint-tradeoff with computed values. That cascade (@sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255) put full-system MTBF, including PCIe and network failures (the redundant power supplies add no term), at `{python} FailureCascadeExample.mtbf_hours_2dp_str`, and the checkpoint payload calculated earlier in this section writes in `{python} FaultToleranceCheckpointRecap.ckpt_write_s_str` (a `{python} FaultToleranceCheckpointRecap.gpt3_ckpt_tb_str` checkpoint at `{python} FaultToleranceCheckpointRecap.aggregate_read_gb_per_s_str`). Substituting these into the Young-Daly formula gives the canonical interval for this cluster.
 
 ```{python}
 #| echo: false
@@ -3207,7 +3217,7 @@ The worked cascade's 10,000-GPU cluster, roughly ten times the Archetype A refer
 # │
 # │ Goal: Quantify the optimal checkpoint interval for a 10K-GPU cluster
 # │       to minimize wasted work using the square-root rule.
-# │ Show: tau_opt_min_str ≈ 13.4 min (2.45 TB, 14 B/param checkpoint), inline in notebook steps;
+# │ Show: tau_opt_min_str ≈ 13.8 min (2.45 TB, 14 B/param checkpoint), inline in notebook steps;
 # │   mtbf_s_str and tau_opt_s_str support the arithmetic.
 # │ How: tau_opt = sqrt(2 * T_write * MTBF_system); bare arithmetic for clarity.
 # │

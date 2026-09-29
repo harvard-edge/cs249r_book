@@ -154,25 +154,25 @@ class TrainingScaleProfiles(Registry):
         0.9,
         pc.SCALING_EFFICIENCY_TIERS,
         name="Scaling efficiency (32 GPUs)",
-        description="Near-linear scaling regime for a reference training scenario.",
+        description="Book convention for small jobs; the 175B reference job needs 64 GPUs per TP8xPP8 replica, so this tier is not modeled.",
     )
     Eff256Gpu = sourced(
-        0.7,
-        pc.SCALING_EFFICIENCY_TIERS,
+        0.87,
+        pc.SCALING_EFFICIENCY_REFERENCE_JOB_MODELED,
         name="Scaling efficiency (256 GPUs)",
-        description="Reference training scenario where communication begins to reduce scaling efficiency.",
+        description="Modeled for the 175B reference job at a fixed GPT-3 batch; tensor-parallel communication is the main loss.",
     )
     Eff1024Gpu = sourced(
-        0.5,
-        pc.SCALING_EFFICIENCY_TIERS,
+        0.83,
+        pc.SCALING_EFFICIENCY_REFERENCE_JOB_MODELED,
         name="Scaling efficiency (1024 GPUs)",
-        description="Reference training scenario with significant communication overhead at 1k GPUs.",
+        description="Modeled for the 175B reference job; pipeline fill and drain become visible (~6% of step).",
     )
     Eff8192Gpu = sourced(
-        0.35,
-        pc.MEGASCALE,
+        0.56,
+        pc.SCALING_EFFICIENCY_REFERENCE_JOB_MODELED,
         name="Scaling efficiency (8192 GPUs)",
-        description="Illustrative scaling efficiency at 8192 GPUs for LLM training.",
+        description="Modeled for the 175B reference job at a fixed GPT-3 batch; pipeline bubble dominates (~33% of step). Production runs with larger batches and interleaved pipelines retain more (MegaScale).",
     )
     # Added 2026-09-28.
     LocalComputeEfficiency = sourced(

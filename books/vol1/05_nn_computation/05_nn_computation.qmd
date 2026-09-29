@@ -1509,7 +1509,7 @@ class HistoricalScale:
 # │ Show: A small-workstation LeNet training run is tens of kWh, while the GPT-4
 # │       public-estimate scale is tens of thousands of MWh after datacenter overhead.
 # │ How: Multiply training days × hours/day × power; for GPT-4, convert estimated
-# │      A100 GPU-days to accelerator energy and apply a simple datacenter overhead.
+# │      A100 GPU-days to accelerator energy and apply a hyperscale-facility PUE.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -1524,7 +1524,8 @@ class TrainingEnergyScale:
     lenet_train_days = 3
     lenet_workstation_power = 0.75 * kW  # scenario-local workstation power assumption
     a100_tdp = Hardware.Cloud.A100.tdp
-    pue = Infrastructure.FacilityCooling.Typical.pue
+    pue = Infrastructure.FacilityCooling.BestAir.pue  # hyperscale-class facility; GPT-4 trained on Azure (Microsoft design PUE 1.12, fleet 1.16; Google fleet 1.10)
+    pue_survey_avg = Infrastructure.FacilityCooling.Typical.pue  # global survey average, for the footnote contrast
     household_energy_per_year = 10.5 * MWh  # representative household energy assumption
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -1533,21 +1534,26 @@ class TrainingEnergyScale:
     gpt4_accelerator_energy = Models.Language.GPT4.training_gpu_days * hours_per_day * hour * a100_tdp
     gpt4_energy = gpt4_accelerator_energy * pue
     us_homes_equiv = (gpt4_energy / household_energy_per_year).to("").magnitude
+    survey_avg_uplift_pct = (pue_survey_avg / pue - 1) * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(lenet_energy < 100 * kWh, f"LeNet workstation energy should be tens of kWh, got {lenet_energy.to(kWh).magnitude:.1f}")
     check(gpt4_energy > 5_000 * MWh, f"GPT-4 energy estimate should be thousands of MWh, got {gpt4_energy.to(MWh).magnitude:.0f}")
+    check(20_000 * MWh < gpt4_energy < 35_000 * MWh, f"GPT-4 estimate should use a hyperscale PUE (~27,000 MWh), got {gpt4_energy.to(MWh).magnitude:.0f}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     lenet_kwh_str = fmt_energy(lenet_energy, unit=kWh, precision=0, commas=False)
-    gpt4_energy_mwh_str = fmt_energy(gpt4_energy, unit=MWh, precision=0, commas=True)
+    gpt4_energy_mwh_str = fmt_energy(round(gpt4_energy.to(MWh).magnitude, -3) * MWh, unit=MWh, precision=0, commas=True)
+    pue_str = fmt(pue, precision=2, commas=False)
+    pue_survey_avg_str = fmt(pue_survey_avg, precision=2, commas=False)
+    survey_avg_uplift_pct_str = fmt_int(round(survey_avg_uplift_pct, -1), commas=False)
     us_homes_str = fmt_int(round(us_homes_equiv, -2), commas=True)
     household_mwh_per_year_str = fmt_energy(household_energy_per_year, unit=MWh, precision=1, commas=False, per="year")
 ```
 
-Beyond raw compute, this growth carries an energy cost that systems engineers cannot ignore. Under the stated scenario assumptions, a three-day LeNet-1 workstation run would use roughly `{python} TrainingEnergyScale.lenet_kwh_str`. Applying an external GPT-4 GPU-day estimate and a data-center-overhead factor yields about `{python} TrainingEnergyScale.gpt4_energy_mwh_str`, comparable to the annual electricity use of roughly `{python} TrainingEnergyScale.us_homes_str` representative US homes.[^fn-energy-scale-training] These are order-of-magnitude estimates, not measured utility records, and they vary with accelerator utilization, facility overhead, and the calculation boundary. Even so, the scale makes energy per operation and achieved utilization design concerns alongside peak FLOP/s. The quantitative energy analysis appears in @sec-hardware-acceleration.
+Beyond raw compute, this growth carries an energy cost that systems engineers cannot ignore. Under the stated scenario assumptions, a three-day LeNet-1 workstation run would use roughly `{python} TrainingEnergyScale.lenet_kwh_str`. Applying an external GPT-4 GPU-day estimate and a hyperscale data-center overhead, a power usage effectiveness (PUE) of `{python} TrainingEnergyScale.pue_str`, yields about `{python} TrainingEnergyScale.gpt4_energy_mwh_str`, comparable to the annual electricity use of roughly `{python} TrainingEnergyScale.us_homes_str` representative US homes.[^fn-energy-scale-training] These are order-of-magnitude estimates, not measured utility records, and they vary with accelerator utilization, facility overhead, and the calculation boundary. Even so, the scale makes energy per operation and achieved utilization design concerns alongside peak FLOP/s. The quantitative energy analysis appears in @sec-hardware-acceleration.
 
-[^fn-energy-scale-training]: **Training energy scale**\index{Energy!training scale}: The estimate assumes a 750 W workstation for the historical run and uses `{python} TrainingEnergyScale.household_mwh_per_year_str` as a representative US household electricity budget. The closed-model scenario treats an external GPU-day estimate as A100-equivalent accelerator time and applies a simple data-center overhead. The result illustrates scale; it does not establish the actual energy used to train GPT-4.
+[^fn-energy-scale-training]: **Training energy scale**\index{Energy!training scale}: The estimate assumes a 750 W workstation for the historical run and uses `{python} TrainingEnergyScale.household_mwh_per_year_str` as a representative US household electricity budget. The closed-model scenario treats an external GPU-day estimate as A100-equivalent accelerator time and applies an assumed hyperscale-facility PUE of `{python} TrainingEnergyScale.pue_str`, in line with published hyperscaler fleet values near 1.1 to 1.2. The global survey average of about `{python} TrainingEnergyScale.pue_survey_avg_str` would raise the estimate by roughly `{python} TrainingEnergyScale.survey_avg_uplift_pct_str` percent. The result illustrates scale; it does not establish the actual energy used to train GPT-4.
 
 ::: {#fig-trends fig-env="figure" fig-pos="htb" fig-cap="**Computational Growth**: Log-scale scatter plot of representative training-compute estimates in FLOPs from 1958 to 2024. Fitted trend lines compare a slower pre-2010 regime with a steeper post-2012 deep-learning frontier; the values illustrate order-of-magnitude growth rather than an audited census of model training runs." fig-alt="Log-scale scatter plot showing total training compute in FLOPs from early AI systems through recent frontier models. Points represent AI models, with different colors for pre-deep-learning era and deep learning era. Trend lines show the acceleration of compute usage over time."}
 

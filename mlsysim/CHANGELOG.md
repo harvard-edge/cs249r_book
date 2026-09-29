@@ -178,6 +178,15 @@ Release body. Omit any section that has no entries for a given release.
   the 4-chip Cloud TPU v3 board rating) and 250 W. Its provenance URL now
   points to the CACM article (DOI 10.1145/3360307) instead of an unrelated
   arXiv entry.
+- `Hardware.Cloud.TPUv3` records its ICI as 280 GB/s per direction, four
+  links at 70 GB/s (Jouppi et al. 2023, Table 4, the source of the TPUv4
+  entry). Jouppi et al. 2020 Table 3 gives a 4 x 656 Gbit/s line rate
+  (328 GB/s). `release_year` is 2018 (announced and deployed 2018), not 2019.
+- `Hardware.Cloud.TPUv2` peak is 46 TFLOP/s per chip (BF16) and TDP 280 W per
+  chip (Jouppi et al. 2020, CACM, Table 3), replacing 45 TFLOP/s (the Hot
+  Chips pod figure divided by 256) and 200 W. Its provenance URL now points to
+  the CACM article (DOI 10.1145/3360307) instead of an unrelated arXiv entry.
+  `release_year` is 2017 (announced May 2017, first deployed Q3 2017), not 2018.
 
 ### Workload & Model Registry
 
@@ -210,7 +219,15 @@ Release body. Omit any section that has no entries for a given release.
   `prov:nvidia-dgx-h100-user-guide-power`). `ReliabilityModel` now sums
   `series_psus` rather than `psus_per_node`, so the DGX H100 node MTBF rises
   from 4,285.7 h to 4,687.5 h (GPU and NIC terms only) and every DGX H100
-  fleet MTBF rises by the same 9.4 percent. Other nodes are unchanged.
+  fleet MTBF rises by the same 9.4 percent.
+- `Systems.Nodes.DGX_A100` records six 3 kW PSUs in 3+3 redundancy and 6.5 kW
+  maximum system power (`prov:nvidia-dgx-a100-user-guide-power`), and
+  `Systems.Nodes.DGX_B200` records six 3.3 kW PSUs in 5+1 redundancy and
+  14.3 kW maximum (`prov:nvidia-dgx-b200-user-guide-power`). Their node MTBF
+  also rises from 4,285.7 h to 4,687.5 h, so every fleet on them
+  (`Clusters.Training_1K_A100`, `Lab_64_A100`, `Meta_RSC_A100_16K`) gains the
+  same 9.4 percent in fleet MTBF. `HGX_H100_EPYC`, `GrandTeton_H100`,
+  `Kempner_H100_4GPU` and custom nodes keep the non-redundant two-PSU default.
 
 ### Documentation
 
