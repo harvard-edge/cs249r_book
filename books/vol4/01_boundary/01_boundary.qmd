@@ -45,7 +45,7 @@ A learned model can recognize a task correctly and still act too late to stop a 
 - Calculate how response delay consumes a moving machine's stopping clearance
 - Distinguish learned proposals from permission to execute them in the five-level machine
 - Diagnose how perception, response timing, and missing redundancy interacted in the Tempe collision
-- Connect the book's four parts to designing, teaching, running, and maintaining a useful machine
+- Connect the book's four parts to designing, teaching, running, and governing a useful machine
 
 :::
 
@@ -65,6 +65,78 @@ The physical plant is the apparatus being controlled, such as the robot's wheele
 
 [^fn-ai-moravec-paradox]: **Moravec's Paradox**\index{Moravec's Paradox}: The observation in artificial intelligence [@moravec1988mind] that high-level reasoning requires comparatively little computation, whereas low-level sensorimotor coordination demands enormous perceptual and computational resources.
 
+The name *physical AI* is recent, and industry usage since 2024 applies it broadly to almost any AI that perceives and acts in the physical world. Two older research traditions cover much of the same ground. **Embodied AI**\index{Embodied AI} descends from the argument that intelligent behavior arises from a body situated in and interacting with its environment rather than from abstract representation alone [@brooks1991intelligence]. **Cyber-physical systems**\index{Cyber-physical systems} name the integration of computation and networking with physical processes, and they carry the timing and verification discipline of embedded engineering [@leeseshia2017embedded]. Embodied AI supplies much of the learning this book uses, and cyber-physical systems supply much of its timing and verification practice. The book's subject is where the two meet at an actuator, and the definition below is deliberately narrower than industry usage: the scope test in @sec-boundary-scope-test makes it testable.
+
+```{python}
+#| label: boundary-vla-state
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ROBOT FOUNDATION MODELS, STATE OF PRACTICE AS OF 2026 (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-01-vla-state in @sec-boundary-beyond-glass.
+# │ Goal:    Record the rate structure each system's authors report, so the
+# │          table can be refreshed for a later edition without touching prose.
+# │ Show:    OpenVLA 7B params, 970k demos, about 6 Hz on one desktop GPU;
+# │          pi0 chunks up to 50 Hz; GR00T N1 10 Hz reasoning and 120 Hz
+# │          actions; Gemini Robotics under 160 ms backbone, about 250 ms
+# │          end to end, 50 Hz effective control.
+# │ How:     Values are the papers' own reported figures (category: literature),
+# │          loaded here until the literature registry holds them.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_int, fmt_frequency, fmt_latency, check
+
+class VLAState:
+    """Rates and sizes reported by the authors of representative robot foundation models."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    # category: literature. Kim et al. (2024), arXiv:2406.09246, abstract and Sec. 3
+    openvla_params_b = 7  # billion parameters
+    openvla_demos_k = 970  # thousand real-robot demonstrations
+    openvla_rate = 6 * hertz  # about 6 Hz on one RTX 4090, bfloat16, no compilation
+    # category: literature. Black et al. (2024), arXiv:2410.24164, Sec. I
+    pi0_chunk_rate = 50 * hertz  # action chunks at up to 50 Hz
+    # category: literature. NVIDIA (2025), arXiv:2503.14734, Sec. 1
+    groot_s2_rate = 10 * hertz  # System 2 vision-language module on an L40
+    groot_s1_rate = 120 * hertz  # System 1 action module
+    # category: literature. Gemini Robotics Team (2025), arXiv:2503.20020, Sec. 3.1
+    gemini_backbone_latency = 160 * millisecond  # cloud backbone, query to response (upper bound)
+    gemini_e2e_latency = 250 * millisecond  # observation to action chunk, approximate
+    gemini_control_rate = 50 * hertz  # effective control frequency with chunking
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    # Nothing is derived; the table reports each paper's own figures.
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(groot_s1_rate > groot_s2_rate, "GR00T N1's action module must run faster than its reasoning module.")
+    check(gemini_e2e_latency > gemini_backbone_latency, "End-to-end latency includes the backbone.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    openvla_params_str = fmt_int(openvla_params_b)
+    openvla_demos_str = fmt_int(openvla_demos_k)
+    openvla_rate_str = fmt_frequency(openvla_rate, unit=hertz, precision=0)
+    pi0_chunk_rate_str = fmt_frequency(pi0_chunk_rate, unit=hertz, precision=0)
+    groot_s2_rate_str = fmt_frequency(groot_s2_rate, unit=hertz, precision=0)
+    groot_s1_rate_str = fmt_frequency(groot_s1_rate, unit=hertz, precision=0)
+    gemini_backbone_str = fmt_latency(gemini_backbone_latency, unit=millisecond, precision=0)
+    gemini_e2e_str = fmt_latency(gemini_e2e_latency, unit=millisecond, precision=0)
+    gemini_rate_str = fmt_frequency(gemini_control_rate, unit=hertz, precision=0)
+```
+
+What made that meeting urgent is a change in where learned proposals come from. Between 2023 and 2025, several groups showed that a model pretrained on web-scale images and text can be fine-tuned to emit robot actions directly. These **vision-language-action (VLA) models**\index{Vision-language-action model} share one mechanism. A pretrained vision-language backbone encodes the camera images and an instruction, and an action head converts the backbone's output into motor commands. The head either decodes actions as discrete tokens, the way a language model decodes words [@brohan2023rt2; @kim2024openvla], or produces a continuous *action chunk*, a short sequence of future setpoints from one inference [@black2024pi0]. A backbone with billions of parameters cannot run at a controller's rate, so recent designs split the work across rates: a slow model interprets the scene and a fast action model or on-robot decoder emits chunks that controllers execute [@bjorck2025gr00t; @geminirobotics2025]. @Tbl-01-vla-state records what their authors report. The running machine adopts the same hierarchy, with an intent model and a chunk policy at the rates fixed on its card in @sec-boundary-running-machine, and @sec-brain develops the costs. The consequence for this book is direct. A general-purpose learned model can now propose motion for a general-purpose machine, so deciding which component may *permit* that motion becomes a design question for every machine that adopts one.
+
+| System (year)                                | Action representation                                                                                                                                                                     | Rate structure reported by its authors                                                                                                                                                                    |
+|:---------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| RT-2 (2023) [@brohan2023rt2]                 | Actions written as text tokens; the model is co-fine-tuned on robot trajectories and web vision-language tasks                                                                            | One model maps each observation to an action                                                                                                                                                              |
+| OpenVLA (2024) [@kim2024openvla]             | Each action dimension discretized into a token; `{python} VLAState.openvla_params_str` billion parameters, trained on `{python} VLAState.openvla_demos_str` thousand robot demonstrations | One model; about `{python} VLAState.openvla_rate_str` on one desktop GPU                                                                                                                                  |
+| $\pi_0$ (2024) [@black2024pi0]               | Continuous action chunks from a flow-matching action expert attached to the backbone                                                                                                      | Chunks executed at up to `{python} VLAState.pi0_chunk_rate_str`                                                                                                                                           |
+| GR00T N1 (2025) [@bjorck2025gr00t]           | Vision-language module (System 2) conditions a diffusion-transformer action module (System 1)                                                                                             | Reasoning at `{python} VLAState.groot_s2_rate_str`, actions at `{python} VLAState.groot_s1_rate_str`                                                                                                      |
+| Gemini Robotics (2025) [@geminirobotics2025] | Cloud-hosted VLA backbone and an action decoder on the robot's computer                                                                                                                   | Backbone under `{python} VLAState.gemini_backbone_str`; about `{python} VLAState.gemini_e2e_str` from observation to action chunk; `{python} VLAState.gemini_rate_str` effective control through chunking |
+
+: **Robot foundation models, state of practice as of 2026**: Representative vision-language-action systems and the rate structure their authors report. The mechanisms (pretrained backbone, action head, chunking across rates) are durable; the named systems are dated instances that a later edition should refresh. Rates depend on the reported hardware and are not comparable across rows. {#tbl-01-vla-state tbl-colwidths="[20,38,42]"}
+
 When a machine acts, it changes the conditions of its next observation. This is the feedback perspective associated with cybernetics[^fn-boundary-wiener-feedback] [@wiener1948cybernetics]. The warehouse robot's movement changes both its distance from the worker and the next image available to its model.
 
 [^fn-boundary-wiener-feedback]: **Cybernetic Feedback Loops**\index{Cybernetic Feedback Loops}: In Norbert Wiener's cybernetic framework [@wiener1948cybernetics], feedback denotes adjusting future action using past performance.
@@ -79,7 +151,7 @@ Building the complete loop requires contributions from several disciplines. Mach
 
 ::: {#dfn-boundary-physical-artificial-intelligence-physical-ai .callout-definition title="Physical artificial intelligence"}
 
-***Physical artificial intelligence***\index{Physical Artificial Intelligence!definition}\index{Physical AI!definition} is the engineering of closed-loop machines in which learned models influence physical actions that change subsequent observations.
+***Physical artificial intelligence***\index{Physical Artificial Intelligence!definition}\index{Physical AI!definition} is the engineering of closed-loop machines in which learned models influence, without synchronous human approval, physical actions that change subsequent observations.
 
 1.  **Significance**: Model performance becomes a property of an operating machine. Its actions must fit the plant's physical limits and the time available to respond.
 2.  **Distinction**: The scope test later in this chapter combines a learned model, consequential physical feedback, and delegated physical authority. Neither a model used only for advice nor an automated machine without a learned component meets all three criteria.
@@ -91,9 +163,7 @@ The first engineering distinction is between a proposed action and its physical 
 
 ## Defining the Cyber-Physical Causal Boundary {#sec-boundary-causal-boundary}
 
-An advisory model that displays an inference result on a screen or returns a JSON payload to a web client has no direct electrical or mechanical coupling to physical actuators. A human operator may inspect and discard the prediction, or downstream business logic may reject a candidate token before committing an external transaction.[^fn-math-idempotency-physical] Neither property makes digital errors benign: an operator may act on flawed recommendations, and an automated algorithmic trading engine may execute catastrophic financial transactions across electronic exchanges. The relevant distinction is whether the automated system can turn an accepted model proposal into physical action. Arbitration belongs inside that system; it protects the causal boundary rather than removing it.
-
-[^fn-math-idempotency-physical]: **Idempotency**\index{Idempotency}: Repeating an idempotent operation has the same specified result as executing it once. A motor setpoint command can have idempotent command semantics, but repeated execution may still dissipate energy. Idempotency does not imply reversibility or harmlessness.
+An advisory model that displays an inference result on a screen or returns a JSON payload to a web client has no direct electrical or mechanical coupling to physical actuators. A human operator or downstream software can inspect and discard the prediction before anything acts on it. That does not make digital errors benign, since an operator may still act on a flawed recommendation. The relevant distinction is whether the automated system can turn an accepted model proposal into physical action. Arbitration belongs inside that system; it protects the causal boundary rather than removing it.
 
 ### From a proposed action to motion {#sec-boundary-tensors-to-silicon}
 
@@ -101,7 +171,7 @@ In modern computational frameworks, executing `action_chunk = policy(observation
 
 A learned policy can propose a sequence of future positions or velocities. Those numbers remain a description of motion until a controller accepts and executes them. The representation and useful duration of such sequences are developed in @sec-brain; here the distinction is between describing an action and authorizing its consequences.
 
-The permission path checks whether the proposed motion fits the current physical limits and can be carried out in time. If admitted, its setpoints pass to the controllers that drive the motors. A position controller determines the motion correction needed; the drive regulates electrical current to produce torque. @Sec-body develops the physical limits of this conversion, and @sec-nervous develops its timing and authority boundaries.
+The permission path, an independent mechanism that alone may let a proposal reach the drives (defined in @sec-boundary-machine-model), checks whether the proposed motion fits the current physical limits and can be carried out in time. If admitted, its setpoints pass to the controllers that drive the motors. A position controller determines the motion correction needed; the drive regulates electrical current to produce torque. @Sec-body develops the physical limits of this conversion, and @sec-nervous develops its timing and authority boundaries.
 
 For a motor driven by pulse-width modulation (PWM), a software write sets a hardware timer's switching command. The power electronics use that signal to control current in the motor windings. Electromagnetic torque then accelerates the rotor and attached mechanism. This example establishes the distinction needed here: changing a proposed setpoint in memory is different from changing a command that has already produced motion. A later command can brake or redirect the machine, but that response takes time and must itself remain physically feasible.
 
@@ -119,8 +189,9 @@ An offline test can hold its examples fixed regardless of the model's prediction
 
 In a physical system, the environment evolves in a closed causal loop: the next physical state $\mathbf{s}_{t+1}$ and incoming sensor observation $\mathbf{o}_{t+1}$ depend directly on the action $\mathbf{a}_t$ produced by the prior model inference. The sensory input stream is endogenous, governed by closed-loop dynamics, represented here at successive observation times:
 $$\mathbf{s}_{t+1} = \mathbf{f}(\mathbf{s}_t, \mathbf{a}_t), \quad \mathbf{o}_{t+1} \sim p(\mathbf{o} \mid \mathbf{s}_{t+1})$$
+Here $\mathbf{f}$ is the plant's dynamics, written without process noise for this introduction, and $p$ is the observation model that turns a physical state into a sensor reading.
 
-An erroneous action can therefore move the machine into states poorly represented in its training data. Errors in those states may produce further departures from the demonstrated behavior (@fig-01-causal-loop). This possibility motivates closed-loop evaluation; it does not mean that every error necessarily produces an unstable trajectory.
+An erroneous action can therefore move the machine into states poorly represented in its training data. Errors in those states may produce further departures from the demonstrated behavior (@fig-01-causal-loop). Imitation learning calls this **covariate shift**\index{Covariate shift!closed loop}: a policy trained on the states an expert visited is deployed on the states its own actions produce, and the expected cost of its mistakes can grow with the square of the task horizon rather than linearly [@ross2011reduction]. @Sec-data-covariate-shift develops the mechanism. This possibility motivates closed-loop evaluation; it does not mean that every error necessarily produces an unstable trajectory.
 
 ::: {#fig-01-causal-loop fig-env="figure" fig-pos="t" fig-cap="**The closed causal loop**: Advisory output (top) stops at an informational interface. In physical AI (bottom), permitted model proposals reach hardware registers, where electrical current produces force and motion. Those actions alter the environment and subsequent sensor observations." fig-alt="Flowchart contrasting advisory predictions with physical AI. The upper path ends at an informational interface; the lower path carries sensor observations to a proposal, the permission path, motor actuators, and a changing physical plant."}
 ![](images/svg/fig01_causal_loop.svg){width="95%"}
@@ -129,112 +200,163 @@ An erroneous action can therefore move the machine into states poorly represente
 ### Delay consumes stopping clearance {#sec-boundary-kinematic-roofline}
 
 A moving base needs distance both before braking begins and while braking brings it to rest. For a steady initial speed, constant deceleration after onset, and a stationary obstacle, the elementary stopping budget is:
-$$d_{\text{stop}} = \underbrace{v \tau_{\text{delay}}}_{\text{computational blind travel}} + \underbrace{\frac{v^2}{2 a_{\max}}}_{\text{mechanical dissipation}} \le R_{\text{sensor}}$$
-Here $v$ is the initial speed, $\tau_{\text{delay}}$ is the full interval from the relevant observation to the onset of retarding force, $a_{\max}$ is the braking deceleration assumed for this calculation, and $R_{\text{sensor}}$ is the usable observed clearance. The first term is travel during the delay; the second is travel while shedding kinetic energy. This simple bound is the starting point for the kinematic roofline, the speed limit imposed by available clearance and response time.
+$$d_{\text{stop}} = \underbrace{v \tau_{\text{delay}}}_{\text{travel during response delay}} + \underbrace{\frac{v^2}{2 a_{\text{brake}}}}_{\text{mechanical dissipation}} \le D_{\text{clear}}$$
+Here $v$ is the initial speed (m/s), $\tau_{\text{delay}}$ is the full interval (s) from the relevant observation to the onset of retarding force, $a_{\text{brake}}$ is the braking deceleration (m/s²) assumed for this calculation, and $D_{\text{clear}}$ is the usable observed clearance (m). The first term is travel during the delay; the second is travel while shedding kinetic energy. The two terms are equal at the crossover speed $v^{*} = 2 a_{\text{brake}} \tau_{\text{delay}}$. Below $v^{*}$ the delay dominates the stop; above it braking dominates, and because braking grows with the square of speed, slowing down pays off faster than shortening the delay. Solving the inequality for $v$ gives the fastest speed the clearance allows, which @sec-body-kinetic-momentum derives.
 
 ```{python}
-#| label: boundary-blind-travel
+#| label: boundary-stopping-budget
 #| echo: false
 #| warning: false
 #| message: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ BLIND TRAVEL OF THE RUNNING MACHINE (LEGO)
+# │ THE RUNNING MACHINE'S ELEMENTARY STOPPING BUDGET (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: The blind-travel paragraph in @sec-boundary-causal-boundary.
-# │ Goal: Convert the running machine's total pre-brake delay into distance.
-# │ Show: Drive limit, total pre-brake delay, and travel before braking begins.
-# │ How: v * tau_delay from the warehouse mobile manipulator and its aisle
-# │      scenario in mlsysim; no value is retyped here.
+# │ Context: @nbk-boundary-stopping-budget in @sec-boundary-kinematic-roofline,
+# │          and the takeaways.
+# │ Goal:    Close the stopping inequality against the card's clear distance,
+# │          open the pre-brake delay into its registry terms, and show the
+# │          crossover speed and a half-speed what-if.
+# │ Show:    133.6 ms = 51.6 + 60 + 1 + 1 + 20 ms; 200.4 + 562.5 = 762.9 mm
+# │          inside 1.10 m (337.1 mm spare); v* = 0.53 m/s; backbone 22 ms is
+# │          33 mm; at 0.75 m/s the stop is 240.8 mm. Guard: the finished
+# │          budget of @sec-enforcement-composite-budget exceeds D_clear at the
+# │          drive limit, which the prose states without printing it.
+# │ How:     RM/AISLE fields from the warehouse mobile manipulator in mlsysim;
+# │          the guard reuses calc_c2_stop_suffix and calc_scurve_stop_distance
+# │          exactly as @sec-enforcement-composite-budget does. No value is retyped.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
+from mlsysim.fmt import fmt, fmt_length, fmt_latency, fmt_velocity, fmt_acceleration, fmt_percent, fmt_multiple, fmt_display_math, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
-class BlindTravel:
-    """Travel of the running machine's base before braking begins (illustrative inputs)."""
+class StoppingBudget:
+    """Elementary stopping budget of the loaded base at its drive limit (illustrative inputs)."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     v = RM.base.max_velocity  # category: illustrative (drive limit)
-    tau_delay = AISLE.tau_delay  # category: derived (capture to retarding force)
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    blind = (v * tau_delay).to(millimeter)
-    blind_display = round(blind.to(millimeter).magnitude) * millimeter
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(v.to(meter / second).magnitude - 1.5) < 1e-9, f"Canon drive limit is 1.5 m/s, got {v}.")
-    check(abs(tau_delay.to(millisecond).magnitude - 133.6) < 5e-3, f"Canon tau_delay is 133.6 ms, got {tau_delay}.")
-    check(abs(blind.to(millimeter).magnitude - 200.4) < 5e-3, f"Canon blind travel is 200 mm, got {blind}.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    v_str = fmt_velocity(v, unit=meter / second, precision=1)
-    tau_delay_str = fmt_latency(tau_delay, unit=millisecond, precision=1)
-    blind_str = fmt_length(blind_display, unit=millimeter, precision=0)
-```
-
-```{python}
-#| label: boundary-class1-momentum
-#| echo: false
-#| warning: false
-#| message: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MOMENTUM OF THE LOADED RUNNING MACHINE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: The Class 1 worked paragraph in @sec-boundary-three-classes.
-# │ Goal: Show what the loaded base carries at its drive limit and how the
-# │       blind travel of the pre-brake delay compares with braking itself.
-# │ Show: Loaded mass, kinetic energy, braking distance, and the blind travel
-# │       as a share of the braking distance.
-# │ How: calc_kinetic_energy and v^2/(2 a_brake) from the warehouse mobile
-# │      manipulator and its aisle scenario in mlsysim; no value is retyped.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-from mlsysim.core.units import *
-from mlsysim.fmt import fmt_length, fmt_energy, fmt_mass, fmt_velocity, fmt_acceleration, fmt_percent, check
-
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-AISLE = Embodied.Scenario.WarehouseAisle
-
-class MachineMomentum:
-    """Energy and braking distance of the loaded base at its drive limit (illustrative inputs)."""
-
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    m_loaded = RM.loaded_mass  # category: derived (upper bound: base, arm, full tote rack)
-    v = RM.base.max_velocity  # category: illustrative (drive limit)
+    v_aisle = AISLE.v_aisle  # category: chosen (aisle speed on the card)
     a_brake = AISLE.a_brake  # category: illustrative (credible deceleration, loaded, dry floor)
-    tau_delay = AISLE.tau_delay  # category: derived (capture to retarding force)
+    d_clear = AISLE.d_clear  # category: illustrative (rack-end clear distance)
+    t_age = AISLE.perception_age  # category: derived (mid-exposure to proposer dispatch)
+    t_backbone = AISLE.t_backbone  # category: illustrative (perception backbone, inside t_age)
+    t_lease = AISLE.t_lease  # category: chosen (chunk lease)
+    t_tick = AISLE.t_tick  # category: chosen (one permission tick)
+    t_bus = AISLE.t_bus  # category: illustrative (one bus cycle)
+    t_onset = AISLE.t_brake_onset  # category: illustrative (brake command to retarding force)
+    tau_delay = AISLE.tau_delay  # category: derived (sum of the five terms above)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    e_kinetic = calc_kinetic_energy(m_loaded, v).to(joule)
-    d_brake = (v**2 / (2 * a_brake)).to(millimeter)
+    tau_sum = (t_age + t_lease + t_tick + t_bus + t_onset).to(millisecond)
     blind = (v * tau_delay).to(millimeter)
+    d_brake = (v**2 / (2 * a_brake)).to(millimeter)
+    d_stop = (blind + d_brake).to(millimeter)
+    spare = (d_clear - d_stop).to(millimeter)
     blind_share = (blind / d_brake).to("dimensionless").magnitude
-    blind_display = round(blind.to(millimeter).magnitude) * millimeter
+    brake_over_blind = (d_brake / blind).to("dimensionless").magnitude
+    v_star = (2 * a_brake * tau_delay).to(meter / second)
+    d_backbone = (v * t_backbone).to(millimeter)
+    d_lease = (v * t_lease).to(millimeter)
+    d_per_ms = (v * (1 * millisecond)).to(millimeter)
+    v_half = v / 2
+    blind_half = (v_half * tau_delay).to(millimeter)
+    brake_half = (v_half**2 / (2 * a_brake)).to(millimeter)
+    d_stop_half = (blind_half + brake_half).to(millimeter)
+    # Guard only: the finished budget of @sec-enforcement-composite-budget at the drive limit
+    j_brake = calc_c2_stop_suffix(v, a_brake)["peak_jerk"].to(meter / second**3)
+    d_finished = (calc_scurve_stop_distance(v, a_brake, j_brake) + blind + AISLE.delta_loc + AISLE.delta_margin + AISLE.eps_track).to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(m_loaded.to(kilogram).magnitude - 368.0) < 1e-9, f"Canon loaded mass is 368 kg, got {m_loaded}.")
-    check(abs(e_kinetic.to(joule).magnitude - 414.0) < 1e-9, f"Canon kinetic energy is 414 J, got {e_kinetic}.")
-    check(abs(d_brake.to(millimeter).magnitude - 562.5) < 1e-9, f"Canon braking distance is 562.5 mm, got {d_brake}.")
-    check(abs(blind_share - 0.356) < 5e-4, f"Blind travel is about 35.6 percent of braking, got {blind_share}.")
+    check(abs(tau_sum.magnitude - tau_delay.to(millisecond).magnitude) < 1e-9, "tau_delay must equal its five registry terms.")
+    check(abs(tau_delay.to(millisecond).magnitude - 133.6) < 5e-3, f"Canon tau_delay is 133.6 ms, got {tau_delay}.")
+    check(abs(d_stop.magnitude - 762.9) < 5e-3, f"Canon elementary stop is 762.9 mm, got {d_stop}.")
+    check(spare.magnitude > 0, "The elementary budget must fit inside D_clear at the drive limit.")
+    check(v_star < v, "At the drive limit braking, not delay, must dominate.")
+    check(d_finished > d_clear, "Prose says the finished budget exceeds D_clear at the drive limit.")
+    check(v_aisle < v, "Prose says the aisle speed sits below the drive limit.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    _m_loaded_str = fmt_mass(m_loaded, unit=kilogram, precision=0)
     v_str = fmt_velocity(v, unit=meter / second, precision=1)
+    v_aisle_str = fmt_velocity(v_aisle, unit=meter / second, precision=1)
     a_brake_str = fmt_acceleration(a_brake, unit=meter / second**2)
-    _e_kinetic_str = fmt_energy(e_kinetic, unit=joule, precision=0)
-    d_brake_str = fmt_length(d_brake, unit=millimeter, precision=1)
-    blind_str = fmt_length(blind_display, unit=millimeter, precision=0)
+    d_clear_str = fmt_length(d_clear, unit=meter, precision=2)
+    tau_delay_str = fmt_latency(tau_delay, unit=millisecond, precision=1)
+    t_age_str = fmt_latency(t_age, unit=millisecond, precision=1)
+    t_backbone_str = fmt_latency(t_backbone, unit=millisecond, precision=0)
+    t_lease_str = fmt_latency(t_lease, unit=millisecond, precision=0)
+    t_tick_str = fmt_latency(t_tick, unit=millisecond, precision=0)
+    t_bus_str = fmt_latency(t_bus, unit=millisecond, precision=0)
+    t_onset_str = fmt_latency(t_onset, unit=millisecond, precision=0)
+    spare_str = fmt_length(spare, unit=millimeter, precision=1)
     blind_share_str = fmt_percent(blind_share, precision=1, style="prose")
+    brake_over_blind_mult_str = fmt_multiple(brake_over_blind, precision=1)
+    d_backbone_str = fmt_length(d_backbone, unit=millimeter, precision=0)
+    d_lease_str = fmt_length(d_lease, unit=millimeter, precision=0)
+    d_per_ms_str = fmt_length(d_per_ms, unit=millimeter, precision=1)
+    v_half_str = fmt_velocity(v_half, unit=meter / second, precision=2)
+    d_stop_half_str = fmt_length(d_stop_half, unit=millimeter, precision=1)
+    blind_half_str = fmt_length(blind_half, unit=millimeter, precision=1)
+    brake_half_str = fmt_length(brake_half, unit=millimeter, precision=1)
+
+    _v = fmt(v, unit=meter / second, precision=1)
+    _a = fmt(a_brake, unit=meter / second**2, precision=0)
+    _tau_s = fmt(tau_delay, unit=second, precision=4)
+    _blind = fmt(blind, unit=millimeter, precision=1)
+    _brake = fmt(d_brake, unit=millimeter, precision=1)
+    _stop = fmt(d_stop, unit=millimeter, precision=1)
+    _clear = fmt(d_clear, unit=millimeter, precision=0, commas=False)
+    _spare = fmt(spare, unit=millimeter, precision=1)
+    _vstar = fmt(v_star, unit=meter / second, precision=2)
+    tau_sum_math = fmt_display_math(
+        rf"\tau_{{\text{{delay}}}} = {fmt(t_age, unit=millisecond, precision=1)} + {fmt(t_lease, unit=millisecond, precision=0)} + {fmt(t_tick, unit=millisecond, precision=0)} + {fmt(t_bus, unit=millisecond, precision=0)} + {fmt(t_onset, unit=millisecond, precision=0)} = {fmt(tau_delay, unit=millisecond, precision=1)}\ \text{{ms}}"
+    )
+    blind_math = fmt_display_math(rf"v\,\tau_{{\text{{delay}}}} = {_v}\ \text{{m/s}} \times {_tau_s}\ \text{{s}} = {_blind}\ \text{{mm}}")
+    brake_math = fmt_display_math(
+        rf"\frac{{v^2}}{{2 a_{{\text{{brake}}}}}} = \frac{{({_v}\ \text{{m/s}})^2}}{{2 \times {_a}\ \text{{m/s}}^2}} = {_brake}\ \text{{mm}}"
+    )
+    close_math = fmt_display_math(
+        rf"d_{{\text{{stop}}}} = {_blind} + {_brake} = {_stop}\ \text{{mm}} \le D_{{\text{{clear}}}} = {_clear}\ \text{{mm}}, \quad D_{{\text{{clear}}}} - d_{{\text{{stop}}}} = {_spare}\ \text{{mm}}"
+    )
+    vstar_math = fmt_display_math(
+        rf"v^{{*}} = 2 a_{{\text{{brake}}}} \tau_{{\text{{delay}}}} = 2 \times {_a}\ \text{{m/s}}^2 \times {_tau_s}\ \text{{s}} \approx {_vstar}\ \text{{m/s}}"
+    )
 ```
 
-For the illustrative warehouse base, take a cruising speed of `{python} MachineMomentum.v_str`, a total pre-brake delay of `{python} BlindTravel.tau_delay_str`, and a credible deceleration of `{python} MachineMomentum.a_brake_str` under the scenario's loaded, dry-floor assumptions. Multiplying speed by delay gives `{python} BlindTravel.blind_str` of travel before braking begins. Braking then needs another `{python} MachineMomentum.d_brake_str`. The delay therefore adds `{python} MachineMomentum.blind_share_str` to the braking distance. These are chosen scenario inputs and derived distances, not measured stopping performance.
+For the illustrative warehouse base, the machine card in @sec-boundary-running-machine supplies every input, and the worked calculation below closes the inequality.
 
-We can change that result through several engineering decisions. Reducing response delay reduces the first term; reducing speed reduces both terms, with braking distance falling quadratically. Selecting a model only for prediction accuracy misses this physical trade-off. Yet model execution time is not automatically the braking delay. An independent protective path can respond while the learned proposer is stalled, provided its own sensing, timing, power, and fallback remain valid. Its response path, rather than the stalled model's completion time, then determines the relevant delay.
+::: {#nbk-boundary-stopping-budget .callout-notebook title="Does the base stop inside its clearance?"}
 
-The calculation is deliberately incomplete as a deployment bound. Acceleration before braking, uncertain traction, obstacles that move, tracking error, and the shape of the stopping trajectory require additional allowances. @Sec-body-kinetic-momentum establishes the physical budget, and later runtime design allocates the delays within it. The introductory result is already enough to change the design question from model accuracy alone to useful behavior delivered within a physical response budget.
+**Problem**: The loaded base cruises toward a rack end at its drive limit, and a worker may step out at the end of the rack. The permission path must stop the base inside the rack-end clear distance on the machine card. Does the elementary stopping budget fit, which term dominates, and how much of the delay belongs to the learned model?
+
+**Variables**:
+
+* Speed $v =$ `{python} StoppingBudget.v_str`, the drive limit (illustrative).
+* Credible deceleration $a_{\text{brake}} =$ `{python} StoppingBudget.a_brake_str`, loaded on a dry floor (illustrative).
+* Clear distance $D_{\text{clear}} =$ `{python} StoppingBudget.d_clear_str` (illustrative).
+* Total pre-brake delay $\tau_{\text{delay}} =$ `{python} StoppingBudget.tau_delay_str` (derived). It is the sum of five registry terms: the observation age of the camera frame that first shows the worker, `{python} StoppingBudget.t_age_str`, which includes the `{python} StoppingBudget.t_backbone_str` perception backbone; the chunk lease of `{python} StoppingBudget.t_lease_str`, the longest an admitted command may drive before the permission path must act; one permission tick of `{python} StoppingBudget.t_tick_str`; one bus cycle of `{python} StoppingBudget.t_bus_str`; and a brake onset of `{python} StoppingBudget.t_onset_str`.
+
+**Math**:
+
+`{python} StoppingBudget.tau_sum_math`
+`{python} StoppingBudget.blind_math`
+`{python} StoppingBudget.brake_math`
+`{python} StoppingBudget.close_math`
+`{python} StoppingBudget.vstar_math`
+
+**Result**: The elementary budget fits, with `{python} StoppingBudget.spare_str` to spare. The drive limit sits above the crossover speed, so braking dominates: it needs `{python} StoppingBudget.brake_over_blind_mult_str` the travel of the delay, and the delay adds `{python} StoppingBudget.blind_share_str` to the braking distance. At half speed, `{python} StoppingBudget.v_half_str`, delay travel halves to `{python} StoppingBudget.blind_half_str` while braking quarters to `{python} StoppingBudget.brake_half_str`, for a stop of `{python} StoppingBudget.d_stop_half_str`.
+
+**Systems insight**: The learned model's backbone accounts for `{python} StoppingBudget.t_backbone_str` of the delay, or `{python} StoppingBudget.d_backbone_str` of travel; the chunk lease alone costs `{python} StoppingBudget.d_lease_str`. Each added millisecond of delay anywhere in the chain costs `{python} StoppingBudget.d_per_ms_str` at this speed, so a slower but more accurate model is a distance cost the budget must absorb. The spare is not yet a safety margin. @Sec-enforcement-composite-budget adds the localization bound, a protective margin, tracking error, and the longer stop of a jerk-limited brake; together they exceed the clear distance at the drive limit, which is why the card sets the aisle speed at `{python} StoppingBudget.v_aisle_str`.
+
+:::
+
+These are illustrative inputs and a derived delay, so the distances are illustrative too; none is measured stopping performance.
+
+We can change that result through several engineering decisions. Reducing response delay reduces the first term; reducing speed reduces both terms, with braking distance falling quadratically. Selecting a model only for prediction accuracy misses this physical trade-off. Yet model execution time is not automatically the braking delay. An independent protective path can respond while the learned proposer is stalled, provided its own sensing, timing, power, and fallback remain valid. Its response path, rather than the stalled model's completion time, then determines the relevant delay. Driverless industrial trucks already carry a non-learned protective path of this kind: their safety standard requires them to detect a person in their path and stop before contact [@iso3691part4]. This book adds learned proposers above such a layer and asks what the layer must know to judge them.
+
+The calculation is deliberately incomplete as a deployment bound. Acceleration before braking, uncertain traction, tracking error, and the shape of the stopping trajectory require additional allowances. Obstacles that move matter most for the motivating scene: a worker walking toward the base closes the gap during the same delay and the same braking, which is why industrial safety distances add an approach-speed term to the machine's own stopping distance (@sec-enforcement-stopping-envelopes). @Sec-body-kinetic-momentum establishes the physical budget, and later runtime design allocates the delays within it. The introductory result is already enough to change the design question from model accuracy alone to useful behavior delivered within a physical response budget.
 
 ### Irreversibility and recovery {#sec-boundary-thermodynamic-irreversibility}
 
@@ -252,7 +374,7 @@ The warehouse machine changes its limiting problem as it works. While traveling 
 
 **Energy- and thermal-dominated operation** spends heat and supply margins. Holding a payload may require sustained motor current even when nothing moves. A simultaneous demand from drives and computation can also reduce the shared supply voltage. The machine must sustain the work long enough to complete its mission and preserve the resources required for its protective response.
 
-::: {#fig-01-three-archetypes fig-env="figure" fig-pos="t" fig-cap="**Three machine classes**: The three foundational physical embodiments classified by their primary binding conservation laws: (a) mass-dominated mobility (Class 1) governed by momentum and spatial clearance; (b) contact-dominated manipulation (Class 2) governed by mechanical impedance and structural yield stress; and (c) energy- and thermal-dominated dynamics (Class 3) governed by thermal capacitance, Joule heating, and power delivery." fig-alt="Three machine classes of physical AI classified by binding conservation laws: mass-dominated mobility governed by momentum and stopping clearance, contact-dominated manipulation governed by mechanical impedance and structural yield stress, and energy-dominated systems governed by thermal capacitance and power delivery."}
+::: {#fig-01-three-archetypes fig-env="figure" fig-pos="t" fig-cap="**Three machine classes**: Each class is named for the constraint that dominates it and the margin it spends: (a) mass-dominated mobility (Class 1) spends stopping clearance, set by momentum and braking; (b) contact-dominated manipulation (Class 2) spends force and deformation margin, set by contact stiffness and the strength of the object and mechanism; and (c) energy- and thermal-dominated operation (Class 3) spends heat and supply margin, set by Joule heating, thermal capacitance, and power delivery. @Sec-body develops the panel equations." fig-alt="Three machine classes of physical AI, each named for its dominant constraint: mass-dominated mobility spending stopping clearance, contact-dominated manipulation spending force and deformation margin, and energy-dominated operation spending heat and supply margin."}
 ![](images/svg/fig01_three_archetypes.svg){width="100%"}
 :::
 
@@ -262,6 +384,80 @@ The classes identify a dominant constraint, not mutually exclusive kinds of robo
 A humanoid makes the coupling especially visible. Catching a load perturbs balance, a recovery step demands additional torque, and that torque draws current and generates heat. Protecting the control electronics does not by itself supply the drive energy needed for the recovery. The part-ending humanoid examples test how each engineering principle survives these coupled demands.
 :::
 
+### The running machine {#sec-boundary-running-machine}
+
+The mobile manipulator is the one machine every later chapter works on, so its parameters are fixed once. @Tbl-01-machine-card collects the fifteen that later calculations use most, each with the evidence category defined in @sec-reader-numbers. A later worked example cites these values by name rather than restating them, and the full data sheet in @sec-appendix-systems-machine-data-sheet lists every other input with the registry field that holds it.
+
+```{python}
+#| label: boundary-machine-card
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE RUNNING MACHINE'S CARD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-01-machine-card in @sec-boundary-running-machine.
+# │ Goal:    Fix the fifteen parameters later chapters use most, with their
+# │          evidence categories, and state the premise the credible
+# │          deceleration rests on.
+# │ Show:    368 kg; 1.5 and 1.3 m/s; 2.0 m/s^2 on a dry floor (mu >= 0.204 with
+# │          all weight on the driven wheels, 0.250 at the load share the drive
+# │          motors allow; tip-over unchecked); 7.11 m/s^3; 1.10 m; 133.6 ms;
+# │          1 ms tick; 60 ms lease; 25 ms step and 50 ms replan; 336 ms intent
+# │          latency at 2 Hz; 605 ms and 4.47 s takeovers.
+# │ How:     machine_card() reads each row from the registry through the same
+# │          helper that prints the full data sheet; the friction premise comes
+# │          from calc_required_friction. Nothing is retyped here.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.embodied.datasheet import data_sheet_lookup, machine_card
+from mlsysim.fmt import MarkdownStr, fmt, check
+
+class MachineCard:
+    """The running machine's most-used parameters, with their evidence categories."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    card = machine_card()  # category: per row, from the registry and its provenance
+    sheet = data_sheet_lookup()  # the braking premise rows of the full sheet
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mu_all = sheet["mu_req"].value  # friction a_brake needs, all weight on the driven wheels
+    mu_share = sheet["mu_req_rated"].value  # friction it needs at the largest allowed load share
+    cg_unknown = sheet["cg_height"].value is None
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(len(card) == 15, f"The machine card prints fifteen rows, got {len(card)}.")
+    check(abs(mu_all - 0.204) < 5e-4, f"Dry-floor premise is mu >= 0.204, got {mu_all}.")
+    check(abs(mu_share - 0.250) < 5e-4, f"At the rated load share the premise is mu >= 0.250, got {mu_share}.")
+    check(cg_unknown, "The tip-over check stays open until the loaded center of gravity is measured.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    value_str = {r.key: MarkdownStr(r.value_str) for r in card}
+    category_str = {r.key: MarkdownStr(r.category_str) for r in card}
+    mu_all_str = fmt(mu_all, precision=3)
+    mu_share_str = fmt(mu_share, precision=3)
+```
+
+| Parameter                                   | Value                                              | Category                                              | Basis                                                                                                                                                                                                                                                                                                   |
+|:--------------------------------------------|:---------------------------------------------------|:------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Loaded mass $m$                             | `{python} MachineCard.value_str["m_loaded"]`       | `{python} MachineCard.category_str["m_loaded"]`       | Base, arm, and a full tote rack; an upper bound (@sec-body-kinetic-momentum)                                                                                                                                                                                                                            |
+| Drive limit $v_{\max}$                      | `{python} MachineCard.value_str["v_drive"]`        | `{python} MachineCard.category_str["v_drive"]`        | Class profile of a warehouse base                                                                                                                                                                                                                                                                       |
+| Aisle speed $v_{\text{aisle}}$              | `{python} MachineCard.value_str["v_aisle"]`        | `{python} MachineCard.category_str["v_aisle"]`        | Set below the dry-floor speed ceiling (@sec-enforcement-stopping-envelopes)                                                                                                                                                                                                                             |
+| Credible deceleration $a_{\text{brake}}$    | `{python} MachineCard.value_str["a_brake"]`        | `{python} MachineCard.category_str["a_brake"]`        | Loaded, on a dry floor that supplies $\mu \ge$ `{python} MachineCard.mu_all_str` with all weight on the driven wheels, or `{python} MachineCard.mu_share_str` at the share the drive motors allow; tip-over is unchecked until the center of gravity is measured (@sec-body-stopping-distance-prebrake) |
+| Stop jerk bound $j_{\max}$                  | `{python} MachineCard.value_str["j_brake"]`        | `{python} MachineCard.category_str["j_brake"]`        | Stipulated for the jerk-limited stop, whose deceleration bound is $a_{\max} = a_{\text{brake}}$ (@sec-planning-c2-stopping-suffix)                                                                                                                                                                      |
+| Rack-end clear distance $D_{\text{clear}}$  | `{python} MachineCard.value_str["d_clear"]`        | `{python} MachineCard.category_str["d_clear"]`        | Clearance the stop must fit inside                                                                                                                                                                                                                                                                      |
+| Total pre-brake delay $\tau_{\text{delay}}$ | `{python} MachineCard.value_str["tau_delay"]`      | `{python} MachineCard.category_str["tau_delay"]`      | Observation age, lease path, and brake onset (@sec-perception-latency-waterfall)                                                                                                                                                                                                                        |
+| Permission tick $T_{\text{tick}}$           | `{python} MachineCard.value_str["t_tick"]`         | `{python} MachineCard.category_str["t_tick"]`         | Period of the chosen permission-loop rate (@sec-nervous-cadences)                                                                                                                                                                                                                                       |
+| Chunk lease $T_{\text{lease}}$              | `{python} MachineCard.value_str["t_lease"]`        | `{python} MachineCard.category_str["t_lease"]`        | Longest an admitted chunk may drive without renewal (@sec-nervous-lease-sizing)                                                                                                                                                                                                                         |
+| Setpoint step $\Delta t$                    | `{python} MachineCard.value_str["t_step"]`         | `{python} MachineCard.category_str["t_step"]`         | Spacing of the chunk policy's setpoints (@sec-brain-action-chunking)                                                                                                                                                                                                                                    |
+| Chunk replan period                         | `{python} MachineCard.value_str["t_period"]`       | `{python} MachineCard.category_str["t_period"]`       | A whole number of setpoint steps                                                                                                                                                                                                                                                                        |
+| Intent-model latency                        | `{python} MachineCard.value_str["t_intent"]`       | `{python} MachineCard.category_str["t_intent"]`       | Prefill plus decode on the application processor (@sec-brain-memory-wall)                                                                                                                                                                                                                               |
+| Intent-model rate                           | `{python} MachineCard.value_str["f_intent"]`       | `{python} MachineCard.category_str["f_intent"]`       | Largest rate whose period covers the latency                                                                                                                                                                                                                                                            |
+| In-loop takeover $T_{\Sigma,1}$             | `{python} MachineCard.value_str["t_takeover_in"]`  | `{python} MachineCard.category_str["t_takeover_in"]`  | Slow-bound human reaction plus console video and handshake (@sec-intervention-reaction-drift)                                                                                                                                                                                                           |
+| Out-of-loop takeover $T_{\Sigma,2}$         | `{python} MachineCard.value_str["t_takeover_out"]` | `{python} MachineCard.category_str["t_takeover_out"]` | Take-over time of the 90th-percentile study condition plus video and handshake                                                                                                                                                                                                                          |
+
+: **The running machine's card**: The fifteen parameters of the warehouse mobile manipulator that later calculations use most. A derived value built on illustrative inputs is illustrative evidence. Values print from the MLSysIM registry when the book is built. {#tbl-01-machine-card tbl-colwidths="[24,12,12,52]"}
+
 The first design task is to identify which margin the intended action approaches, then establish the physical response available before that margin is exhausted. The detailed force, heat, and power calculations belong to the body's design. A separate scope test determines whether the machine also needs the learning and delegated-authority discipline developed in this book.
 
 ## The Physical AI Scope Test {#sec-boundary-scope-test}
@@ -270,21 +466,21 @@ A warehouse arm can follow a fixed control law, execute a human-approved offline
 
 The scope of physical AI is defined by the simultaneous intersection of three structural criteria (@fig-01-scope-venn):
 
-1. **Learned Statistical Model:** The system relies on a policy, perception encoder, or world model acquired from data, such as a neural network or diffusion policy [@chi2024diffusionpolicy]. The criterion concerns how the component is obtained and used, not its size or whether its outputs can be bounded mathematically. Its learned behavior contributes to the actions the system proposes.
+1. **Learned Statistical Model:** The system relies on a policy, perception encoder, or world model whose behavior is specified by training data rather than by an inspectable requirement, such as a neural network or diffusion policy [@chi2024diffusionpolicy]. Evidence that such a component behaves correctly must therefore be gathered empirically over a stated operating domain. A linear plant model fitted by system identification, whose error bounds can be analyzed, does not meet this criterion; a neural policy does.
 2. **Consequential Physical Feedback:** Actuator actions alter the material state of the physical environment, which in turn directly dictates what the sensors observe next under the governing laws of classical mechanics, thermodynamics, or electromagnetism.
-3. **Delegated Physical Authority (System-Level Actuation):** A learned component supplies live proposals that an automated system can execute without synchronous human approval. The learned model need not write an actuator register itself; the system holds physical authority because an accepted proposal can reach one.
+3. **Delegated Physical Authority (System-Level Actuation):** A learned component's output, whether a percept, a state estimate, or a proposed action, can affect live actuation without synchronous human approval. The learned model need not write an actuator register itself; the system holds physical authority because that output can shape a command that reaches one. An automated check does not remove this authority, and a check that judges the command using the same learned perception is not independent of it: one perception error misleads the proposer and the check together.
 
-::: {#fig-01-scope-venn fig-env="figure" fig-pos="t" fig-cap="**The physical AI scope test**: Physical AI combines a learned component, consequential physical feedback, and system-level authority to execute accepted proposals without human approval. An independent veto belongs inside this intersection because accepted proposals can still move the plant. The pairwise overlaps locate advisory systems, digital autonomy, and classical control." fig-alt="Three-set Venn diagram defining physical AI at the intersection of learned models, physical feedback, and physical authority. The pairwise overlaps show advisory systems, digital autonomy, and classical control."}
+::: {#fig-01-scope-venn fig-env="figure" fig-pos="t" fig-cap="**The physical AI scope test**: Physical AI combines a learned component, consequential physical feedback, and system-level authority to let learned outputs reach actuation without human approval. An independent veto belongs inside this intersection because accepted proposals can still move the plant. The pairwise overlaps locate advisory systems, digital autonomy, and classical control." fig-alt="Three-set Venn diagram defining physical AI at the intersection of learned models, physical feedback, and physical authority. The pairwise overlaps show advisory systems, digital autonomy, and classical control."}
 ![](images/svg/fig01_scope_venn.svg){width="90%"}
 :::
 
 A classical proportional-integral-derivative (PID) controller can regulate a motor through physical feedback without a learned component. Conversely, a learned market predictor can influence automated transactions without controlling the physical plant considered here. Neither satisfies all three criteria. This distinction identifies the engineering scope; it does not imply that either system is simple or harmless.
 
-A learned model alone cannot define the field. An offline neural trajectory optimizer may compute paths for a manipulator, but if an engineer must inspect and explicitly load each path before execution, its outputs lack delegated runtime authority. A model that flags assembly defects on a display likewise leaves the physical decision to another actor.
+A learned model alone cannot define the field. An offline neural trajectory optimizer may compute paths for a manipulator, but if an engineer must inspect and explicitly load each path before execution, its outputs lack delegated runtime authority. A model that flags assembly defects on a display likewise leaves the physical decision to another actor. Conversely, many deployed machines are modular: learned perception feeds a planner written as rules or as an optimization. Such a machine meets the third criterion through its percepts, even though no learned component proposes motion; the Tempe vehicle in @sec-boundary-when-fails is one.
 
-Shared autonomy belongs inside the scope whenever a learned component can affect live motion without approval of each correction. A surgical assistant that applies learned haptic guidance can influence contact before the surgeon responds, even though the surgeon remains responsible for the overall task. No universal force threshold or human reaction time determines this classification. What matters is whether the automated system can execute the learned contribution.
+Shared autonomy belongs inside the scope whenever a learned component can affect live motion without approval of each correction. A hypothetical surgical assistant that applied learned haptic guidance could influence contact before the surgeon responds, even though the surgeon remains responsible for the overall task. No universal force threshold or human reaction time determines this classification. What matters is whether the automated system can execute the learned contribution.
 
-Evaluating an ambiguous machine means testing each criterion independently, as the examples above do. A deterministic veto does not remove delegated authority; a mandatory human review of an offline plan does. When all three tests pass, the system operates as physical AI, and its engineering must respect the causal boundary established in @sec-boundary-causal-boundary.
+Evaluating an ambiguous machine means testing each criterion independently, as the examples above do. A deterministic veto does not remove delegated authority, least of all when it judges commands with the learned perception it is meant to check; a mandatory human review of an offline plan does remove it. When all three tests pass, the system operates as physical AI, and its engineering must respect the causal boundary established in @sec-boundary-causal-boundary.
 
 ::: {#chk-boundary-scope-test .callout-checkpoint title="Binding budgets and the scope test"}
 
@@ -308,7 +504,7 @@ The Body establishes what motion, force, and power the machine can sustain. The 
 4. **The Boundary (Level 4):** The interface where commands produce physical effects and sensors convert physical events into measurements.
 5. **The World (Level 5):** Floors, payloads, contact, people, and other conditions that continue evolving whether the machine observes them or not.
 
-One implementation places the learned proposer on an application processor, the permission path on a separate real-time controller, and the motor current loops on dedicated drives. The required separation follows from timing and fault assumptions; naming a processor family or operating system does not establish it. @Sec-nervous turns this division of responsibility into an explicit handoff contract.
+One implementation places the learned proposer on an application processor, the permission path on a separate real-time controller, and the motor current loops on dedicated drives. The required separation follows from timing and fault assumptions; naming a processor family or operating system does not establish it. @Sec-nervous turns this division of responsibility into an explicit handoff record.
 
 Governance is not a sixth level. It is the lifecycle envelope around all five, deciding who may command the machine, what evidence licenses it to operate, and when that license expires, and it changes on the timescale of interventions and releases rather than control cycles.
 
@@ -327,6 +523,8 @@ Governance is not a sixth level. It is the lifecycle envelope around all five, d
 The proposal boundary governs who may authorize an action. The causal boundary is where the admitted command changes the plant. The Nervous System connects the two, checking proposals before allowing the drives to execute them.
 
 :::
+
+Readers from control will recognize a supervisory arrangement. The proposal boundary is a form of runtime assurance, whose Simplex architecture pairs a high-performance controller with a simpler verified one and a rule that decides which may drive the plant [@sha2001using]; @sec-enforcement develops it for this machine, and @tbl-01-law-lineage places the book's other terms in the field's vocabulary. Independence also constrains the permission path's evidence, not only its processor. If the path judges a proposal with the same learned perception that produced it, one perception error defeats both, so the sensing that grants permission must not share the learned component's failure modes (@sec-enforcement-where-enforcer-sits).
 
 The margin stack that opens every chapter draws these same five levels (@fig-01-locator). The rates shown in the locator belong to the book's selected architecture; they are not universal requirements for each level. Later chapters derive the necessary timing from the task and body. For orientation, the essential feature is the proposal boundary between learned computation and execution authority.
 
@@ -350,35 +548,124 @@ Opening a door and carrying a load require more than a sequence of accurate pred
 
 **The fourth law: evidence bounds authority.** Permission to operate depends on evidence for stated conditions. A successful demonstration does not establish safe behavior for every payload, sensor fault, or surface. The release argument must identify the supported operating domain, the assumptions behind its limits, and the conditions that require restricted operation or withdrawal. Part IV develops command authority, fault testing, and release decisions so that uncertainty limits what the machine is allowed to do.
 
+Only the first law is physical. Irreversibility follows from the mechanics of work done on a plant, and no design choice relaxes it. The other three are design principles: engineering commitments the field has learned, often from accidents, that a team could choose to violate at a cost. We call all four laws because the book treats them as non-negotiable for the machines in its scope, but the distinction matters when a reader meets a design that seems to break one. None of the three principles is new. Each already has an established name and a canonical source, and @tbl-01-law-lineage maps the book's vocabulary onto them, together with the documented failure each distills. Where the book's term adds precision, as when it ties fresh evidence to a stopping budget, the book keeps its own name; the field's name remains the better term for searching the literature.
+
+```{python}
+#| label: boundary-incident-record
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE TEMPE AND CRUISE RECORDS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-01-law-lineage and @sec-boundary-when-fails (Tempe timeline,
+# │          action suppression, braking cap, Cruise pullover, checkpoint).
+# │ Goal:    Print the investigators' own values once, and derive the travel
+# │          during action suppression from the two recorded speeds.
+# │ Show:    5.6 s first detection; 43.2 mph at 1.2 s before impact; 1 s
+# │          suppression ending at 0.2 s and 40.5 mph; takeover at 0.02 s;
+# │          18.7 m during suppression; 7 m/s^2 (0.71 g) chosen cap against
+# │          0.92 g (9.0 m/s^2) capability; Cruise about 20 ft (6.1 m) at up
+# │          to 7.7 mph.
+# │ How:     Literature values from NTSB/HAR-19/03 and the Quinn Emanuel report,
+# │          loaded here until the literature registry holds them. Suppression
+# │          travel uses the mean of the two recorded speeds (trapezoid rule);
+# │          no counterfactual stop is computed.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_latency, fmt_length, fmt_velocity, fmt_acceleration, fmt_math, check
+
+class IncidentRecord:
+    """Investigator-reported values for the Tempe (2018) and Cruise (2023) cases."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    # category: literature. NTSB/HAR-19/03 (2019), p. v and table pp. 15-16
+    t_detect = 5.6 * second  # first detection, before impact
+    t_recognize = 1.2 * second  # emergency recognized and suppression begins, before impact
+    v_recognize = 43.2 * ureg.mph  # recorded speed at that instant
+    t_suppress = 1.0 * second  # action-suppression period (p. 13)
+    t_supp_end = 0.2 * second  # suppression ends, before impact
+    v_supp_end = 40.5 * ureg.mph  # recorded speed at that instant
+    t_takeover = 0.02 * second  # operator takes the wheel, before impact
+    # category: literature. NTSB/HAR-19/03, p. 13 and footnote 33
+    a_cap = 7.0 * meter / second**2  # ADS emergency threshold and braking cap (chosen by the developer)
+    g_capable = 0.92  # police-determined average deceleration capability in the crash area, in g
+    # category: literature. Quinn Emanuel report to the Cruise boards (2024), p. 10
+    d_drag = 20 * ureg.foot  # approximate distance moved during the pullover
+    v_drag = 7.7 * ureg.mph  # maximum speed during the pullover
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    g0 = (1 * ureg.standard_gravity).to(meter / second**2)
+    d_suppress = (0.5 * (v_recognize + v_supp_end) * t_suppress).to(meter)
+    a_cap_g = (a_cap / g0).to("dimensionless").magnitude
+    a_capable = (g_capable * g0).to(meter / second**2)
+    d_drag_m = d_drag.to(meter)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs((t_recognize - t_supp_end - t_suppress).to(second).magnitude) < 1e-9, "Suppression must span the two table rows.")
+    check(abs(a_cap_g - 0.71) < 5e-3, f"NTSB states the cap as 0.71 g, got {a_cap_g}.")
+    check(a_capable > a_cap, "The chosen cap must sit below the vehicle's capability.")
+    check(abs(d_suppress.magnitude - 18.7) < 0.05, f"Suppression travel is about 18.7 m, got {d_suppress}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_detect_str = fmt_latency(t_detect, unit=second, precision=1)
+    t_suppress_str = fmt_latency(t_suppress, unit=second, precision=0)
+    t_recognize_math = fmt_math(rf"T-{fmt(t_recognize, unit=second, precision=1)}\text{{ s}}")
+    t_supp_end_math = fmt_math(rf"T-{fmt(t_supp_end, unit=second, precision=1)}\text{{ s}}")
+    t_takeover_math = fmt_math(rf"T-{fmt(t_takeover, unit=second, precision=2)}\text{{ s}}")
+    v_recognize_str = fmt_velocity(v_recognize, unit=ureg.mph, precision=1)
+    v_supp_end_str = fmt_velocity(v_supp_end, unit=ureg.mph, precision=1)
+    d_suppress_str = fmt_length(d_suppress, unit=meter, precision=1)
+    a_cap_str = fmt_acceleration(a_cap, unit=meter / second**2, precision=0)
+    a_cap_g_str = fmt(a_cap_g, precision=2)
+    g_capable_str = fmt(g_capable, precision=2)
+    a_capable_str = fmt_acceleration(a_capable, unit=meter / second**2, precision=1)
+    d_drag_str = fmt_length(d_drag, unit=ureg.foot, precision=0)
+    d_drag_m_str = fmt_length(d_drag_m, unit=meter, precision=1)
+    v_drag_str = fmt_velocity(v_drag, unit=ureg.mph, precision=1)
+```
+
+| Book's law or term                                                         | Kind             | Established name in the field                                             | Canonical source                                               | Documented failure it distills                                                                                                                                                                                                                                                                           |
+|:---------------------------------------------------------------------------|:-----------------|:--------------------------------------------------------------------------|:---------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| First law: irreversibility (the causal boundary)                           | Physical         | Irreversible work on the plant; the reaction-plus-braking stopping budget | Mechanics; @sec-body-kinetic-momentum                          | Tempe (2018): the one-second action suppression let the vehicle travel about `{python} IncidentRecord.d_suppress_str` before any braking was requested [@ntsb2019uber]                                                                                                                                   |
+| Second law: endogenous data                                                | Design principle | Covariate shift; compounding error in imitation learning                  | Ross, Gordon, and Bagnell [@ross2011reduction]                 | A learning result rather than an accident: a cloned policy's errors can compound with the task horizon (@sec-data-covariate-shift)                                                                                                                                                                       |
+| Third law: proposal is not permission (proposal boundary, permission path) | Design principle | Runtime assurance and its Simplex architecture; safety filter             | Sha [@sha2001using]; Hsu, Hu, and Fisac [@hsu2024safetyfilter] | Therac-25: software took over protection that hardware interlocks had provided [@leveson1993investigating]; Mars Pathfinder (1997): lower-priority work delayed a deadline-critical task until a watchdog reset the computer [@reeves1997pathfinder]                                                     |
+| Fresh evidence (an input to every permission check)                        | Design principle | Age of information                                                        | Kaul, Yates, and Gruteser [@kaul2012realtime]                  | Tempe (2018), in a related form: each reclassification discarded the object's earlier locations, so path prediction used less evidence than the sensors had gathered [@ntsb2019uber]                                                                                                                     |
+| Fourth law: evidence bounds authority                                      | Design principle | Assurance case; operational design domain (ODD)                           | UL 4600 [@ul4600]                                              | Tempe (2018): the design made an operator whose attention nothing verified the primary countermeasure in an emergency [@ntsb2019uber]; Cruise (2023): a post-collision pullover moved the vehicle although its sensing could not establish that the space beneath it was clear [@quinnemanuel2024cruise] |
+
+: **Lineage of the four laws**: Each law and key term of this book against the field's established name, its canonical source, and a documented failure it distills. Only the first law is physical; the other three are design principles, which is why each has a literature of its own. {#tbl-01-law-lineage tbl-colwidths="[20,10,20,16,34]"}
+
 The proposal boundary joins the four laws. Irreversibility requires checks before consequential action; endogenous data limits what training alone establishes; and evidence bounds the conditions under which admission is justified. More capable models do not remove these obligations. General methods can benefit from increased computation [@sutton2019bitter], but onboard computation still consumes memory bandwidth, energy, and cooling capacity. This book calls those constraints the **physical wall**\index{Physical Wall}; @sec-brain-cognitive-pipeline measures their effect on the proposers. A refusal must also have a physical meaning: terminating computation does not stop a moving machine, so the runtime needs a timely response that the body can execute.
 
 ## The Architecture of This Book {#sec-boundary-book-architecture}
 
 The book develops the ability to carry a learned proposal from a physical requirement to justified operation. The engineer first bounds what the machine can do, then establishes what its learned proposer has demonstrated, builds the runtime that checks live proposals, and tests the conditions under which operation may continue. Each part is led by one of the four laws. The records in @fig-01-spine preserve the assumptions and results of this reasoning so that later decisions can use them. One strand carries physical limits and evidence of competence; another carries the current observation and proposed action. They meet at the permission decision. @Sec-frontier-architectural-synthesis returns to the resulting engineering capability and the premises on which each claim depends.
 
+A record is a machine-checkable statement that a later decision may rely on, and the stopping calculation (\ref{nbk-boundary-stopping-budget}) already has the shape of the first one, a limit record with the six elements set out in @sec-reader-numbers. Its value is the derived stopping distance. Its conditions are the loaded mass, a dry floor, a stationary obstacle, and a steady initial speed. Its uncertainty is not yet established, because every input is illustrative, and so its margin is not yet a margin: the spare distance is a difference between illustrative numbers. It has no detector, since nothing on the machine yet notices when the floor or the load leaves the stated conditions; @sec-body and @sec-enforcement supply one. Its provenance is the category label on each input. The empty entries are the point: a calculation becomes evidence only when every element is filled, and each box in @fig-01-spine is a record of this kind for a different decision.
+
 ::: {#fig-01-spine fig-env="figure" fig-pos="htb" fig-cap="**The spine of the book**: Each part is led by one law, and each chapter of Parts I to IV except @sec-brain produces a record that a later one consumes. What the plant can do and what the proposer has shown it can do run as one strand, what the proposer proposes now as another, and the two meet at the permission decision." fig-alt="Flow diagram of fifteen record boxes, each labeled with its chapter number, on shaded bands for the four parts. A label at top left reads Chapter 1, What must be guaranteed. In the Part I band, labeled Irreversibility, the limit record of Chapter 2 feeds the handoff record of Chapter 4, and a dashed arrow labeled Chapter 3, proposer limits, also enters the handoff record. The handoff record forks into two rows. The upper row, in the Part II band labeled Endogenous data, runs provenance record 5, policy manifest 6, and evaluation record 7. The lower row, in the Part III band labeled Proposal is not permission, runs observation contract 8, belief record 9, intent lease 10, and trajectory record 11. Both rows converge on the enforcement record of Chapter 12, which feeds the placement record of Chapter 13. An arrow then runs down to a lower row in the Part IV band, labeled Evidence bounds authority: authority record 14, fault record 15, and release manifest 16, which feeds the residual-claims register of Chapter 17, labeled Conclusion and What the evidence supports. A separate arrow runs from the evaluation record around the top and right edges to the release manifest."}
 ![](images/svg/fig01_book_spine.svg){width="100%"}
 :::
 
-Part I, The Machine Anatomy, turns irreversibility into design limits. @Sec-body measures the plant's budgets, @sec-brain establishes what the learned proposer can supply on time, and @sec-nervous connects them through a permission path whose timing follows from those budgets. The limit and handoff records make those assumptions explicit. Part II, Teaching the Machine, follows the consequences of actions changing future observations. @Sec-data, @sec-training, and @sec-evaluation develop the evidence needed to collect demonstrations, train a policy, and assess its competence within a declared operating domain. The provenance record, policy manifest, and evaluation record preserve both the supported claims and their gaps.
+Part I, The Machine Anatomy, turns irreversibility into design limits. @Sec-body measures the plant's budgets, @sec-brain establishes what the learned proposer can supply on time, and @sec-nervous connects them through a permission path whose timing follows from those budgets. The limit and handoff records make those assumptions explicit. Part II, Teaching the Machine, follows the consequences of actions changing future observations. @Sec-data, @sec-training, and @sec-evaluation develop the evidence needed to collect demonstrations, train a policy, and assess its competence within a declared operating domain. The demonstration provenance record, policy manifest, and evaluation record preserve both the supported claims and their gaps.
 
-Part III, Running the Machine, implements the distinction between proposing and permitting an action. @Sec-perception through @sec-placement follow a command from a timestamped observation through a belief, an intent lease, and a proposed trajectory to admission and timely execution. Part IV, Governing the Machine, determines how evidence limits continued operation. @Sec-intervention, @sec-verification, and @sec-release address command authority, fault tests, and release conditions. @Sec-frontier concludes by applying the method to an unfamiliar machine, synthesizing what an engineer can now build and justify, and identifying the work needed to extend that capability. Across these parts, the warehouse mobile manipulator introduced here gives the reader one machine on which to connect the decisions. Its records make the reasoning inspectable; completing a record does not establish that the machine satisfies the physical claim it contains.
+Part III, Running the Machine, implements the distinction between proposing and permitting an action. @Sec-perception through @sec-placement follow a command from a timestamped observation through a belief, an intent lease, and a proposed trajectory to admission and timely execution. Part IV, Governing the Machine, determines how evidence limits continued operation. @Sec-intervention, @sec-verification, and @sec-release address command authority, fault tests, and release conditions. @Sec-frontier concludes by applying the method to an unfamiliar machine, synthesizing what an engineer can now build and justify, and identifying the work needed to extend that capability. Across these parts, the warehouse mobile manipulator introduced here gives the reader one machine on which to connect the decisions. Its records make the reasoning inspectable; completing a record does not establish that the machine satisfies the physical claim it contains. The record register in @sec-appendix-systems-record-register gives each of the fifteen records its name, the chapter that produces it, and what it binds, and the machine card in @sec-boundary-running-machine fixes the machine's own parameters.
 
 The route is a method for making useful behavior dependable. A documented failure now illustrates why these responsibilities must be joined before a machine enters service.
 
 ## When the Responsibilities Fail Together {#sec-boundary-when-fails}
 
-A warehouse model that recognizes an obstacle too late cannot recover the clearance already consumed. In a road vehicle, the same timing problem can combine with tracking errors, delayed intervention, and missing redundancy. The 2018 Tempe collision provides a documented example of these interacting failures; it does not establish that one prescribed hardware architecture would have prevented them.
+A warehouse model that recognizes an obstacle too late cannot recover the clearance already consumed. In a road vehicle, the same timing problem can combine with tracking errors, delayed intervention, and missing redundancy. The 2018 Tempe collision provides a documented example of these interacting failures; it does not establish that one prescribed hardware architecture would have prevented them. The National Transportation Safety Board (NTSB) attributed the crash primarily to the vehicle operator's distraction. The design choices traced below explain why the automated system had made that single, unmonitored person the last line of defense.
 
-On a March night in 2018, a modified Volvo XC90 operating Uber Advanced Technologies Group's developmental automated driving system (ADS) struck and fatally injured a pedestrian pushing a bicycle across a road in Tempe, Arizona [@ntsb2019uber].[^fn-inc-tempe-investigation] The vehicle carried lidar, radar, and cameras (@fig-01-tempe-vehicle). The ADS first detected the pedestrian $5.6\text{ s}$ before impact, but detection alone did not provide a correct path prediction [@ntsb2019uber].
+On a March night in 2018, a modified Volvo XC90 operating Uber Advanced Technologies Group's developmental automated driving system (ADS) struck and fatally injured a pedestrian pushing a bicycle across a road in Tempe, Arizona [@ntsb2019uber].[^fn-inc-tempe-investigation] The vehicle carried lidar, radar, and cameras (@fig-01-tempe-vehicle). The ADS first detected the pedestrian `{python} IncidentRecord.t_detect_str` before impact, but detection alone did not provide a correct path prediction [@ntsb2019uber].
 
 [^fn-inc-tempe-investigation]: **2018 Tempe Autonomous Collision**\index{2018 Tempe Autonomous Collision!NTSB report}: The event times and design details in this section come from NTSB highway accident report NTSB/HAR-19/03 [@ntsb2019uber].
 
 ### Tracking history loss under classification churn {#sec-boundary-tracking-churn}
 
-Despite continuing to track the detected object, the ADS did not brake in response to it. The NTSB record shows classification changes among vehicle, bicycle, and other before $T-1.2\text{ s}$ [@ntsb2019uber].
+Despite continuing to track the detected object, the ADS did not brake in response to it. The NTSB record shows classification changes among vehicle, bicycle, and other before `{python} IncidentRecord.t_recognize_math` [@ntsb2019uber].
 
-When the classification changed, the ADS path predictor did not use the object's earlier locations; for an "other" object it could assume a static path.[^fn-ctrl-kalman-tracking] The loss of earlier locations matters because successive positions provide evidence of motion across the roadway. A changing semantic label must not silently discard that evidence. The resulting path predictions did not place the pedestrian in the SUV's lane until $T-1.2\text{ s}$ [@ntsb2019uber].
+When the classification changed, the ADS path predictor did not use the object's earlier locations; for an "other" object it could assume a static path.[^fn-ctrl-kalman-tracking] The loss of earlier locations matters because successive positions provide evidence of motion across the roadway. A changing semantic label must not silently discard that evidence. The resulting path predictions did not place the pedestrian in the SUV's lane until `{python} IncidentRecord.t_recognize_math` [@ntsb2019uber].
 
 [^fn-ctrl-kalman-tracking]: **Tracking History**\index{Tracking history!classification changes}: A path predictor can estimate motion from successive object locations. In the Tempe ADS, a changed classification caused the predictor to omit earlier locations; the NTSB report does not specify a Kalman-filter reset or a zero-velocity initialization [@ntsb2019uber].
 
@@ -390,9 +677,9 @@ When the classification changed, the ADS path predictor did not use the object's
 
 The ADS included an action-suppression interval intended to reduce responses to false alarms while the system checked the situation and allowed operator intervention [@ntsb2019uber]. That software choice also consumed time available for a physical response.
 
-At $T-1.2\text{ s}$, with the vehicle traveling at $43.2\text{ mph}$, the ADS recognized an emergency and entered its one-second action-suppression period. The design withheld braking while it checked the hazard or waited for operator intervention. At $T-0.2\text{ s}$, suppression ended. The ADS then initiated a plan for gradual slowdown and sounded an alert; it did not request emergency braking. The NTSB notes that communication delay leaves unclear whether that slowdown began before the operator disengaged the ADS at $T-0.02\text{ s}$ [@ntsb2019uber].
+At `{python} IncidentRecord.t_recognize_math`, with the vehicle traveling at `{python} IncidentRecord.v_recognize_str`, the ADS recognized an emergency and entered its one-second action-suppression period. The design withheld braking while it checked the hazard or waited for operator intervention. At `{python} IncidentRecord.t_supp_end_math`, suppression ended with the vehicle at `{python} IncidentRecord.v_supp_end_str`. The ADS then initiated a plan for gradual slowdown and sounded an alert; it did not request emergency braking. The NTSB notes that communication delay leaves unclear whether that slowdown began before the operator disengaged the ADS at `{python} IncidentRecord.t_takeover_math` [@ntsb2019uber].
 
-The warehouse calculation explains the consequence without reconstructing the crash. Travel during a withheld response leaves less clearance for braking afterward. Detection, correct path prediction, hazard recognition, and physical braking are distinct events; reporting the first detection time alone conceals the failures between them.
+The first term of the warehouse stopping budget applies directly. Averaging the two recorded speeds over the `{python} IncidentRecord.t_suppress_str` of suppression, the vehicle traveled about `{python} IncidentRecord.d_suppress_str` while braking was withheld, distance that no later action could recover. The emergency itself was defined by a chosen limit. The ADS treated a situation as an emergency when avoiding a collision required more than `{python} IncidentRecord.a_cap_str` (`{python} IncidentRecord.a_cap_g_str` g) of deceleration or a jerk beyond its limit, and it capped its own automated braking at that deceleration; police determined that the vehicle could decelerate at an average of `{python} IncidentRecord.g_capable_str` g, about `{python} IncidentRecord.a_capable_str`, on that road surface [@ntsb2019uber]. The difference between a chosen permission limit and a physical one is the distinction the book's numbers keep throughout. We do not extend the calculation to a counterfactual stop, because the report does not establish when a different design would have begun braking. Detection, correct path prediction, hazard recognition, and physical braking are distinct events; reporting the first detection time alone conceals the failures between them.
 
 ::: {#fig-01-tempe-vehicle fig-env="figure" fig-pos="t" fig-cap="**Tempe test vehicle sensor locations**: The NTSB diagram identifies the developmental ADS vehicle's lidar, camera, radar, computing, and telecommunications locations. (Source: NTSB, public domain)." fig-alt="NTSB side-view diagram of the Volvo test vehicle with colored outlines marking lidar, cameras, radar, ADS computing and data storage, and GPS equipment."}
 ![](images/jpg/fig01_real_ntsb_tempe_vehicle.jpg){width="95%"}
@@ -405,16 +692,16 @@ The warehouse calculation explains the consequence without reconstructing the cr
 
 **Impact**: The vehicle struck and fatally injured the pedestrian. The late gradual-slowdown plan could not recover the lost stopping opportunity.
 
-**Response**: The NTSB found that disabling the Volvo warning and braking systems, which Uber ATG had done over possible radar interference, removed a safety redundancy layer and recommended stronger safety risk management for testing automated vehicles [@ntsb2019uber].
+**Response**: The NTSB determined that the probable cause was the vehicle operator's failure to monitor the driving environment and the ADS because she was visually distracted throughout the trip by her personal cell phone. It found three contributing factors at Uber ATG, all a consequence of an inadequate safety culture: inadequate safety risk assessment procedures, ineffective oversight of vehicle operators, and a lack of adequate mechanisms for addressing operators' automation complacency. The impaired pedestrian's crossing outside a crosswalk and the Arizona Department of Transportation's insufficient oversight of automated vehicle testing also contributed. The NTSB further found that deactivating the Volvo collision warning and automatic emergency braking, which Uber ATG had done over possible radar interference, removed a layer of safety redundancy, and it recommended stronger safety risk management for testing automated vehicles [@ntsb2019uber].
 
-**Systems lesson**: Classification uncertainty, a delayed response rule, and reliance on an inattentive operator can combine. A design needs timely hazard assessment and a response that can mitigate impact when avoidance is no longer possible; the investigation does not prescribe a particular processor or mailbox architecture.
+**Systems lesson**: Classification uncertainty, a delayed response rule, and reliance on an inattentive operator can combine. The design made the operator the primary countermeasure in an emergency, yet no mechanism verified that she was watching: authority rested on evidence nobody collected, which the fourth law forbids. A design needs timely hazard assessment and a response that can mitigate impact when avoidance is no longer possible; the investigation does not prescribe a particular processor or mailbox architecture.
 :::
 
 The investigation supports a broader architectural requirement. A developmental ADS needs safety redundancy and a timely mitigation path even when perception or path prediction fails, and simulation tests by Volvo that the NTSB cites suggest that the factory emergency braking might have prevented or mitigated this collision. The report does not establish when a separate permission path would have triggered or where it would have stopped the vehicle.[^fn-std-safety-standards]
 
-[^fn-std-safety-standards]: **Safety-Critical Standards**\index{Safety-Critical Standards!autonomous systems}: Functional safety and intended-functionality standards can inform the safety case for sensing, actuation, and fallback. Their applicability and required implementation depend on the system and jurisdiction; the NTSB Tempe report did not mandate an isolated microcontroller architecture.
+[^fn-std-safety-standards]: **Safety-Critical Standards**\index{Safety-Critical Standards!autonomous systems}: Functional safety and intended-functionality standards can inform the safety case for sensing, actuation, and fallback. Their applicability and required implementation depend on the system and jurisdiction; the NTSB Tempe report did not mandate an isolated microcontroller architecture. @Sec-release-safety-cases-claims maps the standards that govern the running machine.
 
-Tempe illustrates failure *before* impact, where classification changes and a software suppression delay prevented timely braking. The 2023 Cruise robotaxi incident [@quinnemanuel2024cruise] marks the opposite pole *after* impact, a post-collision fallback that moved the vehicle while a pedestrian was pinned beneath it (@sec-enforcement-fallback-ladder).
+Tempe illustrates failure *before* impact, where classification changes and a software suppression delay prevented timely braking. The 2023 Cruise robotaxi incident marks the opposite pole *after* impact. A hit-and-run driver's car threw a pedestrian into the path of the driverless vehicle, which braked hard but struck her and stopped. It then began a pullover toward a minimal-risk condition and, because its sensing did not detect a person beneath the vehicle, moved about `{python} IncidentRecord.d_drag_str` (`{python} IncidentRecord.d_drag_m_str`) at up to `{python} IncidentRecord.v_drag_str` while she was pinned beneath it. This account comes from a review commissioned by the company's boards, whose focus was the company's disclosures to regulators [@quinnemanuel2024cruise]; @sec-enforcement-fallback-ladder analyzes the fallback.
 
 Neither failure reduces to an inaccurate model. The first spent stopping distance before braking began, and no later action could recover it. The second chose motion after the impact. Together they show what must hold before the machine acts and what a fallback may do once harm has begun, and connect the four laws to decisions made across an entire system.
 
@@ -423,7 +710,7 @@ Neither failure reduces to an inaccurate model. The first spent stopping distanc
 Verify how the Tempe mechanisms connect to the architecture:
 
 - [ ] **Classification changes and path prediction**: Can you explain how classification changes caused the ADS path predictor to omit earlier object locations, despite continued tracking?
-- [ ] **Software suppression vs. kinematic clearance**: Can you distinguish the $T-1.2\text{ s}$ recognition time from the one-second suppression period and explain why the gradual-slowdown plan at $T-0.2\text{ s}$ could not restore the time already spent?
+- [ ] **Software suppression vs. kinematic clearance**: Can you distinguish the `{python} IncidentRecord.t_recognize_math` recognition time from the one-second suppression period and explain why the gradual-slowdown plan at `{python} IncidentRecord.t_supp_end_math` could not restore the time already spent?
 - [ ] **Safety redundancy**: Can you explain why disabling factory collision warning and emergency braking removed a layer of protection from a developmental ADS?
 
 :::
@@ -458,7 +745,7 @@ Learning pipelines often try to make a policy safe by penalizing undesirable beh
 
 **Pitfall**: *Treating human supervisory intervention as instantaneous in shared-autonomy systems.*
 
-A surgical tool applies haptic guidance force feedback from a learned anatomical model while a surgeon holds the instrument. Human supervision does not remove delegated authority during the interval before the surgeon can respond. If an actuator builds force before the operator can respond, its commands can deform tissue before the operator corrects them. The engineering question is how much force the system can apply during that interval. Local force limits enforced by the permission path must constrain the actuator without depending on either a timely neural prediction or an immediate human response.
+Consider a hypothetical surgical tool that applies haptic guidance force feedback from a learned anatomical model while a surgeon holds the instrument. Human supervision does not remove delegated authority during the interval before the surgeon can respond. If an actuator builds force before the operator can respond, its commands can deform tissue before the operator corrects them. The engineering question is how much force the system can apply during that interval. Local force limits enforced by the permission path must constrain the actuator without depending on either a timely neural prediction or an immediate human response.
 
 :::
 
@@ -484,9 +771,9 @@ The causal boundary connects an admitted command to a physical effect. Restoring
 
 ::: {.callout-takeaways title="Engineering across the causal boundary"}
 * **Useful behavior needs a complete machine**: Physical AI combines learned behavior, consequential physical feedback, and delegated authority. Designing it requires connecting task competence to the body, runtime, and evidence supporting operation.
-* **Response delay spends physical margin**: In the illustrative warehouse calculation, pre-brake travel adds `{python} MachineMomentum.blind_share_str` to braking distance. The relevant delay belongs to the path that produces the response, which can be independent of the learned proposer's completion time.
+* **Response delay spends physical margin**: The elementary budget $d_{\text{stop}} = v\tau_{\text{delay}} + v^2/(2a_{\text{brake}}) \le D_{\text{clear}}$ splits a stop into travel during the delay and travel while braking; below the crossover speed $v^{*} = 2a_{\text{brake}}\tau_{\text{delay}}$ the delay dominates, above it braking does. In the illustrative warehouse calculation, pre-brake travel adds `{python} StoppingBudget.blind_share_str` to braking distance. The relevant delay belongs to the path that produces the response, which can be independent of the learned proposer's completion time.
 * **Proposal and permission have different jobs**: The Brain proposes useful actions; the permission path admits, modifies, or refuses them under current conditions. Its protection depends on valid evidence, physical limits, timing, and a feasible fallback.
-* **Evidence guides improvement and operation**: The four parts connect machine anatomy, learning, execution, and governance. Their purpose is both to establish useful service under stated conditions and to identify the experiments or design changes needed to extend it.
+* **Evidence guides improvement and operation**: Four laws lead the four parts. Only the first, irreversibility, is physical; endogenous data, proposal is not permission, and evidence bounds authority are the field's covariate shift, runtime assurance, and assurance-case disciplines, applied to one machine. The four parts connect machine anatomy, learning, execution, and governance. Their purpose is both to establish useful service under stated conditions and to identify the experiments or design changes needed to extend it.
 :::
 
 The engineer's task is to make the machine perform a useful physical task within its limits. That requires learned behavior suited to the task, timely computation, and a body able to deliver the requested motion. An independent permission path constrains execution even when the proposer is unavailable, subject to valid sensing, physical limits, and a feasible fallback. The next step is to establish those limits for the body that will carry out the action.

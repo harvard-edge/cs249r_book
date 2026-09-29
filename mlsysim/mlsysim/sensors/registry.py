@@ -16,6 +16,8 @@ class Cameras(Registry):
         resolution_height=3040,
         frame_rate=60.0 * ureg.Hz,
         shutter_type="rolling",
+        # exposure_time is a configured setting (category: chosen), not a datasheet
+        # property: the sensor supports a range of exposures.
         exposure_time=16.0 * ureg.millisecond,
         readout_time=16.6 * ureg.millisecond,
         nominal_latency=33.3 * ureg.millisecond,
@@ -30,7 +32,7 @@ class Cameras(Registry):
         resolution_height=1080,
         frame_rate=60.0 * ureg.Hz,
         shutter_type="global",
-        exposure_time=5.0 * ureg.millisecond,
+        exposure_time=5.0 * ureg.millisecond,  # configured setting (category: chosen)
         readout_time=5.0 * ureg.millisecond,
         nominal_latency=10.0 * ureg.millisecond,
         interface="MIPI CSI-2 (1-lane)",
@@ -43,7 +45,11 @@ class Cameras(Registry):
         resolution_width=1920,
         resolution_height=1080,
         frame_rate=30.0 * ureg.Hz,
-        shutter_type="global",
+        # 2026-09-29: the color sensor (OV2740) is rolling shutter; only the
+        # stereo depth imagers (OV9282, D430 wide module) are global shutter.
+        # D400 Series Datasheet rev 023 (Mar 2026), Tables 3-18 and 3-49.
+        shutter_type="rolling",
+        depth_shutter_type="global",
         nominal_latency=25.0 * ureg.millisecond,
         interface="USB 3.1 Gen 1",
         nominal_power=2.0 * ureg.watt,
@@ -59,7 +65,14 @@ class LiDARs(Registry):
         channels=64,
         scan_rate=20.0 * ureg.Hz,
         max_range=120.0 * ureg.meter,
-        nominal_latency=25.0 * ureg.millisecond,
+        # 2026-09-29: the Rev7 datasheet gives data latency < 10 ms (was 25 ms,
+        # unsupported); nominal_latency stores that upper bound.
+        nominal_latency=10.0 * ureg.millisecond,
+        range_precision_min=5.0 * ureg.millimeter,
+        range_precision_max=30.0 * ureg.millimeter,
+        range_accuracy=25.0 * ureg.millimeter,
+        time_sync_accuracy=1.0 * ureg.millisecond,
+        internal_clock_drift=10.0 * ureg.ppm,
         interface="Gigabit Ethernet (UDP)",
         nominal_power=18.0 * ureg.watt,
         metadata=Metadata(provenance=pc.OUSTER_OS1_64),

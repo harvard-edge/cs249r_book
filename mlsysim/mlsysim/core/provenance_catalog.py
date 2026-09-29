@@ -391,6 +391,25 @@ BOSTON_DYNAMICS_ATLAS = _est(
     verified="2026-09-15",
 )
 
+FRANKA_FER_CONTROL_LIMITS = _ds(
+    "prov:franka-fer-control-limits",
+    "Franka Robotics documentation, Robot and interface specifications: 'Limits for "
+    "Franka Emika Robot (FER)' and the Panda Denavit-Hartenberg parameters",
+    "https://github.com/frankaemika/docs/blob/master/source/robot_specifications.rst",
+    verified="2026-09-29",
+    notes=(
+        "Joint limits from source/control-parameters-joint-fer.csv (master, "
+        "checked 2026-09-29): velocity 2.1750 rad/s on joints 1-4 and 2.6100 on "
+        "5-7; acceleration 15, 7.5, 10, 12.5, 15, 20, 20 rad/s^2; jerk 7500, "
+        "3750, 5000, 6250, 7500, 10000, 10000 rad/s^3; torque rate 1000 Nm/s on "
+        "every joint. FER Cartesian translation velocity 1.7 m/s. DH d3 = 0.316 m "
+        "and d5 = 0.384 m: the current page labels the table for FR3; the Panda "
+        "label with d3 = 0.316 m is in earlier revisions of the docs (commits "
+        "6346f562cc and 7a46004875, control_parameters.rst). Rendered site: "
+        "https://frankarobotics.github.io/docs."
+    ),
+)
+
 FRANKA_EMIKA_PANDA = _ds(
     "prov:franka-emika-panda",
     "Franka Emika Panda datasheet (May 2018) and Robot Instruction Handbook (October 2021)",
@@ -443,8 +462,16 @@ INDUSTRIAL_AMR = _est(
 WAREHOUSE_AMR = _est(
     "prov:warehouse-amr-300kg",
     "Representative warehouse fulfillment AMR class profile (300 kg gross mass)",
-    notes="300 kg mass, 1.5 m/s max velocity, 2.0 m/s^2 emergency braking deceleration (Chapter 4 watchdog model).",
-    verified="2026-09-18",
+    notes=(
+        "300 kg mass and 1.5 m/s max velocity are class-profile values. The 2.0 m/s^2 "
+        "max_acceleration is the illustrative credible loaded deceleration that the "
+        "stopping budget adopts; it is not measured. It is checked against the traction, "
+        "drive-torque, and tip-over ceilings by calc_braking_limits with the machine's "
+        "sourced hub-motor drive (ZLTECH_ZLLG10ASM800); the tip-over ceiling needs a "
+        "measured center of gravity. (2026-09-28, M6: previously attributed to a "
+        "'Chapter 4 watchdog model', which is not its origin.)"
+    ),
+    verified="2026-09-28",
 )
 
 HEAVY_AMR = _est(
@@ -452,6 +479,23 @@ HEAVY_AMR = _est(
     "Representative heavy industrial logistics AMR class profile (250 kg mass)",
     notes="250 kg mass, 1.8 m/s cruise velocity, 2.0 m/s^2 braking deceleration (Chapter 1 model).",
     verified="2026-09-18",
+)
+
+# OpenVLA on the Jetson AGX Orin (added 2026-09-28, vol4 M2 intent-model latency).
+JETSON_AI_LAB_OPENVLA_ORIN = _lit(
+    "prov:jetson-ai-lab-openvla-orin",
+    "Franklin, D., NVIDIA Jetson AI Lab, 'OpenVLA' tutorial (2024): OpenVLA-7B "
+    "quantization results on Jetson AGX Orin 64GB, JetPack 6",
+    url="https://www.jetson-ai-lab.com/archive/openvla.html",
+    verified="2026-09-28",
+    notes=(
+        "Measured mean per-frame latency over 10 BridgeData V2 episodes: FP16 "
+        "(HuggingFace backend) 840 ms / 1.19 FPS / 95.3% NRMSE accuracy; FP8 "
+        "(MLC q8f16_ft) 471 ms / 2.12 FPS / 95.2%; INT4 (MLC q4f16_ft) 336 ms / "
+        "2.97 FPS / 90.1%. Single 224x224 image, ~275 image tokens plus the text "
+        "prompt, 7 autoregressive action tokens; vision encoders in FP16 TensorRT. "
+        "Archived page; first published August 2024 (repository history)."
+    ),
 )
 
 # Volume IV running machine (added 2026-09-21, vol4 flow canon section 3.3).
@@ -463,8 +507,9 @@ WAREHOUSE_MOBILE_MANIPULATOR = _est(
         "Composite of existing registry entries; component values carry their own "
         "records. Illustrative or chosen here: 50 kg tote-rack capacity, 1.00 m "
         "footprint width, 1 kHz permission loop, 20 kHz current loop, 1 ms EtherCAT "
-        "cycle, 9 servo axes, 5 Hz / 160 ms intent model, 20 Hz / 40 ms chunk policy, "
-        "20 ms setpoint period, chunk horizon 16, 0.70 sustained DRAM efficiency, "
+        "cycle, 9 servo axes, 2 Hz intent model (latency computed, see "
+        "JETSON_AI_LAB_OPENVLA_ORIN), 20 Hz / 40 ms ACT chunk policy, "
+        "25 ms setpoint period (two per 50 ms renewal), chunk horizon 16, 0.70 sustained DRAM efficiency, "
         "1.0 m/s free-space TCP limit. The WarehouseAMR record calls 300 kg gross, so "
         "the loaded mass is an upper bound."
         " Control rail: 24 V nominal is a design choice; the 21.5 V depleted-battery "
@@ -477,8 +522,20 @@ WAREHOUSE_MOBILE_MANIPULATOR = _est(
         "a design choice; the 70 W permission-path load and the 30-80 ms spring-brake "
         "engage window are illustrative. The permission loads are assumed to share the "
         "18.0 V regulator dropout."
+        " Drive bus and drivetrain (2026-09-28, M6): the wheel drives, arm drives, and a "
+        "48-to-24 V converter share a 48 V-class drive bus whose pack envelope "
+        "(54 / 47.7 / 42 V) comes from MIR250_BATTERY; the converter's 33 V lockout, "
+        "67.2 V input maximum, and 91 percent efficiency come from MEANWELL_DDR240; the "
+        "60 mOhm source resistance is illustrative (needs a measured value); the 60 V "
+        "chopper clamp and 100 V switch rating are design choices. The driven wheels are "
+        "ZLTECH_ZLLG10ASM800 hub motors with the current limit chosen at the motor's "
+        "25 A peak. Loaded center-of-gravity height, its distance to the leading support, "
+        "and the driven wheels' load share need source (corner-scale or tilt measurement)."
+        " The 24 V control-rail fields remain for chapters that still model a 24 V "
+        "shared rail; in the 48 V architecture they describe the permission-rail store "
+        "(charged to 21.5 V, discharging to the 18 V regulator dropout)."
     ),
-    verified="2026-09-21",
+    verified="2026-09-28",
 )
 
 WAREHOUSE_AISLE_SCENARIO = _est(
@@ -521,6 +578,96 @@ ISO_13855_APPROACH_SPEED = _ds(
         "The standard's text is paywalled, so the value was checked against secondary "
         "sources that quote it, not the standard itself, and not against the 2024 "
         "edition."
+    ),
+)
+
+ISO_TS_15066_HAND_BODY_MODEL = _ds(
+    "prov:iso-ts-15066-hand-body-model",
+    "ISO/TS 15066:2016 Annex A body model, hand and fingers: effective mass "
+    "m_H = 0.6 kg, effective spring constant k_H = 75 N/mm",
+    "https://arxiv.org/abs/2203.02706",
+    verified="2026-09-29",
+    notes=(
+        "ISO/TS 15066:2016 (Robots and robotic devices: collaborative robots), "
+        "Annex A, whose collaborative-application content ISO 10218-2:2025 "
+        "absorbed. The standard is paywalled; the values were checked against "
+        "Kirschner, Mansfeld, Abdolshah, and Haddadin, 'ISO/TS 15066: How "
+        "Different Interpretations Affect Risk Assessment' (arXiv:2203.02706, "
+        "2022), which reproduces TS Appendix A (hand m_h = 0.6 kg, "
+        "k = 75 N/mm; back m_h = 40 kg, k = 35 N/mm) and its transient-contact "
+        "model F = v*sqrt(mu*k), mu = (1/m_r + 1/m_h)^-1 (eqs. 1-2)."
+    ),
+)
+
+# --- Human takeover response times (2026-09-28, M4) ---
+CARD_MORAN_NEWELL_MHP = _lit(
+    "prov:card-moran-newell-1983-mhp",
+    "Card, S. K., Moran, T. P., and Newell, A., The Psychology of Human-Computer "
+    "Interaction, Lawrence Erlbaum Associates (1983); CRC Press reprint 2018, "
+    "DOI 10.1201/9780203736166. Model Human Processor cycle times.",
+    url="https://doi.org/10.1201/9780203736166",
+    verified="2026-09-28",
+    notes=(
+        "Processor cycle times, nominal [range]: perceptual 100 [50-200] ms, cognitive "
+        "70 [25-170] ms, motor 70 [30-100] ms; a simple reaction takes one cycle of each, "
+        "240 ms nominal and 470 ms with every processor at its slow bound. Values checked "
+        "against Jastrzembski and Charness (2007), PMC4591021, which quotes the 1983 "
+        "parameters. The ranges bracket the model, not a percentile of a measured "
+        "population. Applies to an attending person responding to an expected stimulus."
+    ),
+)
+
+GREEN_2000_PERCEPTION_BRAKE = _lit(
+    "prov:green-2000-perception-brake",
+    "Green, M., '\"How long does it take to stop?\" Methodological analysis of driver "
+    "perception-brake times', Transportation Human Factors 2(3):195-216 (2000), "
+    "DOI 10.1207/STHF0203_1",
+    url="https://doi.org/10.1207/STHF0203_1",
+    verified="2026-09-28",
+    notes=(
+        "Abstract (Crossref and TRID record): a driver fully aware of the time and place "
+        "of the brake signal detects it and moves the foot to the brake in about "
+        "0.70-0.75 s; an unexpected but common signal (lead-car brake lights) takes about "
+        "1.25 s; a surprise event about 1.5 s. Expectation changes the time by about a "
+        "factor of two. The registry uses 0.75 s, the upper end of the expected range. "
+        "These are typical values synthesized from many data sets, not percentiles."
+    ),
+)
+
+ZHANG_2019_TAKEOVER_META = _lit(
+    "prov:zhang-2019-takeover-meta-analysis",
+    "Zhang, B., de Winter, J., Varotto, S., Happee, R., and Martens, M., 'Determinants "
+    "of take-over time from automated driving: A meta-analysis of 129 studies', "
+    "Transportation Research Part F 64:285-307 (2019), DOI 10.1016/j.trf.2019.04.020; "
+    "supplementary data DOI 10.4121/uuid:75c28abe-6559-4273-85f4-927e969c1c59 (CC0)",
+    url="https://doi.org/10.1016/j.trf.2019.04.020",
+    verified="2026-09-28",
+    notes=(
+        "Paper, section 3.1: mean take-over time (TOT) across 520 conditions of 129 "
+        "studies ranged 0.69-19.79 s; the average mean TOT was 2.72 s (SD 1.45), and the "
+        "distribution of mean TOTs is right-skewed. Section 3.3: mean and SD of TOT "
+        "correlate at r = 0.82 (n = 397). Percentiles computed here from the 520 MTOT "
+        "values in the supplementary mastersheet.xlsx (observed-value, inverted-CDF "
+        "percentiles): p50 2.37 s, p90 4.33 s, p99 7.0 s; the same file reproduces "
+        "2.72 s mean and 1.45 s SD. These are percentiles of condition means, not of "
+        "individual responses: the individual tail within a condition is longer (the "
+        "file's SD rises about 0.39 s per second of mean). Take-over is measured from "
+        "the take-over request to the driver's first input."
+    ),
+)
+
+SCHIMPE_2022_TELEOP_G2G = _lit(
+    "prov:schimpe-2022-teleop-glass-to-glass",
+    "Schimpe, A., Feiler, J., Hoffmann, S., Majstorovic, D., and Diermeyer, F., 'Open "
+    "Source Software for Teleoperated Driving', 2022 International Conference on "
+    "Connected Vehicle and Expo (ICCVE), pp. 1-6, DOI 10.1109/ICCVE52871.2022.9742859",
+    url="https://arxiv.org/abs/2109.11252",
+    verified="2026-09-28",
+    notes=(
+        "Measured glass-to-glass latency of a 40 Hz, 520p video feed sent over a wired "
+        "connection and shown on a 144 Hz monitor: about 104 ms. The same stack on a "
+        "Jetson TX2 RC car at 15 Hz measured 241 ms. The wired figure is a best case; a "
+        "site's wireless console link needs its own measurement."
     ),
 )
 
@@ -593,18 +740,33 @@ SONY_IMX296 = _ds(
 
 INTEL_REALSENSE_D435I = _ds(
     "prov:intel-realsense-d435i",
-    "Intel RealSense Depth Camera D435i Datasheet",
-    "https://www.intelrealsense.com/depth-camera-d435i/",
-    verified="2026-09-18",
-    notes="Active IR stereo depth camera with integrated Bosch BMI055/BMI088 IMU, 90 fps depth stream.",
+    "RealSense D400 Series Product Family Datasheet, revision 023 (March 2026), D435/D435i",
+    "https://www.realsenseai.com/wp-content/uploads/2026/03/RealSense-D400-Series-Datasheet-Mar-2026.pdf",
+    verified="2026-09-29",
+    notes=(
+        "Active IR stereo depth camera with integrated IMU, 90 fps depth stream. "
+        "Table 3-49: the D435/D435i uses the D430 depth module (wide imagers) and "
+        "an OV2740 color sensor. Table 3-18: OV2740 is rolling shutter, 1920x1080. "
+        "The wide left/right imagers (OV9282) are global shutter. shutter_type "
+        "describes the color stream; depth_shutter_type the depth imagers. "
+        "nominal_latency and nominal_power are not from this datasheet."
+    ),
 )
 
 OUSTER_OS1_64 = _ds(
     "prov:ouster-os1-64",
-    "Ouster OS1 Mid-Range High-Resolution Imaging LiDAR Datasheet",
-    "https://ouster.com/products/hardware/os1-lidar-sensor",
-    verified="2026-09-18",
-    notes="64-channel digital LiDAR with 120m range, 10-20 Hz configurable spin rate.",
+    "Ouster OS1 Mid-Range High-Resolution Imaging Lidar Datasheet, hardware Rev7.0, firmware 3.1.x",
+    "https://data.ouster.io/downloads/datasheets/datasheet-rev7-v3p1-os1.pdf",
+    verified="2026-09-29",
+    notes=(
+        "64-channel digital LiDAR, 10 or 20 Hz rotation. Range precision 0.5-3 cm "
+        "(1 sigma, beyond 1 m, 1024 @ 10 Hz); range accuracy +/-2.5 cm Lambertian; "
+        "data latency < 10 ms (stored as nominal_latency); PTP / gPTP / PPS "
+        "accuracy < 1 ms; internal clock 10 ppm drift; power 14-20 W. The Rev7 "
+        "sheet gives range as 170 m (80 percent target) and 90 m (10 percent), so "
+        "the stored 120 m max_range needs source; nominal_power 18 W sits in the "
+        "14-20 W band."
+    ),
 )
 
 BOSCH_BMI088 = _ds(
@@ -1307,6 +1469,20 @@ ENERGY_HIERARCHY_CONVENTIONS = _conv(
     notes="Order-of-magnitude teaching figures; effective system-level energy, consistent with the Horowitz (2014) energy trend.",
 )
 
+LPDDR5_6400_TIMINGS = _ds(
+    "prov:lpddr5-6400-timings",
+    "JEDEC JESD209-5C LPDDR5-6400 timings as encoded in the Ramulator 2.0 "
+    "LPDDR5_6400 preset (tCK = 1250 ps; nRCD = 15, nRP = 15, nRPab = 17 cycles)",
+    "https://github.com/CMU-SAFARI/ramulator2/blob/main/python/ramulator/dram/lpddr5.py",
+    verified="2026-09-29",
+    notes=(
+        "Checked at ramulator2 main 72427a1bba (2026-09-02). BG mode, CKR 4:1: "
+        "t_RCD = t_RP(per bank) = 15 x 1.25 ns = 18.75 ns. The JEDEC standard is "
+        "not read directly (jedec.org access), so the values rest on the "
+        "simulator's encoding of JESD209-5C Table 339/340."
+    ),
+)
+
 MEMORY_INTERFACE_BANDWIDTH_TIERS = _conv(
     "prov:memory-interface-bandwidth-tiers",
     "Representative memory-interface bandwidth tiers",
@@ -1532,6 +1708,123 @@ THERMAL_CONSTANTS_ELECTROMECHANICAL = _est(
         "tau ~ 5-20 min. Values reflect typical orders of magnitude across industrial and mobile robotics."
     ),
     verified="2026-09-22",
+)
+
+
+# ---------------------------------------------------------------------------
+# Drivetrain, drive bus, and arm-joint sources (added 2026-09-28, vol4 M6).
+# ---------------------------------------------------------------------------
+
+ZLTECH_ZLLG10ASM800 = _ds(
+    "prov:zltech-zllg10asm800",
+    "Shenzhen Zhongling Technology (ZLTECH), ZLLG10ASM800-48 V1.0 robot hub motor "
+    "drawing and motor parameters (V1.00, 2022-09-26)",
+    "https://www.zlingkj.com/Data/zlingkj/upload/file/20240102/ZLLG10ASM800%20V1.0%E5%8F%8C%E5%87%BA%E8%BD%B4.pdf",
+    verified="2026-09-28",
+    notes=(
+        "10-inch direct-drive BLDC hub motor for AGV/AMR drive wheels, no gearbox. "
+        "Motor-parameter table: outer (wheel) diameter 266 +/- 2 mm; 48 VDC rated; "
+        "20 N m rated torque at 8.5 A; 60 N m peak torque at 25 A peak current; "
+        "150 rpm rated, 180 rpm peak speed; 20 pole pairs; line resistance "
+        "0.7 ohm +/- 10 percent; line inductance 1.885 mH +/- 10 percent; back-EMF "
+        "constant 0.262 V/rpm +/- 10 percent; 9.5 kg; maximum load 300 kg per two "
+        "motors; ambient -20 to +40 C. The table does not publish rotor inertia "
+        "(needs source). Torque constant is derived as 60 N m / 25 A = 2.4 N m/A. "
+        "Cross-check: 0.262 V/rpm x 180 rpm = 47.2 V, the rated bus, so the "
+        "back-EMF constant is a line-to-line value compared directly with the DC bus."
+    ),
+)
+
+ZLTECH_ZLAC8030L = _ds(
+    "prov:zltech-zlac8030l",
+    "ZLTECH ZLAC8030L hub-servo driver product page (Shenzhen Zhongling Technology)",
+    "https://www.robotmotor.com/zlac8030l-zltech-20v-60v-60a-canopen-rs485-dc-servo-motor-controller-driver-for-robot-agv-product/",
+    verified="2026-09-28",
+    notes=(
+        "Driver matched to the ZLLG10ASM800 (its wiring table names the 8030L): "
+        "24-48 VDC input, rated 30 A, maximum 60 A output current, CANopen/RS485. "
+        "The driver's 60 A exceeds the motor's 25 A peak, so the motor rating sets "
+        "the drive current limit. Overvoltage and undervoltage thresholds are not "
+        "published (needs source)."
+    ),
+)
+
+MIR250_BATTERY = _ds(
+    "prov:mir250-specifications",
+    "Mobile Industrial Robots, MiR250 Specifications (2025-04-14)",
+    "https://ai.motion.com/wp-content/uploads/2025/10/MiR250-Specifications-2.99.pdf",
+    verified="2026-09-28",
+    notes=(
+        "Reference 48 V-class AMR (94 kg robot, 250 kg payload, 2.0 m/s). Battery: "
+        "lithium-ion, 47.7 V nominal, minimum 42 V, maximum 54 V, 1.63 kWh (34.2 Ah). "
+        "Floor-to-wheel friction coefficient 0.60-0.80; clean and dry floors; design "
+        "based on ISO 3691-4 (with listed exceptions) and ISO 13849-1. Used as the "
+        "source of the running machine's drive-bus voltage envelope."
+    ),
+)
+
+MEANWELL_DDR240 = _ds(
+    "prov:meanwell-ddr-240",
+    "MEAN WELL DDR-240 series 240 W DIN-rail DC-DC converter specification (DDR-240C-24, 48 V input)",
+    "https://www.meanwell.com/Upload/PDF/DDR-240/DDR-240-spec.pdf",
+    verified="2026-09-28",
+    notes=(
+        "DDR-240C-24 (48 V in, 24 V out): continuous input 33.6-67.2 VDC; 100 ms "
+        "ride-through 28.8-33.6 VDC; input under-voltage lockout ON >= 33.6 V, "
+        "OFF <= 33 V; typical efficiency 91 percent. Used as the 48-to-24 V converter "
+        "feeding the control electronics; its 33 V turn-off is the drive bus's "
+        "undervoltage threshold and its 67.2 V continuous maximum bounds the clamp."
+    ),
+)
+
+TQ_ROBODRIVE_ILM = _ds(
+    "prov:tq-robodrive-ilm",
+    "TQ-RoboDrive ILM series frameless servo kits data sheet (Rev. 0414)",
+    "https://www.tq-group.com/filedownloads/files/products/robodrive/data-sheets/en/DRVA_DB_Servo-Kits_ILM_EN_Rev0414_Web.pdf",
+    verified="2026-09-28",
+    notes=(
+        "ILM 70x18, star-serial winding: 48 V rated, 1.25 N m rated torque, "
+        "4.05 N m peak torque (20 percent deviation from linearity), 6.7 A rated "
+        "current, torque constant 187 mNm/A, motor constant 0.266 N m/sqrt(W), "
+        "terminal resistance 660 mOhm and inductance 1,460 uH at 20 C, rotor inertia "
+        "0.321 kg cm^2, 10 pole pairs, 330 g. The rated copper loss (22.2 W) equals "
+        "(3/2) I_r^2 (R_TT / 2), so the rated current is the amplitude-invariant "
+        "(peak phase) current. The data sheet states that thermal behavior depends "
+        "strongly on the installation, so no thermal resistance or capacitance is "
+        "published (needs source). The ILM line derives from DLR drive engineering."
+    ),
+)
+
+HARMONIC_DRIVE_CSG_2UH_ENGINEERING = _ds(
+    "prov:harmonic-drive-csg-2uh-engineering-data",
+    "Harmonic Drive AG, Engineering Data CSG-2UH Units (1019642, 12/2014), Table 10.2",
+    "https://innodrive.ru/upload/iblock/387/pv21y3bafuu4i675xna8v70s8naalpa2.pdf",
+    verified="2026-09-28",
+    notes=(
+        "Distributor-hosted copy of the Harmonic Drive AG document; the torque "
+        "ratings match harmonicdrive.net's CSG-25-50-2UH product page. "
+        "CSG-25-2UH, ratio 50: repeatable peak torque 127 N m, average torque 72 N m, "
+        "rated torque 51 N m, momentary peak 242 N m; moment of inertia at the input "
+        "0.413e-4 kg m^2; 1.5 kg. Efficiency varies with load, speed, and temperature "
+        "(Section 4.4)."
+    ),
+)
+
+FRANKA_CLASS_STRAIN_WAVE_JOINT = _est(
+    "prov:franka-class-strain-wave-joint",
+    "Panda-class strain-wave joint stand-in: Harmonic Drive CSG-25-50-2UH with a "
+    "TQ-RoboDrive ILM 70x18 frameless motor",
+    notes=(
+        "Franka does not publish the Panda's joint motor or gear parameters; its "
+        "datasheet gives 87 N m peak torque on axes 1-4 and a harmonic-drive "
+        "transmission with joint torque sensing. The stand-in pairs sourced parts of "
+        "that class: the CSG-25-50 (127 N m repeatable peak covers 87 N m) and the "
+        "smallest ILM whose peak torque through 50:1 covers the gear's repeatable "
+        "peak (ILM 70x18: 4.05 N m x 50 = 202 N m; the ILM 70x10 gives 106 N m). "
+        "Rotor inertia at the motor shaft = ILM rotor 0.321e-4 + CSG-25 input "
+        "0.413e-4 = 0.734e-4 kg m^2. The pairing is a choice; each value is sourced."
+    ),
+    verified="2026-09-28",
 )
 
 

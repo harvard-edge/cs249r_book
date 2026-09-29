@@ -40,8 +40,8 @@ A robot can compute the right refusal too late to prevent an irreversible action
 
 ::: {.callout-learning-objectives}
 
-- Inventory the memory crossbar, interconnect queues, power delivery networks, clock trees, reset controllers, and thermal substrates that proposal and permission paths share
-- Explain why average bus utilization cannot bound a deadline, analyzing AXI4 burst slicing, DRAM bank conflicts, and FR-FCFS arbiter starvation
+- Conduct a dependent-failure inventory of the caches, memory controllers, interconnects, supply rails, clocks, resets, and thermal paths that each candidate placement leaves shared between the proposal and permission paths
+- Explain why average bus utilization cannot bound a deadline, and identify which contention mechanism (bandwidth queueing, bank conflicts, or shared-cache miss handling) threatens a declared worst-case execution time
 - Evaluate whether shared power and reset paths can defeat a selected permission placement
 - Analyze thermal coupling and clock throttling hysteresis between multi-tenant workloads across disparate physical timescales
 - Size a windowed watchdog's service window from measured completion jitter for a non-blocking lock-free record exchange
@@ -65,7 +65,7 @@ Camera input, model-weight transfers, and telemetry logging compete with the enf
 
 Both of the machine's jobs would feel shared-die coupling. For the Class 1 base, a memory crossbar stall during feature extraction delays the permission path's refusal while the loaded base closes on a rack end, and every tick of delay beyond the one the stopping budget counts is distance it never reserved. For the Class 2 arm, an accelerator burst that evicts the permission path's tables from a shared cache delays the contact check while the gripper presses on the spring-latched cage door.
 
-Following the end-to-end argument in system design [@saltzer1984end], memory protection and operating system process isolation do not by themselves establish operational independence. On a heterogeneous die,[^fn-place-system-chip] **operational independence**\index{Operational independence!definition} requires that proposal-side activity cannot push enforcement execution beyond its hard physical deadline, and that proposal-side crashes or thermal overruns cannot disable the permission path's authority to refuse.
+Memory protection and operating system process isolation give each path a private address space, which is spatial partitioning; they do not give it private time on the hardware it shares, which is temporal partitioning, and a safety argument needs both [@kopetz2011real]. Neither establishes operational independence by itself. On a heterogeneous die,[^fn-place-system-chip] **operational independence**\index{Operational independence!definition} requires that proposal-side activity cannot push enforcement execution beyond its hard physical deadline, and that proposal-side crashes or thermal overruns cannot disable the permission path's authority to refuse.
 
 [^fn-place-system-chip]: **Heterogeneous System-on-Chip Architecture**\index{Heterogeneous system-on-chip!architecture}\index{System-on-Chip (SoC)!heterogeneous compute}: Heterogeneous SoCs integrate multiple distinct compute domains onto a single silicon substrate, combining high-throughput application processors and neural accelerators with deterministic real-time safety islands. Although memory management units isolate software address spaces across domains, hardware subcomponents continue to share power distribution networks, clock distribution trees, and DRAM controllers. Under peak cognitive burst workloads, uncoordinated resource contention across these shared physical structures can degrade real-time response times beyond critical physical deadlines.
 
@@ -195,7 +195,7 @@ The mobile manipulator partitions its control across two paths with conflicting 
 
 ***Heterogeneous silicon partitioning***\index{Heterogeneous silicon partitioning!definition}\index{Silicon partitioning!definition} is the architectural allocation of stochastic, high-capacity cognitive workloads (perception, learned policy evaluation) and deterministic safety loops (safety invariant checks, admission and fallback) across specialized execution domains isolated in hardware.
 
-1.  **Significance**: Placing high-capacity neural deliberation and real-time safety enforcement on the same general-purpose operating system or compute engine creates common-mode failures. Kernel thread preemption, dynamic memory allocation, and GPU warp scheduling inject multi-millisecond tail jitter that causes the permission path to miss physical control deadlines.
+1.  **Significance**: Placing high-capacity neural deliberation and real-time safety enforcement on the same general-purpose operating system or compute engine creates common-mode failures. Kernel thread preemption, dynamic memory allocation, and time-slicing between accelerator contexts add tail delay that no measured average bounds, and a permission path exposed to that tail can miss its physical control deadline.
 2.  **Distinction**: Unlike logical software process isolation (such as Linux containers or POSIX process priorities), silicon partitioning enforces isolation across independent hardware registers, tightly-coupled static memories (TCM), and dedicated peripheral buses.
 3.  **Common pitfall**: Assuming multi-core CPU affinity provides true failure-domain separation, when the cores still share caches, memory controllers, clock trees, and power rails.
 
@@ -227,7 +227,9 @@ Assigning tasks to separate processor cores does not create independent failure 
 
 These same dependencies create a **cyber-physical attack vector**\index{Cyber-physical security!shared-die attack surface}\index{Hardware security!side channels and DoS}. A compromised proposal process can deliberately generate the memory traffic or accelerator switching that an ordinary workload produces accidentally. Memory saturation delays enforcement, while a current step can induce $L \cdot dI/dt$ droop on a shared rail. The isolation claim must therefore cover adversarial demand within the proposal domain's permitted resource access; trusting its normal workload does not establish a hardware bound.
 
-[^fn-std-cast-32a]: **Avionic Multicore Certification**\index{Multicore interference!FAA AC 20-193 / CAST-32A}\index{Worst-case execution time!multicore certification}: FAA Advisory Circular AC 20-193 and CAST-32A formalize multicore interference analysis for safety-critical avionics. The guidance requires bounding worst-case execution times by demonstrating that shared caches, interconnect crossbars, and memory controllers cannot cause critical tasks to overrun execution deadlines. Without hardware-enforced quality-of-service partitions or dedicated interconnect channels, cross-core memory traffic invalidates a single-core timing bound.
+Functional-safety engineering has names for this inventory and for the split it protects. Dividing one safety function between a learned proposer that carries no integrity claim and a high-integrity permission path is a decomposition of the safety requirement, and a decomposition is valid only if the two elements are sufficiently independent. The search for resources whose single fault or overload could defeat both elements at once is a **dependent failure analysis**\index{Dependent failure analysis!placement}\index{Common-cause failure!shared silicon}, which ISO 26262 Part 9 requires for exactly this purpose [@iso26262]; IEC 61508 treats the same concern as common-cause failure between redundant channels [@iec61508]. The inventory in this chapter is that analysis, carried out on the machine's hardware and priced in its timing budget.
+
+[^fn-std-cast-32a]: **Avionic Multicore Certification**\index{Multicore interference!FAA AC 20-193 / CAST-32A}\index{Worst-case execution time!multicore certification}: FAA Advisory Circular AC 20-193, issued in 2024 to replace the earlier CAST-32A position paper and aligned with EASA's AMC 20-193, formalizes multicore interference analysis for safety-critical avionics [@faa2024ac20193]. The guidance requires bounding worst-case execution times by demonstrating that shared caches, interconnect crossbars, and memory controllers cannot cause critical tasks to overrun execution deadlines. Without hardware-enforced quality-of-service partitions or dedicated interconnect channels, cross-core memory traffic invalidates a single-core timing bound.
 
 [^fn-place-preempt-rt]: **PREEMPT_RT**\index{Preempt RT!kernel latency}: A Linux real-time configuration reduces some scheduler latencies, but its tail depends on kernel, drivers, workload, and shared hardware. No portable sub-$50\,\mu\text{s}$ or bare-metal comparison follows without measurement.
 
@@ -235,15 +237,111 @@ These same dependencies create a **cyber-physical attack vector**\index{Cyber-ph
 
 [^fn-place-asild-lockstep]: **Dual-core lockstep**\index{Lockstep processor!fault detection}: Two cores can execute matching instruction streams while comparator logic detects selected divergences. Detection coverage, delay, shared-rail vulnerability, and diagnostic response depend on the device and the application safety case, so lockstep is one element of an ASIL D argument, not the whole of it.
 
-Because software process isolation cannot mitigate these hardware-level timing and security couplings, physical silicon placement becomes the primary architectural defense. For the machine's permission loop, compare three placements. Shared application cores expose the permission loop to the kernel and driver scheduling tail described earlier, a tail that can push it past not only the `{python} PlacementMachine.deadline_str` deadline but the `{python} PlacementMachine.tick_str` tick itself. A real-time cluster on the application SoC keeps its own core but shares the die's memory controller, rails, and thermal path; @sec-placement-thermal-timing-coupling shows the clock throttle that rejects it. The discrete safety microcontroller that the machine uses pays for its separation in transport instead, a board-level hop from the application processor that neither shared-die option needs and that @sec-placement-isolation-decisions charges to the lease. The choice among the three rests on each option's measured sensor-to-drive response under interference, not on how many packages it uses.
+### Four candidate placements against one shared-resource inventory
 
-Principle \ref{pri-vol4-proposal-permission} requires a permission path that learned workloads cannot delay, and the three placements differ precisely in which resources the two paths still share. Even the discrete microcontroller's separation is a claim about timing under load, which only a measurement of its tick under that load can support. Every resource the two paths share has claimants on that tick, and the memory system is where they collide first.
+Because software process isolation cannot remove these hardware couplings, the placement of the permission path becomes the primary architectural defense. Four candidates are worth comparing for the machine's permission loop, and @tbl-13-placement-candidates runs each against the same inventory.
+
+(a) *Shared application cores* expose the permission loop to the kernel and driver scheduling tail described earlier, a tail that can push it past not only the `{python} PlacementMachine.deadline_str` deadline but the `{python} PlacementMachine.tick_str` tick itself.
+
+(b) *A real-time cluster in the host clock and power domain* keeps its own cores but shares the die's cache hierarchy, memory controller, core rail, clock governor, and thermal path. @Sec-placement-resource-contention prices its memory exposure, and @sec-placement-thermal-timing-coupling shows the clock throttle that rejects it.
+
+(c) *An on-die safety island* is the design current automotive and industrial SoCs actually offer, and it is a much stronger candidate than (b). The Functional Safety Island of NVIDIA's Orin-class SoCs, for example, groups four dual-core lockstep Cortex-R52 processors, each with its own tightly coupled memory, around 3 MB of on-island SRAM, and runs them from a dedicated crystal and a dedicated voltage rail, with firewalls that block access from the rest of the die [@nvidia2023drivefsi]. The application governor cannot throttle that clock, and a tick whose code and data stay in island memory never waits on the host's DRAM. What still couples the island to the proposer is shorter but not empty: the die temperature and package it shares, the reset and boot chain that brings it up, the on-chip fabric and firewall through which proposals and any island DMA to external memory pass, and the board supply behind its rail. Admitting the island would take evidence on each of those rows: the configured firewall and memory map read back from registers, reset and power sequencing traced to their controlling hardware, and the loaded stress campaign of @sec-placement-testing-separation run with the island ticking.
+
+(d) *A discrete safety microcontroller* removes every on-die row and pays in transport, a board-level link from the application processor that none of the on-die options needs and that @sec-placement-isolation-decisions budgets.
+
+| Shared resource                        | \(a\) Shared cores | \(b\) RT cluster, host domain | \(c\) On-die safety island                   | \(d\) Discrete MCU                         |
+|:---------------------------------------|:-------------------|:------------------------------|:---------------------------------------------|:-------------------------------------------|
+| **Cores and scheduler**                | Shared             | Separated                     | Separated                                    | Separated                                  |
+| **Last-level cache and miss handling** | Shared             | Shared                        | Separated (private caches, TCM)              | Separated (TCM)                            |
+| **DRAM controller and channels**       | Shared             | Shared                        | Separated if the tick stays in island memory | Separated                                  |
+| **On-chip fabric carrying proposals**  | Shared             | Shared                        | Shared, behind a firewall                    | Replaced by a board link                   |
+| **Core supply rail**                   | Shared             | Shared                        | Separated (dedicated rail)                   | Separated (isolated rail)                  |
+| **Clock source and governor**          | Shared             | Shared                        | Separated (dedicated crystal)                | Separated                                  |
+| **Reset and boot chain**               | Shared             | Shared                        | Evidence needed                              | Separated if the supervisor is independent |
+| **Die temperature and package**        | Shared             | Shared                        | Shared                                       | Separated                                  |
+| **Board supply and battery**           | Shared             | Shared                        | Shared                                       | Shared; evidence needed                    |
+| **Proposal transport**                 | In-process memory  | Shared-memory mailbox         | Shared-memory mailbox through the firewall   | Board link into a local mailbox            |
+
+: **Dependent-failure inventory of four placements**: Each row is a resource whose fault or overload could delay or disable both the proposer and the permission path. "Separated" means the placement removes the resource from the permission tick's path; it is still a claim that register readback and loaded tests must support. Only the discrete controller removes the die-level rows, and none of the four removes the common board supply. {#tbl-13-placement-candidates tbl-colwidths="[24,14,18,24,20]"}
+
+On technical merit, candidate (c) would serve this machine: it removes every row that the rejected examples of this chapter exploit. The machine uses (d) for a reason that has nothing to do with silicon capability. The safety island is present on the die, but the commercial edge modules that carry the machine's application processor do not enable it for users, and the vendor reserves it for a separate industrial platform (@tbl-13-island-exposure). A safety island the integrator cannot program is not a placement option, so the permission path moves off the module.
+
+| Platform (vendor statement date)  | Safety island on the SoC                          | Available to the integrator | Source              |
+|:----------------------------------|:--------------------------------------------------|:----------------------------|:--------------------|
+| **Jetson AGX Orin module (2023)** | Cortex-R52 island present                         | No                          | @nvidia2023orinfsi  |
+| **IGX Orin platform (2023)**      | Same island                                       | Announced as offered        | @nvidia2023orinfsi  |
+| **DRIVE AGX Orin (2023)**         | Island with dedicated crystal and rail, 3 MB SRAM | Yes, through DRIVE OS       | @nvidia2023drivefsi |
+| **Jetson Thor module (2026)**     | Not supported                                     | No                          | @nvidia2026thorfsi  |
+| **IGX Thor platform (2026)**      | Supported                                         | Yes                         | @nvidia2026thorfsi  |
+
+: **Safety-island exposure on edge AI platforms, as of 2026**: The same silicon can carry an island that one product line exposes and another does not. Which island a placement can use is a property of the module and its software support, not of the SoC's block diagram, and a later edition should refresh this table. {#tbl-13-island-exposure tbl-colwidths="[30,28,20,22]"}
+
+The durable lesson is that platform exposure is itself a placement constraint. A block diagram that shows an isolated domain establishes what the silicon could do, and only the module's documentation and the integrator's access establish what the design can use. The dated fact will change; the obligation to check it before choosing a placement will not.
+
+Principle \ref{pri-vol4-proposal-permission} requires a permission path that learned workloads cannot delay, and the four placements differ precisely in which resources the two paths still share. Even the discrete microcontroller's separation is a claim about timing under load, which only a measurement of its tick under that load can support. Every resource the two paths share has claimants on that tick, and on the on-die candidates the memory system is where they collide first.
 
 ## Contention for Shared Resources {#sec-placement-resource-contention}
 
 Had the mobile manipulator placed its permission path on the application SoC, camera DMA, neural weight fetches, telemetry writes, cache writebacks, and enforcement reads would compete for memory service. Their simultaneous bursts determine the queue seen by the enforcer. On the selected machine, those host-side bursts delay the observation and chunk rather than the permission tick. The permission path encounters their effects as evidence age (@sec-perception-cost-ingestion), refusing stale evidence and entering fallback if no admitted chunk renews the lease.
 
 ### DRAM bank conflicts, AXI4 burst slicing, and arbiter starvation
+
+```{python}
+#| label: calc-placement-dram-timing
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LPDDR5 ROW-CONFLICT PENALTY ON THE APPLICATION SOC
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-placement-resource-contention, @sec-placement-testing-separation
+# │
+# │ Goal: Source the row-conflict penalty (t_RP + t_RCD) that the loaded-read
+# │       notebook and the stress suite charge, instead of a hand-typed DDR4-era
+# │       14 ns.
+# │ Show: at LPDDR5-6400 the command clock is 800 MHz (1.25 ns); t_RCD and the
+# │       per-bank t_RP are 15 cycles each, 18.75 ns, so a conflict costs
+# │       37.5 ns. 256 bits x 6400 MT/s = 204.8 GB/s, matching the registry's
+# │       rounded 204 GB/s.
+# │ How: Hardware.Tech.Memory.LPDDR5_6400 (JESD209-5 timings as encoded in
+# │      the Ramulator 2.0 preset: nRCD = 15, nRPpb = 15, tCK = 1250 ps); bus
+# │      width and per-pin data rate from the brain SoC's registry memory
+# │      (Jetson AGX Orin technical brief: 256-bit LPDDR5, 204.8 GB/s).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import Q_, nanosecond
+from mlsysim.fmt import fmt, fmt_int, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class PlacementDramTiming:
+    # ┌── 1. LOAD ───────────────────────────────────────────────────────────
+    lpddr5 = Hardware.Tech.Memory.LPDDR5_6400  # category: datasheet (JESD209-5 via Ramulator 2.0 preset)
+    pin_rate = RM.brain_soc.memory.pin_data_rate  # category: datasheet (registry; Orin technical brief)
+    bus_width = RM.brain_soc.memory.bus_width  # category: datasheet (registry; Orin technical brief)
+    bandwidth = RM.brain_soc.memory.bandwidth  # category: datasheet (registry, rounded)
+
+    # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
+    t_ck = lpddr5.t_ck.to(nanosecond)
+    t_rcd = lpddr5.t_rcd.to(nanosecond)
+    t_rp = lpddr5.t_rp.to(nanosecond)
+    n_rcd = (t_rcd / t_ck).to("dimensionless").magnitude
+    n_rp_pb = (t_rp / t_ck).to("dimensionless").magnitude
+    t_conflict = (t_rp + t_rcd).to(nanosecond)
+    data_rate_mts = pin_rate.to("Mbit/s").magnitude  # one bit per transfer per pin
+    bus_bandwidth = (bus_width * pin_rate / Q_("1 bit")).to("GB/s")
+
+    # ┌── 3. GUARD ──────────────────────────────────────────────────────────
+    check(abs(n_rcd - 15) < 1e-9 and abs(n_rp_pb - 15) < 1e-9, "t_RCD and t_RP are 15 command-clock cycles each.")
+    check(abs(t_conflict.magnitude - 37.5) < 1e-9, "t_RP + t_RCD = 2 x 15 x 1.25 ns = 37.5 ns at LPDDR5-6400.")
+    check(abs(bus_bandwidth.magnitude - 204.8) < 1e-9, "256 bits at 6400 MT/s is 204.8 GB/s.")
+    check(abs((bus_bandwidth / bandwidth).to("dimensionless").magnitude - 1) < 0.005, "Bus arithmetic matches the registry's rounded 204 GB/s.")
+
+    # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
+    t_rp_str = fmt(t_rp.magnitude, precision=2)
+    t_conflict_str = fmt(t_conflict.magnitude, precision=1)
+    data_rate_str = fmt_int(data_rate_mts)
+```
 
 A small urgent read can wait behind a large transfer even when the memory bus is mostly idle over a longer interval. The deadline depends on the traffic already ahead of that read and on whether the controller lets it pass. On a shared die, **crossbar bus and DRAM bank contention**\index{Crossbar bus and DRAM bank contention!definition} is queuing delay when memory and DMA transactions share an interconnect and controller, and its bound depends on transaction size, queue policy, and bank timing.[^fn-place-dram-bandwidth]
 
@@ -257,13 +355,9 @@ How long a safety read waits depends on transaction arbitration and DRAM schedul
 
 [^fn-hw-axi-burst]: **AXI4 transaction slicing and burst limits**\index{Hardware!AXI4 burst limits}: AXI4 permits INCR bursts of up to 256 beats and forbids a burst from crossing a 4,096-byte address boundary. An aligned $256\,\text{KiB}$ tile transferred using full-width 128-bit ($16$-byte), 256-beat INCR bursts therefore takes 64 transactions. Smaller beats, shorter bursts, or misalignment change that count. In the selected arbitration example, an urgent read waits for the currently granted burst to finish; that scheduling premise is not a universal AXI guarantee.
 
-DRAM microarchitecture introduces substantial internal latency because memory is organized into independent channels, ranks, bank groups, and banks that each maintain only a single active **row buffer**. Modern LPDDR5x architectures organize memory into 16 or 32 banks distributed across multiple bank groups. When an incoming read accesses an address in the currently open row (a *row hit*), the data is returned with minimal column-access latency ($t_{\text{CL}}$). However, when the enforcer's read targets a different row within the same active bank (a *row conflict* or *bank collision*), the memory controller must service the conflict through a multi-phase command sequence:
+Every memory request passes through four stages: the requester issues it, the interconnect arbiter grants it a slot, the memory controller queues it, and the target bank serves it. Each DRAM bank holds one open row in its **row buffer**. An LPDDR5 channel has 16 banks, organized into 4 bank groups at the highest data rates, or 8 banks in an optional mode that merges pairs [@steiner2022lpddr5]. A read to the open row (a *row hit*) needs only a column access. A read to a different row of the same bank (a *row conflict*) must first close the open row with a precharge ($t_{\text{RP}}$) and then open the new one with an activation ($t_{\text{RCD}}$). At the `{python} PlacementDramTiming.data_rate_str` MT/s data rate of the machine's application SoC, each of those steps takes `{python} PlacementDramTiming.t_rp_str` ns once rounded up to whole command-clock cycles, so a conflict adds `{python} PlacementDramTiming.t_conflict_str` ns [@luo2024ramulator]. Write recovery, bus turnaround, and bank-group spacing add further terms that @sec-appendix-systems-dram develops.
 
-1. **Write recovery and bus turnaround ($t_{\text{WR}} + t_{\text{WTR}}$)**: If a prior write burst occupied the bank or bus channel, the memory controller must wait for internal write recovery before asserting precharge and satisfy write-to-read turnaround delays across the bus.
-2. **Row precharge ($t_{\text{RP}} \approx 14\,\text{ns}$)**: The memory controller deactivates the currently active row in the target bank, restoring bitline voltages and closing the open page before a new row address can be accessed.
-3. **Row-to-column activation delay ($t_{\text{RCD}} \approx 14\,\text{ns}$)**: The memory controller opens the new target row, latching the selected row data into the bank's row buffer before column read (CAS) commands can be issued.
-
-Only after both $t_{\text{RP}}$ and $t_{\text{RCD}}$ have elapsed ($28\,\text{ns}$ of latency penalty per conflict) can column read commands proceed. In addition, consecutive accesses targeting different banks within the same bank group incur longer column-to-column cycle delays ($t_{\text{CCD\_L}}$) than accesses across distinct bank groups ($t_{\text{CCD\_S}}$). Controllers that use **First-Ready First-Come-First-Served (FR-FCFS)**\index{FR-FCFS scheduling!definition} scheduling reorder pending requests to prioritize ready row hits over older requests that target closed rows, maximizing aggregate data bus throughput. Because a streaming neural accelerator supplies an unbroken pipeline of row hits across its weight matrices, FR-FCFS schedulers repeatedly bypass the safety core's sporadic read until an internal starvation counter expires. Under a FIFO queue that lets no later arrival pass the safety read, the idealized wait is
+The controller also decides the order of service. Controllers that use **first-ready, first-come-first-served (FR-FCFS)**\index{FR-FCFS scheduling!definition} scheduling serve ready row hits before older requests that need a new row, which maximizes throughput [@rixner2000memory]. A streaming accelerator supplies an unbroken run of row hits across its weight matrices, so an FR-FCFS scheduler can keep passing the safety core's sporadic read until an internal starvation counter expires. Under a FIFO queue that lets no later arrival pass the safety read, the idealized wait is
 $$t_{\text{queue}} = \sum_{k \in \mathcal{Q}} \frac{B_k}{\text{BW}_{\text{peak}}} + N_{\text{conflicts}} (t_{\text{RP}} + t_{\text{RCD}})$$ {#eq-placement-dram-queuing}
 where $\mathcal{Q}$ holds the transactions ahead of the read, $B_k$ is each one's byte count, $N_{\text{conflicts}}$ counts changes to a different row within an already active bank, and $\text{BW}_{\text{peak}}$ is an optimistic service rate. Arbitration overhead and refresh add to the result. Exceeding the sensing allowance first violates the allocation to that subtask; it does not by itself imply that the whole tick misses its deadline. The worked comparison below keeps the sense allocation, declared execution bound, and physical deadline separate.
 
@@ -280,19 +374,26 @@ where $\mathcal{Q}$ holds the transactions ahead of the read, $B_k$ is each one'
 # │ Goal: Charge a FIFO backlog on shared DRAM to the machine's 40 µs sense
 # │       allowance and 400 µs deadline, to show why the bound is a property of
 # │       the memory controller rather than of the workload.
-# │ Show: one backlog of 88 transactions (360,448 bytes) waits 28.244 µs; a 4 KiB
-# │       snapshot then reads in 28.564 µs, inside the 40 µs allowance (one
-# │       backlog fits, two do not); the declared 250 µs WCET is crossed after
-# │       more than five backlogs (155 µs read), refuting the declared bound, while the
-# │       deadline holds until more than ten (305 µs read); priority bypass cuts
-# │       the read to 0.64 µs.
-# │ How: calc_axi_fifo_contention with PlacementMachine's sub-costs; queue
-# │      composition and snapshot size are scenario inputs.
+# │ Show: one backlog of 88 transactions (360,448 bytes) plus three 37.5 ns row
+# │       conflicts waits 1.879 µs at the application SoC's 204 GB/s; a 4 KiB
+# │       snapshot then reads in 1.899 µs, inside the 40 µs allowance, which
+# │       absorbs 21 such backlogs; the declared 250 µs WCET is crossed after
+# │       more than 82 backlogs (155 µs read), refuting the declared bound,
+# │       while the deadline holds until more than 162 (305 µs read); priority
+# │       bypass cuts the read to 0.04 µs. Bandwidth queueing alone is a weak
+# │       threat; @sec-placement-interference-mechanisms prices the strong one.
+# │ How: calc_axi_fifo_contention with PlacementMachine's sub-costs; bandwidth is
+# │      the brain SoC's registry peak (RM.brain_soc.memory.bandwidth), served
+# │      at the full aggregate rate because addresses interleave across all
+# │      channels; queue composition and snapshot size are scenario inputs.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import *
 from mlsysim.core.units import Q_, microsecond
 from mlsysim.physics.robotics import calc_axi_fifo_contention
 from mlsysim.fmt import fmt_int, fmt_latency, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 
 class PlacementLoadedRead:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
@@ -305,9 +406,13 @@ class PlacementLoadedRead:
     telemetry_bytes = 32 * 1024  # category: illustrative
     snapshot_bytes = 4 * 1024  # category: illustrative (encoder, IMU, and evidence-epoch snapshot)
     transaction_bytes = 4 * 1024  # category: datasheet (AXI4 4 KiB boundary)
-    bandwidth = Q_("12.8 GB/s")  # category: illustrative (peak rate)
+    # Premise: the controller interleaves physical addresses across all its
+    # channels, so the backlog and the snapshot are both served at the SoC's
+    # aggregate peak rate. A backlog confined to the snapshot's channel would wait
+    # longer by the channel count.
+    bandwidth = RM.brain_soc.memory.bandwidth  # category: datasheet (application SoC peak DRAM bandwidth)
     bank_switches = 3  # same-bank row conflicts; category: illustrative
-    bank_switch_time = Q_("28 ns")  # category: illustrative (t_RP + t_RCD)
+    bank_switch_time = PlacementDramTiming.t_conflict  # category: datasheet (LPDDR5-6400 t_RP + t_RCD)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     result = calc_axi_fifo_contention(
@@ -335,11 +440,12 @@ class PlacementLoadedRead:
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(result["queued_transactions"] == 88 and result["tile_transactions"] == 64, "88 queued transactions, 64 of them from one tile.")
-    check(abs(queue.magnitude - 28.244) < 1e-9, "360,448 bytes at 12.8 GB/s plus three 28 ns switches is 28.244 µs.")
-    check(loaded_read < sense < 2 * queue + own_read, "One backlog fits inside the sense allowance; two do not.")
+    check(abs(bandwidth.to("GB/s").magnitude - 204.0) < 1e-9, "The application SoC's registry bandwidth is 204 GB/s.")
+    check(abs(queue.magnitude - 1.8794) < 5e-4, "360,448 bytes at 204 GB/s plus three 37.5 ns conflicts is 1.879 µs.")
+    check(loaded_read < sense, "One backlog fits inside the sense allowance.")
     check(abs(read_ceiling.magnitude - 305.0) < 1e-9, "The deadline leaves 305 µs for the read after 95 µs of compute.")
-    check(backlogs_sense == 1 and backlogs_deadline == 10, "The sense allowance absorbs one backlog, the deadline ten.")
-    check(abs(wcet_read_ceiling.magnitude - 155.0) < 1e-9 and backlogs_wcet == 5, "The declared WCET leaves 155 µs for the read, five backlogs.")
+    check(backlogs_sense == 21 and backlogs_deadline == 162, "The sense allowance absorbs 21 backlogs, the deadline 162.")
+    check(abs(wcet_read_ceiling.magnitude - 155.0) < 1e-9 and backlogs_wcet == 82, "The declared WCET leaves 155 µs for the read, 82 backlogs.")
     check(bypass_read < own_read * 3, "Priority bypass leaves one in-flight transaction ahead of the read.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
@@ -351,17 +457,18 @@ class PlacementLoadedRead:
     backlog_bytes_str = fmt_int(backlog_bytes)
     snapshot_bytes_str = fmt_int(snapshot_bytes)
     queue_str = fmt(queue.magnitude, precision=3)
-    own_read_str = fmt(own_read.magnitude, precision=2)
+    own_read_str = fmt(own_read.magnitude, precision=3)
     loaded_read_str = fmt(loaded_read.magnitude, precision=3)
-    sense_left_str = fmt(sense_left.magnitude, precision=3)
+    sense_left_str = fmt(sense_left.magnitude, precision=2)
     read_ceiling_str = fmt_latency(read_ceiling, unit=microsecond, precision=0)
     backlogs_deadline_str = fmt_int(backlogs_deadline)
     wcet_str = fmt_latency(wcet, unit=microsecond, precision=0)
     wcet_read_ceiling_str = fmt_latency(wcet_read_ceiling, unit=microsecond, precision=0)
     backlogs_wcet_str = fmt_int(backlogs_wcet)
     bypass_read_str = fmt(bypass_read.magnitude, precision=2)
-    bandwidth_str = fmt(bandwidth.to("GB/s").magnitude, precision=1)
-    bank_switch_str = fmt(bank_switch_time.to("ns").magnitude, precision=0)
+    bandwidth_str = fmt(bandwidth.to("GB/s").magnitude, precision=0)
+    backlogs_sense_str = fmt_int(backlogs_sense)
+    bank_switch_str = fmt(bank_switch_time.to("ns").magnitude, precision=1)
     bank_switches_str = fmt_int(bank_switches)
 ```
 
@@ -369,13 +476,78 @@ class PlacementLoadedRead:
 
 **Problem**: Suppose the permission path read its sensor snapshot from the application SoC's shared DRAM. How much queued traffic could precede that read before the tick exceeds its sense allowance, its declared worst-case execution time, and its deadline?
 
-**Variables**: The tick allots `{python} PlacementLoadedRead.sense_str` to sensing and `{python} PlacementLoadedRead.compute_after_sense_str` to constraint evaluation and the drive-frame write, inside a `{python} PlacementLoadedRead.deadline_str` deadline. The snapshot is `{python} PlacementLoadedRead.snapshot_bytes_str` bytes on a `{python} PlacementLoadedRead.bandwidth_str` GB/s channel. Ahead of it the FIFO holds one weight tile (`{python} PlacementLoadedRead.tile_tx_str` transactions), a camera transfer, and a telemetry record: `{python} PlacementLoadedRead.n_tx_str` transactions, `{python} PlacementLoadedRead.backlog_bytes_str` bytes, `{python} PlacementLoadedRead.bank_switches_str` same-bank row conflicts.
+**Variables**: The tick allots `{python} PlacementLoadedRead.sense_str` to sensing and `{python} PlacementLoadedRead.compute_after_sense_str` to constraint evaluation and the drive-frame write, inside a `{python} PlacementLoadedRead.deadline_str` deadline. The snapshot is `{python} PlacementLoadedRead.snapshot_bytes_str` bytes in the application SoC's DRAM, whose peak bandwidth is `{python} PlacementLoadedRead.bandwidth_str` GB/s. The controller interleaves physical addresses across all of its channels, so the snapshot and the traffic ahead of it are served at that aggregate rate. Ahead of it the FIFO holds one weight tile (`{python} PlacementLoadedRead.tile_tx_str` transactions), a camera transfer, and a telemetry record: `{python} PlacementLoadedRead.n_tx_str` transactions, `{python} PlacementLoadedRead.backlog_bytes_str` bytes, `{python} PlacementLoadedRead.bank_switches_str` same-bank row conflicts.
 
-**Math**: By @eq-placement-dram-queuing, serving the backlog's `{python} PlacementLoadedRead.backlog_bytes_str` bytes at `{python} PlacementLoadedRead.bandwidth_str` GB/s, plus `{python} PlacementLoadedRead.bank_switches_str` row-conflict penalties of `{python} PlacementLoadedRead.bank_switch_str` ns, takes `{python} PlacementLoadedRead.queue_str` $\mu\text{s}$. The snapshot itself reads in `{python} PlacementLoadedRead.own_read_str` $\mu\text{s}$, so the loaded read takes `{python} PlacementLoadedRead.loaded_read_str` $\mu\text{s}$ and leaves `{python} PlacementLoadedRead.sense_left_str` $\mu\text{s}$ of the sense allowance. A second backlog would overrun it. The declared worst-case execution time of `{python} PlacementLoadedRead.wcet_str` is crossed once the read exceeds `{python} PlacementLoadedRead.wcet_read_ceiling_str`, which takes more than `{python} PlacementLoadedRead.backlogs_wcet_str` backlogs, and that crossing refutes the declared execution bound even though the tick still meets its deadline. It does not by itself refute the weaker claim that this load preserves the deadline. The deadline itself holds until the read exceeds `{python} PlacementLoadedRead.read_ceiling_str`, which takes more than `{python} PlacementLoadedRead.backlogs_deadline_str` backlogs, so meeting the deadline does not establish the stronger declared execution bound. With validated priority bypass, only the one in-flight transaction waits ahead, and the read takes `{python} PlacementLoadedRead.bypass_read_str` $\mu\text{s}$.
+**Math**: By @eq-placement-dram-queuing, serving the backlog's `{python} PlacementLoadedRead.backlog_bytes_str` bytes at `{python} PlacementLoadedRead.bandwidth_str` GB/s, plus `{python} PlacementLoadedRead.bank_switches_str` row-conflict penalties of `{python} PlacementLoadedRead.bank_switch_str` ns, takes `{python} PlacementLoadedRead.queue_str` $\mu\text{s}$. The snapshot itself reads in `{python} PlacementLoadedRead.own_read_str` $\mu\text{s}$, so the loaded read takes `{python} PlacementLoadedRead.loaded_read_str` $\mu\text{s}$ and leaves `{python} PlacementLoadedRead.sense_left_str` $\mu\text{s}$ of the sense allowance, which absorbs `{python} PlacementLoadedRead.backlogs_sense_str` such backlogs before it overruns. The declared worst-case execution time of `{python} PlacementLoadedRead.wcet_str` is crossed once the read exceeds `{python} PlacementLoadedRead.wcet_read_ceiling_str`, which takes more than `{python} PlacementLoadedRead.backlogs_wcet_str` backlogs, and that crossing refutes the declared execution bound even though the tick still meets its deadline. It does not by itself refute the weaker claim that this load preserves the deadline. The deadline itself holds until the read exceeds `{python} PlacementLoadedRead.read_ceiling_str`, which takes more than `{python} PlacementLoadedRead.backlogs_deadline_str` backlogs, so meeting the deadline does not establish the stronger declared execution bound. With validated priority bypass, only the one in-flight transaction waits ahead, and the read takes `{python} PlacementLoadedRead.bypass_read_str` $\mu\text{s}$.
 
-**Systems insight**: The read's bound belongs to the memory controller, not to the workload. It exists only if the controller limits how much traffic it admits ahead of a safety read or lets that read bypass the queue, and an FR-FCFS controller serving a streaming accelerator provides neither unless its configuration is qualified to do so. The machine's discrete microcontroller removes the question by reading its snapshot from tightly coupled memory on its own bus.
+**Systems insight**: The read's bound belongs to the memory controller, not to the workload. The bound exists only if the controller limits how much traffic it admits ahead of a safety read or lets that read bypass the queue, and an FR-FCFS controller serving a streaming accelerator provides neither unless its configuration is qualified to do so. At the SoC's full bandwidth, though, plain queueing is a weak threat: the allowance absorbs `{python} PlacementLoadedRead.backlogs_sense_str` backlogs, and a backlog confined to the snapshot's channel would still leave several. The mechanisms that actually threaten the declared bound are the ones this FIFO model omits, which @sec-placement-interference-mechanisms prices next.
 
 :::
+
+### Which interference mechanism threatens the declared bound {#sec-placement-interference-mechanisms}
+
+```{python}
+#| label: calc-placement-interference-mechanisms
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WHICH MECHANISM THREATENS THE DECLARED WCET
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-placement-interference-mechanisms, @sec-placement-summary
+# │
+# │ Goal: Compare the stretch the permission tick can absorb with measured
+# │       shared-cache interference on embedded multicores, and find the
+# │       memory-stall share of the tick at which each measured slowdown
+# │       crosses the declared WCET.
+# │ Show: WCET / unloaded = 1.85x, deadline / unloaded = 2.96x; measured MSHR
+# │       contention 21x (Valsan et al. 2016, with cache partitioning) and
+# │       writeback-buffer DoS >300x (Bechtel and Yun 2019). If a stall share
+# │       f of the 135 µs tick is slowed by S, the WCET holds only for
+# │       f <= (1.85 - 1) / (S - 1): 4.3 percent at 21x, 0.28 percent at 300x.
+# │ How: registry WCET, deadline, and unloaded tick; slowdowns are published
+# │      measurements on other platforms (not the Orin), used as multipliers.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import fmt, fmt_percent, fmt_multiple, check
+
+class PlacementInterference:
+    # ┌── 1. LOAD ───────────────────────────────────────────────────────────
+    unloaded = PlacementMachine.unloaded  # category: illustrative (registry)
+    wcet = PlacementMachine.wcet  # category: chosen (declared)
+    deadline = PlacementMachine.deadline  # category: chosen
+    s_mshr = 21.0  # category: measured (Valsan, Yun, Farshchi, RTAS 2016: up to 21x WCET increase, MSHR contention, cache partitioned)
+    s_wb = 300.0  # category: measured (Bechtel and Yun, RTAS 2019: >300x on a dedicated core; lower bound of the reported range)
+
+    # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
+    stretch_wcet = (wcet / unloaded).to("dimensionless").magnitude
+    stretch_deadline = (deadline / unloaded).to("dimensionless").magnitude
+    f_mshr = (stretch_wcet - 1) / (s_mshr - 1)
+    f_wb = (stretch_wcet - 1) / (s_wb - 1)
+    f_mshr_deadline = (stretch_deadline - 1) / (s_mshr - 1)
+
+    # ┌── 3. GUARD ──────────────────────────────────────────────────────────
+    check(abs(stretch_wcet - 250 / 135) < 1e-9 and abs(stretch_deadline - 400 / 135) < 1e-9, "250/135 and 400/135.")
+    check(s_mshr > stretch_deadline and s_wb > 100 * stretch_wcet, "Measured slowdowns exceed the tick's absorbable stretch.")
+    check(abs(f_mshr - 0.0426) < 5e-4 and abs(f_wb - 0.00285) < 5e-5, "Break-even stall shares: 4.3 and 0.28 percent.")
+
+    # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
+    stretch_wcet_str = fmt(stretch_wcet, precision=2)
+    stretch_deadline_str = fmt(stretch_deadline, precision=2)
+    s_mshr_mult_str = fmt_multiple(s_mshr, precision=0)
+    s_wb_mult_str = fmt_multiple(s_wb, precision=0)
+    f_mshr_pct_str = fmt_percent(f_mshr, precision=1)
+    f_wb_pct_str = fmt_percent(f_wb, precision=2)
+    f_mshr_deadline_pct_str = fmt_percent(f_mshr_deadline, precision=1)
+```
+
+The notebook's arithmetic makes the shared die look safe, and that impression is the danger. The permission tick can absorb a stretch of its unloaded `{python} PlacementMachine.unloaded_str` cycle by a factor of `{python} PlacementInterference.stretch_wcet_str` before it crosses the declared worst-case execution time, and by `{python} PlacementInterference.stretch_deadline_str` before it crosses the deadline. Bandwidth queueing at the SoC's full rate does not come close. Two other mechanisms do, and both live in the shared cache rather than in DRAM.
+
+A non-blocking cache tracks each outstanding miss in a *miss status holding register* (MSHR) and parks each dirty line it evicts in a *writeback buffer* until DRAM accepts it. Both structures are small and shared by every core behind the cache. When a streaming co-runner keeps them full, each miss of the victim core waits until an entry drains, so the victim's delay grows with its own miss count times the aggressor's drain time, not with the bytes it reads. Partitioning cache capacity does not help, because the partition divides the lines and leaves the MSHRs and the writeback buffer shared. Measured on commercial embedded multicores, MSHR contention raised a task's worst-case execution time by up to `{python} PlacementInterference.s_mshr_mult_str` with the cache partitioned [@valsan2016taming], and a deliberate attack on the writeback buffer slowed a victim on a dedicated core by more than `{python} PlacementInterference.s_wb_mult_str`, partitioned or not [@bechtel2019denial]. DRAM adds its own multiplier on top. An analytical bound for commercial controllers shows that each of the victim's requests can wait behind every request that other cores may place ahead of it in the same bank, a number set by queue depth and the reordering window rather than by average bandwidth [@kim2014bounding].
+
+These slowdowns were measured on other platforms, on victims whose time was mostly memory stall, so they cannot be charged to the enforcer directly. They can be charged to its memory-stall share. If a fraction $f$ of the unloaded tick waits on shared-cache misses and interference slows that fraction by a factor $S$ while the rest runs unchanged, the tick takes $t_{\text{unloaded}}[(1-f) + fS]$, and the declared bound survives only while
+$$f \le \frac{C_{\text{wcet}}/t_{\text{unloaded}} - 1}{S - 1}.$$
+At the MSHR-class `{python} PlacementInterference.s_mshr_mult_str`, the declared bound falls once more than `{python} PlacementInterference.f_mshr_pct_str` percent of the tick is miss stall, and the deadline once more than `{python} PlacementInterference.f_mshr_deadline_pct_str` percent is. At the writeback-buffer attack's `{python} PlacementInterference.s_wb_mult_str`, the threshold is `{python} PlacementInterference.f_wb_pct_str` percent. A constraint evaluation that touches tables in shared memory easily exceeds those fractions. The mechanism that threatens the declared bound is therefore miss handling in the shared cache, amplified by bank queueing, and the only placements that remove it are those whose tick runs from private memory: candidates (c) and (d) of @tbl-13-placement-candidates. On (a) and (b), the measured stall share on the target and a regulation mechanism that bounds $S$ (@sec-placement-isolation-decisions) are what a qualification must supply.
 
 ### Power-rail interference
 
@@ -437,9 +609,9 @@ class InductivePDNVoltageDroop:
     delay_expansion_pct_str = fmt_int(round(delay_expansion_pct))
 ```
 
-For the illustrative package parameters, the current step produces `{python} InductivePDNVoltageDroop.v_droop_mv_str` mV of droop from a `{python} InductivePDNVoltageDroop.v_core_3dec_str` V nominal rail. The alpha-power model relates the resulting voltage to gate delay:
+For the illustrative package parameters, a `{python} InductivePDNVoltageDroop.delta_i_str` A step with a `{python} InductivePDNVoltageDroop.t_rise_str` ns rise through `{python} InductivePDNVoltageDroop.l_pkg_str` pH gives `{python} InductivePDNVoltageDroop.v_ind_mv_str` mV of inductive droop, and the same step through `{python} InductivePDNVoltageDroop.r_pkg_str` m$\Omega$ gives `{python} InductivePDNVoltageDroop.v_res_mv_str` mV of resistive droop, `{python} InductivePDNVoltageDroop.v_droop_mv_str` mV in all from a `{python} InductivePDNVoltageDroop.v_core_3dec_str` V nominal rail. This pure $L\,dI/dt$ term ignores on-die decoupling capacitance, so it overstates the first droop; power-integrity engineers instead design the delivery network to a target impedance across frequency, and the first droop is set by package inductance resonating with on-die capacitance. The alpha-power model [@sakurai1990alpha] relates the resulting voltage to gate delay:
 $$\frac{t_{\text{prop}}(V_{\text{drooped}})}{t_{\text{prop}}(V_{\text{nominal}})} = \frac{V_{\text{drooped}}}{V_{\text{nominal}}} \left( \frac{V_{\text{nominal}} - V_{\text{th}}}{V_{\text{drooped}} - V_{\text{th}}} \right)^\alpha$$
-Here $V_{\text{th}}$ is the modeled threshold voltage, stipulated as `{python} InductivePDNVoltageDroop.v_th_str` V, and $\alpha$ is the technology-dependent exponent, stipulated as `{python} InductivePDNVoltageDroop.alpha_str`. With those inputs, the modeled delay increases by `{python} InductivePDNVoltageDroop.delay_expansion_pct_str` percent. This is a sensitivity calculation, not a measured reset threshold or a universal delay increase for every gate. Device characterization must establish whether the actual critical paths still meet setup time and whether undervoltage protection trips.
+Here $V_{\text{th}}$ is the modeled threshold voltage, stipulated as `{python} InductivePDNVoltageDroop.v_th_str` V, and $\alpha$ is the technology-dependent exponent, stipulated as `{python} InductivePDNVoltageDroop.alpha_str`. With those inputs, the modeled delay increases by `{python} InductivePDNVoltageDroop.delay_expansion_pct_str` percent. This is a sensitivity calculation, not a measured reset threshold or a universal delay increase for every gate, and it is an upper-bound caricature because it ignores decoupling. The stretch lasts nanoseconds, so it does not lengthen the tick by that percentage; it threatens the setup-time margin of the paths switching during the droop, and it grows without bound as the drooped voltage approaches $V_{\text{th}}$. Many current processors detect the droop and stretch the clock until the rail recovers [@grenat2014adaptive], which turns a timing violation into lost cycles that the tick must absorb. Device characterization must establish whether the actual critical paths still meet setup time, how many cycles adaptive clocking removes, and whether undervoltage protection trips.
 
 A separate permission rail removes the modeled shared core-supply path, but the common battery, wiring, converter behavior, and return paths remain qualification obligations. Rail probes and independent timing instruments must observe them under simultaneous motor and proposal load. The record exchange must preserve the same independence when a producer stalls in software.
 
@@ -461,11 +633,11 @@ The exchange therefore has two separately priced operations: board transport bef
 
 ### Windowed watchdog timers and execution liveness
 
-Software memory boundaries and lock-free seqlocks protect against torn reads, but cannot guarantee that the safety enforcer code is alive and progressing through its intended operations. Liveness of the enforcer belongs to the self-watchdog of @sec-nervous-cadences, which is fed only after a completed tick. A countdown watchdog serviced from a timer interrupt stays blind to a dead task, the failure argued in *Bookout v. Toyota*. On shared silicon, the enforcer can also be starved by interconnect contention or run too fast after clock corruption, so placement needs a stronger form of that self-watchdog, one that constrains the feed from both sides.
+Software memory boundaries and lock-free seqlocks protect against torn reads, but cannot guarantee that the safety enforcer code is alive and progressing through its intended operations. Liveness of the enforcer belongs to the self-watchdog of @sec-nervous-cadences, which is fed only after a completed tick. A countdown watchdog serviced from a timer interrupt stays blind to a dead task, the failure argued in *Bookout v. Toyota* [@barr2013toyota]. On shared silicon, the enforcer can also be starved by interconnect contention or run too fast after clock corruption, so placement needs a stronger form of that self-watchdog, one that constrains the feed from both sides.
 
 High-integrity physical AI architectures therefore enforce **windowed watchdog timers**\index{Windowed watchdog timer!hardware mechanics}\index{Watchdog timer!windowed}. A windowed watchdog rejects any refresh that occurs either too early or too late. The timer hardware defines a service window parameterized by a lower bound (the closed window, $T_{\text{lower}}$) and an upper bound (the open window, $T_{\text{upper}}$):
 
-1. **Early-kick violation ($t_{\text{service}} < T_{\text{lower}}$)**: If software attempts to refresh the watchdog before the lower threshold has elapsed, the hardware triggers its configured fault response. An early kick can indicate control-flow disruption: a corrupted program counter skipping the mathematical barrier evaluation to jump directly to the service subroutine, a stack overflow short-circuiting control loops, or an unexpected Phase-Locked Loop (PLL) multiplier glitch causing runaway clock acceleration. The lower threshold detects feeds that arrive too quickly, but a faulty path that feeds inside the window still requires other diagnostics.
+1. **Early-kick violation ($t_{\text{service}} < T_{\text{lower}}$)**: If software attempts to refresh the watchdog before the lower threshold has elapsed, the hardware triggers its configured fault response. An early kick can indicate control-flow disruption: a corrupted program counter skipping the mathematical barrier evaluation to jump directly to the service subroutine, a stack overflow short-circuiting control loops, or an unexpected Phase-Locked Loop (PLL) multiplier glitch causing runaway clock acceleration. The lower threshold detects feeds that arrive too quickly, but a faulty path that feeds inside the window still requires other diagnostics. A runaway or stalled PLL and a sagging rail are covered first by an independent clock monitor and a voltage supervisor, each with its own reference; the windowed watchdog is the backstop behind them.
 2. **Late-kick violation ($t_{\text{service}} > T_{\text{upper}}$)**: If the timer counts down past $T_{\text{upper}}$ without receiving a valid refresh, the counter underflows, asserting a hardware reset. A late kick can indicate that the enforcer was starved of compute cycles by interconnect contention, deadlocked on an unhandled exception, or delayed by excessive cache evictions.
 3. **Valid service window ($T_{\text{lower}} \le t_{\text{service}} \le T_{\text{upper}}$)**: A refresh inside the window shows the feed path met its timing condition; task progress still needs a suitable challenge or independent supervision.
 
@@ -547,6 +719,7 @@ class RejectedPlacementThrottle:
     t_rise_load = p_load * theta_ja  # K, steady-state rise under continuous inference
     t_steady_load = t_ambient + t_rise_load  # °C, loaded steady state
     t_recov = (tau_th * math.log((t_start - t_target) / (t_clear - t_target))).to(second)
+    t_trip = (tau_th * math.log((t_steady_load - t_target) / (t_steady_load - t_start))).to(second)  # time from baseline to trip under load
     ticks_exposed = math.floor((t_recov / tick).to("dimensionless").magnitude)
     mcu_cycles = (mcu_unloaded * mcu_clock).to("dimensionless").magnitude  # TCM-resident unloaded tick on the discrete MCU
 
@@ -564,6 +737,7 @@ class RejectedPlacementThrottle:
     check(abs(t_recov.magnitude - 2.18) < 5e-3, "Recovery from 95 to 85 °C takes about 2.18 s.")
     check(n_cycles > mcu_cycles, "The shared-die cluster, without TCM, spends more cycles per tick than the discrete MCU's unloaded 54,000.")
     check(ticks_exposed == 2175, "2,175 scheduled ticks fall inside the hysteresis, as the SVG labels them.")
+    check(abs(t_trip.magnitude - 8.0 * math.log(22.0)) < 1e-9, "From 53 °C toward 97 °C, the junction reaches 95 °C after 8 ln 22 = 24.7 s.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     tick_str = fmt_latency(tick, unit=millisecond, precision=0)
@@ -578,6 +752,7 @@ class RejectedPlacementThrottle:
     overrun_str = fmt_latency(overrun, unit=microsecond, precision=0)
     overrun_pct_str = fmt_percent(overrun_ratio, precision=0)
     t_recov_str = fmt_latency(t_recov, unit=second, precision=2)
+    t_trip_str = fmt_latency(t_trip, unit=second, precision=1)
     ticks_exposed_str = fmt_int(ticks_exposed)
     t_ambient_str = fmt(t_ambient, precision=0)
     theta_ja_str = fmt(theta_ja, precision=0)
@@ -595,29 +770,27 @@ For this illustrative thermal scenario, the electronics bay is assumed to sit at
 
 For a conduction-cooled enclosure, the modeled path includes the package, thermal interface, and chassis:
 $$\theta_{\text{JA}} = \theta_{\text{JC}} + \theta_{\text{TIM}} + \theta_{\text{chassis}}.$$
-Interface aging can increase that resistance. Battery and drive losses can also raise bay temperature; the battery contribution includes
-$$P_{\text{batt}} = I_{\text{batt}}^2 R_{\text{batt}}$$
-The environmental envelope must therefore specify both the cooling configuration and the simultaneous mechanical workload. A cold bench run cannot stand in for a warm operating shift.
+Interface aging can increase that resistance. Battery and drive losses can also raise bay temperature, the battery's contribution growing with the square of its current. The environmental envelope must therefore specify both the cooling configuration and the simultaneous mechanical workload. A cold bench run cannot stand in for a warm operating shift.
 
-Suppose the shared SoC within this enclosed bay were conduction-cooled with a **junction-to-ambient thermal resistance**\index{Thermal resistance!junction-to-ambient} of $\theta_{\text{JA}} =$ `{python} RejectedPlacementThrottle.theta_ja_str` $\text{K/W}$ and a **thermal time constant**\index{Thermal time constant} of $\tau_{\text{th}} =$ `{python} RejectedPlacementThrottle.tau_th_str` $\text{s}$. The permission loop with idle and memory power draws `{python} RejectedPlacementThrottle.p_base_str` $\text{W}$ and holds the junction at `{python} RejectedPlacementThrottle.t_target_str`$\,^{\circ}\text{C}$. Continuous proposal inference adds accelerator, memory-traffic, and regulator losses, and a total of `{python} RejectedPlacementThrottle.p_load_str` $\text{W}$ raises the steady state by $P\,\theta_{\text{JA}} =$ `{python} RejectedPlacementThrottle.t_rise_load_str` $\text{K}$ to $T_j =$ `{python} RejectedPlacementThrottle.t_steady_load_str`$\,^{\circ}\text{C}$.
+Suppose the shared SoC within this enclosed bay were conduction-cooled with a **junction-to-ambient thermal resistance**\index{Thermal resistance!junction-to-ambient} of $\theta_{\text{JA}} =$ `{python} RejectedPlacementThrottle.theta_ja_str` $\text{K/W}$ and a **thermal time constant**\index{Thermal time constant} of $\tau_{\text{th}} =$ `{python} RejectedPlacementThrottle.tau_th_str` $\text{s}$. The permission loop with idle and memory power draws `{python} RejectedPlacementThrottle.p_base_str` $\text{W}$ and holds the junction at `{python} RejectedPlacementThrottle.t_target_str`$\,^{\circ}\text{C}$. Continuous proposal inference adds accelerator, memory-traffic, and regulator losses, and a total of `{python} RejectedPlacementThrottle.p_load_str` $\text{W}$ raises the steady state by $P\,\theta_{\text{JA}} =$ `{python} RejectedPlacementThrottle.t_rise_load_str` $\text{K}$ to $T_j =$ `{python} RejectedPlacementThrottle.t_steady_load_str`$\,^{\circ}\text{C}$. The single time constant is the first-order RC response of the junction and package, the fast pole of a thermal network whose heatsink and chassis poles run from minutes upward; the model holds the chassis at a fixed temperature. Rising along that pole from its baseline, the junction reaches the trip threshold after `{python} RejectedPlacementThrottle.t_trip_str` of continuous inference.
 
 ::: {#fig-13-jetson-orin fig-env="figure" fig-pos="t" fig-cap="**Enclosed edge-compute kit**: The photograph shows a Jetson AGX Orin Developer Kit box and a closed, vented enclosure. The SoC, memory, cooling hardware, and clock domains are not visible; the thermal model in the text is a separate illustrative scenario. Photograph: [Auledas](https://commons.wikimedia.org/wiki/File:NVidia_Jetson_Orin_AGX.png), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), via Wikimedia Commons; local copy re-encoded." fig-alt="Jetson AGX Orin Developer Kit retail box beside a closed gray enclosure with ventilation slots and external connectors. Internal components and cooling paths are not visible. Photograph by Auledas, CC BY 4.0; local copy re-encoded."}
 ![](images/jpg/fig13_real_jetson_orin.jpg){width="85%"}
 :::
 
-The stipulated thermal conditions reject this shared-die candidate. Suppose its permission path ran on a real-time cluster of the application SoC at $f_{\text{nom}} =$ `{python} RejectedPlacementThrottle.f_nom_str`, costing $N_{\text{cycles}} =$ `{python} RejectedPlacementThrottle.n_cycles_str` cycles per tick, an assumed workload for this candidate rather than a measured comparison with the discrete controller. When the junction crosses $T_{\text{trip}} =$ `{python} RejectedPlacementThrottle.t_start_str`$\,^{\circ}\text{C}$, the governor drops the cluster to $f_{\text{throt}} =$ `{python} RejectedPlacementThrottle.f_throt_str` and the enforcer's cycle stretches to $t_{\text{exec,throt}} =$ `{python} RejectedPlacementThrottle.t_exec_throt_str`, missing the `{python} RejectedPlacementThrottle.deadline_str` deadline by `{python} RejectedPlacementThrottle.overrun_str` (a `{python} RejectedPlacementThrottle.overrun_pct_str` percent overrun) and far exceeding the declared bound on which every margin above the enforcer was sized. The discrete microcontroller runs on its own clock and rail, beyond the reach of that governor.
+The stipulated thermal conditions reject candidate (b) of @tbl-13-placement-candidates. Suppose its permission path ran on a real-time cluster in the application SoC's clock and power domain at $f_{\text{nom}} =$ `{python} RejectedPlacementThrottle.f_nom_str`, costing $N_{\text{cycles}} =$ `{python} RejectedPlacementThrottle.n_cycles_str` cycles per tick, an assumed workload for this candidate rather than a measured comparison with the discrete controller. When the junction crosses $T_{\text{trip}} =$ `{python} RejectedPlacementThrottle.t_start_str`$\,^{\circ}\text{C}$, the governor drops the cluster to $f_{\text{throt}} =$ `{python} RejectedPlacementThrottle.f_throt_str` and the enforcer's cycle stretches to $t_{\text{exec,throt}} =$ `{python} RejectedPlacementThrottle.t_exec_throt_str`, missing the `{python} RejectedPlacementThrottle.deadline_str` deadline by `{python} RejectedPlacementThrottle.overrun_str` (a `{python} RejectedPlacementThrottle.overrun_pct_str` percent overrun) and far exceeding the declared bound on which every margin above the enforcer was sized. The discrete microcontroller runs on its own clock and rail, beyond the reach of that governor, and so would an on-die safety island with its own crystal and rail; the island would still share the die temperature, which its own qualification would have to bound.
 
 The overrun outlasts the load because the governor applies **state-dependent hysteresis**\index{Hysteresis!state-dependent}, restoring `{python} RejectedPlacementThrottle.f_nom_str` only after the junction cools to $T_{\text{clear}} =$ `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$ so that the clock does not oscillate around the trip line. With the policy halted and power back at `{python} RejectedPlacementThrottle.p_base_str` $\text{W}$, the junction relaxes toward its `{python} RejectedPlacementThrottle.t_target_str`$\,^{\circ}\text{C}$ baseline:
 $$T_j(t) = T_{j,\text{target}} + (T_{j,\text{start}} - T_{j,\text{target}}) e^{-t/\tau_{\text{th}}}$$ {#eq-placement-cooling-recovery}
-where $T_{j,\text{start}}$ is the junction temperature when throttling begins, $T_{j,\text{target}}$ is the baseline equilibrium, and $\tau_{\text{th}}$ is the package thermal time constant. Solving @eq-placement-cooling-recovery for the fall from `{python} RejectedPlacementThrottle.t_start_str` to `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$ gives $t_{\text{recov}} = \tau_{\text{th}} \ln[(T_{j,\text{start}} - T_{j,\text{target}})/(T_{\text{clear}} - T_{j,\text{target}})] =$ `{python} RejectedPlacementThrottle.t_recov_str`. At the machine's `{python} RejectedPlacementThrottle.tick_str` tick, `{python} RejectedPlacementThrottle.ticks_exposed_str` scheduled ticks fall inside that cooldown, and a shared-die design would need a separately timed fallback active for every one of them.
+where $T_{j,\text{start}}$ is the junction temperature when throttling begins, $T_{j,\text{target}}$ is the baseline equilibrium, and $\tau_{\text{th}}$ is the package thermal time constant. Solving @eq-placement-cooling-recovery for the fall from `{python} RejectedPlacementThrottle.t_start_str` to `{python} RejectedPlacementThrottle.t_clear_str`$\,^{\circ}\text{C}$ gives $t_{\text{recov}} = \tau_{\text{th}} \ln[(T_{j,\text{start}} - T_{j,\text{target}})/(T_{\text{clear}} - T_{j,\text{target}})] =$ `{python} RejectedPlacementThrottle.t_recov_str`. That figure is a lower bound: a chassis warmed by a long shift raises the baseline the junction relaxes toward, and the slow poles then stretch the recovery. At the machine's `{python} RejectedPlacementThrottle.tick_str` tick, `{python} RejectedPlacementThrottle.ticks_exposed_str` scheduled ticks fall inside that cooldown, and a shared-die design would need a separately timed fallback active for every one of them.
 
 A stretched cycle on a shared die can also arise from **electrical power-rail coupling**\index{Power-rail coupling}, which operates on a completely different timescale. While the inductive rail droop of @sec-placement-resource-contention arrives within nanoseconds ($10^{-9}\,\text{s}$) of an accelerator current step, thermal coupling accumulates over seconds ($10^1\,\text{s}$) as heat diffuses through silicon, package substrate, and chassis heatsinks. Consequently, temperature-correlated delays direct investigation toward clock governance, while voltage-correlated delays direct it toward the supply path; correlation alone does not identify the cause. This behavior exposes a multi-tiered physical timescale hierarchy spanning many orders of magnitude across the machine:
 
 1. **$10^{-9}\,\text{s}$ (Nanoseconds)**: Simultaneous tensor core switching generates $L \cdot dI/dt$ inductive rail collapse, stretching CMOS gate delays under the $\alpha$-power law within individual clock cycles.
 2. **$10^{-6}\,\text{s}$ (Microseconds)**: AXI4 crossbar arbitration, head-of-line FIFO queueing, and DRAM row-buffer precharge and activation delays ($t_{\text{RP}} + t_{\text{RCD}}$) stall memory reads.
-3. **$10^{-3}\,\text{s}$ (Milliseconds)**: Hard real-time sensor ingestion, CBF-QP invariant evaluation, and EtherCAT fieldbus frame transmission execute cyclically.
-4. **$10^0\text{--}10^1\,\text{s}$ (Seconds)**: Macroscopic silicon die and package heatsink thermal capacitance stores dissipated energy, enforcing long-duration governor throttling hysteresis ($t_{\text{recov}} = 2.18\,\text{s}$) that degrades thousands of control ticks.
-5. **$10^2\text{--}10^3\,\text{s}$ (Minutes)**: Chassis structural thermal mass and battery pack internal Joule heating ($I_{\text{batt}}^2 R_{\text{batt}}$) accumulate heat, shifting bay ambient temperature $T_{\text{ambient}}$ upward and steadily eroding cooling headroom over multi-hour shifts.
+3. **$10^{-4}\text{--}10^{-3}\,\text{s}$ (Sub-milliseconds to milliseconds)**: Sensor ingestion and CBF-QP invariant evaluation run inside the permission tick, and the EtherCAT cycle repeats every millisecond, although one frame for the machine's axes occupies the wire for only tens of microseconds.
+4. **$10^0\text{--}10^1\,\text{s}$ (Seconds)**: Macroscopic silicon die and package heatsink thermal capacitance stores dissipated energy, enforcing governor throttling hysteresis (at least `{python} RejectedPlacementThrottle.t_recov_str` in the example) that degrades thousands of control ticks.
+5. **$10^2\text{--}10^4\,\text{s}$ (Minutes to hours)**: Chassis thermal mass and battery Joule heating accumulate heat, shifting bay ambient temperature $T_{\text{ambient}}$ upward and eroding cooling headroom across a multi-hour shift.
 
 Because thermal mass and heat dissipation operate across seconds and hours, dynamic software thermal management (DTM) or reactive thread migration cannot be assumed to restore a co-located permission loop before its next deadline. The permission path needs a clock and supply whose bounds survive both effects. A shared-die implementation must establish those bounds for its actual domains; when it cannot, relocation to an independently supplied and timed controller removes the offending shared dependencies.
 
@@ -639,8 +812,8 @@ The shared-die contention and thermal examples motivate four remedies, each pric
 
 | Remediation Strategy     | Target Coupling Layer                                            | Implementation Mechanism                                                                         | Systems Engineering Trade-Off                                                                    | Residual Vulnerability                                                                      | Physical Silicon Migration Trigger                                                                   |
 |:-------------------------|:-----------------------------------------------------------------|:-------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
-| **Static Reservation**   | CPU execution time, OS scheduling preemption                     | Fixed-priority preemptive scheduling (`SCHED_FIFO`), static time-slot slicing (ARINC 653)        | Capacity withheld from other work, including during quiescent states                             | Micro-architectural contention beneath OS visibility (shared L3, DRAM bank conflicts)       | Memory bus or cache stalls violate real-time deadlines despite $100\%$ CPU core allocation           |
-| **Spatial Partitioning** | Cache capacity thrashing, DRAM bus contention                    | Cache way-partitioning (ARM MPAM, Intel CAT), MPU/IOMMU domains, AXI QoS rate limiters           | Structural fragmentation; smaller perception working set may increase off-chip traffic           | Unpartitionable DRAM controller queues, row-buffer locality reordering, PDN voltage droop   | Measured rail disturbances violate characterized limits, or DRAM queue stalls exceed the bound       |
+| **Static Reservation**   | CPU execution time, OS scheduling preemption                     | Fixed-priority scheduling, ARINC 653 time slots, per-core memory-bandwidth regulation (MemGuard) | Capacity withheld from other work, including during quiescent states                             | Micro-architectural contention beneath OS visibility (shared L3, DRAM bank conflicts)       | Memory bus or cache stalls violate real-time deadlines despite $100\%$ CPU core allocation           |
+| **Spatial Partitioning** | Cache capacity thrashing, DRAM bus contention                    | Cache coloring or way partitioning, DRAM bank partitioning (PALLOC), Arm MPAM, MPU/IOMMU domains | Structural fragmentation; smaller perception working set may increase off-chip traffic           | Unpartitionable DRAM controller queues, row-buffer locality reordering, PDN voltage droop   | Measured rail disturbances violate characterized limits, or DRAM queue stalls exceed the bound       |
 | **Workload Reduction**   | Memory throughput saturation, peak thermal power                 | Model quantization (INT8/FP8), context downsampling, halved policy rate                          | Degraded policy tracking fidelity; increased control phase lag near dynamic stability boundaries | Common clock distribution trees, shared Power Management Units (PMU), unified reset domains | Model accuracy drops below operational limits, or shared clock/reset faults propagate across domains |
 | **Physical Relocation**  | Shared power, clock, reset, or unbounded controller interference | Separate enforcer MCU with independently assessed power, clock, memory, and sensor/actuator path | More board area and an external communication budget                                             | Harness, transceiver, and common-supply faults remain                                       | Choose when the shared die cannot provide evidence for required timing and fault containment         |
 
@@ -650,19 +823,126 @@ The shared-die contention and thermal examples motivate four remedies, each pric
 
 The identified coupling selects the remedy; loaded tests must then challenge that choice. A queueing failure calls for a bound on service, a capacity conflict calls for separation of working sets, and a supply or clock failure calls for a fault domain that survives the disturbance. Reducing proposal demand can recover useful operating margin, but only a bound on the remaining interference supports the permission claim.
 
-With **static reservation**\index{Static reservation}, the placement stays fixed while the critical path receives dedicated CPU time or bus slots. A processor scheduling reservation does not bound the memory wait; the interconnect needs its own service guarantee, such as periodic TDMA slots with fixed beat quotas. The cost is capacity withheld from the proposer when the permission path has nothing to transfer. On the mobile manipulator, reserving crossbar service for sporadic $4\,\text{KiB}$ sensor reads can reduce chunk-policy throughput even while the base is stationary.
+With **static reservation**\index{Static reservation}, the placement stays fixed while the critical path receives dedicated CPU time or bus slots. A processor scheduling reservation does not bound the memory wait; the interconnect needs its own service guarantee, such as periodic TDMA slots with fixed beat quotas. Where the hardware offers no such slots, software can impose one. **Memory-bandwidth regulation**\index{Memory bandwidth regulation!MemGuard} gives each core a budget of memory accesses per regulation period, counts them with the core's performance counters, and stalls the core once its budget is spent until the next period begins [@yun2013memguard]. Because the budget caps how much traffic any aggressor can place ahead of a critical request, it turns the unbounded multiplier $S$ of @sec-placement-interference-mechanisms into a bounded one; regulating only reads is not enough, and the defense against writeback-buffer attacks extends the budget to the writebacks a core causes [@bechtel2019denial]. The predictable execution model goes further on the critical side, splitting each task into a memory phase that loads its working set into local memory and a compute phase that touches nothing shared [@pellizzoni2011predictable], which is the shape the boundary contract of @sec-placement-boundary-contract already gives the enforcer: one bounded read, then local work. The cost is capacity withheld from the proposer when the permission path has nothing to transfer. On the mobile manipulator, reserving memory service for sporadic $4\,\text{KiB}$ sensor reads throttles chunk-policy weight streaming even while the base is stationary.
 
-When interference comes from competing working sets, **spatial partitioning**\index{Spatial partitioning} assigns separate cache capacity or memory channels.[^fn-std-iso-placement] For example, splitting an eight-megabyte cache into six megabytes for the policy and two for permission tables prevents cross-boundary evictions, but the smaller policy partition can increase off-chip traffic. Cache-way controls such as MPAM do not by themselves separate the DRAM controller's queues or row buffers. Shared channels retain row conflicts ($t_{\text{RP}} + t_{\text{RCD}}$) and scheduling interference. Dedicated channels remove that sharing at the cost of memory bandwidth the proposer can no longer use.
+When interference comes from competing working sets, **spatial partitioning**\index{Spatial partitioning} assigns separate cache capacity or memory channels.[^fn-std-iso-placement] For example, splitting an eight-megabyte cache into six megabytes for the policy and two for permission tables prevents cross-boundary evictions, but the smaller policy partition can increase off-chip traffic. The operating system can do this without hardware support through **cache coloring**\index{Cache coloring}: physical pages whose addresses map to disjoint cache sets are handed to different partitions [@mancuso2013realtime], and the same idea applied to the address bits that select DRAM banks gives each partition private banks, removing the row conflicts of @eq-placement-dram-queuing between them [@yun2014palloc]. Arm's Memory System Resource Partitioning and Monitoring (MPAM) extension puts both controls in hardware, with cache-portion bitmaps on the shared caches and maximum-bandwidth limits at or beyond the last-level cache [@linux2026mpam]. None of these separates the MSHRs and writeback buffer that @sec-placement-interference-mechanisms identified, so partitioning must be paired with regulation, and none removes the shared controller queue. Dedicated channels remove that sharing at the cost of memory bandwidth the proposer can no longer use.
 
-[^fn-std-iso-placement]: **Automotive Freedom From Interference**\index{Freedom from interference!ISO 26262}\index{Automotive safety!FFI}: ISO 26262 Part 9 formalizes Freedom From Interference (FFI) as the absence of cascading faults between software elements with different safety integrity levels. In heterogeneous robotics SoCs, achieving FFI requires hardware-enforced spatial partitioning (memory protection units, IOMMU page tables) and temporal partitioning (fixed-priority bus arbitration, TDMA interconnects) to prevent unprivileged perception models from degrading safety-critical enforcement tasks.
+A **static-partitioning hypervisor**\index{Hypervisor!static partitioning} packages these mechanisms for one SoC: it assigns cores, memory, and devices to partitions once at boot, runs no scheduler of its own, and in designs such as Bao applies cache coloring to each partition [@martins2020bao]. It is the usual way to host a safety partition beside Linux on a shared die, candidate (b) with regulation and coloring added. The scheduling theory behind "the proposer may overrun, the enforcer may not" is **mixed-criticality scheduling**\index{Mixed-criticality scheduling}, which gives each task one execution budget per assurance level and guarantees only the high-criticality budgets when a low-criticality task overruns [@vestal2007preemptive; @burns2017survey]. On this machine the enforcer is the high-criticality task and the proposer the low-criticality one, and the lease already implements the degraded mode: a proposer that overruns loses renewal, not the permission tick.
+
+[^fn-std-iso-placement]: **Automotive Freedom From Interference**\index{Freedom from interference!ISO 26262}\index{Automotive safety!FFI}: ISO 26262 defines Freedom From Interference (FFI) in its vocabulary, Part 1, as the absence of cascading failures between two or more elements that could lead to the violation of a safety requirement [@iso26262]. Part 6 classifies the software interference to consider (timing and execution, memory, and exchange of information), and Part 9 sets the criteria for coexisting elements of different integrity levels and the analysis of dependent failures. The standard mandates no particular mechanism. In heterogeneous robotics SoCs, hardware spatial partitioning (memory protection units, IOMMU page tables) and temporal partitioning (fixed-priority bus arbitration, TDMA interconnects) are common ways to keep unprivileged perception models from degrading safety-critical enforcement tasks.
 
 If the proposal task can tolerate less capacity, **workload reduction**\index{Workload reduction} lowers its memory and thermal demand through quantization, fewer intermediate transfers, less logging, or a slower policy rate. The cost falls on useful behavior. On the mobile manipulator, a chunk period longer than the `{python} PlacementMachine.lease_str` lease lets proposals expire between renewals, requiring successful admissions strictly above `{python} PlacementMachine.min_chunk_rate_str` even before allowing renewal jitter. Producer throughput alone does not establish that condition. Quantization also requires renewed validation of manipulation accuracy. Reduced average demand alone does not bound the activation current step ($\Delta I$) or inductive droop ($L \cdot dI/dt$); those remain separate qualification obligations.
 
 When on-chip controls cannot bound the offending shared dependency, **physical relocation**\index{Physical relocation!silicon segregation} moves the permission path to a controller with its own memory, clock, reset, and qualified supply. Dedicated tightly coupled memory removes shared DRAM arbitration; an isolated, held-up rail addresses host-side power loss. Common supplies, board transport, and the controller's own operating limits still require qualification, so relocation exchanges interference obligations for communication and board-level fault obligations.
 
-Relocating the permission path to separate silicon shifts the engineering cost from on-chip microarchitectural contention to board-level interconnect latency and physical wiring. The drive command bus delay ($T_{\text{bus}}$) remains unchanged because motor drives connect via the EtherCAT fieldbus regardless of compute placement. What relocation adds is proposal transmission across the board-level link—such as high-speed Serial Peripheral Interface (SPI) with DMA, an isolated PCIe Non-Transparent Bridge (NTB), or differential fieldbuses—from the application processor to the safety microcontroller. For example, streaming a $4\,\text{KiB}$ action chunk across a $25\,\text{MHz}$ SPI link requires approximately $1.3\,\text{ms}$ of raw serialization time ($t_{\text{link}}$), before protocol and scheduling overhead. This board-level transport does not delay a local check that already has valid evidence, but it ages the evidence used by a newly admitted proposal. Dispatch-to-admission time must therefore be charged separately to that proposal's physical budget. Variation in proposal transport and admission also consumes the `{python} PlacementMachine.renewal_jitter_str` renewal-jitter allowance that the lease rule (@sec-nervous-coupled-budget) reserves between the `{python} PlacementMachine.chunk_period_str` chunk period and the `{python} PlacementMachine.lease_str` lease. Host memory contention draws on that allowance as well. The illustrative `{python} PlacementMachine.contention_stretch_pct_str` percent inference stretch uses the whole allowance and leaves none for other variable delay; it is not an independently available margin for every stage. Renewal must be measured between successful admissions, rather than inferred from the producer rate (@sec-nervous-coupled-budget).
+Relocating the permission path to separate silicon shifts the engineering cost from on-chip microarchitectural contention to board-level interconnect latency and physical wiring. The drive command bus delay ($T_{\text{bus}}$) remains unchanged because motor drives connect via the EtherCAT fieldbus regardless of compute placement. What relocation adds is proposal transmission across the board-level link—such as high-speed Serial Peripheral Interface (SPI) with DMA, an isolated PCIe Non-Transparent Bridge (NTB), or differential fieldbuses—from the application processor to the safety microcontroller. This board-level transport does not delay a local check that already has valid evidence, but it ages the evidence used by a newly admitted proposal, so it is charged to the dispatch-to-admission interval that the next subsection budgets. Variation in proposal transport and admission also consumes the `{python} PlacementMachine.renewal_jitter_str` renewal-jitter allowance that the lease rule (@sec-nervous-coupled-budget) reserves between the `{python} PlacementMachine.chunk_period_str` chunk period and the `{python} PlacementMachine.lease_str` lease. Host memory contention draws on that allowance as well. The illustrative `{python} PlacementMachine.contention_stretch_pct_str` percent inference stretch uses the whole allowance and leaves none for other variable delay; it is not an independently available margin for every stage. Renewal must be measured between successful admissions, rather than inferred from the producer rate (@sec-nervous-coupled-budget).
 
 Physical relocation also dictates sensor attachment topology. The machine connects joint encoders and the IMU directly to the safety microcontroller's dedicated peripheral interfaces (such as quadrature encoder pulse, QEP, counters and synchronous SPI channels), removing host-side arbitration from their sampling path; actual sampling latency and jitter still require qualification. Conversely, high-bandwidth cameras feed the application processor through the selected camera interfaces, such as MIPI CSI-2; lidar uses its own device-specific interface. These streams support host perception without traversing the microcontroller's local buses. Every silicon placement decision thus propagates across physical interconnects, trading on-die memory controller arbitration bottlenecks for board-level pin counts, trace routing, and serial bus protocols.
+
+### The discrete placement's transport budget and the dispatch-to-admission interval
+
+Every worked number so far has been charged to placements the machine rejects. The placement it uses has a budget of its own, and one interval in it has been left open since @sec-perception: the time from the moment perception dispatches an observation to the moment the permission path admits the chunk built on it. Call it the **dispatch-to-admission interval**\index{Dispatch-to-admission interval!budget} $\Delta_{\text{da}}$. It includes whatever proposer inference remains after dispatch, serialization across the board link, receipt and deserialization on the microcontroller, whole-plan validation, activation, and the wait for the next permission tick. Because the stopping ledger of @sec-enforcement-composite-budget starts from the observation's capture, every millisecond of $\Delta_{\text{da}}$ is travel the machine makes on evidence that is already that much older, and the ledger's displayed spare must pay for it.
+
+```{python}
+#| label: calc-placement-transport-budget
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE DISCRETE PLACEMENT'S DISPATCH-TO-ADMISSION BUDGET
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-placement-isolation-decisions, @sec-placement-summary
+# │          (Ch8, Ch12, and Ch14 name Delta_da; this cell allocates it)
+# │
+# │ Goal: Allocate Delta_da for the selected placement and compare it with the
+# │       largest value the finished stopping budget can pay for.
+# │ Show: SPI serialization of a 4 KiB chunk at 25 MHz = 1.31 ms; allocation
+# │       40 (inference, conservative) + 1.31 (link) + 2 (deserialize) + 18
+# │       (validate) + 1 (activate) + 1 (tick wait) = 63.31 ms; ceiling =
+# │       spare / v = 131.01 mm / 1.3 m/s = 100.78 ms; reserve 37.47 ms =
+# │       48.7 mm. Doubling the chunk or halving the link adds 1.31 ms; a
+# │       second inference's worth of delay (103.31 ms) exhausts the spare.
+# │ How: S-curve budget as in calc-placement-separation-budget; inference from
+# │      the registry; deserialization, validation, and activation are the
+# │      illustrative allowances of @sec-planning-horizon-tradeoff; chunk size
+# │      and link clock are scenario inputs.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import Q_, ureg, millisecond, millimeter, meter, second
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
+from mlsysim.fmt import fmt, fmt_int, fmt_latency, fmt_length, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class PlacementTransport:
+    # ┌── 1. LOAD ───────────────────────────────────────────────────────────
+    chunk_bytes = 4 * 1024  # category: illustrative (serialized chunk with header and evidence epoch)
+    link_clock = 25 * ureg.megahertz  # category: illustrative (SPI clock; one bit per clock)
+    t_infer = RM.chunk_inference_latency  # category: illustrative (registry P99 incl. vision; conservative upper allocation after dispatch)
+    t_deser = 2 * millisecond  # category: illustrative (allowance of @sec-planning-horizon-tradeoff)
+    t_validate = 18 * millisecond  # category: illustrative (whole-plan validation allowance of @sec-planning-horizon-tradeoff)
+    t_activate = 1 * millisecond  # category: illustrative (activation allowance of @sec-planning-horizon-tradeoff)
+    tick = AISLE.t_tick  # category: chosen (wait for the next permission tick)
+    v_aisle = AISLE.v_aisle  # category: chosen
+    tau_delay = AISLE.tau_delay  # category: derived
+    a_brake = AISLE.a_brake  # category: illustrative
+    v_drive = RM.base.max_velocity  # category: illustrative (drive limit that sets the jerk bound)
+    overhead = AISLE.fixed_overhead  # category: illustrative + chosen
+    d_clear = AISLE.d_clear  # category: illustrative
+
+    # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
+    t_link = (chunk_bytes * 8 / link_clock).to(millisecond)
+    delta_da = (t_infer + t_link + t_deser + t_validate + t_activate + tick).to(millisecond)
+    j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"].to(meter / second**3)
+    budget = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_brake, j_brake) + overhead).to(millimeter)
+    spare = (d_clear - budget).to(millimeter)
+    t_ceiling = (spare / v_aisle).to(millisecond)
+    reserve_t = (t_ceiling - delta_da).to(millisecond)
+    reserve_d = (v_aisle * reserve_t).to(millimeter)
+    travel_da = (v_aisle * delta_da).to(millimeter)
+    delta_da_slow = (delta_da + t_infer).to(millisecond)
+
+    # ┌── 3. GUARD ──────────────────────────────────────────────────────────
+    check(abs(t_link.magnitude - 1.31072) < 1e-9, "4 KiB x 8 bits at 25 MHz is 1.31 ms.")
+    check(abs(delta_da.magnitude - 63.31072) < 1e-6, "Allocation 40 + 1.31 + 2 + 18 + 1 + 1 = 63.31 ms.")
+    check(abs(spare.magnitude - 131.0075) < 5e-3, "Canon: spare at 1.3 m/s is 131.01 mm.")
+    check(abs(t_ceiling.magnitude - 100.77) < 0.01, "Spare / v = 100.8 ms, the budget's unallocated allowance.")
+    check(delta_da < t_ceiling and delta_da_slow > t_ceiling, "The allocation fits; one more inference's worth of delay does not.")
+    check(t_link < 0.05 * delta_da, "The link is a small share of the interval; inference and validation dominate.")
+
+    # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
+    chunk_bytes_str = fmt_int(chunk_bytes)
+    link_clock_str = fmt(link_clock.to(ureg.megahertz).magnitude, precision=0)
+    t_link_str = fmt_latency(t_link, unit=millisecond, precision=2)
+    t_infer_str = fmt_latency(t_infer, unit=millisecond, precision=0)
+    t_deser_str = fmt_latency(t_deser, unit=millisecond, precision=0)
+    t_validate_str = fmt_latency(t_validate, unit=millisecond, precision=0)
+    t_activate_str = fmt_latency(t_activate, unit=millisecond, precision=0)
+    tick_str = fmt_latency(tick, unit=millisecond, precision=0)
+    delta_da_str = fmt_latency(delta_da, unit=millisecond, precision=1)
+    spare_str = fmt_length(spare, unit=millimeter, precision=1)
+    v_aisle_str = fmt(v_aisle.to(meter / second).magnitude, precision=1)
+    t_ceiling_str = fmt_latency(t_ceiling, unit=millisecond, precision=1)
+    reserve_t_str = fmt_latency(reserve_t, unit=millisecond, precision=1)
+    reserve_d_str = fmt_length(reserve_d, unit=millimeter, precision=1)
+    travel_da_str = fmt_length(travel_da, unit=millimeter, precision=1)
+    delta_da_slow_str = fmt_latency(delta_da_slow, unit=millisecond, precision=1)
+```
+
+::: {#nbk-placement-transport-budget .callout-notebook title="Dispatch-to-admission budget of the discrete placement"}
+
+**Problem**: The machine's permission path runs on a discrete microcontroller that receives each chunk over a board link. How long may the interval from perception dispatch to admission last before the finished stopping budget has nothing left at the aisle speed?
+
+**Variables**: The chunk policy's P99 inference takes `{python} PlacementTransport.t_infer_str`; charging all of it after dispatch is conservative, because its vision stage already lies in the dispatch age of @sec-perception. The serialized chunk is `{python} PlacementTransport.chunk_bytes_str` bytes on a `{python} PlacementTransport.link_clock_str` MHz SPI link. Deserialization, whole-plan validation, and activation take the illustrative `{python} PlacementTransport.t_deser_str`, `{python} PlacementTransport.t_validate_str`, and `{python} PlacementTransport.t_activate_str` of @sec-planning-horizon-tradeoff, and admission may wait up to one `{python} PlacementTransport.tick_str` permission tick. At `{python} PlacementTransport.v_aisle_str` m/s the finished budget leaves `{python} PlacementTransport.spare_str` of spare.
+
+**Math**: Serialization takes $8B/f_{\text{link}} =$ `{python} PlacementTransport.t_link_str`. The allocation totals $\Delta_{\text{da}} =$ `{python} PlacementTransport.delta_da_str`, which the base covers as `{python} PlacementTransport.travel_da_str` of travel. The spare pays for at most $\Delta_{\text{da,max}} = d_{\text{spare}}/v =$ `{python} PlacementTransport.t_ceiling_str`, so the allocation leaves `{python} PlacementTransport.reserve_t_str`, or `{python} PlacementTransport.reserve_d_str` of positive reserve. Doubling the chunk or halving the link clock adds only another `{python} PlacementTransport.t_link_str`; adding one more inference's worth of delay, `{python} PlacementTransport.delta_da_slow_str` in all, exhausts the spare.
+
+**Systems insight**: The board link that buys the discrete placement its separation costs about a millisecond, a small share of $\Delta_{\text{da}}$; proposer inference and whole-plan validation dominate it. The placement decision therefore does not threaten the stopping budget, while a slower policy or a heavier admission check could. The allocation is a budget to qualify, not a measurement: the fixed part of $\Delta_{\text{da}}$ ages evidence and is charged here, while its variation between renewals draws on the `{python} PlacementMachine.renewal_jitter_str` renewal-jitter allowance, which host contention alone already fills.
+
+:::
+
+The allocation also answers the question that the embedded pathway asks first: what interferes with the enforcer on the microcontroller itself? The link's receive DMA and its completion interrupt, the fieldbus master that sends the drive frame, the interruptible whole-plan validation above, and the ingestion of each evidence snapshot all claim the microcontroller's bus, interrupt controller, and memory. Each needs a stated bound, whether an interrupt priority below the tick, a dedicated DMA channel, or a separate tightly coupled memory bank, and the loaded campaign of @sec-placement-testing-separation must saturate the link and run maximum-size validation while the refusal branch executes. A response-time analysis of the tick with those claimants as higher-priority or blocking terms is the static counterpart of that test (@sec-appendix-systems-timers).
 
 The remedies establish which resources must be reserved or separated. Choosing the remaining proposal hardware also requires accounting for the chassis power envelope, off-board communication, and the way the model uses memory. These constraints narrow the candidates before mission energy distinguishes among feasible placements.
 
@@ -698,17 +978,20 @@ An independence claim, on any placement, is a testable bound on enforcement late
 # │
 # │ Goal: Tie the placement test to the machine's finished stopping budget and
 # │       show that the bound, not the distance, is what placement protects.
-# │ Show: WCET 250 µs < deadline 400 µs < tick 1 ms; budget 997.4 mm at 1.3 m/s
-# │       with 102.6 mm before dispatch-to-admission travel; one missed tick 1.3 mm; renewal-to-onset 82 ms;
+# │ Show: WCET 250 µs < deadline 400 µs < tick 1 ms; budget 969.0 mm at 1.3 m/s
+# │       with 131.0 mm before dispatch-to-admission travel; one missed tick 1.3 mm; renewal-to-onset 82 ms;
 # │       an illustrative 10^7-tick trace that refutes the rejected placement.
-# │ How: calc_safe_stopping_distance with a_eff = a_brake / 1.5 (the C² stop)
-# │      and the aisle scenario's overheads; trace percentiles are illustrative.
+# │ How: v tau + the jerk-limited S-curve stop (calc_scurve_stop_distance; jerk
+# │      bound = the reference C2 polynomial's peak jerk at the drive limit, as in
+# │      @sec-planning-c2-stopping-suffix) + the aisle scenario's overheads;
+# │      trace percentiles are illustrative.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import microsecond, millisecond, millimeter, meter, second
-from mlsysim.physics.robotics import calc_safe_stopping_distance
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt, fmt_int, fmt_latency, fmt_length, fmt_velocity, check
 
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
 class PlacementSeparationBudget:
@@ -719,6 +1002,7 @@ class PlacementSeparationBudget:
     v_aisle = AISLE.v_aisle  # category: chosen
     tau_delay = AISLE.tau_delay  # category: derived
     a_brake = AISLE.a_brake  # category: illustrative
+    v_drive = RM.base.max_velocity  # category: illustrative (drive limit, where the jerk bound is set)
     overhead = AISLE.fixed_overhead  # category: illustrative + chosen (delta_loc + delta_margin + eps_track)
     d_clear = AISLE.d_clear  # category: illustrative
     t_lease = AISLE.t_lease  # category: chosen
@@ -735,8 +1019,8 @@ class PlacementSeparationBudget:
     warm_max = 468 * microsecond  # category: illustrative
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    a_eff = a_brake / 1.5
-    budget = calc_safe_stopping_distance(v_aisle, tau_delay, a_eff, physical_margin=overhead).to(millimeter)
+    j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"].to(meter / second**3)
+    budget = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_brake, j_brake) + overhead).to(millimeter)
     spare = (d_clear - budget).to(millimeter)
     missed_tick = (v_aisle * tick).to(millimeter)
     renewal_to_onset = (t_lease + tick + t_bus + t_onset).to(millisecond)
@@ -747,8 +1031,9 @@ class PlacementSeparationBudget:
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(wcet < deadline < tick, "Declared WCET < deadline < tick.")
-    check(abs(budget.magnitude - 997.43) < 5e-3, "Canon: budget at 1.3 m/s is 997.43 mm.")
-    check(abs(spare.magnitude - 102.57) < 5e-3, "Canon: spare at 1.3 m/s is 102.57 mm.")
+    check(abs(j_brake.magnitude - 64.0 / 9.0) < 1e-9, "Canon: jerk bound is the reference polynomial's 7.11 m/s^3 peak.")
+    check(abs(budget.magnitude - 968.9925) < 5e-3, "Canon: budget at 1.3 m/s is 968.99 mm.")
+    check(abs(spare.magnitude - 131.0075) < 5e-3, "Canon: spare at 1.3 m/s is 131.01 mm.")
     check(abs(missed_tick.magnitude - 1.3) < 1e-9, "Canon: one missed tick costs 1.3 mm at 1.3 m/s.")
     check(abs(renewal_to_onset.magnitude - 82.0) < 1e-9, "Canon: renewal-to-onset bound is 82 ms.")
     check((trace_h, trace_min, trace_sec) == (2, 46, 40), "10^7 ticks at 1 ms span 2 h 46 min 40 s.")
@@ -782,33 +1067,49 @@ class PlacementSeparationBudget:
 
 The pass threshold for this experiment comes from the claim under test. The machine's permission path declares a worst-case execution time $C_{\text{wcet}} =$ `{python} PlacementSeparationBudget.wcet_str` and must finish each tick inside its chosen deadline $D_{\text{enf}} =$ `{python} PlacementSeparationBudget.deadline_str`, which sits inside the tick $T_{\text{tick}} =$ `{python} PlacementSeparationBudget.tick_str`. Every measured enforcement time $t_{\text{enf}}$ must respect that chain, as @eq-placement-falsification-threshold states:
 $$t_{\text{enf}} \le C_{\text{wcet}} < D_{\text{enf}} < T_{\text{tick}}$$ {#eq-placement-falsification-threshold}
-The declared bound $C_{\text{wcet}}$ is the **falsification threshold**\index{Falsification threshold!definition}. If any enforcement cycle under test exceeds it, the declared execution bound is refuted, even when the cycle still meets the deadline, because every margin above the enforcer, from its deadline to the tick that the stopping budget counts, was sized on the declared number. A measured maximum can refute the declared bound but cannot establish it, because a campaign samples only the states it reaches, and on speculative cores timing anomalies can place the true worst case above every cycle recorded.[^fn-math-wcet-anomalies]
+The declared bound $C_{\text{wcet}}$ is the **falsification threshold**\index{Falsification threshold!definition}. If any enforcement cycle under test exceeds it, the declared execution bound is refuted, even when the cycle still meets the deadline, because every margin above the enforcer, from its deadline to the tick that the stopping budget counts, was sized on the declared number. A measured maximum can refute the declared bound but cannot establish it, because a campaign samples only the states it reaches, and timing anomalies can place the true worst case above every cycle recorded.[^fn-math-wcet-anomalies]
 
-[^fn-math-wcet-anomalies]: **Microarchitectural Timing Anomalies**\index{Timing anomalies!worst-case execution time}\index{Worst-case execution time!timing anomalies}: In out-of-order and speculative processing architectures, a local performance improvement, such as a cache hit or accelerated branch evaluation, can alter instruction scheduling and resource contention, resulting in a net increase in global execution time. This counterintuitive behavior invalidates simple compositional worst-case execution time analysis. Safety verification needs a justified bound for the declared workload, arbitration, temperature, and fault conditions; measurements alone and a non-speculative core alone do not establish a hard end-to-end bound.
+[^fn-math-wcet-anomalies]: **Microarchitectural Timing Anomalies**\index{Timing anomalies!worst-case execution time}\index{Worst-case execution time!timing anomalies}: A local speedup, such as a cache hit where a miss was expected, can reorder later resource use and lengthen the whole execution [@lundqvist1999timing]. The effect was first shown on dynamically scheduled processors, but in-order pipelines with caches or shared resources can exhibit it too [@wilhelm2008worst], so assuming the local worst case at every step does not always yield the global worst case. Measurements alone and an in-order core alone therefore do not establish a hard bound.
 
 Even an overrun of $10\,\mu\text{s}$ invalidates the declared timing premise. It need not cause a collision on that tick; it requires revisiting every stopping or renewal margin that relied on the violated bound before continuing to claim that guarantee.
 
 ::: {#dfn-placement-worst-case-execution-time .callout-definition title="Worst-case execution time"}
 
-***Worst-case execution time***\index{Worst-case execution time!definition}\index{WCET!definition} is the formal upper bound on the physical wall-clock duration required for a computational task to execute to completion on a target hardware platform under all admissible inputs, architectural contention states, and operating conditions:
-$$t_{\text{exec}} \le t_{\text{WCET}} \le t_{\text{deadline}}$$
+***Worst-case execution time***\index{Worst-case execution time!definition}\index{WCET!definition} is the longest time a task can take to execute to completion on a given hardware platform, over all admissible inputs, initial hardware states, and interference from the declared co-runners. It is a property of the task and platform that is usually unknown; analysis produces a **safe bound** $\widehat{C}$ that must not lie below it:
+$$t_{\text{exec}} \le \text{WCET} \le \widehat{C}$$
 
-1.  **Significance**: In cyber-physical control loops, correctness depends not only on the numerical validity of the output but also on the instant of its delivery; an optimal control command delivered after the hard physical deadline violates the timing claim, even when an independent fallback contains the resulting hazard.
-2.  **Distinction**: Unlike average execution time ($\bar{t}$) or high percentiles ($P_{99}$), which characterize throughput in soft real-time software, WCET is an absolute deterministic bound that must hold under concurrent memory-bus saturation, cache thrashing, and peripheral interrupt storms.
-3.  **Common pitfall**: Relying on empirical execution profiling or benchmark averages to establish WCET on modern superscalar or out-of-order processors. Microarchitectural timing anomalies (where a local cache hit or branch prediction success paradoxically increases total execution time) mean empirical testing alone cannot prove the true global upper bound without formal static analysis and hardware contention bounds.
+1.  **Significance**: A control command delivered late violates its timing claim even when its value is correct, and every margin sized on the bound fails with it. Whether the bound meets a deadline is a separate schedulability question.
+2.  **Distinction**: Unlike average execution time ($\bar{t}$) or a high percentile ($P_{99}$), which describe typical behavior, the WCET covers every admissible state, including concurrent memory saturation, cache thrashing, and interrupt storms. A declared budget such as $C_{\text{wcet}}$ is a third quantity: a number the design commits to, which evidence must show is at least $\widehat{C}$.
+3.  **Common pitfall**: Treating the largest measured time as the WCET. A measured maximum lies below the WCET by an unknown amount, and each analysis method bounds that gap only under its own premises [@wilhelm2008worst].
 
 :::
 
-The distance at stake in one tick is small, which makes the bound easy to undervalue. The numerical comparison retains the partial budget before the unresolved dispatch-to-admission interval is added; it does not establish a qualified operating speed. Under its stated premises, the partial budget in @tbl-enforcement-stopping-budget requires `{python} PlacementSeparationBudget.budget_str` at the `{python} PlacementSeparationBudget.v_aisle_str` aisle speed, `{python} PlacementSeparationBudget.spare_str` inside the `{python} PlacementSeparationBudget.d_clear_str` clear distance, and one missed tick adds only $v\,T_{\text{tick}} =$ `{python} PlacementSeparationBudget.missed_tick_str`. The displayed spare must still absorb travel during dispatch-to-admission time and any required reserve. Placement must qualify that interval independently of the per-tick bound. Within the local response, the ledger counts one $T_{\text{tick}}$; contention without a bound can instead create a stall of unknown length.
+The distance at stake in one tick is small, which makes the bound easy to undervalue. The numerical comparison retains the partial budget before the dispatch-to-admission interval is charged; it does not establish a qualified operating speed. Under its stated premises, the partial budget in @tbl-enforcement-stopping-budget requires `{python} PlacementSeparationBudget.budget_str` at the `{python} PlacementSeparationBudget.v_aisle_str` aisle speed, `{python} PlacementSeparationBudget.spare_str` inside the `{python} PlacementSeparationBudget.d_clear_str` clear distance, and one missed tick adds only $v\,T_{\text{tick}} =$ `{python} PlacementSeparationBudget.missed_tick_str`. The displayed spare must still absorb travel during the `{python} PlacementTransport.delta_da_str` allocated to $\Delta_{\text{da}}$ in \ref{nbk-placement-transport-budget}, leaving `{python} PlacementTransport.reserve_d_str` of reserve, and placement must qualify that allocation independently of the per-tick bound. Within the local response, the ledger counts one $T_{\text{tick}}$; contention without a bound can instead create a stall of unknown length.
+
+### Worst-case execution time analysis methods
+
+A declared bound is a promise, and the engineer who signs the placement record needs a method that supports it. Four families of method exist, and each earns its bound from a different premise [@wilhelm2008worst].
+
+*Static analysis* never runs the task. It reconstructs the control-flow graph from the binary, bounds every loop, models the pipeline and caches by abstract interpretation to classify each access as a guaranteed hit, a guaranteed miss, or unknown, and then finds the longest feasible path with an integer linear program. Its bound is safe if the hardware model is faithful. That premise holds for the machine's microcontroller, an in-order lockstep core executing from tightly coupled memory with no shared cache, which is the platform class these tools were built for. It fails on a commercial multicore whose cache, interconnect, and memory controller behavior is undocumented and shared, where the model would have to include every co-runner.
+
+*Measurement-based analysis* runs the task on the target under the heaviest load the engineer can construct and adds an engineering margin to the high-water mark. It needs no hardware model, which is its appeal on complex platforms, and it guarantees nothing about states the tests missed; the stress campaign below exists to make that set of missed states as small as possible.
+
+*Hybrid analysis* measures short program segments on the target and combines their times over the program's structure, as static analysis does. It inherits the measurement premise at the segment level and the structural premise across segments.
+
+*Probabilistic analysis* fits an extreme-value distribution to measured execution times and reports the time exceeded with a chosen small probability per run [@cucugrosjean2012measurement]. Its premise is that the measured runs represent the operating runs, which a platform with hidden state can violate; @sec-appendix-systems-timers develops the fit and its limits.
+
+On a multicore, none of these produces a single-core number that survives deployment. The execution time in isolation must be extended by an interference term for each shared resource, and response-time frameworks for multicores compose those terms from each resource's service bound and the co-runners' demands [@davis2018extensible]. That composition is finite only when regulation or partitioning bounds the demand, which is why @sec-placement-isolation-decisions treats MemGuard-style budgets as the thing that makes a shared die analyzable at all. Avionics certification reaches the same conclusion by regulation: FAA AC 20-193 requires the applicant to identify every interference channel, and where time interference is not mitigated, the WCET must be determined by analysis and confirmed by test on the target with all software running in its final configuration [@faa2024ac20193].
+
+For the machine, the method follows the placement. On the discrete microcontroller, a static bound on the enforcer is tractable, and the loaded campaign then tests only the claimants the microcontroller itself hosts. On any on-die candidate, the declared `{python} PlacementSeparationBudget.wcet_str` needs an isolation bound plus a bounded interference term for every shared row of @tbl-13-placement-candidates, and a campaign whose measurements can refute it.
 
 ### Adversarial stress testing and end-to-end brake onset timing
 
 Refuting an independence claim requires synthetic workloads engineered to induce correlated worst-case microarchitectural contention\index{Resource contention!worst-case} rather than standard benchmarks (such as MLPerf) that report average throughput. Standard ML inference pipelines schedule memory transactions to maximize pipeline overlap and average data bus utilization, which conceals transient contention peaks. On physical silicon, maximum interference occurs during synchronized bursts when multiple subsystems demand the exact same physical resources at the exact same clock edge. An adversarial stress suite must deliberately synthesize these worst-case collision patterns:
 
-1. **Targeted DRAM bank conflict generators**: The stress suite issues unaligned DMA transfers with memory strides engineered to target the exact same DRAM bank and bank group as the safety core's memory buffers. By continuously alternating row addresses across adjacent rows, the generator forces repeated row-buffer evictions, maximizing precharge ($t_{\text{RP}} \approx 14\,\text{ns}$) and activation ($t_{\text{RCD}} \approx 14\,\text{ns}$) penalties on every consecutive read.
-2. **Shared cache thrashing engines**: High-bandwidth memory streaming routines cycle through working sets substantially larger than the shared Last-Level Cache (LLC), evicting all cache ways and generating continuous dirty-line writebacks that saturate internal Network-on-Chip (NoC) crossbar buffers.
+1. **Targeted DRAM bank conflict generators**: The stress suite issues unaligned DMA transfers with memory strides engineered to target the exact same DRAM bank and bank group as the safety core's memory buffers. By continuously alternating row addresses across adjacent rows, the generator forces repeated row-buffer evictions, forcing a precharge and activation, `{python} PlacementDramTiming.t_conflict_str` ns at the application SoC's data rate, on every consecutive read.
+2. **Shared-cache miss-handling engines**: Streaming routines cycle through working sets larger than the shared last-level cache, keeping its miss status holding registers occupied and its writeback buffer full of dirty lines, the mechanisms that @sec-placement-interference-mechanisms identifies as the strongest threat to the declared bound.
 3. **Resonant PDN current-step generators**: Exercise achievable accelerator current transitions while sweeping their phase relative to the permission tick. Rail probes establish which transitions excite the actual package response; software cannot assume a particular switching frequency or worst-case droop.
-4. **Correlated peripheral interrupt storms and NVMe telemetry saturation**: MIPI CSI-2 camera deserializers and Non-Volatile Memory Express (NVMe) solid-state storage controllers stream uncompressed multi-gigabyte-per-second telemetry traces across shared PCIe Gen4 lanes, asserting un-coalesced interrupts to flood the Generic Interrupt Controller (GIC) and consuming write-buffer FIFO capacity.
+4. **Correlated peripheral interrupt storms and storage saturation**: The camera inputs and the storage controller stream telemetry at full rate while asserting uncoalesced interrupts, flooding the interrupt controller and consuming write-buffer capacity.
 5. **Chassis electromechanical transient coupling**: The campaign applies the selected machine's declared traction-current transients to its common DC bus, testing whether converter dropout or ground bounce couples into the permission supply or clock path. Current amplitude, slew rate, and bus voltage must come from that machine's operating envelope.
 
 Instrumentation records observation capture, coherent ingestion, permission completion, drive-frame dispatch, and frame arrival. Those events diagnose delay, but dispatch is not braking. For the normal powered stop, synchronized drive-current and independent motion measurements must witness the onset and subsequent profile of physical deceleration. The selected renewal-to-onset allowance is `{python} PlacementSeparationBudget.renewal_to_onset_str`, including the lease, one tick, one bus cycle, and the selected actuation-onset allowance. It remains a qualification target. Spring-brake contact is a separate event at standstill in this response and cannot witness the earlier powered-deceleration onset. Tests of MCU failure or drive-energy loss must instead identify the physical endpoint of their separately qualified fault response. Clock alignment and instrument uncertainty accompany every interval.
@@ -831,7 +1132,7 @@ The mobile manipulator now has a placement for its permission path, a deadline, 
 
 ### The placement record and external test ledger schema
 
-The **placement record**\index{Placement record!definition}\index{Deployment Envelope!contract record} formalizes the **Deployment Envelope** (the twelfth contract in the machine's contract lineage). It consumes the enforcement record of @sec-enforcement-telemetry, from which it takes the permission path's declared worst-case execution time and deadline, and adds the physical evidence that this timing bound holds under peak cognitive contention on target silicon: execution domain, privilege ring, nominal period, unloaded and loaded observed maxima, AXI interconnect arbitration settings, inductive droop limits, thermal trip thresholds, hardware mitigations, and a cryptographic digest of the external test ledger (@tbl-13-deployment-envelope-schema). A loaded maximum above the declared worst-case execution time refutes the claim. Maxima below it support only the tested conditions; as @sec-nervous-deterministic-fieldbuses argued for any observed latency distribution, a sample maximum is evidence about that bound and never replaces it.
+The **placement record**\index{Placement record!definition}, the eleventh record in the record chain, states where the permission path runs and the evidence that its timing holds there. It consumes the enforcement record of @sec-enforcement-telemetry, from which it takes the permission path's declared worst-case execution time and deadline, and adds the physical evidence that this timing bound holds under peak cognitive contention on target silicon: execution domain, privilege ring, nominal period, unloaded and loaded observed maxima, AXI interconnect arbitration settings, inductive droop limits, thermal trip thresholds, hardware mitigations, and a cryptographic digest of the external test ledger (@tbl-13-deployment-envelope-schema). A loaded maximum above the declared worst-case execution time refutes the claim. Maxima below it support only the tested conditions; as @sec-nervous-deterministic-fieldbuses argued for any observed latency distribution, a sample maximum is evidence about that bound and never replaces it.
 
 The record must connect configuration claims to hardware evidence. Register readback identifies the configured execution and arbitration domains, probes measure rail and thermal behavior, and digests bind the summary to the underlying traces:
 
@@ -854,7 +1155,7 @@ The record must connect configuration claims to hardware evidence. Register read
 | `enforcement_record_digest`  | `uint8_t[32]` (SHA-256)                      | Cryptographic link to upstream enforcement record                                  | SHA-256 digest of @tbl-appendix-systems-wire-enforcement                                                         |
 | `test_ledger_digest`         | `uint8_t[32]` (SHA-256)                      | Cryptographic link to full factorial stress campaign ledger                        | Unset until a test ledger exists                                                                                 |
 
-: **Deployment Envelope record schema (placement record header)**: Concrete fields defining the physical compute, memory, thermal, and electrical bounds for deterministic safety enforcement. Loaded observed maximum must remain at or below declared WCET ($C_{\text{wcet}} = 250\,\mu\text{s}$) under full cognitive stress. {#tbl-13-deployment-envelope-schema tbl-colwidths="[22,18,34,26]"}
+: **Placement record header**: Concrete fields defining the physical compute, memory, thermal, and electrical bounds for deterministic safety enforcement. Loaded observed maximum must remain at or below declared WCET ($C_{\text{wcet}} = 250\,\mu\text{s}$) under full cognitive stress. {#tbl-13-deployment-envelope-schema tbl-colwidths="[22,18,34,26]"}
 
 The record has two parts. A compact header holds the configuration values and the observed maxima, and it carries the digest of an external test ledger. The ledger holds what does not fit a fixed layout: inventories, the latency distributions and sample counts behind each maximum, test conditions, mitigations, and open limits.
 
@@ -1026,16 +1327,17 @@ The selected mobile manipulator places its learned proposer on application proce
 
 The evidence must cover the physical resources that the placement still shares. A loaded test supports a scoped claim about its workload, arbitration policy, supply, clock governance, and thermal conditions. Separate processor packages remove some coupling paths, but the board's common supply and communication links remain part of the argument.
 
-The placement record—formally emitting the machine's **Deployment Envelope** contract—carries that evidence forward. It takes the permission path's declared worst-case execution time and deadline from the enforcement record and adds the loaded observed maxima for the declared test conditions, the shared-resource queue and power headroom, the common power, clock, reset, and memory failure paths, and the conditions left untested. The machine's own record holds a `{python} PlacementMachine.unloaded_str` illustrative unloaded estimate against the declared `{python} PlacementMachine.wcet_str` worst case inside the `{python} PlacementMachine.deadline_str` deadline and still awaits a loaded ledger, which must name the arbitration policy, clocks, sample count, and physical endpoint before any release claim can rest on it.
+The placement record carries that evidence forward. It takes the permission path's declared worst-case execution time and deadline from the enforcement record and adds the loaded observed maxima for the declared test conditions, the shared-resource queue and power headroom, the common power, clock, reset, and memory failure paths, and the conditions left untested. The machine's own record holds a `{python} PlacementMachine.unloaded_str` illustrative unloaded estimate against the declared `{python} PlacementMachine.wcet_str` worst case inside the `{python} PlacementMachine.deadline_str` deadline and still awaits a loaded ledger, which must name the arbitration policy, clocks, sample count, and physical endpoint before any release claim can rest on it.
 
-The observation contract, belief record, intent lease, trajectory record, enforcement record, and placement record now describe one machine. Its timing must hold across the chain, including the memory, power, and communication paths between stages. Placement makes the execution premise of principle \ref{pri-vol4-proposal-permission} falsifiable through a threshold, a stress campaign, and a record of what remains untested. Part IV inherits the conditional stopping margin, the unsettled premise of the site crossing rule, and the placement record's empty loaded field.
+The observation contract, belief record, intent lease, trajectory record, enforcement record, and placement record now describe one machine. Its timing must hold across the chain, including the memory, power, and communication paths between stages. Placement makes the execution premise of principle \ref{pri-vol4-proposal-permission} falsifiable through a threshold, a stress campaign, and a record of what remains untested. Part IV inherits the conditional stopping margin, the unsettled premise of the site crossing rule, the placement record's empty loaded field, and a dispatch-to-admission interval $\Delta_{\text{da}}$ that this chapter has allocated at `{python} PlacementTransport.delta_da_str`, inside the `{python} PlacementTransport.t_ceiling_str` the spare can pay for, but not yet measured.
 
 ::: {.callout-takeaways title="Silicon placement and memory contention"}
 * **Logical separation is a hypothesis about hardware:** Privilege rings govern which addresses a task may touch, not where its requests wait, which rail feeds it, or which clock and reset tree it depends on. Loaded tests can refute the claim; justified bounds and fault evidence must support it.
-* **Averages cannot bound a deadline:** On the rejected shared die, one backlog of weight-tile, camera, and telemetry transactions stretches the permission path's snapshot read from `{python} PlacementLoadedRead.own_read_str` to `{python} PlacementLoadedRead.loaded_read_str` $\mu\text{s}$. More than `{python} PlacementLoadedRead.backlogs_wcet_str` such backlogs cross the declared worst-case execution time, which nothing in the average forbids. Transaction size, queue policy, and bypass behavior decide the wait, so the bound belongs to the memory controller.
+* **Averages cannot bound a deadline, and bandwidth is not the main threat:** On a shared die at full bandwidth, more than `{python} PlacementLoadedRead.backlogs_wcet_str` FIFO backlogs must precede the snapshot read before it crosses the declared worst-case execution time. Shared-cache miss handling is far stronger: measured slowdowns of `{python} PlacementInterference.s_mshr_mult_str` and more than `{python} PlacementInterference.s_wb_mult_str` cross the declared bound once `{python} PlacementInterference.f_mshr_pct_str` percent or `{python} PlacementInterference.f_wb_pct_str` percent of the tick is miss stall. Only private memory or regulated co-runners bound that multiplier.
 * **Coupling spans five physical timescales:** Rail droop acts in nanoseconds, interconnect queueing in microseconds, fieldbus loops in milliseconds, silicon thermal throttling persists for seconds after the load stops, and chassis structural and battery pack self-heating accumulates over multi-hour shifts. In the rejected shared-die placement, a halved clock stretches the enforcer's `{python} RejectedPlacementThrottle.wcet_str` cycle to `{python} RejectedPlacementThrottle.t_exec_throt_str` for `{python} RejectedPlacementThrottle.ticks_exposed_str` ticks.
 * **The declared bound is the falsification threshold:** Any loaded cycle above the declared worst-case execution time refutes that bound even when the deadline still holds, because every margin above the enforcer was sized on that number. A passing trace supports only the states it tested.
-* **A refuted claim forces a priced choice:** Reservation costs idle capacity, partitioning costs working set, workload reduction costs policy authority, and relocation adds a board-level link whose worst case must fit inside the lease's renewal-jitter allowance.
+* **A refuted claim forces a priced choice:** Regulation and reservation cost idle capacity, coloring and partitioning cost working set, workload reduction costs policy authority, and relocation adds a board link. On the machine that link costs `{python} PlacementTransport.t_link_str` of a `{python} PlacementTransport.delta_da_str` dispatch-to-admission allocation dominated by inference and validation.
+* **Platform exposure is a placement constraint:** An on-die safety island with its own crystal, rail, and memory removes every die-level coupling except temperature and reset, but as of 2026 the commercial modules that carry the machine's application processor do not enable it, so the permission path moves to a discrete controller.
 * **The placement record bounds the deployment envelope:** It takes its declared worst-case execution time and deadline from the enforcement record and adds loaded observed maxima, thermal headroom, bus arbitration, mitigations, and untested conditions. On the mobile manipulator the measurement fields are still empty, so the independence claim reaches release review without loaded qualification evidence.
 :::
 

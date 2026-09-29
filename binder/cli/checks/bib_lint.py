@@ -284,6 +284,9 @@ CANONICAL_PUBLISHERS: set[str] = {
     "IEEE Computer Society", "ISCA", "Sage Publications", "SAGE Publications", "Routledge",
     "Frontiers Media S.A.", "American Statistical Association", "Pearson", "Prentice Hall",
     "Internet Society", "Farrar, Straus and Giroux", "NATO Science Committee",
+    # 2026-09-29: RSS proceedings (DOI prefix 10.15607) are published by the
+    # RSS Foundation per Crossref; Vol IV cites them heavily.
+    "Robotics: Science and Systems Foundation",
 }
 
 

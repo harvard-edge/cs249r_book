@@ -38,12 +38,17 @@ class MemoryTier(BaseModel):
     energy_per_access: Optional[Quantity] = None  # pJ per access
     energy_per_byte: Optional[Quantity] = None    # pJ per byte
     bandwidth: Optional[Quantity] = None          # representative interface bandwidth
+    # DRAM core timings of a speed grade (command clock, activate-to-column,
+    # precharge). A row conflict costs t_rp + t_rcd before column service.
+    t_ck: Optional[Quantity] = None
+    t_rcd: Optional[Quantity] = None
+    t_rp: Optional[Quantity] = None               # per-bank precharge
     metadata: Metadata = Field(default_factory=Metadata)
 
-    @field_validator("latency", mode="after")
+    @field_validator("latency", "t_ck", "t_rcd", "t_rp", mode="after")
     @classmethod
-    def _validate_latency(cls, v):
-        return require_dimensionality(v, ureg.second, "latency")
+    def _validate_latency(cls, v, info):
+        return require_dimensionality(v, ureg.second, info.field_name)
 
     @field_validator("energy_per_access", mode="after")
     @classmethod

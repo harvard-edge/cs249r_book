@@ -186,10 +186,17 @@ def calc_c2_stop_suffix(entry_velocity, peak_deceleration):
         T = 1.5 * v / a,    d = 0.75 * v^2 / a,
 
     which is 1.5 times the constant-deceleration distance v^2 / (2 * a).
+    The factor belongs to this polynomial, not to smooth stopping in general:
+    its jerk q''' = -(6 v_c / T^2)(1 - 2u) peaks in magnitude at the ends,
+
+        j_peak = 6 * v / T^2 = (8 / 3) * a^2 / v,
+
+    and a jerk-limited S-curve with the same a and j_peak stops shorter
+    (calc_scurve_stop_distance).
 
     Source: derived here. The polynomial satisfies q' = v_c, q'' = 0 at u = 0
     and q' = 0, q'' = 0 at u = 1; peak |q''| occurs at u = 1/2 (minimum of
-    q''(u) = v_c / T * (-6u + 6u^2)).
+    q''(u) = v_c / T * (-6u + 6u^2)); peak |q'''| occurs at u = 0 and u = 1.
 
     Parameters
     ----------
@@ -201,17 +208,190 @@ def calc_c2_stop_suffix(entry_velocity, peak_deceleration):
     Returns
     -------
     dict
-        duration (ms) and distance (m).
+        duration (ms), distance (m), and peak_jerk (m/s^3).
     """
     validate_positive(entry_velocity, "entry_velocity")
     validate_positive(peak_deceleration, "peak_deceleration")
 
     v = entry_velocity.to(ureg.meter / ureg.second)
     a = peak_deceleration.to(ureg.meter / ureg.second**2)
+    duration = 1.5 * v / a
     return {
-        "duration": (1.5 * v / a).to(ureg.millisecond),
+        "duration": duration.to(ureg.millisecond),
         "distance": (0.75 * v**2 / a).to(ureg.meter),
+        "peak_jerk": (6.0 * v / duration**2).to(ureg.meter / ureg.second**3),
     }
+
+
+def _scurve_stop_si(v, a, j):
+    """Duration (s) and distance (m) of a jerk-limited stop, SI magnitudes."""
+    if v <= 0.0:
+        return 0.0, 0.0
+    if v >= a * a / j:
+        # Trapezoidal acceleration: ramp to a in a/j, hold, ramp back to zero.
+        t = v / a + a / j
+    else:
+        # Triangular acceleration: the peak sqrt(v j) stays below a.
+        t = 2.0 * math.sqrt(v / j)
+    # The velocity profile is point-symmetric about its midpoint, so d = v T / 2.
+    return t, 0.5 * v * t
+
+
+def _scurve_si_inputs(entry_velocity, max_deceleration, max_jerk):
+    validate_nonnegative(entry_velocity, "entry_velocity")
+    validate_positive(max_deceleration, "max_deceleration")
+    validate_positive(max_jerk, "max_jerk")
+    return (
+        entry_velocity.to(ureg.meter / ureg.second).magnitude,
+        max_deceleration.to(ureg.meter / ureg.second**2).magnitude,
+        max_jerk.to(ureg.meter / ureg.second**3).magnitude,
+    )
+
+
+def calc_scurve_stop_distance(entry_velocity, max_deceleration, max_jerk):
+    """
+    Distance of a jerk-limited S-curve stop entered from zero-acceleration cruise.
+
+    The stop drives acceleration from zero to -a at the jerk limit j, holds
+    -a, and returns acceleration to zero at the jerk limit as velocity reaches
+    zero (trapezoidal acceleration, the "double S" velocity profile). The
+    profile is C2: position, velocity, and acceleration are continuous and
+    jerk is piecewise constant.
+
+        if v >= a^2 / j:   d = (v / 2) * (v / a + a / j)
+                             = v^2 / (2 a) + v * a / (2 j)
+        else:              d = v * sqrt(v / j)     (a is never reached)
+
+    In the first case the stop equals constant-deceleration braking at a plus
+    cruise over half of one jerk ramp, a / (2 j). Under the bounds |a| <= a_max
+    and |j| <= j_max this is the time-optimal stop, and for a stop that does not
+    reverse it is also the shortest.
+
+    Source: Biagiotti, L. and Melchiorri, C., Trajectory Planning for Automatic
+    Machines and Robots, Springer (2008; DOI 10.1007/978-3-540-85629-0),
+    ch. 3, trajectory with double S velocity profile, specialized here to a
+    stop from v to rest with zero boundary accelerations. Formula re-derived and
+    checked against a discretized minimum-distance linear program.
+
+    Parameters
+    ----------
+    entry_velocity : Quantity
+        Cruise velocity at stop onset (e.g. m/s); zero gives zero distance.
+    max_deceleration : Quantity
+        Deceleration bound a_max (e.g. m/s^2).
+    max_jerk : Quantity
+        Jerk bound j_max (e.g. m/s^3).
+
+    Returns
+    -------
+    Quantity
+        Stopping distance in meters.
+    """
+    v, a, j = _scurve_si_inputs(entry_velocity, max_deceleration, max_jerk)
+    return (_scurve_stop_si(v, a, j)[1] * ureg.meter).to(ureg.meter)
+
+
+def calc_scurve_stop_time(entry_velocity, max_deceleration, max_jerk):
+    """
+    Duration of the jerk-limited S-curve stop of calc_scurve_stop_distance.
+
+        if v >= a^2 / j:   T = v / a + a / j
+        else:              T = 2 * sqrt(v / j)
+
+    Source: Biagiotti and Melchiorri (2008), ch. 3, double S velocity profile;
+    see calc_scurve_stop_distance.
+
+    Returns
+    -------
+    Quantity
+        Stopping time in milliseconds.
+    """
+    v, a, j = _scurve_si_inputs(entry_velocity, max_deceleration, max_jerk)
+    return (_scurve_stop_si(v, a, j)[0] * ureg.second).to(ureg.millisecond)
+
+
+def calc_scurve_max_permitted_velocity(
+    d_clear,
+    total_latency,
+    max_deceleration,
+    max_jerk,
+    loc_margin=None,
+    physical_margin=None,
+    approach_velocity=None,
+):
+    """
+    Highest cruise speed whose delayed S-curve stop fits the clearance.
+
+    Solves for the largest v with
+
+        v * tau + d_S(v) + v_h * (tau + T_S(v)) <= D_clear - delta_loc - delta_margin,
+
+    where d_S and T_S are the S-curve stop distance and time
+    (calc_scurve_stop_distance, calc_scurve_stop_time) and v_h is an optional
+    obstacle approach speed (zero for a static obstacle). The left side is
+    continuous and strictly increasing in v, so bisection finds the root.
+    Because d_S is not a single quadratic in v, no one closed form covers both
+    stop regimes; for v_h = 0 in the trapezoidal regime the result equals
+    calc_max_permitted_velocity with delay tau + a / (2 j).
+
+    Source: derived here from calc_scurve_stop_distance (Biagiotti and
+    Melchiorri 2008, ch. 3) and the additive delay-plus-braking budget of
+    calc_safe_stopping_distance.
+
+    Parameters
+    ----------
+    d_clear : Quantity
+        Clear distance to the obstacle (e.g. m).
+    total_latency : Quantity
+        Pre-brake delay tau (e.g. ms).
+    max_deceleration, max_jerk : Quantity
+        Stop limits a_max (m/s^2) and j_max (m/s^3).
+    loc_margin, physical_margin : Quantity, optional
+        Localization bound and protective clearance subtracted from d_clear.
+    approach_velocity : Quantity, optional
+        Speed at which the obstacle closes during delay and stop (e.g. m/s).
+
+    Returns
+    -------
+    Quantity
+        Speed ceiling in m/s (zero if the margins consume the clearance).
+    """
+    validate_nonnegative(d_clear, "d_clear")
+    validate_nonnegative(total_latency, "total_latency")
+    a = max_deceleration.to(ureg.meter / ureg.second**2).magnitude
+    j = max_jerk.to(ureg.meter / ureg.second**3).magnitude
+    validate_positive(max_deceleration, "max_deceleration")
+    validate_positive(max_jerk, "max_jerk")
+
+    d_eff = d_clear.to(ureg.meter).magnitude
+    for margin, name in ((loc_margin, "loc_margin"), (physical_margin, "physical_margin")):
+        if margin is not None:
+            validate_nonnegative(margin, name)
+            d_eff -= margin.to(ureg.meter).magnitude
+    tau = total_latency.to(ureg.second).magnitude
+    v_h = 0.0
+    if approach_velocity is not None:
+        validate_nonnegative(approach_velocity, "approach_velocity")
+        v_h = approach_velocity.to(ureg.meter / ureg.second).magnitude
+
+    def excess(v):
+        t_s, d_s = _scurve_stop_si(v, a, j)
+        return v * tau + d_s + v_h * (tau + t_s) - d_eff
+
+    zero = 0.0 * (ureg.meter / ureg.second)
+    if excess(0.0) >= 0.0:
+        return zero
+    # d_S(v) >= v^2 / (2 a), so excess(sqrt(2 a d_eff)) >= 0: a valid upper bracket.
+    lo, hi = 0.0, math.sqrt(2.0 * a * d_eff)
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if excess(mid) > 0.0:
+            hi = mid
+        else:
+            lo = mid
+        if hi - lo <= 1e-15 * max(1.0, hi):
+            break
+    return (lo * (ureg.meter / ureg.second)).to(ureg.meter / ureg.second)
 
 
 def calc_kinetic_energy(mass, velocity):
@@ -710,6 +890,101 @@ def calc_action_chunk_streaming_amortization(
     }
 
 
+def calc_chunk_renewal_schedule(
+    chunk_rate,
+    chunk_step,
+    chunk_horizon: int,
+    inference_latency,
+):
+    """
+    Timing of a chunk policy that renews on a whole number of setpoint steps.
+
+    A chunk policy begins a fresh evaluation every renewal period T_r = 1/f_r
+    and emits H setpoints spaced Delta t apart. With the renewal on the setpoint
+    grid (T_r = n Delta t for a whole number n), every renewal instant falls on
+    a setpoint boundary, so a new chunk replaces its predecessor at a defined
+    setpoint index and temporal ensembling can blend chunks step by step:
+
+        n          = T_r / Delta t                  (setpoints per renewal, integer)
+        T_open     = T_r + t_infer                  (worst evidence age at replacement)
+        h_min      = ceil(T_open / Delta t)         (setpoints that bridge one renewal)
+        T_span     = H * Delta t                    (motion one chunk supplies)
+        n_overlap  = floor(H / n)                   (chunks that cover one step)
+
+    T_open is the worst sampling-phase wait plus inference, before transport
+    and admission delays. n_overlap is the number of predictions a temporal
+    ensemble blends at a step in steady state.
+
+    Source: action chunking and temporal ensembling from Zhao et al., "Learning
+    Fine-Grained Bimanual Manipulation with Low-Cost Hardware" (ACT), RSS 2023,
+    arXiv:2304.13705, which queries its policy every step (n = 1). The
+    renewal-on-the-grid requirement, the worst-case age, and the overlap count
+    are arithmetic of this package for n > 1 (Volume IV, @sec-brain-action-chunking).
+
+    Parameters
+    ----------
+    chunk_rate : Quantity
+        Renewal rate f_r of the chunk policy (Hz).
+    chunk_step : Quantity
+        Setpoint spacing Delta t within a chunk (s).
+    chunk_horizon : int
+        Setpoints per chunk H (>= 1).
+    inference_latency : Quantity
+        Time from capture to an available chunk t_infer (s), for example a P99 target.
+
+    Returns
+    -------
+    dict
+        renewal_period, setpoints_per_renewal (int), open_loop_span,
+        min_supply_setpoints (int), chunk_span, overlapping_chunks (int),
+        renewal_slack (T_r - t_infer).
+
+    Raises
+    ------
+    ValueError
+        If the renewal period is not a whole number of setpoint steps, if the
+        inference does not finish within one renewal period, or if one chunk
+        cannot bridge a renewal (H < h_min).
+    """
+    validate_positive(chunk_rate, "chunk_rate")
+    validate_positive(chunk_step, "chunk_step")
+    validate_at_least(chunk_horizon, 1, "chunk_horizon")
+    validate_positive(inference_latency, "inference_latency")
+
+    period = (1.0 / chunk_rate).to(ureg.millisecond)
+    step = chunk_step.to(ureg.millisecond)
+    ratio = (period / step).to("dimensionless").magnitude
+    n_per_renewal = round(ratio)
+    if n_per_renewal < 1 or abs(ratio - n_per_renewal) > 1e-9:
+        raise ValueError(
+            f"renewal period {period:~P} is not a whole number of {step:~P} setpoint steps "
+            f"(ratio {ratio:.4g})"
+        )
+    t_infer = inference_latency.to(ureg.millisecond)
+    if t_infer >= period:
+        raise ValueError(
+            f"inference latency {t_infer:~P} does not finish within the {period:~P} renewal period"
+        )
+
+    open_loop = (period + t_infer).to(ureg.millisecond)
+    h_min = math.ceil((open_loop / step).to("dimensionless").magnitude - 1e-12)
+    if chunk_horizon < h_min:
+        raise ValueError(
+            f"chunk horizon {chunk_horizon} is shorter than the {h_min} setpoints one renewal needs"
+        )
+    span = (chunk_horizon * step).to(ureg.millisecond)
+
+    return {
+        "renewal_period": period,
+        "setpoints_per_renewal": int(n_per_renewal),
+        "open_loop_span": open_loop,
+        "min_supply_setpoints": int(h_min),
+        "chunk_span": span,
+        "overlapping_chunks": int(chunk_horizon // n_per_renewal),
+        "renewal_slack": (period - t_infer).to(ureg.millisecond),
+    }
+
+
 def calc_watchdog_lease_bound(
     clearance_distance,
     initial_velocity,
@@ -770,76 +1045,281 @@ def calc_watchdog_lease_bound(
     }
 
 
-def calc_canfd_bus_utilization(
-    num_axes: int,
-    payload_bytes: int = 64,
-    baud_arbitration=None,
-    baud_data=None,
-    cycle_time=None,
-    interframe_spacing=None,
-    overhead_bits_arb: int = 32,
-    overhead_bits_data: int = 0,
+def calc_phase_lag_total(
+    crossover_frequency,
+    sample_period,
+    compute_delay=None,
+    transport_delay=None,
+    phase_allowance=None,
 ):
     """
-    Calculate serialization latency and bus utilization for cyclic CAN-FD transmission.
+    Total loop delay and the phase it removes at crossover (sample-and-hold,
+    compute, and transport terms together).
 
-    CAN-FD employs a dual-bitrate scheme: an arbitration phase at baud_arbitration
-    (standard 1 Mbps) and a high-speed data phase at baud_data (e.g. 5 Mbps).
+    A zero-order hold behaves in the baseband like a pure delay of half a
+    sample period. A controller that outputs its command some time after it
+    samples adds that compute delay, and a command that reaches the actuator
+    one bus cycle later adds the transport delay. A pure delay tau removes
+    phase omega * tau at every frequency, so near crossover:
 
-    Equation:
-        t_arb = overhead_bits_arb / baud_arbitration
-        t_data = (payload_bytes * 8 + overhead_bits_data) / baud_data
-        t_tx = t_arb + t_data + interframe_spacing
-        t_total_tx = num_axes * t_tx
-        rho = t_total_tx / cycle_time
+        tau_total   = T_s / 2 + tau_comp + tau_bus
+        dphi_total  = 2 * pi * f_c * tau_total              (radians)
+
+    Given a phase allowance dphi_allow, the largest total delay the loop can
+    absorb, and the highest crossover a given total delay supports, are
+
+        tau_allow   = dphi_allow / (2 * pi * f_c)
+        f_c,max     = dphi_allow / (2 * pi * tau_total)
+
+    Source: Franklin, G. F., Powell, J. D. and Workman, M. L., Digital Control
+    of Dynamic Systems, 3rd ed., Addison-Wesley, 1998 (zero-order hold as a
+    T/2 delay; phase of a pure delay). The half-sample approximation holds
+    only well below the sampling frequency; it is a budget, not a stability
+    proof.
 
     Parameters
     ----------
-    num_axes : int
-        Number of cyclic node/axis messages scheduled per loop (>= 1).
-    payload_bytes : int, optional
-        Data field payload size in bytes (default 64 bytes for CAN-FD).
-    baud_arbitration : Quantity, optional
-        Nominal arbitration phase bitrate (default 1.0 Mbps).
-    baud_data : Quantity, optional
-        Data phase bitrate (default 5.0 Mbps).
-    cycle_time : Quantity, optional
-        Total control cycle period (default 1.0 ms).
-    interframe_spacing : Quantity, optional
-        Inter-frame spacing and bus idle interval (default 6.0 us).
-    overhead_bits_arb : int, optional
-        Arbitration, header, and CRC delimiter bit count (default 32 bits).
-    overhead_bits_data : int, optional
-        Data phase stuff bits and CRC bit overhead (default 0).
+    crossover_frequency : Quantity
+        Loop crossover frequency f_c (Hz).
+    sample_period : Quantity
+        Controller sample period T_s.
+    compute_delay : Quantity, optional
+        Sample-to-output compute delay tau_comp (default 0).
+    transport_delay : Quantity, optional
+        Command transport delay to the actuator tau_bus (default 0).
+    phase_allowance : Quantity, optional
+        Phase erosion the design allows at crossover (angle). When given, the
+        allowed delay, the delay margin, and the highest supported crossover
+        are also returned.
 
     Returns
     -------
     dict
-        t_tx, t_total_tx, utilization, is_schedulable.
+        tau_zoh, tau_total (ms); phase_zoh, phase_compute, phase_transport,
+        phase_total (degrees); and, with phase_allowance, tau_allowed,
+        tau_margin (negative when the budget fails), f_crossover_max,
+        within_allowance.
+    """
+    validate_positive(crossover_frequency, "crossover_frequency")
+    validate_positive(sample_period, "sample_period")
+
+    f_c = crossover_frequency.to(ureg.hertz)
+    t_s = sample_period.to(ureg.millisecond)
+    t_comp = (0.0 * ureg.millisecond) if compute_delay is None else compute_delay.to(ureg.millisecond)
+    t_bus = (0.0 * ureg.millisecond) if transport_delay is None else transport_delay.to(ureg.millisecond)
+    validate_nonnegative(t_comp, "compute_delay")
+    validate_nonnegative(t_bus, "transport_delay")
+
+    omega = 2.0 * math.pi * f_c.magnitude  # rad/s
+
+    def _deg(tau):
+        return (omega * tau.to(ureg.second).magnitude * ureg.radian).to(ureg.degree)
+
+    tau_zoh = (t_s / 2.0).to(ureg.millisecond)
+    tau_total = (tau_zoh + t_comp + t_bus).to(ureg.millisecond)
+
+    result = {
+        "tau_zoh": tau_zoh,
+        "tau_total": tau_total,
+        "phase_zoh": _deg(tau_zoh),
+        "phase_compute": _deg(t_comp),
+        "phase_transport": _deg(t_bus),
+        "phase_total": _deg(tau_total),
+    }
+
+    if phase_allowance is not None:
+        validate_positive(phase_allowance, "phase_allowance")
+        allow_rad = phase_allowance.to(ureg.radian).magnitude
+        tau_allowed = (allow_rad / omega * ureg.second).to(ureg.millisecond)
+        f_max = (allow_rad / (2.0 * math.pi * tau_total.to(ureg.second).magnitude)) * ureg.hertz
+        result.update(
+            {
+                "tau_allowed": tau_allowed,
+                "tau_margin": (tau_allowed - tau_total).to(ureg.millisecond),
+                "f_crossover_max": f_max,
+                "within_allowance": bool(tau_total <= tau_allowed),
+            }
+        )
+
+    return result
+
+
+# Data-field sizes a CAN FD DLC can encode (ISO 11898-1:2015). A payload that
+# is not one of these is padded up to the next size on the wire.
+CANFD_DATA_FIELD_SIZES = (0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64)
+
+
+def calc_canfd_frame_bits(
+    payload_bytes: int = 8,
+    extended_id: bool = False,
+    worst_case_stuffing: bool = True,
+):
+    """
+    Bit count of one CAN FD data frame, split by the bit rate each bit uses.
+
+    Frame layout (ISO 11898-1:2015 FD base format; extended format adds the
+    SRR bit and the 18-bit identifier extension):
+
+        nominal rate, before the switch:  SOF 1, ID 11, RRS 1, IDE 1, FDF 1,
+                                          res 1, BRS 1          (17 bits; 36 extended)
+        data rate, after BRS:             ESI 1, DLC 4, data 8n,
+                                          stuff count 4, CRC 17 (n <= 16) or 21,
+                                          fixed stuff bits 6 (CRC-17) or 7 (CRC-21)
+        nominal rate, after the switch:   CRC delimiter 1, ACK slot 1,
+                                          ACK delimiter 1, EOF 7, intermission 3
+                                                                (13 bits)
+
+    Dynamic stuff bits (one after five equal bits) apply from SOF through the
+    end of the data field. The worst case over a stuffed run of L bits is
+    floor((L - 1) / 4); the nominal-rate share is floor((L_nom - 1) / 4) and
+    the rest fall in the data phase. The CRC field uses the fixed stuff bits
+    above instead. BRS and the CRC delimiter straddle the rate switch; both
+    are counted whole at the nominal rate, which slightly overstates the time.
+
+    Source: ISO 11898-1:2015, Road vehicles -- Controller area network (CAN)
+    -- Part 1: Data link layer and physical signalling (FD frame format, stuff
+    count, fixed stuff bits); Robert Bosch GmbH, CAN with Flexible Data-Rate,
+    Specification Version 1.0, 2012 (dual bit rate, CRC-17/21, fixed CRC stuff
+    bits).
+
+    Parameters
+    ----------
+    payload_bytes : int
+        Application bytes to carry (0 to 64). Padded up to the next data-field
+        size a DLC can encode.
+    extended_id : bool
+        29-bit identifier (extended format) instead of 11-bit.
+    worst_case_stuffing : bool
+        Include the worst-case dynamic stuff bits (the bound a response-time
+        analysis needs). False gives the unstuffed length.
+
+    Returns
+    -------
+    dict
+        data_field_bytes, crc_bits, fixed_stuff_bits, stuff_bits_nominal,
+        stuff_bits_data, bits_nominal, bits_data (all int).
+    """
+    validate_at_least(payload_bytes, 0, "payload_bytes")
+    if payload_bytes > 64:
+        raise ValueError(f"CAN FD carries at most 64 data bytes per frame, got {payload_bytes}.")
+
+    data_field = next(s for s in CANFD_DATA_FIELD_SIZES if s >= payload_bytes)
+    crc_bits = 17 if data_field <= 16 else 21
+    fixed_stuff = 6 if crc_bits == 17 else 7
+
+    arb_bits = 36 if extended_id else 17
+    ctrl_data_bits = 1 + 4 + 8 * data_field  # ESI, DLC, data field
+    trailer_nominal = 1 + 1 + 1 + 7 + 3  # CRC delimiter, ACK, ACK delimiter, EOF, intermission
+
+    if worst_case_stuffing:
+        stuffed_run = arb_bits + ctrl_data_bits
+        stuff_total = (stuffed_run - 1) // 4
+        stuff_nominal = (arb_bits - 1) // 4
+        stuff_data = stuff_total - stuff_nominal
+    else:
+        stuff_nominal = 0
+        stuff_data = 0
+
+    bits_nominal = arb_bits + trailer_nominal + stuff_nominal
+    bits_data = ctrl_data_bits + 4 + crc_bits + fixed_stuff + stuff_data
+
+    return {
+        "data_field_bytes": data_field,
+        "crc_bits": crc_bits,
+        "fixed_stuff_bits": fixed_stuff,
+        "stuff_bits_nominal": stuff_nominal,
+        "stuff_bits_data": stuff_data,
+        "bits_nominal": bits_nominal,
+        "bits_data": bits_data,
+    }
+
+
+def calc_canfd_bus_utilization(
+    num_axes: int,
+    payload_bytes: int = 8,
+    baud_arbitration=None,
+    baud_data=None,
+    cycle_time=None,
+    frames_per_axis: int = 2,
+    extended_id: bool = False,
+    worst_case_stuffing: bool = True,
+):
+    """
+    Serialization time and bus occupancy of a cyclic CAN FD axis exchange.
+
+    Each axis exchanges ``frames_per_axis`` frames per cycle (default 2: one
+    command frame from the controller and one feedback frame from the drive;
+    CAN carries them separately, unlike a summation-frame bus such as
+    EtherCAT). Frame bits come from ``calc_canfd_frame_bits``:
+
+        t_frame   = bits_nominal / R_nom + bits_data / R_data
+        n_frames  = num_axes * frames_per_axis
+        t_total   = n_frames * t_frame
+        rho       = t_total / cycle_time
+
+    rho <= 1 is only a necessary condition: non-preemptive blocking, competing
+    frames, and error retransmissions still need a response-time analysis.
+
+    Source: frame format per ISO 11898-1:2015 and Bosch CAN FD Specification
+    1.0 (2012), via ``calc_canfd_frame_bits``.
+
+    Parameters
+    ----------
+    num_axes : int
+        Axes served on this bus (>= 1). Model one bus per call; parallel buses
+        (for example one per limb) are separate calls.
+    payload_bytes : int, optional
+        Application bytes per frame (default 8: a position-mode setpoint or
+        feedback record). Padded to a valid CAN FD data-field size.
+    baud_arbitration : Quantity, optional
+        Nominal (arbitration-phase) bit rate (default 1.0 Mbps).
+    baud_data : Quantity, optional
+        Data-phase bit rate (default 5.0 Mbps).
+    cycle_time : Quantity, optional
+        Cycle the exchange must fit (default 1.0 ms).
+    frames_per_axis : int, optional
+        Frames per axis per cycle (default 2, command plus feedback).
+    extended_id : bool, optional
+        29-bit identifiers (default False).
+    worst_case_stuffing : bool, optional
+        Charge worst-case dynamic stuff bits (default True).
+
+    Returns
+    -------
+    dict
+        t_tx (per frame), t_total_tx, n_frames, utilization, is_schedulable,
+        plus the per-frame bit breakdown of ``calc_canfd_frame_bits``.
     """
     validate_at_least(num_axes, 1, "num_axes")
-    validate_at_least(payload_bytes, 0, "payload_bytes")
+    validate_at_least(frames_per_axis, 1, "frames_per_axis")
 
     baud_arb = (1.0 * (ureg.megabit / ureg.second)) if baud_arbitration is None else baud_arbitration
     baud_dat = (5.0 * (ureg.megabit / ureg.second)) if baud_data is None else baud_data
     t_cycle = (1.0 * ureg.millisecond) if cycle_time is None else cycle_time
-    t_ifs = (6.0 * ureg.microsecond) if interframe_spacing is None else interframe_spacing
 
-    bits_arb = overhead_bits_arb * ureg.bit
-    bits_data = (payload_bytes * 8 + overhead_bits_data) * ureg.bit
+    frame = calc_canfd_frame_bits(
+        payload_bytes=payload_bytes,
+        extended_id=extended_id,
+        worst_case_stuffing=worst_case_stuffing,
+    )
 
-    t_arb = (bits_arb / baud_arb).to(ureg.microsecond)
-    t_data = (bits_data / baud_dat).to(ureg.microsecond)
-    t_tx = t_arb + t_data + t_ifs.to(ureg.microsecond)
-    t_total_tx = num_axes * t_tx
+    t_nom = ((frame["bits_nominal"] * ureg.bit) / baud_arb).to(ureg.microsecond)
+    t_dat = ((frame["bits_data"] * ureg.bit) / baud_dat).to(ureg.microsecond)
+    t_tx = (t_nom + t_dat).to(ureg.microsecond)
+    n_frames = num_axes * frames_per_axis
+    t_total_tx = (n_frames * t_tx).to(ureg.microsecond)
 
     rho = (t_total_tx / t_cycle).to(ureg.dimensionless).magnitude
 
     return {
-        "t_tx": t_tx.to(ureg.microsecond),
-        "t_total_tx": t_total_tx.to(ureg.microsecond),
+        "t_tx": t_tx,
+        "t_nominal": t_nom,
+        "t_data": t_dat,
+        "t_total_tx": t_total_tx,
+        "n_frames": n_frames,
         "utilization": float(rho),
         "is_schedulable": bool(rho <= 1.0),
+        **frame,
     }
 
 
@@ -1143,23 +1623,79 @@ def calc_harmonic_drive_fatigue_consumption(
     }
 
 
-def calc_transient_impact_force(contact_velocity, effective_mass, contact_stiffness):
+def calc_reduced_mass(mass_a, mass_b):
+    """
+    Calculate the two-body reduced mass of a collision.
+
+    Equation:
+        mu = (1/m_a + 1/m_b)^-1
+
+    When one body cannot recoil (m_b -> infinity, a clamped contact), mu -> m_a.
+
+    Source: ISO/TS 15066:2016 Annex A, transient-contact model (content carried
+    into ISO 10218-2:2025), as reproduced in Kirschner et al. 2022, eq. 2
+    (arXiv:2203.02706).
+    """
+    validate_positive(mass_a, "mass_a")
+    validate_positive(mass_b, "mass_b")
+    m_a = mass_a.to(ureg.kg).magnitude
+    m_b = mass_b.to(ureg.kg).magnitude
+    return (1.0 / (1.0 / m_a + 1.0 / m_b)) * ureg.kg
+
+
+def calc_transient_impact_force(contact_velocity, effective_mass, contact_stiffness, human_mass=None):
     """
     Calculate peak unbraked transient impact force on an elastic body.
 
     Equation:
-        F_peak = v * sqrt(k * m_eff)
+        F_peak = v * sqrt(k * m)
+
+    With ``human_mass=None`` the robot-side ``effective_mass`` acts alone
+    (m = m_eff), the clamped (quasi-static) case in which the body part cannot
+    recoil. With ``human_mass`` given, the free body part recoils and the
+    two-body reduced mass acts: m = mu = (1/m_eff + 1/m_H)^-1.
+
+    Source: ISO/TS 15066:2016 Annex A energy model F = v * sqrt(mu * k)
+    (content carried into ISO 10218-2:2025), as reproduced in Kirschner et al.
+    2022, eqs. 1-2 (arXiv:2203.02706).
     """
     validate_positive(contact_velocity, "contact_velocity")
     validate_positive(effective_mass, "effective_mass")
     validate_positive(contact_stiffness, "contact_stiffness")
 
+    mass = effective_mass if human_mass is None else calc_reduced_mass(effective_mass, human_mass)
     v = contact_velocity.to(ureg.meter / ureg.second).magnitude
-    m = effective_mass.to(ureg.kg).magnitude
+    m = mass.to(ureg.kg).magnitude
     k = contact_stiffness.to(ureg.newton / ureg.meter).magnitude
 
     f = v * math.sqrt(k * m)
     return (f * ureg.newton).to(ureg.newton)
+
+
+def calc_transient_contact_speed_limit(force_limit, effective_mass, contact_stiffness, human_mass=None):
+    """
+    Calculate the highest contact speed whose transient peak force stays at a force limit.
+
+    Equation:
+        v_max = F_max / sqrt(k * m)
+
+    The inverse of ``calc_transient_impact_force``: ``human_mass=None`` gives the
+    clamped case (m = m_eff); a ``human_mass`` gives the free, recoiling case
+    (m = mu, the two-body reduced mass).
+
+    Source: ISO/TS 15066:2016 Annex A (carried into ISO 10218-2:2025), as used
+    for v_rel,max in Kirschner et al. 2022 (arXiv:2203.02706).
+    """
+    validate_positive(force_limit, "force_limit")
+    validate_positive(effective_mass, "effective_mass")
+    validate_positive(contact_stiffness, "contact_stiffness")
+
+    mass = effective_mass if human_mass is None else calc_reduced_mass(effective_mass, human_mass)
+    f = force_limit.to(ureg.newton).magnitude
+    m = mass.to(ureg.kg).magnitude
+    k = contact_stiffness.to(ureg.newton / ureg.meter).magnitude
+
+    return (f / math.sqrt(k * m)) * (ureg.meter / ureg.second)
 
 
 def calc_tripwire_contact_force_accumulation(
@@ -1626,6 +2162,114 @@ def calc_target_evidence_horizon(
     v_drift = drift_velocity.to(ureg.meter / ureg.second)
     tau = (r_tol - sig) / v_drift
     return tau.to(ureg.millisecond)
+
+
+def calc_linear_invalidation_horizon(initial_error, error_growth_rate, error_limit):
+    """
+    Calculate the invalidation horizon of a belief whose error bound grows linearly.
+
+    Equation:
+        E(dt) = E_0 + r * dt ;  T_inv = max(0, (E_max - E_0) / r)
+
+    A zero result means the belief never supported the task: its initial error
+    already consumes the tolerance. Unlike ``calc_target_evidence_horizon`` this
+    does not raise when E_0 >= E_max; it floors the deadline at zero.
+
+    Source: first-passage time of a linear error bound (definition of the
+    invalidation horizon, T_inv = inf{dt >= 0 : E(dt) >= E_max}); the
+    reachable-set lineage for occluded free space is Orzechowski, Meyer, and
+    Lauer 2018 (IEEE ITSC).
+    """
+    validate_positive(error_growth_rate, "error_growth_rate")
+    e0 = initial_error.to(ureg.meter).magnitude
+    e_max = error_limit.to(ureg.meter).magnitude
+    r = error_growth_rate.to(ureg.meter / ureg.second).magnitude
+    return (max(e_max - e0, 0.0) / r * ureg.second).to(ureg.millisecond)
+
+
+def calc_free_space_expiry(free_depth, loc_bound, protective_clearance, approach_speed):
+    """
+    Calculate how long a free-space claim survives before an unseen person could breach the clearance.
+
+    Equation:
+        T_inv = max(0, (d_free - delta_loc - delta_margin) / v_h)
+
+    The free region erodes from its unobserved boundary at the approach speed
+    v_h; localization error delta_loc and the protective clearance delta_margin
+    are spent up front. It is ``calc_linear_invalidation_horizon`` with
+    E_0 = delta_loc, r = v_h, and E_max = d_free - delta_margin.
+
+    Source: linear invalidation horizon applied to occluded free space; the
+    walking-speed bound v_h is ISO 13855's K (1.6 m/s).
+    """
+    validate_positive(approach_speed, "approach_speed")
+    return calc_linear_invalidation_horizon(loc_bound, approach_speed, free_depth - protective_clearance)
+
+
+def calc_scurve_rest_to_rest_time(distance, max_acceleration, max_jerk):
+    """
+    Calculate the duration of a jerk-limited rest-to-rest move with no cruise phase.
+
+    A symmetric double-S profile that accelerates, then immediately decelerates.
+    With t_j = a/j and x the time from the start of the jerk ramp to the end of
+    the constant-acceleration plateau minus t_j (peak speed a*x):
+
+        plateau reached (x >= t_j):  D = a * x * (x + t_j),  T = 2 (x + t_j)
+        no plateau (D < 2 a^3 / j^2): D = 2 j tau^3,           T = 4 tau
+
+    Returns a dict with ``duration``, ``peak_velocity``, and ``reaches_max_acceleration``.
+    Works for linear or angular moves (distance in m or rad, rates to match).
+
+    Source: Biagiotti and Melchiorri, Trajectory Planning for Automatic Machines
+    and Robots (Springer, 2008), ch. 3, double-S velocity profile.
+    """
+    validate_positive(distance, "distance")
+    validate_positive(max_acceleration, "max_acceleration")
+    validate_positive(max_jerk, "max_jerk")
+
+    t_unit = ureg.second
+    d_unit = distance.units
+    d = distance.magnitude
+    a = max_acceleration.to(d_unit / t_unit**2).magnitude
+    j = max_jerk.to(d_unit / t_unit**3).magnitude
+
+    t_j = a / j
+    x = (-t_j + math.sqrt(t_j**2 + 4 * d / a)) / 2
+    if x >= t_j:
+        duration = 2 * (x + t_j)
+        v_peak = a * x
+        plateau = True
+    else:
+        tau = (d / (2 * j)) ** (1.0 / 3.0)
+        duration = 4 * tau
+        v_peak = j * tau**2
+        plateau = False
+    return {
+        "duration": duration * t_unit,
+        "peak_velocity": v_peak * (d_unit / t_unit),
+        "reaches_max_acceleration": plateau,
+    }
+
+
+def calc_quasistatic_spill_acceleration(inner_radius, freeboard, gravity=None):
+    """
+    Calculate the steady horizontal acceleration at which an open container's liquid reaches its rim.
+
+    Equation:
+        tan(theta) = a / g ;  wall rise = R a / g ;  a_max = g h_f / R
+
+    Under steady acceleration the free surface settles perpendicular to the
+    effective gravity. Sloshing overshoots this steady tilt, so the bound is
+    necessary, not sufficient.
+
+    Source: hydrostatics of a uniformly accelerated liquid (free surface normal
+    to effective gravity); container slosh context in Mayer and Krechetnikov
+    2012, "Walking with coffee: why does it spill?", Phys. Rev. E 85, 046117.
+    """
+    validate_positive(inner_radius, "inner_radius")
+    validate_positive(freeboard, "freeboard")
+    g = (1 * ureg.standard_gravity) if gravity is None else gravity
+    return (g * freeboard / inner_radius).to(ureg.meter / ureg.second**2)
 
 
 def calc_intent_drift_lease(tolerance_radius, sensor_noise, drift_velocity):

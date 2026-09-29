@@ -9,6 +9,7 @@ from .types import EmbodiedPlatform
 from ..core.provenance import sourced_qty
 from ..sensors.registry import Sensors
 from ..models.registry import Models
+from ..actuators.registry import Actuators
 from .types import MobileManipulatorPlatform, EmbodiedSiteScenario
 
 
@@ -79,6 +80,30 @@ class Manipulators(Registry):
         nominal_power=300.0 * ureg.watt,
         transmission="Harmonic drive with integrated joint torque sensors",
         compute_soc=Hardware.Edge.JetsonAGXOrin,
+        # Kinematic chain and control-interface limits (2026-09-29), Franka docs
+        # "Limits for Franka Emika Robot (FER)" and the Panda DH table.
+        upper_arm_length=sourced_qty(0.316 * ureg.meter, pc.FRANKA_FER_CONTROL_LIMITS, name="Panda DH d3"),
+        forearm_length=sourced_qty(0.384 * ureg.meter, pc.FRANKA_FER_CONTROL_LIMITS, name="Panda DH d5"),
+        joint_velocity_limits=tuple(
+            sourced_qty(v * (ureg.radian / ureg.second), pc.FRANKA_FER_CONTROL_LIMITS)
+            for v in (2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100)
+        ),
+        joint_acceleration_limits=tuple(
+            sourced_qty(a * (ureg.radian / ureg.second**2), pc.FRANKA_FER_CONTROL_LIMITS)
+            for a in (15.0, 7.5, 10.0, 12.5, 15.0, 20.0, 20.0)
+        ),
+        joint_jerk_limits=tuple(
+            sourced_qty(j * (ureg.radian / ureg.second**3), pc.FRANKA_FER_CONTROL_LIMITS)
+            for j in (7500.0, 3750.0, 5000.0, 6250.0, 7500.0, 10000.0, 10000.0)
+        ),
+        joint_torque_rate_limit=sourced_qty(
+            1000.0 * (ureg.newton * ureg.meter / ureg.second), pc.FRANKA_FER_CONTROL_LIMITS,
+            name="FER joint torque-rate limit",
+        ),
+        cartesian_velocity_limit=sourced_qty(
+            1.7 * (ureg.meter / ureg.second), pc.FRANKA_FER_CONTROL_LIMITS,
+            name="FER Cartesian translational velocity limit",
+        ),
         metadata=Metadata(provenance=pc.FRANKA_EMIKA_PANDA),
     )
 
@@ -228,11 +253,32 @@ class MobileManipulators(Registry):
         imu=Sensors.IMU.Bosch_BMI088,
         intent_model=Models.Embodied.OpenVLA_7B,
         chunk_model=Models.Embodied.ACT_ALOHA,
-        intent_rate=5.0 * ureg.Hz,                             # chosen
-        intent_inference_latency=160.0 * ureg.millisecond,     # illustrative
+        # Intent model: OpenVLA-7B with INT4 weight-only quantization (OpenVLA
+        # reports INT4 matching bfloat16 task success; Kim et al. 2024, Table 2),
+        # decoding its 7 action tokens autoregressively. Latency is computed by
+        # the intent_inference_latency property (compute-bound prefill plus six
+        # bandwidth-bound decode sweeps), about 336 ms; the rate is the largest
+        # whole-hertz rate whose period covers it (2026-09-28, M2; was a
+        # stipulated 5 Hz / 160 ms that priced only one weight sweep).
+        intent_rate=2.0 * ureg.Hz,                             # chosen, <= 1 / computed latency
+        intent_weight_bytes_per_param=0.5 * (ureg.byte / ureg.param),  # chosen: INT4 weights
+        intent_input_tokens=288,                               # 256 image patches (224 px, P = 14) + 32 prompt tokens, illustrative
+        intent_parallel_decode=False,                          # OpenVLA: one token per action dimension
+        intent_compute_utilization=0.50,                       # illustrative achieved fraction of dense FP16 peak
+        intent_reference_latency=sourced_qty(
+            336.0 * ureg.millisecond, pc.JETSON_AI_LAB_OPENVLA_ORIN,
+            name="OpenVLA-7B INT4 per-frame latency, Jetson AGX Orin 64GB",
+        ),
+        # Chunk policy: the ACT architecture (chunk_model), one CVAE-decoder pass
+        # per chunk, no iterative denoising; this is the one deployed chunk
+        # policy every chapter uses (2026-09-28, M5). Its renewal period must
+        # be a whole number of setpoint steps (validated): 50 ms = 2 x 25 ms.
+        # The step was 20 ms (2.5 steps per renewal); 25 ms keeps the 50 ms
+        # renewal that the 60 ms lease rule and every lease-dependent budget
+        # use, and keeps H = 16 longer than the conveyor evidence horizon.
         chunk_rate=20.0 * ureg.Hz,                             # chosen
         chunk_inference_latency=40.0 * ureg.millisecond,       # illustrative P99 incl. vision
-        chunk_step=20.0 * ureg.millisecond,                    # chosen setpoint period
+        chunk_step=25.0 * ureg.millisecond,                    # chosen setpoint period (40 Hz)
         chunk_horizon=16,                                      # chosen
         dram_efficiency=0.70,                                  # sustained fraction of peak
         tcp_speed_limit=1.0 * (ureg.meter / ureg.second),      # chosen free-space limit
@@ -244,6 +290,33 @@ class MobileManipulators(Registry):
         permission_rail_load=70.0 * ureg.watt,                 # illustrative permission-path load
         spring_brake_engage_min=30.0 * ureg.millisecond,       # illustrative spring-brake engage, fast end
         spring_brake_engage_max=80.0 * ureg.millisecond,       # illustrative spring-brake engage, slow end
+        # Braking drivetrain (2026-09-28, M6): two driven 10-inch hub motors.
+        drive_unit=Actuators.HubMotor.ZLTECH_ZLLG10ASM800,
+        drive_wheel_count=2,
+        drive_current_limit=Actuators.HubMotor.ZLTECH_ZLLG10ASM800.peak_current,  # chosen: the motor's datasheet peak (the ZLAC8030L driver allows 60 A)
+        drive_wheel_load_share=None,   # needs source: corner-scale weighing of the loaded machine
+        cg_height=None,                # needs source: tilt-table or corner-scale CoG measurement, loaded
+        tip_arm_stowed=None,           # needs source: CoG to leading support line, arm stowed
+        # 48 V drive bus (2026-09-28, M6): MiR250-class Li-NMC pack envelope.
+        drive_bus_full_charge=sourced_qty(
+            54.0 * ureg.volt, pc.MIR250_BATTERY, name="48 V-class AMR pack, maximum voltage",
+        ),
+        drive_bus_nominal=sourced_qty(
+            47.7 * ureg.volt, pc.MIR250_BATTERY, name="48 V-class AMR pack, nominal voltage",
+        ),
+        drive_bus_battery_low=sourced_qty(
+            42.0 * ureg.volt, pc.MIR250_BATTERY, name="48 V-class AMR pack, minimum voltage",
+        ),
+        drive_bus_resistance=60.0 * ureg.milliohm,             # illustrative source path; needs a measured cell + BMS + fuse + harness value
+        drive_bus_uvlo=sourced_qty(
+            33.0 * ureg.volt, pc.MEANWELL_DDR240, name="DDR-240C-24 input under-voltage lockout, OFF",
+        ),
+        drive_bus_converter_max=sourced_qty(
+            67.2 * ureg.volt, pc.MEANWELL_DDR240, name="DDR-240C-24 continuous input maximum",
+        ),
+        drive_bus_converter_efficiency=0.91,                   # DDR-240C-24 typical efficiency (MEANWELL_DDR240)
+        drive_bus_clamp=60.0 * ureg.volt,                      # chosen: above 54 V full charge, below 67.2 V converter maximum
+        drive_bus_switch_rating=100.0 * ureg.volt,             # chosen: 100 V switch class, >= 1.5x the clamp
         metadata=Metadata(provenance=pc.WAREHOUSE_MOBILE_MANIPULATOR),
     )
 
@@ -293,13 +366,83 @@ class SiteScenarios(Registry):
         a_conveyor_slip=0.50 * (ureg.meter / ureg.second**2),
         grasp_tolerance=15.0 * ureg.millimeter,
         grasp_initial_error=3.0 * ureg.millimeter,
-        k_contact_human=15_000.0 * (ureg.newton / ureg.meter),
+        # Coworker hand body model (2026-09-29): ISO/TS 15066:2016 Annex A hand and
+        # fingers, carried into ISO 10218-2:2025. Replaces an illustrative 15 N/mm.
+        k_contact_human=sourced_qty(
+            75_000.0 * (ureg.newton / ureg.meter), pc.ISO_TS_15066_HAND_BODY_MODEL,
+            name="ISO/TS 15066 hand and fingers effective spring constant",
+        ),
+        m_contact_human=sourced_qty(
+            0.6 * ureg.kilogram, pc.ISO_TS_15066_HAND_BODY_MODEL,
+            name="ISO/TS 15066 hand and fingers effective mass",
+        ),
         f_contact_criterion=50.0 * ureg.newton,                # chosen
         v_handover=0.10 * (ureg.meter / ureg.second),          # chosen coworker handover TCP speed
-        t_takeover_in_loop=150.0 * ureg.millisecond,           # illustrative in-loop takeover
-        t_takeover_out_of_loop=2.0 * ureg.second,              # illustrative out-of-loop takeover
-        v_takeover_in_loop=1.2 * (ureg.meter / ureg.second),   # chosen slow-down before an in-loop request
-        v_takeover_out_of_loop=0.3 * (ureg.meter / ureg.second),  # chosen crawl before an out-of-loop request
+        # Remote takeover (2026-09-28, M4; replaces an illustrative 150 ms in-loop
+        # and 2.0 s out-of-loop takeover). The design totals are properties:
+        # t_takeover_in_loop = slow-bound simple reaction + video + handshake;
+        # t_takeover_out_of_loop = p90 condition-mean take-over time + video + handshake.
+        t_human_perceptual=sourced_qty(
+            100.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor perceptual cycle, nominal",
+        ),
+        t_human_perceptual_slow=sourced_qty(
+            200.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor perceptual cycle, slow bound",
+        ),
+        t_human_cognitive=sourced_qty(
+            70.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor cognitive cycle, nominal",
+        ),
+        t_human_cognitive_slow=sourced_qty(
+            170.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor cognitive cycle, slow bound",
+        ),
+        t_human_motor=sourced_qty(
+            70.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor motor cycle, nominal",
+        ),
+        t_human_motor_slow=sourced_qty(
+            100.0 * ureg.millisecond, pc.CARD_MORAN_NEWELL_MHP,
+            name="Model Human Processor motor cycle, slow bound",
+        ),
+        t_brake_response_expected=sourced_qty(
+            0.75 * ureg.second, pc.GREEN_2000_PERCEPTION_BRAKE,
+            name="Perception-brake time, expected signal (upper end of 0.70-0.75 s)",
+        ),
+        t_brake_response_unexpected=sourced_qty(
+            1.25 * ureg.second, pc.GREEN_2000_PERCEPTION_BRAKE,
+            name="Perception-brake time, unexpected but common signal",
+        ),
+        t_brake_response_surprise=sourced_qty(
+            1.5 * ureg.second, pc.GREEN_2000_PERCEPTION_BRAKE,
+            name="Perception-brake time, surprise event",
+        ),
+        t_takeover_driving_p50=sourced_qty(
+            2.37 * ureg.second, pc.ZHANG_2019_TAKEOVER_META,
+            name="Take-over time, median of 520 condition means",
+        ),
+        t_takeover_driving_mean=sourced_qty(
+            2.72 * ureg.second, pc.ZHANG_2019_TAKEOVER_META,
+            name="Take-over time, average of 520 condition means",
+        ),
+        t_takeover_driving_p90=sourced_qty(
+            4.33 * ureg.second, pc.ZHANG_2019_TAKEOVER_META,
+            name="Take-over time, 90th percentile of 520 condition means",
+        ),
+        t_takeover_driving_p99=sourced_qty(
+            7.0 * ureg.second, pc.ZHANG_2019_TAKEOVER_META,
+            name="Take-over time, 99th percentile of 520 condition means",
+        ),
+        t_video_glass_to_glass=sourced_qty(
+            104.0 * ureg.millisecond, pc.SCHIMPE_2022_TELEOP_G2G,
+            name="Teleoperation video glass-to-glass latency, wired best case",
+        ),                                                     # site wireless link: needs a measured value
+        t_handshake_request=10.0 * ureg.millisecond,           # chosen protocol budget
+        t_handshake_acknowledge=5.0 * ureg.millisecond,        # chosen protocol budget
+        t_handshake_confirm=15.0 * ureg.millisecond,           # chosen protocol budget
+        v_takeover_in_loop=0.8 * (ureg.meter / ureg.second),   # chosen slow-down, under the sourced in-loop ceiling (was 1.2)
+        v_takeover_out_of_loop=0.15 * (ureg.meter / ureg.second),  # chosen crawl, under the sourced out-of-loop ceiling (was 0.3)
         i_rail_transient=70.0 * ureg.ampere,                   # illustrative coincident inference + drive transient
         metadata=Metadata(provenance=pc.WAREHOUSE_AISLE_SCENARIO),
     )
