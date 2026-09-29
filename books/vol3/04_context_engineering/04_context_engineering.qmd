@@ -52,6 +52,8 @@ The connection-pool investigation now has more information than it started with.
 
 Continue the example with illustrative source and test version `r17`. The relevant files are `src/pool.py` and `tests/test_pool.py`; the controlled reproducer is `test_waiter_notified_on_return`. Before asking for a candidate repair, the runtime must decide which source excerpts, test observations, constraints, and unresolved questions belong in the next request. This is the **working-set decision**: selecting the information that supports the next bounded step.
 
+The term comes from Denning's working-set model of program behavior [@denning1968]. Over any recent window, a running program references only a subset of its pages, and a memory manager that keeps that subset resident avoids thrashing while leaving the rest on backing store. The runtime faces the same question of what must be resident for the next step, with one difference that shapes the whole chapter. Denning's working set is measured from references the program has already made. The context working set must be chosen before the call, from a judgment about what the next decision depends on, and nothing in the model's behavior reports which staged tokens it used.
+
 ::: {.column-margin}
 ![](images/svg/hsa_locator_s.svg){width="100%" fig-alt="H·S·A locator with only the State axis lit in purple."}
 
@@ -78,6 +80,14 @@ Selection requires judgment about relevance. Keeping the failing observation but
 The working context is also distinct from records retained outside the request. A raw test log may remain available through a stored handle, subject to retention, permissions, and tool access. The handle does not place the log’s contents in the model’s input. If a later decision needs an omitted assertion or configuration value, the runtime must retrieve it before relying on it. Keeping a record elsewhere and making its information available now are different decisions.
 
 Selection must satisfy the invocation contract from @sec-vol3-foundation-model-tokenization. For an interface with a combined input/output limit, the final serialized input length $S$ must satisfy $S \leq S_{\max} - K_{\max}$, where $K_{\max}$ is the reserved output allowance. Independent input or output limits also apply when the interface specifies them. Count the completed request, including message framing and tool declarations, rather than summing independently tokenized fragments. A shorter evidence digest does not free its apparent token savings if the surrounding serialization adds them back.
+
+The inequality bounds the total; allocation divides it among the roles in the manifest. A planning budget assigns each role a share of the input allowance, subject to
+
+$$
+S_{\text{system}} + S_{\text{tools}} + S_{\text{state}} + S_{\text{obs}} \le S_{\max} - K_{\max}.
+$$ {#eq-vol3-context-budget-partition}
+
+Here $S_{\text{system}}$ covers application instructions, $S_{\text{tools}}$ the tool declarations, $S_{\text{state}}$ the task constraints, progress record, and selected source and test excerpts, and $S_{\text{obs}}$ the recent tool results and the next-step request. The terms compete for a fixed right side. A runtime that appends every tool result lets $S_{\text{obs}}$ grow each turn, and each added log line is paid for by shrinking $S_{\text{state}}$, the excerpts and constraints the next decision depends on. @Eq-vol3-context-budget-partition is a planning budget rather than a token count. Fragment lengths do not sum exactly to the serialized length, so the runtime still checks the assembled request against the aggregate limit, and uses the partition to decide which term to shrink when that check fails. The staging section orders the same four terms by how often they change.
 
 These limits constrain admission, not adequacy. The request may fit while omitting the return path needed to propose a repair. It may include every relevant excerpt while burying their version relationships among superseded material. The chapter therefore first distinguishes nominal capacity from usable context, then develops staging, compaction, progress records, and refresh policies. Its final evaluation asks whether those choices preserve the information needed for subsequent decisions.
 
@@ -107,6 +117,52 @@ An isolated retrieval probe asks whether specified information can be found in a
 : **Retrieval and decision scope**: A simple retrieval probe and the running repair example test different capabilities. This comparison does not characterize every long-context benchmark or predict a universal performance gap. {#tbl-vol3-capacity-comparison tbl-colwidths="[23,29,48]"}
 
 Input organization can affect measured performance even when the needed information is present. In multi-document question answering and key-value retrieval experiments, @liu2024lost reported substantial sensitivity to the position of relevant information in the tested models, often with poorer performance in the middle of the input. This finding motivates testing placement on the intended workload. It does not establish a universal failure threshold, a fixed middle region that every model ignores, or a mechanism proving that longer context must reduce repair quality.
+
+A first-order mechanism still explains why added material cannot be assumed free. Within one attention head, a query assigns weight to each visible key through a softmax. For a target key with scaled logit $z_{\text{target}}$ among $n$ other keys with logits $z_j = \mathbf{q}\cdot\mathbf{k}_j/\sqrt{d_k}$, the target's weight is
+
+$$
+\alpha_{\text{target}} = \frac{e^{z_{\text{target}}}}{e^{z_{\text{target}}} + \sum_{j=1}^{n} e^{z_j}}.
+$$ {#eq-vol3-softmax-dilution}
+
+```{python}
+#| label: calc-vol3-softmax-dilution
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SHARED-NORMALIZER DILUTION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-softmax-dilution, working set capacity section.
+# │ Goal: Show how fixed-logit background keys shrink one target's weight.
+# │ Show: Target attention weight at two context lengths.
+# │ How: Toy logits held fixed; only the number of background keys changes.
+# └─────────────────────────────────────────────────────────────────────────────
+from math import exp
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class SoftmaxDilution:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    z_target = 6  # toy scaled logit for the target key
+    z_background = -2  # toy scaled logit for every other key
+    short_len = 100  # total keys, short context
+    long_len = 100_000  # total keys, long context
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    alpha_short = exp(z_target) / (exp(z_target) + (short_len - 1) * exp(z_background))
+    alpha_long = exp(z_target) / (exp(z_target) + (long_len - 1) * exp(z_background))
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(0 < alpha_long < alpha_short < 1, "More fixed-logit keys lower the target weight")
+    check(alpha_short > 0.9 and alpha_long < 0.05, "Toy endpoints show the stated contrast")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    z_target_str = fmt_int(z_target)
+    z_background_str = fmt_int(z_background)
+    short_len_str = fmt_int(short_len)
+    long_len_str = fmt_int(long_len)
+    alpha_short_pct_str = fmt_percent(alpha_short, style="prose", precision=1)
+    alpha_long_pct_str = fmt_percent(alpha_long, style="prose", precision=1)
+```
+
+All weights share one normalizer. Every added key contributes a positive term to the denominator of @eq-vol3-softmax-dilution, so when the existing logits stay fixed, added tokens can only lower the target's share. In a toy head with a target logit of `{python} SoftmaxDilution.z_target_str` and every other logit at `{python} SoftmaxDilution.z_background_str`, the target holds `{python} SoftmaxDilution.alpha_short_pct_str` of the weight among `{python} SoftmaxDilution.short_len_str` keys and `{python} SoftmaxDilution.alpha_long_pct_str` among `{python} SoftmaxDilution.long_len_str`, although no single background key is individually competitive. Agent contexts make the effect worse than unrelated filler would. Earlier source reads, logs, and superseded test output share identifiers such as `waiter`, `connection`, and `timeout` with the evidence that matters, so their logits are not small. This is a sufficient condition for dilution under fixed logits, not a prediction of lost accuracy. Trained models sharpen logits, route evidence through many heads and layers, and learn position-dependent behavior, which is why @liu2024lost measured the effect rather than derived it. The same normalizer also makes the earliest tokens absorb attention regardless of content, a serving consequence that @sec-vol3-kvcache-intrasequence takes up. For context selection, the lesson is that every staged token competes with the evidence the next decision needs.
 
 ### Choosing a working budget
 
@@ -282,6 +338,20 @@ Compaction methods differ in what they retain and what later work they require. 
 
 : **Compaction representation choices**: Repeatability describes how a representation is produced; it does not establish that the representation preserves everything the task requires. {#tbl-compaction-spectrum}
 
+The first three classes are built from a small set of deterministic techniques that a runtime can implement without a model call. @Tbl-vol3-compaction-techniques lists them with the evidence each can drop without any error being reported. The right-hand column carries the design information. Each technique is repeatable, and each is safe only when the next decision does not depend on what it removes.
+
+| Technique                              | What it keeps                                                        | What it can silently drop                                            |
+|:---------------------------------------|:---------------------------------------------------------------------|:---------------------------------------------------------------------|
+| Repeated-poll deduplication            | One copy of an unchanged status output and a repetition count        | A brief change between polls, or the timing of repetitions           |
+| Terminal-control stripping             | Plain text without escape codes, progress redraws, or spinners       | Timing or ordering signals carried only by the redraws               |
+| Diff hunk folding                      | Changed lines, their location, and a marker for unchanged context    | Surrounding code needed to judge whether the change is correct       |
+| Superseded-read replacement            | A pointer from an old file read to the edit that replaced its source | Old text a later decision needs to explain what changed              |
+| Head, tail, and failure-marker slicing | Setup lines, final lines, and lines matching failure patterns        | An intermediate warning or event ordering that matches no pattern    |
+| Source outline                         | Signatures, types, and docstrings, with bodies folded                | The implementation a repair must read, such as the notification path |
+| Tool-result digest                     | Status, exit code, payload size, and a handle to the retained output | Every detail of the payload until the handle is retrieved            |
+
+: **Deterministic compaction techniques**: Each technique is repeatable, and each discards a characteristic kind of evidence without reporting it. The controlled-test log below shows the slicing row failing on the repair's own evidence. {#tbl-vol3-compaction-techniques tbl-colwidths="[24,38,38]"}
+
 Exact reversible compression preserves the source bytes, but an encoded archive generally must be decoded before its contents can serve as ordinary model input. A digest with a raw-payload handle follows a different contract: the full text is outside the prompt. The handle is useful only while retention, permissions, and the available inspection tool allow retrieval. Retrieval also spends time and request capacity. Neither technique makes omitted evidence immediately available to the next model call.
 
 For the repair task, suppose the controlled test at `r17` emitted the illustrative excerpt in @lst-vol3-compaction-observation. Repeated progress messages have been abbreviated here; this is log text, not executable Python.
@@ -306,6 +376,8 @@ The shorter account supports the missed-notification hypothesis under the tested
 ### Task-scoped protected fields
 
 The runtime can name fields that a compaction pass must retain and check them against the source before replacing the working context. For this step of the repair, those fields include the tested artifact identities, test name, controlled event ordering, failed assertion, and check status. The task's constraints also remain present: preserve the public API, stay within the approved workspace, and do not deploy to production. A later step may require a particular function body or configuration value that the current digest does not contain.
+
+Not every protected field arrives in the task contract. Some are discovered. Suppose the reproducer fails only under the controlled waiter-before-return schedule and passes under the default scheduler. No instruction states that condition; it exists only in tool results. A summary that records "the waiter test failed" and drops the schedule leaves the next call free to run the default configuration, observe a pass on unpatched code, and conclude that the defect is gone. The runtime therefore promotes a condition into the protected-field inventory when a tool result establishes that the task's evidence depends on it, and records the observation that supports it. The promoted field then receives the same audit as a contract constraint, and it can be revisited if the environment that produced it changes.
 
 Protection is therefore task-scoped. Keeping every historical line number and identifier would consume the capacity compaction is meant to release, while keeping only a fixed list of field names could miss an important relation. An assertion without its source version, or a result without the conditions that produced it, can be copied exactly and still mislead. Credentials and other secrets should not be retained merely because they are exact strings; preserve only the authorized information needed for the task.
 
@@ -447,6 +519,41 @@ Suppose the proposed record says that the full regression suite passed on `r18`,
 
 References require equally careful interpretation. A historical observation may legitimately name `r17` while the workspace holds `r18`; the version difference does not corrupt the historical record. A claim about the current workspace needs support applicable to the current artifacts and conditions. The audit should distinguish a missing historical payload from a valid old observation and from a current-state claim needing refresh. Treating all three as a hash mismatch would discard useful history without establishing present truth.
 
+@Lst-vol3-progress-audit collects these checks into one host-side function. It runs as ordinary code outside the model, and every value it compares comes from a source the candidate record did not write: the runtime-owned inventory, the recorded tool events, and the current workspace.
+
+::: {#lst-vol3-progress-audit lst-cap="**Auditing a candidate progress record**: Every comparison uses evidence the summarizer did not produce. An empty result permits replacement; any finding rejects the candidate."}
+```python
+def audit_record(record, inventory, events, workspace):
+    findings = []
+
+    # 1. Required fields: contract constraints plus promoted discoveries,
+    #    such as the controlled waiter-before-return schedule.
+    for field in inventory.required_fields():
+        if record.value_of(field.name) != field.value:
+            findings.append(("missing_or_altered", field.name))
+
+    # 2. Claimed progress: operation, result, and artifact version must all
+    #    match the recorded event, not only its exit status.
+    for claim in record.milestones:
+        event = events.get(claim.event_id)
+        if event is None:
+            findings.append(("no_evidence", claim))
+        elif (claim.operation, claim.result, claim.artifact_version) != \
+             (event.operation, event.result, event.artifact_version):
+            findings.append(("contradicts_event", claim))
+
+    # 3. Scope: history may name r17; a current-state claim needs support
+    #    recorded at the version the workspace holds now.
+    for claim in record.current_state_claims:
+        if claim.artifact_version != workspace.version_of(claim.artifact):
+            findings.append(("needs_current_evidence", claim))
+
+    return findings
+```
+:::
+
+Against the proposed record above, check 2 rejects "full regression suite passed on `r18`" because the recorded operation ran one test, and check 1 flags a dropped no-deployment constraint or controlled schedule. Check 3 lets the `r17` failure remain as history while refusing to let it describe `r18`.
+
 The runtime keeps the source material needed for the audit until it has decided whether the candidate is an adequate replacement. Removing narrative from the next prompt need not delete its retained payloads. If the audit fails, the runtime may report the specific mismatch and request a corrected record, or construct a narrower record directly from checked fields. These operations consume the remaining task budget. A retry policy must cap correction calls, retrieval work, and elapsed time rather than regenerate until a schema happens to pass.
 
 If the allowed corrections still leave essential evidence missing, the runtime cannot solve the problem by accepting the unsupported summary. It can retain a larger selected context if that context fits, retrieve a necessary source within the remaining allowance, or stop with an explicit unresolved handoff. If retrieval fails or no adequate context fits, that limitation must remain visible. Budget exhaustion bounds the continuation attempt; it does not establish summary fidelity or task completion.
@@ -478,6 +585,22 @@ The connection-pool repair now has a candidate patch at `r18`, but its progress 
 
 The same distinction applies to source excerpts. An excerpt from `src/pool.py` at `r17` may explain the original missed-notification hypothesis, yet it cannot establish the exact code to edit at `r18`. The runtime must decide whether to retain that excerpt as history, replace it with current source, or omit it because the next decision no longer needs it. Invalidating current applicability does not require declaring the original observation false or deleting the record of the investigation.
 
+When the runtime skips this decision, stale context fails in three recognizable ways. In *offset drift*, an edit targets line numbers or byte ranges read at `r17`, but the patch that produced `r18` moved the code, so the edit either fails to apply or, under fuzzy matching, lands in the wrong function. In *ghost-symptom chasing*, the `r17` failure stays in the request as though it described the current code, and the model proposes another fix for a defect the patch may already have addressed. In *regression from old negative evidence*, a detailed early failure outweighs a brief later pass, and the model reverts or compensates for a change that the current check supports. @Lst-vol3-stale-offset-edit shows the first failure at the tool boundary. Each mode is a confusion of historical evidence with current state, which the dependency tracking below makes mechanical to prevent.
+
+::: {#lst-vol3-stale-offset-edit lst-cap="**An edit planned from a superseded read**: The hunk's line numbers and context come from the r17 excerpt, and the patch tool rejects it against r18. Illustrative output, not a recorded trace."}
+```text
+--- a/src/pool.py   (hunk planned from the r17 excerpt)
++++ b/src/pool.py
+@@ -87,3 +87,4 @@
+     def release(self, conn):
+         self._idle.append(conn)
++        self._wake_one_waiter()
+         return None
+error: hunk 1 does not apply at line 87 of src/pool.py (r18)
+error: expected context 'def release(self, conn):', found a different function
+```
+:::
+
 ### Track the dependencies of a claim
 
 An observation needs enough provenance to identify its source and the conditions under which it was obtained. For a source excerpt, this includes the artifact identity, revision, and relevant range or symbol. For a test result, it includes the tested source and test revisions, selected test, relevant configuration, and outcome. A timestamp records when an observation was made; it does not by itself establish which artifact was observed.
@@ -492,6 +615,14 @@ Derived conclusions inherit dependencies from their supporting observations. To 
 | Subsequent passing reproducer        | `r18`, the executed `tests/test_pool.py`, selected test, and configuration | Record this bounded result; broader behavior remains unresolved.          |
 
 : **Dependencies and current applicability**: Each entry has a different reason to remain in, leave, or be refreshed within the repair's next request. {#tbl-vol3-context-tracking-schemas tbl-colwidths="[25,35,40]"}
+
+The runtime can compute this table rather than ask the model to maintain it. Each staged observation $o$ carries a binding to what it observed,
+
+$$
+\lambda(o) = \langle \text{artifact}, \text{kind}, \text{revision}, \text{range}, \text{content id} \rangle,
+$$ {#eq-vol3-observation-binding}
+
+naming the artifact, its kind (source file, test run, process, build output), the revision at which it was observed, the range or symbol read, and an identifier for the content actually read. Each derived entry, such as a test result or the missed-notification hypothesis, holds an edge to every observation it depends on. The bindings and edges form a dependency graph. When a write changes an artifact, the runtime marks each observation bound to it as historical and follows the edges forward, flagging every derived entry that depends on it for reassessment. Applied at the `r18` patch, propagation over the bindings of @eq-vol3-observation-binding produces the right-hand column of @tbl-vol3-context-tracking-schemas. The `r17` excerpt and failure become history, the hypothesis is flagged, and an observation of an unrelated file keeps its status.
 
 A dependency record makes invalidation selective. Editing an unrelated documentation file need not invalidate the waiter/return trace's applicability to unchanged executable artifacts. Editing the test's assertion, a relevant configuration value, or the implementation it exercises does require reconsideration. When the runtime cannot identify the relevant dependencies reliably, it should conservatively widen the set of observations marked for refresh rather than treat an incomplete dependency list as proof of freshness.
 
@@ -610,11 +741,64 @@ The experiment needs measurements that separate a missing field from a model's f
 
 Required-field retention counts correctly represented required items divided by the required items assessed. An item counts only if its value and scope agree with the fixture; the mere presence of a field named `test_status` is insufficient. For exact identifiers or assertion text, equality checks can test the specified string. For a paraphrased claim, the evaluator needs a stated semantic criterion and must account for disagreement or uncertainty in applying it. Report omitted, altered, and unsupported fields separately when those distinctions change the diagnosis.
 
-Retention across successive compactions is a stricter event than retention after only the final compaction. An item can disappear and later return through a fresh read. The experiment should state whether it measures presence at each boundary, uninterrupted retention, or successful recovery before use. A hypothetical probability of retaining one specified item through independent compaction rounds is not the probability that every constraint survives. Extending such a model to all required items needs their joint behavior, and empirical compaction errors need not be independent across items or rounds. A schema-valid record establishes neither event by itself.
+Retention across successive compactions is a stricter event than retention after only the final compaction. An item can disappear and later return through a fresh read. The experiment should state whether it measures presence at each boundary, uninterrupted retention, or successful recovery before use. For uninterrupted retention of a constraint set $\mathcal{C}$ through $k$ compaction boundaries, the measured score is
 
-Behavior needs its own denominator. A constraint-violation rate can count violating proposals among the proposals to which that constraint applies. The runtime should retain rejected proposals for this diagnosis without executing them. An executed-violation rate answers a different question about enforcement. Likewise, a stale-support rate can count decisions that treat a known superseded observation as current among decisions requiring current evidence. A historical reference to the r17 failure is not an error merely because the workspace is now at r18. The error is using that reference to assert a property of r18 without support. Fixtures and trace review must make the classification rule explicit.
+$$
+S_{\text{CR}}(k) = \frac{1}{|\mathcal{C}|} \sum_{c \in \mathcal{C}} \prod_{i=1}^{k} \mathbb{I}\left[c \text{ correctly retained at boundary } i\right].
+$$ {#eq-vol3-constraint-retention}
 
-Task acceptance provides the end-to-end measure. Its numerator is the number of trials meeting the stated acceptance standard within the limits; its denominator is all assigned trials. A reproducer pass is one observation within that standard, not an unrestricted claim that the patch is correct. Report unresolved trials and the reasons they stopped rather than excluding them from the denominator. The measurement contract in @tbl-vol3-context-evaluation keeps these different outcomes visible.
+```{python}
+#| label: calc-vol3-constraint-retention
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONSTRAINT RETENTION ACROSS COMPACTION ROUNDS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-constraint-retention, working-memory evaluation section.
+# │ Goal: Show how a small per-round loss compounds over repeated compaction.
+# │ Show: Single-item survival probability after a short and a long run.
+# │ How: Hypothetical independent per-round loss; one specified item only.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class ConstraintRetention:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    loss_per_round = 0.05  # hypothetical probability one item is lost per round
+    short_rounds = 10
+    long_rounds = 40
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    survive_short = (1 - loss_per_round) ** short_rounds
+    survive_long = (1 - loss_per_round) ** long_rounds
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(0 < survive_long < survive_short < 1, "Survival falls with more rounds")
+    check(survive_long < 0.2 < 0.5 < survive_short, "Endpoints show the stated contrast")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    loss_pct_str = fmt_percent(loss_per_round, style="prose", precision=0)
+    short_rounds_str = fmt_int(short_rounds)
+    long_rounds_str = fmt_int(long_rounds)
+    survive_short_pct_str = fmt_percent(survive_short, style="prose", precision=1)
+    survive_long_pct_str = fmt_percent(survive_long, style="prose", precision=1)
+```
+
+The product in @eq-vol3-constraint-retention is what makes repeated compaction demanding. If one specified item survives each round independently with probability $1-\rho$, it survives $k$ rounds with probability $(1-\rho)^k$, the horizon-compounding form of @eq-vol3-horizon-compounding with compaction rounds in place of turns. At a hypothetical loss of `{python} ConstraintRetention.loss_pct_str` per round, the item survives `{python} ConstraintRetention.short_rounds_str` rounds with probability `{python} ConstraintRetention.survive_short_pct_str` and `{python} ConstraintRetention.long_rounds_str` rounds with probability `{python} ConstraintRetention.survive_long_pct_str`. A loss rate that looks negligible in a single compaction test decides whether a long trajectory still carries its constraints, which is why protected fields are checked at every boundary rather than entrusted to a summarizer's average fidelity. Extending such a model to all required items needs their joint behavior, and empirical compaction errors need not be independent across items or rounds. A schema-valid record establishes neither event by itself.
+
+Behavior needs its own denominator. A constraint-violation rate can count violating proposals among the proposals to which that constraint applies. The runtime should retain rejected proposals for this diagnosis without executing them. An executed-violation rate answers a different question about enforcement. Likewise, the stale-support rate
+
+$$
+\epsilon_{\text{stale}} = \frac{\text{decisions that treat superseded support as current}}{\text{decisions that require current evidence}}
+$$ {#eq-vol3-stale-support}
+
+restricts its denominator to decisions for which currency matters. A historical reference to the r17 failure is not an error merely because the workspace is now at r18. The error is using that reference to assert a property of r18 without support. Fixtures and trace review must make the classification rule explicit.
+
+Task acceptance provides the end-to-end measure,
+
+$$
+\hat{p}_{\text{acc}} = \frac{N_{\text{acc}}}{N},
+$$ {#eq-vol3-task-acceptance}
+
+which estimates the acceptance probability $p_{\text{acc}}$ of @eq-vol3-cost-per-accepted-task. Here $N_{\text{acc}}$ counts trials meeting the stated acceptance standard within the limits and $N$ counts all assigned trials. A reproducer pass is one observation within that standard, not an unrestricted claim that the patch is correct. Report unresolved trials and the reasons they stopped rather than excluding them from the denominator. The measurement contract in @tbl-vol3-context-evaluation keeps these different outcomes visible, and @eq-vol3-stale-support and @eq-vol3-task-acceptance fix two of its denominators.
 
 | Measurement              | What the evaluator records                                                                     | What the result cannot establish                           |
 |:-------------------------|:-----------------------------------------------------------------------------------------------|:-----------------------------------------------------------|
@@ -627,7 +811,13 @@ Task acceptance provides the end-to-end measure. Its numerator is the number of 
 
 : **Context-policy measurement contract**: Representation checks, behavioral observations, and task outcomes answer different questions. Their denominators and coverage must remain explicit when comparing policies. {#tbl-vol3-context-evaluation tbl-colwidths="[21,43,36]"}
 
-Compression is a representation ratio, not a quality metric. At a specified decision point, construct a reference request from the available history without compaction and a request from the evaluated policy. Count each complete serialized request with the same tokenizer, including its instructions, tool definitions, metadata, and framing. Define the request compression ratio as the reference token count divided by the policy token count. The reference may exceed the service limit; counting it does not imply that it can be submitted. A ratio above unity denotes a smaller request under this convention. Counting raw observations in the numerator but the whole prompt in the denominator would describe a different quantity and must not use the same interpretation.
+Compression is a representation ratio, not a quality metric. At a specified decision point, construct a reference request from the available history without compaction and a request from the evaluated policy. Count each complete serialized request with the same tokenizer, including its instructions, tool definitions, metadata, and framing. The request compression ratio is
+
+$$
+C_r = \frac{S_{\text{ref}}}{S_{\pi}},
+$$ {#eq-vol3-request-compression}
+
+where $S_{\text{ref}}$ and $S_{\pi}$ are the serialized token counts of the reference request and the policy's request. The reference may exceed the service limit; counting it does not imply that it can be submitted. A value of @eq-vol3-request-compression above unity denotes a smaller request under this convention. Counting raw observations in the numerator but the whole prompt in the denominator would describe a different quantity and must not use the same interpretation.
 
 The ratio also depends on which history is available. In a fixed-history probe, policies share that input, making their resulting request lengths directly comparable. In complete task trials, policies can generate different histories. A large compression ratio for one policy may reflect that it first produced more material to discard. Report absolute input counts and task expenditure alongside the ratio, including the cost of building summaries, obtaining fresh observations, and recovering omitted payloads. Context savings can otherwise hide work displaced into another call.
 
