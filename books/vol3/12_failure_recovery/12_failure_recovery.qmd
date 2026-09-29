@@ -62,6 +62,8 @@ If the worker loses the provisioning reply, creation remains unresolved under th
 
 This application-level response is **compensation**. Releasing the environment does not erase its creation history or costs already incurred, and cleanup can itself fail or remain uncertain. A **saga** organizes these separately committed steps and their compensations. Recovery may instead preserve useful completed work and repair a later proposal, or stop task work while transferring unresolved obligations to an authorized owner. The choice depends on evidence and future costs, not merely on how much has already been spent.
 
+A shared boundary cannot simply be imposed on these services. Classical transaction processing makes a group of updates atomic and isolated by holding locks on the affected data until the outcome is decided. Two-phase commit extends that decision across several resource managers, each of which enters a prepare phase and holds its locks and recovery state until the coordinator's decision arrives [@gray1981transaction]. A trajectory defeats both requirements. The endpoints it calls expose no prepare phase and hold nothing on the runtime's behalf. Even a cooperating participant would have to keep its locks across model calls, tool execution, test runs, and human approval, intervals far longer than the short transactions lock-based concurrency control was built for. A prepared participant that loses contact with its coordinator must also wait, blocking every other client of the locked data. Garcia-Molina and Salem introduced the saga for exactly this class of long-lived transaction. A saga gives up isolation across the whole sequence, commits each step separately, and pairs each step with a compensating step [@garciamolina1987sagas]. @Sec-vol3-appendix-systems-transactions reviews two-phase commit's blocking behavior and the original saga abstraction.
+
 All of these choices remain inside the harness's control and admission contract. New repair work requires current authority, compatible dependencies, capacity, bounded liability, and time; uncertain earlier charges are not refunded. Stopping model-directed continuation does not erase responsibility for remote work or preclude separately authorized administrative cleanup. The runtime therefore needs more than a reverse list of tool names. It needs recovery obligations recorded before effects can escape, with enough identity, dependency, and outcome information to govern each later action. The trajectory saga pattern develops that record next.
 
 ## The Trajectory Saga Pattern {#sec-vol3-sagas-architecture}
@@ -77,6 +79,12 @@ The authorized integration-test extension creates a temporary environment for th
 3. **Common pitfall**: Registering cleanup only after receiving a successful forward result, leaving a crash window in which a resource exists but its recovery obligation was never preserved.
 
 :::
+
+In the original formulation, a saga is a sequence of separately committed forward steps $F_1, \dots, F_n$, each paired with a compensating step $C_i$ that the runtime may execute after $F_i$ has taken effect [@garciamolina1987sagas]. A step with no external effect needs no compensation. If every forward step succeeds, the saga executes $F_1, \dots, F_n$. If step $F_k$ fails, a linear saga executes
+
+$$F_1, \dots, F_{k-1}, F_k^{\text{fail}}, C_k, C_{k-1}, \dots, C_1,$$ {#eq-vol3-saga-unwind}
+
+where $C_k$ runs only when evidence establishes that the failed step produced an effect, and is omitted when evidence establishes that it produced none. When the outcome of $F_k$ is unknown, the runtime can neither run nor skip $C_k$ on that basis; the obligation stays open until evidence settles it. @Eq-vol3-saga-unwind is the special case of a linear dependency relation, and the cleanup graph later in this section generalizes it to branching workflows. Each $C_i$ is itself a separately committed operation with its own outcome, so the unwind can stop partway with some compensations settled and others unresolved.
 
 ### Register the obligation before dispatch
 
@@ -111,6 +119,12 @@ An authorized result-recovery request may supply a lost provisioning acknowledgm
 :::
 
 For the example, the cleanup contract can require that the task-owned environment is no longer allocated and that no admitted test still depends on it. Required test evidence must already be preserved outside the environment before it is released. The contract also states what release evidence the endpoint supplies and whether additional work is needed to establish that usage has stopped. Final billing can remain unresolved after resource release, so the charge obligation is tracked separately.
+
+The contract can be stated precisely. Let $\sigma_0$ be the environment state before the forward step, let $\sigma_0'$ be the state after the forward step and its compensation, and let $\Phi$ be the set of postcondition predicates the compensation contract declares. The two states generally differ, because history, logs, and charges have changed. Compensation succeeds when they agree on every declared predicate,
+
+$$\sigma_0' \equiv_{\Phi} \sigma_0 \iff \forall \phi \in \Phi:\ \phi(\sigma_0') = \phi(\sigma_0).$$ {#eq-vol3-semantic-equivalence}
+
+@Eq-vol3-semantic-equivalence makes the scope of a compensation explicit. In the example, “the environment is allocated” and “an admitted test depends on it” belong to $\Phi$; the billing record does not, which is why the charge obligation needs its own settlement. A predicate outside $\Phi$ is not claimed to be restored, and the contract is only as strong as the set the designer declared.
 
 These are application postconditions, not a claim that the world has returned to its earlier state. Other actors may have observed the environment, and compute already used remains used. Concurrent activity can also invalidate a cleanup precondition. If an authorized workflow has begun sharing the environment, its original owner cannot delete it merely because its own branch has failed. The resource's ownership and dependencies must be checked at the enforcing boundary, not inferred from stale planning text.
 
@@ -164,7 +178,7 @@ Compensation gives the runtime a way to manage established partial effects, but 
 
 The separately authorized operation `provision_test_env_r18` has settled, binding the temporary integration-test environment `env_r18_01`. The runtime rejects its next test configuration before dispatch: a field that requires an integer contains a string. The candidate remains `ws_r18`, and the rejected request has started no integration test. Releasing the environment through `release_test_env_r18` is one possible response, but it may discard preparation that is still useful. A bounded correction of the configuration may restore readiness without rebuilding that preparation.
 
-This case differs from the unresolved `test_r18` intent recovered in the preceding chapter. A missing result cannot be treated as a configuration rejection. Before choosing recovery, the runtime needs the operation's known effects, unresolved attempts, evidence scope, and current obligations. **Forward recovery** changes the present state or proposed action to restore a permitted path toward the task. It preserves useful work where possible; it does not establish that the original operation failed or erase its history.
+This case differs from the unresolved `test_r18` intent recovered in the preceding chapter. A missing result cannot be treated as a configuration rejection. Before choosing recovery, the runtime needs the operation's known effects, unresolved attempts, evidence scope, and current obligations. **Forward recovery** changes the present state or proposed action to restore a permitted path toward the task. It preserves useful work where possible; it does not establish that the original operation failed or erase its history. The dependability taxonomy distinguishes it from **backward recovery**\index{Backward recovery}, which returns a system to an earlier saved state [@avizienis2004basic]. Restoring a workspace checkpoint is backward recovery for the state that checkpoint covers. Compensation aims at declared earlier postconditions through new execution, so it restores only what @eq-vol3-semantic-equivalence names.
 
 ### Choose a recovery action from evidence
 
@@ -330,13 +344,27 @@ Within such a region, perform the checks that can legitimately precede commitmen
 
 The ordering must respect actual dependencies. A check that requires the committed effect cannot be moved before it merely to make the plan look reversible. Its possible failure becomes a declared postcommitment risk. Likewise, one pivot is a discipline for a particular region, not a law that every valid trajectory contains at most one irreversible action. A task requiring several independent submissions needs several declared commitment regions or a broader workflow that explicitly handles partial completion.
 
+Consider a separate, explicitly authorized task: publish a particular approved artifact to an external registry and notify an external recipient after publication. This task is not part of the connection-pool repair's grant. A first plan publishes, then validates the artifact's signature and dependency versions, then prepares release notes, then notifies. If validation fails at the second step, an invalid artifact is already public and no compensation within the task's authority withdraws every copy. @Tbl-vol3-commitment-reordering moves every check and every compensable preparation that does not depend on publication ahead of it, leaving publication as the single commitment of its region.
+
+| Step | First plan                          | Reordered plan                                                   | Recovery if a later step fails                                         |
+|:-----|:------------------------------------|:-----------------------------------------------------------------|:-----------------------------------------------------------------------|
+| 1    | Publish the artifact (commitment)   | Validate signature and dependency versions locally               | Nothing external to undo                                               |
+| 2    | Validate signature and dependencies | Stage release notes and the notification payload privately       | Discard staged drafts                                                  |
+| 3    | Prepare release notes               | Confirm authority and approval; record intent and follow-up duty | Nothing external to undo                                               |
+| 4    | Notify the recipient (commitment)   | Publish the artifact (commitment of this region)                 | Publication stands; notification remains an owned follow-up obligation |
+| 5    |                                     | Deliver the staged notification after publication evidence       | A second commitment region with its own unknown-outcome handling       |
+
+: **Reordering around a commitment**: Checks and compensable preparation move ahead of publication, so a failure before step 4 leaves nothing public. Notification depends on publication evidence and therefore cannot move ahead of it; it forms a second region. {#tbl-vol3-commitment-reordering}
+
+Reordering has a limit. A check that needs the published artifact, such as confirming that the registry resolves it under its public name, cannot be hoisted. It stays after the commitment as a declared postcommitment risk with an owner.
+
 Before a commitment, compensation can still leave residue or fail. After it, some cleanup can remain safe and necessary. For example, an independently owned temporary resource can be released when no continuing duty depends on it. The runtime must retain those obligations rather than discard the entire compensation ledger when one commitment is observed. It withholds only recovery actions whose preconditions no longer hold or whose effects would violate an established commitment.
 
 ### Distinguish local staging from external settlement
 
 ::: {#exmp-11-the-dual-commit-trap-and-pivot .callout-example title="What an outbox does not commit"}
 
-Consider a separate, explicitly authorized task: publish a particular approved artifact to an external registry and notify an external recipient after publication. This is not part of the connection-pool repair's grant. Publication and notification are distinct commitments; the recipient cannot be notified of a verified publication before the publication result is known.
+Return to the reordered publication task. Publication and notification are distinct commitments; the recipient cannot be notified of a verified publication before the publication result is known.
 
 After obtaining adequate correlated evidence of publication, the runtime can atomically record that established outcome and insert the required notification into an **outbox**, a durable collection of requests awaiting delivery. That local transaction prevents a crash from preserving the outcome update while losing the corresponding notification obligation, assuming both participate in that transaction and its declared durability contract. If the worker crashes before this update, the earlier durable publication intent and recorded follow-up requirement still survive. Reconciliation can recover publication evidence and perform the local update without losing the notification duty. This local transaction does not atomically publish at the registry and deliver a notification at another service.
 
@@ -366,6 +394,8 @@ Commitment-aware recovery thus limits which actions remain permissible while pre
 
 The repair can keep producing valid tool calls while making little useful progress. After the targeted check of `r18`, suppose later candidate revisions alternate between two versions of the same change and reproduce the same scoped test failure. Each call completes, yet the evidence does not show that the reported connection-pool defect is closer to resolution. A process heartbeat answers whether a component responds; it does not answer whether this sequence is worth continuing.
 
+Classical liveness monitoring detects the absence of activity. A daemon that stops sending keepalives, a process deadlocked on a lock, or a read that never returns silences the heartbeat, and a supervisor restarts the component. A looping trajectory fails in the opposite way, through activity that does not advance the task. Its model calls return, its tool calls parse and pass admission, its health endpoint answers, and every liveness probe stays green while it spends. Budgets do not close this gap either. A cumulative allowance bounds how much the trajectory can spend in total, not how much it spends without progress, so a cycle can consume most of the allowance before the ceiling stops it. Detecting nonprogress requires evidence about the task, not about the process.
+
 A **semantic watchdog**\index{Semantic watchdog} is a runtime policy that uses task-relevant observations to flag possible nonprogress and choose a bounded intervention. “Semantic” describes the question it asks, not an ability to read the task's true state. Its signals can be mistaken. The enforceable property is that the runtime can withhold further work under its policy, even when the model proposes continuing.
 
 The repair-attempt bound established earlier limits one recovery episode. The cumulative budgets of @sec-vol3-controlplane-accounting limit the whole trajectory. A watchdog adds an earlier decision based on observed behavior: more work may still fit the allowance but have little evidential justification. A detector need not wait for the budget to be exhausted, and a permissive detector never overrides that budget.
@@ -384,7 +414,24 @@ Three complementary signals cover different failure patterns. @Tbl-vol3-watchdog
 
 : **Watchdog Signals and Their Limits**: These are evidence for a progress decision, not proofs that a task is advancing or irreparably stuck. {#tbl-vol3-watchdog-invariants}
 
-For state recurrence, the runtime can canonicalize selected candidate contents and retain their digests in a window of recent observations. Equal digests support equality of that captured projection under the encoding and integrity assumptions; they do not establish equality of the entire environment or of what the trajectory has learned. Collision resistance is not a bound on the detector's false-alarm rate. The more common ambiguity is useful work that leaves the selected bytes unchanged. Conversely, changing a scratch file on every turn can defeat an overly broad content comparison without repairing anything.
+For state recurrence, the runtime can canonicalize selected candidate contents and retain their digests in a window of recent observations. Let $D_t$ be the digest of the canonicalized captured projection at observation $t$, and let the window retain the previous $m$ digests. The detector flags a recurrence of period $k$ when
+
+$$\exists\, k \in \{1, \dots, m\}:\ D_t = D_{t-k}.$$ {#eq-vol3-state-recurrence}
+
+Period $k=1$ means the last step left the captured projection unchanged; period $k=2$ is the flip-flop in which a candidate alternates between two versions. @Lst-vol3-state-recurrence-detector implements @eq-vol3-state-recurrence as a scan of the retained window.
+
+::: {#lst-vol3-state-recurrence-detector lst-cap="**Bounded state-recurrence check**: The scan returns the smallest period at which the current digest repeats within the retained window, or no period. A returned period is evidence for a progress review, not proof of a loop."}
+```python
+def recurrence_period(window: list[str], current: str) -> int | None:
+    # window holds the most recent digests, oldest first, at most m entries
+    for k, past in enumerate(reversed(window), start=1):
+        if past == current:
+            return k
+    return None
+```
+:::
+
+Equal digests support equality of that captured projection under the encoding and integrity assumptions; they do not establish equality of the entire environment or of what the trajectory has learned. Collision resistance is not a bound on the detector's false-alarm rate. The more common ambiguity is useful work that leaves the selected bytes unchanged. Conversely, changing a scratch file on every turn can defeat an overly broad content comparison without repairing anything.
 
 Canonicalization must therefore specify what is included and why omitted fields are irrelevant to this comparison. Hashing work grows with the bytes processed; sorting or reading the selected content can add further cost. Average constant-time hash-table lookup does not make capture and canonicalization constant-time. A bounded window limits memory and comparison work but misses recurrences longer than its retained history. Preserve the candidate revision attached to each observation even when comparing content independently of revision labels.
 
@@ -478,7 +525,7 @@ class LoopCost:
 
 ### Intervene through guarded admission
 
-A watchdog finding records its supporting observations, candidate and plan versions, rule, and comparison window. It is not a new trajectory state. The runtime applies the control and admission rules of @sec-vol3-controlplane-statemachine to hold new work while deciding what remains justified. @Tbl-vol3-watchdog-escalation-protocol gives three possible responses; policy need not try each one before selecting a stronger hold.
+A watchdog finding records its supporting observations, candidate and plan versions, rule, and comparison window. It is not a new trajectory state. The runtime applies the control and admission rules of @sec-vol3-controlplane-statemachine to hold new work while deciding what remains justified. @Tbl-vol3-watchdog-escalation-protocol gives the three responses of the watchdog's escalation protocol; policy need not try each one before selecting a stronger hold.
 
 | Response                        | What the runtime does                                                                                        | Condition that limits it                                                                                  |
 |:--------------------------------|:-------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------|
@@ -486,7 +533,7 @@ A watchdog finding records its supporting observations, candidate and plan versi
 | Controlled backtrack            | Restore a compatible private candidate boundary and revise the continuation while retaining failure evidence | Restored files do not undo external effects; unresolved operations and dependencies must be accounted for |
 | End model-directed repair       | Stop ordinary admission, enter guarded finalization, and resolve or transfer remaining duties                | Compensation and trusted cleanup still require current authority, funded bounds, and outcome evidence     |
 
-: **Watchdog Intervention Choices**: Runtime guards enforce the selected response; a prompt warning alone does not constrain subsequent behavior or settle outstanding effects. {#tbl-vol3-watchdog-escalation-protocol}
+: **Watchdog Escalation Protocol**: Runtime guards enforce the selected response; a prompt warning alone does not constrain subsequent behavior or settle outstanding effects. {#tbl-vol3-watchdog-escalation-protocol}
 
 A diagnostic observation might say: “The proposed test invocation was withheld. The same candidate content and test failure recur in the retained window; no changed precondition is recorded. Verify a new hypothesis before requesting another test.” It distinguishes the withheld proposal from earlier executed work and describes observed repetition rather than asserting that the model is incapable of repair. The message enters a newly assembled eligible context, not an in-flight model stream. Its wording may help the next proposal, but the admission gate supplies the bound if the model ignores it.
 
@@ -518,6 +565,12 @@ Three controls address different parts of the problem. A circuit breaker withhol
 
 A **circuit breaker**\index{Circuit breaker!tool dependencies} maintains an admission policy for a defined dependency scope. The scope might distinguish a service operation, region, resource partition, or tenant allocation. A malformed request from one trajectory is not evidence that the service is unavailable to every tenant. Likewise, a tenant-specific quota response should not automatically disable unrelated allocations. Define which failures contribute to the breaker, its observation window and minimum evidence, and the conditions for reconsidering service. Thresholds and cooldowns are policy choices to evaluate, not universal constants.
 
+Classification is the central design decision. An outcome counts against the scope when it reflects the dependency's ability to serve: a connection failure, a transport timeout, a server error, or a throttling response issued for that scope. An outcome that reflects the request counts as a success for breaker purposes, even when the task fails: a validation rejection of a malformed call, an authorization denial, or a correct domain answer such as “record not found.” Counting those would let one trajectory's bad requests shut off a healthy service for everyone. Over a window $W$ of recent classified outcomes, with $e_i = 1$ for a counted failure and $0$ otherwise, the breaker trips when
+
+$$|W| \ge n_{\min} \quad\text{and}\quad r = \frac{1}{|W|}\sum_{i \in W} e_i \ge r_{\text{trip}},$$ {#eq-vol3-breaker-trip}
+
+In @eq-vol3-breaker-trip, the minimum evidence $n_{\min}$ keeps one failure among a few calls from opening the breaker, and $r_{\text{trip}}$ is the policy's failure-fraction threshold.
+
 @Tbl-vol3-circuit-breaker-states gives the familiar three-state pattern, with meanings restricted to this admission gate. These are breaker states, not replacements for the trajectory states in @sec-vol3-controlplane-statemachine. The [circuit-breaker pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker) separates ordinary admission, temporary refusal, and limited trial traffic.
 
 | Breaker state | Admission policy                                                                                       | Evidence used to change it                                                             |
@@ -532,7 +585,7 @@ Opening the breaker does not sever every outstanding effect. The runtime records
 
 Half-open admission needs coordination. For a single-probe policy, the gateway atomically claims the probe slot before sending, so concurrent callers cannot all become the probe. Give each trial cycle a `breaker_generation` and record the generation and probe identity at admission. Only a completion matching the current trial may decide its transition. This counter is local breaker control metadata, distinct from trajectory `control_epoch` and authenticated `owner_epoch`.
 
-Consider a probe that times out. The breaker reopens and advances its generation. A late success from that probe is useful historical evidence, but cannot close the newly opened breaker or consume a newer probe's slot. Authenticate and correlate it, settle its operation and charge where supported, and keep current breaker transitions guarded. A probe itself needs authority, bounded resources, and a safe operation contract. A supported status request can be useful; a new resource-creation request is not a harmless health check merely because it is called a probe. Even a valid probe success establishes only its observed operation under that load. Restore traffic cautiously under rate and capacity limits.
+Consider a probe that times out. The breaker reopens and advances its generation. A common policy also lengthens the next cooldown, $T_{\text{cool}} \leftarrow \min(2\,T_{\text{cool}},\, T_{\text{cool}}^{\max})$, so a dependency that keeps failing its trials receives geometrically fewer probes up to a cap. A late success from that probe is useful historical evidence, but cannot close the newly opened breaker or consume a newer probe's slot. Authenticate and correlate it, settle its operation and charge where supported, and keep current breaker transitions guarded. A probe itself needs authority, bounded resources, and a safe operation contract. A supported status request can be useful; a new resource-creation request is not a harmless health check merely because it is called a probe. Even a valid probe success establishes only its observed operation under that load. Restore traffic cautiously under rate and capacity limits.
 
 ### Coordinate retries before adding jitter
 
@@ -551,6 +604,8 @@ Independent jitter changes the arrival distribution; it does not guarantee a max
 ### Bound retained resources
 
 **Bulkhead isolation**\index{Bulkhead isolation!dependency resources} assigns explicit execution and queue limits to resource domains so one dependency cannot occupy capacity reserved for unrelated work. The relevant unit depends on the implementation: blocking worker threads, asynchronous in-flight requests, retained payload bytes, or remote job reservations are different quantities. An asynchronous wait can release a thread while retaining sockets, buffers, and unresolved operations.
+
+Little's law (@sec-vol3-kv-workload-dynamics) sizes the steady-state version of the problem. Calls to a stalled dependency that arrive at rate $\lambda_{\text{ext}}$ and each hold a worker until a timeout $T_{\text{out}}$ occupy on average $\lambda_{\text{ext}} T_{\text{out}}$ workers, so an uncapped pool of $N_{\text{pool}}$ workers holds $N_{\text{blocked}} = \min(N_{\text{pool}}, \lambda_{\text{ext}} T_{\text{out}})$ of them, and once that product reaches $N_{\text{pool}}$ even local work that would finish almost immediately waits behind the external timeout.
 
 Bound the waiting queue as well as execution. When both are full, withhold or reject additional requests before sending them, record that disposition, and retain enough information for the task's recovery policy. A bounded queue limits retained work but may refuse useful tasks during a burst; a larger queue trades more memory and waiting time for fewer immediate refusals. Queue expiry does not authorize later dispatch after the task's deadline.
 
@@ -639,7 +694,7 @@ An ordinary timeout, a rejected proposal, or ingestion of an untrusted document 
 
 ### Hold model-directed work without abandoning cleanup
 
-Compensation never required a benign model: its registered handlers and admission checks are runtime responsibilities. A suspected incident can make further model-directed repair inappropriate while leaving a narrowly authorized administrative cleanup safe to attempt. Containment therefore does not replace compensation with an indiscriminate stop of every recovery activity.
+Compensation never required a benign model: its registered handlers and admission checks are runtime responsibilities. Holding on suspicion applies the principle of fail-safe defaults [@saltzer1975]. When the evidence that would justify further model-directed work is in doubt, the default decision denies admission rather than permitting it. A suspected incident can make further model-directed repair inappropriate while leaving a narrowly authorized administrative cleanup safe to attempt. Containment therefore does not replace compensation with an indiscriminate stop of every recovery activity.
 
 The supervisor records a control hold and prevents new model-directed admission at the guarded boundaries established in @sec-vol3-controlplane-statemachine. It withdraws eligibility from active output and held proposals rather than allowing them to become new calls. If it pauses the continuation, it uses the existing guarded path through `READY` to `PAUSED` under the same admission hold, with no runnable gap. If the task must end, `FINALIZING` retains or transfers its remaining duties before terminal continuation.
 
