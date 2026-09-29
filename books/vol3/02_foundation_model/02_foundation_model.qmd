@@ -560,7 +560,7 @@ Resource enforcement also has a local boundary. A host-side receive limit bounds
 
 The runtime represents the observed outcome using the **normalized status envelope**\index{Normalized status envelope!definition}
 
-$$\mathcal{E} = \langle \text{status}, \mathbf{y}, \mathbf{m} \rangle$$
+$$\mathcal{N} = \langle \text{status}, \mathbf{y}, \mathbf{m} \rangle$$
 
 Here, $\mathbf{y}$ is the returned payload, possibly absent or partial. The metadata $\mathbf{m}$ carries the response `kind`, raw `stop_reason`, reported `usage`, request identity, and available timing and configuration information. These fields can appear separately in a concrete response object; the tuple groups them to distinguish the payload from evidence about how it arrived. Missing usage is unknown usage, not a zero charge.
 
@@ -904,13 +904,13 @@ class CallPrice:
     growth_cache_mult_str = fmt_multiple(growth_cache, precision=1)
 ```
 
-For an initial estimate, we can separate an input-processing allowance from an output-generation allowance, because the two are set by different physical limits. A dense model with $P$ parameters performs about $2P$ operations per token. Prefill shares each weight read across all $S$ prompt positions, so a long enough prompt keeps the accelerator near its peak arithmetic rate $\pi$. Ordinary decode for one stream produces one token per pass and must read the full weight payload of $Pb$ bytes, with $b$ bytes per parameter, through memory bandwidth $\beta$ at every step:
+For an initial estimate, we can separate an input-processing allowance from an output-generation allowance, because the two are set by different physical limits. A dense model with $P$ parameters performs about $2P$ operations per token. Prefill shares each weight read across all $S$ prompt positions, so a long enough prompt keeps the accelerator near its peak arithmetic rate $R_{\text{peak}}$. Ordinary decode for one stream produces one token per pass and must read the full weight payload of $Pb$ bytes, with $b$ bytes per parameter, through memory bandwidth $\text{BW}$ at every step:
 
-$$t_{\text{prefill}} \approx \frac{2P}{\pi}, \qquad t_{\text{decode}} \ge \frac{P b}{\beta}$$ {#eq-vol3-fm-token-floors}
+$$t_{\text{prefill}} \approx \frac{2P}{R_{\text{peak}}}, \qquad t_{\text{decode}} \ge \frac{P b}{\text{BW}}$$ {#eq-vol3-fm-token-floors}
 
 Dividing the two floors cancels the model size:
 
-$$\frac{t_{\text{decode}}}{t_{\text{prefill}}} \approx \frac{\pi \, b}{2 \beta}$$ {#eq-vol3-fm-floor-ratio}
+$$\frac{t_{\text{decode}}}{t_{\text{prefill}}} \approx \frac{R_{\text{peak}} \, b}{2 \, \text{BW}}$$ {#eq-vol3-fm-floor-ratio}
 
 The reference configuration uses a dense model with `{python} CallPrice.params_str` parameters and 8-bit weights on one accelerator. @Eq-vol3-fm-token-floors gives an input allowance of `{python} CallPrice.t_pre_us_str` per prompt token and an output allowance of `{python} CallPrice.t_dec_ms_str` per generated token, so @eq-vol3-fm-floor-ratio puts one output token at about `{python} CallPrice.ratio_str` prompt tokens. That ratio is why output length governs latency (principle \ref{pri-vol3-memory-bandwidth-decoding}). It holds for weight-dominated, unbatched decode against peak-rate prefill, and it is not a measured service rate or a price ratio; @sec-vol3-appendix-inference-roofline derives both floors and states their conditions.
 
@@ -920,15 +920,15 @@ For the first repair turn, a prompt of `{python} CallPrice.s0_str` tokens contri
 
 ### Multi-turn trajectory cost accumulation
 
-A short reply can still lead to a large input workload across a trajectory. Suppose the runtime retains an append-only transcript and supplies that complete transcript on every call. If the first prompt has $S_{\text{init}}$ tokens and each turn appends $\Delta$ tokens of model output and tool results, a trajectory with horizon $H$ turns supplies
+A short reply can still lead to a large input workload across a trajectory. Suppose the runtime retains an append-only transcript and supplies that complete transcript on every call. If the first prompt has $S_{\text{base}}$ tokens and each turn appends $\Delta$ tokens of model output and tool results, a trajectory with horizon $H$ turns supplies
 
-$$S_{\text{sent}} = \sum_{j=0}^{H-1} \left(S_{\text{init}} + j\Delta\right) = H S_{\text{init}} + \Delta \frac{H(H-1)}{2}$$ {#eq-vol3-trajectory-resend}
+$$S_{\text{sent}} = \sum_{j=0}^{H-1} \left(S_{\text{base}} + j\Delta\right) = H S_{\text{base}} + \Delta \frac{H(H-1)}{2}$$ {#eq-vol3-trajectory-resend}
 
 prompt tokens in total. The quadratic term in @eq-vol3-trajectory-resend follows from repeatedly supplying growing history, not from an unavoidable property of every agent. Selecting a bounded context or summarizing old observations changes the workload. A stateful service interface can also avoid transmitting the complete transcript over the network even when the effective prompt has this length.
 
 Repeated input need not mean repeated computation. **Prefix caching**\index{Prefix caching!economics} reuses previously computed KV state for a compatible, unchanged beginning of a request [@zheng2024sglang]. Reuse requires that the relevant model configuration and encoded prefix match and that the cached state remain available. Changing an early instruction or tool definition can invalidate reuse from the changed position onward. Unchanged visible text is insufficient if its encoded representation or other model inputs differ.
 
-For a simple comparison, assume the service reuses each earlier prompt prefix but processes the entire newly appended suffix again. That suffix includes the previous model response as well as the tool observation. Across all turns, the number of prompt tokens requiring fresh prefill is then $S_{\text{init}}+(H-1)\Delta$. This accounting deliberately excludes reuse of the previous response's generated KV state; retaining that state can avoid reprocessing those output tokens too. The worked estimate keeps these assumptions fixed so the saving follows from one identifiable change.
+For a simple comparison, assume the service reuses each earlier prompt prefix but processes the entire newly appended suffix again. That suffix includes the previous model response as well as the tool observation. Across all turns, the number of prompt tokens requiring fresh prefill is then $S_{\text{base}}+(H-1)\Delta$. This accounting deliberately excludes reuse of the previous response's generated KV state; retaining that state can avoid reprocessing those output tokens too. The worked estimate keeps these assumptions fixed so the saving follows from one identifiable change.
 
 ::: {#nbk-02-price-of-a-trajectory .callout-notebook title="The price of an append-only trajectory"}
 
@@ -942,7 +942,7 @@ With prompt-prefix reuse, fresh prefill covers `{python} CallPrice.cached_math` 
 
 :::
 
-The notebook's two totals answer different questions. Latency is what one trajectory experiences. Each call waits for the previous observation, so the trajectory cannot batch its own dependent calls, and every output token remains a sequential step on its critical path even when the server shares that step with other trajectories. Work is what the serving system experiences. When one weight read serves many concurrent streams, the amortized time per generated token falls toward the arithmetic floor $2P/\pi$ of @eq-vol3-fm-token-floors, the same as a prompt token's, and processing work then tracks the total number of tokens processed (@sec-vol3-appendix-inference-roofline). For an append-only agent that total is mostly re-sent input. Output length therefore sets a trajectory's latency, while uncached repeated input sets most of its work, provided the server sustains large batches and the attention-state capacity they require.
+The notebook's two totals answer different questions. Latency is what one trajectory experiences. Each call waits for the previous observation, so the trajectory cannot batch its own dependent calls, and every output token remains a sequential step on its critical path even when the server shares that step with other trajectories. Work is what the serving system experiences. When one weight read serves many concurrent streams, the amortized time per generated token falls toward the arithmetic floor $2P/R_{\text{peak}}$ of @eq-vol3-fm-token-floors, the same as a prompt token's, and processing work then tracks the total number of tokens processed (@sec-vol3-appendix-inference-roofline). For an append-only agent that total is mostly re-sent input. Output length therefore sets a trajectory's latency, while uncached repeated input sets most of its work, provided the server sustains large batches and the attention-state capacity they require.
 
 That conclusion belongs to the repair agent, whose consumer is a program that can act only on a complete response. The support agent (\ref{lhs-vol3-support-agent}) serves a person reading a streamed reply, and the same model on the same hardware puts that workload on a different term of @eq-vol3-call-latency.
 
@@ -1016,7 +1016,7 @@ Latency, computational work, and billed usage are different accounting quantitie
 A call's token count and its elapsed time describe different parts of the task budget.
 
 - [ ] **Measurement boundary**: If time to first token already includes delivery of the first token, how many subsequent token intervals remain in a completed response of length $K$?
-- [ ] **Horizon estimate**: If the trajectory triples to `{python} CallPrice.turns_3x_str` turns with the same $S_{\text{init}}$ and $\Delta$, estimate the growth factor of uncached input and of fresh prefill under reuse. Which one decides whether the longer task is affordable?
+- [ ] **Horizon estimate**: If the trajectory triples to `{python} CallPrice.turns_3x_str` turns with the same $S_{\text{base}}$ and $\Delta$, estimate the growth factor of uncached input and of fresh prefill under reuse. Which one decides whether the longer task is affordable?
 - [ ] **Reuse assumptions**: What changes in the estimate if the reusable prefix is evicted during a tool wait?
 - [ ] **Cost denominator**: Why does an input-token majority fail to establish an input-cost majority when cached input and output have different prices?
 - [ ] **Interface estimate**: A whole-file response requires `{python} CallPrice.k_full_str` output tokens and a localized edit requires `{python} CallPrice.k_diff_str`. At the reference output allowance, which merits further testing against a `{python} CallPrice.deadline_str` deadline? Why is the estimate alone insufficient to guarantee it? The next section works it through.
