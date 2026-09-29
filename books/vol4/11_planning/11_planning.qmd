@@ -110,7 +110,7 @@ A multi-step action chunk contains future setpoints that the tracking controller
 
 The separation of rates lets the tracking controller consume admitted references on its own clock while inference takes a variable amount of time. Buffering addresses that timing mismatch, but it cannot make the stored references valid indefinitely. The planning deadline must leave time to enter a feasible stop before either the references or their supporting evidence expire.
 
-[^fn-plan-action-chunking]: **Action chunking representations**\index{Action chunking!architectures}\index{Policy learning!temporal horizons}: ACT and Diffusion Policy, the 2023-era chunk policies, carry no boundary-derivative constraints. Real-time chunking [@black2025real] conditions each new chunk on the actions already committed, which makes a consistent join more likely without guaranteeing one, so the planner still proposes a transition bridge across each replanning seam and the permission path checks it before admission.
+[^fn-plan-action-chunking]: **Action chunking representations**\index{Action chunking!architectures}\index{Policy learning!temporal horizons}: ACT and Diffusion Policy, the 2023-era chunk policies, carry no boundary-derivative constraints. Real-time chunking [@black2025realtime] conditions each new chunk on the actions already committed, which makes a consistent join more likely without guaranteeing one, so the planner still proposes a transition bridge across each replanning seam and the permission path checks it before admission.
 
 ::: {#dfn-planning-kinodynamic-feasibility-envelope .callout-definition title="Kinodynamic feasibility envelope"}
 
@@ -163,8 +163,9 @@ For a manipulator, a configuration $(q_1, \dots, q_n)$ is the collection of join
 # │          1.0 m/s in the weakest direction needs |qdot| = 4.90 rad/s at a
 # │          90 degree elbow (one joint >= 3.46 rad/s > 2.175 rad/s) and
 # │          37.8 rad/s at a 10 degree elbow.
-# │ How:     Franka FER kinematic chain (d3, d5) and joint velocity limit
-# │          (franka2023robot); smallest singular value of the 2x2 Jacobian.
+# │ How:     Franka FER kinematic chain (d3, d5) and joint velocity limit from
+# │          the registry (franka2023robot); smallest singular value of the
+# │          2x2 Jacobian.
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from mlsysim import *
@@ -183,9 +184,9 @@ class PlanningTwoLinkArm:
     """Planar two-link abstraction of the arm: forward kinematics and Jacobian conditioning."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────
-    l1 = 0.316 * ureg.meter  # category: datasheet; FER DH d3, shoulder to elbow (franka2023robot)
-    l2 = 0.384 * ureg.meter  # category: datasheet; FER DH d5, elbow to wrist (franka2023robot)
-    qd_max = 2.1750 * ureg.radian / ureg.second  # category: datasheet; FER joints 1-4 velocity limit (franka2023robot)
+    l1 = RM.arm.upper_arm_length  # category: datasheet; FER DH d3, shoulder to elbow, registry (franka2023robot)
+    l2 = RM.arm.forearm_length  # category: datasheet; FER DH d5, elbow to wrist, registry (franka2023robot)
+    qd_max = RM.arm.joint_velocity_limits[1]  # category: datasheet; FER joints 1-4 velocity limit, registry (franka2023robot)
     v_tool = RM.tcp_speed_limit  # category: chosen; free-space TCP limit, registry
     q2_good_deg = 90  # category: illustrative; right-angle elbow
     q2_bad_deg = 10  # category: illustrative; nearly straight elbow
@@ -694,7 +695,7 @@ $$\Delta q_{\mathrm{reference}}=\int_{t_0}^{t_{\mathrm{seam}}}\dot q_A(t)\,dt,\q
 
 The projected seam state $\hat{\mathbf{x}}_{\mathrm{seam}}$ in @eq-plan-execution-delay-gap is a reference-space construct; disturbances, payload deflection, and actuator lag can displace the plant from it. Admission before the seam therefore checks a bounded reachable-state envelope, including feasible bridges and stops from that envelope, rather than claiming to measure a future state. At activation, the MCU uses current encoder-based state estimates and their error bounds to check the actual boundary gap $(\Delta q, \Delta\dot q, \Delta\ddot q)$ against the admitted envelope. It selects or synthesizes a bounded $C^2$ quintic bridge whose full constraints pass before dispatch. This activation work must fit the reserved deadline. If the state or bridge lies outside the checked envelope, the MCU refuses that replacement. The active record continues only while its own state, evidence, lease, and stop remain valid; otherwise the MCU selects the validated state-matched fallback. Matching two *reference* trajectories makes the references $C^2$, not the plant.
 
-Learned chunk policies now apply the same idea inside the generator. Real-time chunking [@black2025real] computes the next chunk while the current one executes. The actions that will run during the inference delay are already committed, so the method freezes them to their known values and generates the rest of the chunk to agree with them, weighting agreement less toward the end of the overlap. Its authors report higher task success under injected latency, and they state no continuity guarantee. Conditioning on the committed prefix makes a consistent join more likely, and it shrinks the gap the activation check must bridge, but it does not replace that check. The MCU still compares the measured seam state with the admitted envelope before the new chunk takes over.
+Learned chunk policies now apply the same idea inside the generator. Real-time chunking [@black2025realtime] computes the next chunk while the current one executes. The actions that will run during the inference delay are already committed, so the method freezes them to their known values and generates the rest of the chunk to agree with them, weighting agreement less toward the end of the overlap. Its authors report higher task success under injected latency, and they state no continuity guarantee. Conditioning on the committed prefix makes a consistent join more likely, and it shrinks the gap the activation check must bridge, but it does not replace that check. The MCU still compares the measured seam state with the admitted envelope before the new chunk takes over.
 
 ::: {#dfn-planning-future-state-conditioning .callout-definition title="Future-state conditioning"}
 
@@ -765,7 +766,7 @@ class PlanningOneJointDynamics:
     # ┌── 2. EXECUTE (The Compute) ─────────────────
     tau_grav = (m_pay * g0 * r_reach).to(ureg.newton * ureg.meter)
     grav_ratio = (tau_grav / tau_max).to("dimensionless").magnitude
-    j_eff = (m_pay * r_reach**2 + j_rotor_ref).to(ureg.kilogram * ureg.meter**2)
+    j_eff = (m_pay * r_reach**2 + j_rotor_ref).to(kilogram * meter**2)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(tau_grav.magnitude - 20.594) < 1e-3, "payload holding torque changed")
@@ -773,7 +774,7 @@ class PlanningOneJointDynamics:
     check(grav_ratio < 0.5, "payload gravity no longer a minority of the joint limit")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
-    m_pay_str = fmt_mass(m_pay, unit=ureg.kilogram, precision=0)
+    m_pay_str = fmt_mass(m_pay, unit=kilogram, precision=0)
     tau_max_str = fmt_torque(tau_max, precision=0)
     tau_grav_str = fmt_torque(tau_grav, precision=1)
     grav_pct_str = fmt_percent(grav_ratio, precision=1, style="prose")
@@ -1003,14 +1004,18 @@ The traversal time is $T = \int_0^1 ds/\dot s$, so the fastest timing keeps $\do
 # │          at the switch; jerk 604.8 rad/s^3; 528.9 ms jerk-limited (+12.6 ms).
 # │ How:     PlanningOneJointDynamics (payload-only, gravity held at its
 # │          horizontal value over the swing); FER joint-2 acceleration limit
-# │          and torque-rate limit (franka2023robot); rest-to-rest double-S
-# │          without cruise: D = a x (x + a/j), T = 2 (x + a/j).
+# │          and torque-rate limit (registry, franka2023robot); rest-to-rest
+# │          double-S without cruise, calc_scurve_rest_to_rest_time:
+# │          D = a x (x + a/j), T = 2 (x + a/j).
 # │          Ruckig timing from berscheid2021jerk, Table III.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
 from mlsysim.core.units import ureg, millisecond, microsecond
+from mlsysim.physics.robotics import calc_scurve_rest_to_rest_time
 from mlsysim.fmt import check, fmt, fmt_int, fmt_latency, fmt_percent, fmt_torque, fmt_torque_rate, fmt_angular_velocity, fmt_angle
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 
 class PlanningTimeParam:
     """Phase-plane swing of the loaded shoulder and the cost of a jerk bound."""
@@ -1021,8 +1026,8 @@ class PlanningTimeParam:
     tau_g = PlanningOneJointDynamics.tau_grav  # category: derived; payload holding torque, held constant near horizontal
     tau_max = PlanningOneJointDynamics.tau_max  # category: datasheet; joint torque limit, registry
     qd_max = PlanningTwoLinkArm.qd_max  # category: datasheet; FER joint 2 velocity limit (franka2023robot)
-    qdd_max = 7.5 * ureg.radian / ureg.second**2  # category: datasheet; FER joint 2 acceleration limit (franka2023robot)
-    taud_max = 1000.0 * ureg.newton * ureg.meter / ureg.second  # category: datasheet; FER torque-rate limit (franka2023robot)
+    qdd_max = RM.arm.joint_acceleration_limits[1]  # category: datasheet; FER joint 2 acceleration limit, registry (franka2023robot)
+    taud_max = RM.arm.joint_torque_rate_limit  # category: datasheet; FER torque-rate limit, registry (franka2023robot)
     ruckig_mean = 19.8 * microsecond  # category: literature; 7-DoF mean, i7-8700K (berscheid2021jerk, Table III)
     ruckig_worst = 123 * microsecond  # category: literature; 7-DoF worst case (berscheid2021jerk, Table III)
     ruckig_dofs = 7  # category: literature; axes in the benchmark (berscheid2021jerk)
@@ -1038,10 +1043,9 @@ class PlanningTimeParam:
     tau_step = (2 * j_eff * a_bind / rad).to(ureg.newton * ureg.meter)
     t_step = (tau_step / taud_max).to(millisecond)
     j_bound = (taud_max / j_eff).to(ureg.second**-3).magnitude * rad / ureg.second**3
-    _tj = (a_bind / j_bound).to(ureg.second).magnitude
-    _x = (-_tj + math.sqrt(_tj**2 + 4 * _dq / _a)) / 2
-    t_jerk = 2 * (_x + _tj) * ureg.second
-    v_peak_jerk = _a * _x * rad / ureg.second
+    _move = calc_scurve_rest_to_rest_time(d_q, a_bind, j_bound)
+    t_jerk = _move["duration"].to(ureg.second)
+    v_peak_jerk = _move["peak_velocity"].to(rad / ureg.second)
     t_extra = (t_jerk - t_opt).to(millisecond)
     extra_ratio = (t_extra / t_opt).to("dimensionless").magnitude
 
@@ -1053,7 +1057,7 @@ class PlanningTimeParam:
     check(abs(t_opt.to(millisecond).magnitude - 516.40) < 0.01, "time-optimal swing changed")
     check(abs(tau_step.magnitude - 24.80) < 0.01, "switch torque step changed")
     check(abs(t_jerk.to(millisecond).magnitude - 528.95) < 0.01, "jerk-limited swing changed")
-    check(_x >= _tj, "jerk-limited swing no longer reaches the acceleration plateau")
+    check(_move["reaches_max_acceleration"], "jerk-limited swing no longer reaches the acceleration plateau")
     check(ruckig_worst < 1 * millisecond, "online generator worst case no longer inside a 1 ms cycle")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
@@ -1292,13 +1296,15 @@ In the alternate arm schedule, commitment preserves the `{python} PlanningC2Stop
 # │          freeboard); a <= g h_f / R = 2.45 m/s^2; stop from 1.0 m/s at that
 # │          bound 280.4 mm; with 82 mm lease path 362.4 mm > 300 mm; fitting
 # │          carry speed 0.885 m/s.
-# │ How:     Free surface normal to effective gravity (tan theta = a / g);
+# │ How:     calc_quasistatic_spill_acceleration (free surface normal to
+# │          effective gravity, tan theta = a / g);
 # │          illustrative mug geometry; jerk bound = reference polynomial's peak
 # │          at the same peak and the TCP limit, as for the free-space stop;
 # │          calc_scurve_stop_distance and calc_scurve_max_permitted_velocity.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import ureg, millisecond
+from mlsysim.physics.robotics import calc_quasistatic_spill_acceleration
 from mlsysim.fmt import check, fmt_length, fmt_acceleration, fmt_velocity
 
 class PlanningMugSpill:
@@ -1315,7 +1321,7 @@ class PlanningMugSpill:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
     rise_free = (r_mug * a_free / g0).to(ureg.millimeter)
-    a_mug = (g0 * h_free / r_mug).to(ureg.meter / ureg.second**2)
+    a_mug = calc_quasistatic_spill_acceleration(r_mug, h_free)
     j_mug = calc_c2_stop_suffix(v_arm, a_mug)["peak_jerk"]
     d_mug = calc_scurve_stop_distance(v_arm, a_mug, j_mug).to(ureg.millimeter)
     d_mug_total = (v_arm * t_path).to(ureg.millimeter) + d_mug
@@ -1504,7 +1510,7 @@ class PlanningPractice2026:
 | Online jerk-limited generation   | Ruckig [@berscheid2021jerk]                        | Time-optimal constant-jerk phases from an arbitrary state                               | `{python} PlanningTimeParam.ruckig_mean_str` mean, `{python} PlanningTimeParam.ruckig_worst_str` worst case for `{python} PlanningTimeParam.ruckig_dofs_str` axes on a desktop processor                                                     |
 | Parallel trajectory optimization | cuRobo [@sundaralingam2023curobo]                  | Many optimizer seeds in parallel on an accelerator, sphere-based collision model        | Kinematics and position derivatives only; full dynamics left open                                                                                                                                                                            |
 | Learned chunk proposals          | $\pi_0$ [@black2024pi0]                            | Flow-matching action chunks executed open loop                                          | `{python} PlanningPractice2026.pi0_horizon_str`-action chunks; `{python} PlanningPractice2026.pi0_rate_str` robots re-infer after `{python} PlanningPractice2026.pi0_executed_str` actions (`{python} PlanningPractice2026.pi0_reinfer_str`) |
-| Chunk-boundary conditioning      | Real-time chunking [@black2025real]                | Freeze the actions that run during inference, generate the rest to agree with them      | No continuity guarantee stated                                                                                                                                                                                                               |
+| Chunk-boundary conditioning      | Real-time chunking [@black2025realtime]            | Freeze the actions that run during inference, generate the rest to agree with them      | No continuity guarantee stated                                                                                                                                                                                                               |
 | Mobile-base local control        | Nav2 DWB and MPPI controllers [@macenski2023desks] | Velocity-space sampling with admissibility, or sampled control sequences scored by cost | Both ship in the ROS 2 navigation stack                                                                                                                                                                                                      |
 
 : **Trajectory generation in practice, as of 2026**: Each system implements a mechanism this chapter teaches and remains a proposer in this architecture. Figures come from each system's own paper, measured on its authors' hardware, and are not admission evidence for this machine. {#tbl-11-practice-2026 tbl-colwidths="[18,22,30,30]"}

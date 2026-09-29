@@ -746,17 +746,51 @@ In cloud machine learning clusters, GPUs utilize high-bandwidth memory (HBM) phy
 
 ### DRAM bank organization and conflict latency
 
+```{python}
+#| label: appendix-systems-dram-timing
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LPDDR5-6400 ROW-CONFLICT TIMINGS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-appendix-systems-dram (row precharge and activate steps)
+# │ Goal: Quote t_RP and t_RCD for the application SoC's LPDDR5-6400 from the
+# │       registry instead of a DDR4-era 14 ns.
+# │ Show: 18.75 ns each (15 command-clock cycles of 1.25 ns); 37.5 ns conflict.
+# │ How: Hardware.Tech.Memory.LPDDR5_6400 (JESD209-5 via Ramulator 2.0).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import nanosecond
+from mlsysim.fmt import fmt, check
+
+class AppendixDramTiming:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    lpddr5 = Hardware.Tech.Memory.LPDDR5_6400  # category: datasheet (registry)
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_rp = lpddr5.t_rp.to(nanosecond)
+    t_rcd = lpddr5.t_rcd.to(nanosecond)
+    t_conflict = (t_rp + t_rcd).to(nanosecond)
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(abs(t_rp.magnitude - 18.75) < 1e-9 and abs(t_rcd.magnitude - 18.75) < 1e-9, "LPDDR5-6400 t_RP = t_RCD = 18.75 ns.")
+    check(abs(t_conflict.magnitude - 37.5) < 1e-9, "A row conflict costs 37.5 ns.")
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_rp_str = fmt(t_rp.magnitude, precision=2)
+    t_rcd_str = fmt(t_rcd.magnitude, precision=2)
+    t_conflict_str = fmt(t_conflict.magnitude, precision=1)
+```
+
 DRAM organizes storage into channels, ranks, **bank groups**, and banks; their counts and timing depend on the memory standard and device organization. Each individual bank possesses an independent row buffer consisting of sense amplifiers. A read that changes the open row can require the following sequence:\index{Memory contention!DRAM bank conflicts}\index{Memory contention!row buffer management}\index{Memory contention!bank groups}
 
-1. **Row precharge** ($t_{\text{RP}}$): Closes the active row and equalizes the bitlines for the next activation (typically $14\text{ ns}$).
-2. **Row activate** ($t_{\text{RCD}}$): Reads an entire page of storage cells (e.g., 2 KB to 8 KB) across wordlines into the bank's open row buffer ($14\text{ ns}$).
+1. **Row precharge** ($t_{\text{RP}}$): Closes the active row and equalizes the bitlines for the next activation (`{python} AppendixDramTiming.t_rp_str` ns per bank at LPDDR5-6400).
+2. **Row activate** ($t_{\text{RCD}}$): Reads an entire page of storage cells (e.g., 2 KB to 8 KB) across wordlines into the bank's open row buffer (`{python} AppendixDramTiming.t_rcd_str` ns at LPDDR5-6400).
 3. **Column access** ($t_{\text{CAS}} / t_{\text{CL}}$): Reads or writes data beats from the open row buffer onto the memory data bus ($14\text{ ns}$).
 
 **Bank Groups and Timing Penalties.** To sustain high data rates, modern DRAM organizes banks into bank groups. Consecutive column reads to the same bank group require a long column-to-column delay $t_{\text{CCD\_L}} \approx 8\text{ ns}$ due to internal sense-amplifier routing constraints, whereas column accesses to different bank groups require only $t_{\text{CCD\_S}} \approx 4\text{ ns}$.
 
 **The Bank Conflict Penalty.** When consecutive memory operations target different rows within the same physical bank—a *bank conflict*—the memory controller cannot immediately access the column. It must execute a precharge followed by an activate before issuing the column command, introducing a compulsory stall:
 $$ \Delta t_{\text{conflict}} \approx t_{\text{RP}} + t_{\text{RCD}} $$
-Furthermore, the minimum time between consecutive row activations to the same bank is governed by the row cycle time $t_{\text{RC}} = t_{\text{RAS}} + t_{\text{RP}} \approx 45\text{--}60\text{ ns}$.
+At LPDDR5-6400 that stall is `{python} AppendixDramTiming.t_conflict_str` ns. Furthermore, the minimum time between consecutive row activations to the same bank is governed by the row cycle time $t_{\text{RC}} = t_{\text{RAS}} + t_{\text{RP}} \approx 45\text{--}60\text{ ns}$.
 
 **Row Buffer Locality vs. Thrashing.** Memory controllers select between an *open-page* or *closed-page* policy. Under an open-page policy, row buffers remain active after access in anticipation of spatial locality. While this maximizes bandwidth for sequential streaming (such as dense general matrix multiplication (GEMM) weight fetching or linear camera DMA writes), sporadic random accesses (such as sensor fusion state lookups or 1 kHz safety monitor checks) frequently hit different rows in active banks. When a continuous camera DMA stream writes video frames to the same DRAM bank that holds real-time safety buffers, repeated row-buffer conflicts transform low-latency reads into multi-hundred-nanosecond stalls.[^fn-sys-dram-conflicts]
 
@@ -1411,7 +1445,7 @@ Every calculation on the running machine draws its inputs from one registry entr
 # │          @sec-appendix-systems-machine-data-sheet.
 # │ Goal:    Print every running-machine input the chapters' calculations use,
 # │          with its evidence category and the MLSysIM field that holds it.
-# │ Show:    124 rows in eight subsystem groups; four values still need a source.
+# │ Show:    125 rows in eight subsystem groups; four values still need a source.
 # │ How:     machine_data_sheet() reads each value from the registry (or computes
 # │          it with the registry's own functions) and carries the category of
 # │          its provenance; nothing is retyped here. A value added to the
@@ -1432,7 +1466,7 @@ class MachineDataSheet:
     n_needs_source = sum(1 for r in rows if r.value is None)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(n_rows == 124, f"The data sheet table lists 124 rows; the registry sheet has {n_rows}.")
+    check(n_rows == 125, f"The data sheet table lists 125 rows; the registry sheet has {n_rows}.")
     check(n_needs_source == 4, f"Four inputs still need a source; the sheet has {n_needs_source}.")
     check(all(r.category in CATEGORIES for r in rows), "Every row carries one of the five categories.")
 
@@ -1517,7 +1551,7 @@ class MachineDataSheet:
 | Permission check, declared WCET                                | `{python} MachineDataSheet.value_str["t_enf_wcet"]`      | `{python} MachineDataSheet.category_str["t_enf_wcet"]`      | `AISLE.enforcer_wcet`                                                  |                                                                                         |
 | Permission check deadline                                      | `{python} MachineDataSheet.value_str["t_enf_deadline"]`  | `{python} MachineDataSheet.category_str["t_enf_deadline"]`  | `AISLE.enforcer_deadline`                                              |                                                                                         |
 | **Sensing and observation age**                                |                                                          |                                                             |                                                                        |                                                                                         |
-| Navigation-camera exposure                                     | `{python} MachineDataSheet.value_str["t_exposure"]`      | `{python} MachineDataSheet.category_str["t_exposure"]`      | `RM.nav_camera.exposure_time`                                          |                                                                                         |
+| Navigation-camera exposure                                     | `{python} MachineDataSheet.value_str["t_exposure"]`      | `{python} MachineDataSheet.category_str["t_exposure"]`      | `RM.nav_camera.exposure_time`                                          | Configured setting, not a sensor property                                               |
 | Navigation-camera readout                                      | `{python} MachineDataSheet.value_str["t_readout"]`       | `{python} MachineDataSheet.category_str["t_readout"]`       | `RM.nav_camera.readout_time`                                           |                                                                                         |
 | Sensor transport                                               | `{python} MachineDataSheet.value_str["t_transport"]`     | `{python} MachineDataSheet.category_str["t_transport"]`     | `AISLE.t_transport`                                                    |                                                                                         |
 | DMA transfer                                                   | `{python} MachineDataSheet.value_str["t_dma"]`           | `{python} MachineDataSheet.category_str["t_dma"]`           | `AISLE.t_dma`                                                          |                                                                                         |
@@ -1550,7 +1584,8 @@ class MachineDataSheet:
 | Mug slip acceleration on the conveyor                          | `{python} MachineDataSheet.value_str["a_slip"]`          | `{python} MachineDataSheet.category_str["a_slip"]`          | `AISLE.a_conveyor_slip`                                                |                                                                                         |
 | Grasp tolerance                                                | `{python} MachineDataSheet.value_str["r_tol"]`           | `{python} MachineDataSheet.category_str["r_tol"]`           | `AISLE.grasp_tolerance`                                                |                                                                                         |
 | Initial grasp-estimate error                                   | `{python} MachineDataSheet.value_str["e_0"]`             | `{python} MachineDataSheet.category_str["e_0"]`             | `AISLE.grasp_initial_error`                                            |                                                                                         |
-| Coworker contact stiffness                                     | `{python} MachineDataSheet.value_str["k_human"]`         | `{python} MachineDataSheet.category_str["k_human"]`         | `AISLE.k_contact_human`                                                |                                                                                         |
+| Coworker hand spring constant $k_H$                            | `{python} MachineDataSheet.value_str["k_human"]`         | `{python} MachineDataSheet.category_str["k_human"]`         | `AISLE.k_contact_human`                                                | ISO/TS 15066 hand body model                                                            |
+| Coworker hand effective mass $m_H$                             | `{python} MachineDataSheet.value_str["m_human"]`         | `{python} MachineDataSheet.category_str["m_human"]`         | `AISLE.m_contact_human`                                                | ISO/TS 15066 hand body model                                                            |
 | Coworker contact force criterion                               | `{python} MachineDataSheet.value_str["f_contact"]`       | `{python} MachineDataSheet.category_str["f_contact"]`       | `AISLE.f_contact_criterion`                                            |                                                                                         |
 | Handover TCP speed                                             | `{python} MachineDataSheet.value_str["v_handover"]`      | `{python} MachineDataSheet.category_str["v_handover"]`      | `AISLE.v_handover`                                                     |                                                                                         |
 | **Human takeover**                                             |                                                          |                                                             |                                                                        |                                                                                         |

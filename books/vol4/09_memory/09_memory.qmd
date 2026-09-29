@@ -386,7 +386,7 @@ def _representation_rows(pitches_cm, reach, l_map, v_slab, s_esdf, s_occ, n_tril
 
 class RepresentationQuery:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
-    t_reflex = 100 * ureg.microsecond  # category: chosen (collision-check allocation within the 1 kHz tick)
+    t_reflex = 100 * microsecond  # category: chosen (collision-check allocation within the 1 kHz tick)
     n_hulls = 50  # category: illustrative (sphere hulls covering the machine)
     r_hull = 0.25 * ureg.meter  # category: illustrative (sphere-hull radius)
     delta_margin = AISLE.delta_margin  # category: chosen (protective clearance)
@@ -402,7 +402,7 @@ class RepresentationQuery:
     n_trilinear = 8  # category: derived (corner cells of one trilinear interpolation)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    t_query = (t_reflex / n_hulls).to(ureg.microsecond)
+    t_query = (t_reflex / n_hulls).to(microsecond)
     reads_budget = (t_query * sram_bw / s_esdf).to(ureg.dimensionless).magnitude
     reach = (r_hull + delta_margin).to(ureg.meter)
     v_slab = (aisle_width * d_clear * h_slab).to(ureg.meter**3)
@@ -419,7 +419,7 @@ class RepresentationQuery:
     check(r10["quant"] > delta_margin / 2, "At 10 cm, quantization alone must exceed half the protective clearance.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
-    t_query_str = fmt_latency(t_query, unit=ureg.microsecond, precision=0)
+    t_query_str = fmt_latency(t_query, unit=microsecond, precision=0)
     sram_bw_str = fmt_bandwidth(sram_bw, precision=1)
     sram_cap_str = fmt_memory(sram_cap, unit=ureg.megabyte, precision=2)
     reads_budget_str = fmt_int(reads_budget)
@@ -758,21 +758,17 @@ Forward propagation changes the estimate and its uncertainty while preserving th
 # │          for the aisle ahead (clear distance); what the frame's age leaves
 # │          of the second; the running total memory leaves unchanged; the
 # │          walking-person term at the drive limit against the clear distance.
-# │ How:     T_inv = max(0, (d_free - delta_loc - delta_margin) / v_h); the
+# │ How:     calc_free_space_expiry: max(0, (d_free - dloc - dmargin) / v_h); the
 # │          running total from the RM/AISLE terms at the drive limit; the
 # │          walking term v_h (tau_delay + v / a_brake) for a constant-
 # │          deceleration stop at the drive limit (the C2 suffix is Ch11's, and
 # │          the speed ceiling this term implies is computed in Ch12).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
+from mlsysim.physics.robotics import calc_free_space_expiry
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
-
-def free_space_expiry(d_free, delta_loc, delta_margin, v_h):
-    """Erosion deadline of a free-space claim: (d_free - delta_loc - delta_margin) / v_h, floored at zero."""
-    slack = d_free - delta_loc - delta_margin
-    return (max(slack.to(ureg.meter).magnitude, 0.0) * ureg.meter / v_h).to(millisecond)
 
 class RackEndBelief:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
@@ -788,8 +784,8 @@ class RackEndBelief:
     tau_delay = AISLE.tau_delay  # category: derived (total pre-brake delay)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    t_exp_abreast = free_space_expiry(side_clearance, delta_loc, delta_margin, v_h)
-    t_exp_ahead = free_space_expiry(d_clear, delta_loc, delta_margin, v_h)
+    t_exp_abreast = calc_free_space_expiry(side_clearance, delta_loc, delta_margin, v_h).to(millisecond)
+    t_exp_ahead = calc_free_space_expiry(d_clear, delta_loc, delta_margin, v_h).to(millisecond)
     t_left_at_dispatch = (t_exp_ahead - t_age).to(millisecond)
     frame_period = (1 / frame_rate).to(millisecond)
     frames_bridged = (t_left_at_dispatch / frame_period).to(ureg.dimensionless).magnitude
@@ -903,6 +899,7 @@ The stochastic model behind that propagation separates three mechanisms of decay
 # │          positive root of E(t) = E_max.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
+from mlsysim.physics.robotics import calc_linear_invalidation_horizon
 from mlsysim.fmt import fmt_math, fmt_magnitude, fmt_qty_int
 
 class LatchSlotBelief:
@@ -923,7 +920,7 @@ class LatchSlotBelief:
     t_exp_tight = _root(e0, v_drift, a_dist, e_max_tight)
     tol_ratio = (e_max / e_max_tight).to(ureg.dimensionless).magnitude
     horizon_ratio = (t_exp / t_exp_tight).to(ureg.dimensionless).magnitude
-    t_linear = ((e_max - e0) / v_drift).to(millisecond)
+    t_linear = calc_linear_invalidation_horizon(e0, v_drift, e_max).to(millisecond)
     e_linear = (e0 + v_drift * t_linear + a_dist * t_linear**2 / 2).to(ureg.millimeter)
     overshoot = (e_linear / e_max - 1).to(ureg.dimensionless).magnitude
     t_extra = (t_linear - t_exp).to(millisecond)

@@ -108,7 +108,7 @@ For the warehouse mobile manipulator, the release question is whether empirical 
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_velocity, fmt_length, fmt_mass, fmt_force, fmt_latency, check
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_max_permitted_velocity
+from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_max_permitted_velocity, calc_reduced_mass, calc_transient_contact_speed_limit
 
 # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
@@ -116,10 +116,9 @@ AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene;
 g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
 v_restricted = 1.0 * meter / second  # category: chosen (scenario assumption: restricted mode on inspected floors, the value @sec-frontier uses)
 # ISO body model for the coworker's hand (ISO/TS 15066:2016 Annex A, carried into
-# ISO 10218-2:2025; values as reproduced in Kirschner et al. 2022, arXiv:2203.02706).
-# Promotion candidate: AISLE.m_contact_human and a sourced AISLE.k_contact_human.
-m_hand_iso = 0.6 * kilogram  # category: datasheet (ISO body-model effective mass, hand and fingers)
-k_hand_iso = 75.0 * newton / millimeter  # category: datasheet (ISO body-model effective spring constant, hand and fingers)
+# ISO 10218-2:2025), sourced in the registry.
+m_hand_iso = AISLE.m_contact_human  # category: datasheet (ISO body-model effective mass, hand and fingers)
+k_hand_iso = AISLE.k_contact_human  # category: datasheet (ISO body-model effective spring constant, hand and fingers)
 
 # ┌── 2. EXECUTE: ceilings and friction bands ───────────────────────────────────
 # Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
@@ -136,9 +135,11 @@ v_inspected_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.ta
 )
 # Handover contact: transient (free hand) uses the two-body reduced mass; a
 # clamped hand cannot recoil, so the robot-side mass alone acts on it.
-m_reduced_hand = (1 / (1 / m_hand_iso + 1 / RM.arm_effective_contact_mass)).to(kilogram)
-v_handover_ceiling = (AISLE.f_contact_criterion / (k_hand_iso * m_reduced_hand) ** 0.5).to(meter / second)
-v_handover_ceiling_clamped = (AISLE.f_contact_criterion / (k_hand_iso * RM.arm_effective_contact_mass) ** 0.5).to(meter / second)
+m_reduced_hand = calc_reduced_mass(RM.arm_effective_contact_mass, m_hand_iso).to(kilogram)
+v_handover_ceiling = calc_transient_contact_speed_limit(
+    AISLE.f_contact_criterion, RM.arm_effective_contact_mass, k_hand_iso, human_mass=m_hand_iso
+).to(meter / second)
+v_handover_ceiling_clamped = calc_transient_contact_speed_limit(AISLE.f_contact_criterion, RM.arm_effective_contact_mass, k_hand_iso).to(meter / second)
 
 # ┌── 3. GUARD: canon values quoted in the prose and the table ──────────────────
 check(abs(v_ceiling.magnitude - 1.4367) < 5e-5, "Unconditional aisle speed ceiling is 1.44 m/s")
@@ -281,6 +282,7 @@ from mlsysim.fmt import (
 )
 from mlsysim.physics.robotics import (
     calc_transient_impact_force,
+    calc_transient_contact_speed_limit,
     calc_c2_stop_suffix,
     calc_scurve_stop_distance,
 )
@@ -294,12 +296,12 @@ m_eff = RM.arm_effective_contact_mass
 m_hand = ReleaseEnvelope.m_hand_iso  # ISO body model, set once in calc-release-operating-envelope
 k_hand = ReleaseEnvelope.k_hand_iso
 m_red = ReleaseEnvelope.m_reduced_hand
-f_at_tcp_limit = calc_transient_impact_force(RM.tcp_speed_limit, m_red, k_hand).to(newton)
+f_at_tcp_limit = calc_transient_impact_force(RM.tcp_speed_limit, m_eff, k_hand, human_mass=m_hand).to(newton)
 f_ratio = (f_at_tcp_limit / AISLE.f_contact_criterion).to("dimensionless").magnitude
-f_at_handover = calc_transient_impact_force(AISLE.v_handover, m_red, k_hand).to(newton)
+f_at_handover = calc_transient_impact_force(AISLE.v_handover, m_eff, k_hand, human_mass=m_hand).to(newton)
 f_at_handover_clamped = calc_transient_impact_force(AISLE.v_handover, m_eff, k_hand).to(newton)
-v_handover_ceiling = (AISLE.f_contact_criterion / (k_hand * m_red) ** 0.5).to(meter / second)
-v_handover_ceiling_clamped = (AISLE.f_contact_criterion / (k_hand * m_eff) ** 0.5).to(meter / second)
+v_handover_ceiling = calc_transient_contact_speed_limit(AISLE.f_contact_criterion, m_eff, k_hand, human_mass=m_hand).to(meter / second)
+v_handover_ceiling_clamped = calc_transient_contact_speed_limit(AISLE.f_contact_criterion, m_eff, k_hand).to(meter / second)
 
 # Jerk bound: the reference C2 polynomial's peak jerk at the drive limit (@sec-planning-c2-stopping-suffix)
 j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3)
@@ -386,7 +388,7 @@ A photograph of a clear aisle cannot establish that the loaded base stops inside
 
 ### Assurance argument grammar and warrants {#sec-release-assurance-grammar}
 
-The claim-argument-evidence (CAE) framework and Goal Structuring Notation (GSN)\index{Goal Structuring Notation}, two notations for the same argument structure, were introduced with the fault records in @sec-verification-contract-matrix [@kelly1998arguing; @kelly2004goal]. Release uses them to decide, so the safety case of \ref{dfn-release-goal-structured-safety-case}\index{Claim-argument-evidence safety case!argument structure} now carries a verdict. Its structure descends from Stephen Toulmin's analysis of arguments [@toulmin1958uses], and ANSI/UL 4600 requires a goal-based safety case of this kind for autonomous products [@ul4600ed3; @koopman2023ul4600]. Its top-level claim $C_0$ names a testable physical property, such as keeping the base's stopping distance within surveyed clearance ($d_{\text{stop}} \le D_{\text{clear}}$) or limiting contact force ($F_{\text{contact}} \le F_{\text{limit}}$). Supporting claims identify the conditions needed for that result, and evidence records support those claims. Representing these links as a directed acyclic graph (DAG) makes their dependencies explicit: the reviewer can follow a claim toward its supporting observations without circular reasoning. The graph also records the operating assumptions under which each link holds.
+The claim-argument-evidence (CAE) framework and Goal Structuring Notation (GSN)\index{Goal Structuring Notation}, two notations for the same argument structure, were introduced with the fault records in @sec-verification-contract-matrix [@kelly1998arguing; @kelly2004goal]. Release uses them to decide, so the safety case of \ref{dfn-release-goal-structured-safety-case}\index{Claim-argument-evidence safety case!argument structure} now carries a verdict. Its structure descends from Stephen Toulmin's analysis of arguments [@toulmin1958uses], and ANSI/UL 4600 requires a goal-based safety case of this kind for autonomous products [@ul4600; @koopman2023ul4600]. Its top-level claim $C_0$ names a testable physical property, such as keeping the base's stopping distance within surveyed clearance ($d_{\text{stop}} \le D_{\text{clear}}$) or limiting contact force ($F_{\text{contact}} \le F_{\text{limit}}$). Supporting claims identify the conditions needed for that result, and evidence records support those claims. Representing these links as a directed acyclic graph (DAG) makes their dependencies explicit: the reviewer can follow a claim toward its supporting observations without circular reasoning. The graph also records the operating assumptions under which each link holds.
 
 The structural integrity of this engineering assertion DAG hinges on strictly distinguishing evidence from demonstration. A **demonstration**\index{Demonstration!vs. evidence} is a record of successful task execution over an uncharacterized test distribution, such as a long run of clean door openings with the strike plate always at its nominal position or a thousand collision-free warehouse aisle transits. It measures mean performance but bounds neither the tail nor the failure modes outside the sampled trajectory. In contrast, evidence is a falsifiable, calibrated artifact with quantified uncertainty bounds, such as an execution-time distribution captured on a logic analyzer together with the separate analysis supporting a worst-case execution time (WCET) bound, loaded vehicle stopping trials across degraded friction regimes, or a hardware-in-the-loop (HIL) fault-injection trace that drives the machine to the physical boundary of its envelope. Evidence requirements follow the claim: nominal trials can support performance in their sampled conditions, and calibration records can support the measured sensor geometry. Neither must stress every physical boundary to be useful. A worst-response or envelope-boundary claim needs the additional coverage, uncertainty analysis, and warrant that establish that stronger result.
 
@@ -548,6 +550,7 @@ from mlsysim.physics.robotics import (
     calc_scurve_stop_distance,
     calc_latch_contact_stopping_profile,
     calc_transient_impact_force,
+    calc_transient_contact_speed_limit,
 )
 
 # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
@@ -568,12 +571,16 @@ f_cmd = latch_stop["f_at_brake_onset"]
 x_remaining = latch_stop["x_remaining"]
 a_arm_needed = latch_stop["a_arm_needed"]
 # C1 handover: transient (free-hand) force at the handover speed, ISO hand body model.
-f_handover = calc_transient_impact_force(AISLE.v_handover, ReleaseEnvelope.m_reduced_hand, ReleaseEnvelope.k_hand_iso).to(newton)
+f_handover = calc_transient_impact_force(
+    AISLE.v_handover, RM.arm_effective_contact_mass, AISLE.k_contact_human, human_mass=AISLE.m_contact_human
+).to(newton)
 # C2: last valid renewal to brake onset.
 t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
 # C3: friction the credible deceleration needs.
 mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
-v_handover_ceiling = (AISLE.f_contact_criterion / (ReleaseEnvelope.k_hand_iso * ReleaseEnvelope.m_reduced_hand) ** 0.5).to(meter / second)
+v_handover_ceiling = calc_transient_contact_speed_limit(
+    AISLE.f_contact_criterion, RM.arm_effective_contact_mass, AISLE.k_contact_human, human_mass=AISLE.m_contact_human
+).to(meter / second)
 # C6: an unacknowledged handover falls back by the spare spent as time, at the
 # in-loop takeover slow-down (operative) and at aisle speed (a policy request).
 t_timeout = (spare_aisle / AISLE.v_aisle).to(millisecond)
@@ -667,10 +674,10 @@ A reviewer who signs the warehouse machine's release must also establish which p
 | IEC 61800-5-2 [@iec61800part52]                     | 2016 (2nd ed.)               | Safety functions of power drives: Safe Torque Off (STO), Safe Stop 1 (SS1), safely limited speed                                                               | Base and arm drives; the stop sequence                            | @sec-nervous-actuation-authority, @sec-enforcement-stop-categories        |
 | ISO 3691-4 [@iso3691part4]                          | 2023 (2nd ed.)               | Driverless industrial trucks and their systems: personnel detection, stopping, operating zones                                                                 | Mobile base in the aisles; the site crossing rule                 | @sec-enforcement-stopping-envelopes, @sec-memory-belief-through-occlusion |
 | ISO 10218-1 and -2 [@iso10218part1; @iso10218part2] | 2025                         | Industrial robots (Part 1) and robot applications and cells, including collaborative applications, which absorbed the content of ISO/TS 15066:2016 (Part 2)    | Arm, door opening, mug handover                                   | @sec-release-question, @sec-intervention-enabling-hardware                |
-| ANSI/A3 R15.08-1 and -2 [@r1508part1; @r1508part2]  | 2020 (reaffirmed 2026); 2023 | Industrial mobile robots in North America: the robot (Part 1), its systems and applications (Part 2)                                                           | The whole machine as a North American installation                | This chapter                                                              |
+| ANSI/A3 R15.08-1 and -2 [@ansi1508part1; @ansi1508part2] | 2020 (reaffirmed 2026); 2023 | Industrial mobile robots in North America: the robot (Part 1), its systems and applications (Part 2)                                                           | The whole machine as a North American installation                | This chapter                                                              |
 | ISO 26262 [@iso26262]                               | 2018 (2nd ed.)               | Road-vehicle functional safety: hazards from random hardware and systematic faults                                                                             | Borrowed method: fault decomposition, confirmation of safety work | @sec-verification-contract-matrix                                         |
 | ISO 21448 [@iso21448]                               | 2022                         | Road-vehicle safety of the intended functionality: hazards without a fault                                                                                     | Borrowed method: perception and proposer insufficiencies          | @sec-verification-contract-matrix, @sec-data-odd-blind-spots              |
-| ANSI/UL 4600 [@ul4600ed3]                           | 3rd ed., 2023                | Goal-based safety case for autonomous products, with safety performance indicators and independent assessment                                                  | The release argument and its field monitoring                     | @sec-release-assurance-grammar, @sec-release-data-curation-flywheel       |
+| ANSI/UL 4600 [@ul4600]                              | 3rd ed., 2023                | Goal-based safety case for autonomous products, with safety performance indicators and independent assessment                                                  | The release argument and its field monitoring                     | @sec-release-assurance-grammar, @sec-release-data-curation-flywheel       |
 | ISO/PAS 8800 [@iso8800]                             | 2024                         | Safety of AI elements in road vehicles: AI safety lifecycle, data, assurance argument                                                                          | Borrowed method: the learned proposer and its data                | @sec-data-schema, @sec-evaluation-logs                                    |
 | Regulation (EU) 2023/1230 [@eu2023machinery]        | Applies from 20 January 2027 | EU Machinery Regulation: essential requirements, third-party assessment for machine-learning safety functions, substantial modification                        | The whole machine on the EU market; its over-the-air updates      | @sec-release-modular-safety-cases                                         |
 
@@ -708,7 +715,7 @@ A refusal verdict is an engineering deliverable, not an administrative failure. 
 
 Accountability for the release decision must reside with an identifiable **lead systems adjudicator**\index{Lead systems adjudicator!accountability} rather than being diffused across development teams. When a vision team signs off on detection scores, an actuator supplier on torque curves, and a learning team on policy convergence, each assumes that another layer provides the margin. The adjudicator alone attests that the integrated system satisfies the safety case, and the attestation binds the verdict to a set of immutable technical artifacts, including the cryptographic hash of the verified policy weights, the calibration logs of the arm's contact-force sensing, the brake-onset trials together with a separately justified worst-response bound, and the stopping trials at the loaded mass that establish the credible deceleration. The adjudicator signs the release manifest with a private key held in a hardware security module, committing personal and institutional accountability to the integrity of the evidence; the machine verifies that signature against a public key anchored in its own hardware root of trust.
 
-The adjudicator's signature is the developer's own acceptance, and external acceptance is a separate act. UL 4600 calls for independent assessment of the safety case [@ul4600ed3], and a machine whose safety functions rely on machine learning falls, under the Machinery Regulation, among the products that need a third-party conformity assessment (@sec-release-standards-map). Independence matters for the same reason diverse legs do in an argument. An assessor who did not build the case does not share the assumptions that shaped its evidence, and so can find the premise the developer's own review was organized not to see. The release manifest must therefore preserve the raw evidence an assessor needs, not only the verdict it supported.
+The adjudicator's signature is the developer's own acceptance, and external acceptance is a separate act. UL 4600 calls for independent assessment of the safety case [@ul4600], and a machine whose safety functions rely on machine learning falls, under the Machinery Regulation, among the products that need a third-party conformity assessment (@sec-release-standards-map). Independence matters for the same reason diverse legs do in an argument. An assessor who did not build the case does not share the assumptions that shaped its evidence, and so can find the premise the developer's own review was organized not to see. The release manifest must therefore preserve the raw evidence an assessor needs, not only the verdict it supported.
 
 The adjudicator signs one of the three decisions in @tbl-16-verdicts-taxonomy. A conditional verdict needs a separately evidenced restricted envelope; a known hole in the nominal argument cannot simply be relabeled as a safe restriction. No verdict moves the proposal boundary. Under `UNCOND` and `COND` alike the policy only proposes and the enforcer still admits each action, as principle \ref{pri-vol4-proposal-permission} requires, so a release sets the envelope the permission path enforces and never grants the policy permission of its own.
 
@@ -946,7 +953,9 @@ v_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, A
     meter / second
 )
 t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
-f_handover = calc_transient_impact_force(AISLE.v_handover, ReleaseEnvelope.m_reduced_hand, ReleaseEnvelope.k_hand_iso).to(newton)
+f_handover = calc_transient_impact_force(
+    AISLE.v_handover, RM.arm_effective_contact_mass, AISLE.k_contact_human, human_mass=AISLE.m_contact_human
+).to(newton)
 
 # ┌── 3. GUARD: canon values quoted in the prose and the table ──────────────────
 check(abs(f_cmd_lo.magnitude - 39.0) < 1e-9, "Latch force at brake command, guarded approach")
@@ -1310,7 +1319,7 @@ An enforcer trip can reveal a policy failure, a changed physical premise, or bot
 
 **Edge event-triggered telemetry**\index{Edge event-triggered telemetry!architecture} retains the sensor, proposal, permission, actuator, and timestamp chain around an intervention or boundary excursion. A local rolling buffer preserves the lead-up; capture continues through the physical response when the qualified recording power path survives. Buffer length, write bandwidth, and hold-up energy are sized from the required reconstruction window and verified under the same contention and power faults as the permission path. A logic-rail capacitor does not guarantee that the full sensor and storage path survives, and recording must never delay the stop.
 
-UL 4600 calls the field measurements that keep a claim alive **safety performance indicators**\index{Safety performance indicator} (SPIs). Each is a metric tied to a named claim, with a threshold and a predeclared response when the threshold is crossed [@ul4600ed3]. On the running machine, every standing condition of @sec-release-standing-conditions has one. Measured stop distance at scheduled trials and enforcer trips per operating hour watch the base's stopping claim, age refusals per operating hour watch the observation-age claim, and localization residuals against their allowance watch the sensor geometry. An SPI whose threshold is crossed withdraws or narrows the grant it watches; one that drifts toward its threshold triggers review before it is crossed, which is the defense against the normalization of deviance of @sec-release-adversarial-review.
+UL 4600 calls the field measurements that keep a claim alive **safety performance indicators**\index{Safety performance indicator} (SPIs). Each is a metric tied to a named claim, with a threshold and a predeclared response when the threshold is crossed [@ul4600]. On the running machine, every standing condition of @sec-release-standing-conditions has one. Measured stop distance at scheduled trials and enforcer trips per operating hour watch the base's stopping claim, age refusals per operating hour watch the observation-age claim, and localization residuals against their allowance watch the sensor geometry. An SPI whose threshold is crossed withdraws or narrows the grant it watches; one that drifts toward its threshold triggers review before it is crossed, which is the defense against the normalization of deviance of @sec-release-adversarial-review.
 
 Compact health summaries support fleet monitoring, while required incident records retain full provenance locally until transfer succeeds. Learning-data filters may prioritize unfamiliar events, but cannot discard required safety evidence or hide repeated failures. A reviewer distinguishes policy hesitation from calibration drift, contamination, and mechanism wear before assigning the repair. Qualified recovery traces can enter the experience pipeline of @sec-data-schema; reconstructed simulations extend test coverage only over their modeled conditions.
 

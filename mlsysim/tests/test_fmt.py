@@ -81,6 +81,7 @@ from mlsysim.fmt import (
     fmt_torque,
     fmt_torque_rate,
     fmt_torque_constant,
+    fmt_motor_constant,
     fmt_math,
     fmt_frac,
     fmt_thermal_resistance,
@@ -1368,6 +1369,7 @@ class TestDomainFormatters:
         assert fmt_torque(50 * (newton * meter), precision=0, commas=False) == "50 N·m"
         assert fmt_torque_rate(100 * (newton * meter / second), precision=0, commas=False) == "100 N·m/s"
         assert fmt_torque_constant(0.2 * (newton * meter / ampere), precision=1, commas=False) == "0.2 N·m/A"
+        assert fmt_motor_constant(0.123 * (newton * meter / ureg.watt**0.5), precision=3, commas=False) == "0.123 N·m/√W"
         assert fmt_token_rate(150, precision=0, commas=False) == "150 tokens/s"
         assert fmt_math(r"\alpha + \beta") == "$\\alpha + \\beta$"
         assert fmt_frac(1, 4) == "$\\frac{1}{4}$"

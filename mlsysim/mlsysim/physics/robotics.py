@@ -1623,23 +1623,79 @@ def calc_harmonic_drive_fatigue_consumption(
     }
 
 
-def calc_transient_impact_force(contact_velocity, effective_mass, contact_stiffness):
+def calc_reduced_mass(mass_a, mass_b):
+    """
+    Calculate the two-body reduced mass of a collision.
+
+    Equation:
+        mu = (1/m_a + 1/m_b)^-1
+
+    When one body cannot recoil (m_b -> infinity, a clamped contact), mu -> m_a.
+
+    Source: ISO/TS 15066:2016 Annex A, transient-contact model (content carried
+    into ISO 10218-2:2025), as reproduced in Kirschner et al. 2022, eq. 2
+    (arXiv:2203.02706).
+    """
+    validate_positive(mass_a, "mass_a")
+    validate_positive(mass_b, "mass_b")
+    m_a = mass_a.to(ureg.kg).magnitude
+    m_b = mass_b.to(ureg.kg).magnitude
+    return (1.0 / (1.0 / m_a + 1.0 / m_b)) * ureg.kg
+
+
+def calc_transient_impact_force(contact_velocity, effective_mass, contact_stiffness, human_mass=None):
     """
     Calculate peak unbraked transient impact force on an elastic body.
 
     Equation:
-        F_peak = v * sqrt(k * m_eff)
+        F_peak = v * sqrt(k * m)
+
+    With ``human_mass=None`` the robot-side ``effective_mass`` acts alone
+    (m = m_eff), the clamped (quasi-static) case in which the body part cannot
+    recoil. With ``human_mass`` given, the free body part recoils and the
+    two-body reduced mass acts: m = mu = (1/m_eff + 1/m_H)^-1.
+
+    Source: ISO/TS 15066:2016 Annex A energy model F = v * sqrt(mu * k)
+    (content carried into ISO 10218-2:2025), as reproduced in Kirschner et al.
+    2022, eqs. 1-2 (arXiv:2203.02706).
     """
     validate_positive(contact_velocity, "contact_velocity")
     validate_positive(effective_mass, "effective_mass")
     validate_positive(contact_stiffness, "contact_stiffness")
 
+    mass = effective_mass if human_mass is None else calc_reduced_mass(effective_mass, human_mass)
     v = contact_velocity.to(ureg.meter / ureg.second).magnitude
-    m = effective_mass.to(ureg.kg).magnitude
+    m = mass.to(ureg.kg).magnitude
     k = contact_stiffness.to(ureg.newton / ureg.meter).magnitude
 
     f = v * math.sqrt(k * m)
     return (f * ureg.newton).to(ureg.newton)
+
+
+def calc_transient_contact_speed_limit(force_limit, effective_mass, contact_stiffness, human_mass=None):
+    """
+    Calculate the highest contact speed whose transient peak force stays at a force limit.
+
+    Equation:
+        v_max = F_max / sqrt(k * m)
+
+    The inverse of ``calc_transient_impact_force``: ``human_mass=None`` gives the
+    clamped case (m = m_eff); a ``human_mass`` gives the free, recoiling case
+    (m = mu, the two-body reduced mass).
+
+    Source: ISO/TS 15066:2016 Annex A (carried into ISO 10218-2:2025), as used
+    for v_rel,max in Kirschner et al. 2022 (arXiv:2203.02706).
+    """
+    validate_positive(force_limit, "force_limit")
+    validate_positive(effective_mass, "effective_mass")
+    validate_positive(contact_stiffness, "contact_stiffness")
+
+    mass = effective_mass if human_mass is None else calc_reduced_mass(effective_mass, human_mass)
+    f = force_limit.to(ureg.newton).magnitude
+    m = mass.to(ureg.kg).magnitude
+    k = contact_stiffness.to(ureg.newton / ureg.meter).magnitude
+
+    return (f / math.sqrt(k * m)) * (ureg.meter / ureg.second)
 
 
 def calc_tripwire_contact_force_accumulation(
@@ -2106,6 +2162,114 @@ def calc_target_evidence_horizon(
     v_drift = drift_velocity.to(ureg.meter / ureg.second)
     tau = (r_tol - sig) / v_drift
     return tau.to(ureg.millisecond)
+
+
+def calc_linear_invalidation_horizon(initial_error, error_growth_rate, error_limit):
+    """
+    Calculate the invalidation horizon of a belief whose error bound grows linearly.
+
+    Equation:
+        E(dt) = E_0 + r * dt ;  T_inv = max(0, (E_max - E_0) / r)
+
+    A zero result means the belief never supported the task: its initial error
+    already consumes the tolerance. Unlike ``calc_target_evidence_horizon`` this
+    does not raise when E_0 >= E_max; it floors the deadline at zero.
+
+    Source: first-passage time of a linear error bound (definition of the
+    invalidation horizon, T_inv = inf{dt >= 0 : E(dt) >= E_max}); the
+    reachable-set lineage for occluded free space is Orzechowski, Meyer, and
+    Lauer 2018 (IEEE ITSC).
+    """
+    validate_positive(error_growth_rate, "error_growth_rate")
+    e0 = initial_error.to(ureg.meter).magnitude
+    e_max = error_limit.to(ureg.meter).magnitude
+    r = error_growth_rate.to(ureg.meter / ureg.second).magnitude
+    return (max(e_max - e0, 0.0) / r * ureg.second).to(ureg.millisecond)
+
+
+def calc_free_space_expiry(free_depth, loc_bound, protective_clearance, approach_speed):
+    """
+    Calculate how long a free-space claim survives before an unseen person could breach the clearance.
+
+    Equation:
+        T_inv = max(0, (d_free - delta_loc - delta_margin) / v_h)
+
+    The free region erodes from its unobserved boundary at the approach speed
+    v_h; localization error delta_loc and the protective clearance delta_margin
+    are spent up front. It is ``calc_linear_invalidation_horizon`` with
+    E_0 = delta_loc, r = v_h, and E_max = d_free - delta_margin.
+
+    Source: linear invalidation horizon applied to occluded free space; the
+    walking-speed bound v_h is ISO 13855's K (1.6 m/s).
+    """
+    validate_positive(approach_speed, "approach_speed")
+    return calc_linear_invalidation_horizon(loc_bound, approach_speed, free_depth - protective_clearance)
+
+
+def calc_scurve_rest_to_rest_time(distance, max_acceleration, max_jerk):
+    """
+    Calculate the duration of a jerk-limited rest-to-rest move with no cruise phase.
+
+    A symmetric double-S profile that accelerates, then immediately decelerates.
+    With t_j = a/j and x the time from the start of the jerk ramp to the end of
+    the constant-acceleration plateau minus t_j (peak speed a*x):
+
+        plateau reached (x >= t_j):  D = a * x * (x + t_j),  T = 2 (x + t_j)
+        no plateau (D < 2 a^3 / j^2): D = 2 j tau^3,           T = 4 tau
+
+    Returns a dict with ``duration``, ``peak_velocity``, and ``reaches_max_acceleration``.
+    Works for linear or angular moves (distance in m or rad, rates to match).
+
+    Source: Biagiotti and Melchiorri, Trajectory Planning for Automatic Machines
+    and Robots (Springer, 2008), ch. 3, double-S velocity profile.
+    """
+    validate_positive(distance, "distance")
+    validate_positive(max_acceleration, "max_acceleration")
+    validate_positive(max_jerk, "max_jerk")
+
+    t_unit = ureg.second
+    d_unit = distance.units
+    d = distance.magnitude
+    a = max_acceleration.to(d_unit / t_unit**2).magnitude
+    j = max_jerk.to(d_unit / t_unit**3).magnitude
+
+    t_j = a / j
+    x = (-t_j + math.sqrt(t_j**2 + 4 * d / a)) / 2
+    if x >= t_j:
+        duration = 2 * (x + t_j)
+        v_peak = a * x
+        plateau = True
+    else:
+        tau = (d / (2 * j)) ** (1.0 / 3.0)
+        duration = 4 * tau
+        v_peak = j * tau**2
+        plateau = False
+    return {
+        "duration": duration * t_unit,
+        "peak_velocity": v_peak * (d_unit / t_unit),
+        "reaches_max_acceleration": plateau,
+    }
+
+
+def calc_quasistatic_spill_acceleration(inner_radius, freeboard, gravity=None):
+    """
+    Calculate the steady horizontal acceleration at which an open container's liquid reaches its rim.
+
+    Equation:
+        tan(theta) = a / g ;  wall rise = R a / g ;  a_max = g h_f / R
+
+    Under steady acceleration the free surface settles perpendicular to the
+    effective gravity. Sloshing overshoots this steady tilt, so the bound is
+    necessary, not sufficient.
+
+    Source: hydrostatics of a uniformly accelerated liquid (free surface normal
+    to effective gravity); container slosh context in Mayer and Krechetnikov
+    2012, "Walking with coffee: why does it spill?", Phys. Rev. E 85, 046117.
+    """
+    validate_positive(inner_radius, "inner_radius")
+    validate_positive(freeboard, "freeboard")
+    g = (1 * ureg.standard_gravity) if gravity is None else gravity
+    return (g * freeboard / inner_radius).to(ureg.meter / ureg.second**2)
 
 
 def calc_intent_drift_lease(tolerance_radius, sensor_noise, drift_velocity):

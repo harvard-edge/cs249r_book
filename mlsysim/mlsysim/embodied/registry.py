@@ -80,6 +80,30 @@ class Manipulators(Registry):
         nominal_power=300.0 * ureg.watt,
         transmission="Harmonic drive with integrated joint torque sensors",
         compute_soc=Hardware.Edge.JetsonAGXOrin,
+        # Kinematic chain and control-interface limits (2026-09-29), Franka docs
+        # "Limits for Franka Emika Robot (FER)" and the Panda DH table.
+        upper_arm_length=sourced_qty(0.316 * ureg.meter, pc.FRANKA_FER_CONTROL_LIMITS, name="Panda DH d3"),
+        forearm_length=sourced_qty(0.384 * ureg.meter, pc.FRANKA_FER_CONTROL_LIMITS, name="Panda DH d5"),
+        joint_velocity_limits=tuple(
+            sourced_qty(v * (ureg.radian / ureg.second), pc.FRANKA_FER_CONTROL_LIMITS)
+            for v in (2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100)
+        ),
+        joint_acceleration_limits=tuple(
+            sourced_qty(a * (ureg.radian / ureg.second**2), pc.FRANKA_FER_CONTROL_LIMITS)
+            for a in (15.0, 7.5, 10.0, 12.5, 15.0, 20.0, 20.0)
+        ),
+        joint_jerk_limits=tuple(
+            sourced_qty(j * (ureg.radian / ureg.second**3), pc.FRANKA_FER_CONTROL_LIMITS)
+            for j in (7500.0, 3750.0, 5000.0, 6250.0, 7500.0, 10000.0, 10000.0)
+        ),
+        joint_torque_rate_limit=sourced_qty(
+            1000.0 * (ureg.newton * ureg.meter / ureg.second), pc.FRANKA_FER_CONTROL_LIMITS,
+            name="FER joint torque-rate limit",
+        ),
+        cartesian_velocity_limit=sourced_qty(
+            1.7 * (ureg.meter / ureg.second), pc.FRANKA_FER_CONTROL_LIMITS,
+            name="FER Cartesian translational velocity limit",
+        ),
         metadata=Metadata(provenance=pc.FRANKA_EMIKA_PANDA),
     )
 
@@ -342,7 +366,16 @@ class SiteScenarios(Registry):
         a_conveyor_slip=0.50 * (ureg.meter / ureg.second**2),
         grasp_tolerance=15.0 * ureg.millimeter,
         grasp_initial_error=3.0 * ureg.millimeter,
-        k_contact_human=15_000.0 * (ureg.newton / ureg.meter),
+        # Coworker hand body model (2026-09-29): ISO/TS 15066:2016 Annex A hand and
+        # fingers, carried into ISO 10218-2:2025. Replaces an illustrative 15 N/mm.
+        k_contact_human=sourced_qty(
+            75_000.0 * (ureg.newton / ureg.meter), pc.ISO_TS_15066_HAND_BODY_MODEL,
+            name="ISO/TS 15066 hand and fingers effective spring constant",
+        ),
+        m_contact_human=sourced_qty(
+            0.6 * ureg.kilogram, pc.ISO_TS_15066_HAND_BODY_MODEL,
+            name="ISO/TS 15066 hand and fingers effective mass",
+        ),
         f_contact_criterion=50.0 * ureg.newton,                # chosen
         v_handover=0.10 * (ureg.meter / ureg.second),          # chosen coworker handover TCP speed
         # Remote takeover (2026-09-28, M4; replaces an illustrative 150 ms in-loop

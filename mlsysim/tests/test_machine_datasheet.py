@@ -47,6 +47,9 @@ _NOT_INPUTS = {
 # Datasheet values the registry stores as plain numbers with the source named in
 # a comment (they cannot carry provenance until the registry wraps them).
 _COMMENT_SOURCED = {"eff_conv"}  # MEANWELL_DDR240 typical efficiency
+# Configured settings stored on a datasheet-sourced part: the datasheet bounds
+# the range, but the stored value is chosen, so the row says Chosen (2026-09-29).
+_CONFIGURED_SETTINGS = {"t_exposure"}
 # Registry aliases: the sheet lists the scenario's name for the same value.
 _ALIASES = {"RM.fieldbus_cycle": "AISLE.t_bus"}
 
@@ -82,6 +85,9 @@ def test_rows_resolve_and_match_the_registry():
 def test_sourced_leaves_carry_the_category_of_their_provenance():
     for spec in SPECS:
         if spec.compute is not None:
+            continue
+        if spec.key in _CONFIGURED_SETTINGS:
+            assert spec.category == "Chosen", spec.key
             continue
         root, *attrs = spec.field.split(".")
         owner = resolve_field(".".join([root, *attrs[:-1]]), RM, AISLE)

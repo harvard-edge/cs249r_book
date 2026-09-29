@@ -303,9 +303,10 @@ Had the mobile manipulator placed its permission path on the application SoC, ca
 # │       per-bank t_RP are 15 cycles each, 18.75 ns, so a conflict costs
 # │       37.5 ns. 256 bits x 6400 MT/s = 204.8 GB/s, matching the registry's
 # │       rounded 204 GB/s.
-# │ How: JESD209-5 timings as encoded in the Ramulator 2.0 LPDDR5_6400 preset
-# │      (nRCD = 15, nRPpb = 15, tCK = 1250 ps); bus width and data rate from
-# │      the Jetson AGX Orin technical brief (256-bit LPDDR5, 204.8 GB/s).
+# │ How: Hardware.Tech.Memory.LPDDR5_6400 (JESD209-5 timings as encoded in
+# │      the Ramulator 2.0 preset: nRCD = 15, nRPpb = 15, tCK = 1250 ps); bus
+# │      width and per-pin data rate from the brain SoC's registry memory
+# │      (Jetson AGX Orin technical brief: 256-bit LPDDR5, 204.8 GB/s).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import Q_, nanosecond
@@ -315,20 +316,23 @@ RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 
 class PlacementDramTiming:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
-    data_rate_mts = 6400  # category: datasheet (Jetson AGX Orin technical brief; needs registry field)
-    bus_bits = 256  # category: datasheet (Jetson AGX Orin technical brief; needs registry field)
-    t_ck = Q_("1.25 ns")  # category: datasheet (LPDDR5-6400 command clock, 4:1 WCK ratio; Ramulator 2.0 preset)
-    n_rcd = 15  # category: datasheet (JESD209-5 via Ramulator 2.0 LPDDR5_6400 preset)
-    n_rp_pb = 15  # category: datasheet (per-bank precharge; JESD209-5 via Ramulator 2.0)
+    lpddr5 = Hardware.Tech.Memory.LPDDR5_6400  # category: datasheet (JESD209-5 via Ramulator 2.0 preset)
+    pin_rate = RM.brain_soc.memory.pin_data_rate  # category: datasheet (registry; Orin technical brief)
+    bus_width = RM.brain_soc.memory.bus_width  # category: datasheet (registry; Orin technical brief)
     bandwidth = RM.brain_soc.memory.bandwidth  # category: datasheet (registry, rounded)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    t_rcd = (n_rcd * t_ck).to(nanosecond)
-    t_rp = (n_rp_pb * t_ck).to(nanosecond)
+    t_ck = lpddr5.t_ck.to(nanosecond)
+    t_rcd = lpddr5.t_rcd.to(nanosecond)
+    t_rp = lpddr5.t_rp.to(nanosecond)
+    n_rcd = (t_rcd / t_ck).to("dimensionless").magnitude
+    n_rp_pb = (t_rp / t_ck).to("dimensionless").magnitude
     t_conflict = (t_rp + t_rcd).to(nanosecond)
-    bus_bandwidth = Q_(bus_bits / 8 * data_rate_mts * 1e6, "B/s").to("GB/s")
+    data_rate_mts = pin_rate.to("Mbit/s").magnitude  # one bit per transfer per pin
+    bus_bandwidth = (bus_width * pin_rate / Q_("1 bit")).to("GB/s")
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
+    check(abs(n_rcd - 15) < 1e-9 and abs(n_rp_pb - 15) < 1e-9, "t_RCD and t_RP are 15 command-clock cycles each.")
     check(abs(t_conflict.magnitude - 37.5) < 1e-9, "t_RP + t_RCD = 2 x 15 x 1.25 ns = 37.5 ns at LPDDR5-6400.")
     check(abs(bus_bandwidth.magnitude - 204.8) < 1e-9, "256 bits at 6400 MT/s is 204.8 GB/s.")
     check(abs((bus_bandwidth / bandwidth).to("dimensionless").magnitude - 1) < 0.005, "Bus arithmetic matches the registry's rounded 204 GB/s.")

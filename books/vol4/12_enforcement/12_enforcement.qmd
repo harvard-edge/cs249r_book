@@ -255,6 +255,7 @@ from mlsysim.physics.robotics import (
     calc_scurve_max_permitted_velocity,
     calc_max_permitted_velocity,
     calc_safe_stopping_distance,
+    calc_free_space_expiry,
 )
 from mlsysim.fmt import fmt, fmt_int, fmt_length, fmt_velocity, fmt_latency, fmt_acceleration, fmt_jerk, fmt_magnitude, fmt_math, check
 
@@ -342,7 +343,9 @@ class EnforcementStoppingBudget:
     ).to(millimeter)
 
     # Time rows (no distance added)
-    belief_life = ((delta_margin - delta_loc) / v_human).to(millisecond)
+    # Free-space expiry abreast of the occluded rack end (@eq-mem-free-space-expiry):
+    # the free depth is the hull-to-rack side clearance.
+    belief_life = calc_free_space_expiry(AISLE.side_clearance, delta_loc, delta_margin, v_human).to(millisecond)
     two_frames = (2 / frame_rate).to(millisecond)
     missed_tick = (v_aisle * t_tick).to(millimeter)
     t_latest = (spare / v_aisle).to(millisecond)
@@ -414,7 +417,7 @@ class EnforcementStoppingBudget:
     # 2026-09-28 (M1/M2): the deployed intent model is INT4; its full computed inference replaces the FP16 weight sweep.
     check(abs(t_intent.to(millisecond).magnitude - 335.61) < 5e-3, f"Intent inference latency drifted: {t_intent}")
     check(t_intent > t_lease, "The intent inference cannot renew a chunk lease.")
-    check(abs(belief_life.magnitude - 31.25) < 1e-9, "Occluded-rack-end belief expires in about 31 ms.")
+    check(belief_life.magnitude == 0.0, "Abreast of the occluded rack end the free-space claim expires at capture.")
     check(belief_life < two_frames, "The rack-end belief lapses in under two camera frames.")
     check(abs(missed_tick.magnitude - 1.3) < 1e-9, "One missed tick costs 1.3 mm at 1.3 m/s.")
     check(abs(t_latest.magnitude - 100.775) < 5e-3, "The unallocated timing allowance is 100.8 ms at 1.3 m/s.")
@@ -457,7 +460,7 @@ class EnforcementStoppingBudget:
     lease_path_str = fmt_latency(lease_path, unit=millisecond, precision=0)
     t_age_str = fmt_latency(t_age, unit=millisecond, precision=1)
     t_intent_str = fmt_latency(round(t_intent.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
-    belief_life_str = fmt_latency(belief_life, unit=millisecond, precision=2)
+    belief_life_str = fmt_latency(belief_life, unit=millisecond, precision=0)
     missed_tick_str = fmt_length(missed_tick, unit=millimeter, precision=1)
     t_latest_str = fmt_latency(t_latest, unit=millisecond, precision=1)
     capture_to_admission_max_str = fmt_latency(capture_to_admission_max, unit=millisecond, precision=1)
@@ -524,7 +527,7 @@ At the candidate speed, the entire unallocated allowance corresponds to `{python
 |   — | @sec-brain-cognitive-pipeline            | Time only: the chunk policy can renew a lease; the intent model's `{python} EnforcementStoppingBudget.t_intent_str` inference cannot                                       |                                                          — |                                                   — |                                                    — |                                                          — |
 |   4 | @sec-nervous-cadences                    | Lease path, $v(T_{\text{lease}}+T_{\text{tick}}+T_{\text{bus}})$ over `{python} EnforcementStoppingBudget.lease_path_str`                                                  | `{python} EnforcementStoppingBudget.lease_drive_value_str` | `{python} EnforcementStoppingBudget.run4_value_str` | `{python} EnforcementStoppingBudget.left4_value_str` | `{python} EnforcementStoppingBudget.lease_aisle_value_str` |
 |   5 | @sec-perception-transduction-calibration | Observation age, $v\,t_{\text{age}}$ over `{python} EnforcementStoppingBudget.t_age_str`                                                                                   |   `{python} EnforcementStoppingBudget.age_drive_value_str` | `{python} EnforcementStoppingBudget.run5_value_str` | `{python} EnforcementStoppingBudget.left5_value_str` |   `{python} EnforcementStoppingBudget.age_aisle_value_str` |
-|   — | @sec-memory-belief-through-occlusion     | Time only: belief that an occluded rack end is clear expires in `{python} EnforcementStoppingBudget.belief_life_str`, under two camera frames, so memory cannot certify it |                                                          — |                                                   — |                                                    — |                                                          — |
+|   — | @sec-memory-belief-through-occlusion     | Time only: abreast of an occluded rack end the free-space claim expires in `{python} EnforcementStoppingBudget.belief_life_str`, at capture, so memory cannot certify it |                                                          — |                                                   — |                                                    — |                                                          — |
 |   6 | @sec-planning-behavior-seam              | Jerk-limited $C^2$ stop, the jerk-ramp travel $v\,a_{\text{brake}}/2j_{\max}$ added to $v^2/2a_{\text{brake}}$                                                             | `{python} EnforcementStoppingBudget.shape_drive_value_str` | `{python} EnforcementStoppingBudget.run6_value_str` |      `{python} EnforcementStoppingBudget.left6_math` | `{python} EnforcementStoppingBudget.shape_aisle_value_str` |
 |   7 | @sec-enforcement-stopping-envelopes      | Tracking inset, $\epsilon_{\text{track}}$                                                                                                                                  |       `{python} EnforcementStoppingBudget.inset_value_str` | `{python} EnforcementStoppingBudget.run7_value_str` |      `{python} EnforcementStoppingBudget.left7_math` |       `{python} EnforcementStoppingBudget.inset_value_str` |
 |     |                                          | **Total**                                                                                                                                                                  |        `{python} EnforcementStoppingBudget.run7_value_str` |                                                     |                                                      | `{python} EnforcementStoppingBudget.total_aisle_value_str` |
@@ -655,7 +658,7 @@ Later decisions can spend only the reserve left after dispatch-to-admission trav
 
 A stalled proposer would spend more than the whole remainder. Were the chunk lease of @sec-enforcement-authority-refuse left to the host to honor, a last proposal that kept its authority for `{python} EnforcementStoppingBudget.t_stall_str` instead of the `{python} EnforcementLeaseStop.lease_ms_str` lease would add `{python} EnforcementStoppingBudget.stall_added_str` to the stop and carry the base `{python} EnforcementStoppingBudget.stall_breach_str` past the clear distance at the rack end.
 
-An independent protective scanner needs its own event-to-stop ledger. Its detection, safety-output, controller, communication, and drive-onset delays replace the vision-dispatch and proposal-lease intervals when its protective response bypasses them. The response still reserves the appropriate braking travel, tracking error, localization uncertainty, and protective margin; only intervals actually traversed belong in its sum. A mobile base can use a risk-assessed protective field under applicable vehicle and machinery standards, including ISO 3691-4 [@iso3691part4] and ISO 13849-1 [@iso13849-1-2023], such as the scanner in @fig-12-real-laser-scanner. The field length follows that scanner path's qualified ledger, not an automatic reuse of the proposal path's lease and vision delays. On a certified machine this scanner path, not the vision path, carries the claim for a person at the rack end: ISO 3691-4 requires detection of persons in the path and control of the braking system at performance level d, and it specifies that detection for a person who is standing in the path [@tuv2021iso3691]. The static-obstacle convention of @eq-enforce-stopping-envelope is therefore the same one the vehicle standard tests against, and a person still approaching during the stop is outside what that function claims. @Sec-enforcement-certified-functions places the vision-path budget above this certified floor.
+An independent protective scanner needs its own event-to-stop ledger. Its detection, safety-output, controller, communication, and drive-onset delays replace the vision-dispatch and proposal-lease intervals when its protective response bypasses them. The response still reserves the appropriate braking travel, tracking error, localization uncertainty, and protective margin; only intervals actually traversed belong in its sum. A mobile base can use a risk-assessed protective field under applicable vehicle and machinery standards, including ISO 3691-4 [@iso3691part4] and ISO 13849-1 [@iso13849part1], such as the scanner in @fig-12-real-laser-scanner. The field length follows that scanner path's qualified ledger, not an automatic reuse of the proposal path's lease and vision delays. On a certified machine this scanner path, not the vision path, carries the claim for a person at the rack end: ISO 3691-4 requires detection of persons in the path and control of the braking system at performance level d, and it specifies that detection for a person who is standing in the path [@tuv2021iso3691]. The static-obstacle convention of @eq-enforce-stopping-envelope is therefore the same one the vehicle standard tests against, and a person still approaching during the stop is outside what that function claims. @Sec-enforcement-certified-functions places the vision-path budget above this certified floor.
 
 ::: {#fig-12-real-laser-scanner fig-env="figure" fig-pos="t" fig-cap="**Industrial safety laser scanner**: A scanner can provide an early warning field and a protective field. The warning field requests earlier deceleration; the protective field's safety output feeds a controller that selects a risk-assessed stop. Protective-field length must include scanner response, controller and drive delay, braking travel, and uncertainty. A moving AMR does not become safe merely because motor torque is removed." fig-alt="Industrial safety laser scanner with outer warning and inner protective fields. The protective field initiates a safety-controller response whose total sensing, control, drive, braking, and uncertainty budget determines the required field length; drive torque removal alone may allow coasting."}
 ![](images/jpg/fig12_real_laser_scanner.jpg){width="85%"}
@@ -1397,7 +1400,7 @@ The fallback ladder organizes four state-matched responses, each named for the e
 
 1. **Rung 1: PROJECT (minimal-intervention projection, MCU firmware):** The primary safety filter executes on every control cycle while the feasible control set is nonempty ($\mathcal{U}_{\text{safe}} \neq \emptyset$), the proposal lease is fresh, and tracking error remains within bounds ($\|e(t)\| \le \epsilon_{\text{track}}$). It computes the minimal-intervention torque $\mathbf{u}^* = \arg\min_{\mathbf{u}} \|\mathbf{u} - \mathbf{u}_{\text{nom}}\|^2$ subject to active barrier half-spaces within its `{python} EnforcementCycleBudget.qp_us_str` $\mu\text{s}$ cycle allocation. It makes the smallest feasible effort correction under the stated invariance assumptions; the planner must still account for any changed task-space path.
 2. **Rung 2: HOLD (powered hold at standstill, MCU firmware):** Where the machine is stationary, the response is an energized position hold, analogous to an IEC 60204-1 Category 2 stop: Safe Stop 2 (SS2) followed by Safe Operating Stop (SOS), the drive function that monitors standstill.[^fn-std-iec60204-sil3] Its safety value comes from that safety-rated standstill monitor, not from the gain of the position loop. Because IEC 60204-1 permits only Category 0 or Category 1 for an emergency stop, HOLD can never be the answer to an E-stop [@iec60204]. The drives hold coordinate $\mathbf{x}_{\text{hold}}$ in closed-loop position control, with inverter bridges continuously modulating phase currents against gravity and static load. This rung incurs thermal accumulation in motor windings\index{Joule heating} (@sec-body-thermal-duty-cycles), but eliminates mechanical brake pad erosion and preserves kinematic calibration, allowing seamless task resumption once a fresh proposal arrives. On the warehouse mobile manipulator, this rung answers a lapsed lease or silent host heartbeat strictly when the machine is already at standstill.
-3. **Rung 3: STOP (controlled dynamic stop, MCU firmware):** When a machine in active transit loses proposal authority, tracking error diverges, or an obstacle breaches the stopping envelope, the response is a resident state-matched controlled stop, analogous to an IEC 60204-1 Category 1 stop (Safe Stop 1 / SS1). Its certified counterpart is the ramp-monitored variant, which checks the deceleration against a limit throughout the stop; a time-controlled SS1 merely removes torque after a fixed delay and would not verify that the $C^2$ ramp happened [@iec61800]. The attached $C^2$ quartic position suffix serves this role only when the current state lies in its validated entry region. Executed autonomously by bare-metal MCU firmware directly from local SRAM, this stop peaks at the credible deceleration $a_{\text{brake}}$, returning kinetic energy through motor inverters to the DC bus for absorption or dissipation by the qualified regeneration path. Power removal and mechanical brake clamping occur only after confirmed zero velocity.
+3. **Rung 3: STOP (controlled dynamic stop, MCU firmware):** When a machine in active transit loses proposal authority, tracking error diverges, or an obstacle breaches the stopping envelope, the response is a resident state-matched controlled stop, analogous to an IEC 60204-1 Category 1 stop (Safe Stop 1 / SS1). Its certified counterpart is the ramp-monitored variant, which checks the deceleration against a limit throughout the stop; a time-controlled SS1 merely removes torque after a fixed delay and would not verify that the $C^2$ ramp happened [@iec61800part52]. The attached $C^2$ quartic position suffix serves this role only when the current state lies in its validated entry region. Executed autonomously by bare-metal MCU firmware directly from local SRAM, this stop peaks at the credible deceleration $a_{\text{brake}}$, returning kinetic energy through motor inverters to the DC bus for absorption or dissipation by the qualified regeneration path. Power removal and mechanical brake clamping occur only after confirmed zero velocity.
 4. **Rung 4: INHIBIT (torque inhibit and spring-brake clamping, hardware interlocks):** When the safety microcontroller itself suffers brownout, clock loss, or watchdog expiration, software decision logic is impossible. Dedicated, out-of-band hardware interlocks trigger Safe Torque Off (STO) to de-energize gate drive power supplies and drop hold current to electromechanical spring-applied brakes. This terminal rung removes motor torque without software execution; the brakes provide only their separately qualified holding or dynamic-stopping capability.
 
 [^fn-std-iec60204-sil3]: **Machine stop functions**\index{IEC 60204-1!Stopping categories}\index{Functional safety!Emergency stop categories}: IEC 60204-1 distinguishes uncontrolled power removal (Category 0), controlled stopping followed by power removal (Category 1), and controlled stopping with power retained (Category 2). IEC 61800-5-2 drive functions such as STO, SS1, and SS2 may implement parts of those responses. The required performance level, circuit architecture, and suitable stop are determined by the machine-specific risk assessment; ISO 13849-1 does not impose one universal PL or channel count.
@@ -1589,7 +1592,7 @@ The warehouse stop uses motor torque during deceleration and applies holding bra
 
 ### Certified safety functions beneath the permission path {#sec-enforcement-certified-functions}
 
-Every response so far runs in the MCU's firmware, and nothing in this chapter has claimed that firmware is developed as a safety function. A certification engineer would ask at once which of these claims rests on safety-rated hardware. On a production machine the answer is a second, lower layer: safety functions in the drives, the scanner, and the arm's safety controller, each built and verified to a **performance level (PL)**\index{Performance level} under ISO 13849-1 [@iso13849-1-2023]. Those functions carry the certified claim. The permission path above them is a performance layer whose job is to keep the learned proposer inside their envelope, so that the certified floor almost never trips. The two layers answer different questions. The floor answers whether a person can be hurt when everything above it fails; the permission path answers how much useful motion survives while nothing has failed.
+Every response so far runs in the MCU's firmware, and nothing in this chapter has claimed that firmware is developed as a safety function. A certification engineer would ask at once which of these claims rests on safety-rated hardware. On a production machine the answer is a second, lower layer: safety functions in the drives, the scanner, and the arm's safety controller, each built and verified to a **performance level (PL)**\index{Performance level} under ISO 13849-1 [@iso13849part1]. Those functions carry the certified claim. The permission path above them is a performance layer whose job is to keep the learned proposer inside their envelope, so that the certified floor almost never trips. The two layers answer different questions. The floor answers whether a person can be hurt when everything above it fails; the permission path answers how much useful motion survives while nothing has failed.
 
 ```{python}
 #| label: calc-enforcement-certified-functions
@@ -1653,7 +1656,7 @@ class EnforcementCertifiedFunctions:
     share_h_str = fmt_percent(round(share_h, 2), precision=0, style="prose")
 ```
 
-@Tbl-12-certified-functions maps each response and speed channel of this chapter onto its certified counterpart. The drive functions come from IEC 61800-5-2 [@iec61800]: **safe torque off (STO)**, **safe stop 1 (SS1)** and **safe stop 2 (SS2)**, the **safe operating stop (SOS)** that monitors standstill, **safely limited speed (SLS)**, and **safe brake control (SBC)**, which drives the spring brake's coil through a monitored output. For the base, ISO 3691-4 assigns required performance level (PLr) d to control of the braking system and to detection of persons in the path, and PLr b to the parking brake [@iso3691part4; @tuv2021iso3691]. For the arm, ISO 10218-1:2025 divides robots into Class I, at most `{python} EnforcementCertifiedFunctions.class1_mass_str` kg of manipulator mass with bounded force and speed, and Class II, and requires PL d (or SIL 2) of a Class II robot's safety functions [@iso10218part1; @hartmann2026evolution]. The registered arm weighs `{python} EnforcementCertifiedFunctions.arm_mass_str` kg, so it is Class II.
+@Tbl-12-certified-functions maps each response and speed channel of this chapter onto its certified counterpart. The drive functions come from IEC 61800-5-2 [@iec61800part52]: **safe torque off (STO)**, **safe stop 1 (SS1)** and **safe stop 2 (SS2)**, the **safe operating stop (SOS)** that monitors standstill, **safely limited speed (SLS)**, and **safe brake control (SBC)**, which drives the spring brake's coil through a monitored output. For the base, ISO 3691-4 assigns required performance level (PLr) d to control of the braking system and to detection of persons in the path, and PLr b to the parking brake [@iso3691part4; @tuv2021iso3691]. For the arm, ISO 10218-1:2025 divides robots into Class I, at most `{python} EnforcementCertifiedFunctions.class1_mass_str` kg of manipulator mass with bounded force and speed, and Class II, and requires PL d (or SIL 2) of a Class II robot's safety functions [@iso10218part1; @hartmann2026evolution]. The registered arm weighs `{python} EnforcementCertifiedFunctions.arm_mass_str` kg, so it is Class II.
 
 | Response or channel                   | Certified counterpart                                        | Governing requirement                               | Required level on this machine                   |
 |:--------------------------------------|:-------------------------------------------------------------|:----------------------------------------------------|:-------------------------------------------------|
@@ -1678,12 +1681,12 @@ The standards draw one more distinction. ISO 3691-4 tests the base against a per
 
 | Standard (edition)                                                     | What it governs                                                             | What this chapter's enforcer implements against it             |
 |:-----------------------------------------------------------------------|:----------------------------------------------------------------------------|:---------------------------------------------------------------|
-| ANSI/A3 R15.08-2:2023 [@ansir1508part2]                                | Integration of industrial mobile robots; a mobile manipulator is IMR Type C | The classification that assesses base and arm as one machine   |
+| ANSI/A3 R15.08-2:2023 [@ansi1508part2]                                 | Integration of industrial mobile robots; a mobile manipulator is IMR Type C | The classification that assesses base and arm as one machine   |
 | ISO 3691-4:2023 [@iso3691part4]                                        | Driverless industrial trucks: braking, speed control, person detection      | The base's stopping budget, scanner field, and `STOP`          |
 | ISO 10218-1:2025 and ISO 10218-2:2025 [@iso10218part1; @iso10218part2] | Industrial robots and robot applications, including SSM and PFL             | The arm's speed channels, `HOLD`, and the handover channel     |
 | ISO 13855:2010 [@iso13855]                                             | Positioning of safeguards against the approach of the human body            | The approach speed $v_h$ in the walking-person and SSM budgets |
-| ISO 13849-1:2023 [@iso13849-1-2023]                                    | Performance levels of safety-related parts of control systems               | The PL targets of @tbl-12-certified-functions                  |
-| IEC 61800-5-2:2016 [@iec61800]                                         | Functional safety of drives: STO, SS1, SS2, SOS, SLS, SBC                   | The certified counterparts of the four responses               |
+| ISO 13849-1:2023 [@iso13849part1]                                      | Performance levels of safety-related parts of control systems               | The PL targets of @tbl-12-certified-functions                  |
+| IEC 61800-5-2:2016 [@iec61800part52]                                   | Functional safety of drives: STO, SS1, SS2, SOS, SLS, SBC                   | The certified counterparts of the four responses               |
 | IEC 60204-1:2016 [@iec60204]                                           | Stop categories of machine electrical equipment                             | The categories of @tbl-12-iec60204-stopping-categories         |
 
 : **Standards the enforcer implements against (as of 2026)**: The editions in force for a warehouse mobile manipulator as of 2026, what each governs, and the part of this chapter that answers to it. The list is limited to what the enforcer implements; later editions change the edition column, not the structure. {#tbl-12-governing-standards tbl-colwidths="[24,38,38]"}
@@ -1761,10 +1764,12 @@ The record is therefore split at the bus. A drive has no use for a trajectory di
 # │ How:     calc_scurve_stop_time / _distance on RM/AISLE with the jerk bound
 # │          and inspected-floor peak from EnforcementStoppingBudget;
 # │          calc_contact_yield_deadline for the door;
-# │          the contact-force ceiling F_h / sqrt(k_h m_eff) for the handover.
+# │          calc_transient_contact_speed_limit for the handover: the free-hand
+# │          ceiling F_h / sqrt(k_H mu) (ISO/TS 15066 hand body model, reduced
+# │          mass mu) and the clamped-hand ceiling F_h / sqrt(k_H m_eff).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_scurve_stop_distance, calc_scurve_stop_time, calc_contact_yield_deadline
+from mlsysim.physics.robotics import calc_scurve_stop_distance, calc_scurve_stop_time, calc_contact_yield_deadline, calc_transient_contact_speed_limit
 from mlsysim.fmt import fmt, fmt_length, fmt_latency, fmt_velocity, fmt_acceleration, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -1789,7 +1794,8 @@ class EnforcementRecordMachine:
     tcp_limit = RM.tcp_speed_limit  # category: chosen (free-space TCP limit)
     v_handover = AISLE.v_handover  # category: chosen (handover approach under accept_item)
     f_contact = AISLE.f_contact_criterion  # category: chosen
-    k_hand = AISLE.k_contact_human  # category: illustrative
+    k_hand = AISLE.k_contact_human  # category: datasheet (ISO/TS 15066 hand body model)
+    m_hand = AISLE.m_contact_human  # category: datasheet (ISO/TS 15066 hand body model)
     m_eff_arm = RM.arm_effective_contact_mass  # category: derived
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
@@ -1801,7 +1807,8 @@ class EnforcementRecordMachine:
     t_stop_restricted = calc_scurve_stop_time(v_restricted, a_inspected, j_brake).to(millisecond)
     d_stop_restricted = calc_scurve_stop_distance(v_restricted, a_inspected, j_brake).to(millimeter)
     t_yield_high = calc_contact_yield_deadline(f_latch_limit, k_latch, v_latch_high).to(millisecond)
-    v_handover_ceiling = (f_contact / (k_hand * m_eff_arm) ** 0.5).to(meter / second)
+    v_handover_ceiling = calc_transient_contact_speed_limit(f_contact, m_eff_arm, k_hand, human_mass=m_hand).to(meter / second)
+    v_handover_ceiling_clamped = calc_transient_contact_speed_limit(f_contact, m_eff_arm, k_hand).to(meter / second)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(eps_track.to(millimeter).magnitude - 40.0) < 1e-9, "The base's tracking bound is 40 mm.")
@@ -1818,8 +1825,10 @@ class EnforcementRecordMachine:
     check(v_latch < v_latch_high, "The target-ODD approach is the slower one.")
     check(abs(tcp_limit.to(meter / second).magnitude - 1.0) < 1e-9, "The free-space TCP limit is 1.0 m/s.")
     check(abs(v_handover.to(meter / second).magnitude - 0.10) < 1e-9, "The handover approach ceiling is 0.10 m/s.")
-    check(v_handover < v_handover_ceiling, "The handover ceiling sits under the contact-force ceiling.")
-    check(abs(v_handover_ceiling.magnitude - 0.118) < 5e-4, "The contact-force ceiling at the hand is 0.118 m/s.")
+    check(v_handover < v_handover_ceiling, "The handover cap sits under the free-hand contact-force ceiling.")
+    check(abs(v_handover_ceiling.magnitude - 0.2415) < 5e-5, "The free-hand contact-force ceiling is 0.24 m/s.")
+    check(abs(v_handover_ceiling_clamped.magnitude - 0.0527) < 5e-5, "The clamped-hand contact-force ceiling is 0.053 m/s.")
+    check(v_handover > v_handover_ceiling_clamped, "The handover cap exceeds the clamped ceiling, so clamping must be excluded.")
 
     # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
     eps_track_str = fmt_length(eps_track, unit=millimeter, precision=0)
@@ -1842,7 +1851,8 @@ class EnforcementRecordMachine:
     t_contact_str = fmt_latency(t_contact, unit=millisecond, precision=0)
     tcp_limit_str = fmt_velocity(tcp_limit, precision=0)
     v_handover_str = fmt_velocity(v_handover, precision=2)
-    v_handover_ceiling_str = fmt_velocity(v_handover_ceiling, precision=3)
+    v_handover_ceiling_str = fmt_velocity(v_handover_ceiling, precision=2)
+    v_handover_ceiling_clamped_str = fmt_velocity(v_handover_ceiling_clamped, precision=3)
 ```
 
 Filled in for the machine, the record fixes the base's stops at the rack end and the arm's validity region and channels at the door and the packing station:
@@ -1851,7 +1861,7 @@ Filled in for the machine, the record fixes the base's stops at the rack end and
 - The resident stop is the jerk-limited $C^2$ suffix, which lasts `{python} EnforcementRecordMachine.t_stop_aisle_str` and covers `{python} EnforcementRecordMachine.d_stop_aisle_str` from the `{python} EnforcementRecordMachine.v_aisle_str` aisle speed, or `{python} EnforcementRecordMachine.t_stop_drive_str` and `{python} EnforcementRecordMachine.d_stop_drive_str` from the `{python} EnforcementRecordMachine.v_drive_str` drive limit.
 - The loop period is `{python} EnforcementCycleBudget.tick_str`, with a declared WCET of `{python} EnforcementCycleBudget.wcet_us_str` $\mu\text{s}$ inside a `{python} EnforcementCycleBudget.deadline_us_str` $\mu\text{s}$ deadline. Three timers run beside it, the `{python} EnforcementLeaseStop.lease_ms_str` chunk lease, the `{python} EnforcementLeaseStop.heartbeat_rate_hz_str` $\text{Hz}$ host heartbeat with its `{python} EnforcementLeaseStop.heartbeat_timeout_ms_str` silence timeout, and the `{python} EnforcementLeaseStop.self_watchdog_ms_str` self-watchdog.
 - The validity region for the arm covers the door and the packing station. For the original door policy it is the nominal target ODD of @sec-evaluation-logs: the nominal plate, the door's own load, a stopped base, and the guarded approach. The separately stipulated recovery update in @sec-evaluation-recovery-update adds the qualified positive displaced-plate cell only under its new record; it does not expand the original policy's validity region. At the packing station it admits the mug pick from the conveyor under a live intent lease (@sec-intent-lease), and the handover that follows.
-- The arm's channels are ceilings the enforcer applies to the tool point. The approach-speed channel of the evaluation record's `runtime_monitor_specs` caps it at `{python} EnforcementRecordMachine.v_latch_str` inside the door zone. The mug pick runs under the `{python} EnforcementRecordMachine.tcp_limit_str` free-space Tool Center Point (TCP) limit. While the coworker holds `accept_item` (@sec-intervention-human-authority), a handover channel caps the approach to the coworker's hand at `{python} EnforcementRecordMachine.v_handover_str`, below the `{python} EnforcementRecordMachine.v_handover_ceiling_str` contact-force ceiling, and it engages before the hand comes within the arm's biased stop plus its blind travel.
+- The arm's channels are ceilings the enforcer applies to the tool point. The approach-speed channel of the evaluation record's `runtime_monitor_specs` caps it at `{python} EnforcementRecordMachine.v_latch_str` inside the door zone. The mug pick runs under the `{python} EnforcementRecordMachine.tcp_limit_str` free-space Tool Center Point (TCP) limit. While the coworker holds `accept_item` (@sec-intervention-human-authority), a handover channel caps the approach to the coworker's hand at `{python} EnforcementRecordMachine.v_handover_str`, below the `{python} EnforcementRecordMachine.v_handover_ceiling_str` contact-force ceiling for a free hand that recoils. A hand clamped against a rack upright or the arm admits only `{python} EnforcementRecordMachine.v_handover_ceiling_clamped_str`, so the cap is valid only while the handover geometry excludes clamping (@sec-release-question). The channel engages before the hand comes within the arm's biased stop plus its blind travel.
 - For the base, the normal configuration is valid on floors with friction of at least `{python} EnforcementRecordMachine.mu_min_str`, where the credible deceleration binds. A restricted configuration is valid down to the inspected-floor friction of `{python} EnforcementRecordMachine.mu_inspected_str`; its suffix is sized for the `{python} EnforcementRecordMachine.a_inspected_str` peak that floor allows, and it takes `{python} EnforcementRecordMachine.t_stop_restricted_str` and `{python} EnforcementRecordMachine.d_stop_restricted_str` to stop from `{python} EnforcementRecordMachine.v_restricted_str`, under the `{python} EnforcementRecordMachine.v_inspected_str` inspected-floor ceiling. Each configuration carries its own digest, and the release manifest (@sec-release-manifest) names both.
 
 The base entry must also carry the qualified dispatch-to-admission bound and the positive reserve remaining after its travel is charged. Without that bound, neither the normal nor restricted configuration is admitted by these subtotals alone.

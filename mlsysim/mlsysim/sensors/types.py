@@ -40,7 +40,10 @@ class CameraSensor(Sensor):
     resolution_width: int
     resolution_height: int
     frame_rate: Quantity
-    shutter_type: Literal["rolling", "global"]
+    shutter_type: Literal["rolling", "global"]  # the color/image stream the resolution describes
+    # Stereo depth cameras carry separate depth imagers whose shutter can differ
+    # from the color sensor's; None for plain image sensors.
+    depth_shutter_type: Optional[Literal["rolling", "global"]] = None
     exposure_time: Optional[Quantity] = None
     readout_time: Optional[Quantity] = None
 
@@ -64,6 +67,33 @@ class LiDARSensor(Sensor):
     scan_rate: Quantity
     max_range: Optional[Quantity] = None
     points_per_second: Optional[Quantity] = None
+    # Datasheet ranging and timing specs (all upper bounds or 1-sigma typicals).
+    range_precision_min: Optional[Quantity] = None   # 1-sigma range noise, best case
+    range_precision_max: Optional[Quantity] = None   # 1-sigma range noise, worst case
+    range_accuracy: Optional[Quantity] = None        # mean range bias, Lambertian targets
+    time_sync_accuracy: Optional[Quantity] = None    # PTP / gPTP / PPS error bound
+    internal_clock_drift: Optional[Quantity] = None  # free-running clock drift (ppm)
+
+    @field_validator("range_precision_min", "range_precision_max", "range_accuracy", mode="after")
+    @classmethod
+    def _validate_range_specs(cls, v, info):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.meter, info.field_name)
+
+    @field_validator("time_sync_accuracy", mode="after")
+    @classmethod
+    def _validate_sync(cls, v):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.second, "time_sync_accuracy")
+
+    @field_validator("internal_clock_drift", mode="after")
+    @classmethod
+    def _validate_drift(cls, v):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.dimensionless, "internal_clock_drift")
 
     @field_validator("scan_rate", mode="after")
     @classmethod

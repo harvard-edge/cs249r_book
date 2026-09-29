@@ -3276,6 +3276,27 @@ def fmt_torque_constant(quantity, *, unit=None, precision=None, commas=False):
     )
 
 
+def fmt_motor_constant(quantity, *, unit=None, precision=None, commas=False):
+    """Format a motor constant K_m = K_t / sqrt(R) for prose (N·m/√W)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_motor_constant() requires a Pint Quantity.")
+    km_unit = ureg.newton * ureg.meter / ureg.watt**0.5
+    if (1 * quantity).dimensionality != (1 * km_unit).dimensionality:
+        raise ValueError(f"fmt_motor_constant unit must have N·m/√W dimensionality, got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else km_unit
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        unit_label="N·m/√W",
+        trim_trailing_zeros=auto_precision,
+    )
+
+
 def fmt_force(
     quantity,
     *,

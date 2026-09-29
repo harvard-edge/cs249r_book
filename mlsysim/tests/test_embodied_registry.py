@@ -81,6 +81,18 @@ def test_sensors_registry():
     assert isinstance(lidar, LiDARSensor)
     assert lidar.channels == 64
     assert lidar.scan_rate.to("Hz").magnitude == pytest.approx(20.0)
+    # Rev7 datasheet (2026-09-29): data latency < 10 ms, precision 5-30 mm,
+    # accuracy 25 mm, PTP < 1 ms, internal clock 10 ppm.
+    assert lidar.nominal_latency.to("ms").magnitude == pytest.approx(10.0)
+    assert lidar.range_precision_min.to("mm").magnitude == pytest.approx(5.0)
+    assert lidar.range_precision_max.to("mm").magnitude == pytest.approx(30.0)
+    assert lidar.range_accuracy.to("mm").magnitude == pytest.approx(25.0)
+    assert lidar.time_sync_accuracy.to("ms").magnitude == pytest.approx(1.0)
+    assert lidar.internal_clock_drift.to("ppm").magnitude == pytest.approx(10.0)
+
+    d435i = Sensors.Camera.Intel_RealSense_D435i
+    assert d435i.shutter_type == "rolling"        # OV2740 color sensor
+    assert d435i.depth_shutter_type == "global"   # OV9282 depth imagers
 
     imu = Sensors.IMU.Bosch_BMI088
     assert isinstance(imu, IMUSensor)
@@ -142,8 +154,11 @@ from mlsysim.physics.robotics import (
     calc_action_chunk_streaming_amortization,
     calc_c2_stop_suffix,
     calc_contact_yield_deadline,
+    calc_free_space_expiry,
     calc_max_permitted_velocity,
     calc_target_evidence_horizon,
+    calc_transient_contact_speed_limit,
+    calc_transient_impact_force,
 )
 
 _RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -233,8 +248,14 @@ _QUANTITY_GUARDS = [
     ("renewal_to_onset", lambda: _AISLE.t_lease + _AISLE.t_tick + _AISLE.t_bus + _AISLE.t_brake_onset,
      82.0, "ms", 1e-9),
     ("missed_tick_1.3", lambda: _AISLE.v_aisle * _AISLE.t_tick, 1.3, "mm", 1e-9),
-    ("occlusion_belief", lambda: (_AISLE.delta_margin - _AISLE.delta_loc) / _AISLE.v_human_approach,
-     31.25, "ms", 1e-9),
+    # Free-space expiry abreast of the rack end: the side clearance is exactly
+    # spent by delta_loc + delta_margin (2026-09-29; was an inconsistent 31.25 ms).
+    ("occlusion_belief", lambda: calc_free_space_expiry(
+        _AISLE.side_clearance, _AISLE.delta_loc, _AISLE.delta_margin, _AISLE.v_human_approach),
+     0.0, "ms", 1e-9),
+    ("free_space_ahead", lambda: calc_free_space_expiry(
+        _AISLE.d_clear, _AISLE.delta_loc, _AISLE.delta_margin, _AISLE.v_human_approach),
+     593.75, "ms", 1e-9),
     ("E_k", lambda: 0.5 * _RM.loaded_mass * _v(1.5) ** 2, 414.0, "J", 1e-9),
     ("intent_sweep", lambda: _weight_sweep(_RM.intent_model), 98.04, "ms", 5e-3),
     ("chunk_sweep", lambda: _weight_sweep(_RM.chunk_model), 1.1204, "ms", 5e-4),  # ACT ~80M (2026-09-28)
@@ -244,10 +265,19 @@ _QUANTITY_GUARDS = [
         _AISLE.f_latch_limit, _AISLE.k_latch, _AISLE.v_latch_approach), 8.333, "ms", 5e-4),
     ("yield_0.10", lambda: calc_contact_yield_deadline(
         _AISLE.f_latch_limit, _AISLE.k_latch, _AISLE.v_latch_high), 2.5, "ms", 1e-9),
-    ("v_hand_ceiling", lambda: _AISLE.f_contact_criterion
-     / (_AISLE.k_contact_human * _RM.arm_effective_contact_mass) ** 0.5, 0.1179, "m/s", 5e-5),
-    ("F_handover", lambda: _AISLE.v_handover
-     * (_AISLE.k_contact_human * _RM.arm_effective_contact_mass) ** 0.5, 42.4, "N", 5e-2),
+    # ISO/TS 15066 hand body model (2026-09-29): free hand uses the reduced mass,
+    # clamped hand the robot-side mass alone.
+    ("v_hand_ceiling", lambda: calc_transient_contact_speed_limit(
+        _AISLE.f_contact_criterion, _RM.arm_effective_contact_mass, _AISLE.k_contact_human,
+        human_mass=_AISLE.m_contact_human), 0.2415, "m/s", 5e-5),
+    ("v_hand_ceiling_clamped", lambda: calc_transient_contact_speed_limit(
+        _AISLE.f_contact_criterion, _RM.arm_effective_contact_mass, _AISLE.k_contact_human),
+     0.0527, "m/s", 5e-5),
+    ("F_handover", lambda: calc_transient_impact_force(
+        _AISLE.v_handover, _RM.arm_effective_contact_mass, _AISLE.k_contact_human,
+        human_mass=_AISLE.m_contact_human), 20.70, "N", 5e-3),
+    ("F_handover_clamped", lambda: calc_transient_impact_force(
+        _AISLE.v_handover, _RM.arm_effective_contact_mass, _AISLE.k_contact_human), 94.87, "N", 5e-3),
     ("tau_ev_untracked", lambda: calc_target_evidence_horizon(
         _AISLE.grasp_tolerance, _AISLE.grasp_initial_error, _AISLE.v_conveyor), 60.0, "ms", 1e-9),
     ("tau_ev_tracked", lambda: (2 * _AISLE.grasp_tolerance / _AISLE.a_conveyor_slip) ** 0.5,
@@ -297,9 +327,14 @@ def test_running_machine_chosen_speeds_sit_under_their_ceilings():
     assert _AISLE.v_aisle.to(_MPS).magnitude < _ceiling()
     assert _AISLE.v_takeover_in_loop.to(_MPS).magnitude < _scurve_ceiling(_AISLE.t_takeover_in_loop)
     assert _AISLE.v_takeover_out_of_loop.to(_MPS).magnitude < _scurve_ceiling(_AISLE.t_takeover_out_of_loop)
-    hand_ceiling = (_AISLE.f_contact_criterion
-                    / (_AISLE.k_contact_human * _RM.arm_effective_contact_mass) ** 0.5)
+    hand_ceiling = calc_transient_contact_speed_limit(
+        _AISLE.f_contact_criterion, _RM.arm_effective_contact_mass, _AISLE.k_contact_human,
+        human_mass=_AISLE.m_contact_human)
     assert _AISLE.v_handover < hand_ceiling
+    # A clamped hand admits less than the chosen handover speed, so the handover
+    # claim is a transient-contact claim that must exclude clamping.
+    assert _AISLE.v_handover > calc_transient_contact_speed_limit(
+        _AISLE.f_contact_criterion, _RM.arm_effective_contact_mass, _AISLE.k_contact_human)
     assert _AISLE.enforcer_wcet < _AISLE.enforcer_deadline < _AISLE.t_tick
     assert _RM.control_rail_battery_low < _RM.control_rail_nominal
 

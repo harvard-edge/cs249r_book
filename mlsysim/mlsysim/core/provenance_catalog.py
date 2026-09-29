@@ -391,6 +391,25 @@ BOSTON_DYNAMICS_ATLAS = _est(
     verified="2026-09-15",
 )
 
+FRANKA_FER_CONTROL_LIMITS = _ds(
+    "prov:franka-fer-control-limits",
+    "Franka Robotics documentation, Robot and interface specifications: 'Limits for "
+    "Franka Emika Robot (FER)' and the Panda Denavit-Hartenberg parameters",
+    "https://github.com/frankaemika/docs/blob/master/source/robot_specifications.rst",
+    verified="2026-09-29",
+    notes=(
+        "Joint limits from source/control-parameters-joint-fer.csv (master, "
+        "checked 2026-09-29): velocity 2.1750 rad/s on joints 1-4 and 2.6100 on "
+        "5-7; acceleration 15, 7.5, 10, 12.5, 15, 20, 20 rad/s^2; jerk 7500, "
+        "3750, 5000, 6250, 7500, 10000, 10000 rad/s^3; torque rate 1000 Nm/s on "
+        "every joint. FER Cartesian translation velocity 1.7 m/s. DH d3 = 0.316 m "
+        "and d5 = 0.384 m: the current page labels the table for FR3; the Panda "
+        "label with d3 = 0.316 m is in earlier revisions of the docs (commits "
+        "6346f562cc and 7a46004875, control_parameters.rst). Rendered site: "
+        "https://frankarobotics.github.io/docs."
+    ),
+)
+
 FRANKA_EMIKA_PANDA = _ds(
     "prov:franka-emika-panda",
     "Franka Emika Panda datasheet (May 2018) and Robot Instruction Handbook (October 2021)",
@@ -562,6 +581,24 @@ ISO_13855_APPROACH_SPEED = _ds(
     ),
 )
 
+ISO_TS_15066_HAND_BODY_MODEL = _ds(
+    "prov:iso-ts-15066-hand-body-model",
+    "ISO/TS 15066:2016 Annex A body model, hand and fingers: effective mass "
+    "m_H = 0.6 kg, effective spring constant k_H = 75 N/mm",
+    "https://arxiv.org/abs/2203.02706",
+    verified="2026-09-29",
+    notes=(
+        "ISO/TS 15066:2016 (Robots and robotic devices: collaborative robots), "
+        "Annex A, whose collaborative-application content ISO 10218-2:2025 "
+        "absorbed. The standard is paywalled; the values were checked against "
+        "Kirschner, Mansfeld, Abdolshah, and Haddadin, 'ISO/TS 15066: How "
+        "Different Interpretations Affect Risk Assessment' (arXiv:2203.02706, "
+        "2022), which reproduces TS Appendix A (hand m_h = 0.6 kg, "
+        "k = 75 N/mm; back m_h = 40 kg, k = 35 N/mm) and its transient-contact "
+        "model F = v*sqrt(mu*k), mu = (1/m_r + 1/m_h)^-1 (eqs. 1-2)."
+    ),
+)
+
 # --- Human takeover response times (2026-09-28, M4) ---
 CARD_MORAN_NEWELL_MHP = _lit(
     "prov:card-moran-newell-1983-mhp",
@@ -703,18 +740,33 @@ SONY_IMX296 = _ds(
 
 INTEL_REALSENSE_D435I = _ds(
     "prov:intel-realsense-d435i",
-    "Intel RealSense Depth Camera D435i Datasheet",
-    "https://www.intelrealsense.com/depth-camera-d435i/",
-    verified="2026-09-18",
-    notes="Active IR stereo depth camera with integrated Bosch BMI055/BMI088 IMU, 90 fps depth stream.",
+    "RealSense D400 Series Product Family Datasheet, revision 023 (March 2026), D435/D435i",
+    "https://www.realsenseai.com/wp-content/uploads/2026/03/RealSense-D400-Series-Datasheet-Mar-2026.pdf",
+    verified="2026-09-29",
+    notes=(
+        "Active IR stereo depth camera with integrated IMU, 90 fps depth stream. "
+        "Table 3-49: the D435/D435i uses the D430 depth module (wide imagers) and "
+        "an OV2740 color sensor. Table 3-18: OV2740 is rolling shutter, 1920x1080. "
+        "The wide left/right imagers (OV9282) are global shutter. shutter_type "
+        "describes the color stream; depth_shutter_type the depth imagers. "
+        "nominal_latency and nominal_power are not from this datasheet."
+    ),
 )
 
 OUSTER_OS1_64 = _ds(
     "prov:ouster-os1-64",
-    "Ouster OS1 Mid-Range High-Resolution Imaging LiDAR Datasheet",
-    "https://ouster.com/products/hardware/os1-lidar-sensor",
-    verified="2026-09-18",
-    notes="64-channel digital LiDAR with 120m range, 10-20 Hz configurable spin rate.",
+    "Ouster OS1 Mid-Range High-Resolution Imaging Lidar Datasheet, hardware Rev7.0, firmware 3.1.x",
+    "https://data.ouster.io/downloads/datasheets/datasheet-rev7-v3p1-os1.pdf",
+    verified="2026-09-29",
+    notes=(
+        "64-channel digital LiDAR, 10 or 20 Hz rotation. Range precision 0.5-3 cm "
+        "(1 sigma, beyond 1 m, 1024 @ 10 Hz); range accuracy +/-2.5 cm Lambertian; "
+        "data latency < 10 ms (stored as nominal_latency); PTP / gPTP / PPS "
+        "accuracy < 1 ms; internal clock 10 ppm drift; power 14-20 W. The Rev7 "
+        "sheet gives range as 170 m (80 percent target) and 90 m (10 percent), so "
+        "the stored 120 m max_range needs source; nominal_power 18 W sits in the "
+        "14-20 W band."
+    ),
 )
 
 BOSCH_BMI088 = _ds(
@@ -1358,6 +1410,20 @@ ENERGY_HIERARCHY_CONVENTIONS = _conv(
     "prov:energy-hierarchy-conventions",
     "Simplified energy hierarchy: architecture-class effective pJ/FLOP (CPU→ASIC) and per-byte data-movement cost (register→network)",
     notes="Order-of-magnitude teaching figures; effective system-level energy, consistent with the Horowitz (2014) energy trend.",
+)
+
+LPDDR5_6400_TIMINGS = _ds(
+    "prov:lpddr5-6400-timings",
+    "JEDEC JESD209-5C LPDDR5-6400 timings as encoded in the Ramulator 2.0 "
+    "LPDDR5_6400 preset (tCK = 1250 ps; nRCD = 15, nRP = 15, nRPab = 17 cycles)",
+    "https://github.com/CMU-SAFARI/ramulator2/blob/main/python/ramulator/dram/lpddr5.py",
+    verified="2026-09-29",
+    notes=(
+        "Checked at ramulator2 main 72427a1bba (2026-09-02). BG mode, CKR 4:1: "
+        "t_RCD = t_RP(per bank) = 15 x 1.25 ns = 18.75 ns. The JEDEC standard is "
+        "not read directly (jedec.org access), so the values rest on the "
+        "simulator's encoding of JESD209-5C Table 339/340."
+    ),
 )
 
 MEMORY_INTERFACE_BANDWIDTH_TIERS = _conv(

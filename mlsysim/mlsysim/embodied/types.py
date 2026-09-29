@@ -29,7 +29,50 @@ class EmbodiedPlatform(BaseModel):
     nominal_power: Optional[Quantity] = None
     compute_soc: Optional[HardwareNode] = None
     transmission: Optional[str] = None
+    # Serial-arm kinematics and interface limits (manipulators only; None otherwise).
+    # upper_arm_length / forearm_length are the shoulder-to-elbow and elbow-to-wrist
+    # offsets of the kinematic chain (Denavit-Hartenberg d3 and d5 on a Panda).
+    upper_arm_length: Optional[Quantity] = None
+    forearm_length: Optional[Quantity] = None
+    joint_velocity_limits: Optional[tuple[Quantity, ...]] = None      # per joint, base outward
+    joint_acceleration_limits: Optional[tuple[Quantity, ...]] = None
+    joint_jerk_limits: Optional[tuple[Quantity, ...]] = None
+    joint_torque_rate_limit: Optional[Quantity] = None                # same on every joint
+    cartesian_velocity_limit: Optional[Quantity] = None               # commanded TCP translation
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("upper_arm_length", "forearm_length", mode="after")
+    @classmethod
+    def _validate_link_length(cls, v, info):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.meter, info.field_name)
+
+    @field_validator("joint_velocity_limits", "joint_acceleration_limits", "joint_jerk_limits", mode="after")
+    @classmethod
+    def _validate_joint_limits(cls, v, info):
+        if v is None:
+            return v
+        unit = {
+            "joint_velocity_limits": ureg.radian / ureg.second,
+            "joint_acceleration_limits": ureg.radian / ureg.second**2,
+            "joint_jerk_limits": ureg.radian / ureg.second**3,
+        }[info.field_name]
+        return tuple(require_dimensionality(q, unit, info.field_name) for q in v)
+
+    @field_validator("joint_torque_rate_limit", mode="after")
+    @classmethod
+    def _validate_torque_rate(cls, v):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.newton * ureg.meter / ureg.second, "joint_torque_rate_limit")
+
+    @field_validator("cartesian_velocity_limit", mode="after")
+    @classmethod
+    def _validate_cartesian_velocity(cls, v):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.meter / ureg.second, "cartesian_velocity_limit")
 
     @field_validator("mass", "payload_capacity", mode="after")
     @classmethod
@@ -461,7 +504,8 @@ class EmbodiedSiteScenario(BaseModel):
     a_conveyor_slip: Quantity
     grasp_tolerance: Quantity
     grasp_initial_error: Quantity
-    k_contact_human: Quantity
+    k_contact_human: Quantity             # ISO/TS 15066 Annex A hand effective spring constant
+    m_contact_human: Quantity             # ISO/TS 15066 Annex A hand effective mass
     f_contact_criterion: Quantity
     # coworker handover and remote takeover (shared by more than one chapter)
     v_handover: Quantity
@@ -539,6 +583,11 @@ class EmbodiedSiteScenario(BaseModel):
     @classmethod
     def _validate_stiffness(cls, v, info):
         return require_dimensionality(v, ureg.newton / ureg.meter, info.field_name)
+
+    @field_validator("m_contact_human", mode="after")
+    @classmethod
+    def _validate_mass(cls, v, info):
+        return require_dimensionality(v, ureg.kilogram, info.field_name)
 
     @field_validator("f_latch_tripwire", "f_latch_limit", "f_contact_criterion", mode="after")
     @classmethod
