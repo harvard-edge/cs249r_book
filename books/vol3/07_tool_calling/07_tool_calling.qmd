@@ -75,19 +75,19 @@ An agent asked to restart a container on a staging server emits a short tool cal
 ```
 :::
 
-The result is matched to its call by identifier, not merely by position. That identifier tells the runtime which exchange the result belongs to; preventing a second restart takes a separate contract for the intended operation, developed in @sec-vol3-tool-calling-idempotency. A plausible outcome described in the next model call leaves the uncertainty where it was, and the runtime permits repetition only on evidence or an enforced retry guarantee.
+The result is matched to its call by identifier, not merely by position. That identifier tells the runtime which exchange the result belongs to; preventing a second restart takes a separate contract for the intended operation, developed in @sec-vol3-tool-calling-idempotency. If the next model call supplies a plausible outcome, the uncertainty stays where it was; the runtime permits repetition only on evidence or an enforced retry guarantee.
 
 The distinction between proposal, effect, and evidence comes from @sec-vol3-intro. The memory chapters already relied on tools to read sources, search indexes, and update records. This chapter makes those operations explicit. A retrieval result identifies the version it observed. Keeping that version current until a later edit is an action-time precondition, and the tool boundary enforces it, together with the decisions about whether the operation is permitted and what outcome can honestly be reported.
 
 ### One mediated round trip
 
-@Sec-vol3-foundation-model-contract established the model-side call surface: a response can contain structured tool-call blocks rather than a final answer. What follows is the runtime's responsibility. Between a proposal leaving the model and an observation entering the next call, the runtime mediates the entire round trip across the four coordinated stages in @fig-vol3-tool-call-loop.
+@Sec-vol3-foundation-model-contract established the model-side call surface, in which a response can contain structured tool-call blocks rather than a final answer. What follows is the runtime's responsibility. Between a proposal leaving the model and an observation entering the next call, the runtime mediates the entire round trip across the four coordinated stages in @fig-vol3-tool-call-loop.
 
 Request validation parses proposed arguments against the tool's declared interface, verifying required fields, types, ranges, and parameter relationships. Conditions that depend on changing environment state must also be enforced at the appropriate execution boundary rather than inferred from a prior read. Operation authorization then evaluates the session's grants for the target resource and operation alongside applicable resource limits; reading a private record requires explicit authority just as modifying it does, and that grant comes from the task, never from a well-formed proposal or an advertised tool.
 
 Following authorization, dispatch invokes the permitted operation while outcome tracking retains enough identity and status to distinguish rejection before dispatch, work still running, a reported result, and an unknown effect. A timeout is an outcome of waiting, not proof that execution stopped. Finally, observation shaping correlates the result with the call identifier and stages a bounded payload with its relevant status and omission information. A shortened log discloses that it was shortened, and a dispatch acknowledgment is reported as an acknowledgment rather than a completed effect.
 
-These responsibilities refine the turn lifecycle of @sec-vol3-intro-execution-lifecycle rather than replace it. Some checks must occur together at the endpoint: an edit conditioned on a source version needs the version check coupled to the update. The host and endpoint each enforce the boundary they own. Permission comes from the host's grants, never from a server's advertisement, and the endpoint checks access even for calls the host approved.
+These responsibilities refine the turn lifecycle of @sec-vol3-intro-execution-lifecycle rather than replace it. Some checks belong at the endpoint because they must happen together with the effect; an edit conditioned on a source version needs the version check coupled to the update. The host and endpoint each enforce the boundary they own, and the endpoint checks access even for calls the host approved.
 
 ::: {#fig-vol3-tool-call-loop fig-env="figure" fig-pos="htb" fig-cap="**The tool-call loop**: Validation and authorization can reject a proposed call before dispatch. For a dispatched call, the runtime tracks the available outcome and shapes the return into a bounded observation matched to its call identifier. An unknown effect remains unknown in that observation." fig-alt="Flow diagram showing model tool calls passing through runtime validation, authorization, dispatch and outcome tracking, and observation shaping before the next model call. Rejected calls return structured errors without reaching the environment."}
 ![](images/svg/tool_call_loop.svg)
@@ -97,19 +97,19 @@ When the serving interface returns structured call blocks, the runtime reads tho
 
 ### Complete mediation {#sec-vol3-tool-calling-complete-mediation}
 
-The organizing requirement is *complete mediation*: every access to every object must be checked for authority [@saltzer1975]. At the tool boundary, this includes reads and disclosures, not just mutations. The model proposes calls; it does not gain the runtime's credentials by naming an operation.
+The organizing requirement is one of the oldest principles of protection design [@saltzer1975]. At the tool boundary it covers reads and disclosures, not just mutations, and the model proposes calls without gaining the runtime's credentials by naming an operation.
 
 ::: {#dfn-complete-mediation .callout-definition title="Complete mediation"}
 
 ***Complete mediation***\index{Complete mediation!definition}\index{Tool actuation!complete mediation} requires every proposed access to pass through an enforced authorization boundary before it reaches the protected resource. In an agent runtime, the return path is also mediated so that observations enter context under explicit access, payload, and status contracts.
 
 1. **Significance**: A valid-looking call cannot bypass the checks governing what the session may read, change, or disclose.
-2. **Distinction**: Schema validation establishes structural admissibility, not permission. Observation normalization establishes a usable representation, not the truth of its contents or immunity to prompt injection.
+2. **Distinction**: Schema validation establishes structural admissibility, not permission. Observation normalization establishes a usable representation, not the truth of its contents or immunity to prompt injection, attacker-controlled content that attempts to redirect the model (@sec-vol3-security).
 3. **Common pitfall**: Treating a prompt instruction such as “never delete production data” as an access barrier. The runtime must enforce the restriction even when the model proposes the prohibited action.
 
 :::
 
-Complete mediation names a property; a reference monitor is the component that provides it. Anderson's formulation gives the monitor three requirements [@anderson1972computer], and each one fixes a design choice at the tool boundary. The monitor must be tamper-proof, so neither the model nor any text it reads can alter the policy it enforces. It must be always invoked, so no route to a protected resource bypasses it; a general command runner that reaches the network around the checked adapter voids the boundary. It must be small enough to verify, so the decision it makes is a deterministic policy check rather than a judgment by another model call. A classifier model can inform that policy, but its behavior cannot be verified in the required sense, so it cannot be the monitor.
+Complete mediation names a property. Anderson named the component that provides it and the conditions it must meet [@anderson1972computer].
 
 ::: {#dfn-reference-monitor .callout-definition title="Reference monitor"}
 
@@ -121,7 +121,9 @@ Complete mediation names a property; a reference monitor is the component that p
 
 :::
 
-The returned observation is evidence of a particular scope. A tool can report that a process exited or that one test passed; acceptance of the whole task is a separate judgment. Likewise, text from a file or remote service remains untrusted input even after the runtime removes terminal formatting and adds labels. The observation contract preserves what was reported and what was omitted, and the content stays data: it carries neither instructions nor permission for the next call.
+Each requirement fixes a design choice at the tool boundary. Tamper-proofing means neither the model nor any text it reads can alter the policy the monitor enforces. Always-invoked means no route to a protected resource bypasses it; a general command runner that reaches the network around the checked adapter voids the boundary. Verifiability means the decision is a deterministic policy check rather than a judgment by another model call. A classifier model can inform that policy, but its behavior cannot be verified in the required sense, so it cannot be the monitor.
+
+The returned observation is evidence of a particular scope. A tool can report that a process exited or that one test passed; acceptance of the whole task is a separate judgment. Likewise, text from a file or remote service remains untrusted input even after the runtime removes terminal formatting and adds labels. The observation contract preserves what was reported and what was omitted, and the content stays data, carrying neither instructions nor permission for the next call.
 
 ### Batches and forced calls
 
@@ -137,7 +139,7 @@ The rest of the chapter develops this round-trip contract: a typed request and a
 
 ## Tool Interface Schemas {#sec-vol3-tool-calling-schemas}
 
-Return to the connection-pool repair just before the edit from `r17` to `r18`. The model has read `src/pool.py` and proposed replacement text. Before applying it, the runtime needs to know which operation the proposal names, what its arguments mean, whether the task permits the edit, and whether the source still matches the version on which the proposal depends. A well-formed request answers only part of this problem.
+Return to the connection-pool repair (\ref{lhs-vol3-repair-agent}) just before the edit from `r17` to `r18`. The model has read `src/pool.py` and proposed replacement text. Before applying it, the runtime needs to know which operation the proposal names, what its arguments mean, whether the task permits the edit, and whether the source still matches the version on which the proposal depends. A well-formed request answers only part of this problem.
 
 A **tool descriptor**\index{Tool descriptor!definition} communicates the operation's purpose, arguments, result, and relevant effect semantics. Its **argument schema**\index{Argument schema!definition} specifies machine-checkable structure: required fields, types, allowed values, and supported bounds. The descriptions help the model choose and parameterize the operation; the runtime and endpoint enforce the contract.
 
@@ -196,7 +198,7 @@ For the replacement request, a missing `expected_version` or a numeric `path` fa
 
 A path-shaped string is not a confined resource reference. The implementation must resolve and operate on the target within the authorized workspace, accounting for indirection and changes that could otherwise redirect the operation. Similarly, declaring a replacement as a string does not bound its encoded byte size. The adapter needs an enforced input-size limit and a bounded result, as well as the execution limits appropriate to its endpoint. Schema validation expresses the static conditions; checks that depend on current state belong to the implementation. @Sec-vol3-app-b-json-schema supplies a bounded edit descriptor and a schema-review checklist covering required fields, size limits, units, and variant semantics.
 
-The host enforces the task's grants before dispatch, while the execution endpoint enforces its own access boundary. Reads require this mediation too: returning a private file can disclose information even when no file changes. Grants come from the task: neither a tool argument nor retrieved text that suggests an action can enlarge them.
+Authority is checked on reads as well as edits, because returning a private file discloses information even when no file changes. Neither a tool argument nor retrieved text that suggests an action can enlarge the task's grants.
 
 Grammar-guided generation reduces structural errors under the conditions developed in @sec-vol3-foundation-model-grammar-constrained. Permissions, path resolution, and version comparison stay with the host and endpoint: the host validates the actual returned candidate, and the endpoint checks conditions that belong with execution. This is the typed action contract (principle \ref{pri-vol3-strict-action-abi}) applied to an operation, not a second decoding mechanism.
 
@@ -208,7 +210,7 @@ The endpoint must therefore compare the expected version and apply the replaceme
 
 The two branches are concrete. If the applicable source version is still `r17`, the conditional update commits the replacement and returns `r18`, identifying the source state produced by this edit. If another writer changed the source first, the comparison fails and this attempt applies no replacement, returning a version conflict. The agent then requires an authorized read of the changed source and a reconsidered proposal, rather than an automatic overwrite with the old replacement.
 
-The protection holds only for writers that pass through the coordination boundary. Where writers can bypass it, a stored version label protects nothing, and the endpoint declines to offer the guarantee. A prior dry run follows the same rule: execution enforces the precondition and current grants again, because inspecting a diff reserves neither the source version nor the later write.
+The protection holds only for writers that pass through the coordination boundary. Where writers can bypass it, a stored version label protects nothing, and the endpoint declines to offer the guarantee. A prior dry run follows the same rule. Execution enforces the precondition and current grants again, because inspecting a diff reserves neither the source version nor the later write.
 
 A delivered `r18` result establishes the stated file change, not that the race condition has been repaired. The subsequent pass of `test_waiter_notified_on_return` supplies evidence about that test on that candidate; acceptance still follows the broader task contract. Conversely, a lost reply leaves the caller uncertain about whether the edit committed. The retry contract in @sec-vol3-tool-calling-idempotency addresses that uncertainty.
 
@@ -282,9 +284,9 @@ Discovery establishes how to address an operation; authorization decides whether
 
 ## Retrying Uncertain Actions {#sec-vol3-tool-calling-idempotency}
 
-Discovery and authorization establish which operation the runtime may dispatch. What happened when its reply fails to arrive is a different question. Return to the staging-container restart: after `POST /containers/srv-stage-04/restart` times out, the request might have been lost, delayed, or accepted. The restart might still be running, might have partially changed the service, or might have finished without a delivered reply. A timeout records the caller's lack of a timely response, not a completed failure at the endpoint [@cristian1991understanding].
+Return to the staging-container restart. After `POST /containers/srv-stage-04/restart` times out, the request might have been lost, delayed, or accepted. The restart might still be running, might have partially changed the service, or might have finished without a delivered reply. A timeout records the caller's lack of a timely response, not a completed failure at the endpoint [@cristian1991understanding].
 
-Permission to perform the restart is therefore different from permission to repeat it. The next decision depends on the operation's repeat behavior and on evidence about the earlier attempt. Asking the model to try again answers neither question.
+The next decision depends on the operation's repeat behavior and on evidence about the earlier attempt, and asking the model to try again answers neither question.
 
 ::: {#dfn-uncertain-outcome .callout-definition title="Uncertain outcome"}
 
@@ -326,7 +328,7 @@ Setting a configuration field to a desired value can be idempotent with respect 
 
 The conditional-update concern in @tbl-vol3-tool-idempotency arises when the repair tool conditions its edit on source version `r17`. Once it has installed `r18`, repeating the same conditional request cannot overwrite a later version if the endpoint enforces the version check together with the write. The repeated request may return a conflict rather than its earlier success. That protects the source. Which attempt produced `r18` is a separate question, answered by operation identity through a result-recovery contract.
 
-Repeat behavior is a different axis from the authority levels $A_0$ through $A_3$ of @sec-vol3-intro-hsa. An authority level decides whether an action may run without further approval; its repeat behavior decides whether it may safely run twice. The two meet at $A_2$. An external action counts as retry-safe only if each timeout is settled before any retry, whether by operation semantics, an endpoint deduplication contract, or reconciliation.
+Repeat behavior is a different axis from the authority levels $A_0$ through $A_3$ of @sec-vol3-intro-hsa. An authority level decides whether an action may run without further approval; its repeat behavior decides whether it may safely run twice. The two meet at $A_2$, the level @sec-vol3-intro-hsa reserves for external actions with a defined safe retry or compensation. An external action earns that level only if each timeout is settled before any retry, whether by operation semantics, an endpoint deduplication contract, or reconciliation.
 
 ```{python}
 #| label: calc-vol3-tool-calling-settlement
@@ -418,7 +420,7 @@ def dispatch_mutation(transport, tool, args, op_id, max_attempts=3):
 
 Whether the endpoint honors the contract is a property the tool descriptor declares, and the runtime retries through this path only for tools that declare it.
 
-The effect boundary is also where an obsolete worker must be stopped. A host-side lease can expire while the old worker is still able to act, allowing a new worker and the old worker to produce separate effects. A lease longer than a high percentile of observed execution time makes that overlap rarer; only enforcement at the effect boundary, such as an epoch number the endpoint checks on every write, excludes it.
+The effect boundary is also where a superseded worker must be stopped. If the host reassigns an operation when the first worker's lease, its time-limited claim on the work, expires, that worker may still be running, and the two workers can produce separate effects. A lease longer than a high percentile of observed execution time makes that overlap rarer; only enforcement at the effect boundary excludes it, such as an epoch number that increases with each reassignment and that the endpoint checks on every write.
 
 Retention is part of the contract too. The endpoint states how long it recognizes an operation identity and returns its result, including how it treats delayed attempts. Past that window, retrying an old identity or minting a fresh one is again an unsettled retry. A unique token therefore yields an exactly-once effect only together with endpoint deduplication, a record binding effect and result, and a stated retention window. @Sec-vol3-durable-execution develops durable logging and recovery; the tool interface must expose the guarantees it actually offers.
 
@@ -434,9 +436,9 @@ In @eq-vol3-legacy-tool-contract, $\text{actuate}(\theta)$ performs mutation $\t
 
 A probe result of “unchanged” still justifies repetition only with additional grounds. The runtime might establish that the original attempt can no longer commit and produced no relevant effect, or rely on operation semantics that make repetition safe despite uncertainty. Without such grounds, the delayed-attempt counterexample still applies. A reconciliation query can itself fail or exceed its budget, leaving the effect unknown.
 
-The appropriate outcome may therefore be an unresolved operation: preserve its identity and available evidence, withhold a blind retry, and request further reconciliation or human direction. A partially applied effect may need a task-specific repair; not every action has an inverse, and a compensating action is another authorized operation rather than proof that the original never happened. Work that depends on the uncertain effect waits for settlement; independent work proceeds.
+The appropriate outcome may therefore be an unresolved operation. The runtime preserves its identity and available evidence, withholds a blind retry, and requests further reconciliation or human direction. A partially applied effect may need a task-specific repair; not every action has an inverse, and a compensating action is another authorized operation rather than proof that the original never happened. Work that depends on the uncertain effect waits for settlement; independent work proceeds.
 
-The runtime now has a basis for reporting what it knows without overstating it. Whether the operation completed, remains pending, or has an unknown effect, its diagnostics still need to fit the next model call. The return path must preserve those outcome distinctions while bounding the observation payload.
+The runtime now has a basis for reporting what it knows without overstating it. Whether the operation completed, remains pending, or has an unknown effect, its diagnostics still need to fit the next model call.
 
 ## Observation Stream Truncation {#sec-vol3-tool-calling-streaming}
 
@@ -481,7 +483,7 @@ In @eq-vol3-observation-byte-budget, $B_{\text{head}}$ holds the first bytes of 
 ![](images/svg/vol3-stream-ingestion.svg)
 :::
 
-Line counts are a presentation convenience, not a memory bound: one line can be arbitrarily long. Enforce byte limits on capture and parser buffers, handle character boundaries and decoding failures explicitly, then measure the final serialized model payload in tokens. That measurement includes provenance, status fields, omission notices, and other wrappers. The request must still leave room for the task's other context and reserved model output; an observation budget is not the whole context window.
+Line counts are a presentation convenience, not a memory bound, because one line can be arbitrarily long. Enforce byte limits on capture and parser buffers, handle character boundaries and decoding failures explicitly, then measure the final serialized model payload in tokens. That measurement includes provenance, status fields, omission notices, and other wrappers. The request must still leave room for the task's other context and reserved model output; an observation budget is not the whole context window.
 
 ```{python}
 #| label: calc-vol3-tool-calling-observation-budget
@@ -540,7 +542,7 @@ class ObservationBudget:
 
 The shaped result occupies `{python} ObservationBudget.shaped_share_str` of the whole window, before accounting for other context and output reserve. Its later input contribution is $4{,}000 \times 30 =$ `{python} ObservationBudget.carried_tokens_str` tokens. At the assumed prices, these later reads cost `{python} ObservationBudget.carried_cost_uncached_str` if all are uncached, or `{python} ObservationBudget.carried_cost_cached_str` if all qualify for cached-input billing. These figures exclude the initial inclusion, output generation, and all other request content.
 
-**Systems insight**: A staged observation is paid once for every later call that selects it, so its carried cost is payload times remaining turns: staged for all `{python} ObservationBudget.remaining_turns_str` later calls, the shaped log costs `{python} ObservationBudget.remaining_turns_str` times its one-time price. Both factors are knobs. Halving the payload, or dropping the observation once the decision it informs is made, cuts the bill in proportion, and cached billing cuts it by a factor of `{python} ObservationBudget.cached_discount_str` at these prices. Observation shaping therefore acts on the numerator of the cost per accepted task, $C_{\text{eff}}$ (@sec-vol3-intro-horizon-arithmetic), provided the smaller payload still carries the evidence the next decision needs.
+**Systems insight**: A staged observation is paid once for every later call that selects it, so its carried cost is payload times remaining turns, and both factors are knobs. Halving the payload, or dropping the observation once the decision it informs is made, cuts the bill in proportion, and cached billing cuts it by a factor of `{python} ObservationBudget.cached_discount_str` at these prices. Observation shaping therefore acts on the numerator of the cost per accepted task, $C_{\text{eff}}$ (@sec-vol3-intro-horizon-arithmetic), provided the smaller payload still carries the evidence the next decision needs.
 :::
 
 ### Make omitted evidence inspectable
@@ -549,21 +551,21 @@ A truncation notice should identify what was selected, what is missing, and whet
 
 When authorized retention permits it, the runtime can store the captured log separately and return an **inspection handle**\index{Inspection handle!definition} for bounded reads of it. A request such as `read_observation_slice(handle, offset_bytes, max_bytes)` retrieves a specified range, subject to current access checks and the next request's payload budget. The handle identifies the original call's record, avoiding a rerun merely to recover text already captured. A search over that record can locate a diagnostic before fetching its surrounding range.
 
-Retention is bounded: the contract carries a quota, an expiry policy, and an explicit unavailable result after loss or expiry. Logs may contain secrets, so storing or returning them requires the appropriate disclosure policy. A content hash identifies bytes; permission to read them and durability of the store are separate guarantees. Normalized excerpts should retain a mapping to their source ranges when later inspection depends on byte offsets.
+Retention is bounded. The contract carries a quota, an expiry policy, and an explicit unavailable result after loss or expiry. Logs may contain secrets, so storing or returning them requires the appropriate disclosure policy. A content hash identifies bytes; permission to read them and durability of the store are separate guarantees. Normalized excerpts should retain a mapping to their source ranges when later inspection depends on byte offsets.
 
 Structured tools can avoid generating a monolithic log by returning pages. Each page needs both a record-count limit and a serialized payload limit, because one record may be large. The result states whether more results are known to exist or completeness remains unknown, whether a deadline or search limit curtailed the query, and how an authorized caller can continue. A cursor identifies continuation state. Access and snapshot consistency are separate contracts, so the tool states whether later pages use the same snapshot or can reflect intervening changes.
 
-Where continuation state lives is a trade-off that agents make sharper. A stateful server-side cursor keeps an open query or snapshot on the server until the caller finishes. Agents abandon searches routinely, because an early page often changes the plan, so abandoned cursors accumulate until a time-to-live reaps them. A **stateless cursor**\index{Stateless cursor!definition} instead carries its position in the token. The tool serializes a query digest, the last key returned, and an issue time into $d$, then hands the caller $d \parallel \text{MAC}_K(d)$ under a key $K$ that only the tool holds. Abandonment then costs the server nothing, and the tool rejects a forged or expired cursor. The price is consistency and context. Resuming after the last key reads current data rather than a snapshot, and the token spends more context than a short identifier. Both designs apply the retrieval-contract obligations of @sec-vol3-persistent-governance to a tool's return path.
+Where continuation state lives is a trade-off that agents make sharper. A stateful server-side cursor keeps an open query or snapshot on the server until the caller finishes. Agents abandon searches routinely, because an early page often changes the plan, so abandoned cursors accumulate until a time-to-live reaps them. A **stateless cursor**\index{Stateless cursor!definition} instead carries its position in the token. The tool serializes a query digest, the last key returned, and an issue time into $d$, then hands the caller $d \parallel \text{MAC}_K(d)$, the state followed by a message authentication code under a key $K$ that only the tool holds. Abandonment then costs the server nothing, and the tool rejects a forged or expired cursor. The price is consistency and context. Resuming after the last key reads current data rather than a snapshot, and the token spends more context than a short identifier. Both designs apply the retrieval-contract obligations of @sec-vol3-persistent-governance to a tool's return path.
 
-The bounded payload now fits its request. It must also be interpretable: a selected terminal byte sequence is not necessarily the text a person would have seen on screen.
+The bounded payload now fits its request. Whether its bytes say what they appear to say is a separate problem.
 
 ## Terminal Output Normalization {#sec-vol3-tool-calling-observation-parsing}
 
-Prefer a documented structured-output or noninteractive mode when the tool offers one. A test report containing test identifiers, outcomes, and configuration avoids having to infer those fields from colored progress text. Such output still needs validation and resource bounds; a JSON format does not make its claims true.
+A test runner writing to a terminal redraws its progress line with carriage returns and colors its verdict with escape sequences, so the captured bytes are not the text a person saw on screen. Prefer a documented structured-output or noninteractive mode when the tool offers one. A test report containing test identifiers, outcomes, and configuration avoids having to infer those fields from colored progress text. Such output still needs validation and resource bounds; a JSON format does not make its claims true.
 
 When terminal output is unavoidable, the adapter needs a declared normalization policy. Color controls can be removed without retaining their display effect. Carriage returns and cursor commands can overwrite displayed text rather than append new lines, so merely deleting control bytes can change the apparent message. A parser must preserve state across incoming chunks and bound its own buffers. A parser that supports a subset of terminal behavior marks unsupported or incomplete sequences in its output. Collapsing progress updates also loses intermediate states; the retained raw record, when available, remains the source for investigating them.
 
-Keep standard-output and standard-error provenance when available, and treat the stream name as a convention: programs print data, warnings, and failures on either stream, and separately captured streams lose the exact cross-stream event order. Diagnostic extraction should use the known tool format, retain source locations, and report parse failures instead of manufacturing a definitive cause from a partial traceback.
+Keep standard-output and standard-error provenance when available, and treat the stream name as a convention, since programs print data, warnings, and failures on either stream, and separately captured streams lose the exact cross-stream event order. Diagnostic extraction should use the known tool format, retain source locations, and report parse failures instead of manufacturing a definitive cause from a partial traceback.
 
 Normalization changes presentation, not authority. Safe serialization keeps returned text from breaking the observation's structural encoding, while instruction-like text inside it remains external evidence under the same action grants; @sec-vol3-security develops the adversarial-influence problem.
 
@@ -611,11 +613,11 @@ The `call_id` correlates this result with one exchange. The workspace revision i
 
 :::
 
-So far, the result describes a call for which the adapter can report an outcome. Some operations remain running when the model turn ends. The same return-path contract must then expose a pending operation and bounded progress evidence without pretending that dispatch is completion. Asynchronous tool dispatch extends the round trip over that longer lifetime.
+So far, every result describes a call whose outcome the adapter could report before the turn ended. Asynchronous dispatch extends the same return-path contract to operations that are still running, without pretending that dispatch is completion.
 
 ## Asynchronous Tool Dispatch {#sec-vol3-tool-calling-async}
 
-A bounded observation can describe a completed operation, but some operations outlast the turn that requested them. The repair agent may start a test suite and have no useful decision to make until its result arrives. A prompt return from dispatch is an acknowledgment; the result arrives later. The interface must distinguish acknowledgment of the request from the job's later outcome, while the runtime continues to supervise the work.
+The repair agent starts a long test suite and has no useful decision to make until its result arrives. A prompt return from that dispatch is an acknowledgment, not the result. The interface must distinguish acknowledgment of the request from the job's later outcome, while the runtime continues to supervise the work.
 
 ### Waiting without losing control {#sec-vol3-tool-calling-async-mismatch}
 
@@ -643,7 +645,7 @@ A provider-neutral acknowledgment might be:
 
 Here `call_id` correlates the dispatch exchange, while `job_id` identifies the accepted work for later interactions. If a mutating operation also has a logical operation ID for retry handling, that identity retains the meaning established in @sec-vol3-tool-calling-idempotency; a job ID alone supplies no deduplication guarantee. Losing the dispatch reply can leave the runtime uncertain whether a job was accepted, just as a timeout on a short call can leave its effect uncertain.
 
-The acknowledgment establishes only what the executor has confirmed: in this example, acceptance for execution, not a started test process or a passing result. Later status can report running work, an explicit input request, completion with a stated result, or failure with known details. If the executor becomes unreachable, “last observed running” and “current status unavailable” preserve more information than calling the job failed. A timeout in status retrieval is not evidence that the job stopped.
+The acknowledgment establishes only what the executor has confirmed, which in this example is acceptance for execution, not a started test process or a passing result. Later status can report running work, an explicit input request, completion with a stated result, or failure with known details. If the executor becomes unreachable, “last observed running” and “current status unavailable” preserve more information than calling the job failed. A timeout in status retrieval is not evidence that the job stopped.
 
 When the result is available, the runtime supplies the bounded observation contract from the preceding sections, including the tested revision, checks actually executed, process or application disposition, and any omission. A completed test job at `r18` may report the targeted `test_waiter_notified_on_return` pass. A completed process and an incompletely captured output stream are compatible outcomes, so result completeness stays an explicit field.
 
@@ -794,7 +796,7 @@ Two choices interact. Granularity determines how much work one tool performs; ca
 
 Selection can use an explicit task-to-tool mapping, a namespace menu, a catalog search, or a combination. Dense retrieval is one possible search method, not a prerequisite for a large catalog. As with the retrieval methods in @sec-vol3-long-term-memory, a high-ranked match is a candidate. A bounded path to search again or report missing functionality keeps an omitted tool from turning into a false claim that the operation is impossible.
 
-Staging a descriptor makes its contract visible and grants nothing: the runtime still resolves every proposal against registered tool identities and the applicable per-call checks. If discovery returns a changed descriptor, the runtime must reconcile that version before using it rather than dispatch against an interface different from the one supplied to the model.
+Staging a descriptor makes its contract visible and grants nothing. The runtime still resolves every proposal against registered tool identities and the applicable per-call checks. If discovery returns a changed descriptor, the runtime must reconcile that version before using it rather than dispatch against an interface different from the one supplied to the model.
 
 Definitions consume capacity together with instructions, source excerpts, prior observations, and output headroom. Measure the final serialized request, including wrappers and selection metadata, rather than adding independently tokenized description fragments and assuming their boundaries are free. The following ledger isolates catalog-related input for one call.
 
@@ -890,11 +892,11 @@ The design target is a toolkit whose contracts fit the workload and whose costs 
 
 ## Visual Actuation and Computer Use {#sec-vol3-tool-calling-visual-actuation}
 
-A tool need not expose the application's underlying operation directly. When an application offers no suitable programmatic interface, a **computer-use tool**\index{Computer-use tool!definition} can return a screenshot and accept clicks, keystrokes, or scrolling. The model proposes an interaction with the displayed surface; the runtime still owns validation, authorization, dispatch, and the returning observation. A valid coordinate establishes where an input event would be sent, not what effect it would have.
+Return to the staging-container restart, now performed through an administrative dashboard that offers no suitable programmatic interface. A **computer-use tool**\index{Computer-use tool!definition} can return a screenshot and accept clicks, keystrokes, or scrolling. The model proposes an interaction with the displayed surface; the runtime still owns validation, authorization, dispatch, and the returning observation. A valid coordinate establishes where an input event would be sent, not what effect it would have.
 
 ### An action against a changing surface
 
-Return to the staging-container restart, now performed through an administrative dashboard. The session may restart `srv-stage-04`, but may not modify production containers. An observed confirmation dialog names the staging container and offers a Restart button. The following trace applies the same contract used for a structured call.
+The session may restart `srv-stage-04`, but may not modify production containers. An observed confirmation dialog names the staging container and offers a Restart button. The following trace applies the same contract used for a structured call.
 
 The observation records the application and window, a capture identifier and time, the displayed target, and the geometry presented to the model. If the runtime supplies a crop or resized image, it also retains the crop origin and scale needed to map a proposed point back into the tool's coordinate space. Screenshot pixels, window-relative coordinates, and desktop coordinates are not interchangeable. An out-of-range point should be rejected under the interface contract; silently clamping it to the nearest edge can turn an invalid proposal into a valid click on the wrong control.
 
@@ -946,7 +948,7 @@ Exit status is the invoked program's convention. A runner that discovers zero te
 ::: {.fallacy-pitfall}
 **Pitfall**: *Shrinking an observation without recording what was dropped.*
 
-Truncation itself is unavoidable: the illustrative log in notebook \ref{nbk-07-observation-budget} is `{python} ObservationBudget.raw_windows_mult_str` the entire context window. The mistake is losing the record of omission. A head-only policy applied to @lst-vol3-head-truncation keeps the banner and passing tests and drops the one panic that explains the failure. The head, notice, and tail of @eq-vol3-observation-byte-budget keep it within the same byte budget, and an inspection handle recovers the middle on request.
+Truncation itself is unavoidable, since the illustrative log in notebook \ref{nbk-07-observation-budget} is `{python} ObservationBudget.raw_windows_mult_str` the entire context window. The mistake is losing the record of omission. A head-only policy applied to @lst-vol3-head-truncation keeps the banner and passing tests and drops the one panic that explains the failure. The head, notice, and tail of @eq-vol3-observation-byte-budget keep it within the same byte budget, and an inspection handle recovers the middle on request.
 :::
 
 ::: {.fallacy-pitfall}
